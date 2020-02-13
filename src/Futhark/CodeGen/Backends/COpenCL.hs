@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.COpenCL
 
 import Control.Monad hiding (mapM)
 import Data.List
+import qualified Data.Map as M
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -26,18 +27,19 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opencl_code opencl_prelude kernel_names types sizes prog') -> do
+    Right (Program opencl_code opencl_prelude kernels
+           types sizes failures prog') -> do
       let cost_centres =
             [copyDevToDev, copyDevToHost, copyHostToDev,
              copyScalarToDev, copyScalarFromDev]
-            ++ kernel_names
+            ++ M.keys kernels
       Right <$> GC.compileProg operations
                 (generateBoilerplate opencl_code opencl_prelude
-                 cost_centres kernel_names types sizes)
+                 cost_centres kernels types sizes failures)
                 include_opencl_h [Space "device", DefaultSpace]
                 cliOptions prog'
   where operations :: GC.Operations OpenCL ()
-        operations = GC.Operations
+        operations = GC.defaultOperations
                      { GC.opsCompiler = callKernel
                      , GC.opsWriteScalar = writeOpenCLScalar
                      , GC.opsReadScalar = readOpenCLScalar
@@ -55,20 +57,6 @@ compileProg prog = do
                                     "#else",
                                     "#include <CL/cl.h>",
                                     "#endif"]
-
-copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
-copyDevToDev = "copy_dev_to_dev"
-copyDevToHost = "copy_dev_to_host"
-copyHostToDev = "copy_host_to_dev"
-copyScalarToDev = "copy_scalar_to_dev"
-copyScalarFromDev = "copy_scalar_from_dev"
-
-profilingEvent :: String -> C.Exp
-profilingEvent name =
-  [C.cexp|ctx->profiling_paused ? NULL
-          : opencl_get_event(&ctx->opencl,
-                             &ctx->$id:(kernelRuns name),
-                             &ctx->$id:(kernelRuntime name))|]
 
 cliOptions :: [Option]
 cliOptions =
@@ -141,16 +129,23 @@ writeOpenCLScalar mem i t "device" _ val = do
 writeOpenCLScalar _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
+-- It is often faster to do a blocking clEnqueueReadBuffer() than to
+-- do an async clEnqueueReadBuffer() followed by a clFinish(), even
+-- with an in-order command queue.  This is safe if and only if there
+-- are no possible outstanding failures.
 readOpenCLScalar :: GC.ReadScalar OpenCL ()
 readOpenCLScalar mem i t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(
-                   clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem, CL_TRUE,
+                   clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem,
+                                       ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
                                        $exp:i * sizeof($ty:t), sizeof($ty:t),
                                        &$id:val,
                                        0, NULL, $exp:(profilingEvent copyScalarFromDev)));
               |]
+  GC.stm [C.cstm|if (ctx->failure_is_an_option &&
+                     futhark_context_sync(ctx) != 0) { return 1; }|]
   return [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space _ =
   error $ "Cannot read from '" ++ space ++ "' memory space."
@@ -175,10 +170,13 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nby
   GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem, CL_TRUE,
+        clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem,
+                            ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
                             $exp:srcidx, $exp:nbytes,
                             $exp:destmem + $exp:destidx,
                             0, NULL, $exp:(profilingEvent copyHostToDev)));
+      if (ctx->failure_is_an_option &&
+          futhark_context_sync(ctx) != 0) { return 1; }
    }
   |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
@@ -267,12 +265,27 @@ callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
   in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
 
-callKernel (LaunchKernel name args num_workgroups workgroup_size) = do
-  zipWithM_ setKernelArg [(0::Int)..] args
+callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
+
+  -- The other failure args are set automatically when the kernel is
+  -- first created.
+  when (safety == SafetyFull) $
+    GC.stm [C.cstm|
+      OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, 1,
+                                              sizeof(ctx->failure_is_an_option),
+                                              &ctx->failure_is_an_option));
+    |]
+
+  zipWithM_ setKernelArg [numFailureParams safety..] args
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM GC.compileExp workgroup_size
   local_bytes <- foldM localBytes [C.cexp|0|] args
+
   launchKernel name num_workgroups' workgroup_size' local_bytes
+
+  when (safety >= SafetyFull) $
+    GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
+
   where setKernelArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName "kernel_arg" bt e
           GC.stm [C.cstm|

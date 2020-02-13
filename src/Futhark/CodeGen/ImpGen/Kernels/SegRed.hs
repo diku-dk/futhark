@@ -271,7 +271,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
              isActive (init $ zip gtids dims) .&&.
              ltid .<. segment_size * segments_per_group) in_bounds out_of_bounds
 
-      sOp Imp.LocalBarrier
+      sOp Imp.ErrorSync -- Also implicitly barrier.
 
       let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
       sWhen (segment_size .>. 0) $
@@ -498,7 +498,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
               when (primType $ paramType p) $
               copyDWIM arr [local_tid] (Var $ paramName p) []
 
-          sOp Imp.LocalBarrier
+          sOp Imp.ErrorSync -- Also implicitly barrier.
 
           groupReduce constants (kernelGroupSize constants) slug_op_renamed (slugArrs slug)
 

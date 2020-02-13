@@ -33,6 +33,7 @@ module Futhark.CodeGen.ImpCode
   , index
   , ErrorMsg(..)
   , ErrorMsgPart(..)
+  , errorMsgArgTypes
   , ArrayContents(..)
 
     -- * Typed enumerations
@@ -62,7 +63,7 @@ import Data.Traversable
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
 import Futhark.Representation.AST.Syntax
-  (Space(..), SpaceId, ErrorMsg(..), ErrorMsgPart(..))
+  (Space(..), SpaceId, ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Analysis.PrimExp
@@ -488,8 +489,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' dests <> freeIn' args
   freeIn' (If cond t f) =
     freeIn' cond <> freeIn' t <> freeIn' f
-  freeIn' (Assert e _ _) =
-    freeIn' e
+  freeIn' (Assert e msg _) =
+    freeIn' e <> foldMap freeIn' msg
   freeIn' (Op op) =
     freeIn' op
   freeIn' (Comment _ code) =

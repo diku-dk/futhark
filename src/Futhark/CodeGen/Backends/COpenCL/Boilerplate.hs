@@ -2,11 +2,14 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( generateBoilerplate
+  , profilingEvent
+  , copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev
 
   , kernelRuntime
   , kernelRuns
 
   , commonOptions
+  , failureSwitch
   ) where
 
 import Data.FileEmbed
@@ -20,14 +23,48 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util (chunk, zEncodeString)
 
-generateBoilerplate :: String -> String -> [String] -> [String] -> [PrimType]
+errorMsgNumArgs :: ErrorMsg a -> Int
+errorMsgNumArgs = length . errorMsgArgTypes
+
+failureSwitch :: [FailureMsg] -> C.Stm
+failureSwitch failures =
+  let printfEscape = let escapeChar '%' = "%%"
+                         escapeChar c = [c]
+                     in concatMap escapeChar
+      onPart (ErrorString s) = printfEscape s
+      onPart ErrorInt32{} = "%d"
+      onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
+         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
+             msgargs = [ [C.cexp|args[$int:j]|] | j <- [0..errorMsgNumArgs emsg-1] ]
+         in [C.cstm|case $int:i: {ctx->error = msgprintf($string:msg, $args:msgargs); break;}|]
+      failure_cases =
+        zipWith onFailure [(0::Int)..] failures
+  in [C.cstm|switch (failure_idx) { $stms:failure_cases }|]
+
+
+copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
+copyDevToDev = "copy_dev_to_dev"
+copyDevToHost = "copy_dev_to_host"
+copyHostToDev = "copy_host_to_dev"
+copyScalarToDev = "copy_scalar_to_dev"
+copyScalarFromDev = "copy_scalar_from_dev"
+
+profilingEvent :: String -> C.Exp
+profilingEvent name =
+  [C.cexp|ctx->profiling_paused ? NULL
+          : opencl_get_event(&ctx->opencl,
+                             &ctx->$id:(kernelRuns name),
+                             &ctx->$id:(kernelRuntime name))|]
+
+generateBoilerplate :: String -> String -> [String] -> M.Map KernelName Safety -> [PrimType]
                     -> M.Map Name SizeClass
+                    -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names types sizes = do
+generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types sizes failures = do
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls profiling_centres kernel_names opencl_code opencl_prelude
+        openClDecls profiling_centres kernels opencl_code opencl_prelude
 
   GC.earlyDecls top_decls
 
@@ -240,15 +277,15 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names ty
                          char *error;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
+                         typename cl_mem global_failure;
+                         typename cl_mem global_failure_args;
                          struct opencl_context opencl;
                          struct sizes sizes;
+                         // True if a potentially failing kernel has been enqueued.
+                         typename cl_int failure_is_an_option;
                        };|])
 
   mapM_ GC.libDecl later_top_decls
-  let set_required_types = [ [C.cstm|required_types |= OPENCL_F64; |]
-                           | FloatType Float64 `elem` types ]
-      set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
-                          [(0::Int)..] $ M.keys sizes
 
   GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
                      ctx->opencl.cfg = cfg->opencl;
@@ -265,21 +302,44 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names ty
                               sizeof(struct profiling_record));
                      create_lock(&ctx->lock);
 
+                     ctx->failure_is_an_option = 0;
                      $stms:init_fields
                      $stms:ctx_opencl_inits
   }|]
 
+  let set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
+                          [(0::Int)..] $ M.keys sizes
+      max_failure_args =
+        foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+
   GC.libDecl [C.cedecl|static int init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx, typename cl_program prog) {
                      typename cl_int error;
+
+                     typename cl_int no_error = -1;
+                     ctx->global_failure =
+                       clCreateBuffer(ctx->opencl.ctx,
+                                      CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+                                      sizeof(cl_int), &no_error, &error);
+                     OPENCL_SUCCEED_OR_RETURN(error);
+
+                     // The +1 is to avoid zero-byte allocations.
+                     ctx->global_failure_args =
+                       clCreateBuffer(ctx->opencl.ctx,
+                                      CL_MEM_READ_WRITE,
+                                      sizeof(cl_int)*$int:max_failure_args+1, NULL, &error);
+                     OPENCL_SUCCEED_OR_RETURN(error);
+
                      // Load all the kernels.
-                     $stms:(map (loadKernelByName) kernel_names)
+                     $stms:(map loadKernel (M.toList kernels))
 
                      $stms:final_inits
-
                      $stms:set_sizes
 
                      return 0;
   }|]
+
+  let set_required_types = [ [C.cstm|required_types |= OPENCL_F64; |]
+                           | FloatType Float64 `elem` types ]
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
@@ -294,8 +354,11 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names ty
 
                           init_context_early(cfg, ctx);
                           typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types, cfg->build_opts);
-                          init_context_late(cfg, ctx, prog);
-                          return ctx;
+                          if (init_context_late(cfg, ctx, prog) == 0) {
+                            return ctx;
+                          } else {
+                            return NULL;
+                          }
                        }|])
 
   GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
@@ -327,9 +390,35 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names ty
   GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         ctx->error = OPENCL_SUCCEED_NONFATAL(clFinish(ctx->opencl.queue));
-                         return ctx->error != NULL;
-                       }|])
+                 // Check for any delayed error.
+                 typename cl_int failure_idx = -1;
+                 if (ctx->failure_is_an_option) {
+                   OPENCL_SUCCEED_OR_RETURN(
+                     clEnqueueReadBuffer(ctx->opencl.queue,
+                                         ctx->global_failure,
+                                         CL_FALSE,
+                                         0, sizeof(typename cl_int), &failure_idx,
+                                         0, NULL, $exp:(profilingEvent copyScalarFromDev)));
+                   ctx->failure_is_an_option = 0;
+                 }
+
+                 OPENCL_SUCCEED_OR_RETURN(clFinish(ctx->opencl.queue));
+
+                 if (failure_idx >= 0) {
+                   typename cl_int args[$int:max_failure_args];
+                   OPENCL_SUCCEED_OR_RETURN(
+                     clEnqueueReadBuffer(ctx->opencl.queue,
+                                         ctx->global_failure_args,
+                                         CL_TRUE,
+                                         0, sizeof(args), &args,
+                                         0, NULL, $exp:(profilingEvent copyDevToHost)));
+
+                   $stm:(failureSwitch failures)
+
+                   return 1;
+                 }
+                 return 0;
+               }|])
 
   GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
     ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
@@ -367,9 +456,9 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernel_names ty
   GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
   mapM_ GC.profileReport $ openClReport profiling_centres
 
-openClDecls :: [String] -> [String] -> String -> String
+openClDecls :: [String] -> M.Map KernelName Safety -> String -> String
             -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls profiling_centres kernel_names opencl_program opencl_prelude =
+openClDecls profiling_centres kernels opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where opencl_program_fragments =
           -- Some C compilers limit the size of literal strings, so
@@ -381,7 +470,7 @@ openClDecls profiling_centres kernel_names opencl_program opencl_prelude =
           [ [C.csdecl|int total_runs;|],
             [C.csdecl|long int total_runtime;|] ] ++
           [ [C.csdecl|typename cl_kernel $id:name;|]
-          | name <- kernel_names ] ++
+          | name <- M.keys kernels ] ++
           concat
           [ [ [C.csdecl|typename int64_t $id:(kernelRuntime name);|]
             , [C.csdecl|int $id:(kernelRuns name);|]
@@ -421,14 +510,27 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
           $esc:openCL_h
           static const char *opencl_program[] = {$inits:program_fragments};|]
 
-loadKernelByName :: String -> C.Stm
-loadKernelByName name = [C.cstm|{
+loadKernel :: (KernelName, Safety) -> C.Stm
+loadKernel (name, safety) = [C.cstm|{
   ctx->$id:name = clCreateKernel(prog, $string:name, &error);
   OPENCL_SUCCEED_FATAL(error);
+  $items:set_args
   if (ctx->debugging) {
     fprintf(stderr, "Created kernel %s.\n", $string:name);
   }
   }|]
+  where set_global_failure =
+          [C.citem|OPENCL_SUCCEED_FATAL(
+                     clSetKernelArg(ctx->$id:name, 0, sizeof(typename cl_mem),
+                                    &ctx->global_failure));|]
+        set_global_failure_args =
+          [C.citem|OPENCL_SUCCEED_FATAL(
+                     clSetKernelArg(ctx->$id:name, 2, sizeof(typename cl_mem),
+                                    &ctx->global_failure_args));|]
+        set_args = case safety of
+                     SafetyNone -> []
+                     SafetyCheap -> [set_global_failure]
+                     SafetyFull -> [set_global_failure, set_global_failure_args]
 
 kernelRuntime :: String -> String
 kernelRuntime = (++"_total_runtime")

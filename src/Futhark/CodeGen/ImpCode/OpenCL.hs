@@ -14,7 +14,10 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelName
        , KernelArg (..)
        , OpenCL (..)
+       , Safety(..)
+       , numFailureParams
        , KernelTarget (..)
+       , FailureMsg(..)
        , module Futhark.CodeGen.ImpCode
        , module Futhark.Representation.Kernels.Sizes
        )
@@ -32,13 +35,21 @@ import Futhark.Util.Pretty
 data Program = Program { openClProgram :: String
                        , openClPrelude :: String
                          -- ^ Must be prepended to the program.
-                       , openClKernelNames :: [KernelName]
+                       , openClKernelNames :: M.Map KernelName Safety
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
                        , openClSizes :: M.Map Name SizeClass
                          -- ^ Runtime-configurable constants.
+                       , openClFailures :: [FailureMsg]
+                         -- ^ Assertion failure error messages.
                        , hostFunctions :: Functions OpenCL
                        }
+
+-- | Something that can go wrong in a kernel.  Part of the machinery
+-- for reporting error messages from within kernels.
+data FailureMsg = FailureMsg { failureError :: ErrorMsg Exp
+                             , failureBacktrace :: String
+                             }
 
 -- | A function calling OpenCL kernels.
 type Function = Imp.Function OpenCL
@@ -58,8 +69,33 @@ data KernelArg = ValueKArg Exp PrimType
                  -- ^ Create this much local memory per workgroup.
                deriving (Show)
 
+-- | Whether a kernel can potentially fail (because it contains bounds
+-- checks and such).
+data MayFail = MayFail | CannotFail
+             deriving (Show)
+
+-- | Information about bounds checks and how sensitive it is to
+-- errors.  Ordered by least demanding to most.
+data Safety
+  = SafetyNone
+    -- ^ Does not need to know if we are in a failing state, and also
+    -- cannot fail.
+  | SafetyCheap
+    -- ^ Needs to be told if there's a global failure, and that's it,
+    -- and cannot fail.
+  | SafetyFull
+    -- ^ Needs all parameters, may fail itself.
+    deriving (Eq, Ord, Show)
+
+-- | How many leading failure arguments we must pass when launching a
+-- kernel with these safety characteristics.
+numFailureParams :: Safety -> Int
+numFailureParams SafetyNone = 0
+numFailureParams SafetyCheap = 1
+numFailureParams SafetyFull = 3
+
 -- | Host-level OpenCL operation.
-data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
+data OpenCL = LaunchKernel Safety KernelName [KernelArg] [Exp] [Exp]
             | GetSize VName Name
             | CmpSizeLe VName Name Exp
             | GetSizeMax VName SizeClass

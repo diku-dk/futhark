@@ -38,7 +38,6 @@ import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import Data.List
-import Data.Loc
 
 import Prelude hiding (quot, rem)
 
@@ -73,15 +72,6 @@ data KernelConstants = KernelConstants
 keyWithEntryPoint :: Name -> Name -> Name
 keyWithEntryPoint fname key =
   nameFromString $ nameToString fname ++ "." ++ nameToString key
-
-noAssert :: MonadError InternalError m => [SrcLoc] -> m a
-noAssert locs =
-  compilerLimitationS $
-  unlines [ "Cannot compile assertion at " ++
-            intercalate " -> " (reverse $ map locStr locs) ++
-            " inside parallel kernel."
-          , "As a workaround, surround the expression with 'unsafe'."]
-
 
 allocLocal, allocPrivate :: AllocCompiler ExplicitMemory Imp.KernelOp
 allocLocal mem size =
@@ -121,7 +111,6 @@ splitSpace pat _ _ _ _ =
   compilerBugS $ "Invalid target for splitSpace: " ++ pretty pat
 
 compileThreadExp :: ExpCompiler ExplicitMemory Imp.KernelOp
-compileThreadExp _ (BasicOp (Assert _ _ (loc, locs))) = noAssert $ loc:locs
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIM (patElemName dest) [fromIntegral (i::Int32)] e []
@@ -168,7 +157,6 @@ groupCopy constants to to_is from from_is = do
     copyDWIM to (to_is++ is) from (from_is ++ is)
 
 compileGroupExp :: KernelConstants -> ExpCompiler ExplicitMemory Imp.KernelOp
-compileGroupExp _ _ (BasicOp (Assert _ _ (loc, locs))) = noAssert $ loc:locs
 -- The static arrays stuff does not work inside kernels.
 compileGroupExp _ (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
@@ -265,7 +253,7 @@ compileGroupOp constants pat (Inner (SegOp (SegMap lvl space _ body))) = do
     zipWithM_ (compileThreadResult space constants) (patternElements pat) $
     kernelBodyResult body
 
-  sOp Imp.LocalBarrier
+  sOp Imp.ErrorSync
 
 compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
   compileGroupSpace constants lvl space
@@ -279,7 +267,7 @@ compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))
     (map (`Imp.var` int32) ltids)
     (kernelResultSubExp res) []
 
-  sOp Imp.LocalBarrier
+  sOp Imp.ErrorSync
 
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
@@ -308,7 +296,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       copyDWIM dest (map (`Imp.var` int32) ltids) (kernelResultSubExp res) []
     zipWithM_ (compileThreadResult space constants) map_pes map_res
 
-  sOp Imp.LocalBarrier
+  sOp Imp.ErrorSync
 
   case dims' of
     -- Nonsegmented case (or rather, a single segment) - this we can
@@ -317,7 +305,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupReduce constants dim' (segRedLambda op) tmps
 
-      sOp Imp.LocalBarrier
+      sOp Imp.ErrorSync
 
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIM (patElemName pe) [] (Var arr) [0]
@@ -332,7 +320,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupScan constants (Just crossesSegment) (product dims') (segRedLambda op) tmps
 
-      sOp Imp.LocalBarrier
+      sOp Imp.ErrorSync
 
       let segment_is = map Imp.vi32 $ init ltids
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
@@ -380,7 +368,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
               copyDWIM (paramName p) [] v is
             do_op (bin_is ++ is)
 
-  sOp Imp.LocalBarrier
+  sOp Imp.ErrorSync
 
 compileGroupOp _ pat _ =
   compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
@@ -1066,9 +1054,13 @@ sKernelThread, sKernelGroup :: String
             dPrimV_ v $ flatf constants
             f constants
 
-sKernel :: Operations ExplicitMemory Imp.KernelOp
-        -> KernelConstants -> Name -> ImpM ExplicitMemory Imp.KernelOp a -> CallKernelGen ()
-sKernel ops constants name m = do
+sKernelFailureTolerant :: Bool
+                       -> Operations ExplicitMemory Imp.KernelOp
+                       -> KernelConstants
+                       -> Name
+                       -> ImpM ExplicitMemory Imp.KernelOp a
+                       -> CallKernelGen ()
+sKernelFailureTolerant tol ops constants name m = do
   body <- makeAllMemoryGlobal $ subImpM_ ops m
   uses <- computeKernelUses body mempty
   emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
@@ -1077,7 +1069,12 @@ sKernel ops constants name m = do
     , Imp.kernelNumGroups = [kernelNumGroups constants]
     , Imp.kernelGroupSize = [kernelGroupSize constants]
     , Imp.kernelName = name
+    , Imp.kernelFailureTolerant = tol
     }
+
+sKernel :: Operations ExplicitMemory Imp.KernelOp
+        -> KernelConstants -> Name -> ImpM ExplicitMemory Imp.KernelOp a -> CallKernelGen ()
+sKernel = sKernelFailureTolerant False
 
 -- | A kernel with the given number of threads, running per-thread code.
 sKernelSimple :: String -> Imp.Exp
@@ -1138,7 +1135,7 @@ sReplicateKernel arr se = do
       name = nameFromString $ "replicate_" ++
              show (baseTag $ kernelGlobalThreadIdVar constants)
 
-  sKernel (threadOperations constants) constants name $ do
+  sKernelFailureTolerant True (threadOperations constants) constants name $ do
     set_constants
     sWhen (kernelThreadActive constants) $
       copyDWIM arr is' se $ drop (length ds) is'
@@ -1208,7 +1205,7 @@ sIota arr n x s et = do
   let name = nameFromString $ "iota_" ++
              show (baseTag $ kernelGlobalThreadIdVar constants)
 
-  sKernel (threadOperations constants) constants name $ do
+  sKernelFailureTolerant True (threadOperations constants) constants name $ do
     set_constants
     let gtid = kernelGlobalThreadId constants
     sWhen (kernelThreadActive constants) $ do
@@ -1238,7 +1235,7 @@ sCopy bt
   let name = nameFromString $ "copy_" ++
              show (baseTag $ kernelGlobalThreadIdVar constants)
 
-  sKernel (threadOperations constants) constants name $ do
+  sKernelFailureTolerant True (threadOperations constants) constants name $ do
     set_constants
 
     let gtid = kernelGlobalThreadId constants
