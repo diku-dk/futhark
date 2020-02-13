@@ -1,6 +1,3 @@
--- ==
--- tags { no_opencl }
-
 type point = (f32, f32)
 
 let f (p1: point) (p2: point) =

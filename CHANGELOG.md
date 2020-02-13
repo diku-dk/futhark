@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Futhark now type-checks size annotations using a size-dependent
     type system.
 
+  * The parallel code generators can now handle bounds checking and
+    other safety checks.
+
   * `reduce_by_index` may be somewhat faster for complex operators on
     histograms that barely fit in local memory.
 

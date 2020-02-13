@@ -115,6 +115,8 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
                   to' = to + Imp.var chunk_offset int32
               in f from' to'
 
+      sOp Imp.ErrorSync -- Also implicitly barrier.
+
       groupScan constants crossesSegment'
         (kernelGroupSize constants) scan_op_renamed local_arrs
 

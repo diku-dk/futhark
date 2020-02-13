@@ -646,7 +646,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
                   copyDWIM (paramName p) [] v is
                 do_op (bucket_is ++ is)
 
-    sOp Imp.LocalBarrier
+    sOp Imp.ErrorSync
     sOp Imp.GlobalBarrier
 
     sComment "Compact the multiple local memory subhistograms to result in global memory" $
