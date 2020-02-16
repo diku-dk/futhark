@@ -1167,7 +1167,9 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   int r;
                   /* Run the program once. */
                   $stms:pack_input
-                  assert($id:sync_ctx(ctx) == 0);
+                  if ($id:sync_ctx(ctx) != 0) {
+                    panic(1, "%s", $id:error_ctx(ctx));
+                  };
                   // Only profile last run.
                   if (profile_run) {
                     $id:unpause_profiling(ctx);
@@ -1179,7 +1181,9 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   if (r != 0) {
                     panic(1, "%s", $id:error_ctx(ctx));
                   }
-                  assert($id:sync_ctx(ctx) == 0);
+                  if ($id:sync_ctx(ctx) != 0) {
+                    panic(1, "%s", $id:error_ctx(ctx));
+                  };
                   if (profile_run) {
                     $id:pause_profiling(ctx);
                   }
