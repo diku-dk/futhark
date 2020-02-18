@@ -166,7 +166,7 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
   freeIn' (a,b,c) = freeIn' a <> freeIn' b <> freeIn' c
 
 instance FreeIn a => FreeIn [a] where
-  freeIn' = fold . fmap freeIn'
+  freeIn' = foldMap freeIn'
 
 instance (FreeAttr (ExpAttr lore),
           FreeAttr (BodyAttr lore),
@@ -214,7 +214,7 @@ instance (FreeAttr (ExpAttr lore),
     freeIn' cs <> precomputed attr (freeIn' attr <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm lore) => FreeIn (Stms lore) where
-  freeIn' = fold . fmap freeIn'
+  freeIn' = foldMap freeIn'
 
 instance FreeIn Names where
   freeIn' = fvNames

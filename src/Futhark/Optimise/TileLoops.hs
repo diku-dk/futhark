@@ -86,8 +86,8 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 1D tiling of redomap.
       | (gtid, kdim) : top_space_rev <- reverse $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
-        all (not . nameIn gtid .
-             flip (M.findWithDefault mempty) variance) arrs,
+        not $ all (nameIn gtid .
+                   flip (M.findWithDefault mempty) variance) arrs,
         not $ gtid `nameIn` branch_variant,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),

@@ -106,8 +106,8 @@ bindMapShapes indexArg extra_args inner_shapes sizefun args outer_shape
       let sizefun_safe =
             all (I.safeExp . I.stmExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
-            not $ any (`nameIn` freeIn (I.lambdaBody sizefun')) $
-            map I.paramName $ lambdaParams sizefun'
+            not $ any ((`nameIn` freeIn (I.lambdaBody sizefun')) . I.paramName) $
+            lambdaParams sizefun'
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'
                 forM_ (zip inner_shapes ses) $ \(v, se) ->
