@@ -159,11 +159,11 @@ launchKernel safety kernel_name kernel_dims workgroup_dims args = do
         , processValueArg kernel_name' 1 int32 $ Var "Ctx.GlobalFailureIsAnOption"
         , processMemArg kernel_name' 2 $ Var "Ctx.GlobalFailureArgs"]
 
-  sequence_ $ take (Imp.numFailureParams safety) failure_args
+  failure_args' <- concat <$> sequence (take (Imp.numFailureParams safety) failure_args)
 
   args_stms <- zipWithM (processKernelArg kernel_name')
                [toInteger (Imp.numFailureParams safety)..] args
-  CS.stm $ Unsafe $ concat args_stms
+  CS.stm $ Unsafe $ failure_args' ++ concat args_stms
 
   global_work_size <- newVName' "GlobalWorkSize"
   local_work_size <- newVName' "LocalWorkSize"
