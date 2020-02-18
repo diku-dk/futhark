@@ -16,6 +16,7 @@ module Futhark.Representation.AST.Syntax.Core
          , ShapeBase(..)
          , Shape
          , Ext(..)
+         , isExt
          , ExtSize
          , ExtShape
          , Rank(..)
@@ -71,6 +72,11 @@ type Shape = ShapeBase SubExp
 data Ext a = Ext Int
            | Free a
            deriving (Eq, Ord, Show)
+
+-- | Returns the existential if any
+isExt :: Ext a -> Maybe Int
+isExt (Ext i) = Just i
+isExt _ = Nothing
 
 -- | The size of this dimension.
 type ExtSize = Ext SubExp
