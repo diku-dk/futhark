@@ -839,7 +839,7 @@ groupScan :: KernelConstants
           -> [VName]
           -> ImpM ExplicitMemory Imp.KernelOp ()
 groupScan constants seg_flag w lam arrs = do
-  when (any (not . primType . paramType) $ lambdaParams lam) $
+  unless (all (primType . paramType) $ lambdaParams lam) $
     compilerLimitationS "Cannot compile parallel scans with array element type."
 
   renamed_lam <- renameLambda lam

@@ -431,7 +431,7 @@ typeOf (Stream w form lam _) =
                   | t <- drop (length nes) (lambdaReturnType lam) ]
   in  accrtps ++ arrtps
 typeOf (Scatter _w lam _ivs dests) =
-  zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) aws
+  zipWith arrayOfRow (drop (n `div` 2) lam_ts) aws
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
         (aws, _, _) = unzip3 dests
@@ -634,9 +634,7 @@ soacToStream soac = do
     where mkMapPlusAccLam :: (MonadFreshNames m, Bindable lore)
                           => [SubExp] -> Lambda lore -> m (Lambda lore)
           mkMapPlusAccLam accs plus = do
-            let lampars = lambdaParams plus
-                (accpars, rempars) = (  take (length accs) lampars,
-                                        drop (length accs) lampars  )
+            let (accpars, rempars) = splitAt (length accs) $ lambdaParams plus
                 parbnds = zipWith (\ par se -> mkLet [] [paramIdent par]
                                                         (BasicOp $ SubExp se)
                                   ) accpars accs

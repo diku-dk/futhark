@@ -1155,7 +1155,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
   outsz  <- arraysSize 0 <$> mapM lookupType arrs
   let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
   lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
-  let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
+  let lam0_acc_params = take (length accs) $ I.lambdaParams lam0'
   acc_params <- forM lam0_acc_params $ \p -> do
     name <- newVName $ baseString $ I.paramName p
     return p { I.paramName = name }

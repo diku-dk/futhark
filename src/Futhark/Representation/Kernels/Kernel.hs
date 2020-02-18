@@ -56,7 +56,6 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
 import qualified Data.Map.Strict as M
-import Data.Foldable
 import Data.List
 
 import Futhark.Representation.AST
@@ -199,7 +198,7 @@ instance FreeIn KernelResult where
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn' (KernelBody attr stms res) =
     fvBind bound_in_stms $ freeIn' attr <> freeIn' stms <> freeIn' res
-    where bound_in_stms = fold $ fmap boundByStm stms
+    where bound_in_stms = foldMap boundByStm stms
 
 instance Attributes lore => Substitute (KernelBody lore) where
   substituteNames subst (KernelBody attr stms res) =

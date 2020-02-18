@@ -746,8 +746,8 @@ checkBasicOp (Rotate rots arr) = do
 checkBasicOp (Concat i arr1exp arr2exps ressize) = do
   arr1t  <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
-  let success = all (== (dropAt i 1 $ arrayDims arr1t)) $
-                map (dropAt i 1 . arrayDims) arr2ts
+  let success = all ((== dropAt i 1 (arrayDims arr1t)).
+                     dropAt i 1 . arrayDims) arr2ts
   unless success $
     bad $ TypeError $
     "Types of arguments to concat do not match.  Got " ++
