@@ -98,8 +98,9 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
-import Data.Foldable (traverse_)
+import Data.Foldable (traverse_, toList)
 import Data.List
+import qualified Data.Set as S
 
 import Futhark.Analysis.Metrics
 import Futhark.Representation.AST.Syntax
@@ -668,8 +669,11 @@ matchPatternToExp pat e = do
       (ctx_map_ids, ctx_map_exts) =
         getExtMaps $ zip ctx_ids [0..length ctx_ids - 1]
 
+  let rt_exts = foldMap extInExpReturns rt
+
   unless (length val_ts == length rt &&
-          and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)) $
+          and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt) &&
+          M.keysSet ctx_map_exts `S.isSubsetOf` S.map Ext rt_exts) $
     TC.bad $ TC.TypeError $ "Expression type:\n  " ++ prettyTuple rt ++
                             "\ncannot match pattern type:\n  " ++ prettyTuple val_ts ++
                             "\nwith context elements: " ++ pretty ctx_ids
@@ -696,6 +700,27 @@ matchPatternToExp pat e = do
             (_, Nothing) -> True
             _ -> False
         matches _ _ _ _ = False
+
+        extInExpReturns :: ExpReturns -> S.Set Int
+        extInExpReturns (MemArray _ shape _ mem_return) =
+          extInShape shape <> maybe S.empty extInMemReturn mem_return
+        extInExpReturns _ = mempty
+
+        extInShape :: ShapeBase (Ext SubExp) -> S.Set Int
+        extInShape shape = S.fromList $ mapMaybe isExt $ shapeDims shape
+
+        extInMemReturn :: MemReturn -> S.Set Int
+        extInMemReturn (ReturnsInBlock _ extixfn) = extInIxFn extixfn
+        extInMemReturn (ReturnsNewBlock _ i extixfn) =
+          S.singleton i <> extInIxFn extixfn
+
+        extInIxFn :: ExtIxFun -> S.Set Int
+        extInIxFn ixfun = S.fromList $ concatMap (mapMaybe isExt . toList) ixfun
+
+        isExt :: Ext a -> Maybe Int
+        isExt (Ext i) = Just i
+        isExt _ = Nothing
+
 
 varMemInfo :: ExplicitMemorish lore =>
               VName -> TC.TypeM lore (MemInfo SubExp NoUniqueness MemBind)
