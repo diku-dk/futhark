@@ -278,7 +278,7 @@ generateContextFuns cfg kernels sizes failures = do
                  CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
                  CUDA_SUCCEED(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  // The +1 is to avoid zero-byte allocations.
-                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure_args, sizeof(int32_t)*$int:max_failure_args+1));
+                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure_args, sizeof(int32_t)*($int:max_failure_args+1)));
 
                  $stms:(map loadKernel (M.toList kernels))
 
@@ -310,7 +310,7 @@ generateContextFuns cfg kernels sizes failures = do
                    ctx->failure_is_an_option = 0;
 
                    if (failure_idx >= 0) {
-                     typename int32_t args[$int:max_failure_args];
+                     typename int32_t args[$int:max_failure_args+1];
                      CUDA_SUCCEED(
                        cuMemcpyDtoH(&args,
                                     ctx->global_failure_args,

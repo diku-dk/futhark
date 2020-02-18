@@ -326,7 +326,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                      ctx->global_failure_args =
                        clCreateBuffer(ctx->opencl.ctx,
                                       CL_MEM_READ_WRITE,
-                                      sizeof(cl_int)*$int:max_failure_args+1, NULL, &error);
+                                      sizeof(cl_int)*($int:max_failure_args+1), NULL, &error);
                      OPENCL_SUCCEED_OR_RETURN(error);
 
                      // Load all the kernels.
@@ -405,7 +405,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                  OPENCL_SUCCEED_OR_RETURN(clFinish(ctx->opencl.queue));
 
                  if (failure_idx >= 0) {
-                   typename cl_int args[$int:max_failure_args];
+                   typename cl_int args[$int:max_failure_args+1];
                    OPENCL_SUCCEED_OR_RETURN(
                      clEnqueueReadBuffer(ctx->opencl.queue,
                                          ctx->global_failure_args,

@@ -215,7 +215,7 @@ generateBoilerplate opencl_code opencl_prelude kernels types sizes failures = do
 
      , Exp $ CS.simpleCall "OPENCL_SUCCEED"
        [CS.simpleCall "OpenCLAllocActual" [ Ref $ Var "Ctx"
-                                          , Integer $ toInteger $ 4 * max_failure_args + 1
+                                          , Integer $ toInteger $ 4 * (max_failure_args + 1)
                                           , Ref $ Var "Ctx.GlobalFailureArgs"]]]]
     ++ concatMap loadKernel (M.toList kernels)
     ++ final_inits
@@ -235,7 +235,8 @@ generateBoilerplate opencl_code opencl_prelude kernels types sizes failures = do
             ]
 
     , If (BinOp "!=" (Var "failure_idx") (Integer (-1)))
-      ([ AssignTyped intArrayT (Var "args") $ Just $ CreateArray intT $ Left max_failure_args
+      ([ AssignTyped intArrayT (Var "args") $ Just $ CreateArray intT $
+         Left $ max_failure_args + 1
        , Unsafe [
            Fixed (Var "ptr") (Addr (Index (Var "args") $ IdxExp $ Integer 0))
            [Exp $ CS.simpleCall "CL10.EnqueueReadBuffer"
