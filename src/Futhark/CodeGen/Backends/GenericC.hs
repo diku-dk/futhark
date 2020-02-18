@@ -13,6 +13,7 @@ module Futhark.CodeGen.Backends.GenericC
   , Operations (..)
   , defaultOperations
   , OpCompiler
+  , ErrorCompiler
 
   , PointerQuals
   , MemoryType
@@ -133,6 +134,8 @@ data HeaderSection = ArrayDecl String
 -- compilation function.
 type OpCompiler op s = op -> CompilerM op s ()
 
+type ErrorCompiler op s = ErrorMsg Exp -> String -> CompilerM op s ()
+
 -- | The address space qualifiers for a pointer of the given type with
 -- the given annotation.
 type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
@@ -179,11 +182,24 @@ data Operations op s =
 
              , opsMemoryType :: MemoryType op s
              , opsCompiler :: OpCompiler op s
+             , opsError :: ErrorCompiler op s
 
              , opsFatMemory :: Bool
                -- ^ If true, use reference counting.  Otherwise, bare
                -- pointers.
              }
+
+defError :: ErrorCompiler op s
+defError (ErrorMsg parts) stacktrace = do
+  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
+      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
+  stm [C.cstm|{ ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
+                $items:free_all_mem
+                return 1;
+              }|]
 
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
@@ -198,6 +214,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
                                , opsFatMemory = True
+                               , opsError = defError
                                }
   where defWriteScalar _ _ _ _ _ =
           error "Cannot write to non-default memory space because I am dumb"
@@ -217,6 +234,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           error "Has no type for non-default memory space"
         defCompiler _ =
           error "The default compiler cannot compile extended operations"
+
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
@@ -1752,18 +1770,11 @@ compileCode c
 
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
-compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
+compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
-  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
-      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
-  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
-  let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
-  stm [C.cstm|if (!$exp:e') {
-                   ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
-                   $items:free_all_mem
-                   return 1;
-                 }|]
+  err <- collect $ join $
+         asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
+  stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
 compileCode (Allocate name (Count e) space) = do

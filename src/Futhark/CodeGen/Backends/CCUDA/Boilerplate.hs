@@ -8,19 +8,21 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import qualified Language.C.Quote.OpenCL as C
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.ImpCode.OpenCL
+import Futhark.CodeGen.Backends.COpenCL.Boilerplate (failureSwitch)
 import Futhark.Util (chunk, zEncodeString)
 
 import qualified Data.Map as M
 import Data.FileEmbed (embedStringFile)
 
+errorMsgNumArgs :: ErrorMsg a -> Int
+errorMsgNumArgs = length . errorMsgArgTypes
 
-
-generateBoilerplate :: String -> String -> [String]
+generateBoilerplate :: String -> String -> M.Map KernelName Safety
                     -> M.Map Name SizeClass
+                    -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
+generateBoilerplate cuda_program cuda_prelude kernels sizes failures = do
   GC.earlyDecls [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
@@ -32,7 +34,7 @@ generateBoilerplate cuda_program cuda_prelude kernel_names sizes = do
 
   generateSizeFuns sizes
   cfg <- generateConfigFuns sizes
-  generateContextFuns cfg kernel_names sizes
+  generateContextFuns cfg kernels sizes failures
   where
     cuda_h = $(embedStringFile "rts/c/cuda.h")
     free_list_h = $(embedStringFile "rts/c/free_list.h")
@@ -222,14 +224,15 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
-generateContextFuns :: String -> [String]
+generateContextFuns :: String -> M.Map KernelName Safety
                     -> M.Map Name SizeClass
+                    -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
-generateContextFuns cfg kernel_names sizes = do
+generateContextFuns cfg kernels sizes failures = do
   final_inits <- GC.contextFinalInits
   (fields, init_fields) <- GC.contextContents
-  let kernel_fields = map (\k -> [C.csdecl|typename CUfunction $id:k;|])
-                        kernel_names
+  let kernel_fields = map (\k -> [C.csdecl|typename CUfunction $id:k;|]) $
+                          M.keys kernels
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
@@ -241,33 +244,49 @@ generateContextFuns cfg kernel_names sizes = do
                          char *error;
                          $sdecls:fields
                          $sdecls:kernel_fields
+                         typename CUdeviceptr global_failure;
+                         typename CUdeviceptr global_failure_args;
                          struct cuda_context cuda;
                          struct sizes sizes;
+                         // True if a potentially failing kernel has been enqueued.
+                         typename int32_t failure_is_an_option;
                        };|])
 
   let set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
                           [(0::Int)..] $ M.keys sizes
+      max_failure_args =
+        foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
      [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
-                          struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
-                          if (ctx == NULL) {
-                            return NULL;
-                          }
-                          ctx->profiling = ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
+                 struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
+                 if (ctx == NULL) {
+                   return NULL;
+                 }
+                 ctx->profiling = ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
 
-                          ctx->cuda.cfg = cfg->cu_cfg;
-                          create_lock(&ctx->lock);
-                          $stms:init_fields
+                 ctx->cuda.cfg = cfg->cu_cfg;
+                 create_lock(&ctx->lock);
 
-                          cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
-                          $stms:(map (loadKernelByName) kernel_names)
+                 ctx->failure_is_an_option = 0;
+                 $stms:init_fields
 
-                          $stms:final_inits
-                          $stms:set_sizes
-                          return ctx;
-                       }|])
+                 cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
+
+                 typename int32_t no_error = -1;
+                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
+                 CUDA_SUCCEED(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
+                 // The +1 is to avoid zero-byte allocations.
+                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure_args, sizeof(int32_t)*$int:max_failure_args+1));
+
+                 $stms:(map loadKernel (M.toList kernels))
+
+                 $stms:final_inits
+                 $stms:set_sizes
+
+                 return ctx;
+               }|])
 
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
@@ -280,9 +299,29 @@ generateContextFuns cfg kernel_names sizes = do
   GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         CUDA_SUCCEED(cuCtxSynchronize());
-                         return 0;
-                       }|])
+                 CUDA_SUCCEED(cuCtxSynchronize());
+                 if (ctx->failure_is_an_option) {
+                   // Check for any delayed error.
+                   typename int32_t failure_idx;
+                   CUDA_SUCCEED(
+                     cuMemcpyDtoH(&failure_idx,
+                                  ctx->global_failure,
+                                  sizeof(int32_t)));
+                   ctx->failure_is_an_option = 0;
+
+                   if (failure_idx >= 0) {
+                     typename int32_t args[$int:max_failure_args];
+                     CUDA_SUCCEED(
+                       cuMemcpyDtoH(&args,
+                                    ctx->global_failure_args,
+                                    sizeof(args)));
+
+                     $stm:(failureSwitch failures)
+
+                     return 1;
+                   }
+                 }
+               }|])
 
   GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
     ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
@@ -304,6 +343,6 @@ generateContextFuns cfg kernel_names sizes = do
                }|])
 
   where
-    loadKernelByName name =
+    loadKernel (name, _) =
       [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(&ctx->$id:name,
                 ctx->cuda.module, $string:name));|]

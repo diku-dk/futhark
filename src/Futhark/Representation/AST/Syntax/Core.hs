@@ -30,6 +30,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Diet(..)
          , ErrorMsg (..)
          , ErrorMsgPart (..)
+         , errorMsgArgTypes
 
          -- * Values
          , PrimValue(..)
@@ -342,3 +343,10 @@ instance Foldable ErrorMsgPart where
 instance Traversable ErrorMsgPart where
   traverse _ (ErrorString s) = pure $ ErrorString s
   traverse f (ErrorInt32 a) = ErrorInt32 <$> f a
+
+-- | How many non-constant parts does the error message have, and what
+-- is their type?
+errorMsgArgTypes :: ErrorMsg a -> [PrimType]
+errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
+  where onPart ErrorString{} = Nothing
+        onPart ErrorInt32{} = Just $ IntType Int32
