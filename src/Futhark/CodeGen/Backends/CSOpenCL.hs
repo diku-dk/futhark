@@ -26,7 +26,7 @@ compileProg module_name prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes prog') ->
+    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes failures prog') ->
       Right <$> CS.compileProg
                   module_name
                   CS.emptyConstructor
@@ -34,7 +34,7 @@ compileProg module_name prog = do
                   defines
                   operations
                   ()
-                  (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes)
+                  (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes failures)
                   []
                   [Imp.Space "device", Imp.Space "local", Imp.DefaultSpace]
                   cliOptions
@@ -135,7 +135,7 @@ callKernel (Imp.GetSizeMax v size_class) =
                      Imp.SizeLocalMemory -> "MaxLocalMemory"
                      Imp.SizeBespoke{} -> "MaxBespoke"
 
-callKernel (Imp.LaunchKernel name args num_workgroups workgroup_size) = do
+callKernel (Imp.LaunchKernel _ name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM CS.compileExp num_workgroups
   workgroup_size' <- mapM CS.compileExp workgroup_size
   let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
@@ -153,9 +153,11 @@ callKernel (Imp.CmpSizeLe v key x) = do
 launchKernel :: String -> [CSExp] -> [CSExp] -> [Imp.KernelArg] -> CS.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims args = do
   let kernel_name' = "Ctx."++kernel_name
-  args_stms <- zipWithM (processKernelArg kernel_name') [0..] args
 
-  CS.stm $ Unsafe $ concat args_stms
+  failure_arg <- processMemArg kernel_name' 0 $ Var "Ctx.GlobalFailure"
+  failure_args_arg <- processMemArg kernel_name' 1 $ Var "Ctx.GlobalFailureArgs"
+  args_stms <- zipWithM (processKernelArg kernel_name') [2..] args
+  CS.stm $ Unsafe $  concat $ [failure_arg, failure_args_arg] ++ args_stms
 
   global_work_size <- newVName' "GlobalWorkSize"
   local_work_size <- newVName' "LocalWorkSize"
@@ -172,9 +174,7 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
 
   let ctx = (++) "Ctx."
   let debugEndStmts =
-          [ Exp $ CS.simpleCall "OPENCL_SUCCEED" [
-              CS.simpleCall "CL10.Finish"
-                [Var "Ctx.OpenCL.Queue"]]
+          [ Exp $ CS.simpleCall "FutharkContextSync" []
           , Exp $ CallMethod (Var stop_watch) (Var "Stop") []
           , Assign (Var time_diff) $ asMicroseconds (Var stop_watch)
           , AssignOp "+" (Var $ ctx $ kernelRuntime kernel_name) (Var time_diff)
@@ -198,7 +198,15 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
      [ If (Var "Ctx.Debugging") debugEndStmts [] ]) []
   finishIfSynchronous
 
-  where processKernelArg :: String
+  where processMemArg kernel argnum mem = do
+          err <- newVName' "setargErr"
+          dest <- newVName "kArgDest"
+          let err_var = Var err
+          return [ Fixed (Var $ CS.compileName dest) (Addr mem)
+                   [ Assign err_var $ getKernelCall kernel argnum (CS.sizeOf $ Primitive IntPtrT) (Var $ CS.compileName dest)]
+                 ]
+
+        processKernelArg :: String
                          -> Integer
                          -> Imp.KernelArg
                          -> CS.CompilerM op s [CSStmt]
@@ -211,13 +219,8 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
           return [ AssignTyped t (Var tmp) (Just e')
                  , Assign err_var $ getKernelCall kernel argnum (CS.sizeOf t) (Addr $ Var tmp)]
 
-        processKernelArg kernel argnum (Imp.MemKArg v) = do
-          err <- newVName' "setargErr"
-          dest <- newVName "kArgDest"
-          let err_var = Var err
-          return [ Fixed (Var $ CS.compileName dest) (Addr $ memblockFromMem v)
-                   [ Assign err_var $ getKernelCall kernel argnum (CS.sizeOf $ Primitive IntPtrT) (Var $ CS.compileName dest)]
-                 ]
+        processKernelArg kernel argnum (Imp.MemKArg v) =
+          processMemArg kernel argnum $ memblockFromMem v
 
         processKernelArg kernel argnum (Imp.SharedMemoryKArg (Imp.Count num_bytes)) = do
           err <- newVName' "setargErr"

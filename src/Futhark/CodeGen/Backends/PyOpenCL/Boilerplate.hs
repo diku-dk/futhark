@@ -11,10 +11,15 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import NeatInterpolation (text)
 
-import Futhark.CodeGen.ImpCode.OpenCL (PrimType(..), SizeClass(..))
+import Futhark.CodeGen.ImpCode.OpenCL
+  (PrimType(..), SizeClass(..),
+   FailureMsg(..), ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.Util.Pretty (prettyText)
+
+errorMsgNumArgs :: ErrorMsg a -> Int
+errorMsgNumArgs = length . errorMsgArgTypes
 
 -- | @rts/python/opencl.py@ embedded as a string.
 openClPrelude :: String
@@ -23,9 +28,11 @@ openClPrelude = $(embedStringFile "rts/python/opencl.py")
 -- | Python code (as a string) that calls the
 -- @initiatialize_opencl_object@ procedure.  Should be put in the
 -- class constructor.
-openClInit :: [PrimType] -> String -> M.Map Name SizeClass -> String
-openClInit types assign sizes = T.unpack [text|
+openClInit :: [PrimType] -> String -> M.Map Name SizeClass -> [FailureMsg] -> String
+openClInit types assign sizes failures = T.unpack [text|
 size_heuristics=$size_heuristics
+self.global_failure_args_max = $max_num_args
+self.failure_msgs=$failure_msgs
 program = initialise_opencl_object(self,
                                    program_src=fut_opencl_src,
                                    command_queue=command_queue,
@@ -46,6 +53,19 @@ $assign'
         size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
         types' = prettyText $ map (show . pretty) types -- Looks enough like Python.
         sizes' = prettyText $ sizeClassesToPython sizes
+        max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+        failure_msgs = prettyText $ List $ map formatFailure failures
+
+formatFailure :: FailureMsg -> PyExp
+formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
+  String $ concatMap onPart parts ++ "\n" ++ formatEscape backtrace
+  where formatEscape = let escapeChar '{' = "{{"
+                           escapeChar '}' = "}}"
+                           escapeChar c = [c]
+                       in concatMap escapeChar
+
+        onPart (ErrorString s) = formatEscape s
+        onPart ErrorInt32{} = "{}"
 
 sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList
