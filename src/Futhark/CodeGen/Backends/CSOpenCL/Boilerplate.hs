@@ -161,6 +161,7 @@ generateBoilerplate opencl_code opencl_prelude kernels types sizes failures = do
     , (Primitive BoolT, "DetailMemory")
     , (Primitive BoolT, "Debugging")
     , (CustomT "CLMemoryHandle", "GlobalFailure")
+    , (intT, "GlobalFailureIsAnOption")
     , (CustomT "CLMemoryHandle", "GlobalFailureArgs")
     , (CustomT "OpenCLContext", "OpenCL")
     , (CustomT "Sizes", "Sizes") ]
@@ -199,19 +200,20 @@ generateBoilerplate opencl_code opencl_prelude kernels types sizes failures = do
         (Just $ CS.simpleCall "SetupOpenCL" [ Ref $ Var "Ctx"
                                             , Var "OpenCLProgram"
                                             , Var "RequiredTypes"])] ++
-    [Unsafe
-     [ Exp $ CS.simpleCall "OPENCL_SUCCEED"
-       [CS.simpleCall "OpenCLAllocActual" [ Ref $ Var "Ctx"
-                                          , Integer 4
-                                          , Ref $ Var "Ctx.GlobalFailure"]]
-     , AssignTyped intT (Var "no_failure") (Just (Integer (-1)))
-     , Exp $ CS.simpleCall "OPENCL_SUCCEED"
-       [CS.simpleCall "CL10.EnqueueWriteBuffer"
-        [ Var "Ctx.OpenCL.Queue", Var "Ctx.GlobalFailure", AST.Bool True
-        , CS.toIntPtr $ Integer 0
-        , CS.toIntPtr $ Integer 4
-        , CS.toIntPtr $ Addr (Var "no_failure")
-        , Integer 0, Null, Null]]
+    [ Reassign (Var "Ctx.GlobalFailureIsAnOption") (Integer 0)
+    , Unsafe
+      [ Exp $ CS.simpleCall "OPENCL_SUCCEED"
+        [CS.simpleCall "OpenCLAllocActual" [ Ref $ Var "Ctx"
+                                           , Integer 4
+                                           , Ref $ Var "Ctx.GlobalFailure"]]
+      , AssignTyped intT (Var "no_failure") (Just (Integer (-1)))
+      , Exp $ CS.simpleCall "OPENCL_SUCCEED"
+        [CS.simpleCall "CL10.EnqueueWriteBuffer"
+         [ Var "Ctx.OpenCL.Queue", Var "Ctx.GlobalFailure", AST.Bool True
+         , CS.toIntPtr $ Integer 0
+         , CS.toIntPtr $ Integer 4
+         , CS.toIntPtr $ Addr (Var "no_failure")
+         , Integer 0, Null, Null]]
 
      , Exp $ CS.simpleCall "OPENCL_SUCCEED"
        [CS.simpleCall "OpenCLAllocActual" [ Ref $ Var "Ctx"
@@ -223,7 +225,8 @@ generateBoilerplate opencl_code opencl_prelude kernels types sizes failures = do
 
   CS.stm $ CS.privateFunDef sync_ctx VoidT []
     [ AssignTyped intT (Var "failure_idx") (Just $ CS.simpleInitClass (pretty intT) [])
-    , Unsafe [CS.assignScalarPointer (Var "failure_idx") (Var "ptr")
+    , Unsafe [ CS.assignScalarPointer (Var "failure_idx") (Var "ptr")
+             , Reassign (Var "Ctx.GlobalFailureIsAnOption") (Integer 0)
              , Exp $ CS.simpleCall "OPENCL_SUCCEED" [
                  CS.simpleCall "CL10.EnqueueReadBuffer"
                  [ Var "Ctx.OpenCL.Queue", Var "Ctx.GlobalFailure", AST.Bool True

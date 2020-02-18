@@ -8,7 +8,7 @@ import Data.List
 
 
 import Futhark.Error
-import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
+import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory, int32)
 import Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericCSharp as CS
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
@@ -135,13 +135,13 @@ callKernel (Imp.GetSizeMax v size_class) =
                      Imp.SizeLocalMemory -> "MaxLocalMemory"
                      Imp.SizeBespoke{} -> "MaxBespoke"
 
-callKernel (Imp.LaunchKernel _ name args num_workgroups workgroup_size) = do
+callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM CS.compileExp num_workgroups
   workgroup_size' <- mapM CS.compileExp workgroup_size
   let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)
-  body <- CS.collect $ launchKernel name kernel_size workgroup_size' args
+  body <- CS.collect $ launchKernel safety name kernel_size workgroup_size' args
   CS.stm $ If cond body []
   where mult_exp = BinOp "*"
 
@@ -150,14 +150,20 @@ callKernel (Imp.CmpSizeLe v key x) = do
   CS.stm $ Reassign (Var (CS.compileName v)) $
     BinOp "<=" (Field (Var "Ctx.Sizes") (zEncodeString $ pretty key)) x'
 
-launchKernel :: String -> [CSExp] -> [CSExp] -> [Imp.KernelArg] -> CS.CompilerM op s ()
-launchKernel kernel_name kernel_dims workgroup_dims args = do
+launchKernel :: Imp.Safety -> String -> [CSExp] -> [CSExp] -> [Imp.KernelArg] -> CS.CompilerM op s ()
+launchKernel safety kernel_name kernel_dims workgroup_dims args = do
   let kernel_name' = "Ctx."++kernel_name
 
-  failure_arg <- processMemArg kernel_name' 0 $ Var "Ctx.GlobalFailure"
-  failure_args_arg <- processMemArg kernel_name' 1 $ Var "Ctx.GlobalFailureArgs"
-  args_stms <- zipWithM (processKernelArg kernel_name') [2..] args
-  CS.stm $ Unsafe $  concat $ [failure_arg, failure_args_arg] ++ args_stms
+  let failure_args =
+        [ processMemArg kernel_name' 0 $ Var "Ctx.GlobalFailure"
+        , processValueArg kernel_name' 1 int32 $ Var "Ctx.GlobalFailureIsAnOption"
+        , processMemArg kernel_name' 2 $ Var "Ctx.GlobalFailureArgs"]
+
+  sequence_ $ take (Imp.numFailureParams safety) failure_args
+
+  args_stms <- zipWithM (processKernelArg kernel_name')
+               [toInteger (Imp.numFailureParams safety)..] args
+  CS.stm $ Unsafe $ concat args_stms
 
   global_work_size <- newVName' "GlobalWorkSize"
   local_work_size <- newVName' "LocalWorkSize"
@@ -196,6 +202,10 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
            , Var global_work_size, Var local_work_size, Integer 0, Null, Null]]]
      ++
      [ If (Var "Ctx.Debugging") debugEndStmts [] ]) []
+
+  when (safety >= Imp.SafetyFull) $
+    CS.stm $ Reassign (Var "Ctx.GlobalFailureIsAnOption") (Integer 1)
+
   finishIfSynchronous
 
   where processMemArg kernel argnum mem = do
@@ -206,18 +216,20 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
                    [ Assign err_var $ getKernelCall kernel argnum (CS.sizeOf $ Primitive IntPtrT) (Var $ CS.compileName dest)]
                  ]
 
+        processValueArg kernel argnum et e = do
+          let t = CS.compilePrimTypeToAST et
+          tmp <- newVName' "kernelArg"
+          err <- newVName' "setargErr"
+          let err_var = Var err
+          return [ AssignTyped t (Var tmp) (Just e)
+                 , Assign err_var $ getKernelCall kernel argnum (CS.sizeOf t) (Addr $ Var tmp)]
+
         processKernelArg :: String
                          -> Integer
                          -> Imp.KernelArg
                          -> CS.CompilerM op s [CSStmt]
-        processKernelArg kernel argnum (Imp.ValueKArg e bt) = do
-          let t = CS.compilePrimTypeToAST bt
-          tmp <- newVName' "kernelArg"
-          e' <- CS.compileExp e
-          err <- newVName' "setargErr"
-          let err_var = Var err
-          return [ AssignTyped t (Var tmp) (Just e')
-                 , Assign err_var $ getKernelCall kernel argnum (CS.sizeOf t) (Addr $ Var tmp)]
+        processKernelArg kernel argnum (Imp.ValueKArg e et) =
+          processValueArg kernel argnum et =<< CS.compileExp e
 
         processKernelArg kernel argnum (Imp.MemKArg v) =
           processMemArg kernel argnum $ memblockFromMem v
