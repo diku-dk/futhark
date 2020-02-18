@@ -403,10 +403,6 @@ fixExtIxFun i e = fmap $ replaceInPrimExp update
 leafExp :: Int -> PrimExp (Ext a)
 leafExp i = LeafExp (Ext i) int32
 
-memReturnIxFun :: MemReturn -> ExtIxFun
-memReturnIxFun (ReturnsInBlock _ ixfun) = ixfun
-memReturnIxFun (ReturnsNewBlock _ _ ixfun) = ixfun
-
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
 existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
   where ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0..]
@@ -557,25 +553,8 @@ matchReturnType rettype res ts = do
   let (ctx_ts, val_ts) = splitFromEnd (length rettype) ts
       (ctx_res, _val_res) = splitFromEnd (length rettype) res
 
-      getId :: (SubExp,Int) -> Maybe (VName,Int)
-      getId (Var ii, i) = Just (ii,i)
-      getId (Constant _, _) = Nothing
-
-      (ctx_map_ids, ctx_map_exts) =
-        getExtMaps $ mapMaybe getId $ zip ctx_res [0..length ctx_res - 1]
-
       existentialiseIxFun0 :: IxFun -> ExtIxFun
-      existentialiseIxFun0 = IxFun.substituteInIxFun ctx_map_ids . fmap (fmap Free)
-
-      getCt :: (Int,SubExp) -> Maybe (Ext VName, PrimExp (Ext VName))
-      getCt (_, Var _) = Nothing
-      getCt (i, Constant c) = Just (Ext i, ValueExp c)
-
-      ctx_map_cts = M.fromList $ mapMaybe getCt $
-                    zip [0..length ctx_res - 1] ctx_res
-
-      substConstsInExtIndFun :: ExtIxFun -> ExtIxFun
-      substConstsInExtIndFun = IxFun.substituteInIxFun (ctx_map_cts<>ctx_map_exts)
+      existentialiseIxFun0 = fmap $ fmap Free
 
       fetchCtx i = case maybeNth i $ zip ctx_res ctx_ts of
                      Nothing -> throwError $ "Cannot find context variable " ++
@@ -591,8 +570,6 @@ matchReturnType rettype res ts = do
         | x_pt == y_pt, shapeRank x_shape == shapeRank y_shape = do
             zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
             checkMemReturn x_ret y_ret
-              where extDim (Ext v) = LeafExp (Ext v) int32
-                    extDim (Free se) = Free <$> primExpFromSubExp int32 se
       checkReturn x y =
         throwError $ unwords ["Expected ", pretty x, " but got ", pretty y]
 
@@ -612,23 +589,19 @@ matchReturnType rettype res ts = do
       extsInMemInfo _ = S.empty
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
-          | x_mem == y_mem = do
-              let x_ixfun' = substConstsInExtIndFun x_ixfun
-                  y_ixfun' = existentialiseIxFun0   y_ixfun
-              unless (x_ixfun' == y_ixfun') $
+          | x_mem == y_mem =
+              unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
                 throwError $ unwords  ["Index function unification failed (ReturnsInBlock)",
-                    "\nixfun of body result: ", pretty y_ixfun',
-                    "\nixfun of return type: ", pretty x_ixfun',
+                    "\nixfun of body result: ", pretty y_ixfun,
+                    "\nixfun of return type: ", pretty x_ixfun,
                     "\nand context elements: ", pretty ctx_res]
       checkMemReturn (ReturnsNewBlock x_space x_ext x_ixfun)
                      (ArrayIn y_mem y_ixfun) = do
         (x_mem, x_mem_type)  <- fetchCtx x_ext
-        let x_ixfun' = substConstsInExtIndFun x_ixfun
-            y_ixfun' = existentialiseIxFun0   y_ixfun
-        unless (x_ixfun' == y_ixfun') $
+        unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
           throwError $ unwords  ["Index function unification failed (ReturnsNewBlock)",
-            "\nixfun of body result: ", pretty y_ixfun',
-            "\nixfun of return type: ", pretty x_ixfun',
+            "\nixfun of body result: ", pretty y_ixfun,
+            "\nixfun of return type: ", pretty x_ixfun,
             "\nand context elements: ", pretty ctx_res]
         case x_mem_type of
           MemMem y_space -> do
@@ -704,7 +677,7 @@ matchPatternToExp pat e = do
              Just (ReturnsNewBlock y_space y_i y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_space == y_space && x_i == y_i && x_ixfun' == y_ixfun'
+              in  x_space == y_space && x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
             (_, Nothing) -> True
             _ -> False
         matches _ _ _ _ = False
