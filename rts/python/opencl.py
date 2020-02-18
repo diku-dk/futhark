@@ -114,7 +114,8 @@ def initialise_opencl_object(self,
 
     self.global_failure = self.pool.allocate(np.int32().itemsize)
     cl.enqueue_fill_buffer(self.queue, self.global_failure, np.int32(-1), 0, np.int32().itemsize)
-    self.global_failure_args = self.pool.allocate(np.int32().itemsize * self.global_failure_args_max)
+    self.global_failure_args = self.pool.allocate(np.int32().itemsize *
+                                                  (self.global_failure_args_max+1))
     self.failure_is_an_option = np.int32(0)
 
     if 'default_group_size' in sizes:
@@ -212,6 +213,6 @@ def sync(self):
     cl.enqueue_copy(self.queue, failure, self.global_failure, is_blocking=True)
     self.failure_is_an_option = np.int32(0)
     if failure[0] >= 0:
-        failure_args = np.empty(self.global_failure_args_max, dtype=np.int32)
+        failure_args = np.empty(self.global_failure_args_max+1, dtype=np.int32)
         cl.enqueue_copy(self.queue, failure_args, self.global_failure_args, is_blocking=True)
         raise Exception(self.failure_msgs[failure[0]].format(*failure_args))
