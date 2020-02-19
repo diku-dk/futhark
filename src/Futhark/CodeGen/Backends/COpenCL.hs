@@ -282,7 +282,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   launchKernel name num_workgroups' workgroup_size' local_bytes
 
   when (safety >= SafetyFull) $
-    GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
+    GC.stm [C.cstm|{ctx->failure_is_an_option = 1; futhark_context_sync(ctx);}|]
 
   where setKernelArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName "kernel_arg" bt e

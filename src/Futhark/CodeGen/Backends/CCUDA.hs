@@ -253,7 +253,7 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
     }|]
 
   when (safety >= SafetyFull) $
-    GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
+    GC.stm [C.cstm|{ctx->failure_is_an_option = 1; futhark_context_sync(ctx);}|]
 
   where
     mkDims [] = ([C.cexp|0|] , [C.cexp|0|], [C.cexp|0|])
