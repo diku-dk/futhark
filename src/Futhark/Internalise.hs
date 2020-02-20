@@ -1216,118 +1216,138 @@ internaliseOperation s e op = do
   vs <- internaliseExpToVars s e
   letSubExps s =<< mapM (fmap I.BasicOp . op) vs
 
-internaliseBinOp :: String
+certifyingNonzero :: SrcLoc -> IntType -> SubExp
+                  -> InternaliseM a
+                  -> InternaliseM a
+certifyingNonzero loc t x m = do
+  c <- assertingOne $ do
+    zero <- letSubExp "zero" $ I.BasicOp $
+            CmpOp (CmpEq (IntType t)) x (intConst t 0)
+    nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp Not zero
+    letExp "nonzero_cert" $ I.BasicOp $
+      I.Assert nonzero "division by zero" (loc, mempty)
+  certifying c m
+
+internaliseBinOp :: SrcLoc -> String
                  -> E.BinOp
                  -> I.SubExp -> I.SubExp
                  -> E.PrimType
                  -> E.PrimType
                  -> InternaliseM [I.SubExp]
-internaliseBinOp desc E.Plus x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Plus x y (E.Signed t) _ =
   simpleBinOp desc (I.Add t) x y
-internaliseBinOp desc E.Plus x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Plus x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Add t) x y
-internaliseBinOp desc E.Plus x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Plus x y (E.FloatType t) _ =
   simpleBinOp desc (I.FAdd t) x y
-internaliseBinOp desc E.Minus x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Minus x y (E.Signed t) _ =
   simpleBinOp desc (I.Sub t) x y
-internaliseBinOp desc E.Minus x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Minus x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Sub t) x y
-internaliseBinOp desc E.Minus x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Minus x y (E.FloatType t) _ =
   simpleBinOp desc (I.FSub t) x y
-internaliseBinOp desc E.Times x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Times x y (E.Signed t) _ =
   simpleBinOp desc (I.Mul t) x y
-internaliseBinOp desc E.Times x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Times x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Mul t) x y
-internaliseBinOp desc E.Times x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Times x y (E.FloatType t) _ =
   simpleBinOp desc (I.FMul t) x y
-internaliseBinOp desc E.Divide x y (E.Signed t) _ =
+internaliseBinOp loc desc E.Divide x y (E.Signed t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.SDiv t) x y
-internaliseBinOp desc E.Divide x y (E.Unsigned t) _ =
+internaliseBinOp loc desc E.Divide x y (E.Unsigned t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.UDiv t) x y
-internaliseBinOp desc E.Divide x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Divide x y (E.FloatType t) _ =
   simpleBinOp desc (I.FDiv t) x y
-internaliseBinOp desc E.Pow x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Pow x y (E.FloatType t) _ =
   simpleBinOp desc (I.FPow t) x y
-internaliseBinOp desc E.Pow x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Pow x y (E.Signed t) _ =
   simpleBinOp desc (I.Pow t) x y
-internaliseBinOp desc E.Pow x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Pow x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Pow t) x y
-internaliseBinOp desc E.Mod x y (E.Signed t) _ =
+internaliseBinOp loc desc E.Mod x y (E.Signed t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.SMod t) x y
-internaliseBinOp desc E.Mod x y (E.Unsigned t) _ =
+internaliseBinOp loc desc E.Mod x y (E.Unsigned t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.UMod t) x y
-internaliseBinOp desc E.Mod x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Mod x y (E.FloatType t) _ =
   simpleBinOp desc (I.FMod t) x y
-internaliseBinOp desc E.Quot x y (E.Signed t) _ =
+internaliseBinOp loc desc E.Quot x y (E.Signed t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.SQuot t) x y
-internaliseBinOp desc E.Quot x y (E.Unsigned t) _ =
+internaliseBinOp loc desc E.Quot x y (E.Unsigned t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.UDiv t) x y
-internaliseBinOp desc E.Rem x y (E.Signed t) _ =
+internaliseBinOp loc desc E.Rem x y (E.Signed t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.SRem t) x y
-internaliseBinOp desc E.Rem x y (E.Unsigned t) _ =
+internaliseBinOp loc desc E.Rem x y (E.Unsigned t) _ =
+  certifyingNonzero loc t y $
   simpleBinOp desc (I.UMod t) x y
-internaliseBinOp desc E.ShiftR x y (E.Signed t) _ =
+internaliseBinOp _ desc E.ShiftR x y (E.Signed t) _ =
   simpleBinOp desc (I.AShr t) x y
-internaliseBinOp desc E.ShiftR x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.ShiftR x y (E.Unsigned t) _ =
   simpleBinOp desc (I.LShr t) x y
-internaliseBinOp desc E.ShiftL x y (E.Signed t) _ =
+internaliseBinOp _ desc E.ShiftL x y (E.Signed t) _ =
   simpleBinOp desc (I.Shl t) x y
-internaliseBinOp desc E.ShiftL x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.ShiftL x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Shl t) x y
-internaliseBinOp desc E.Band x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Band x y (E.Signed t) _ =
   simpleBinOp desc (I.And t) x y
-internaliseBinOp desc E.Band x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Band x y (E.Unsigned t) _ =
   simpleBinOp desc (I.And t) x y
-internaliseBinOp desc E.Xor x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Xor x y (E.Signed t) _ =
   simpleBinOp desc (I.Xor t) x y
-internaliseBinOp desc E.Xor x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Xor x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Xor t) x y
-internaliseBinOp desc E.Bor x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Bor x y (E.Signed t) _ =
   simpleBinOp desc (I.Or t) x y
-internaliseBinOp desc E.Bor x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Bor x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Or t) x y
 
-internaliseBinOp desc E.Equal x y t _ =
+internaliseBinOp _ desc E.Equal x y t _ =
   simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y
-internaliseBinOp desc E.NotEqual x y t _ = do
+internaliseBinOp _ desc E.NotEqual x y t _ = do
   eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq $ internalisePrimType t) x y
   fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
-internaliseBinOp desc E.Less x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Less x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSlt t) x y
-internaliseBinOp desc E.Less x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Less x y (E.Unsigned t) _ =
   simpleCmpOp desc (I.CmpUlt t) x y
-internaliseBinOp desc E.Leq x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Leq x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSle t) x y
-internaliseBinOp desc E.Leq x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Leq x y (E.Unsigned t) _ =
   simpleCmpOp desc (I.CmpUle t) x y
-internaliseBinOp desc E.Greater x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Greater x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSlt t) y x -- Note the swapped x and y
-internaliseBinOp desc E.Greater x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Greater x y (E.Unsigned t) _ =
   simpleCmpOp desc (I.CmpUlt t) y x -- Note the swapped x and y
-internaliseBinOp desc E.Geq x y (E.Signed t) _ =
+internaliseBinOp _ desc E.Geq x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSle t) y x -- Note the swapped x and y
-internaliseBinOp desc E.Geq x y (E.Unsigned t) _ =
+internaliseBinOp _ desc E.Geq x y (E.Unsigned t) _ =
   simpleCmpOp desc (I.CmpUle t) y x -- Note the swapped x and y
-internaliseBinOp desc E.Less x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Less x y (E.FloatType t) _ =
   simpleCmpOp desc (I.FCmpLt t) x y
-internaliseBinOp desc E.Leq x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Leq x y (E.FloatType t) _ =
   simpleCmpOp desc (I.FCmpLe t) x y
-internaliseBinOp desc E.Greater x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Greater x y (E.FloatType t) _ =
   simpleCmpOp desc (I.FCmpLt t) y x -- Note the swapped x and y
-internaliseBinOp desc E.Geq x y (E.FloatType t) _ =
+internaliseBinOp _ desc E.Geq x y (E.FloatType t) _ =
   simpleCmpOp desc (I.FCmpLe t) y x -- Note the swapped x and y
 
 -- Relational operators for booleans.
-internaliseBinOp desc E.Less x y E.Bool _ =
+internaliseBinOp _ desc E.Less x y E.Bool _ =
   simpleCmpOp desc I.CmpLlt x y
-internaliseBinOp desc E.Leq x y E.Bool _ =
+internaliseBinOp _ desc E.Leq x y E.Bool _ =
   simpleCmpOp desc I.CmpLle x y
-internaliseBinOp desc E.Greater x y E.Bool _ =
+internaliseBinOp _ desc E.Greater x y E.Bool _ =
   simpleCmpOp desc I.CmpLlt y x -- Note the swapped x and y
-internaliseBinOp desc E.Geq x y E.Bool _ =
+internaliseBinOp _ desc E.Geq x y E.Bool _ =
   simpleCmpOp desc I.CmpLle y x -- Note the swapped x and y
 
-internaliseBinOp _ op _ _ t1 t2 =
+internaliseBinOp _ _ op _ _ t1 t2 =
   fail $ "Invalid binary operator " ++ pretty op ++
   " with operand types " ++ pretty t1 ++ ", " ++ pretty t2
 
@@ -1483,7 +1503,7 @@ isOverloadedFunction qname args loc = do
         y' <- internaliseExp1 "y" y
         case (E.typeOf x, E.typeOf y) of
           (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
-            internaliseBinOp desc bop x' y' t1 t2
+            internaliseBinOp loc desc bop x' y' t1 t2
           _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
     handle [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v

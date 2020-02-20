@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The parallel code generators can now handle bounds checking and
     other safety checks.
 
+  * Integer division by zero is now properly safety-checked and
+    produces an error message.
+
   * `reduce_by_index` may be somewhat faster for complex operators on
     histograms that barely fit in local memory.
 
