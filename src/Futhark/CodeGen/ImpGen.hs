@@ -13,8 +13,6 @@ module Futhark.CodeGen.ImpGen
   , AllocCompiler
   , Operations (..)
   , defaultOperations
-  , ValueDestination
-  , arrayDestination
   , MemLocation (..)
   , MemEntry (..)
   , ScalarEntry (..)
@@ -53,15 +51,12 @@ module Futhark.CodeGen.ImpGen
   , compileStms
   , compileExp
   , defCompileExp
-  , offsetArray
-  , strideArray
   , fullyIndexArray
   , fullyIndexArray'
   , Imp.dimSizeToExp
   , dimSizeToSubExp
   , copy
   , copyDWIM
-  , copyDWIMDest
   , copyDWIMFix
   , copyElementWise
   , typeSize
@@ -194,9 +189,6 @@ data ValueDestination = ScalarDestination VName
                         -- copy/assignment of a memory block somewhere
                         -- takes care of this array.
                       deriving (Show)
-
-arrayDestination :: MemLocation -> ValueDestination
-arrayDestination = ArrayDestination . Just
 
 data Env lore op = Env {
     envExpCompiler :: ExpCompiler lore op
@@ -968,18 +960,6 @@ sliceArray (MemLocation mem shape ixfun) slice =
   where update (d:ds) (DimSlice{}:is) = d : update ds is
         update (_:ds) (DimFix{}:is) = update ds is
         update _      _               = []
-
-offsetArray :: MemLocation
-            -> Imp.Exp
-            -> MemLocation
-offsetArray (MemLocation mem shape ixfun) offset =
-  MemLocation mem shape $ IxFun.offsetIndex ixfun offset
-
-strideArray :: MemLocation
-            -> Imp.Exp
-            -> MemLocation
-strideArray (MemLocation mem shape ixfun) stride =
-  MemLocation mem shape $ IxFun.strideIndex ixfun stride
 
 -- More complicated read/write operations that use index functions.
 
