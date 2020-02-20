@@ -1089,13 +1089,13 @@ sKernelSimple name kernel_size f = do
     f constants
 
 copyInGroup :: CopyCompiler ExplicitMemory Imp.KernelOp
-copyInGroup pt destloc srcloc n = do
+copyInGroup pt destloc srcloc = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
 
   if isScalarMem dest_space && isScalarMem src_space
     then memLocationName destloc <-- Imp.var (memLocationName srcloc) pt
-    else copyElementWise pt destloc srcloc n
+    else copyElementWise pt destloc srcloc
 
   where isScalarMem (Space space) = space `M.member` allScalarMemory
         isScalarMem DefaultSpace = False
@@ -1218,17 +1218,16 @@ sIota arr n x s et = do
 sCopy :: PrimType
       -> MemLocation
       -> MemLocation
-      -> Imp.Count Imp.Elements Imp.Exp
       -> CallKernelGen ()
 sCopy bt
   destloc@(MemLocation destmem _ _)
   srcloc@(MemLocation srcmem srcshape _)
-  n = do
+  = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map dimSizeToExp srcshape
       shape_se = map (Imp.unCount . dimSizeToExp) srcshape
-      kernel_size = Imp.unCount $ n * product (drop 1 shape)
+      kernel_size = Imp.unCount $ product shape
 
   (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
 

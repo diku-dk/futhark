@@ -123,7 +123,6 @@ type ExpCompiler lore op = Pattern lore -> Exp lore -> ImpM lore op ()
 type CopyCompiler lore op = PrimType
                            -> MemLocation
                            -> MemLocation
-                           -> Count Elements Imp.Exp -- ^ Number of row elements of the source.
                            -> ImpM lore op ()
 
 -- | An alternate way of compiling an allocation.
@@ -697,7 +696,7 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
           rows = case drop i $ entryArrayShape yentry of
                   []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
                   r:_ -> unCount $ Imp.dimSizeToExp r
-      copy (elemType $ patElemType pe) destloc srcloc $ arrayOuterSize yentry
+      copy (elemType $ patElemType pe) destloc srcloc
       emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
 defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
@@ -711,7 +710,7 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
                        IxFun.iota [fromIntegral $ length es]
           entry = MemVar Nothing $ MemEntry dest_space
       addVar static_array entry
-      copy t dest_mem static_src $ fromIntegral $ length es
+      copy t dest_mem static_src
   | otherwise =
     forM_ (zip [0..] es) $ \(i,e) ->
       copyDWIM (patElemName pe) [fromInteger i] e []
@@ -981,23 +980,16 @@ strideArray :: MemLocation
 strideArray (MemLocation mem shape ixfun) stride =
   MemLocation mem shape $ IxFun.strideIndex ixfun stride
 
-arrayOuterSize :: ArrayEntry -> Count Elements Imp.Exp
-arrayOuterSize = arrayDimSize 0
-
-arrayDimSize :: Int -> ArrayEntry -> Count Elements Imp.Exp
-arrayDimSize i =
-  product . map Imp.dimSizeToExp . take 1 . drop i . entryArrayShape
-
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler lore op
-copy bt pat src n = do
+copy bt pat src = do
   cc <- asks envCopyCompiler
-  cc bt pat src n
+  cc bt pat src
 
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler lore op
-defaultCopy bt dest src n
+defaultCopy bt dest src
   | ixFunMatchesInnerShape
       (Shape $ map dimSizeToExp destshape) destIxFun,
     ixFunMatchesInnerShape
@@ -1011,21 +1003,21 @@ defaultCopy bt dest src n
         emit $ Imp.Copy
           destmem (bytes destoffset) destspace
           srcmem (bytes srcoffset) srcspace $
-          (n * row_size) `withElemType` bt
+          num_elems `withElemType` bt
   | otherwise =
-      copyElementWise bt dest src n
+      copyElementWise bt dest src
   where bt_size = primByteSize bt
-        row_size = product $ map Imp.dimSizeToExp $ drop 1 srcshape
+        num_elems = product $ map Imp.dimSizeToExp srcshape
         MemLocation destmem destshape destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
 copyElementWise :: CopyCompiler lore op
-copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
+copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     let ivars = map Imp.vi32 is
         destidx = IxFun.index destIxFun ivars
         srcidx = IxFun.index srcIxFun ivars
-        bounds = map unCount $ n : drop 1 (map Imp.dimSizeToExp srcshape)
+        bounds = map (unCount . Imp.dimSizeToExp) srcshape
     srcspace <- entryMemSpace <$> lookupMemory srcmem
     destspace <- entryMemSpace <$> lookupMemory destmem
     vol <- asks envVolatility
@@ -1043,7 +1035,8 @@ copyArrayDWIM bt
   destlocation@(MemLocation _ destshape dest_ixfun) destis
   srclocation@(MemLocation _ srcshape src_ixfun) srcis
 
-  | length srcis == length srcshape, length destis == length destshape = do
+  | length srcis == length srcshape,
+    length destis == length destshape = do
   (targetmem, destspace, targetoffset) <-
     fullyIndexArray' destlocation destis
   (srcmem, srcspace, srcoffset) <-
@@ -1069,9 +1062,7 @@ copyArrayDWIM bt
              " vs " ++ pretty srcrank ++ ")"
       else if destlocation' == srclocation'
         then return mempty -- Copy would be no-op.
-        else collect $ copy bt destlocation' srclocation' $
-             product $ map Imp.dimSizeToExp $
-             take 1 $ drop (length srcis) srcshape
+        else collect $ copy bt destlocation' srclocation'
 
 -- | Like 'copyDWIM', but the target is a 'ValueDestination'
 -- instead of a variable name.
