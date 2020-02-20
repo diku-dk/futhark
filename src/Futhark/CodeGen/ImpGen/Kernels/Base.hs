@@ -1254,21 +1254,18 @@ compileGroupResult :: SegSpace
                    -> InKernelGen ()
 
 compileGroupResult _ constants pe (TileReturns [(w,per_group_elems)] what) = do
-  dest_loc <- entryArrayLocation <$> lookupArray (patElemName pe)
-  let dest_loc_offset = offsetArray dest_loc offset
-      dest' = arrayDestination dest_loc_offset
   n <- toExp . arraySize 0 =<< lookupType what
 
   -- Avoid loop for the common case where each thread is statically
   -- known to write at most one element.
   if toExp' int32 per_group_elems == kernelGroupSize constants
     then sWhen (offset + ltid .<. toExp' int32 w) $
-         copyDWIMDest dest' [ltid] (Var what) [ltid]
+         copyDWIM (patElemName pe) [ltid + offset] (Var what) [ltid]
     else
     sFor "i" (n `quotRoundingUp` kernelGroupSize constants) $ \i -> do
       j <- fmap Imp.vi32 $ dPrimV "j" $
            kernelGroupSize constants * i + ltid
-      sWhen (j .<. n) $ copyDWIMDest dest' [j] (Var what) [j]
+      sWhen (j .<. n) $ copyDWIM (patElemName pe) [j + offset] (Var what) [j]
   where ltid = kernelLocalThreadId constants
         offset = toExp' int32 per_group_elems * kernelGroupId constants
 
