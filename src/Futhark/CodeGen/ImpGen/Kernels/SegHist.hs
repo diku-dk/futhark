@@ -389,7 +389,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
 
         sComment "save map-out results" $
           forM_ (zip map_pes map_res) $ \(pe, res) ->
-          copyDWIM (patElemName pe)
+          copyDWIMFix (patElemName pe)
           (map (Imp.vi32 . fst) $ unSegSpace space)
           (kernelResultSubExp res) []
 
@@ -415,7 +415,7 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
               dLParams $ lambdaParams lam
               sLoopNest shape $ \is -> do
                 forM_ (zip vs_params vs') $ \(p, res) ->
-                  copyDWIM (paramName p) [] (kernelResultSubExp res) is
+                  copyDWIMFix (paramName p) [] (kernelResultSubExp res) is
                 do_op (bucket_is ++ is)
 
 
@@ -479,7 +479,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group num_groups space =
 
             sComment "All locks start out unlocked" $
               groupCoverSpace constants dims $ \is ->
-              copyDWIM locks is (intConst Int32 0) []
+              copyDWIMFix locks is (intConst Int32 0) []
 
             return $ f $ Locking locks 0 1 0 id
 
@@ -599,9 +599,9 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
       let global_is = map Imp.vi32 segment_is ++ [0] ++ global_bucket_is
           local_is = local_subhisto_i : local_bucket_is
       sIf (global_subhisto_i .==. 0)
-        (copyDWIM dest_local local_is (Var dest_global) global_is)
+        (copyDWIMFix dest_local local_is (Var dest_global) global_is)
         (sLoopNest (histShape op) $ \is ->
-            copyDWIM dest_local (local_is++is) ne [])
+            copyDWIMFix dest_local (local_is++is) ne [])
 
     sOp Imp.LocalBarrier
 
@@ -622,7 +622,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
         sWhen (chk_i .==. 0) $
           sComment "save map-out results" $
           forM_ (zip map_pes map_res) $ \(pe, se) ->
-          copyDWIM (patElemName pe)
+          copyDWIMFix (patElemName pe)
           (map Imp.vi32 space_is) se []
 
         forM_ (zip4 (map slugOp slugs) histograms buckets (perOp vs)) $
@@ -643,7 +643,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
               dLParams $ lambdaParams lam
               sLoopNest shape $ \is -> do
                 forM_ (zip vs_params vs') $ \(p, v) ->
-                  copyDWIM (paramName p) [] v is
+                  copyDWIMFix (paramName p) [] v is
                 do_op (bucket_is ++ is)
 
     sOp Imp.ErrorSync
@@ -678,14 +678,14 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
 
           sComment "Read values from subhistogram 0." $
             forM_ (zip xparams local_dests) $ \(xp, subhisto) ->
-            copyDWIM
+            copyDWIMFix
             (paramName xp) []
             (Var subhisto) (0:local_bucket_is)
 
           sComment "Accumulate based on values in other subhistograms." $
             sFor "subhisto_id" (num_subhistos_per_group - 1) $ \subhisto_id -> do
               forM_ (zip yparams local_dests) $ \(yp, subhisto) ->
-                copyDWIM
+                copyDWIMFix
                 (paramName yp) []
                 (Var subhisto) (subhisto_id + 1 : local_bucket_is)
               compileBody' xparams $ lambdaBody $ histOp $ slugOp slug
@@ -696,7 +696,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
                   [group_id `rem` unCount groups_per_segment] ++
                   global_bucket_is
             forM_ (zip xparams global_dests) $ \(xp, global_dest) ->
-              copyDWIM global_dest global_is (Var $ paramName xp) []
+              copyDWIMFix global_dest global_is (Var $ paramName xp) []
 
 histKernelLocal :: VName -> Count NumGroups Imp.Exp
                 -> [PatElem ExplicitMemory]
