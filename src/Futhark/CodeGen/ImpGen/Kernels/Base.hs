@@ -113,7 +113,7 @@ splitSpace pat _ _ _ _ =
 compileThreadExp :: ExpCompiler ExplicitMemory Imp.KernelOp
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
-  copyDWIM (patElemName dest) [fromIntegral (i::Int32)] e []
+  copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
 compileThreadExp dest e =
   defCompileExp dest e
 
@@ -154,13 +154,13 @@ groupCopy :: KernelConstants -> VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> InK
 groupCopy constants to to_is from from_is = do
   ds <- mapM toExp . arrayDims =<< subExpType from
   groupCoverSpace constants ds $ \is ->
-    copyDWIM to (to_is++ is) from (from_is ++ is)
+    copyDWIMFix to (to_is++ is) from (from_is ++ is)
 
 compileGroupExp :: KernelConstants -> ExpCompiler ExplicitMemory Imp.KernelOp
 -- The static arrays stuff does not work inside kernels.
 compileGroupExp _ (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
-  copyDWIM (patElemName dest) [fromIntegral (i::Int32)] e []
+  copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Copy arr)) = do
   groupCopy constants (patElemName dest) [] (Var arr) []
   sOp Imp.LocalBarrier
@@ -170,7 +170,7 @@ compileGroupExp constants (Pattern _ [dest]) (BasicOp (Manifest _ arr)) = do
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
   ds' <- mapM toExp $ shapeDims ds
   groupCoverSpace constants ds' $ \is ->
-    copyDWIM (patElemName dest) is se (drop (shapeRank ds) is)
+    copyDWIMFix (patElemName dest) is se (drop (shapeRank ds) is)
   sOp Imp.LocalBarrier
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   n' <- toExp n
@@ -178,7 +178,7 @@ compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   s' <- toExp s
   groupLoop constants n' $ \i' -> do
     x <- dPrimV "x" $ e' + i' * s'
-    copyDWIM (patElemName dest) [i'] (Var x) []
+    copyDWIMFix (patElemName dest) [i'] (Var x) []
   sOp Imp.LocalBarrier
 
 compileGroupExp _ dest e =
@@ -233,7 +233,7 @@ prepareIntraGroupSegHist constants group_size =
 
           sComment "All locks start out unlocked" $
             groupCoverSpace constants [kernelGroupSize constants] $ \is ->
-            copyDWIM locks is (intConst Int32 0) []
+            copyDWIMFix locks is (intConst Int32 0) []
 
           return (Just l', f l' (Space "local") local_subhistos)
 
@@ -263,7 +263,7 @@ compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))
   sWhen (isActive $ unSegSpace space) $
     compileStms mempty (kernelBodyStms body) $
     forM_ (zip (patternNames pat) $ kernelBodyResult body) $ \(dest, res) ->
-    copyDWIM dest
+    copyDWIMFix dest
     (map (`Imp.var` int32) ltids)
     (kernelResultSubExp res) []
 
@@ -293,7 +293,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
     let (red_res, map_res) =
           splitAt (segRedResults ops) $ kernelBodyResult body
     forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
-      copyDWIM dest (map (`Imp.var` int32) ltids) (kernelResultSubExp res) []
+      copyDWIMFix dest (map (`Imp.var` int32) ltids) (kernelResultSubExp res) []
     zipWithM_ (compileThreadResult space constants) map_pes map_res
 
   sOp Imp.ErrorSync
@@ -308,7 +308,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       sOp Imp.ErrorSync
 
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
-        copyDWIM (patElemName pe) [] (Var arr) [0]
+        copyDWIMFix (patElemName pe) [] (Var arr) [0]
 
     _ -> do
       -- Segmented intra-group reductions are turned into (regular)
@@ -324,7 +324,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       let segment_is = map Imp.vi32 $ init ltids
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
-        copyDWIM (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
+        copyDWIMFix (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
 
       sOp Imp.LocalBarrier
 
@@ -365,7 +365,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
           dLParams $ lambdaParams lam
           sLoopNest shape $ \is -> do
             forM_ (zip vs_params op_vs) $ \(p, v) ->
-              copyDWIM (paramName p) [] v is
+              copyDWIMFix (paramName p) [] v is
             do_op (bin_is ++ is)
 
   sOp Imp.ErrorSync
@@ -499,7 +499,7 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
         everythingVolatile $
         sComment "bind lhs" $
         forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
-        copyDWIM (paramName acc_p) [] (Var arr) bucket
+        copyDWIMFix (paramName acc_p) [] (Var arr) bucket
 
   let op_body = sComment "execute operation" $
                 compileBody' acc_params $ lambdaBody op
@@ -525,7 +525,7 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
       release_lock
       break_loop
     fence
-  where writeArray bucket arr val = copyDWIM arr bucket val []
+  where writeArray bucket arr val = copyDWIMFix arr bucket val []
 
 atomicUpdateCAS :: Space -> PrimType
                 -> VName -> VName
@@ -547,7 +547,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
   -- XXX: CUDA may generate really bad code if this is not a volatile
   -- read.  Unclear why.  The later reads are volatile, so maybe
   -- that's it.
-  everythingVolatile $ copyDWIM old [] (Var arr) bucket
+  everythingVolatile $ copyDWIMFix old [] (Var arr) bucket
 
   (arr', _a_space, bucket_offset) <- fullyIndexArray arr bucket
 
@@ -821,14 +821,14 @@ groupReduceWithOffset constants offset w lam arrs = do
         readReduceArgument param arr
           | Prim _ <- paramType param = do
               let i = local_tid + Imp.vi32 offset
-              copyDWIM (paramName param) [] (Var arr) [i]
+              copyDWIMFix (paramName param) [] (Var arr) [i]
           | otherwise = do
               let i = global_tid + Imp.vi32 offset
-              copyDWIM (paramName param) [] (Var arr) [i]
+              copyDWIMFix (paramName param) [] (Var arr) [i]
 
         writeReduceOpResult param arr
           | Prim _ <- paramType param =
-              copyDWIM arr [local_tid] (Var $ paramName param) []
+              copyDWIMFix arr [local_tid] (Var $ paramName param) []
           | otherwise =
               return ()
 
@@ -1138,7 +1138,7 @@ sReplicateKernel arr se = do
   sKernelFailureTolerant True (threadOperations constants) constants name $ do
     set_constants
     sWhen (kernelThreadActive constants) $
-      copyDWIM arr is' se $ drop (length ds) is'
+      copyDWIMFix arr is' se $ drop (length ds) is'
 
 replicateFunction :: PrimType -> CallKernelGen Imp.Function
 replicateFunction bt = do
@@ -1259,12 +1259,12 @@ compileGroupResult _ constants pe (TileReturns [(w,per_group_elems)] what) = do
   -- known to write at most one element.
   if toExp' int32 per_group_elems == kernelGroupSize constants
     then sWhen (offset + ltid .<. toExp' int32 w) $
-         copyDWIM (patElemName pe) [ltid + offset] (Var what) [ltid]
+         copyDWIMFix (patElemName pe) [ltid + offset] (Var what) [ltid]
     else
     sFor "i" (n `quotRoundingUp` kernelGroupSize constants) $ \i -> do
       j <- fmap Imp.vi32 $ dPrimV "j" $
            kernelGroupSize constants * i + ltid
-      sWhen (j .<. n) $ copyDWIM (patElemName pe) [j + offset] (Var what) [j]
+      sWhen (j .<. n) $ copyDWIMFix (patElemName pe) [j + offset] (Var what) [j]
   where ltid = kernelLocalThreadId constants
         offset = toExp' int32 per_group_elems * kernelGroupId constants
 
@@ -1276,7 +1276,7 @@ compileGroupResult space constants pe (TileReturns dims what) = do
   is_for_thread <- mapM (dPrimV "thread_out_index") $ zipWith (+) group_is local_is
 
   sWhen (isActive $ zip is_for_thread $ map fst dims) $
-    copyDWIM (patElemName pe) (map Imp.vi32 is_for_thread) (Var what) local_is
+    copyDWIMFix (patElemName pe) (map Imp.vi32 is_for_thread) (Var what) local_is
 
 compileGroupResult space constants pe (Returns _ what) = do
   in_local_memory <- arrayInLocalMemory what
@@ -1284,7 +1284,7 @@ compileGroupResult space constants pe (Returns _ what) = do
 
   if not in_local_memory then
     sWhen (kernelLocalThreadId constants .==. 0) $
-    copyDWIM (patElemName pe) gids what []
+    copyDWIMFix (patElemName pe) gids what []
     else
       -- If the result of the group is an array in local memory, we
       -- store it by collective copying among all the threads of the
@@ -1304,7 +1304,7 @@ compileThreadResult :: SegSpace
 
 compileThreadResult space _ pe (Returns _ what) = do
   let is = map (Imp.vi32 . fst) $ unSegSpace space
-  copyDWIM (patElemName pe) is what []
+  copyDWIMFix (patElemName pe) is what []
 
 compileThreadResult _ constants pe (ConcatReturns SplitContiguous _ per_thread_elems what) = do
   dest_loc <- entryArrayLocation <$> lookupArray (patElemName pe)
@@ -1329,7 +1329,7 @@ compileThreadResult _ constants pe (WriteReturns rws _arr dests) = do
     let condInBounds i rw = 0 .<=. i .&&. i .<. rw
         write = foldl (.&&.) (kernelThreadActive constants) $
                 zipWith condInBounds is' rws'
-    sWhen write $ copyDWIM (patElemName pe) (map (toExp' int32) is) e []
+    sWhen write $ copyDWIMFix (patElemName pe) (map (toExp' int32) is) e []
 
 compileThreadResult _ _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
