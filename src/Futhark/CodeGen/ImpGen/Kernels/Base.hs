@@ -1307,19 +1307,13 @@ compileThreadResult space _ pe (Returns _ what) = do
   copyDWIMFix (patElemName pe) is what []
 
 compileThreadResult _ constants pe (ConcatReturns SplitContiguous _ per_thread_elems what) = do
-  dest_loc <- entryArrayLocation <$> lookupArray (patElemName pe)
-  let dest_loc_offset = offsetArray dest_loc offset
-      dest' = arrayDestination dest_loc_offset
-  copyDWIMDest dest' [] (Var what) []
+  n <- toExp' int32 . arraySize 0 <$> lookupType what
+  copyDWIM (patElemName pe) [DimSlice offset n 1] (Var what) []
   where offset = toExp' int32 per_thread_elems * kernelGlobalThreadId constants
 
 compileThreadResult _ constants pe (ConcatReturns (SplitStrided stride) _ _ what) = do
-  dest_loc <- entryArrayLocation <$> lookupArray (patElemName pe)
-  let dest_loc' = strideArray
-                  (offsetArray dest_loc offset) $
-                  toExp' int32 stride
-      dest' = arrayDestination dest_loc'
-  copyDWIMDest dest' [] (Var what) []
+  n <- toExp' int32 . arraySize 0 <$> lookupType what
+  copyDWIM (patElemName pe) [DimSlice offset n $ toExp' int32 stride] (Var what) []
   where offset = kernelGlobalThreadId constants
 
 compileThreadResult _ constants pe (WriteReturns rws _arr dests) = do
