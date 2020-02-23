@@ -9,6 +9,9 @@ import qualified Data.Map as M
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote as C
 
+--TODO:
+import qualified Language.C.Quote.OpenCL as C
+
 import Futhark.CodeGen.ImpCode.OpenGL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -21,4 +24,9 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
   -- Insert required boilerplate here; see
   -- Futhark.CodeGen.Backends.COpenCL.Boilerplate.  Feel free tot
   -- ignore most of the parameters.
-  undefined
+
+  -----------------------------
+  --TODO: Accommodate OpenGL
+
+  GC.earlyDecls [C.cunit|
+                        |]

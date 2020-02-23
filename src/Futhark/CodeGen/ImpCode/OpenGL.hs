@@ -20,9 +20,12 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 
 import Futhark.Util.Pretty
 
--- | An program calling OpenGL shaders.
-data Program = Program { openClShaderNames :: [ShaderName]
-                       , openClSizes :: M.Map Name SizeClass
+-- | A program calling OpenGL shaders.
+data Program = Program { openGlProgram :: String
+                       , openGlPrelude :: String
+                         -- ^ Must be prepended to the program.
+                       , openGlShaderNames :: [ShaderName]
+                       , openGlSizes :: M.Map Name SizeClass
                          -- ^ Runtime-configurable constants.
                        , hostFunctions :: Functions OpenGL
                        }
