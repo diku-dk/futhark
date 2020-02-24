@@ -1569,7 +1569,6 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
         mapM_ dimToInit $ M.toList init_substs'
 
         mergepat'' <- applySubst (`M.lookup` init_substs') <$> updateTypes mergepat'
-
         return (nub sparams, mergepat'')
 
   -- First we do a basic check of the loop body to figure out which of
@@ -1665,6 +1664,11 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
           While{} -> mempty
       loopt' = second (`S.difference` S.map AliasBound bound_here) $
                loopt `setUniqueness` Unique
+
+
+  -- Eliminate those new_dims that turned into sparams so it won't
+  -- look like we have ambiguous sizes lying around.
+  modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` sparams
 
   return $ DoLoop sparams mergepat'' mergeexp' form' loopbody' (Info (loopt', retext)) loc
 
@@ -2211,65 +2215,97 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   e'' <- updateTypes e'
   return (tparams, e'')
 
-constructivelyBound :: [Pattern] -> S.Set VName
-constructivelyBound = foldMap (onType . patternStructType)
-  where onType (Scalar Arrow{}) = mempty
-        onType (Scalar Prim{}) = mempty
-        onType (Scalar (Record fields)) = foldMap onType fields
-        onType (Scalar (Sum cs)) = foldMap (foldMap onType) cs
-        onType (Scalar (TypeVar _ _ tn _)) = S.singleton $ typeLeaf tn
-        onType (Array _ _ t _) = onType $ Scalar t
-
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
 -- ensure that we can actually determine their shape at run-time.
-verifyConstructive :: [TypeParam] -> [Pattern] -> Exp -> TermTypeM ()
-verifyConstructive tparams params body = do
+causalityCheck :: Exp -> TermTypeM ()
+causalityCheck binding_body = do
   constraints <- getConstraints
-  either throwError (const $ return ()) $ onExp constraints body
-  where tparams_names = map typeParamName tparams
-        constructively_bound = constructivelyBound params
 
-        nonconstructiveParam v =
-          (v `elem` tparams_names) &&
-          (v `notElem` constructively_bound)
+  let checkCausality what known t loc
+        | (d,dloc):_ <- mapMaybe (unknown constraints known) $
+                        S.toList $ mustBeExplicit $ toStruct t =
+            Just $ lift $ causality what loc d dloc t
+        | otherwise = Nothing
 
-        onExp constraints (Constr _ _ (Info t) loc)
-          | ds <- nonconstructive constraints t,
-            not $ null ds =
-              ambig loc ds t
-        onExp constraints (ArrayLit [] (Info t) loc)
-          | ds <- nonconstructive constraints t,
-            not $ null ds =
-              ambig loc ds t
-        onExp constraints e = astMap mapper e
-          where mapper = identityMapper { mapOnExp = onExp constraints }
+      checkParamCausality known p =
+        checkCausality (ppr p) known (patternType p) (srclocOf p)
 
-        nonconstructive constraints t
-          | names_in_t <- typeVars t,
-            vs <- filter nonconstructiveParam $ S.toList names_in_t,
-            not $ null vs =
-              vs
-          | otherwise =
-              mapMaybe (nonconstructiveDim constraints) $
-              S.toList $ typeDimNames t
+      onExp :: S.Set VName -> Exp
+            -> StateT (S.Set VName) (Either TypeError) Exp
 
-        nonconstructiveDim constraints v
-          | Just (_, Size Nothing _) <- v `M.lookup` constraints =
-              Just v
-        nonconstructiveDim _ _ =
-          Nothing
+      onExp known (Var v (Info t) loc)
+        | Just bad <- checkCausality (pquote (ppr v)) known t loc =
+            bad
 
-        ambig loc ds t =
-          Left $ TypeError loc Nothing mempty $
-          unlines [ "Inferred expression to have type:"
-                  , sindent $ pretty t
-                  , "Where the following sizes are ambiguous:"
-                  , "  " ++ intercalate ", " (map prettyName ds)
-                  , "Add type annotations to disambiguate."
-                  ]
+      onExp known (ArrayLit [] (Info t) loc)
+        | Just bad <- checkCausality (text "empty array") known t loc =
+            bad
 
-        sindent = intercalate "\n" . map ("  "++) . lines
+      onExp known (Lambda params _ _ _ _)
+        | bad : _ <- mapMaybe (checkParamCausality known) params =
+            bad
+
+      onExp known e@(LetPat _ bindee_e body_e (_, Info ext) _) = do
+        sequencePoint known bindee_e body_e ext
+        return e
+
+      onExp known e@(Apply f arg (Info (_, p)) (_, Info ext) _) = do
+        sequencePoint known arg f $ maybeToList p ++ ext
+        return e
+
+      onExp known e = do
+        recurse known e
+
+        case e of
+          BinOp _ _ (_, Info (_, xp)) (_, Info (_, yp)) _ (Info ext) _ ->
+            modify (<>S.fromList (catMaybes [xp,yp]++ext))
+          DoLoop _ _ _ _ _ (Info (_, ext)) _ ->
+            modify (<>S.fromList ext)
+          If _ _ _ (_, Info ext) _ ->
+            modify (<>S.fromList ext)
+          Index _ _ (_, Info ext) _ ->
+            modify (<>S.fromList ext)
+          Match _ _ (_, Info ext) _ ->
+            modify (<>S.fromList ext)
+          Range _ _ _ (_, Info ext) _ ->
+            modify (<>S.fromList ext)
+          _ ->
+            return ()
+
+        return e
+
+      recurse known = void . astMap mapper
+        where mapper = identityMapper { mapOnExp = onExp known }
+
+      sequencePoint known x y ext = do
+        new_known <- lift $ execStateT (onExp known x) mempty
+        void $ onExp (new_known<>known) y
+        modify ((new_known<>S.fromList ext)<>)
+
+  either throwError (const $ return ()) $
+    evalStateT (onExp mempty binding_body) mempty
+  where unknown constraints known v = do
+          guard $ v `S.notMember` known
+          loc <- unknowable constraints v
+          return (v,loc)
+
+        unknowable constraints v =
+          case snd <$> M.lookup v constraints of
+            Just (UnknowableSize loc _) -> Just loc
+            _                           -> Nothing
+
+        causality what loc d dloc t =
+          Left $ TypeError loc Nothing mempty $ pretty $
+          text "Causality check: size" <+/> pquote (pprName d) <+/>
+          text "needed for type of" <+> what <> colon </>
+          indent 2 (ppr t) </>
+          text "But" <+> pquote (pprName d) <+> text "is computed at" <+/>
+          text (locStrRel loc dloc) <> text "." </>
+          text "" </>
+          text "Hint:" <+>
+          align (textwrap "Bind the expression producing" <+> pquote (pprName d) <+>
+                 text "with 'let' beforehand.")
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
@@ -2299,7 +2335,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
   checkUnmatched body''
 
   -- Check if the function body can actually be evaluated.
-  verifyConstructive tparams' params'' body''
+  causalityCheck body''
 
   bindSpaced [(Term, fname)] $ do
     fname' <- checkName Term fname loc
@@ -2350,6 +2386,9 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList . M.map s
                     pretty (Sum cs) ++ ")."
                   , "Add a type annotation to disambiguate the type."]
 
+        fixOverloaded (_, Size Nothing usage) =
+          typeError usage mempty "Size is ambiguous."
+
         fixOverloaded _ = return ()
 
 hiddenParamNames :: [Pattern] -> Names
@@ -2380,6 +2419,10 @@ checkBinding :: (Name, Maybe UncheckedTypeExp,
                            StructType, [VName], Exp)
 checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
   noUnique $ incLevel $ bindingParams tparams params $ \tparams' params' -> do
+    when (null params && any isSizeParam tparams) $
+      typeError loc mempty $ pretty $
+      text "Size parameters are only allowed on bindings that also have value parameters."
+
     maybe_retdecl' <- forM maybe_retdecl $ \retdecl -> do
       (retdecl', ret_nodims, _) <- checkTypeExp retdecl
       (ret, _) <- instantiateEmptyArrayDims loc "funret" Nonrigid ret_nodims
@@ -2651,19 +2694,13 @@ letGeneralise defname defloc tparams params rettype =
 
   rettype'' <- updateTypes rettype'
 
-  -- The inference might produce types that would not be valid if
-  -- typed in by hand.
-  let t = foldFunType (map patternStructType params) rettype''
-      (paramts, _) = unfoldFunType t
-  checkSizeParamUses tparams' paramts
-    `catchError` \(TypeError _ _ notes msg) -> do
-    let ctx = pretty $
-              pquote (pprName defname) <+>
-              text "inferred to have invalid type:" </>
-              indent 2 (text "val" <+> pprName defname <+>
-                        spread (map ppr tparams') <+> colon <+>
-                        align (ppr t))
-    throwError $ TypeError defloc (Just ctx) notes msg
+  let used_sizes = foldMap typeDimNames $
+                   rettype'' : map patternStructType params
+  case filter ((`S.notMember` used_sizes) . typeParamName) $
+       filter isSizeParam tparams' of
+    [] -> return ()
+    tp:_ -> typeError defloc mempty $ pretty $
+            text "Size parameter" <+> pquote (ppr tp) <+> text "unused."
 
   -- We keep those type variables that were not closed over by
   -- let-generalisation.
