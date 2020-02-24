@@ -235,6 +235,11 @@ instance FreeIn SubExp where
   freeIn' (Var v) = freeIn' v
   freeIn' Constant{} = mempty
 
+instance FreeIn Space where
+  freeIn' (ScalarSpace ds _) = freeIn' ds
+  freeIn' DefaultSpace = mempty
+  freeIn' (Space _) = mempty
+
 instance FreeIn d => FreeIn (ShapeBase d) where
   freeIn' = freeIn' . shapeDims
 

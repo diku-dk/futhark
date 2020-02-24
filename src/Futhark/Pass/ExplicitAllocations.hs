@@ -914,9 +914,14 @@ inGroupExpHints :: Allocator ExplicitMemory m => Exp ExplicitMemory -> m [ExpHin
 inGroupExpHints (Op (Inner (SegOp (SegMap SegThreadScalar{} space ts _)))) = return $ do
   t <- ts
   case t of
-    Prim pt ->
-      return $ Hint (IxFun.iota $ map (primExpFromSubExp int32) $
-                     segSpaceDims space ++ arrayDims t) $ Space $ scalarMemory pt
+    Prim pt -> do
+      let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
+          t_dims = map (primExpFromSubExp int32) $ arrayDims t
+          dims = seg_dims ++ t_dims
+          nilSlice d = DimSlice 0 d 0
+      return $ Hint (IxFun.slice (IxFun.iota dims) $
+                     fullSliceNum dims $ map nilSlice seg_dims) $
+        ScalarSpace 1 pt
     _ ->
       return NoHint
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint

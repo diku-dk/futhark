@@ -83,11 +83,10 @@ kernelAlloc :: KernelConstants
             -> Pattern ExplicitMemory
             -> SubExp -> Space
             -> ImpM ExplicitMemory Imp.KernelOp ()
-kernelAlloc _ (Pattern _ [_]) _ (Space space)
-  | space `M.member` allScalarMemory =
-      return () -- Handled by the declaration of the memory block,
-                -- which is then translated to an actual scalar
-                -- variable during C code generation.
+kernelAlloc _ (Pattern _ [_]) _ ScalarSpace{} =
+  -- Handled by the declaration of the memory block, which is then
+  -- translated to an actual scalar variable during C code generation.
+  return ()
 kernelAlloc _ (Pattern _ [mem]) size (Space "private") = do
   size' <- toExp size
   allocPrivate (patElemName mem) $ Imp.bytes size'
@@ -1097,8 +1096,8 @@ copyInGroup pt destloc srcloc = do
     then memLocationName destloc <-- Imp.var (memLocationName srcloc) pt
     else copyElementWise pt destloc srcloc
 
-  where isScalarMem (Space space) = space `M.member` allScalarMemory
-        isScalarMem DefaultSpace = False
+  where isScalarMem ScalarSpace{} = True
+        isScalarMem _ = False
 
 threadOperations, groupOperations :: KernelConstants
                                   -> Operations ExplicitMemory Imp.KernelOp

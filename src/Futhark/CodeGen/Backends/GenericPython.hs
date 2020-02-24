@@ -413,12 +413,12 @@ entryPointOutput (Imp.OpaqueValue desc vs) =
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
   return $ simpleCall tf [Var $ compileName name]
   where tf = compilePrimToExtNp bt ept
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace bt ept dims)) = do
-  let cast = Cast (Var $ compileName mem) (compilePrimTypeExt bt ept)
-  return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ bt ept dims)) = do
+  let cast = Cast (Var $ compileName mem) (compilePrimTypeExt bt ept)
+  return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
 
 badInput :: Int -> PyExp -> String -> PyStmt
 badInput i e t =
@@ -453,7 +453,15 @@ entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
     [Catch (Tuple [Var "TypeError", Var "AssertionError"])
      [badInput i e $ prettySigned (s==Imp.TypeUnsigned) bt]]
 
-entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace t s dims), e) = do
+entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
+  unpack_input <- asks envEntryInput
+  unpack <- collect $ unpack_input mem sid bt ept dims e
+  stm $ Try unpack
+    [Catch (Tuple [Var "TypeError", Var "AssertionError"])
+     [badInput i e $ concat (replicate (length dims) "[]") ++
+     prettySigned (ept==Imp.TypeUnsigned) bt]]
+
+entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = do
   let type_is_wrong =
         UnOp "not" $
         BinOp "and"
@@ -469,14 +477,6 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace t 
       unwrap_call = simpleCall "unwrapArray" [e]
 
   stm $ Assign dest unwrap_call
-
-entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
-  unpack_input <- asks envEntryInput
-  unpack <- collect $ unpack_input mem sid bt ept dims e
-  stm $ Try unpack
-    [Catch (Tuple [Var "TypeError", Var "AssertionError"])
-     [badInput i e $ concat (replicate (length dims) "[]") ++
-     prettySigned (ept==Imp.TypeUnsigned) bt]]
 
 extValueDescName :: Imp.ExternalValue -> String
 extValueDescName (Imp.TransparentValue v) = extName $ valueDescName v
@@ -562,11 +562,11 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
           src = name
           offset = Integer 0
       case space of
-        DefaultSpace ->
-          stm $ Assign (Var (compileName name'))
-                       (simpleCall "allocateMem" [size]) -- FIXME
         Space sid ->
           allocate name' size sid
+        _ ->
+          stm $ Assign (Var (compileName name'))
+                       (simpleCall "allocateMem" [size]) -- FIXME
       copy dest offset space src offset space size (IntType Int32) -- FIXME
       return $ Just $ compileName name'
     _ -> return Nothing
@@ -781,16 +781,16 @@ compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
 compileExp (Imp.LeafExp (Imp.SizeOf t) _) =
   return $ simpleCall (compilePrimToNp $ IntType Int32) [Integer $ primByteSize t]
 
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace _) _) = do
-  iexp' <- compileExp iexp
-  let bt' = compilePrimType bt
-  let nptype = compilePrimToNp bt
-  return $ simpleCall "indexArray" [Var $ compileName src, iexp', Var bt', Var nptype]
-
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
   join $ asks envReadScalar
     <*> pure src <*> compileExp iexp
     <*> pure restype <*> pure space
+
+compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt _ _) _) = do
+  iexp' <- compileExp iexp
+  let bt' = compilePrimType bt
+  let nptype = compilePrimToNp bt
+  return $ simpleCall "indexArray" [Var $ compileName src, iexp', Var bt', Var nptype]
 
 compileExp (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike x y
@@ -875,7 +875,11 @@ compileCode (Imp.DeclareScalar v _ Cert) =
   stm $ Assign (Var $ compileName v) $ Var "True"
 compileCode Imp.DeclareScalar{} = return ()
 
-compileCode (Imp.DeclareArray name DefaultSpace t vs) = do
+compileCode (Imp.DeclareArray name (Space space) t vs) =
+  join $ asks envStaticArray <*>
+  pure name <*> pure space <*> pure t <*> pure vs
+
+compileCode (Imp.DeclareArray name _ t vs) = do
   -- It is important to store the Numpy array in a temporary variable
   -- to prevent it from going "out-of-scope" before calling
   -- unwrapArray (which internally uses the .ctype method); see
@@ -895,10 +899,6 @@ compileCode (Imp.DeclareArray name DefaultSpace t vs) = do
   stm $ Assign (Var name') $ Field (Var "self") name'
   where name' = compileName name
         arr_name = name' <> "_arr"
-
-compileCode (Imp.DeclareArray name (Space space) t vs) =
-  join $ asks envStaticArray <*>
-  pure name <*> pure space <*> pure t <*> pure vs
 
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
@@ -934,7 +934,13 @@ compileCode (Imp.SetMem dest src _) = do
   let dest' = Var (compileName dest)
   stm $ Assign dest' src'
 
-compileCode (Imp.Allocate name (Imp.Count e) DefaultSpace) = do
+compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
+  join $ asks envAllocate
+    <*> pure name
+    <*> compileExp e
+    <*> pure space
+
+compileCode (Imp.Allocate name (Imp.Count e) _) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
   let name' = Var (compileName name)
@@ -942,12 +948,6 @@ compileCode (Imp.Allocate name (Imp.Count e) DefaultSpace) = do
 
 compileCode (Imp.Free name _) =
   stm $ Assign (Var (compileName name)) None
-
-compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
-  join $ asks envAllocate
-    <*> pure name
-    <*> compileExp e
-    <*> pure space
 
 compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
   destoffset' <- compileExp destoffset
@@ -966,14 +966,6 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
     <*> pure src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size <*> pure (IntType Int32) -- FIXME
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
-  idx' <- compileExp idx
-  elemexp' <- compileExp elemexp
-  let dest' = Var $ compileName dest
-  let elemtype' = compilePrimType elemtype
-  let ctype = simpleCall elemtype' [elemexp']
-  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
-
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $ asks envWriteScalar
     <*> pure dest
@@ -981,5 +973,13 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp
     <*> pure elemtype
     <*> pure space
     <*> compileExp elemexp
+
+compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
+  idx' <- compileExp idx
+  elemexp' <- compileExp elemexp
+  let dest' = Var $ compileName dest
+  let elemtype' = compilePrimType elemtype
+  let ctype = simpleCall elemtype' [elemexp']
+  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
 
 compileCode Imp.Skip = return ()
