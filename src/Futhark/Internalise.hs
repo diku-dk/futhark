@@ -518,6 +518,8 @@ internaliseExp desc (E.Negate e _) = do
 
 internaliseExp desc e@E.Apply{} = do
   (qfname, args, ret, retext) <- findFuncall e
+  -- Argument evaluation is outermost-in so that any existential sizes
+  -- created by function applications can be brought into scope.
   let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
       loc = srclocOf e
       arg_desc = nameToString fname ++ "_arg"
@@ -533,12 +535,12 @@ internaliseExp desc e@E.Apply{} = do
 
          | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
              let tag ses = [ (se, I.Observe) | se <- ses ]
-             args' <- mapM (internaliseArg arg_desc) args
+             args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
              let args'' = concatMap tag args'
              letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
 
          | otherwise -> do
-             args' <- concat <$> mapM (internaliseArg arg_desc) args
+             args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
              fst <$> funcall desc qfname args' loc
 
   bindExtSizes ret retext ses
