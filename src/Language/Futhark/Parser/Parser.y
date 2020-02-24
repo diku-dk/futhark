@@ -626,7 +626,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                         StringLit (encode s) loc }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
-               (Parens $2 (srcspan $1 (map snd $>)))
+               (Parens $2 (srcspan $1 ($3:map snd $>)))
                $4 }
      | '(' Exp ')[' DimIndices ']'    { Index (Parens $2 $1) $4 (NoInfo, NoInfo) (srcspan $1 $>) }
      | '(' Exp ',' Exps1 ')'          { TupLit ($2 : fst $4 : snd $4) (srcspan $1 $>) }
