@@ -639,15 +639,15 @@ entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
   return $ cast $ Var $ compileName name
   where cast = compileTypecastExt bt ept
 
-entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace bt ept dims)) = do
-  let src = Var $ compileName mem
-  let createTuple = "createTuple_" ++ compilePrimTypeExt bt ept
-  return $ simpleCall createTuple [src, CreateArray (Primitive $ CSInt Int64T) $ Right $ map compileDim dims]
-
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
   unRefMem mem (Imp.Space sid)
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
+
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ bt ept dims)) = do
+  let src = Var $ compileName mem
+  let createTuple = "createTuple_" ++ compilePrimTypeExt bt ept
+  return $ simpleCall createTuple [src, CreateArray (Primitive $ CSInt Int64T) $ Right $ map compileDim dims]
 
 entryPointInput :: (Int, Imp.ExternalValue, CSExp) -> CompilerM op s ()
 entryPointInput (i, Imp.OpaqueValue _ vs, e) =
@@ -659,17 +659,17 @@ entryPointInput (_, Imp.TransparentValue (Imp.ScalarValue bt _ name), e) = do
       cast = compileTypecast bt
   stm $ Assign vname' (cast e)
 
-entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem Imp.DefaultSpace bt _ dims), e) = do
+entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
+  unpack_input <- asks envEntryInput
+  unpack <- collect $ unpack_input mem sid bt ept dims e
+  stms unpack
+
+entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem _ bt _ dims), e) = do
   zipWithM_ (unpackDim e) dims [0..]
   let arrayData = Field e "Item1"
   let dest = Var $ compileName mem
       unwrap_call = simpleCall "unwrapArray" [arrayData, sizeOf $ compilePrimTypeToAST bt]
   stm $ Assign dest unwrap_call
-
-entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
-  unpack_input <- asks envEntryInput
-  unpack <- collect $ unpack_input mem sid bt ept dims e
-  stms unpack
 
 extValueDescName :: Imp.ExternalValue -> String
 extValueDescName (Imp.TransparentValue v) = extName $ valueDescName v
@@ -878,11 +878,11 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
           src = name
           offset = Integer 0
       case space of
-        DefaultSpace ->
-          stm $ Reassign (Var (compileName name'))
-                       (simpleCall "allocateMem" [size]) -- FIXME
         Space sid ->
           allocate name' size sid
+        _ ->
+          stm $ Reassign (Var (compileName name'))
+                       (simpleCall "allocateMem" [size]) -- FIXME
       copy dest offset space src offset space size (IntType Int64) -- FIXME
       return $ Just (compileName name')
     _ -> return Nothing
@@ -1154,20 +1154,20 @@ compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
 compileExp (Imp.LeafExp (Imp.SizeOf t) _) =
   return $ (compileTypecast $ IntType Int32) (Integer $ primByteSize t)
 
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) (IntType Int8) DefaultSpace _) _) = do
-  let src' = compileName src
-  iexp' <- compileExp iexp
-  return $ Cast (Primitive $ CSInt Int8T) (Index (Var src') (IdxExp iexp'))
-
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace _) _) = do
-  iexp' <- compileExp iexp
-  let bt' = compilePrimType bt
-  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp']
-
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
   join $ asks envReadScalar
     <*> pure src <*> compileExp iexp
     <*> pure restype <*> pure space
+
+compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) (IntType Int8) _ _) _) = do
+  let src' = compileName src
+  iexp' <- compileExp iexp
+  return $ Cast (Primitive $ CSInt Int8T) (Index (Var src') (IdxExp iexp'))
+
+compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt _ _) _) = do
+  iexp' <- compileExp iexp
+  let bt' = compilePrimType bt
+  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp']
 
 compileExp (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike x y
@@ -1247,7 +1247,11 @@ compileCode (Imp.DeclareScalar v _ t) =
   stm $ AssignTyped t' (Var $ compileName v) Nothing
   where t' = compilePrimTypeToAST t
 
-compileCode (Imp.DeclareArray name DefaultSpace t vs) =
+compileCode (Imp.DeclareArray name (Space space) t vs) =
+  join $ asks envStaticArray <*>
+  pure name <*> pure space <*> pure t <*> pure vs
+
+compileCode (Imp.DeclareArray name _ t vs) =
   stms [Assign (Var $ "init_"++name') $
         simpleCall "unwrapArray"
          [
@@ -1260,10 +1264,6 @@ compileCode (Imp.DeclareArray name DefaultSpace t vs) =
        , Assign (Var name') $ Var ("init_"++name')
        ]
   where name' = compileName name
-
-compileCode (Imp.DeclareArray name (Space space) t vs) =
-  join $ asks envStaticArray <*>
-  pure name <*> pure space <*> pure t <*> pure vs
 
 compileCode (Imp.Comment s code) = do
   code' <- blockScope $ compileCode code
@@ -1303,17 +1303,17 @@ compileCode (Imp.SetMem dest src _) = do
   let dest' = Var (compileName dest)
   stm $ Exp $ simpleCall "MemblockSetDevice" [Ref $ Var "Ctx", Ref dest', Ref src', String (compileName src)]
 
-compileCode (Imp.Allocate name (Imp.Count e) DefaultSpace) = do
-  e' <- compileExp e
-  let allocate' = simpleCall "allocateMem" [e']
-  let name' = Var (compileName name)
-  stm $ Reassign name' allocate'
-
 compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
   join $ asks envAllocate
     <*> pure name
     <*> compileExp e
     <*> pure space
+
+compileCode (Imp.Allocate name (Imp.Count e) _) = do
+  e' <- compileExp e
+  let allocate' = simpleCall "allocateMem" [e']
+  let name' = Var (compileName name)
+  stm $ Reassign name' allocate'
 
 compileCode (Imp.Free name space) = do
   unRefMem name space
@@ -1335,14 +1335,6 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
     <*> pure src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size <*> pure (IntType Int64) -- FIXME
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
-  idx' <- compileExp idx
-  elemexp' <- compileExp elemexp
-  let dest' = Var $ compileName dest
-  let elemtype' = compileTypecast elemtype
-  let ctype = elemtype' elemexp'
-  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
-
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $ asks envWriteScalar
     <*> pure dest
@@ -1350,6 +1342,14 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp
     <*> pure elemtype
     <*> pure space
     <*> compileExp elemexp
+
+compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
+  idx' <- compileExp idx
+  elemexp' <- compileExp elemexp
+  let dest' = Var $ compileName dest
+  let elemtype' = compileTypecast elemtype
+  let ctype = elemtype' elemexp'
+  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
 
 compileCode Imp.Skip = return ()
 
@@ -1375,7 +1375,7 @@ unRefMem mem (Space "device") =
                                                  , (String . compileName) mem]
 unRefMem _ DefaultSpace = stm Pass
 unRefMem _ (Space "local") = stm Pass
-unRefMem _ (Space _) = error "The default compiler cannot compile unRefMem for other spaces"
+unRefMem _ _ = error "The default compiler cannot compile unRefMem for other spaces"
 
 
 -- | Public names must have a consistent prefix.
@@ -1388,14 +1388,14 @@ declMem name space = do
   stm $ declMem' (compileName name) space
 
 declMem' :: String -> Space -> CSStmt
-declMem' name DefaultSpace =
-  AssignTyped (Composite $ ArrayT $ Primitive ByteT) (Var name) Nothing
 declMem' name (Space _) =
   AssignTyped (CustomT "OpenCLMemblock") (Var name) (Just $ simpleCall "EmptyMemblock" [Var "Ctx.EMPTY_MEM_HANDLE"])
+declMem' name _ =
+  AssignTyped (Composite $ ArrayT $ Primitive ByteT) (Var name) Nothing
 
 rawMemCSType :: Space -> CSType
-rawMemCSType DefaultSpace = Composite $ ArrayT $ Primitive ByteT
 rawMemCSType (Space _) = CustomT "OpenCLMemblock"
+rawMemCSType _ = Composite $ ArrayT $ Primitive ByteT
 
 toIntPtr :: CSExp -> CSExp
 toIntPtr e = simpleInitClass "IntPtr" [e]

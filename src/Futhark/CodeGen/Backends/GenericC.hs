@@ -464,25 +464,26 @@ memToCType space = do
 rawMemCType :: Space -> CompilerM op s C.Type
 rawMemCType DefaultSpace = return defaultMemBlockType
 rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
+rawMemCType (ScalarSpace d t) = return [C.cty|$ty:(primTypeToCType t)[$int:d]|]
 
 fatMemType :: Space -> C.Type
 fatMemType space =
   [C.cty|struct $id:name|]
   where name = case space of
-          DefaultSpace -> "memblock"
           Space sid    -> "memblock_" ++ sid
+          _            -> "memblock"
 
 fatMemSet :: Space -> String
-fatMemSet DefaultSpace = "memblock_set"
 fatMemSet (Space sid) = "memblock_set_" ++ sid
+fatMemSet _ = "memblock_set"
 
 fatMemAlloc :: Space -> String
-fatMemAlloc DefaultSpace = "memblock_alloc"
 fatMemAlloc (Space sid) = "memblock_alloc_" ++ sid
+fatMemAlloc _ = "memblock_alloc"
 
 fatMemUnRef :: Space -> String
-fatMemUnRef DefaultSpace = "memblock_unref"
 fatMemUnRef (Space sid) = "memblock_unref_" ++ sid
+fatMemUnRef _ = "memblock_unref"
 
 rawMem :: C.ToExp a => a -> CompilerM op s C.Exp
 rawMem v = rawMem' <$> asks envFatMemory <*> pure v
@@ -509,7 +510,7 @@ defineMemorySpace space = do
   free <- case space of
     Space sid -> do free_mem <- asks envDeallocate
                     collect $ free_mem [C.cexp|block->mem|] [C.cexp|block->desc|] sid
-    DefaultSpace -> return [[C.citem|free(block->mem);|]]
+    _ -> return [[C.citem|free(block->mem);|]]
   ctx_ty <- contextType
   let unrefdef = [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
@@ -535,11 +536,11 @@ defineMemorySpace space = do
   -- When allocating a memory block we initialise the reference count to 1.
   alloc <- collect $
     case space of
-      DefaultSpace ->
-        stm [C.cstm|block->mem = (char*) malloc(size);|]
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure [C.cexp|desc|] <*> pure sid
+      _ ->
+        stm [C.cstm|block->mem = (char*) malloc(size);|]
   let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
     panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
@@ -588,14 +589,14 @@ defineMemorySpace space = do
                            (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
-          DefaultSpace -> ("peak_mem_usage_default",
-                           "cur_mem_usage_default",
-                            "memblock",
-                            "default space")
           Space sid    -> ("peak_mem_usage_" ++ sid,
                            "cur_mem_usage_" ++ sid,
                            "memblock_" ++ sid,
                            "space '" ++ sid ++ "'")
+          _ -> ("peak_mem_usage_default",
+                "cur_mem_usage_default",
+                "memblock",
+                "default space")
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
@@ -642,11 +643,11 @@ allocMem name size space on_failure = do
                      }|]
     else alloc name
   where alloc dest = case space of
-          DefaultSpace ->
-            stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
           Space sid ->
             join $ asks envAllocate <*> rawMem name <*>
             pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
+          _ ->
+            stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
@@ -1649,6 +1650,11 @@ compileExp = compilePrimExp compileLeaf
           <*> rawMem src <*> compileExp iexp
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
+        compileLeaf (Index src (Count iexp) _ ScalarSpace{} _) = do
+          src' <- rawMem src
+          iexp' <- compileExp iexp
+          return [C.cexp|$exp:src'[$exp:iexp']|]
+
         compileLeaf (SizeOf t) =
           return [C.cexp|(typename int32_t)sizeof($ty:t')|]
           where t' = primTypeToCType t
@@ -1837,6 +1843,12 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
+compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
+  dest' <- rawMem dest
+  idx' <- compileExp idx
+  elemexp' <- compileExp elemexp
+  stm [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]
+
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
@@ -1852,6 +1864,9 @@ compileCode (DeclareMem name space) =
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
+
+compileCode (DeclareArray name ScalarSpace{} _ _) =
+  error $ "Cannot declare array " ++ pretty name ++ " in scalar space."
 
 compileCode (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"

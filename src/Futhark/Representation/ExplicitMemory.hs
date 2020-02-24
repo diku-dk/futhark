@@ -80,9 +80,6 @@ module Futhark.Representation.ExplicitMemory
        , ixFunMatchesInnerShape
        , existentialiseIxFun
 
-       , scalarMemory
-       , allScalarMemory
-
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -196,7 +193,7 @@ instance Substitute inner => Substitute (MemOp inner) where
 
 instance PP.Pretty inner => PP.Pretty (MemOp inner) where
   ppr (Alloc e DefaultSpace) = PP.text "alloc" <> PP.apply [PP.ppr e]
-  ppr (Alloc e (Space sp)) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.text sp]
+  ppr (Alloc e s) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.ppr s]
   ppr (Inner k) = PP.ppr k
 
 instance OpMetrics inner => OpMetrics (MemOp inner) where
@@ -322,10 +319,8 @@ instance (Engine.Simplifiable d, Engine.Simplifiable ret) =>
 instance (PP.Pretty (TypeBase (ShapeBase d) u),
           PP.Pretty d, PP.Pretty u, PP.Pretty ret) => PP.Pretty (MemInfo d u ret) where
   ppr (MemPrim bt) = PP.ppr bt
-  ppr (MemMem DefaultSpace) =
-    PP.text "mem"
-  ppr (MemMem (Space sp)) =
-    PP.text "mem" <> PP.text "@" <> PP.text sp
+  ppr (MemMem DefaultSpace) = PP.text "mem"
+  ppr (MemMem s) = PP.text "mem" <> PP.ppr s
   ppr (MemArray bt shape u ret) =
     PP.ppr (Array bt shape u) <> PP.text "@" <> PP.ppr ret
 
@@ -419,9 +414,7 @@ instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
     PP.parens $ PP.text (pretty v) <> PP.text "->" <> PP.ppr ixfun
   ppr (ReturnsNewBlock space i ixfun) =
-    PP.text ("?" ++ show i) <> space' <> PP.text "->" <> PP.ppr ixfun
-    where space' = case space of DefaultSpace -> mempty
-                                 Space s -> PP.text $ "@" ++ s
+    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" <> PP.ppr ixfun
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
@@ -1059,12 +1052,3 @@ ixFunMatchesInnerShape :: (Eq num, IntegralExp num) =>
                           ShapeBase num -> IxFun.IxFun num -> Bool
 ixFunMatchesInnerShape shape ixfun =
   drop 1 (IxFun.shape ixfun) == drop 1 (shapeDims shape)
-
--- | Construct the scalar memory space corresponding to a given primitive type.
-scalarMemory :: PrimType -> SpaceId
-scalarMemory = ("scalar_"++) . pretty
-
--- | A mapping from all scalar memory spaces to the 'PrimType' they
--- store.
-allScalarMemory :: M.Map SpaceId PrimType
-allScalarMemory = M.fromList $ zip (map scalarMemory allPrimTypes) allPrimTypes

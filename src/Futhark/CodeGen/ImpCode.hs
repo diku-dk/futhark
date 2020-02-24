@@ -269,12 +269,8 @@ instance Pretty op => Pretty (FunctionT op) where
           block = indent 2 . stack . map ppr
 
 instance Pretty Param where
-  ppr (ScalarParam name ptype) =
-    ppr ptype <+> ppr name
-  ppr (MemParam name space) =
-    text "mem" <> space' <+> ppr name
-    where space' = case space of Space s      -> text "@" <> text s
-                                 DefaultSpace -> mempty
+  ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
+  ppr (MemParam name space) = text "mem" <> ppr space <+> ppr name
 
 instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
@@ -282,12 +278,10 @@ instance Pretty ValueDesc where
     where ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
   ppr (ArrayValue mem space et ept shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> space' <+> ept'
+    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> ppr space <+> ept'
     where f e s = brackets $ s <> comma <> ppr e
           ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
-          space' = case space of Space s      -> text "@" <> text s
-                                 DefaultSpace -> mempty
 
 
 instance Pretty ExternalValue where
@@ -317,7 +311,7 @@ instance Pretty op => Pretty (Code op) where
     indent 2 (ppr body) </>
     text "}"
   ppr (DeclareMem name space) =
-    text "var" <+> ppr name <> text ": mem" <> parens (ppr space)
+    text "var" <+> ppr name <> text ": mem" <> ppr space
   ppr (DeclareScalar name vol t) =
     text "var" <+> ppr name <> text ":" <+> vol' <> ppr t
     where vol' = case vol of Volatile -> text "volatile "
@@ -371,10 +365,8 @@ instance Pretty ExpLeaf where
   ppr (ScalarVar v) =
     ppr v
   ppr (Index v is bt space vol) =
-    ppr v <> langle <> vol' <> ppr bt <> space' <> rangle <> brackets (ppr is)
-    where space' = case space of DefaultSpace -> mempty
-                                 Space s      -> text "@" <> text s
-          vol' = case vol of Volatile -> text "volatile "
+    ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
+    where vol' = case vol of Volatile -> text "volatile "
                              Nonvolatile -> mempty
 
   ppr (SizeOf t) =
@@ -473,8 +465,8 @@ instance FreeIn a => FreeIn (Code a) where
     mempty
   freeIn' DeclareArray{} =
     mempty
-  freeIn' (Allocate name size _) =
-    freeIn' name <> freeIn' size
+  freeIn' (Allocate name size space) =
+    freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
   freeIn' (Copy dest x _ src y _ n) =

@@ -27,7 +27,6 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
-import Futhark.Representation.ExplicitMemory (allScalarMemory)
 import Futhark.Util (zEncodeString)
 
 kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program
@@ -528,8 +527,8 @@ inKernelOperations body =
 
         atomicCast s t = do
           let volatile = [C.ctyquals|volatile|]
-          quals <- case s of DefaultSpace -> pointerQuals "global"
-                             Space sid    -> pointerQuals sid
+          quals <- case s of Space sid    -> pointerQuals sid
+                             _            -> pointerQuals "global"
           return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
         doAtomic s old arr ind val op ty = do
@@ -591,29 +590,15 @@ inKernelOperations body =
         noStaticArrays _ _ _ _ =
           error "Cannot create static array in kernel."
 
-        kernelMemoryType space
-          | Just t <- M.lookup space allScalarMemory =
-              return $ GenericC.primTypeToCType t
-
         kernelMemoryType space = do
           quals <- pointerQuals space
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
-        kernelWriteScalar dest _ _ space _ v
-          | space `M.member` allScalarMemory =
-              GenericC.stm [C.cstm|$exp:dest = $exp:v;|]
-
-        kernelWriteScalar dest i elemtype space vol v =
+        kernelWriteScalar =
           GenericC.writeScalarPointerWithQuals pointerQuals
-          dest i elemtype space vol v
 
-        kernelReadScalar dest _ _ space _
-          | space `M.member` allScalarMemory =
-              return dest
-
-        kernelReadScalar dest i elemtype space vol =
+        kernelReadScalar =
           GenericC.readScalarPointerWithQuals pointerQuals
-          dest i elemtype space vol
 
         errorInKernel msg@(ErrorMsg parts) backtrace = do
           n <- length . kernelFailures <$> GenericC.getUserState
