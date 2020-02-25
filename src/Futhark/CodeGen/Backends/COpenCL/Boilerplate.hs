@@ -51,7 +51,7 @@ copyScalarFromDev = "copy_scalar_from_dev"
 
 profilingEvent :: String -> C.Exp
 profilingEvent name =
-  [C.cexp|ctx->profiling_paused ? NULL
+  [C.cexp|(ctx->profiling_paused || !ctx->profiling) ? NULL
           : opencl_get_event(&ctx->opencl,
                              &ctx->$id:(kernelRuns name),
                              &ctx->$id:(kernelRuntime name))|]
