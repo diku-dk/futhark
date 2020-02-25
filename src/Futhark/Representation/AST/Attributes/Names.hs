@@ -236,7 +236,7 @@ instance FreeIn SubExp where
   freeIn' Constant{} = mempty
 
 instance FreeIn Space where
-  freeIn' (ScalarSpace ds _) = freeIn' ds
+  freeIn' (ScalarSpace d _) = freeIn' d
   freeIn' DefaultSpace = mempty
   freeIn' (Space _) = mempty
 
@@ -249,7 +249,7 @@ instance FreeIn d => FreeIn (Ext d) where
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Array _ shape _) = freeIn' shape
-  freeIn' (Mem _)           = mempty
+  freeIn' (Mem s)           = freeIn' s
   freeIn' (Prim _)          = mempty
 
 instance FreeIn attr => FreeIn (Param attr) where

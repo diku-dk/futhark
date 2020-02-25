@@ -459,8 +459,8 @@ instance FreeIn a => FreeIn (Code a) where
     fvBind (oneName i) $ freeIn' bound <> freeIn' body
   freeIn' (While cond body) =
     freeIn' cond <> freeIn' body
-  freeIn' DeclareMem{} =
-    mempty
+  freeIn' (DeclareMem _ space) =
+    freeIn' space
   freeIn' DeclareScalar{} =
     mempty
   freeIn' DeclareArray{} =

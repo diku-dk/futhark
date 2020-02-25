@@ -514,6 +514,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
                     stmsToList $ stms1<>stms2
 
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp ArrayLit{})) = False
+      isNotHoistableBnd _ _ _ (Let _ _ (BasicOp SubExp{})) = False
       isNotHoistableBnd nms _ _ stm = not (hasPatName nms stm)
 
       block = branch_blocker `orIf`
