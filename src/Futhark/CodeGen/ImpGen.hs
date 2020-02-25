@@ -481,9 +481,10 @@ compileBody pat (Body _ bnds ses) = do
   compileStms (freeIn ses) bnds $
     forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
-compileBody' :: (ExplicitMemorish lore, attr ~ LetAttr lore)
-             => [Param attr] -> Body lore -> ImpM lore op ()
-compileBody' = compileBody . patternFromParams
+compileBody' :: [Param attr] -> Body lore -> ImpM lore op ()
+compileBody' params (Body _ bnds ses) =
+  compileStms (freeIn ses) bnds $
+    forM_ (zip params ses) $ \(param, se) -> copyDWIM (paramName param) [] se []
 
 compileLoopBody :: Typed attr => [Param attr] -> Body lore -> ImpM lore op ()
 compileLoopBody mergeparams (Body _ bnds ses) = do
@@ -921,18 +922,15 @@ lookupMemory name = do
     _              -> compilerBugS $ "Unknown memory block: " ++ pretty name
 
 destinationFromPattern :: ExplicitMemorish lore => Pattern lore -> ImpM lore op Destination
-destinationFromPattern pat = fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $
-                             patternElements pat
-  where ctx_names = patternContextNames pat
-        inspect patElem = do
+destinationFromPattern pat =
+  fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $
+  patternElements pat
+  where inspect patElem = do
           let name = patElemName patElem
           entry <- lookupVar name
           case entry of
-            ArrayVar _ (ArrayEntry (MemLocation mem shape ixfun) _) ->
-              return $ ArrayDestination $
-              if mem `elem` ctx_names
-              then Nothing
-              else Just $ MemLocation mem shape ixfun
+            ArrayVar _ (ArrayEntry MemLocation{} _) ->
+              return $ ArrayDestination Nothing
             MemVar{} ->
               return $ MemoryDestination name
 
