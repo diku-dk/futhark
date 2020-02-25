@@ -273,7 +273,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 
         mergeinit' <-
           fmap (map Var) $ certifying (stmAuxCerts aux) $
-          tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultNoSimplify $
+          tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultPrivate $
           \in_bounds slice ->
             fmap (map Var) $ protectOutOfBounds "loopinit" in_bounds merge_ts $ do
             addPrivStms slice inloop_privstms
