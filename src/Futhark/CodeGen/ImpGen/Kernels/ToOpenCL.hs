@@ -154,7 +154,7 @@ onKernel target kernel = do
                  [C.citem|const int block_dim1 = 1;|],
                  [C.citem|const int block_dim2 = 2;|]])
 
-      const_defs = mapMaybe constDef $ kernelUses kernel
+      (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
 
   let (safety, error_init)
         | length (kernelFailures kstate) == length failures =
@@ -203,6 +203,8 @@ onKernel target kernel = do
                   $items:kernel_body
 
                   $id:(errorLabel kstate): return;
+
+                  $items:const_undefs
                 }|]
   modify $ \s -> s
     { clKernels = M.insert name (safety, kernel_fun) $ clKernels s
@@ -243,10 +245,15 @@ useAsParam (MemoryUse name) =
 useAsParam ConstUse{} =
   Nothing
 
-constDef :: KernelUse -> Maybe C.BlockItem
-constDef (ConstUse v e) = Just [C.citem|const $ty:t $id:v = $exp:e';|]
-  where t = GenericC.primTypeToCType $ primExpType e
-        e' = compilePrimExp e
+-- Constants are #defined as macros.  Since a constant name in one
+-- kernel might potentially (although unlikely) also be used for
+-- something else in another kernel, we #undef them after the kernel.
+constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
+constDef (ConstUse v e) = Just ([C.citem|$escstm:def|],
+                                [C.citem|$escstm:undef|])
+  where e' = compilePrimExp e
+        def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ pretty e' ++ ")"
+        undef = "#undef " ++ pretty (C.toIdent v mempty)
 constDef _ = Nothing
 
 openClCode :: [C.Func] -> String
