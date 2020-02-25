@@ -1045,10 +1045,7 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
       then let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
                t_dims = map (primExpFromSubExp int32) $ arrayDims t
                dims = seg_dims ++ t_dims
-               nilSlice d = DimSlice 0 d 0
-           in Hint (IxFun.slice (IxFun.iota dims) $
-                    fullSliceNum dims $ map nilSlice seg_dims) $
-              ScalarSpace one $ elemType t
+           in Hint (IxFun.iota dims) $ ScalarSpace one $ elemType t
       else NoHint
   where private (Returns ResultPrivate _) = True
         private _                         = False
