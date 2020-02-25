@@ -156,9 +156,16 @@ deriving instance Annotations lore => Eq (KernelBody lore)
 -- might otherwise be removed by the simplifier because they're
 -- semantically redundant.  This has no semantic effect and can be
 -- ignored at code generation.
-data ResultManifest = ResultNoSimplify -- ^ Don't simplify this one!
-                    | ResultMaySimplify -- ^ Go nuts.
-                  deriving (Eq, Show, Ord)
+data ResultManifest
+  = ResultNoSimplify
+    -- ^ Don't simplify this one!
+  | ResultMaySimplify
+    -- ^ Go nuts.
+  | ResultPrivate
+    -- ^ The results produced are only used within the
+    -- same physical thread later on, and can thus be
+    -- kept in registers.
+  deriving (Eq, Show, Ord)
 
 data KernelResult = Returns ResultManifest SubExp
                     -- ^ Each "worker" in the kernel returns this.
@@ -321,6 +328,8 @@ instance PrettyLore lore => Pretty (KernelBody lore) where
 instance Pretty KernelResult where
   ppr (Returns ResultNoSimplify what) =
     text "returns (manifest)" <+> ppr what
+  ppr (Returns ResultPrivate what) =
+    text "returns (private)" <+> ppr what
   ppr (Returns ResultMaySimplify what) =
     text "returns" <+> ppr what
   ppr (WriteReturns rws arr res) =
@@ -357,14 +366,6 @@ data SegLevel = SegThread { segNumGroups :: Count NumGroups SubExp
               | SegGroup { segNumGroups :: Count NumGroups SubExp
                          , segGroupSize :: Count GroupSize SubExp
                          , segVirt :: SegVirt }
-              | SegThreadScalar { segNumGroups :: Count NumGroups SubExp
-                                , segGroupSize :: Count GroupSize SubExp
-                                , segVirt :: SegVirt }
-                -- ^ Like 'SegThread', but with the invariant that the
-                -- results produced are only used within the same
-                -- physical thread later on, and can thus be kept in
-                -- registers.  May only occur within an enclosing
-                -- 'SegGroup' construct.
               deriving (Eq, Ord, Show)
 
 -- | Index space of a 'SegOp'.
@@ -460,8 +461,6 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SegOp lore) where
     namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
 
 checkSegLevel :: Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
-checkSegLevel Nothing SegThreadScalar{} =
-  TC.bad $ TC.TypeError "SegThreadScalar at top level."
 checkSegLevel Nothing _ =
   return ()
 checkSegLevel (Just SegThread{}) _ =
@@ -645,11 +644,6 @@ mapOnSegLevel tv (SegGroup num_groups group_size virt) =
   <$> traverse (mapOnSegOpSubExp tv) num_groups
   <*> traverse (mapOnSegOpSubExp tv) group_size
   <*> pure virt
-mapOnSegLevel tv (SegThreadScalar num_groups group_size virt) =
-  SegThreadScalar
-  <$> traverse (mapOnSegOpSubExp tv) num_groups
-  <*> traverse (mapOnSegOpSubExp tv) group_size
-  <*> pure virt
 
 mapOnSegOpType :: Monad m =>
                   SegOpMapper flore tlore m -> Type -> m Type
@@ -733,7 +727,6 @@ instance Pretty SegSpace where
 
 instance PP.Pretty SegLevel where
   ppr SegThread{} = "thread"
-  ppr SegThreadScalar{} = "scalar"
   ppr SegGroup{} = "group"
 
 ppSegLevel :: SegLevel -> PP.Doc
