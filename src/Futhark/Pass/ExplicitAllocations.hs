@@ -562,7 +562,6 @@ allocAtLevel lvl = local $ \env -> env { allocSpace = space
                                        , aggressiveReuse = True
                                        }
   where space = case lvl of SegThread{} -> DefaultSpace
-                            SegThreadScalar{} -> DefaultSpace
                             SegGroup{} -> Space "local"
 
 bodyReturnMemCtx :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
@@ -874,7 +873,6 @@ allocInKernelBody :: SegLevel -> KernelBody Kernels
 allocInKernelBody lvl (KernelBody () stms res) =
   local f $ allocInStms stms $ \stms' -> return $ KernelBody () stms' res
   where f = case lvl of SegThread{} -> inThread
-                        SegThreadScalar{} -> inThread
                         SegGroup{} -> inGroup
         inThread env = env { envExpHints = inThreadExpHints }
         inGroup env = env { envExpHints = inGroupExpHints }
@@ -1037,17 +1035,17 @@ innermost space_dims t_dims =
   in ixfun_rearranged
 
 inGroupExpHints :: Allocator ExplicitMemory m => Exp ExplicitMemory -> m [ExpHint]
-inGroupExpHints (Op (Inner (SegOp (SegMap SegThreadScalar{} space ts _)))) = return $ do
-  t <- ts
-  case t of
-    Prim pt -> do
+inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body)))) = return $ do
+  (t, r) <- zip ts $ kernelBodyResult body
+  case r of
+    Returns ResultPrivate _ -> do
       let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
           t_dims = map (primExpFromSubExp int32) $ arrayDims t
           dims = seg_dims ++ t_dims
           nilSlice d = DimSlice 0 d 0
       return $ Hint (IxFun.slice (IxFun.iota dims) $
                      fullSliceNum dims $ map nilSlice seg_dims) $
-        ScalarSpace 1 pt
+        ScalarSpace 1 $ elemType t
     _ ->
       return NoHint
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint

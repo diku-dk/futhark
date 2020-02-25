@@ -185,7 +185,6 @@ compileGroupExp _ dest e =
 
 sanityCheckLevel :: SegLevel -> InKernelGen ()
 sanityCheckLevel SegThread{} = return ()
-sanityCheckLevel SegThreadScalar{} = return ()
 sanityCheckLevel SegGroup{} =
   fail "compileGroupOp: unexpected group-level SegOp."
 
