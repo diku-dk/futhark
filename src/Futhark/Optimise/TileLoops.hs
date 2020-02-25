@@ -304,7 +304,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 doPrelude :: Tiling -> Stms Kernels -> [VName] -> Binder Kernels [VName]
 doPrelude tiling prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
-  tilingSegMap tiling "prelude" (scalarLevel tiling) ResultMaySimplify $
+  tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
   \in_bounds _slice -> do
     ts <- mapM lookupType prestms_live
     fmap (map Var) $ letTupExp "pre" =<<
