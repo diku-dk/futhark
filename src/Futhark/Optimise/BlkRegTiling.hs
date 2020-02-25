@@ -4,16 +4,16 @@
 --   the following pattern:
 --     * a redomap is quasi-perfectly nested inside a kernel with at
 --       least two parallel dimension (the perfectly nested restriction
---       is relaxed a bit to allow for SEGMM);
+--       is relaxed a bit to allow for SGEMM);
 --     * all streamed arrays are one dimensional;
 --     * all streamed arrays are variant to exacly one of the two
---       innermost parallel dimensions, and conversly for each of
+--       innermost parallel dimensions, and conversely for each of
 --       the two innermost parallel dimensions, there is at least
 --       one streamed array variant to it;
 --     * the stream's result is a tuple of scalar values, which are
 --       also the "thread-in-space" return of the kernel.
 --   Test code can be found in "tests/mmm/sgemm.fut".
-module Futhark.Optimise.TileLoops.BlkRegTiling
+module Futhark.Optimise.BlkRegTiling
        ( mmmTiling2D )
        where
 
@@ -37,45 +37,47 @@ import Debug.Trace
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
 
-
-
 mmmTiling2D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
 mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker_body))))
   | KernelBody () kstms kres <- old_ker_body,
-    -- build the variance table, that records, for each variable
-    -- name, the variables it depends on
-    initial_variance <- M.map mempty $ scopeOfSegSpace space,
-    variance <- varianceInStms initial_variance kstms,
-    -- check that the code fits the pattern having:
-    -- some `code1`, followed by one Screma SOAC, followed by some `code2`
-    (code1, Just redomap_stmt, code2) <- matchCodeStreamCode kstms,
-    Let pat_redomap aux_redomap (Op _) <- redomap_stmt,
-    -- checks that the Screma SOAC is actually a redomap and normalizes it
-    Just (w, arrs, (red_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap redomap_stmt,
-    -- checks that the input arrays to redomap are variant to
-    -- exactly one of the two innermost dimensions of the kernel
-    Just arr_var_dims <- isInvarTo1of2InnerDims mempty space variance arrs,
-    -- get the variables on which the first result of redomap depends on
-    fst_res : _ <- patternValueElements pat_redomap,
+    
+    initial_variance <- M.map mempty $ scopeOfSegSpace space,                    -- build the variance table, that records, for
+    variance <- varianceInStms initial_variance kstms,                           -- each variable name, the variables it depends on
+                                                                                
+                                                                                 -- check that the code fits the pattern having:                        
+    (code1, Just screma_stmt, code2) <- matchCodeStreamCode kstms,               -- some `code1`, followed by one Screma SOAC, followed by some `code2`
+
+    Let pat_redomap aux_redomap (Op _) <- screma_stmt,
+
+    Just (w, arrs, (red_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt, -- checks that the Screma SOAC is actually a redomap and normalizes it
+
+    Just arr_var_dims <- isInvarTo1of2InnerDims mempty space variance arrs,      -- checks that the input arrays to redomap are variant to
+                                                                                 -- exactly one of the two innermost dimensions of the kernel
+
+    fst_res : _ <- patternValueElements pat_redomap,                             -- get the variables on which the first result of redomap depends on
     Just res_red_var <- M.lookup (patElemName fst_res) variance,
+
     -- we furthermore check that code1 is only formed by
     -- 1. statements that slice some globally-declared arrays
     --    to produce the input for the redomap, and
     -- 2. potentially some statements on which the redomap
     --    is independent to; these are recorded in `code2'`
     Just (code2', arr_tab0) <- foldl (processIndirections (namesFromList arrs) res_red_var)
-                                     (Just (Seq.empty,M.empty)) code1,
-    -- we get the global-thread id for the two inner dimensions,
-    --   as we are probably going to use it in code generation 
-    (gidx,m_X) : (gidy,m_Y) : _ <- reverse $ unSegSpace space,
-    -- sanity check that the reduce part is not trivial (it shouldn't be)
-    not (null red_nes) =
+                                     (Just (Seq.empty, M.empty)) code1,
+
+    (gidx, m_X) : (gidy, m_Y) : _ <- reverse $ unSegSpace space,                 -- we get the global-thread id for the two inner dimensions,
+                                                                                 --   as we are probably going to use it in code generation 
+
+    not (null red_nes) =                                                         -- sanity check that the reduce part is not trivial (it shouldn't be)
     -- here should come the actual implementation; for the moment we
     -- print some debug info, and return `Nothing` so the code
     -- generation will try other things, i.e., Troels' block tiling.
-    trace ("Cosmin printing:\n" ++ pretty stm ++ "\n Variant arrays: \n" ++ pretty arr_var_dims ++
-           "\n variance table: \n" ++ pretty variance ++ "\n code2': \n" ++ pretty code2' ++
-           "\n indirect-slice table: \n" ++ pretty arr_tab0) $
+    trace ("Cosmin printing:\n"                                       ++ pretty stm ++
+           "\n==================\n  Variant arrays:  \n "             ++ pretty arr_var_dims ++
+           "\n==================\n  variance table:  \n "             ++ pretty variance ++
+           "\n==================\n  code2':  \n"                      ++ pretty code2' ++
+           "\n==================\n  indirect-slice table:  \n"        ++ pretty arr_tab0 ++
+           "\n==================\n  (gidx, m_X) : (gidy, m_Y) : _ \n" ++ pretty (reverse $ unSegSpace space)) $
           return Nothing
 
   where -- | There are two supported cases here:
@@ -99,7 +101,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker
               Just (ss, M.insert p_nm (arr_nm,slc,p_tp) tab)
 
         processIndirections _ res_red_var acc stm@(Let patt _ _)
-          | Just (ss,tab) <- acc,
+          | Just (ss, tab) <- acc,
             ps <- patternValueElements patt,
             all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
               Just (ss Seq.|> stm, tab)
@@ -107,27 +109,31 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker
                 
 mmmTiling2D _ = return Nothing
 
---------------
---- HELPES ---
---------------
+---------------
+--- HELPERS ---
+---------------
 
 -- | translates an LParam to an FParam
 translParamToFParam :: LParam Kernels -> FParam Kernels
 translParamToFParam = fmap (`toDecl` Nonunique)
 
--- | Tries to identified the following pattern:
---   code folowed by a Screma SOAC followed by
---   another code.
+-- | Tries to identify the following pattern:
+--   code followed by a Screma SOAC followed by
+--   more code.
 matchCodeStreamCode :: Stms Kernels ->
                        ([Stm Kernels], Maybe (Stm Kernels), [Stm Kernels])
 matchCodeStreamCode kstms =
   foldl (\acc stmt ->
-            case (acc,stmt) of
-                ( (cd1,Nothing,cd2), Let _ _ (Op (OtherOp (Screma _ _ _)))) ->
-                    (cd1, Just stmt, cd2)
-                ( (cd1, Nothing, cd2), _) -> (cd1++[stmt], Nothing, cd2)
-                ( (cd1,Just strm,cd2), _) -> (cd1,Just strm,cd2++[stmt])
-        ) ([],Nothing,[]) (stmsToList kstms)
+            case (acc, stmt) of
+              ((cd1, Nothing, cd2), Let _ _ (Op (OtherOp (Screma _ _ _)))) ->
+               (cd1, Just stmt, cd2)
+
+              ((cd1, Nothing, cd2), _) ->
+               (cd1++[stmt], Nothing, cd2)
+
+              ((cd1, Just strm, cd2), _) ->
+               (cd1, Just strm, cd2++[stmt])
+        ) ([], Nothing, []) (stmsToList kstms)
 
 isTileableRedomap :: Stm Kernels
          -> Maybe (SubExp, [VName],
@@ -139,7 +145,7 @@ isTileableRedomap stm
     all (primType . rowType . paramType) $ lambdaParams red_lam,
     all (primType . rowType . paramType) $ lambdaParams map_lam,
     lambdaReturnType map_lam == lambdaReturnType red_lam, -- No mapout arrays.
-    not $ null arrs,
+    not (null arrs),
     all primType $ lambdaReturnType map_lam,
     all (primType . paramType) $ lambdaParams map_lam =
       Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
@@ -147,15 +153,15 @@ isTileableRedomap stm
       Nothing
 
 -- | Checks that all streamed arrays are variant to exacly one of
---   the two innermost parallel dimensions, and conversly, for
+--   the two innermost parallel dimensions, and conversely, for
 --   each of the two innermost parallel dimensions, there is at
 --   least one streamed array variant to it. The result is the
 --   the number of the only variant parallel dimension for each array.
 isInvarTo1of2InnerDims :: Names -> SegSpace -> VarianceTable -> [VName]
                        -> Maybe [Int]
 isInvarTo1of2InnerDims branch_variant kspace variance arrs =
-  let inner_perm0= map variantOnlyToOneOfTwoInnerDims arrs
-      inner_perm = catMaybes inner_perm0
+  let inner_perm0 = map variantOnlyToOneOfTwoInnerDims arrs
+      inner_perm  = catMaybes inner_perm0
       ok1 = elem 0 inner_perm && elem 1 inner_perm
       ok2 = length inner_perm0 == length inner_perm
   in  if ok1 && ok2 then Just inner_perm else Nothing
@@ -179,8 +185,7 @@ varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
 varianceInStms = foldl varianceInStm
 
 -- just in case you need the Screma being treated differently than
--- by default; previously Cosmin when dealing with stream had to
--- enhance it.
+-- by default; previously Cosmin had to enhance it when dealing with stream.
 varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
 varianceInStm v0 bnd@(Let pat _ (Op (OtherOp (Screma _ _ _))))
   | Just (w, arrs, (red_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap bnd =
