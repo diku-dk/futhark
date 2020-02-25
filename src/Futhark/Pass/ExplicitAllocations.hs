@@ -1034,20 +1034,24 @@ innermost space_dims t_dims =
       ixfun_rearranged = IxFun.permute ixfun_base perm_inv
   in ixfun_rearranged
 
-inGroupExpHints :: Allocator ExplicitMemory m => Exp ExplicitMemory -> m [ExpHint]
-inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body)))) = return $ do
-  (t, r) <- zip ts $ kernelBodyResult body
-  case r of
-    Returns ResultPrivate _ -> do
-      let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
-          t_dims = map (primExpFromSubExp int32) $ arrayDims t
-          dims = seg_dims ++ t_dims
-          nilSlice d = DimSlice 0 d 0
-      return $ Hint (IxFun.slice (IxFun.iota dims) $
-                     fullSliceNum dims $ map nilSlice seg_dims) $
-        ScalarSpace 1 $ elemType t
-    _ ->
-      return NoHint
+inGroupExpHints :: Exp ExplicitMemory -> AllocM Kernels ExplicitMemory [ExpHint]
+inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
+  | any private $ kernelBodyResult body = do
+  one <- letExp "one" $ BasicOp $ SubExp $ intConst Int32 1
+  return $ do
+    (t, r) <- zip ts $ kernelBodyResult body
+    return $ if
+      private r
+      then let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
+               t_dims = map (primExpFromSubExp int32) $ arrayDims t
+               dims = seg_dims ++ t_dims
+               nilSlice d = DimSlice 0 d 0
+           in Hint (IxFun.slice (IxFun.iota dims) $
+                    fullSliceNum dims $ map nilSlice seg_dims) $
+              ScalarSpace one $ elemType t
+      else NoHint
+  where private (Returns ResultPrivate _) = True
+        private _                         = False
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint
 
 inThreadExpHints :: Allocator ExplicitMemory m => Exp ExplicitMemory -> m [ExpHint]

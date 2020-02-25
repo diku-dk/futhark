@@ -464,7 +464,7 @@ memToCType space = do
 rawMemCType :: Space -> CompilerM op s C.Type
 rawMemCType DefaultSpace = return defaultMemBlockType
 rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
-rawMemCType (ScalarSpace d t) = return [C.cty|$ty:(primTypeToCType t)[$int:d]|]
+rawMemCType (ScalarSpace d t) = return [C.cty|$ty:(primTypeToCType t)[$id:d]|]
 
 fatMemType :: Space -> C.Type
 fatMemType space =

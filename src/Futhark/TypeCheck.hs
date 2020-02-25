@@ -876,7 +876,8 @@ checkSOACArrayArgs width vs =
 
 checkType :: Checkable lore =>
              TypeBase Shape u -> TypeM lore ()
-checkType = mapM_ checkSubExp . arrayDims
+checkType (Mem (ScalarSpace d _)) = requireI [Prim int32] d
+checkType t = mapM_ checkSubExp $ arrayDims t
 
 checkExtType :: Checkable lore =>
                 TypeBase ExtShape u

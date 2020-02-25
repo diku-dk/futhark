@@ -278,7 +278,7 @@ instance DeclTyped (MemInfo SubExp Uniqueness ret) where
 
 instance (FreeIn d, FreeIn ret) => FreeIn (MemInfo d u ret) where
   freeIn' (MemArray _ shape _ ret) = freeIn' shape <> freeIn' ret
-  freeIn' MemMem{} = mempty
+  freeIn' (MemMem s) = freeIn' s
   freeIn' MemPrim{} = mempty
 
 instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
@@ -731,6 +731,7 @@ checkMemInfo :: TC.Checkable lore =>
                  VName -> MemInfo SubExp u MemBind
              -> TC.TypeM lore ()
 checkMemInfo _ (MemPrim _) = return ()
+checkMemInfo _ (MemMem (ScalarSpace d _)) = TC.requireI [Prim int32] d
 checkMemInfo _ (MemMem _) = return ()
 checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
   t <- lookupType v
