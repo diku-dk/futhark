@@ -78,7 +78,7 @@ instance Pretty ExtShape where
 instance Pretty Space where
   ppr DefaultSpace = mempty
   ppr (Space s) = text "@" <> text s
-  ppr (ScalarSpace d t) = text "@" <> brackets (ppr d) <> ppr t
+  ppr (ScalarSpace d t) = text "@" <> brackets (mconcat $ map ppr d) <> ppr t
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim et) = ppr et

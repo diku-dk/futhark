@@ -932,8 +932,11 @@ fullyIndexArray' :: MemLocation -> [Imp.Exp]
                  -> ImpM lore op (VName, Imp.Space, Count Elements Imp.Exp)
 fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
-  let indices' = case space of ScalarSpace{} -> map (const 0) indices
-                               _             -> indices
+  let indices' = case space of
+                   ScalarSpace ds _ ->
+                     let (zero_is, is) = splitFromEnd (length ds) indices
+                     in map (const 0) zero_is ++ is
+                   _ -> indices
   return (mem, space,
           elements $ IxFun.index ixfun indices')
 

@@ -1036,17 +1036,14 @@ innermost space_dims t_dims =
 
 inGroupExpHints :: Exp ExplicitMemory -> AllocM Kernels ExplicitMemory [ExpHint]
 inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
-  | any private $ kernelBodyResult body = do
-  one <- letExp "one" $ BasicOp $ SubExp $ intConst Int32 1
-  return $ do
-    (t, r) <- zip ts $ kernelBodyResult body
-    return $ if
-      private r
-      then let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
-               t_dims = map (primExpFromSubExp int32) $ arrayDims t
-               dims = seg_dims ++ t_dims
-           in Hint (IxFun.iota dims) $ ScalarSpace one $ elemType t
-      else NoHint
+  | any private $ kernelBodyResult body = return $ do
+      (t, r) <- zip ts $ kernelBodyResult body
+      return $
+        if private r
+        then let dims = map (primExpFromSubExp int32) $
+                            segSpaceDims space ++ arrayDims t
+             in Hint (IxFun.iota dims) $ ScalarSpace (arrayDims t) $ elemType t
+        else NoHint
   where private (Returns ResultPrivate _) = True
         private _                         = False
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint

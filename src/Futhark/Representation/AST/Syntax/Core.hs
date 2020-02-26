@@ -153,7 +153,7 @@ instance ArrayShape Rank where
 -- between host memory ('DefaultSpace') and GPU space.
 data Space = DefaultSpace
            | Space SpaceId
-           | ScalarSpace VName PrimType
+           | ScalarSpace [SubExp] PrimType
              -- ^ A special kind of memory that is a statically sized
              -- array of some primitive type.  Used for private memory
              -- on GPUs.
