@@ -20,7 +20,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Control.Monad.Fail as Fail
 import Data.Maybe
-import Data.List (zip4, partition)
+import Data.List (zip4, partition, union)
 
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplify.Lore
@@ -733,7 +733,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
     mapM_ addStm bnds
     (val_res', mem_ctx_res, bodyrets, _) <-
       foldM helper ([], [], [], ext_ini) (zip4 ifrets val_res substs spaces)
-    return (ctx_res <> mem_ctx_res <> val_res', bodyrets)
+    return (ctx_res `union` mem_ctx_res <> val_res', bodyrets)
   body' <- mkBodyM all_body_stms res'
   return (body', bodyrets')
     where
@@ -758,12 +758,12 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
                 exttp = case ifr of
                           Array pt shp u ->
                             MemArray pt shp u $
-                            ReturnsNewBlock sp' (k + i) ixfn'
+                            ReturnsNewBlock sp' i ixfn'
                           _ -> error "Impossible case reached in addResCtxInIfBody"
             return (res_acc ++ [r],
                     ctx_acc ++ ext_ses ++ mem_ctx_r,
                     br_acc ++ [exttp],
-                    k + i + 1)
+                    i + 1)
 
       inspect i (Array pt shape u) space =
         let space' = fromMaybe DefaultSpace space
@@ -973,6 +973,7 @@ bindPatternWithAllocations types names e = do
 
 data ExpHint = NoHint
              | Hint IxFun Space
+             deriving Show
 
 kernelExpHints :: Allocator ExplicitMemory m => Exp ExplicitMemory -> m [ExpHint]
 kernelExpHints (BasicOp (Manifest perm v)) = do

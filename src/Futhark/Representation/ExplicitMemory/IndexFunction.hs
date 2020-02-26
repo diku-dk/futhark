@@ -803,7 +803,7 @@ type MapPExp v = M.Map Int (PrimExp v, PrimExp v)
 --   3. Most importantly, both index functions correspond to the same permutation
 --      (since the permutation is represented by INTs, this restriction cannot
 --       be relaxed, unless we move to a gated-LMAD representation!)
-leastGeneralGeneralization :: Eq v => Int -> IxFun (PrimExp v) -> IxFun (PrimExp v) ->
+leastGeneralGeneralization :: (Eq v, Show v) => Int -> IxFun (PrimExp v) -> IxFun (PrimExp v) ->
                               Maybe (Int, IxFun (PrimExp (Ext v)), MapPExp v)
 leastGeneralGeneralization k0 (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| []) oshp2 ctg2) = do
   guard $
@@ -812,24 +812,25 @@ leastGeneralGeneralization k0 (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| 
     map ldPerm (lmadDims lmad1) == map ldPerm (lmadDims lmad2) &&
     lmadDMon lmad1 == lmadDMon lmad2
   let (ctg, dperm, dmon) = (ctg1, lmadPermutation lmad1, lmadDMon lmad1)
-  (k1, oshp, tab1) <- generalize k0 oshp1 oshp2
-  (k2, dstd, tab2) <- generalize k1 (lmadDSrd lmad1) (lmadDSrd lmad2)
-  (k3, dshp, tab3) <- generalize k2 (lmadDShp lmad1) (lmadDShp lmad2)
-  (k4, drot, tab4) <- generalize k3 (lmadDRot lmad1) (lmadDRot lmad2)
-  (k5, offt, tab5) <- PEG.leastGeneralGeneralization k4 (lmadOffset lmad1) (lmadOffset lmad2)
+      m = M.empty
+  (k1, oshp, tab1) <- generalize m k0 oshp1 oshp2
+  (k2, dstd, tab2) <- generalize tab1 k1 (lmadDSrd lmad1) (lmadDSrd lmad2)
+  (k3, dshp, tab3) <- generalize tab2 k2 (lmadDShp lmad1) (lmadDShp lmad2)
+  (k4, drot, tab4) <- generalize tab3 k3 (lmadDRot lmad1) (lmadDRot lmad2)
+  (k5, offt, tab5) <- PEG.leastGeneralGeneralization tab4 k4 (lmadOffset lmad1) (lmadOffset lmad2)
   let lmad_dims = map (\(a,b,c,d,e) -> LMADDim a b c d e) $
         zip5 dstd drot dshp dperm dmon
       lmad = LMAD offt lmad_dims
-  return (k5, IxFun (lmad :| []) oshp ctg, M.unions [tab1, tab2, tab3, tab4, tab5])
+  return (k5, IxFun (lmad :| []) oshp ctg, tab5)
   where lmadDMon = map ldMon    . lmadDims
         lmadDSrd = map ldStride . lmadDims
         lmadDShp = map ldShape  . lmadDims
         lmadDRot = map ldRotate . lmadDims
-        generalize k l1 l2 =
+        generalize m k l1 l2 =
           foldM (\(k_acc, l_acc, tab) (pe1,pe2) -> do
-                    (k_acc', e, t) <- PEG.leastGeneralGeneralization k_acc pe1 pe2
-                    return (k_acc', l_acc++[e], M.union t tab)
-                ) (k,[],M.empty) (zip l1 l2)
+                    (k_acc', e, t) <- PEG.leastGeneralGeneralization tab k_acc pe1 pe2
+                    return (k_acc', l_acc++[e], t)
+                ) (k,[],m) (zip l1 l2)
 leastGeneralGeneralization _ _ _ = Nothing
 
 -- | When comparing index functions as part of the type check in ExplicitMemory,
