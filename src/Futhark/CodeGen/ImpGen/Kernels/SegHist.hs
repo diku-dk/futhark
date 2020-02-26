@@ -919,32 +919,32 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
   h <- dPrimVE "h" $ Imp.unCount $ sum op_hs
   seg_h <- dPrimVE "seg_h" $ Imp.unCount $ sum op_seg_hs
 
-  -- Maximum group size (or actual, in this case).
-  let hist_B = unCount group_size'
-
-  -- Size of a histogram.
-  hist_H <- dPrimVE "hist_H" $ sum $ map (toExp' int32 . histWidth) ops
-
-  -- Size of a single histogram element.  Actually the weighted
-  -- average of histogram elements in cases where we have more than
-  -- one histogram operation, plus any locks.
-  let lockSize slug = case slugAtomicUpdate slug of
-                        AtomicLocking{} -> Just $ primByteSize int32
-                        _               -> Nothing
-  hist_el_size <- dPrimVE "hist_el_size" $ foldl' (+) (h `quotRoundingUp` hist_H) $
-                  mapMaybe lockSize slugs
-
-  -- Input elements contributing to each histogram.
-  hist_N <- dPrimVE "hist_N" segment_size
-
-  -- Compute RF as the average RF over all the histograms.
-  hist_RF <- dPrimVE "hist_RF" $
-             sum (map (toExp' int32. histRaceFactor . slugOp) slugs)
-             `quot`
-             genericLength slugs
-
   -- Check for emptyness to avoid division-by-zero.
   sUnless (seg_h .==. 0) $ do
+
+    -- Maximum group size (or actual, in this case).
+    let hist_B = unCount group_size'
+
+    -- Size of a histogram.
+    hist_H <- dPrimVE "hist_H" $ sum $ map (toExp' int32 . histWidth) ops
+
+    -- Size of a single histogram element.  Actually the weighted
+    -- average of histogram elements in cases where we have more than
+    -- one histogram operation, plus any locks.
+    let lockSize slug = case slugAtomicUpdate slug of
+                          AtomicLocking{} -> Just $ primByteSize int32
+                          _               -> Nothing
+    hist_el_size <- dPrimVE "hist_el_size" $ foldl' (+) (h `quotRoundingUp` hist_H) $
+                    mapMaybe lockSize slugs
+
+    -- Input elements contributing to each histogram.
+    hist_N <- dPrimVE "hist_N" segment_size
+
+    -- Compute RF as the average RF over all the histograms.
+    hist_RF <- dPrimVE "hist_RF" $
+               sum (map (toExp' int32. histRaceFactor . slugOp) slugs)
+               `quot`
+               genericLength slugs
 
     let hist_T = unCount num_groups' * unCount group_size'
     emit $ Imp.DebugPrint "\n# SegHist" Nothing
