@@ -981,18 +981,16 @@ defaultCopy bt dest src
         MemLocation srcmem srcshape srcIxFun = src
 
 copyElementWise :: CopyCompiler lore op
-copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) = do
-    is <- replicateM (IxFun.rank destIxFun) (newVName "i")
+copyElementWise bt dest src = do
+    let bounds = map (toExp' int32) $ memLocationShape src
+    is <- replicateM (length bounds) (newVName "i")
     let ivars = map Imp.vi32 is
-        destidx = IxFun.index destIxFun ivars
-        srcidx = IxFun.index srcIxFun ivars
-        bounds = map (toExp' int32) srcshape
-    srcspace <- entryMemSpace <$> lookupMemory srcmem
-    destspace <- entryMemSpace <$> lookupMemory destmem
+    (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
+    (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
     vol <- asks envVolatility
     emit $ foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
-      Imp.Write destmem (elements destidx) bt destspace vol $
-      Imp.index srcmem (elements srcidx) bt srcspace vol
+      Imp.Write destmem destidx bt destspace vol $
+      Imp.index srcmem srcidx bt srcspace vol
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.
