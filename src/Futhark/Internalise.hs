@@ -1230,6 +1230,17 @@ certifyingNonzero loc t x m = do
       I.Assert nonzero "division by zero" (loc, mempty)
   certifying c m
 
+certifyingNonnegative :: SrcLoc -> IntType -> SubExp
+                      -> InternaliseM a
+                      -> InternaliseM a
+certifyingNonnegative loc t x m = do
+  c <- assertingOne $ do
+    nonnegative <- letSubExp "nonnegative" $ I.BasicOp $
+                   CmpOp (CmpSle t) (intConst t 0) x
+    letExp "nonzero_cert" $ I.BasicOp $
+      I.Assert nonnegative "negative exponent" (loc, mempty)
+  certifying c m
+
 internaliseBinOp :: SrcLoc -> String
                  -> E.BinOp
                  -> I.SubExp -> I.SubExp
@@ -1264,7 +1275,8 @@ internaliseBinOp _ desc E.Divide x y (E.FloatType t) _ =
   simpleBinOp desc (I.FDiv t) x y
 internaliseBinOp _ desc E.Pow x y (E.FloatType t) _ =
   simpleBinOp desc (I.FPow t) x y
-internaliseBinOp _ desc E.Pow x y (E.Signed t) _ =
+internaliseBinOp loc desc E.Pow x y (E.Signed t) _ =
+  certifyingNonnegative loc t y $
   simpleBinOp desc (I.Pow t) x y
 internaliseBinOp _ desc E.Pow x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Pow t) x y
