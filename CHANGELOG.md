@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Integer division by zero is now properly safety-checked and
     produces an error message.
 
+  * Integer exponentiation with negative exponent is now properly
+    safety-checked and produces an error message.
+
   * `reduce_by_index` may be somewhat faster for complex operators on
     histograms that barely fit in local memory.
 
