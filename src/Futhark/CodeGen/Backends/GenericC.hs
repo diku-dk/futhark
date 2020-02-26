@@ -390,6 +390,10 @@ instance C.ToExp PrimValue where
   toExp (BoolValue False) = C.toExp (0::Int8)
   toExp Checked = C.toExp (1::Int8)
 
+instance C.ToExp SubExp where
+  toExp (Var v) = C.toExp v
+  toExp (Constant c) = C.toExp c
+
 -- | Construct a publicly visible definition using the specified name
 -- as the template.  The first returned definition is put in the
 -- header file, and the second is the implementation.  Returns the public
@@ -463,7 +467,11 @@ memToCType space = do
 rawMemCType :: Space -> CompilerM op s C.Type
 rawMemCType DefaultSpace = return defaultMemBlockType
 rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
-rawMemCType (ScalarSpace d t) = return [C.cty|$ty:(primTypeToCType t)[$id:d]|]
+rawMemCType (ScalarSpace [] t) =
+  return [C.cty|$ty:(primTypeToCType t)[1]|]
+rawMemCType (ScalarSpace ds t) =
+  return $ foldl' addDim [C.cty|$ty:(primTypeToCType t)|] ds
+  where addDim t' d = [C.cty|$ty:t'[$exp:d]|]
 
 fatMemType :: Space -> C.Type
 fatMemType space =

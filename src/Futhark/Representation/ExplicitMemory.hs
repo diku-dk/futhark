@@ -731,7 +731,7 @@ checkMemInfo :: TC.Checkable lore =>
                  VName -> MemInfo SubExp u MemBind
              -> TC.TypeM lore ()
 checkMemInfo _ (MemPrim _) = return ()
-checkMemInfo _ (MemMem (ScalarSpace d _)) = TC.requireI [Prim int32] d
+checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int32]) d
 checkMemInfo _ (MemMem _) = return ()
 checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
   t <- lookupType v
