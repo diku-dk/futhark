@@ -805,12 +805,16 @@ instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se
   simplify (Ext x)   = return $ Ext x
 
+instance Simplifiable Space where
+  simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
+  simplify s = pure s
+
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) = do
     shape' <- simplify shape
     return $ Array et shape' u
   simplify (Mem space) =
-    pure $ Mem space
+    Mem <$> simplify space
   simplify (Prim bt) =
     return $ Prim bt
 
