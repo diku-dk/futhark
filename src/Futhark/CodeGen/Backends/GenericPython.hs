@@ -390,18 +390,17 @@ compileName :: VName -> String
 compileName = zEncodeString . pretty
 
 compileDim :: Imp.DimSize -> PyExp
-compileDim (Imp.ConstSize i) = Integer $ toInteger i
-compileDim (Imp.VarSize v) = Var $ compileName v
+compileDim (Imp.Constant v) = compilePrimValue v
+compileDim (Imp.Var v) = Var $ compileName v
 
 unpackDim :: PyExp -> Imp.DimSize -> Int32 -> CompilerM op s ()
-unpackDim arr_name (Imp.ConstSize c) i = do
+unpackDim arr_name (Imp.Constant c) i = do
   let shape_name = Field arr_name "shape"
-  let constant_c = Integer $ toInteger c
+  let constant_c = compilePrimValue c
   let constant_i = Integer $ toInteger i
   stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) $
     String "constant dimension wrong"
-
-unpackDim arr_name (Imp.VarSize var) i = do
+unpackDim arr_name (Imp.Var var) i = do
   let shape_name = Field arr_name "shape"
       src = Index shape_name $ IdxExp $ Integer $ toInteger i
   stm $ Assign (Var $ compileName var) $ simpleCall "np.int32" [src]

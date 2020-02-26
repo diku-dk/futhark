@@ -42,7 +42,6 @@ module Futhark.CodeGen.Backends.GenericC
   , compilePrimExp
   , compilePrimValue
   , compileExpToName
-  , dimSizeToExp
   , rawMem
   , item
   , stm
@@ -83,7 +82,7 @@ import Text.Printf
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
+import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -927,7 +926,7 @@ prepareEntryInputs = zipWithM prepare [(0::Int)..]
           stm [C.cstm|$exp:mem = $exp:src->mem;|]
 
           let rank = length shape
-              maybeCopyDim (VarSize d) i =
+              maybeCopyDim (Var d) i =
                 Just [C.cstm|$id:d = $exp:src->shape[$int:i];|]
               maybeCopyDim _ _ = Nothing
 
@@ -974,9 +973,9 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
           stm [C.cstm|$exp:dest->mem = $id:mem;|]
 
           let rank = length shape
-              maybeCopyDim (ConstSize x) i =
-                [C.cstm|$exp:dest->shape[$int:i] = $int:x;|]
-              maybeCopyDim (VarSize d) i =
+              maybeCopyDim (Constant x) i =
+                [C.cstm|$exp:dest->shape[$int:i] = $exp:x;|]
+              maybeCopyDim (Var d) i =
                 [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
           stms $ zipWith maybeCopyDim shape [0..rank-1]
 
@@ -1597,10 +1596,6 @@ compilePrimValue (BoolValue b) =
 
 compilePrimValue Checked =
   [C.cexp|0|]
-
-dimSizeToExp :: DimSize -> C.Exp
-dimSizeToExp (ConstSize x) = [C.cexp|$int:x|]
-dimSizeToExp (VarSize v)   = [C.cexp|$exp:v|]
 
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =

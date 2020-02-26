@@ -7,7 +7,7 @@ module Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
 
 import qualified Data.Map as M
 
-import Futhark.CodeGen.ImpCode.OpenCL hiding (Index, If)
+import Futhark.CodeGen.ImpCode.OpenCL hiding (Index, If, SubExp(..))
 import Futhark.CodeGen.Backends.GenericCSharp as CS
 import Futhark.CodeGen.Backends.GenericCSharp.AST as AST
 import Futhark.CodeGen.OpenCL.Heuristics
