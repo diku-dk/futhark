@@ -1178,7 +1178,7 @@ replicateIsFill arr v = do
           fname <- replicateForType v_t'
           emit $ Imp.Call [] fname
             [Imp.MemArg arr_mem,
-             Imp.ExpArg $ unCount $ product $ map dimSizeToExp arr_shape,
+             Imp.ExpArg $ product $ map (toExp' int32) arr_shape,
              Imp.ExpArg $ toExp' v_t' v]
     _ -> return Nothing
 
@@ -1223,9 +1223,8 @@ sCopy bt
   = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
-  let shape = map dimSizeToExp srcshape
-      shape_se = map (Imp.unCount . dimSizeToExp) srcshape
-      kernel_size = Imp.unCount $ product shape
+  let shape = map (toExp' int32) srcshape
+      kernel_size = product shape
 
   (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
 
@@ -1236,7 +1235,7 @@ sCopy bt
     set_constants
 
     let gtid = kernelGlobalThreadId constants
-        dest_is = unflattenIndex shape_se gtid
+        dest_is = unflattenIndex shape gtid
         src_is = dest_is
 
     (_, destspace, destidx) <- fullyIndexArray' destloc dest_is

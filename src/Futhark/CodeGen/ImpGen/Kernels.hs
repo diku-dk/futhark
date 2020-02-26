@@ -148,14 +148,14 @@ callKernelCopy bt
 
   | bt_size <- primByteSize bt,
     ixFunMatchesInnerShape
-      (Shape $ map (Imp.unCount . Imp.dimSizeToExp) destshape) destIxFun,
+      (Shape $ map (toExp' int32) destshape) destIxFun,
     ixFunMatchesInnerShape
-      (Shape $ map (Imp.unCount . Imp.dimSizeToExp) srcshape) srcIxFun,
+      (Shape $ map (toExp' int32) srcshape) srcIxFun,
     Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
-        let num_elems = product $ map dimSizeToExp srcshape
+        let num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
         emit $ Imp.Copy

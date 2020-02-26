@@ -16,7 +16,7 @@ module Futhark.CodeGen.ImpCode
   , ExternalValue (..)
   , Param (..)
   , paramName
-  , Size (..)
+  , SubExp(..)
   , MemSize
   , DimSize
   , Type (..)
@@ -43,11 +43,6 @@ module Futhark.CodeGen.ImpCode
   , bytes
   , withElemType
 
-    -- * Converting from sizes
-  , dimSizeToExp
-
-    -- * Analysis
-
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
   , module Futhark.Representation.Primitive
@@ -63,19 +58,16 @@ import Data.Traversable
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
 import Futhark.Representation.AST.Syntax
-  (Space(..), SpaceId, ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
+  (SubExp(..), Space(..), SpaceId,
+   ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Analysis.PrimExp
 import Futhark.Util.Pretty hiding (space)
 import Futhark.Representation.Kernels.Sizes (Count(..))
 
-data Size = ConstSize Int64
-          | VarSize VName
-          deriving (Eq, Show)
-
-type MemSize = Size
-type DimSize = Size
+type MemSize = SubExp
+type DimSize = SubExp
 
 data Type = Scalar PrimType | Mem Space
 
@@ -235,12 +227,6 @@ withElemType :: Count Elements Exp -> PrimType -> Count Bytes Exp
 withElemType (Count e) t =
   bytes $ ConvOpExp (SExt Int32 Int64) e * LeafExp (SizeOf t) (IntType Int64)
 
-dimSizeToExp :: DimSize -> Count Elements Exp
-dimSizeToExp (VarSize v) =
-  elements $ LeafExp (ScalarVar v) (IntType Int32)
-dimSizeToExp (ConstSize x) =
-  elements $ ValueExp $ IntValue $ Int32Value $ fromIntegral x
-
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
@@ -289,10 +275,6 @@ instance Pretty ExternalValue where
   ppr (OpaqueValue desc vs) =
     text "opaque" <+> text desc <+>
     nestedBlock "{" "}" (stack $ map ppr vs)
-
-instance Pretty Size where
-  ppr (ConstSize x) = ppr x
-  ppr (VarSize v)   = ppr v
 
 instance Pretty ArrayContents where
   ppr (ArrayValues vs) = braces (commasep $ map ppr vs)
@@ -498,7 +480,3 @@ instance FreeIn ExpLeaf where
 instance FreeIn Arg where
   freeIn' (MemArg m) = freeIn' m
   freeIn' (ExpArg e) = freeIn' e
-
-instance FreeIn Size where
-  freeIn' (VarSize name) = fvName name
-  freeIn' (ConstSize _) = mempty

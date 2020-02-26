@@ -42,7 +42,6 @@ module Futhark.CodeGen.ImpGen
     -- * Building Blocks
   , ToExp(..)
   , compileAlloc
-  , subExpToDimSize
   , everythingVolatile
   , compileBody
   , compileBody'
@@ -53,8 +52,6 @@ module Futhark.CodeGen.ImpGen
   , defCompileExp
   , fullyIndexArray
   , fullyIndexArray'
-  , Imp.dimSizeToExp
-  , dimSizeToSubExp
   , copy
   , copyDWIM
   , copyDWIMFix
@@ -248,7 +245,7 @@ instance HasScope SOACS (ImpM lore op) where
           entryType (ArrayVar _ arrayEntry) =
             Array
             (entryArrayElemType arrayEntry)
-            (Shape $ map dimSizeToSubExp $ entryArrayShape arrayEntry)
+            (Shape $ entryArrayShape arrayEntry)
             NoUniqueness
           entryType (ScalarVar _ scalarEntry) =
             Prim $ entryScalarType scalarEntry
@@ -333,10 +330,9 @@ compileInParam fparam = case paramAttr fparam of
     return $ Left $ Imp.ScalarParam name bt
   MemMem space ->
     return $ Left $ Imp.MemParam name space
-  MemArray bt shape _ (ArrayIn mem ixfun) -> do
-    shape' <- mapM subExpToDimSize $ shapeDims shape
+  MemArray bt shape _ (ArrayIn mem ixfun) ->
     return $ Right $ ArrayDecl name bt $
-      MemLocation mem shape' $ fmap (toExp' int32) ixfun
+    MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
   where name = paramName fparam
 
 data ArrayDecl = ArrayDecl VName PrimType MemLocation
@@ -449,11 +445,11 @@ compileOutParams orig_rts orig_epts = do
               tell ([Imp.ScalarParam out int32],
                     M.singleton x $ ScalarDestination out)
               put (memseen, M.insert x out arrseen)
-              return $ Imp.VarSize out
+              return $ Var out
             Just out ->
-              return $ Imp.VarSize out
+              return $ Var out
         inspectExtSize (Free se) =
-          imp $ subExpToDimSize se
+          return se
 
 compileFunDef :: ExplicitMemorish lore =>
                  FunDef lore
@@ -689,7 +685,7 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
       let srcloc = entryArrayLocation yentry
           rows = case drop i $ entryArrayShape yentry of
                   []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
-                  r:_ -> unCount $ Imp.dimSizeToExp r
+                  r:_ -> toExp' int32 r
       copy (elemType $ patElemType pe) destloc srcloc
       emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
@@ -700,7 +696,7 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
       let t = primValueType v
       static_array <- newVName "static_array"
       emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
-      let static_src = MemLocation static_array [Imp.ConstSize $ fromIntegral $ length es] $
+      let static_src = MemLocation static_array [intConst Int32 $ fromIntegral $ length es] $
                        IxFun.iota [fromIntegral $ length es]
           entry = MemVar Nothing $ MemEntry dest_space
       addVar static_array entry
@@ -797,8 +793,7 @@ memBoundToVarEntry e (MemPrim bt) =
 memBoundToVarEntry e (MemMem space) =
   return $ MemVar e $ MemEntry space
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
-  shape' <- mapM subExpToDimSize $ shapeDims shape
-  let location = MemLocation mem shape' $ fmap (toExp' int32) ixfun
+  let location = MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
   return $ ArrayVar e ArrayEntry { entryArrayLocation = location
                                  , entryArrayElemType = bt
                                  }
@@ -844,16 +839,6 @@ funcallTargets (Destination _ dests) =
           return []
         funcallTarget (MemoryDestination name) =
           return [name]
-
-subExpToDimSize :: SubExp -> ImpM lore op Imp.DimSize
-subExpToDimSize (Var v) =
-  return $ Imp.VarSize v
-subExpToDimSize (Constant (IntValue (Int64Value i))) =
-  return $ Imp.ConstSize $ fromIntegral i
-subExpToDimSize (Constant (IntValue (Int32Value i))) =
-  return $ Imp.ConstSize $ fromIntegral i
-subExpToDimSize Constant{} =
-  compilerBugS "Size subexp is not an int32 or int64 constant."
 
 -- | Compile things to 'Imp.Exp'.
 class ToExp a where
@@ -972,9 +957,9 @@ copy bt pat src = do
 defaultCopy :: CopyCompiler lore op
 defaultCopy bt dest src
   | ixFunMatchesInnerShape
-      (Shape $ map dimSizeToExp destshape) destIxFun,
+      (Shape $ map (toExp' int32) destshape) destIxFun,
     ixFunMatchesInnerShape
-      (Shape $ map dimSizeToExp srcshape) srcIxFun,
+      (Shape $ map (toExp' int32) srcshape) srcIxFun,
     Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
@@ -988,7 +973,7 @@ defaultCopy bt dest src
   | otherwise =
       copyElementWise bt dest src
   where bt_size = primByteSize bt
-        num_elems = product $ map Imp.dimSizeToExp srcshape
+        num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         MemLocation destmem destshape destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
@@ -998,7 +983,7 @@ copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshap
     let ivars = map Imp.vi32 is
         destidx = IxFun.index destIxFun ivars
         srcidx = IxFun.index srcIxFun ivars
-        bounds = map (unCount . Imp.dimSizeToExp) srcshape
+        bounds = map (toExp' int32) srcshape
     srcspace <- entryMemSpace <$> lookupMemory srcmem
     destspace <- entryMemSpace <$> lookupMemory destmem
     vol <- asks envVolatility
@@ -1171,13 +1156,6 @@ compileAlloc (Pattern [] [mem]) e space = do
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
   compilerBugS $ "compileAlloc: Invalid pattern: " ++ pretty pat
-
-dimSizeToSubExp :: Imp.Size -> SubExp
-dimSizeToSubExp (Imp.ConstSize n) = constant n
-dimSizeToSubExp (Imp.VarSize v) = Var v
-
-dimSizeToExp :: Imp.Size -> Imp.Exp
-dimSizeToExp = toExp' int32 . primExpFromSubExp int32 . dimSizeToSubExp
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format.
