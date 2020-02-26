@@ -206,10 +206,10 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
   hist_el_size <- dPrimVE "hist_el_size" $ sum $ map slugElAvgSize slugs
 
   hist_C_max <- dPrimVE "hist_C_max" $
-    Imp.BinOpExp (SMin Int32) hist_T $ hist_H `quot` hist_k_ct_min
+    Imp.BinOpExp (FMin Float64) (r64 hist_T) $ r64 hist_H / hist_k_ct_min
 
   hist_M_min <- dPrimVE "hist_M_min" $
-    Imp.BinOpExp (SMax Int32) 1 $ hist_T `quot` hist_C_max
+    Imp.BinOpExp (SMax Int32) 1 $ t64 $ r64 hist_T / hist_C_max
 
   -- Querying L2 cache size is not reliable.  Instead we provide a
   -- tunable knob with a hopefully sane default.
