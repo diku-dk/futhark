@@ -35,7 +35,6 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.RWS.Lazy
-import Data.Foldable
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Annotations
@@ -144,7 +143,7 @@ instance Scoped lore a => Scoped lore [a] where
   scopeOf = mconcat . map scopeOf
 
 instance Scoped lore (Stms lore) where
-  scopeOf = fold . fmap scopeOf
+  scopeOf = foldMap scopeOf
 
 instance Scoped lore (Stm lore) where
   scopeOf = scopeOfPattern . stmPattern

@@ -202,15 +202,18 @@ extractGenericBodyAllocations bound_outside get_stms set_stms body =
 extractStmAllocations :: Names -> Stm ExplicitMemory
                       -> Writer Extraction (Maybe (Stm ExplicitMemory))
 extractStmAllocations bound_outside (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
-  | space `notElem`
-    [Space "private", Space "local"] ++
-    map Space (M.keys allScalarMemory),
+  | expandable space,
     visibleOutside size = do
       tell $ M.singleton (patElemName patElem) (size, space)
       return Nothing
 
         where visibleOutside (Var v) = v `nameIn` bound_outside
               visibleOutside Constant{} = True
+
+              expandable (Space "private") = False
+              expandable (Space "local") = False
+              expandable ScalarSpace{} = False
+              expandable _ = True
 
 extractStmAllocations bound_outside stm = do
   e <- mapExpM expMapper $ stmExp stm

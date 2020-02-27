@@ -960,7 +960,7 @@ identifierReferences (_:s') =
 -- syntactical properties.
 leadingOperator :: Name -> BinOp
 leadingOperator s = maybe Backtick snd $ find ((`isPrefixOf` s') . fst) $
-                    sortBy (flip $ comparing $ length . fst) $
+                    sortOn (Down . length . fst) $
                     zip (map pretty operators) operators
   where s' = nameToString s
         operators :: [BinOp]

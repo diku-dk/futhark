@@ -257,21 +257,21 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       let out_of_bounds =
             forM_ (zip reds reds_arrs) $ \(SegRedOp _ _ nes _, red_arrs) ->
             forM_ (zip red_arrs nes) $ \(arr, ne) ->
-            copyDWIM arr [ltid] ne []
+            copyDWIMFix arr [ltid] ne []
 
           in_bounds =
             body constants $ \red_res ->
             sComment "save results to be reduced" $ do
             let red_dests = zip (concat reds_arrs) $ repeat [ltid]
             forM_ (zip red_dests red_res) $ \((d,d_is), (res, res_is)) ->
-              copyDWIM d d_is res res_is
+              copyDWIMFix d d_is res res_is
 
       sComment "apply map function if in bounds" $
         sIf (segment_size .>. 0 .&&.
              isActive (init $ zip gtids dims) .&&.
              ltid .<. segment_size * segments_per_group) in_bounds out_of_bounds
 
-      sOp Imp.LocalBarrier
+      sOp Imp.ErrorSync -- Also implicitly barrier.
 
       let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
       sWhen (segment_size .>. 0) $
@@ -288,7 +288,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
         -- Figure out which segment result this thread should write...
         let flat_segment_index = group_id' * segments_per_group + ltid
             gtids' = unflattenIndex (init dims') flat_segment_index
-        copyDWIM (patElemName pe) gtids'
+        copyDWIMFix (patElemName pe) gtids'
                         (Var arr) [(ltid+1) * segment_size_nonzero - 1]
 
       -- Finally another barrier, because we will be writing to the
@@ -398,7 +398,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
             forM_ (zip slugs segred_pes) $ \(slug, pes) ->
             sWhen (local_tid .==. 0) $
               forM_ (zip pes (slugAccs slug)) $ \(v, (acc, acc_is)) ->
-              copyDWIM (patElemName v) (map (`Imp.var` int32) segment_gtids) (Var acc) acc_is
+              copyDWIMFix (patElemName v) (map (`Imp.var` int32) segment_gtids) (Var acc) acc_is
 
       sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
 
@@ -483,7 +483,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
     forM_ slugs $ \slug ->
     forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
     sLoopNest (slugShape slug) $ \vec_is ->
-    copyDWIM acc (acc_is++vec_is) ne []
+    copyDWIMFix acc (acc_is++vec_is) ne []
 
   slugs_op_renamed <- mapM (renameLambda . segRedLambda . slugOp) slugs
 
@@ -492,13 +492,13 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
         sLoopNest (slugShape slug) $ \vec_is -> do
           comment "to reduce current chunk, first store our result in memory" $ do
             forM_ (zip (slugParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-              copyDWIM (paramName p) [] (Var acc) (acc_is++vec_is)
+              copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
 
             forM_ (zip (slugArrs slug) (slugParams slug)) $ \(arr, p) ->
               when (primType $ paramType p) $
-              copyDWIM arr [local_tid] (Var $ paramName p) []
+              copyDWIMFix arr [local_tid] (Var $ paramName p) []
 
-          sOp Imp.LocalBarrier
+          sOp Imp.ErrorSync -- Also implicitly barrier.
 
           groupReduce constants (kernelGroupSize constants) slug_op_renamed (slugArrs slug)
 
@@ -507,7 +507,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
           sComment "first thread saves the result in accumulator" $
             sWhen (local_tid .==. 0) $
             forM_ (zip (slugAccs slug) (lambdaParams slug_op_renamed)) $ \((acc, acc_is), p) ->
-            copyDWIM acc (acc_is++vec_is) (Var $ paramName p) []
+            copyDWIMFix acc (acc_is++vec_is) (Var $ paramName p) []
 
   -- If this is a non-commutative reduction, each thread must run the
   -- loop the same number of iterations, because we will be performing
@@ -540,17 +540,17 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
         sLoopNest (slugShape slug) $ \vec_is -> do
         sComment "load accumulator" $
           forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-          copyDWIM (paramName p) [] (Var acc) (acc_is ++ vec_is)
+          copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
         sComment "load new values" $
           forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
-          copyDWIM (paramName p) [] res (res_is ++ vec_is)
+          copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
         sComment "apply reduction operator" $
           compileStms mempty (bodyStms $ slugBody slug) $
           sComment "store in accumulator" $
           forM_ (zip
                   (slugAccs slug)
                   (bodyResult $ slugBody slug)) $ \((acc, acc_is), se) ->
-          copyDWIM acc (acc_is ++ vec_is) se []
+          copyDWIMFix acc (acc_is ++ vec_is) se []
 
     case comm of
       Noncommutative -> do
@@ -560,7 +560,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
                 forM_ slugs $ \slug ->
                 forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
                 sLoopNest (slugShape slug) $ \vec_is ->
-                copyDWIM acc (acc_is++vec_is) ne []
+                copyDWIMFix acc (acc_is++vec_is) ne []
           sUnless (local_tid .==. 0) reset_to_neutral
       _ -> return ()
 
@@ -583,7 +583,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
     Noncommutative ->
       forM_ slugs $ \slug ->
       forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-      copyDWIM (paramName p) [] (Var acc) acc_is
+      copyDWIMFix (paramName p) [] (Var acc) acc_is
     _ -> doTheReduction
 
   return slugs_op_renamed
@@ -613,7 +613,7 @@ reductionStageTwo constants segred_pes
   comment "first thread in group saves group result to global memory" $
     sWhen (local_tid .==. 0) $ do
     forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
-      copyDWIM v [0, group_id] (Var acc) acc_is
+      copyDWIMFix v [0, group_id] (Var acc) acc_is
     sOp Imp.MemFenceGlobal
     -- Increment the counter, thus stating that our result is
     -- available.
@@ -626,7 +626,7 @@ reductionStageTwo constants segred_pes
   sOp Imp.GlobalBarrier
 
   is_last_group <- dPrim "is_last_group" Bool
-  copyDWIM is_last_group [] (Var sync_arr) [0]
+  copyDWIMFix is_last_group [] (Var sync_arr) [0]
   sWhen (Imp.var is_last_group Bool) $ do
     -- The final group has written its result (and it was
     -- us!), so read in all the group results and perform the
@@ -642,14 +642,14 @@ reductionStageTwo constants segred_pes
         forM_ (zip4 red_acc_params red_arrs nes group_res_arrs) $
         \(p, arr, ne, group_res_arr) -> do
           let load_group_result =
-                copyDWIM (paramName p) []
+                copyDWIMFix (paramName p) []
                 (Var group_res_arr) ([0, first_group_for_segment + local_tid] ++ vec_is)
               load_neutral_element =
-                copyDWIM (paramName p) [] ne []
+                copyDWIMFix (paramName p) [] ne []
           sIf (local_tid .<. groups_per_segment)
             load_group_result load_neutral_element
           when (primType $ paramType p) $
-            copyDWIM arr [local_tid] (Var $ paramName p) []
+            copyDWIMFix arr [local_tid] (Var $ paramName p) []
 
       sOp Imp.LocalBarrier
 
@@ -659,4 +659,4 @@ reductionStageTwo constants segred_pes
         sComment "and back to memory with the final result" $
           sWhen (local_tid .==. 0) $
           forM_ (zip segred_pes $ lambdaParams red_op_renamed) $ \(pe, p) ->
-          copyDWIM (patElemName pe) (segment_gtids++vec_is) (Var $ paramName p) []
+          copyDWIMFix (patElemName pe) (segment_gtids++vec_is) (Var $ paramName p) []

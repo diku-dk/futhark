@@ -64,6 +64,14 @@ data Kernel = Kernel
               , kernelName :: Name
                -- ^ A short descriptive and _unique_ name - should be
                -- alphanumeric and without spaces.
+
+              , kernelFailureTolerant :: Bool
+                -- ^ If true, this kernel does not need for check
+                -- whether we are in a failing state, as it can cope.
+                -- Intuitively, it means that the kernel does not
+                -- depend on any non-scalar parameters to make control
+                -- flow decisions.  Replication, transpose, and copy
+                -- kernels are examples of this.
               }
             deriving (Show)
 
@@ -136,6 +144,7 @@ instance Pretty Kernel where
     (text "groups" <+> brace (ppr $ kernelNumGroups kernel) </>
      text "group_size" <+> brace (ppr $ kernelGroupSize kernel) </>
      text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
+     text "failure_tolerant" <+> ppr (kernelFailureTolerant kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
 
 data KernelOp = GetGroupId VName Int
@@ -151,6 +160,13 @@ data KernelOp = GetGroupId VName Int
               | MemFenceGlobal
               | PrivateAlloc VName (Count Bytes Imp.Exp)
               | LocalAlloc VName (Count Bytes Imp.Exp)
+              | ErrorSync
+                -- ^ Perform a local memory barrier and also check
+                -- whether any threads have failed an assertion.  Make
+                -- sure all threads would reach all 'ErrorSync's if
+                -- any of them do.  A failing assertion will jump to
+                -- the next following 'ErrorSync', so make sure it's
+                -- not inside control flow or similar.
               deriving (Show)
 
 -- Atomic operations return the value stored before the update.
@@ -210,6 +226,8 @@ instance Pretty KernelOp where
     ppr name <+> equals <+> text "private_alloc" <> parens (ppr size)
   ppr (LocalAlloc name size) =
     ppr name <+> equals <+> text "local_alloc" <> parens (ppr size)
+  ppr ErrorSync =
+    text "error_sync()"
   ppr (Atomic _ (AtomicAdd old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_add" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])

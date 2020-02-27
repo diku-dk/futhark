@@ -66,7 +66,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker
     -- 1. statements that slice some globally-declared arrays
     --    to produce the input for the redomap, and
     -- 2. potentially some statements on which the redomap
-    --    is independent to; these are recorded in `code2'`
+    --    is independent; these are recorded in `code2'`
     Just (code2', arr_tab0) <- foldl (processIndirections (namesFromList arrs) res_red_var)
                                      (Just (Seq.empty, M.empty)) code1,
 
@@ -75,24 +75,26 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker
     (gidx, m_X) : (gidy, m_Y) : _ <- reverse $ unSegSpace space,
 
 
-    -- sanity check that the reduce part is not trivial (it shouldn't be)
+    -- sanity check that the reduce part is not missing (it shouldn't be)
     not (null red_nes) =
-    trace ("nystudiegruppe printing:"              ++
-           "==================\npat:\n"            ++ pretty pat ++
-           "\n==================\naux:\n"          ++ show aux ++
-           "\n==================\nlvl:\n"          ++ pretty lvl ++
-           "\n==================\nspace:\n"        ++ pretty space ++
-           "\n==================\nold_ker_body:\n" ++ pretty old_ker_body ++
+      let let_binding = Let (Pattern {patternContextElements = [],
+                                      patternValueElements =
+                                      [PatElem {patElemName = (VName (nameFromString "foo") 7),
+                                                patElemAttr = Prim (IntType Int32)}]})
+                            aux (BasicOp (SubExp (Constant (IntValue (Int32Value 3)))))
+ 
+      in trace ("pat:\n"                              ++ pretty pat ++
+           "\n\n-----\n\nspace:\n"                    ++ pretty space ++
+           "\n\n-----\n\nold_ker_body:\n"             ++ pretty old_ker_body ++
+           "\n\n-----\n\ncode2':\n"                   ++ pretty code2' ++
+           "\n\n-----\n\nVariant arrays:\n"           ++ pretty arr_var_dims ++
+           "\n\n-----\n\nVariance table:\n"           ++ pretty variance ++
+           "\n\n-----\n\nreduce result variance:\n"   ++ pretty res_red_var ++
+           "\n\n-----\n\nindirect-slice table:\n"     ++ pretty arr_tab0 ++
+           "\n\n-----\n\n(gidx, m_X) : (gidy, m_Y)\n" ++ pretty (reverse $ unSegSpace space) ++
+           "\n\n\nstm:\n" ++ pretty stm)
 
-           "\n\n\nCosmin printing:\n"                                 ++ pretty stm ++
-           "\n==================\nVariant arrays:  \n "             ++ pretty arr_var_dims ++
-           "\n==================\nvariance table:  \n "             ++ pretty variance ++
-           "\n==================\ncode2':  \n"                      ++ pretty code2' ++
-           "\n==================\nindirect-slice table:  \n"        ++ pretty arr_tab0 ++
-           "\n==================\n(gidx, m_X) : (gidy, m_Y)\n" ++ pretty (reverse $ unSegSpace space))
-           $ return Nothing
-
-
+           $ return (Just (oneStm let_binding, stm))
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the

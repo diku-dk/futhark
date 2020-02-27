@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.PyOpenCL
   ) where
 
 import Control.Monad
+import qualified Data.Map as M
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
@@ -16,7 +17,6 @@ import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.MonadFreshNames
 
-
 --maybe pass the config file rather than multiple arguments
 compileProg :: MonadFreshNames m =>
                Maybe String -> Prog ExplicitMemory ->  m (Either InternalError String)
@@ -25,9 +25,12 @@ compileProg module_name prog = do
   --could probably be a better why do to this..
   case res of
     Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes prog')  -> do
+    Right (Imp.Program opencl_code opencl_prelude kernels types sizes failures prog')  -> do
       --prepare the strings for assigning the kernels and set them as global
-      let assign = unlines $ map (\x -> pretty $ Assign (Var ("self."++x++"_var")) (Var $ "program."++x)) kernel_names
+      let assign = unlines $
+                   map (\x -> pretty $ Assign (Var ("self."++x++"_var"))
+                              (Var $ "program."++x)) $
+                   M.keys kernels
 
       let defines =
             [Assign (Var "synchronous") $ Bool False,
@@ -59,7 +62,7 @@ compileProg module_name prog = do
                                        , "default_tile_size=default_tile_size"
                                        , "default_threshold=default_threshold"
                                        , "sizes=sizes"]
-                        [Escape $ openClInit types assign sizes]
+                        [Escape $ openClInit types assign sizes failures]
           options = [ Option { optionLongName = "platform"
                              , optionShortName = Just 'p'
                              , optionArgument = RequiredArgument "str"
@@ -109,7 +112,7 @@ compileProg module_name prog = do
                     ]
 
       Right <$> Py.compileProg module_name constructor imports defines operations ()
-        [Exp $ Py.simpleCall "self.queue.finish" []] options prog'
+        [Exp $ Py.simpleCall "sync" [Var "self"]] options prog'
   where operations :: Py.Operations Imp.OpenCL ()
         operations = Py.Operations
                      { Py.opsCompiler = callKernel
@@ -139,24 +142,34 @@ callKernel (Imp.GetSizeMax v size_class) =
   Py.stm $ Assign (Var (Py.compileName v)) $
   Var $ "self.max_" ++ pretty size_class
 
-callKernel (Imp.LaunchKernel name args num_workgroups workgroup_size) = do
+callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
   workgroup_size' <- mapM (fmap asLong . Py.compileExp) workgroup_size
   let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)
-  body <- Py.collect $ launchKernel name kernel_size workgroup_size' args
+
+  body <- Py.collect $ launchKernel name safety kernel_size workgroup_size' args
   Py.stm $ If cond body []
+
+  when (safety >= Imp.SafetyFull) $
+    Py.stm $ Assign (Var "self.failure_is_an_option") $
+    Py.compilePrimValue (Imp.IntValue (Imp.Int32Value 1))
+
   where mult_exp = BinOp "*"
 
-launchKernel :: String -> [PyExp] -> [PyExp] -> [Imp.KernelArg]
+launchKernel :: String -> Imp.Safety -> [PyExp] -> [PyExp] -> [Imp.KernelArg]
              -> Py.CompilerM op s ()
-launchKernel kernel_name kernel_dims workgroup_dims args = do
+launchKernel kernel_name safety kernel_dims workgroup_dims args = do
   let kernel_dims' = Tuple kernel_dims
       workgroup_dims' = Tuple workgroup_dims
       kernel_name' = "self." ++ kernel_name ++ "_var"
   args' <- mapM processKernelArg args
-  Py.stm $ Exp $ Py.simpleCall (kernel_name' ++ ".set_args") args'
+  let failure_args = take (Imp.numFailureParams safety)
+                     [Var "self.global_failure",
+                      Var "self.failure_is_an_option",
+                      Var "self.global_failure_args"]
+  Py.stm $ Exp $ Py.simpleCall (kernel_name' ++ ".set_args") $ failure_args ++ args'
   Py.stm $ Exp $ Py.simpleCall "cl.enqueue_nd_range_kernel"
     [Var "self.queue", Var kernel_name', kernel_dims', workgroup_dims']
   finishIfSynchronous
@@ -194,7 +207,8 @@ readOpenCLScalar mem i bt "device" = do
   Py.stm $ Exp $ Call (Var "cl.enqueue_copy")
     [Arg $ Var "self.queue", Arg val', Arg mem',
      ArgKeyword "device_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
-     ArgKeyword "is_blocking" $ Bool True]
+     ArgKeyword "is_blocking" $ Var "synchronous"]
+  Py.stm $ Exp $ Py.simpleCall "sync" [Var "self"]
   return $ Index val' $ IdxExp $ Integer 0
 
 readOpenCLScalar _ _ _ space =
@@ -334,4 +348,4 @@ ifNotZeroSize e s =
 
 finishIfSynchronous :: Py.CompilerM op s ()
 finishIfSynchronous =
-  Py.stm $ If (Var "synchronous") [Exp $ Py.simpleCall "self.queue.finish" []] []
+  Py.stm $ If (Var "synchronous") [Exp $ Py.simpleCall "sync" [Var "self"]] []

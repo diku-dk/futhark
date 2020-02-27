@@ -76,6 +76,10 @@ OPTIONS
 
     futhark bench prog.fut --backend=opencl --pass-option=-dHawaii
 
+--pass-compiler-option=opt
+
+  Pass an extra option to the compiler when compiling the programs.
+
 --runner=program
 
   If set to a non-empty string, compiled programs are not run

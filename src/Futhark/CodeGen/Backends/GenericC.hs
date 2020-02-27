@@ -13,6 +13,7 @@ module Futhark.CodeGen.Backends.GenericC
   , Operations (..)
   , defaultOperations
   , OpCompiler
+  , ErrorCompiler
 
   , PointerQuals
   , MemoryType
@@ -41,7 +42,6 @@ module Futhark.CodeGen.Backends.GenericC
   , compilePrimExp
   , compilePrimValue
   , compileExpToName
-  , dimSizeToExp
   , rawMem
   , item
   , stm
@@ -82,7 +82,7 @@ import Text.Printf
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
+import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -133,6 +133,8 @@ data HeaderSection = ArrayDecl String
 -- compilation function.
 type OpCompiler op s = op -> CompilerM op s ()
 
+type ErrorCompiler op s = ErrorMsg Exp -> String -> CompilerM op s ()
+
 -- | The address space qualifiers for a pointer of the given type with
 -- the given annotation.
 type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
@@ -179,11 +181,24 @@ data Operations op s =
 
              , opsMemoryType :: MemoryType op s
              , opsCompiler :: OpCompiler op s
+             , opsError :: ErrorCompiler op s
 
              , opsFatMemory :: Bool
                -- ^ If true, use reference counting.  Otherwise, bare
                -- pointers.
              }
+
+defError :: ErrorCompiler op s
+defError (ErrorMsg parts) stacktrace = do
+  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
+      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
+  stm [C.cstm|{ ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
+                $items:free_all_mem
+                return 1;
+              }|]
 
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
@@ -198,6 +213,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
                                , opsFatMemory = True
+                               , opsError = defError
                                }
   where defWriteScalar _ _ _ _ _ =
           error "Cannot write to non-default memory space because I am dumb"
@@ -217,6 +233,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           error "Has no type for non-default memory space"
         defCompiler _ =
           error "The default compiler cannot compile extended operations"
+
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
@@ -373,6 +390,10 @@ instance C.ToExp PrimValue where
   toExp (BoolValue False) = C.toExp (0::Int8)
   toExp Checked = C.toExp (1::Int8)
 
+instance C.ToExp SubExp where
+  toExp (Var v) = C.toExp v
+  toExp (Constant c) = C.toExp c
+
 -- | Construct a publicly visible definition using the specified name
 -- as the template.  The first returned definition is put in the
 -- header file, and the second is the implementation.  Returns the public
@@ -446,25 +467,30 @@ memToCType space = do
 rawMemCType :: Space -> CompilerM op s C.Type
 rawMemCType DefaultSpace = return defaultMemBlockType
 rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
+rawMemCType (ScalarSpace [] t) =
+  return [C.cty|$ty:(primTypeToCType t)[1]|]
+rawMemCType (ScalarSpace ds t) =
+  return $ foldl' addDim [C.cty|$ty:(primTypeToCType t)|] ds
+  where addDim t' d = [C.cty|$ty:t'[$exp:d]|]
 
 fatMemType :: Space -> C.Type
 fatMemType space =
   [C.cty|struct $id:name|]
   where name = case space of
-          DefaultSpace -> "memblock"
           Space sid    -> "memblock_" ++ sid
+          _            -> "memblock"
 
 fatMemSet :: Space -> String
-fatMemSet DefaultSpace = "memblock_set"
 fatMemSet (Space sid) = "memblock_set_" ++ sid
+fatMemSet _ = "memblock_set"
 
 fatMemAlloc :: Space -> String
-fatMemAlloc DefaultSpace = "memblock_alloc"
 fatMemAlloc (Space sid) = "memblock_alloc_" ++ sid
+fatMemAlloc _ = "memblock_alloc"
 
 fatMemUnRef :: Space -> String
-fatMemUnRef DefaultSpace = "memblock_unref"
 fatMemUnRef (Space sid) = "memblock_unref_" ++ sid
+fatMemUnRef _ = "memblock_unref"
 
 rawMem :: C.ToExp a => a -> CompilerM op s C.Exp
 rawMem v = rawMem' <$> asks envFatMemory <*> pure v
@@ -491,7 +517,7 @@ defineMemorySpace space = do
   free <- case space of
     Space sid -> do free_mem <- asks envDeallocate
                     collect $ free_mem [C.cexp|block->mem|] [C.cexp|block->desc|] sid
-    DefaultSpace -> return [[C.citem|free(block->mem);|]]
+    _ -> return [[C.citem|free(block->mem);|]]
   ctx_ty <- contextType
   let unrefdef = [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
@@ -517,11 +543,11 @@ defineMemorySpace space = do
   -- When allocating a memory block we initialise the reference count to 1.
   alloc <- collect $
     case space of
-      DefaultSpace ->
-        stm [C.cstm|block->mem = (char*) malloc(size);|]
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure [C.cexp|desc|] <*> pure sid
+      _ ->
+        stm [C.cstm|block->mem = (char*) malloc(size);|]
   let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
     panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
@@ -570,14 +596,14 @@ defineMemorySpace space = do
                            (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
-          DefaultSpace -> ("peak_mem_usage_default",
-                           "cur_mem_usage_default",
-                            "memblock",
-                            "default space")
           Space sid    -> ("peak_mem_usage_" ++ sid,
                            "cur_mem_usage_" ++ sid,
                            "memblock_" ++ sid,
                            "space '" ++ sid ++ "'")
+          _ -> ("peak_mem_usage_default",
+                "cur_mem_usage_default",
+                "memblock",
+                "default space")
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
@@ -624,11 +650,11 @@ allocMem name size space on_failure = do
                      }|]
     else alloc name
   where alloc dest = case space of
-          DefaultSpace ->
-            stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
           Space sid ->
             join $ asks envAllocate <*> rawMem name <*>
             pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
+          _ ->
+            stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
@@ -908,7 +934,7 @@ prepareEntryInputs = zipWithM prepare [(0::Int)..]
           stm [C.cstm|$exp:mem = $exp:src->mem;|]
 
           let rank = length shape
-              maybeCopyDim (VarSize d) i =
+              maybeCopyDim (Var d) i =
                 Just [C.cstm|$id:d = $exp:src->shape[$int:i];|]
               maybeCopyDim _ _ = Nothing
 
@@ -955,9 +981,9 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
           stm [C.cstm|$exp:dest->mem = $id:mem;|]
 
           let rank = length shape
-              maybeCopyDim (ConstSize x) i =
-                [C.cstm|$exp:dest->shape[$int:i] = $int:x;|]
-              maybeCopyDim (VarSize d) i =
+              maybeCopyDim (Constant x) i =
+                [C.cstm|$exp:dest->shape[$int:i] = $exp:x;|]
+              maybeCopyDim (Var d) i =
                 [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
           stms $ zipWith maybeCopyDim shape [0..rank-1]
 
@@ -1167,7 +1193,9 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   int r;
                   /* Run the program once. */
                   $stms:pack_input
-                  assert($id:sync_ctx(ctx) == 0);
+                  if ($id:sync_ctx(ctx) != 0) {
+                    panic(1, "%s", $id:error_ctx(ctx));
+                  };
                   // Only profile last run.
                   if (profile_run) {
                     $id:unpause_profiling(ctx);
@@ -1179,7 +1207,9 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   if (r != 0) {
                     panic(1, "%s", $id:error_ctx(ctx));
                   }
-                  assert($id:sync_ctx(ctx) == 0);
+                  if ($id:sync_ctx(ctx) != 0) {
+                    panic(1, "%s", $id:error_ctx(ctx));
+                  };
                   if (profile_run) {
                     $id:pause_profiling(ctx);
                   }
@@ -1575,10 +1605,6 @@ compilePrimValue (BoolValue b) =
 compilePrimValue Checked =
   [C.cexp|0|]
 
-dimSizeToExp :: DimSize -> C.Exp
-dimSizeToExp (ConstSize x) = [C.cexp|$int:x|]
-dimSizeToExp (VarSize v)   = [C.cexp|$exp:v|]
-
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
   [C.cexp|(($ty:res_t)$exp:ptr)[$exp:i]|]
@@ -1626,6 +1652,11 @@ compileExp = compilePrimExp compileLeaf
           join $ asks envReadScalar
           <*> rawMem src <*> compileExp iexp
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
+
+        compileLeaf (Index src (Count iexp) _ ScalarSpace{} _) = do
+          src' <- rawMem src
+          iexp' <- compileExp iexp
+          return [C.cexp|$exp:src'[$exp:iexp']|]
 
         compileLeaf (SizeOf t) =
           return [C.cexp|(typename int32_t)sizeof($ty:t')|]
@@ -1748,18 +1779,11 @@ compileCode c
 
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
-compileCode (Assert e (ErrorMsg parts) (loc, locs)) = do
+compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
-  free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
-  let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
-      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
-  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
-  let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
-  stm [C.cstm|if (!$exp:e') {
-                   ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
-                   $items:free_all_mem
-                   return 1;
-                 }|]
+  err <- collect $ join $
+         asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
+  stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
 compileCode (Allocate name (Count e) space) = do
@@ -1822,6 +1846,12 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
+compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
+  dest' <- rawMem dest
+  idx' <- compileExp idx
+  elemexp' <- compileExp elemexp
+  stm [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]
+
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
@@ -1837,6 +1867,9 @@ compileCode (DeclareMem name space) =
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
+
+compileCode (DeclareArray name ScalarSpace{} _ _) =
+  error $ "Cannot declare array " ++ pretty name ++ " in scalar space."
 
 compileCode (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
