@@ -20,7 +20,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Control.Monad.Fail as Fail
 import Data.Maybe
-import Data.List (zip4, partition)
+import Data.List (zip4, partition, sort)
 
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplify.Lore
@@ -309,9 +309,9 @@ allocsForPattern sizeidents validents rts hints = do
                               m ([PatElemT (MemInfo d u ret)], IxFun)
         instantiateExtIxFun idd ext_ixfn = do
           let idnm = baseString (identName idd) <> "_ixfn"
-              (is, ptps) = unzip $ S.toList $
-                            foldMap onlyExts $
-                            foldMap leafExpTypes ext_ixfn
+              (is, ptps) = unzip $ sort $ S.toList $
+                           foldMap onlyExts $
+                           foldMap leafExpTypes ext_ixfn
               is' = drop (length sizeidents) is
               ptps' = drop (length sizeidents) ptps
           if length is /= length ptps
