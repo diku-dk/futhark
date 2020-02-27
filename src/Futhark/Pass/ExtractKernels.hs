@@ -434,7 +434,7 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
 
   where
     paralleliseOuter path'
-      | any (not . primType) $ lambdaReturnType red_fun = do
+      | not $ all primType $ lambdaReturnType red_fun = do
           -- Split into a chunked map and a reduction, with the latter
           -- further transformed.
           let fold_fun' = soacsLambdaToKernels fold_fun

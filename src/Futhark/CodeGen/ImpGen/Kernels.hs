@@ -135,7 +135,6 @@ callKernelCopy :: CopyCompiler ExplicitMemory Imp.HostOp
 callKernelCopy bt
   destloc@(MemLocation destmem destshape destIxFun)
   srcloc@(MemLocation srcmem srcshape srcIxFun)
-  n
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
           src_elems, dest_elems) <- isMapTransposeKernel bt destloc srcloc = do
@@ -149,22 +148,22 @@ callKernelCopy bt
 
   | bt_size <- primByteSize bt,
     ixFunMatchesInnerShape
-      (Shape $ map (Imp.unCount . Imp.dimSizeToExp) destshape) destIxFun,
+      (Shape $ map (toExp' int32) destshape) destIxFun,
     ixFunMatchesInnerShape
-      (Shape $ map (Imp.unCount . Imp.dimSizeToExp) srcshape) srcIxFun,
+      (Shape $ map (toExp' int32) srcshape) srcIxFun,
     Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
-        let row_size = product $ map dimSizeToExp $ drop 1 srcshape
+        let num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
         emit $ Imp.Copy
           destmem (bytes destoffset) destspace
           srcmem (bytes srcoffset) srcspace $
-          (n * row_size) `Imp.withElemType` bt
+          num_elems `Imp.withElemType` bt
 
-  | otherwise = sCopy bt destloc srcloc n
+  | otherwise = sCopy bt destloc srcloc
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do

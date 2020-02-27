@@ -247,7 +247,7 @@ protectIfHoisted cond side m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
   runBinder $ do
-    if any (not . safeExp . stmExp) stms
+    if not $ all (safeExp . stmExp) stms
       then do cond' <- if side then return cond
                        else letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
               mapM_ (protectIf ops unsafeOrCostly cond') stms
@@ -268,7 +268,7 @@ protectLoopHoisted ctx val form m = do
   (x, stms) <- m
   ops <- asks $ protectHoistedOpS . fst
   runBinder $ do
-    if any (not . safeExp . stmExp) stms
+    if not $ all (safeExp . stmExp) stms
       then do is_nonempty <- checkIfNonEmpty
               mapM_ (protectIf ops (not . safeExp) is_nonempty) stms
       else addStms stms
@@ -329,7 +329,7 @@ emptyOfType ctx_names (Array pt shape _) = do
 -- further optimisation..
 notWorthHoisting :: Attributes lore => BlockPred lore
 notWorthHoisting _ _ (Let pat _ e) =
-  not (safeExp e) && any (>0) (map arrayRank $ patternTypes pat)
+  not (safeExp e) && any ((>0) . arrayRank) (patternTypes pat)
 
 hoistStms :: SimplifiableLore lore =>
              RuleBook (Wise lore) -> BlockPred (Wise lore)
@@ -514,6 +514,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
                     stmsToList $ stms1<>stms2
 
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp ArrayLit{})) = False
+      isNotHoistableBnd _ _ _ (Let _ _ (BasicOp SubExp{})) = False
       isNotHoistableBnd nms _ _ stm = not (hasPatName nms stm)
 
       block = branch_blocker `orIf`
@@ -804,12 +805,16 @@ instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se
   simplify (Ext x)   = return $ Ext x
 
+instance Simplifiable Space where
+  simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
+  simplify s = pure s
+
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) = do
     shape' <- simplify shape
     return $ Array et shape' u
   simplify (Mem space) =
-    pure $ Mem space
+    Mem <$> simplify space
   simplify (Prim bt) =
     return $ Prim bt
 

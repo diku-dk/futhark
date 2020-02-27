@@ -411,7 +411,7 @@ lookupRange name vtable =
 enclosingLoopVars :: [VName] -> SymbolTable lore -> [VName]
 enclosingLoopVars free vtable =
   map fst $
-  sortBy (flip (comparing (bindingDepth . snd))) $
+  sortOn (Down . bindingDepth . snd) $
   filter (loopVariable . snd) $ mapMaybe fetch free
   where fetch name = do e <- lookup name vtable
                         return (name, e)

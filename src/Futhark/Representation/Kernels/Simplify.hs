@@ -196,9 +196,6 @@ instance Engine.Simplifiable SegLevel where
   simplify (SegGroup num_groups group_size virt) =
     SegGroup <$> traverse Engine.simplify num_groups <*>
     traverse Engine.simplify group_size <*> pure virt
-  simplify (SegThreadScalar num_groups group_size virt) =
-    SegThreadScalar <$> traverse Engine.simplify num_groups <*>
-    traverse Engine.simplify group_size <*> pure virt
 
 instance Engine.Simplifiable SegSpace where
   simplify (SegSpace phys dims) =
@@ -239,10 +236,6 @@ removeInvariantKernelResults :: TopDownRuleOp (Wise Kernels)
 removeInvariantKernelResults vtable (Pattern [] kpes) attr
                              (SegOp (SegMap lvl space ts (KernelBody _ kstms kres))) = Simplify $ do
 
-  case lvl of
-    SegThreadScalar{} -> cannotSimplify
-    _ -> return ()
-
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
@@ -255,8 +248,9 @@ removeInvariantKernelResults vtable (Pattern [] kpes) attr
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
 
-        checkForInvarianceResult (_, pe, Returns _ se)
-          | isInvariant se = do
+        checkForInvarianceResult (_, pe, Returns rm se)
+          | rm == ResultMaySimplify,
+            isInvariant se = do
               letBindNames_ [patElemName pe] $
                 BasicOp $ Replicate (Shape $ segSpaceDims space) se
               return False

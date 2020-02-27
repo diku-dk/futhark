@@ -21,9 +21,6 @@ compileSegMap :: Pattern ExplicitMemory
               -> KernelBody ExplicitMemory
               -> CallKernelGen ()
 
-compileSegMap _ SegThreadScalar{} _ _ =
-  fail "compileSegMap: SegThreadScalar cannot be compiled at top level."
-
 compileSegMap pat lvl space kbody = do
   let (is, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
@@ -32,8 +29,6 @@ compileSegMap pat lvl space kbody = do
   group_size' <- traverse toExp $ segGroupSize lvl
 
   case lvl of
-    SegThreadScalar{} ->
-      fail "compileSegMap: SegThreadScalar cannot be compiled at top level."
 
     SegThread{} ->
       sKernelThread "segmap" num_groups' group_size' (segFlat space) $ \constants -> do

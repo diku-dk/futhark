@@ -80,9 +80,6 @@ module Futhark.Representation.ExplicitMemory
        , ixFunMatchesInnerShape
        , existentialiseIxFun
 
-       , scalarMemory
-       , allScalarMemory
-
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -98,8 +95,9 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
-import Data.Foldable (traverse_)
+import Data.Foldable (traverse_, toList)
 import Data.List
+import qualified Data.Set as S
 
 import Futhark.Analysis.Metrics
 import Futhark.Representation.AST.Syntax
@@ -195,7 +193,7 @@ instance Substitute inner => Substitute (MemOp inner) where
 
 instance PP.Pretty inner => PP.Pretty (MemOp inner) where
   ppr (Alloc e DefaultSpace) = PP.text "alloc" <> PP.apply [PP.ppr e]
-  ppr (Alloc e (Space sp)) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.text sp]
+  ppr (Alloc e s) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.ppr s]
   ppr (Inner k) = PP.ppr k
 
 instance OpMetrics inner => OpMetrics (MemOp inner) where
@@ -280,7 +278,7 @@ instance DeclTyped (MemInfo SubExp Uniqueness ret) where
 
 instance (FreeIn d, FreeIn ret) => FreeIn (MemInfo d u ret) where
   freeIn' (MemArray _ shape _ ret) = freeIn' shape <> freeIn' ret
-  freeIn' MemMem{} = mempty
+  freeIn' (MemMem s) = freeIn' s
   freeIn' MemPrim{} = mempty
 
 instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
@@ -321,10 +319,8 @@ instance (Engine.Simplifiable d, Engine.Simplifiable ret) =>
 instance (PP.Pretty (TypeBase (ShapeBase d) u),
           PP.Pretty d, PP.Pretty u, PP.Pretty ret) => PP.Pretty (MemInfo d u ret) where
   ppr (MemPrim bt) = PP.ppr bt
-  ppr (MemMem DefaultSpace) =
-    PP.text "mem"
-  ppr (MemMem (Space sp)) =
-    PP.text "mem" <> PP.text "@" <> PP.text sp
+  ppr (MemMem DefaultSpace) = PP.text "mem"
+  ppr (MemMem s) = PP.text "mem" <> PP.ppr s
   ppr (MemArray bt shape u ret) =
     PP.ppr (Array bt shape u) <> PP.text "@" <> PP.ppr ret
 
@@ -410,6 +406,10 @@ fixExtIxFun i e = fmap $ replaceInPrimExp update
 leafExp :: Int -> PrimExp (Ext a)
 leafExp i = LeafExp (Ext i) int32
 
+memReturnIxFun :: MemReturn -> ExtIxFun
+memReturnIxFun (ReturnsInBlock _ ixfun) = ixfun
+memReturnIxFun (ReturnsNewBlock _ _ ixfun) = ixfun
+
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
 existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
   where ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0..]
@@ -418,9 +418,7 @@ instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
     PP.parens $ PP.text (pretty v) <> PP.text "->" <> PP.ppr ixfun
   ppr (ReturnsNewBlock space i ixfun) =
-    PP.text ("?" ++ show i) <> space' <> PP.text "->" <> PP.ppr ixfun
-    where space' = case space of DefaultSpace -> mempty
-                                 Space s -> PP.text $ "@" ++ s
+    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" <> PP.ppr ixfun
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
@@ -562,25 +560,8 @@ matchReturnType rettype res ts = do
   let (ctx_ts, val_ts) = splitFromEnd (length rettype) ts
       (ctx_res, _val_res) = splitFromEnd (length rettype) res
 
-      getId :: (SubExp,Int) -> Maybe (VName,Int)
-      getId (Var ii, i) = Just (ii,i)
-      getId (Constant _, _) = Nothing
-
-      (ctx_map_ids, ctx_map_exts) =
-        getExtMaps $ mapMaybe getId $ zip ctx_res [0..length ctx_res - 1]
-
       existentialiseIxFun0 :: IxFun -> ExtIxFun
-      existentialiseIxFun0 = IxFun.substituteInIxFun ctx_map_ids . fmap (fmap Free)
-
-      getCt :: (Int,SubExp) -> Maybe (Ext VName, PrimExp (Ext VName))
-      getCt (_, Var _) = Nothing
-      getCt (i, Constant c) = Just (Ext i, ValueExp c)
-
-      ctx_map_cts = M.fromList $ mapMaybe getCt $
-                    zip [0..length ctx_res - 1] ctx_res
-
-      substConstsInExtIndFun :: ExtIxFun -> ExtIxFun
-      substConstsInExtIndFun = IxFun.substituteInIxFun (ctx_map_cts<>ctx_map_exts)
+      existentialiseIxFun0 = fmap $ fmap Free
 
       fetchCtx i = case maybeNth i $ zip ctx_res ctx_ts of
                      Nothing -> throwError $ "Cannot find context variable " ++
@@ -595,7 +576,14 @@ matchReturnType rettype res ts = do
                   (MemArray y_pt y_shape _ y_ret)
         | x_pt == y_pt, shapeRank x_shape == shapeRank y_shape = do
             zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
+            unless (map extDim (shapeDims x_shape) == IxFun.shape (memReturnIxFun x_ret)) $
+              throwError $ unlines [ "Index function does not match type."
+                                   , "Shape of type: " ++ pretty x_shape
+                                   , "Shape of index function: " ++ pretty (IxFun.shape (memReturnIxFun x_ret))
+                                   ]
             checkMemReturn x_ret y_ret
+              where extDim (Ext v) = LeafExp (Ext v) int32
+                    extDim (Free se) = Free <$> primExpFromSubExp int32 se
       checkReturn x y =
         throwError $ unwords ["Expected ", pretty x, " but got ", pretty y]
 
@@ -610,23 +598,19 @@ matchReturnType rettype res ts = do
                                 "but got", pretty y]
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
-          | x_mem == y_mem = do
-              let x_ixfun' = substConstsInExtIndFun x_ixfun
-                  y_ixfun' = existentialiseIxFun0   y_ixfun
-              unless (x_ixfun' == y_ixfun') $
+          | x_mem == y_mem =
+              unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
                 throwError $ unwords  ["Index function unification failed (ReturnsInBlock)",
-                    "\nixfun of body result: ", pretty y_ixfun',
-                    "\nixfun of return type: ", pretty x_ixfun',
+                    "\nixfun of body result: ", pretty y_ixfun,
+                    "\nixfun of return type: ", pretty x_ixfun,
                     "\nand context elements: ", pretty ctx_res]
       checkMemReturn (ReturnsNewBlock x_space x_ext x_ixfun)
                      (ArrayIn y_mem y_ixfun) = do
         (x_mem, x_mem_type)  <- fetchCtx x_ext
-        let x_ixfun' = substConstsInExtIndFun x_ixfun
-            y_ixfun' = existentialiseIxFun0   y_ixfun
-        unless (x_ixfun' == y_ixfun') $
+        unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
           throwError $ unwords  ["Index function unification failed (ReturnsNewBlock)",
-            "\nixfun of body result: ", pretty y_ixfun',
-            "\nixfun of return type: ", pretty x_ixfun',
+            "\nixfun of body result: ", pretty y_ixfun,
+            "\nixfun of return type: ", pretty x_ixfun,
             "\nand context elements: ", pretty ctx_res]
         case x_mem_type of
           MemMem y_space -> do
@@ -668,8 +652,11 @@ matchPatternToExp pat e = do
       (ctx_map_ids, ctx_map_exts) =
         getExtMaps $ zip ctx_ids [0..length ctx_ids - 1]
 
+  let rt_exts = foldMap extInExpReturns rt
+
   unless (length val_ts == length rt &&
-          and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt)) $
+          and (zipWith (matches ctx_map_ids ctx_map_exts) val_ts rt) &&
+          M.keysSet ctx_map_exts `S.isSubsetOf` S.map Ext rt_exts) $
     TC.bad $ TC.TypeError $ "Expression type:\n  " ++ prettyTuple rt ++
                             "\ncannot match pattern type:\n  " ++ prettyTuple val_ts ++
                             "\nwith context elements: " ++ pretty ctx_ids
@@ -692,10 +679,26 @@ matchPatternToExp pat e = do
              Just (ReturnsNewBlock y_space y_i y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_space == y_space && x_i == y_i && x_ixfun' == y_ixfun'
+              in  x_space == y_space && x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
             (_, Nothing) -> True
             _ -> False
         matches _ _ _ _ = False
+
+        extInExpReturns :: ExpReturns -> S.Set Int
+        extInExpReturns (MemArray _ shape _ mem_return) =
+          extInShape shape <> maybe S.empty extInMemReturn mem_return
+        extInExpReturns _ = mempty
+
+        extInShape :: ShapeBase (Ext SubExp) -> S.Set Int
+        extInShape shape = S.fromList $ mapMaybe isExt $ shapeDims shape
+
+        extInMemReturn :: MemReturn -> S.Set Int
+        extInMemReturn (ReturnsInBlock _ extixfn) = extInIxFn extixfn
+        extInMemReturn (ReturnsNewBlock _ i extixfn) =
+          S.singleton i <> extInIxFn extixfn
+
+        extInIxFn :: ExtIxFun -> S.Set Int
+        extInIxFn ixfun = S.fromList $ concatMap (mapMaybe isExt . toList) ixfun
 
 varMemInfo :: ExplicitMemorish lore =>
               VName -> TC.TypeM lore (MemInfo SubExp NoUniqueness MemBind)
@@ -739,6 +742,7 @@ checkMemInfo :: TC.Checkable lore =>
                  VName -> MemInfo SubExp u MemBind
              -> TC.TypeM lore ()
 checkMemInfo _ (MemPrim _) = return ()
+checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int32]) d
 checkMemInfo _ (MemMem _) = return ()
 checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
   t <- lookupType v
@@ -1034,12 +1038,3 @@ ixFunMatchesInnerShape :: (Eq num, IntegralExp num) =>
                           ShapeBase num -> IxFun.IxFun num -> Bool
 ixFunMatchesInnerShape shape ixfun =
   drop 1 (IxFun.shape ixfun) == drop 1 (shapeDims shape)
-
--- | Construct the scalar memory space corresponding to a given primitive type.
-scalarMemory :: PrimType -> SpaceId
-scalarMemory = ("scalar_"++) . pretty
-
--- | A mapping from all scalar memory spaces to the 'PrimType' they
--- store.
-allScalarMemory :: M.Map SpaceId PrimType
-allScalarMemory = M.fromList $ zip (map scalarMemory allPrimTypes) allPrimTypes

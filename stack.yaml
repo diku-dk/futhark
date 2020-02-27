@@ -1,10 +1,8 @@
-resolver: nightly-2020-01-25
+resolver: lts-15.0
 packages:
 - .
 
 extra-deps:
-- megaparsec-8.0.0@sha256:362f85e243ecbcb550e1de6e5c74ba5a50c09edaa1208c99bc5b9fd242227fc6,3808
-- neat-interpolation-0.5.1
 
 flags: {}
 
