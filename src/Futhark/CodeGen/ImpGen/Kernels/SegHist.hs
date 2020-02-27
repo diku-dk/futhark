@@ -757,6 +757,8 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
 
   let r64 = ConvOpExp (SIToFP Int32 Float64)
       t64 = ConvOpExp (FPToSI Float64 Int32)
+      i32_to_i64 = ConvOpExp (SExt Int32 Int64)
+      i64_to_i32 = ConvOpExp (SExt Int64 Int32)
       f64ceil x = t64 $ FunExp "round64" [x] $ FloatType Float64
 
   -- M approximation.
@@ -824,9 +826,11 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
     if segmented then do
 
       hist_T_hist_min <- dPrimVE "hist_T_hist_min" $
-                         Imp.BinOpExp (SMin Int32) (hist_Nin * hist_Nout) hist_T
+                         i64_to_i32 $
+                         Imp.BinOpExp (SMin Int64)
+                         (i32_to_i64 hist_Nin * i32_to_i64 hist_Nout) (i32_to_i64 hist_T)
                          `quotRoundingUp`
-                         hist_Nout
+                         i32_to_i64 hist_Nout
 
       -- Number of groups, rounded up.
       let r = hist_T_hist_min `quotRoundingUp` hist_B
