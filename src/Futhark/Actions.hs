@@ -3,6 +3,7 @@ module Futhark.Actions
   ( printAction
   , impCodeGenAction
   , kernelImpCodeGenAction
+  , multicoreImpCodeGenAction
   , rangeAction
   , metricsAction
   )
@@ -18,6 +19,7 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
+import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
 import Futhark.Analysis.Metrics
 import Futhark.Util.Pretty (prettyText)
@@ -59,4 +61,13 @@ kernelImpCodeGenAction =
          , actionProcedure = \prog ->
                                either (`internalError` prettyText prog) (liftIO . putStrLn . pretty) =<<
                                ImpGenKernels.compileProg prog
+         }
+
+multicoreImpCodeGenAction :: Action ExplicitMemory
+multicoreImpCodeGenAction =
+  Action { actionName = "Compile to imperative multicore"
+         , actionDescription = "Translate program into imperative multicore IL and write it on standard output."
+         , actionProcedure = \prog ->
+                               either (`internalError` prettyText prog) (liftIO . putStrLn . pretty) =<<
+                               ImpGenMulticore.compileProg prog
          }

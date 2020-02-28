@@ -21,6 +21,7 @@ import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.C as C
 import qualified Futhark.CLI.OpenCL as OpenCL
 import qualified Futhark.CLI.CUDA as CCUDA
+import qualified Futhark.CLI.Multicore as Multicore
 import qualified Futhark.CLI.Python as Python
 import qualified Futhark.CLI.PyOpenCL as PyOpenCL
 import qualified Futhark.CLI.CSharp as CSharp
@@ -50,6 +51,7 @@ commands = sortOn fst
            , ("c", (C.main, "Compile to sequential C."))
            , ("opencl", (OpenCL.main, "Compile to C calling OpenCL."))
            , ("cuda", (CCUDA.main, "Compile to C calling CUDA."))
+           , ("multicore", (Multicore.main, "Compile to multicore C."))
 
            , ("python", (Python.main, "Compile to sequential Python."))
            , ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL."))

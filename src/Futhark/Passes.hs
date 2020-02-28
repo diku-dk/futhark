@@ -6,6 +6,7 @@ module Futhark.Passes
   , kernelsPipeline
   , sequentialCpuPipeline
   , gpuPipeline
+  , multicorePipeline
   )
 where
 
@@ -84,6 +85,19 @@ sequentialCpuPipeline =
 
 gpuPipeline :: Pipeline SOACS ExplicitMemory
 gpuPipeline =
+  kernelsPipeline >>>
+  onePass explicitAllocations >>>
+  passes [ simplifyExplicitMemory
+         , performCSE False
+         , simplifyExplicitMemory
+         , doubleBuffer
+         , simplifyExplicitMemory
+         , expandAllocations
+         , simplifyExplicitMemory
+         ]
+
+multicorePipeline :: Pipeline SOACS ExplicitMemory
+multicorePipeline =
   kernelsPipeline >>>
   onePass explicitAllocations >>>
   passes [ simplifyExplicitMemory

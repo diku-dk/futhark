@@ -272,6 +272,10 @@ commandLineOptions =
     (NoArg $ Right $ \opts ->
        opts { futharkAction = ExplicitMemoryAction kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
+  , Option [] ["compile-imperative-multicore"]
+    (NoArg $ Right $ \opts ->
+       opts { futharkAction = ExplicitMemoryAction multicoreImpCodeGenAction })
+    "Translate program into the imperative IL with kernels and write it on standard output."
   , Option [] ["range-analysis"]
        (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction rangeAction rangeAction rangeAction })
        "Print the program with range annotations added."
@@ -322,6 +326,8 @@ commandLineOptions =
     gpuPipeline [] ["gpu"]
   , explicitMemoryPipelineOption "Run the sequential CPU compilation pipeline"
     sequentialCpuPipeline [] ["cpu"]
+  , explicitMemoryPipelineOption "Run the multicore compilation pipeline"
+    multicorePipeline [] ["multicore"]
   ]
 
 incVerbosity :: Maybe FilePath -> FutharkConfig -> FutharkConfig
