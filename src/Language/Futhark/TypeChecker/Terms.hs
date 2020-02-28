@@ -1521,9 +1521,9 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
         pat_t <- normTypeFully $ patternType mergepat'
         -- We are ignoring the dimensions here, because any mismatches
         -- should be turned into fresh size variables.
-        unify (mkUsage (srclocOf loopbody) "matching loop body to loop pattern")
+        expect (mkUsage (srclocOf loopbody) "matching loop body to loop pattern")
           (toStruct (anySizes pat_t))
-          (toStruct (anySizes loopbody_t))
+          (toStruct loopbody_t)
         pat_t' <- normTypeFully pat_t
         loopbody_t' <- normTypeFully loopbody_t
 
