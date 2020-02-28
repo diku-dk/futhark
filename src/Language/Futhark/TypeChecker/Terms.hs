@@ -1716,20 +1716,20 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
               v:_ <- S.toList $
                      S.map aliasVar (aliases t) `S.intersection` bound_outside =
                 lift $ typeError loc mempty $
-                "Loop return value corresponding to merge parameter " ++
+                "Return value for loop parameter " ++
                 quote (prettyName pat_v) ++ " aliases " ++ prettyName v ++ "."
 
             | otherwise = do
                 (cons,obs) <- get
                 unless (S.null $ aliases t `S.intersection` cons) $
                   lift $ typeError loc mempty $
-                  "Loop return value for merge parameter " ++
+                  "Return value for loop parameter " ++
                   quote (prettyName pat_v) ++
-                  " aliases other consumed merge parameter."
+                  " aliases other consumed loop parameter."
                 when (unique pat_v_t &&
                       not (S.null (aliases t `S.intersection` (cons<>obs)))) $
                   lift $ typeError loc mempty $
-                  "Loop return value for consuming merge parameter " ++
+                  "Return value for consuming loop parameter " ++
                   quote (prettyName pat_v) ++ " aliases previously returned value."
                 if unique pat_v_t
                   then put (cons<>aliases t, obs)
