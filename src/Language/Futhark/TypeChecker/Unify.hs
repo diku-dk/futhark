@@ -406,7 +406,7 @@ unifyWith onDims usage orig_t1 orig_t2 =
 unify :: MonadUnify m => Usage -> StructType -> StructType -> m ()
 unify usage = unifyWith onDims usage
   where onDims _ _ d1 d2
-          | isJust $ unifyDims d1 d2 = return ()
+          | d1 == d2 = return ()
         onDims _ nonrigid (NamedDim (QualName _ d1)) d2
           | Just lvl1 <- nonrigid d1 =
               linkVarToDim usage d1 lvl1 d2
@@ -748,9 +748,7 @@ anyDimOnMismatch :: Monoid as =>
                     TypeBase (DimDecl VName) as -> TypeBase (DimDecl VName) as
                  -> (TypeBase (DimDecl VName) as, [(DimDecl VName, DimDecl VName)])
 anyDimOnMismatch t1 t2 = runWriter $ matchDims onDims t1 t2
-  where onDims AnyDim d2 = return d2
-        onDims d1 AnyDim = return d1
-        onDims d1 d2
+  where onDims d1 d2
           | d1 == d2 = return d1
           | otherwise = do tell [(d1, d2)]
                            return AnyDim
