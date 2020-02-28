@@ -339,7 +339,8 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
 
   | otherwise = do
-      arr_t_ext <- internaliseType $ E.toStruct arr_t
+      (arr_t_ext, cm) <- internaliseReturnType $ E.toStruct arr_t
+      mapM_ (uncurry (internaliseDimConstant loc)) cm
       es' <- mapM (internaliseExp "arr_elem") es
 
       let typeFromElements =
@@ -356,13 +357,16 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         maybe typeFromElements pure $
         mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext
 
-      let arraylit ks rt =
-            I.BasicOp $ I.ArrayLit ks rt
+      let arraylit ks rt = do
+            ks' <- mapM (ensureShape asserting
+                         "shape of element differs from shape of first element"
+                         loc rt "elem_reshaped") ks
+            return $ I.BasicOp $ I.ArrayLit ks' rt
 
-      letSubExps desc $
+      letSubExps desc =<<
         if null es'
-        then map (arraylit []) rowtypes
-        else zipWith arraylit (transpose es') rowtypes
+        then mapM (arraylit []) rowtypes
+        else zipWithM arraylit (transpose es') rowtypes
 
   where isArrayLiteral :: E.Exp -> Maybe ([Int],[E.Exp])
         isArrayLiteral (E.ArrayLit inner_es _ _) = do
