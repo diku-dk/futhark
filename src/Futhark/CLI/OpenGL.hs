@@ -21,6 +21,13 @@ main = compilerMain () []
                   COpenGL.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
+             extra_options = [ "-L/rts"
+                             , "-ldl"
+                             , "-lGL"
+                             , "-lX11"
+                             , "-lXi"
+                             , "-lXrandr"
+                             ]
 
          case mode of
            ToLibrary -> do
@@ -29,4 +36,14 @@ main = compilerMain () []
              liftIO $ writeFile cpath impl
            ToExecutable -> do
              liftIO $ writeFile cpath $ COpenGL.asExecutable cprog
-             liftIO $ putStrLn $ "result in " ++ cpath
+             let args = [cpath, "-O", "-std=c99", "-lm", "-o", outpath]
+                        ++ extra_options
+             ret <- liftIO $ runProgramWithExitCode "gcc" args mempty
+             case ret of
+               Left err ->
+                 externalErrorS $ "Failed to run gcc: " ++ show err
+               Right (ExitFailure code, _, gccerr) ->
+                 externalErrorS $ "gcc failed with code " ++
+                 show code ++ ":\n" ++ gccerr
+               Right (ExitSuccess, _, _) ->
+                 return ()
