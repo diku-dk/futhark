@@ -48,14 +48,12 @@ compileProg prog = do
                      , GC.opsMemoryType = openglMemoryType
                      , GC.opsFatMemory = True
                      }
-        --TODO: Add more necessary headers.
-        include_opengl_h = unlines ["#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
-                                    "#ifdef __APPLE__",
-                                    "#define CL_SILENCE_DEPRECATION",
-                                    "#include <OpenCL/cl.h>",
-                                    "#else",
-                                    "#include <CL/cl.h>",
-                                    "#endif"] -- necessary headers
+        include_opengl_h = unlines [ "#include <glad/glad.h>"
+                                   , "#include <X11/X.h>"
+                                   , "#include <X11/Xlib.h>"
+                                   , "#include <GL/gl.h>"
+                                   , "#include <GL/glx.h>"
+                                   ]
 
 copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
 copyDevToDev = "copy_dev_to_dev"
