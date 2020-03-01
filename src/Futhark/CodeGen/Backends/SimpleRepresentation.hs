@@ -5,8 +5,6 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , tupleFieldExp
   , funName
   , defaultMemBlockType
-  , intTypeToCType
-  , floatTypeToCType
   , primTypeToCType
   , signedPrimTypeToCType
 

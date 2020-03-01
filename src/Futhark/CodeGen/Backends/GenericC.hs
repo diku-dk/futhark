@@ -1795,7 +1795,7 @@ compileCode (Free name space) =
 
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
-      it' = intTypeToCType it
+      it' = primTypeToCType $ IntType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
