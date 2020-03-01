@@ -102,9 +102,11 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         taggedI s Int32 = s ++ "32"
         taggedI s Int64 = s ++ "64"
 
-        mkAdd = simpleIntOp "add" [C.cexp|x + y|]
-        mkSub = simpleIntOp "sub" [C.cexp|x - y|]
-        mkMul = simpleIntOp "mul" [C.cexp|x * y|]
+        -- Use unsigned types for add/sub/mul so we can do
+        -- well-defined overflow.
+        mkAdd = simpleUintOp "add" [C.cexp|x + y|]
+        mkSub = simpleUintOp "sub" [C.cexp|x - y|]
+        mkMul = simpleUintOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
