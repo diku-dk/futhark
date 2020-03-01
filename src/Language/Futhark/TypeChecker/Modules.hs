@@ -234,19 +234,19 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
       _ ->
         missingType loc $ fmap baseName name
   where mismatchedLiftedness name_l abs name mod_t =
-          Left $ TypeError loc Nothing mempty $
-          unlines ["Module defines",
-                   sindent $ ppTypeAbbr abs name mod_t,
-                   "but module type requires " ++ what ++ "."]
+          Left $ TypeError loc Nothing mempty $ pretty $
+          text "Module defines" </>
+          indent 2 (ppTypeAbbr abs name mod_t) </>
+          text "but module type requires" <+> text what <> text "."
           where what = case name_l of Unlifted -> "a non-lifted type"
                                       SizeLifted -> "a size-lifted type"
                                       Lifted -> "a lifted type"
 
         anonymousSizes abs name mod_t =
-          Left $ TypeError loc Nothing mempty $
-          unlines ["Module defines",
-                   sindent $ ppTypeAbbr abs name mod_t,
-                   "which contains anonymous sizes, but module type requires non-lifted type."]
+          Left $ TypeError loc Nothing mempty $ pretty $
+          text "Module defines" </>
+          indent 2 (ppTypeAbbr abs name mod_t) </>
+          text "which contains anonymous sizes, but module type requires non-lifted type."
 
         emptyDims :: StructType -> Bool
         emptyDims = isNothing . traverseDims onDim
@@ -309,23 +309,20 @@ mismatchedType :: SrcLoc
                -> (Liftedness, [TypeParam], StructType)
                -> Either TypeError b
 mismatchedType loc abs name spec_t env_t =
-  Left $ TypeError loc Nothing mempty $ intercalate "\n"
-  ["Module defines",
-   sindent $ ppTypeAbbr abs name env_t,
-   "but module type requires",
-   sindent $ ppTypeAbbr abs name spec_t]
+  Left $ TypeError loc Nothing mempty $ pretty $
+  text "Module defines" </>
+  indent 2 (ppTypeAbbr abs name env_t) </>
+  text "but module type requires" </>
+  indent 2 (ppTypeAbbr abs name spec_t)
 
-sindent :: String -> String
-sindent = intercalate "\n" . map ("  "++) . lines
-
-ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructType) -> String
+ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructType) -> Doc
 ppTypeAbbr abs name (l, ps, Scalar (TypeVar () _ tn args))
   | typeLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-      pretty $ text "type" <> ppr l <+> pprName name <+>
+      text "type" <> ppr l <+> pprName name <+>
       spread (map ppr ps)
 ppTypeAbbr _ name (l, ps, t) =
-  pretty $ text "type" <> ppr l <+> pprName name <+>
+  text "type" <> ppr l <+> pprName name <+>
   spread (map ppr ps) <+> equals <+/>
   nest 2 (align (ppr t))
 
@@ -432,6 +429,15 @@ matchMTys orig_mty orig_mty_sig =
       -- We have to create substitutions for the type parameters, too.
       unless (length spec_ps == length ps) $ nomatch spec_t
       param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
+
+      case S.toList (mustBeExplicitInType t) `intersect` map typeParamName ps of
+        [] -> return ()
+        d:_ -> Left $ TypeError loc Nothing mempty $ pretty $
+               text "Type" </>
+               indent 2 (ppTypeAbbr [] name (l, ps, t)) </>
+               textwrap "cannot be made abstract because size parameter" <+/> pquote (pprName d) <+/>
+               textwrap "is not used as an array size in the definition."
+
       let spec_t' = substituteTypes (param_substs<>abs_subst_to_type) spec_t
       if spec_t' == t
         then return (spec_name, name)

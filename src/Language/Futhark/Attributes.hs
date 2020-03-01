@@ -68,6 +68,8 @@ module Language.Futhark.Attributes
   , anySizes
   , traverseDims
   , DimPos(..)
+  , mustBeExplicit
+  , mustBeExplicitInType
   , tupleRecord
   , isTupleRecord
   , areTupleFields
@@ -103,6 +105,7 @@ module Language.Futhark.Attributes
   )
   where
 
+import           Control.Monad.State
 import           Control.Monad.Writer  hiding (Sum)
 import           Data.Char
 import           Data.Foldable
@@ -202,6 +205,35 @@ traverseDims f = go PosImmediate
           TypeArgDim <$> f b d <*> pure loc
         onTypeArg b (TypeArgType t loc) =
           TypeArgType <$> go b t <*> pure loc
+
+mustBeExplicitAux :: StructType -> M.Map VName Bool
+mustBeExplicitAux t =
+  execState (traverseDims onDim t) mempty
+  where onDim PosImmediate (NamedDim d) =
+          modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
+        onDim _ (NamedDim d) =
+          modify $ M.insertWith (&&) (qualLeaf d) True
+        onDim _ _ =
+          return ()
+
+-- | Figure out which of the sizes in a parameter type must be passed
+-- explicitly, because their first use is as something else than just
+-- an array dimension.  'mustBeExplicit' is like this function, but
+-- first decomposes into parameter types.
+mustBeExplicitInType :: StructType -> S.Set VName
+mustBeExplicitInType t =
+  S.fromList $ M.keys $ M.filter id $ mustBeExplicitAux t
+
+-- | Figure out which of the sizes in a binding type must be passed
+-- explicitly, because their first use is as something else than just
+-- an array dimension.
+mustBeExplicit :: StructType -> S.Set VName
+mustBeExplicit bind_t =
+  let (ts, ret) = unfoldFunType bind_t
+      alsoRet = M.unionWith (&&) $
+                M.fromList $ zip (S.toList $ typeDimNames ret) $ repeat True
+  in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty ts
+  where onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
@@ -346,18 +378,19 @@ combineTypeShapes :: (Monoid as, ArrayDim dim) =>
 combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
   | M.keys ts1 == M.keys ts2 =
       Scalar $ Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
-combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 shape2)
-  | Just new_shape <- unifyShapes shape1 shape2 =
-      arrayOfWithAliases (combineTypeShapes (Scalar et1) (Scalar et2)
-                          `setAliases` mempty)
-      (als1<>als2) new_shape u1
+combineTypeShapes (Scalar (Arrow als1 p1 a1 b1)) (Scalar (Arrow als2 _p2 a2 b2)) =
+  Scalar $ Arrow (als1<>als2) p1 (combineTypeShapes a1 a2) (combineTypeShapes b1 b2)
+combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 _shape2) =
+  arrayOfWithAliases (combineTypeShapes (Scalar et1) (Scalar et2)
+                       `setAliases` mempty)
+  (als1<>als2) shape1 u1
 combineTypeShapes _ new_tp = new_tp
 
 -- | Match the dimensions of otherwise assumed-equal types.
 matchDims :: (Monoid as, Monad m) =>
-             (d -> d -> m d)
-          -> TypeBase d as -> TypeBase d as
-          -> m (TypeBase d as)
+             (d1 -> d2 -> m d1)
+          -> TypeBase d1 as -> TypeBase d2 as
+          -> m (TypeBase d1 as)
 matchDims onDims t1 t2 =
   case (t1, t2) of
     (Array als1 u1 et1 shape1, Array als2 u2 et2 shape2) ->
@@ -368,6 +401,9 @@ matchDims onDims t1 t2 =
     (Scalar (Record f1), Scalar (Record f2)) ->
       Scalar . Record <$>
       traverse (uncurry (matchDims onDims)) (M.intersectionWith (,) f1 f2)
+    (Scalar (Arrow als1 p1 a1 b1), Scalar (Arrow als2 _p2 a2 b2)) ->
+      Scalar <$>
+      (Arrow (als1 <> als2) p1 <$> matchDims onDims a1 a2 <*> matchDims onDims b1 b2)
     (Scalar (TypeVar als1 u v targs1),
      Scalar (TypeVar als2 _ _ targs2)) ->
       Scalar . TypeVar (als1 <> als2) u v <$> zipWithM matchTypeArg targs1 targs2
