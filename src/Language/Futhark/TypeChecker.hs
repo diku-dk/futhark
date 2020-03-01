@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | The type checker checks whether the program is type-consistent
 -- and adds type annotations and various other elaborations.  The
 -- program does not need to have any particular properties for the
@@ -131,8 +132,8 @@ dupDefinitionError :: MonadTypeChecker m =>
                       Namespace -> Name -> SrcLoc -> SrcLoc -> m a
 dupDefinitionError space name loc1 loc2 =
   typeError loc1 mempty $
-  "Duplicate definition of " ++ ppSpace space ++ " " ++
-  nameToString name ++ ".  Previously defined at " ++ locStr loc2
+  "Duplicate definition of" <+> ppr space <+>
+  pprName name <> ".  Previously defined at" <+> text (locStr loc2) <> "."
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -196,8 +197,8 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
 
     when (emptyDimParam $ unInfo $ expandedType vtype') $
       typeError loc mempty $
-      "All function parameters must have non-anonymous sizes.\n" ++
-      "Hint: add size parameters to " ++ quote (prettyName name') ++ "."
+      "All function parameters must have non-anonymous sizes." </>
+      "Hint: add size parameters to" <+> pquote (pprName name') <> "."
 
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
@@ -455,26 +456,26 @@ checkTypeBind (TypeBind name l tps td doc loc) =
     case filter ((`S.notMember` used_dims) . typeParamName) $
          filter isSizeParam tps' of
       [] -> return ()
-      tp:_ -> typeError loc mempty $ pretty $
-              text "Size parameter" <+> pquote (ppr tp) <+> text "unused."
+      tp:_ -> typeError loc mempty $
+              "Size parameter" <+> pquote (ppr tp) <+> "unused."
 
     case (l, l') of
       (_, Lifted)
         | l < Lifted ->
           typeError loc mempty $
-          "Non-lifted type abbreviations may not contain functions.\n" ++
+          "Non-lifted type abbreviations may not contain functions." </>
           "Hint: consider using 'type^'."
       (_, SizeLifted)
         | l < SizeLifted ->
           typeError loc mempty $
-          "Non-size-lifted type abbreviations may not contain size-lifted types.\n" ++
+          "Non-size-lifted type abbreviations may not contain size-lifted types." </>
           "Hint: consider using 'type~'."
       (Unlifted, _)
         | emptyDimParam $ unInfo $ expandedType td' ->
             typeError loc mempty $
-            "Non-lifted type abbreviations may not use anonymous sizes in their definition.\n" ++
-            "Hint: use 'type~' or add size parameters to " ++
-            quote (prettyName name) ++ "."
+            "Non-lifted type abbreviations may not use anonymous sizes in their definition." </>
+            "Hint: use 'type~' or add size parameters to" <+>
+            pquote (pprName name) <> "."
       _ -> return ()
 
     bindSpaced [(Type, name)] $ do

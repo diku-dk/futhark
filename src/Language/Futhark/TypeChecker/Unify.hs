@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Language.Futhark.TypeChecker.Unify
   ( Constraint(..)
   , Usage
@@ -47,10 +48,11 @@ import qualified Data.Set as S
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types
-import Futhark.Util.Pretty (Pretty, prettyOneLine)
+import Futhark.Util.Pretty hiding (empty)
 
 -- | A usage that caused a type constraint.
 data Usage = Usage (Maybe String) SrcLoc
+  deriving (Show)
 
 mkUsage :: SrcLoc -> String -> Usage
 mkUsage = flip (Usage . Just)
@@ -58,9 +60,9 @@ mkUsage = flip (Usage . Just)
 mkUsage' :: SrcLoc -> Usage
 mkUsage' = Usage Nothing
 
-instance Show Usage where
-  show (Usage Nothing loc) = "use at " ++ locStr loc
-  show (Usage (Just s) loc) = s ++ " at " ++ locStr loc
+instance Pretty Usage where
+  ppr (Usage Nothing loc) = "use at " <> text (locStr loc)
+  ppr (Usage (Just s) loc) = text s <+> "at" <+> text (locStr loc)
 
 instance Located Usage where
   locOf (Usage _ loc) = locOf loc
@@ -139,60 +141,62 @@ data RigidSource
 data Rigidity = Rigid RigidSource | Nonrigid
               deriving (Eq, Ord, Show)
 
-prettySource :: SrcLoc -> SrcLoc -> RigidSource -> String
+prettySource :: SrcLoc -> SrcLoc -> RigidSource -> Doc
 
 prettySource ctx loc (RigidRet Nothing) =
-  "is unknown size returned by function at " <> locStrRel ctx loc <> "."
+  "is unknown size returned by function at" <+>
+  text (locStrRel ctx loc) <> "."
 
 prettySource ctx loc (RigidRet (Just fname)) =
-  "is unknown size returned by " <> quote (pretty fname) <>
-  " at " <> locStrRel ctx loc <> "."
+  "is unknown size returned by" <+> pquote (ppr fname) <+>
+  "at" <+> text (locStrRel ctx loc) <> "."
 
 prettySource ctx loc (RigidArg fname arg) =
-  "is value of argument\n" <>
-  indent (shorten arg) <>
-  "\npassed to " <> fname' <> " at " <> locStrRel ctx loc <> "."
-  where fname' = maybe "function" (quote . pretty) fname
+  "is value of argument" </>
+  indent 2 (shorten arg) </>
+  "passed to" <+> fname' <+> "at" <+> text (locStrRel ctx loc) <> "."
+  where fname' = maybe "function" (pquote . ppr) fname
 
 prettySource ctx loc (RigidSlice d slice) =
-  "is size produced by slice\n" <>
-  indent (shorten slice) <>
-  "\n" <> d_desc <> "at " <> locStrRel ctx loc <> "."
+  "is size produced by slice" </>
+  indent 2 (shorten slice) </>
+  d_desc <> "at" <+> text (locStrRel ctx loc) <> "."
   where d_desc = case d of
-                   Just d' -> "of dimension of size " <> quote (pretty d') <> " "
-                   Nothing -> ""
+                   Just d' -> "of dimension of size " <> pquote (ppr d') <> " "
+                   Nothing -> mempty
 
 prettySource ctx loc RigidLoop =
-  "is unknown size of value returned at " <> locStrRel ctx loc <> "."
+  "is unknown size of value returned at" <+> text (locStrRel ctx loc) <> "."
 
 prettySource ctx loc RigidRange =
-  "is unknown length of range at " <> locStrRel ctx loc <> "."
+  "is unknown length of range at" <+> text (locStrRel ctx loc) <> "."
 
 prettySource ctx loc (RigidBound bound) =
-  "generated from expression\n" <>
-  indent (shorten bound)
-  <> "\nused in range at " <> locStrRel ctx loc <> "."
+  "generated from expression" </>
+  indent 2 (shorten bound) </>
+  "used in range at " <> text (locStrRel ctx loc) <> "."
 
 prettySource ctx loc (RigidOutOfScope boundloc v) =
-  "is an unknown size arising from " <> quote (prettyName v) <>
-  " going out of scope at " <> locStrRel ctx loc <> ".\n" <>
-  "Originally bound at " <> locStrRel ctx boundloc <> "."
+  "is an unknown size arising from " <> pquote (pprName v) <>
+  " going out of scope at " <> text (locStrRel ctx loc) <> "." </>
+  "Originally bound at " <> text (locStrRel ctx boundloc) <> "."
 
 prettySource _ _ RigidUnify =
   "is an artificial size invented during unification of functions with anonymous sizes"
 
 prettySource ctx loc (RigidCond t1 t2) =
-  "is unknown due to conditional expression at " <> locStrRel ctx loc <> ".\n" <>
-  "One branch returns array of type: " <> prettyOneLine t1 <> "\n" <>
-  "The other an array of type:       " <> prettyOneLine t2
+  "is unknown due to conditional expression at " <>
+  text (locStrRel ctx loc) <> "." </>
+  "One branch returns array of type: " <> align (ppr t1) </>
+  "The other an array of type:       " <> align (ppr t2)
 
 dimNotes :: (Located a, MonadUnify m) => a -> DimDecl VName -> m Notes
 dimNotes ctx (NamedDim d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
-      return $ aNote $ quote (pretty d) <> " " <>
-      prettySource (srclocOf ctx) loc rsrc
+      return $ aNote $ pretty $
+      pquote (ppr d) <+> prettySource (srclocOf ctx) loc rsrc
     _ -> return mempty
 dimNotes _ _ = return mempty
 
@@ -280,10 +284,7 @@ unifySharedConstructors usage cs1 cs2 =
               zipWithM_ (unify usage) f1 f2
           | otherwise =
               typeError usage mempty $
-              "Cannot unify constructor " ++ quote (prettyName c) ++ "."
-
-indent :: String -> String
-indent = intercalate "\n" . map ("  "++) . lines
+              "Cannot unify constructor" <+> pquote (pprName c) <> "."
 
 unifyWith :: MonadUnify m =>
              ([VName] ->
@@ -311,8 +312,8 @@ unifyWith onDims usage orig_t1 orig_t2 =
             | t1 == orig_t1, t2 == orig_t2 =
                 typeError (srclocOf usage) mempty "Types do not match."
             | otherwise =
-                typeError (srclocOf usage) mempty $ "Couldn't match expected type\n" ++
-                indent (pretty t1') ++ "\nwith actual type\n" ++ indent (pretty t2')
+                typeError (srclocOf usage) mempty $ "Couldn't match expected type" </>
+                indent 2 (ppr t1') </> "with actual type" </> indent 2 (ppr t2')
 
           -- Remove any of the intermediate dimensions we added just
           -- for unification purposes.
@@ -416,8 +417,8 @@ unify usage = unifyWith onDims usage
         onDims _ _ d1 d2 = do
           notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
           typeError usage notes $
-            "Dimensions " ++ quote (pretty d1) ++
-            " and " ++ quote (pretty d2) ++ " do not match."
+            "Dimensions" <+> pquote (ppr d1) <+>
+            "and" <+> pquote (ppr d2) <+> "do not match."
 
 -- | @expect super sub@ checks that @sub@ is a subtype of @super@.
 expect :: MonadUnify m => Usage -> StructType -> StructType -> m ()
@@ -433,8 +434,8 @@ expect usage = unifyWith onDims usage
               linkVarToDim usage d2 lvl2 d1
         onDims _ _ d1 d2 = do
           notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
-          typeError usage notes $ "Dimensions " ++ quote (pretty d1) ++
-            " and " ++ quote (pretty d2) ++ " do not match."
+          typeError usage notes $ "Dimensions" <+> pquote (ppr d1) <+>
+            "and" <+> pquote (ppr d2) <+> "do not match."
 
         boundParam bound (NamedDim (QualName _ d)) = d `elem` bound
         boundParam _ _ = False
@@ -447,8 +448,8 @@ hasEmptyDims = biany empty (const False)
 occursCheck :: MonadUnify m => Usage -> VName -> StructType -> m ()
 occursCheck usage vn tp =
   when (vn `S.member` typeVars tp) $
-  typeError usage mempty $ "Occurs check: cannot instantiate " ++
-  prettyName vn ++ " with " ++ pretty tp
+  typeError usage mempty $ "Occurs check: cannot instantiate" <+>
+  pprName vn <+> "with" <+> ppr tp <> "."
 
 scopeCheck :: MonadUnify m => Usage -> VName -> Level -> StructType -> m ()
 scopeCheck usage vn max_lvl tp = do
@@ -469,10 +470,10 @@ scopeCheck usage vn max_lvl tp = do
 
         scopeViolation v = do
           notes <- typeNotes usage tp
-          typeError usage notes $ "Cannot unify type\n" ++
-            indent (prettyOneLine tp) ++
-            "\nwith " ++ quote (prettyName vn) ++ " (scope violation).\n" ++
-            "This is because " ++ quote (prettyName v) ++ " is rigidly bound in a deeper scope."
+          typeError usage notes $ "Cannot unify type" </>
+            indent 2 (ppr tp) </>
+            "with" <+> pquote (pprName vn) <+> "(scope violation)." </>
+            "This is because" <+> pquote (pprName v) <+> "is rigidly bound in a deeper scope."
 
 linkVarToType :: MonadUnify m => Usage -> VName -> Level -> StructType -> m ()
 linkVarToType usage vn lvl tp = do
@@ -485,14 +486,13 @@ linkVarToType usage vn lvl tp = do
   case snd <$> M.lookup vn constraints of
 
     Just (NoConstraint Unlifted unlift_usage) -> do
-      zeroOrderType usage (show unlift_usage) tp'
+      zeroOrderType usage (pretty unlift_usage) tp'
 
       when (hasEmptyDims tp') $
-        typeError usage mempty $ "Type variable " ++ prettyName vn ++
-        " cannot be instantiated with type containing anonymous sizes:\n" ++
-        indent (pretty tp) ++
-        "\nThis is usually because the size of arrays returned a higher-order function argument\n" ++
-        "cannot be determined statically.  Add type annotation to clarify."
+        typeError usage mempty $ "Type variable" <+> pprName vn <+>
+        "cannot be instantiated with type containing anonymous sizes:" </>
+        indent 2 (ppr tp) </>
+        textwrap "This is usually because the size of arrays returned a higher-order function argument cannot be determined statically.  Add type annotation to clarify."
 
     Just (Equality _) ->
       equalityType usage tp'
@@ -504,11 +504,11 @@ linkVarToType usage vn lvl tp = do
               | not $ isRigid v constraints ->
                   linkVarToTypes usage v ts
             _ ->
-              typeError usage mempty $ "Cannot unify " ++ quote (prettyName vn) ++
-              "' with type\n" ++ indent (pretty tp) ++ "\nas " ++
-              quote (prettyName vn) ++ " must be one of " ++
-              intercalate ", " (map pretty ts) ++
-              " due to " ++ show old_usage ++ ")."
+              typeError usage mempty $ "Cannot unify" <+> pquote (pprName vn) <+>
+              "with type" </> indent 2 (ppr tp) </> "as" <+>
+              pquote (pprName vn) <+> "must be one of" <+>
+              commasep (map ppr ts) <+>
+              "due to" <+> ppr old_usage <> "."
 
     Just (HasFields required_fields old_usage) ->
       case tp of
@@ -522,11 +522,11 @@ linkVarToType usage vn lvl tp = do
               (lvl, HasFields required_fields old_usage)
         _ ->
           typeError usage mempty $
-          "Cannot unify " ++ quote (prettyName vn) ++ " with type\n" ++
-          indent (pretty tp) ++ "\nas " ++ quote (prettyName vn) ++
-          " must be a record with fields\n" ++
-          pretty (Record required_fields) ++
-          "\ndue to " ++ show old_usage ++ "."
+          "Cannot unify" <+> pquote (pprName vn) <+> "with type" </>
+          indent 2 (ppr tp) </>
+          "as" <+> pquote (pprName vn) <+> "must be a record with fields" </>
+          ppr (Record required_fields) </>
+          "due to" <+> ppr old_usage <> "."
 
     Just (HasConstrs required_cs old_usage) ->
       case tp of
@@ -562,10 +562,10 @@ linkVarToDim usage vn lvl dim = do
             ParamSize{} -> do
               notes <- dimNotes usage dim
               typeError usage notes $
-                "Cannot unify size variable " ++ quote (pretty dim') ++
-                " with " ++ quote (prettyName vn) ++ " (scope violation).\n" ++
-                "This is because " ++ quote (pretty dim') ++
-                " is rigidly bound in a deeper scope."
+                "Cannot unify size variable" <+> pquote (ppr dim') <+>
+                "with" <+> pquote (pprName vn) <+> "(scope violation)." </>
+                "This is because" <+> pquote (ppr dim') <+>
+                "is rigidly bound in a deeper scope."
             _ -> modifyConstraints $ M.insert (qualLeaf dim') (lvl, c)
     _ -> return ()
 
@@ -595,8 +595,8 @@ mustBeOneOf ts usage t = do
 
     _ -> failure
 
-  where failure = typeError usage mempty $ "Cannot unify type \"" ++ pretty t ++
-                  "\" with any of " ++ intercalate "," (map pretty ts) ++ "."
+  where failure = typeError usage mempty $ text "Cannot unify type" <+> pquote (ppr t) <+>
+                  "with any of " <> commasep (map ppr ts) <> "."
 
 linkVarToTypes :: MonadUnify m => Usage -> VName -> [PrimType] -> m ()
 linkVarToTypes usage vn ts = do
@@ -604,33 +604,33 @@ linkVarToTypes usage vn ts = do
   case vn_constraint of
     Just (lvl, Overloaded vn_ts vn_usage) ->
       case ts `intersect` vn_ts of
-        [] -> typeError usage mempty $ "Type constrained to one of " ++
-              intercalate "," (map pretty ts) ++ " but also one of " ++
-              intercalate "," (map pretty vn_ts) ++ " due to " ++ show vn_usage ++ "."
+        [] -> typeError usage mempty $ "Type constrained to one of" <+>
+              commasep (map ppr ts) <+> "but also one of" <+>
+              commasep (map ppr vn_ts) <+> "due to" <+> ppr vn_usage <> "."
         ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
 
     Just (_, HasConstrs _ vn_usage) ->
-      typeError usage mempty $ "Type constrained to one of " ++
-      intercalate "," (map pretty ts) ++ ", but also inferred to be sum type due to " ++
-      show vn_usage ++ "."
+      typeError usage mempty $ "Type constrained to one of" <+>
+      commasep (map ppr ts) <> ", but also inferred to be sum type due to" <+>
+      ppr vn_usage <> "."
 
     Just (_, HasFields _ vn_usage) ->
-      typeError usage mempty $ "Type constrained to one of " ++
-      intercalate "," (map pretty ts) ++ ", but also inferred to be record due to " ++
-      show vn_usage ++ "."
+      typeError usage mempty $ "Type constrained to one of" <+>
+      commasep (map ppr ts) <> ", but also inferred to be record due to" <+>
+      ppr vn_usage <> "."
 
     Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
 
     Nothing ->
       typeError usage mempty $
-      "Cannot constrain type to one of " ++ intercalate "," (map pretty ts)
+      "Cannot constrain type to one of" <+> commasep (map ppr ts)
 
 equalityType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
                 Usage -> TypeBase dim as -> m ()
 equalityType usage t = do
   unless (orderZero t) $
     typeError usage mempty $
-    "Type \"" ++ pretty t ++ "\" does not support equality (is higher-order)."
+    "Type " <+> pquote (ppr t) <+> "does not support equality (is higher-order)."
   mapM_ mustBeEquality $ typeVars t
   where mustBeEquality vn = do
           constraints <- getConstraints
@@ -640,8 +640,8 @@ equalityType usage t = do
             Just (_, Constraint vn_t cusage)
               | not $ orderZero vn_t ->
                   typeError usage mempty $
-                  unlines ["Type \"" ++ pretty t ++ "\" does not support equality.",
-                           "Constrained to be higher-order due to " ++ show cusage ++ "."]
+                  "Type" <+> pquote (ppr t) <+> "does not support equality." </>
+                  "Constrained to be higher-order due to" <+> ppr cusage <+> "."
               | otherwise -> return ()
             Just (lvl, NoConstraint _ _) ->
               modifyConstraints $ M.insert vn (lvl, Equality usage)
@@ -652,30 +652,30 @@ equalityType usage t = do
             Just (_, HasConstrs cs _) ->
               mapM_ (equalityType usage) $ concat $ M.elems cs
             _ ->
-              typeError usage mempty $ "Type " ++ pretty (prettyName vn) ++
-              " does not support equality."
+              typeError usage mempty $
+              "Type" <+> pprName vn <+> "does not support equality."
 
 zeroOrderType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
                  Usage -> String -> TypeBase dim as -> m ()
 zeroOrderType usage desc t = do
   unless (orderZero t) $
-    typeError usage mempty $ "Type " ++ desc ++
-    " must not be functional, but is " ++ quote (pretty t) ++ "."
+    typeError usage mempty $ "Type" <+> text desc <+>
+    "must not be functional, but is" <+> pquote (ppr t) <> "."
   mapM_ mustBeZeroOrder . S.toList . typeVars $ t
   where mustBeZeroOrder vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
             Just (_, Constraint vn_t old_usage)
               | not $ orderZero t ->
-                typeError usage mempty $ "Type " ++ desc ++
-                " must be non-function, but inferred to be " ++
-                quote (pretty vn_t) ++ " due to " ++ show old_usage ++ "."
+                typeError usage mempty $ "Type" <+> text desc <+>
+                "must be non-function, but inferred to be" <+>
+                pquote (ppr vn_t) <+> "due to" <+> ppr old_usage <> "."
             Just (lvl, NoConstraint _ _) ->
               modifyConstraints $ M.insert vn (lvl, NoConstraint Unlifted usage)
             Just (_, ParamType Lifted ploc) ->
-              typeError usage mempty $ "Type " ++ desc ++
-              " must be non-function, but type parameter " ++ quote (prettyName vn) ++ " at " ++
-              locStr ploc ++ " may be a function."
+              typeError usage mempty $ "Type" <+> text desc <+>
+              "must be non-function, but type parameter" <+> pquote (pprName vn) <+> "at" <+>
+              text (locStr ploc) <+> "may be a function."
             _ -> return ()
 
 -- | In @mustHaveConstr usage c t fs@, the type @t@ must have a
@@ -695,19 +695,19 @@ mustHaveConstr usage c t fs = do
           Just fs'
             | length fs == length fs' -> zipWithM_ (unify usage) fs fs'
             | otherwise ->
-                typeError usage mempty $ "Different arity for constructor "
-                ++ quote (pretty c) ++ "."
+                typeError usage mempty $
+                "Different arity for constructor" <+> pquote (ppr c) <> "."
 
     Scalar (Sum cs) ->
       case M.lookup c cs of
         Nothing ->
           typeError usage mempty $
-          "Constuctor " ++ quote (pretty c) ++ " not present in type."
+          "Constuctor" <+> pquote (ppr c) <+> "not present in type."
         Just fs'
             | length fs == length fs' -> zipWithM_ (unify usage) fs fs'
             | otherwise ->
                 typeError usage mempty $
-                "Different arity for constructor " ++ quote (pretty c) ++ "."
+                "Different arity for constructor" <+> pquote (ppr c) <+> "."
 
     _ -> do unify usage t $ Scalar $ Sum $ M.singleton c fs
             return ()
@@ -736,8 +736,8 @@ mustHaveField usage l t = do
           return t'
       | otherwise ->
           typeError usage mempty $
-            "Attempt to access field " ++ quote (pretty l) ++ " of value of type " ++
-            pretty (toStructural t) ++ "."
+            "Attempt to access field" <+> pquote (ppr l) <+> " of value of type" <+>
+            ppr (toStructural t) <> "."
     _ -> do unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
             return l_type
 

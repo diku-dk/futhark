@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | A re-export of the prettyprinting library, along with a convenience function.
 module Futhark.Util.Pretty
        ( module Text.PrettyPrint.Mainland
@@ -13,6 +14,7 @@ module Futhark.Util.Pretty
        , annot
        , nestedBlock
        , textwrap
+       , shorten
        )
        where
 
@@ -72,3 +74,11 @@ nestedBlock :: String -> String -> Doc -> Doc
 nestedBlock pre post body = text pre </>
                             PP.indent 2 body </>
                             text post
+
+-- | Prettyprint on a single line up to at most some appropriate
+-- number of characters, with trailing ... if necessary.  Used for
+-- error messages.
+shorten :: Pretty a => a -> Doc
+shorten a | length s > 70 = text (take 70 s) <> text "..."
+          | otherwise = text s
+  where s = pretty a
