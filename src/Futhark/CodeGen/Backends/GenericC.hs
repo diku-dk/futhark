@@ -1720,12 +1720,14 @@ compilePrimExp f (ConvOpExp conv x) = do
 compilePrimExp f (BinOpExp bop x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
+  -- Note that integer addition, subtraction, and multiplication are
+  -- not handled by explicit operators, but rather by functions.  This
+  -- is because we want to implicitly convert them to unsigned
+  -- numbers, so we can do overflow without invoking undefined
+  -- behaviour.
   return $ case bop of
-             Add{} -> [C.cexp|$exp:x' + $exp:y'|]
              FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]
-             Sub{} -> [C.cexp|$exp:x' - $exp:y'|]
              FSub{} -> [C.cexp|$exp:x' - $exp:y'|]
-             Mul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FMul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FDiv{} -> [C.cexp|$exp:x' / $exp:y'|]
              Xor{} -> [C.cexp|$exp:x' ^ $exp:y'|]
