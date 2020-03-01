@@ -1,7 +1,6 @@
--- No hiding negative positions through type abbreviations!
 -- ==
--- error: Size parameter "n" must be used
+-- input { 2 } output { [2i32, 2i32] }
 
-type^ ft [n] = i32 -> [n]i32
+let f [n] (x: i32) : [n]i32 = replicate n x
 
-let f [n] (_: ft [n]) = 0
+let main (x: i32) : [x]i32 = f x

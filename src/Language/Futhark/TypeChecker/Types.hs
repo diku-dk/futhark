@@ -11,9 +11,6 @@ module Language.Futhark.TypeChecker.Types
   , checkTypeParams
   , typeParamToArg
 
-  , typeExpUses
-  , checkSizeParamUses
-
   , TypeSub(..)
   , TypeSubs
   , substituteTypes
@@ -284,37 +281,6 @@ checkForDuplicateNamesInType = check mempty
         check _ TEArray{} = return ()
         check _ TEVar{} = return ()
 
--- | Ensure that every shape parameter is used in positive position at
--- least once before being used in negative position.
-checkSizeParamUses :: MonadTypeChecker m =>
-                      [TypeParam] -> [StructType] -> m ()
-checkSizeParamUses tps ts = do
-  let uses = foldl' onType mempty ts
-  mapM_ (checkUsage uses) tps
-  mapM_ (checkIfUsed uses) tps
-  where onDim pos (NamedDim d) =
-          modify $ M.insertWith min (qualLeaf d) pos
-        onDim _ _ = return ()
-
-        onType uses t =
-          execState (traverseDims onDim t) uses
-
-        checkUsage uses (TypeParamDim pv loc)
-          | Just pos <- M.lookup pv uses,
-            pos `elem` [PosParam, PosReturn] =
-              typeError loc mempty $
-                "Size parameter " ++ quote (prettyName pv) ++
-                " must be used in" ++
-                " a non-functional parameter (constructivity restriction)."
-        checkUsage _ _ = return ()
-
-        checkIfUsed uses (TypeParamDim pv loc)
-          | M.member pv uses = return ()
-          | otherwise =
-              typeError loc mempty $ "Size parameter " ++
-              quote (prettyName pv) ++ " unused in parameters."
-        checkIfUsed _ _ = return ()
-
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]
                 -> ([TypeParamBase VName] -> m a)
@@ -347,26 +313,6 @@ typeParamToArg (TypeParamDim v ploc) =
   TypeArgDim (NamedDim $ qualName v) ploc
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
-
--- | Return the shapes used in a given type expression in positive and negative
--- position, respectively.
-typeExpUses :: TypeExp VName -> ([VName], [VName])
-typeExpUses (TEVar _ _) = mempty
-typeExpUses (TETuple tes _) = foldMap typeExpUses tes
-typeExpUses (TERecord fs _) = foldMap (typeExpUses . snd) fs
-typeExpUses (TEArray te d _) = typeExpUses te <> dimExpUses d
-typeExpUses (TEUnique te _) = typeExpUses te
-typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
-  where typeArgUses (TypeArgExpDim d _) = dimExpUses d
-        typeArgUses (TypeArgExpType tae) = typeExpUses tae
-typeExpUses (TEArrow _ t1 t2 _) =
-  let (pos, neg) = typeExpUses t1 <> typeExpUses t2
-  in (mempty, pos <> neg)
-typeExpUses (TESum cs _) = foldMap (mconcat . fmap typeExpUses . snd) cs
-
-dimExpUses :: DimExp VName -> ([VName], [VName])
-dimExpUses (DimExpNamed v _) = ([qualLeaf v], [])
-dimExpUses _ = mempty
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)

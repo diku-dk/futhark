@@ -456,8 +456,7 @@ checkTypeBind (TypeBind name l tps td doc loc) =
          filter isSizeParam tps' of
       [] -> return ()
       tp:_ -> typeError loc mempty $ pretty $
-              text "Size parameter" <+> ppr tp <+>
-              text "unused."
+              text "Size parameter" <+> pquote (ppr tp) <+> text "unused."
 
     case (l, l') of
       (_, Lifted)
@@ -504,6 +503,13 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
         || not (all orderZero rettype_params)
         || not (orderZero rettype') ->
           typeError loc mempty "Entry point functions may not be higher-order."
+
+      | sizes_only_in_ret <-
+          S.fromList (map typeParamName tparams') `S.intersection`
+          typeDimNames rettype' `S.difference`
+          foldMap typeDimNames (map patternStructType params' ++ rettype_params),
+        not $ S.null sizes_only_in_ret ->
+          typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
 
       | p : _ <- filter nastyParameter params' ->
           warn loc $ "Entry point parameter\n\n  " <>
