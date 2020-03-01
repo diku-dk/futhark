@@ -1,4 +1,6 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp
   , checkTypeDecl
@@ -33,6 +35,7 @@ import qualified Data.Map.Strict as M
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.Traversals
+import Futhark.Util.Pretty
 
 -- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -111,8 +114,8 @@ checkTypeExp (TEVar name loc) = do
   case ps of
     [] -> return (TEVar name' loc, t, l)
     _  -> typeError loc mempty $
-          "Type constructor " ++ quote (unwords (pretty name : map pretty ps)) ++
-          " used without any arguments."
+          "Type constructor" <+> pquote (spread (ppr name : map ppr ps)) <+>
+          "used without any arguments."
 checkTypeExp (TETuple ts loc) = do
   (ts', ts_s, ls) <- unzip3 <$> mapM checkTypeExp ts
   return (TETuple ts' loc, tupleRecord ts_s, foldl' max Unlifted ls)
@@ -120,7 +123,7 @@ checkTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nub field_names)) $
-    typeError loc mempty $ "Duplicate record fields in " ++ pretty t
+    typeError loc mempty $ "Duplicate record fields in" <+> ppr t <> "."
 
   fs_ts_ls <- traverse checkTypeExp $ M.fromList fs
   let fs' = fmap (\(x,_,_) -> x) fs_ts_ls
@@ -136,10 +139,12 @@ checkTypeExp (TEArray t d loc) = do
     (Unlifted, st') -> return (TEArray t' d' loc, st', Unlifted)
     (SizeLifted, _) ->
       typeError loc mempty $
-      "Cannot create array with elements of size-lifted type " ++ quote (pretty t) ++ " (might cause irregular array)."
+      "Cannot create array with elements of size-lifted type" <+> pquote (ppr t) <+/>
+      "(might cause irregular array)."
     (Lifted, _) ->
       typeError loc mempty $
-      "Cannot create array with elements of lifted type " ++ quote (pretty t) ++ " (might contain function)."
+      "Cannot create array with elements of lifted type" <+> pquote (ppr t) <+/>
+      "(might contain function)."
   where checkDimExp DimExpAny =
           return (DimExpAny, AnyDim)
         checkDimExp (DimExpConst k dloc) =
@@ -178,8 +183,8 @@ checkTypeExp ote@TEApply{} = do
   (tname', ps, t, l) <- lookupType tloc tname
   if length ps /= length targs
   then typeError tloc mempty $
-       "Type constructor " ++ quote (pretty tname) ++ " requires " ++ show (length ps) ++
-       " arguments, but provided " ++ show (length targs) ++ "."
+       "Type constructor" <+> pquote (ppr tname) <+> "requires" <+> ppr (length ps) <+>
+       "arguments, but provided" <+> ppr (length targs) <+> "."
   else do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
     return (foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
@@ -192,7 +197,7 @@ checkTypeExp ote@TEApply{} = do
         rootAndArgs (TEApply op arg _) = do (op', loc, args) <- rootAndArgs op
                                             return (op', loc, args++[arg])
         rootAndArgs te' = typeError (srclocOf te') mempty $
-                          "Type '" ++ pretty te' ++ "' is not a type constructor."
+                          "Type" <+> pquote (ppr te') <+> "is not a type constructor."
 
         checkArgApply (TypeParamDim pv _) (TypeArgExpDim (DimExpNamed v dloc) loc) = do
           v' <- checkNamedDim loc v
@@ -211,16 +216,16 @@ checkTypeExp ote@TEApply{} = do
                   M.singleton pv $ TypeSub $ TypeAbbr l [] st)
 
         checkArgApply p a =
-          typeError tloc mempty $ "Type argument " ++ pretty a ++
-          " not valid for a type parameter " ++ pretty p
+          typeError tloc mempty $ "Type argument" <+> ppr a <+>
+          "not valid for a type parameter" <+> ppr p <> "."
 
 checkTypeExp t@(TESum cs loc) = do
   let constructors = map fst cs
   unless (sort constructors == sort (nub constructors)) $
-    typeError loc mempty $ "Duplicate constructors in " ++ pretty t
+    typeError loc mempty $ "Duplicate constructors in" <+> ppr t
 
-  unless (length constructors <= 256) $
-    typeError loc mempty "Sum types must have 256 or fewer constructors."
+  unless (length constructors < 256) $
+    typeError loc mempty "Sum types must have less than 256 constructors."
 
   cs_ts_ls <- (traverse . traverse) checkTypeExp $ M.fromList cs
   let cs'  = (fmap . fmap) (\(x,_,_) -> x) cs_ts_ls
@@ -249,7 +254,8 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
           case already of
             Just prev_loc ->
               lift $ typeError loc mempty $
-              "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
+              "Name" <+> pquote (ppr v) <+> "also bound at" <+>
+              text (locStr prev_loc) <> "."
             Nothing ->
               modify $ M.insert v loc
 
@@ -264,7 +270,8 @@ checkForDuplicateNamesInType = check mempty
   where check seen (TEArrow (Just v) t1 t2 loc)
           | Just prev_loc <- M.lookup v seen =
               typeError loc mempty $
-              "Name " ++ quote (pretty v) ++ " also bound at " ++ locStr prev_loc
+              text "Name" <+> pquote (ppr v) <+>
+              "also bound at" <+> text (locStr prev_loc) <> "."
           | otherwise =
               check seen' t1 >> check seen' t2
               where seen' = M.insert v loc seen
@@ -296,8 +303,8 @@ checkTypeParams ps m =
           case seen of
             Just prev ->
               lift $ typeError loc mempty $
-              "Type parameter " ++ quote (pretty v) ++
-              " previously defined at " ++ locStr prev ++ "."
+              text "Type parameter" <+> pquote (ppr v) <+>
+              "previously defined at" <+> text (locStr prev) <> "."
             Nothing -> do
               modify $ M.insert (ns,v) loc
               lift $ checkName ns v loc
