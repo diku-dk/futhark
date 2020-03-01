@@ -21,7 +21,7 @@ main = compilerMain () []
                   COpenGL.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
-             extra_options = [ "-L/rts"
+             extra_options = [ "-L/rts/c/glad/include/glad"
                              , "-ldl"
                              , "-lGL"
                              , "-lX11"
