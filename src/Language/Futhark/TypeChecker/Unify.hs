@@ -38,6 +38,7 @@ where
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Control.Monad.RWS.Strict hiding (Sum)
+import Control.Monad.State
 import Data.Bifoldable (biany)
 import Data.List
 import Data.Loc
@@ -741,9 +742,7 @@ mustHaveField usage l t = do
     _ -> do unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
             return l_type
 
--- | Replace dimension mismatches with AnyDim.  Where one of the types
--- contains an AnyDim dimension, the corresponding dimension in the
--- other type is used.
+-- | Replace dimension mismatches with AnyDim.
 anyDimOnMismatch :: Monoid as =>
                     TypeBase (DimDecl VName) as -> TypeBase (DimDecl VName) as
                  -> (TypeBase (DimDecl VName) as, [(DimDecl VName, DimDecl VName)])
@@ -752,6 +751,26 @@ anyDimOnMismatch t1 t2 = runWriter $ matchDims onDims t1 t2
           | d1 == d2 = return d1
           | otherwise = do tell [(d1, d2)]
                            return AnyDim
+
+newDimOnMismatch :: (Monoid as, MonadUnify m) =>
+                    SrcLoc -> TypeBase (DimDecl VName) as -> TypeBase (DimDecl VName) as
+                 -> m (TypeBase (DimDecl VName) as, [VName])
+newDimOnMismatch loc t1 t2 = do
+  (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
+  return (t, M.elems seen)
+  where r = Rigid $ RigidCond (toStruct t1) (toStruct t2)
+        onDims d1 d2
+          | d1 == d2 = return d1
+          | otherwise = do
+              -- Remember mismatches we have seen before and reuse the
+              -- same new size.
+              maybe_d <- gets $ M.lookup (d1, d2)
+              case maybe_d of
+                Just d -> return $ NamedDim $ qualName d
+                Nothing -> do
+                  d <- lift $ newDimVar loc r "differ"
+                  modify $ M.insert (d1, d2) d
+                  return $ NamedDim $ qualName d
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.
@@ -764,9 +783,7 @@ unifyMostCommon usage t1 t2 = do
               (toStruct (anySizes t2))
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
-  let rsrc = RigidCond (toStruct t1') (toStruct t2')
-  instantiateEmptyArrayDims (srclocOf usage) "differ" (Rigid rsrc) $
-    fst $ anyDimOnMismatch t1' t2'
+  newDimOnMismatch (srclocOf usage) t1' t2'
 
 -- Simple MonadUnify implementation.
 
