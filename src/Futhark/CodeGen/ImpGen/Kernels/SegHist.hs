@@ -953,13 +953,15 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
     let hist_T = unCount num_groups' * unCount group_size'
     emit $ Imp.DebugPrint "\n# SegHist" Nothing
     emit $ Imp.DebugPrint "Number of threads (T)" $ Just hist_T
-    emit $ Imp.DebugPrint "Memory per set of subhistograms per segment" $ Just h
-    emit $ Imp.DebugPrint "Memory per set of subhistograms times segments" $ Just seg_h
-    emit $ Imp.DebugPrint "Input elements per histogram (N)" $ Just hist_N
     emit $ Imp.DebugPrint "Desired group size (B)" $ Just hist_B
     emit $ Imp.DebugPrint "Histogram size (H)" $ Just hist_H
+    emit $ Imp.DebugPrint "Input elements per histogram (N)" $ Just hist_N
+    emit $ Imp.DebugPrint "Number of segments" $
+      Just $ product $ map (toExp' int32 . snd) segment_dims
     emit $ Imp.DebugPrint "Histogram element size (el_size)" $ Just hist_el_size
     emit $ Imp.DebugPrint "Race factor (RF)" $ Just hist_RF
+    emit $ Imp.DebugPrint "Memory per set of subhistograms per segment" $ Just h
+    emit $ Imp.DebugPrint "Memory per set of subhistograms times segments" $ Just seg_h
 
     (use_local_memory, run_in_local_memory) <-
       localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kbody
