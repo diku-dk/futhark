@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
 import Data.Maybe
 import Data.List
+import Data.Ord
 import qualified Data.Text as T
 import System.Console.GetOpt
 import System.Directory
@@ -64,7 +65,8 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  results <- concat <$> mapM (runBenchmark opts) compiled_benchmarks
+  results <- concat <$> mapM (runBenchmark opts)
+             (sortBy (comparing fst) compiled_benchmarks)
   case optJSON opts of
     Nothing -> return ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
