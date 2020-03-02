@@ -76,7 +76,6 @@ module Futhark.Representation.ExplicitMemory
        , lookupMemInfo
        , subExpMemInfo
        , lookupArraySummary
-       , fullyLinear
        , existentialiseIxFun
 
          -- * Module re-exports
@@ -112,7 +111,6 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.PrimExp.Simplify
 import Futhark.Util
-import Futhark.Util.IntegralExp
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Lore
@@ -1051,15 +1049,3 @@ applyFunReturns rets params args
           where mem' = case M.lookup mem parammap of
                   Just (Var v, _) -> v
                   _               -> mem
-
--- | Is an array of the given shape stored fully flat row-major with
--- the given index function?
-fullyLinear :: (Eq num, IntegralExp num) =>
-               ShapeBase num -> IxFun.IxFun num -> Bool
-fullyLinear shape ixfun =
-  IxFun.isLinear ixfun && ixFunMatchesInnerShape shape ixfun
-
-ixFunMatchesInnerShape :: (Eq num, IntegralExp num) =>
-                          ShapeBase num -> IxFun.IxFun num -> Bool
-ixFunMatchesInnerShape shape ixfun =
-  drop 1 (IxFun.shape ixfun) == drop 1 (shapeDims shape)
