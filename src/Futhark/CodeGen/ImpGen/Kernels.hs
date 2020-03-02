@@ -298,7 +298,7 @@ isMapTransposeKernel bt
     Just (r1, r2, _) <- isMapTranspose perm =
       isOk (product srcshape) srcshape id r1 r2 dest_offset src_offset
   | otherwise =
-    Nothing
+      Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
 
