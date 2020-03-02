@@ -84,7 +84,6 @@ import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM, State)
 import Control.Monad.Writer hiding (mapM, forM)
 import Control.Monad.Except hiding (mapM, forM)
-import qualified Control.Monad.Fail as Fail
 import Data.Either
 import Data.Traversable
 import qualified Data.Map.Strict as M
@@ -228,9 +227,6 @@ newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) (State lore op) 
             MonadReader (Env lore op),
             MonadWriter (Imp.Code op),
             MonadError InternalError)
-
-instance Fail.MonadFail (ImpM lore op) where
-  fail = error . ("ImpM.fail: "++)
 
 instance MonadFreshNames (ImpM lore op) where
   getNameSource = gets stateNameSource
@@ -1026,7 +1022,7 @@ copyArrayDWIM bt
           destrank = length (memLocationShape destlocation')
           srcrank = length (memLocationShape srclocation')
       if destrank /= srcrank
-        then fail $ "copyArrayDWIM: cannot copy to " ++
+        then error $ "copyArrayDWIM: cannot copy to " ++
              pretty (memLocationName destlocation') ++
              " from " ++ pretty (memLocationName srclocation') ++
              " because ranks do not match (" ++ pretty destrank ++

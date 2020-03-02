@@ -186,7 +186,7 @@ compileGroupExp _ dest e =
 sanityCheckLevel :: SegLevel -> InKernelGen ()
 sanityCheckLevel SegThread{} = return ()
 sanityCheckLevel SegGroup{} =
-  fail "compileGroupOp: unexpected group-level SegOp."
+  error "compileGroupOp: unexpected group-level SegOp."
 
 compileGroupSpace :: KernelConstants -> SegLevel -> SegSpace -> InKernelGen ()
 compileGroupSpace constants lvl space = do

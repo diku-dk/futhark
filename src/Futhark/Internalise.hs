@@ -254,7 +254,7 @@ internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) =
   case tp of
     E.Scalar E.Prim{} -> return name
-    _ -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
+    _ -> error $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
          ++ pretty name ++ " of type " ++ pretty tp ++
          " at " ++ locStr loc ++ "."
 
@@ -409,7 +409,7 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
     case E.typeOf start of
       E.Scalar (E.Prim (E.Signed it)) -> return (it, CmpSle it, CmpSlt it)
       E.Scalar (E.Prim (E.Unsigned it)) -> return (it, CmpUle it, CmpUlt it)
-      start_t -> fail $ "Start value in range has type " ++ pretty start_t
+      start_t -> error $ "Start value in range has type " ++ pretty start_t
 
   let one = intConst it 1
       negone = intConst it (-1)
@@ -518,7 +518,7 @@ internaliseExp desc (E.Negate e _) = do
                letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
              I.Prim (I.FloatType t) ->
                letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
-             _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
+             _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
 internaliseExp desc e@E.Apply{} = do
   (qfname, args, ret, retext) <- findFuncall e
@@ -636,7 +636,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
               I.Prim (IntType it) -> return it
-              _                   -> fail "internaliseExp DoLoop: invalid type"
+              _                   -> error "internaliseExp DoLoop: invalid type"
 
       bindingParams sparams' [mergepat] $
         \mergecm shapepat nested_mergepat -> do
@@ -766,7 +766,7 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) loc) = do
     Just (i, js) ->
       (intConst Int8 (toInteger i):) <$> clauses 0 ts' (zip js es')
     Nothing ->
-      fail "internaliseExp Constr: missing constructor"
+      error "internaliseExp Constr: missing constructor"
 
   where clauses j (t:ts) js_to_es
           | Just e <- j `lookup` js_to_es =
@@ -778,7 +778,7 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) loc) = do
           return []
 
 internaliseExp _ (E.Constr _ _ (Info t) loc) =
-  fail $ "internaliseExp: constructor with type " ++ pretty t ++ " at " ++ locStr loc
+  error $ "internaliseExp: constructor with type " ++ pretty t ++ " at " ++ locStr loc
 
 internaliseExp desc (E.Match e cs (Info ret, Info retext) _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
@@ -811,13 +811,13 @@ internaliseExp _ (E.IntLit v (Info t) _) =
       return [I.Constant $ I.IntValue $ intValue it v]
     E.Scalar (E.Prim (E.FloatType ft)) ->
       return [I.Constant $ I.FloatValue $ floatValue ft v]
-    _ -> fail $ "internaliseExp: nonsensical type for integer literal: " ++ pretty t
+    _ -> error $ "internaliseExp: nonsensical type for integer literal: " ++ pretty t
 
 internaliseExp _ (E.FloatLit v (Info t) _) =
   case t of
     E.Scalar (E.Prim (E.FloatType ft)) ->
       return [I.Constant $ I.FloatValue $ floatValue ft v]
-    _ -> fail $ "internaliseExp: nonsensical type for float literal: " ++ pretty t
+    _ -> error $ "internaliseExp: nonsensical type for float literal: " ++ pretty t
 
 internaliseExp desc (E.If ce te fe (Info ret, Info retext) _) = do
   ses <- letTupExp' desc =<<
@@ -851,22 +851,22 @@ internaliseExp desc (E.Project k e (Info rt) _) = do
   take n . drop i' <$> internaliseExp desc e
 
 internaliseExp _ e@E.Lambda{} =
-  fail $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
+  error $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
 
 internaliseExp _ e@E.OpSection{} =
-  fail $ "internaliseExp: Unexpected operator section at " ++ locStr (srclocOf e)
+  error $ "internaliseExp: Unexpected operator section at " ++ locStr (srclocOf e)
 
 internaliseExp _ e@E.OpSectionLeft{} =
-  fail $ "internaliseExp: Unexpected left operator section at " ++ locStr (srclocOf e)
+  error $ "internaliseExp: Unexpected left operator section at " ++ locStr (srclocOf e)
 
 internaliseExp _ e@E.OpSectionRight{} =
-  fail $ "internaliseExp: Unexpected right operator section at " ++ locStr (srclocOf e)
+  error $ "internaliseExp: Unexpected right operator section at " ++ locStr (srclocOf e)
 
 internaliseExp _ e@E.ProjectSection{} =
-  fail $ "internaliseExp: Unexpected projection section at " ++ locStr (srclocOf e)
+  error $ "internaliseExp: Unexpected projection section at " ++ locStr (srclocOf e)
 
 internaliseExp _ e@E.IndexSection{} =
-  fail $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
+  error $ "internaliseExp: Unexpected index section at " ++ locStr (srclocOf e)
 
 internaliseArg :: String -> (E.Exp, Maybe VName) -> InternaliseM [SubExp]
 internaliseArg desc (arg, argdim) = do
@@ -885,7 +885,7 @@ generateCond orig_p orig_ses = do
     -- Literals are always primitive values.
     compares (E.PatternLit e _ _) (se:ses) = do
       e' <- internaliseExp1 "constant" e
-      I.Prim t' <- subExpType se
+      t' <- I.elemType <$> subExpType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
 
@@ -899,10 +899,10 @@ generateCond orig_p orig_ses = do
           (cmps, pertinent, _) <- comparesMany pats $ map (payload_ses!!) payload_is
           return (cmp : cmps, pertinent, ses')
         Nothing ->
-          fail "generateCond: missing constructor"
+          error "generateCond: missing constructor"
 
     compares (E.PatternConstr _ (Info t) _ _) _ =
-      fail $ "generateCond: PatternConstr has nonsensical type: " ++ pretty t
+      error $ "generateCond: PatternConstr has nonsensical type: " ++ pretty t
 
     compares (E.Id _ t loc) ses =
       compares (E.Wildcard t loc) ses
@@ -1196,7 +1196,7 @@ internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
   vs <- internaliseExp desc e
   case vs of [se] -> return se
-             _ -> fail "Internalise.internaliseExp1: was passed not just a single subexpression"
+             _ -> error "Internalise.internaliseExp1: was passed not just a single subexpression"
 
 -- | Promote to dimension type as appropriate for the original type.
 -- Also return original type.
@@ -1206,7 +1206,7 @@ internaliseDimExp s e = do
   case E.typeOf e of
     E.Scalar (E.Prim (Signed it))   -> (,it) <$> asIntS Int32 e'
     E.Scalar (E.Prim (Unsigned it)) -> (,it) <$> asIntZ Int32 e'
-    _                               -> fail "internaliseDimExp: bad type"
+    _                               -> error "internaliseDimExp: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
@@ -1366,7 +1366,7 @@ internaliseBinOp _ desc E.Geq x y E.Bool _ =
   simpleCmpOp desc I.CmpLle y x -- Note the swapped x and y
 
 internaliseBinOp _ _ op _ _ t1 t2 =
-  fail $ "Invalid binary operator " ++ pretty op ++
+  error $ "Invalid binary operator " ++ pretty op ++
   " with operand types " ++ pretty t1 ++ ", " ++ pretty t2
 
 simpleBinOp :: String
@@ -1393,7 +1393,7 @@ findFuncall (E.Apply f arg (Info (_, argext)) (Info ret, Info retext) _) = do
   (fname, args, _, _) <- findFuncall f
   return (fname, args ++ [(arg, argext)], E.toStruct ret, retext)
 findFuncall e =
-  fail $ "Invalid function expression in application: " ++ pretty e
+  error $ "Invalid function expression in application: " ++ pretty e
 
 internaliseLambda :: InternaliseLambda
 
@@ -1407,7 +1407,7 @@ internaliseLambda (E.Lambda params body _ (Info (_, rettype)) loc) rowtypes =
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda e _ = fail $ "internaliseLambda: unexpected expression:\n" ++ pretty e
+internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
 
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
@@ -1522,7 +1522,7 @@ isOverloadedFunction qname args loc = do
         case (E.typeOf x, E.typeOf y) of
           (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
             internaliseBinOp loc desc bop x' y' t1 t2
-          _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
+          _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
     handle [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
 
@@ -1664,7 +1664,7 @@ isOverloadedFunction qname args loc = do
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
         E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
-        _ -> fail "Futhark.Internalise.handle: non-numeric type in ToSigned"
+        _ -> error "Futhark.Internalise.handle: non-numeric type in ToSigned"
 
     toUnsigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e
@@ -1679,7 +1679,7 @@ isOverloadedFunction qname args loc = do
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
         E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
-        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
+        _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
 
     complementF e desc = do
       e' <- internaliseExp1 "complement_arg" e
@@ -1689,7 +1689,7 @@ isOverloadedFunction qname args loc = do
                  I.Prim I.Bool ->
                    letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
                  _ ->
-                   fail "Futhark.Internalise.internaliseExp: non-int/bool type in Complement"
+                   error "Futhark.Internalise.internaliseExp: non-int/bool type in Complement"
 
     scatterF a si v desc = do
       si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
@@ -1754,7 +1754,7 @@ internaliseIfConst loc name = do
       (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs loc constparams
       safety <- askSafety
       case mk_rettype $ zip constargs $ map I.fromDecl const_ts of
-        Nothing -> fail $ "internaliseIfConst: " ++
+        Nothing -> error $ "internaliseIfConst: " ++
                    unwords (pretty name : zipWith (curry pretty) constargs const_ts) ++
                    " failed"
         Just rettype -> do
@@ -1791,7 +1791,7 @@ funcall desc (QualName _ fname) args loc = do
            paramts (constargs ++ map I.Var closure ++ shapeargs ++ args)
   argts' <- mapM subExpType args'
   case rettype_fun $ zip args' argts' of
-    Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
+    Nothing -> error $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
                pretty args' ++ "\nof types\n " ++
                pretty argts' ++
                "\nFunction has parameters\n " ++ pretty fun_params
@@ -1832,7 +1832,7 @@ partitionWithSOACS k lam arrs = do
   classes_and_increments <- letTupExp "increments" $ I.Op $ I.Screma w (mapSOAC lam) arrs
   (classes, increments) <- case classes_and_increments of
                              classes : increments -> return (classes, take k increments)
-                             _                    -> fail "partitionWithSOACS"
+                             _                    -> error "partitionWithSOACS"
 
   add_lam_x_params <-
     replicateM k $ I.Param <$> newVName "x" <*> pure (I.Prim int32)
