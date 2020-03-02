@@ -14,7 +14,8 @@ jobs:
 
   steps:
 
-  - submodules: true
+  - checkout: self
+    submodules: true
 
   - script: |
       set -e
