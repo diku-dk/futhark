@@ -882,7 +882,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
         .&&. Imp.vi32 hist_M .>. 0
 
       groups_per_segment
-        | segmented = 1 -- num_groups' `quotRoundingUp` Imp.Count hist_Nout
+        | segmented = num_groups' `quotRoundingUp` Imp.Count hist_Nout
         | otherwise = num_groups'
 
       run = do
