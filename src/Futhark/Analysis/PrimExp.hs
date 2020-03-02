@@ -7,7 +7,6 @@ module Futhark.Analysis.PrimExp
   , primExpType
   , primExpSizeAtLeast
   , coerceIntPrimExp
-  , leafExpTypes
   , true
   , false
   , constFoldPrimExp
@@ -19,7 +18,6 @@ module Futhark.Analysis.PrimExp
 import           Control.Monad
 import           Data.Traversable
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 import           Futhark.Representation.AST.Attributes.Names
 import           Futhark.Representation.Primitive
@@ -347,15 +345,3 @@ instance Pretty v => Pretty (PrimExp v) where
   ppr (ConvOpExp op x)  = ppr op <+> parens (ppr x)
   ppr (UnOpExp op x)    = ppr op <+> parens (ppr x)
   ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)
-
-leafExpTypes :: Ord a => PrimExp a -> S.Set (a, PrimType)
-leafExpTypes (LeafExp x ptp) = S.singleton (x, ptp)
-leafExpTypes (ValueExp _) = S.empty
-leafExpTypes (UnOpExp _ e) = leafExpTypes e
-leafExpTypes (ConvOpExp _ e) = leafExpTypes e
-leafExpTypes (BinOpExp _ e1 e2) =
-  S.union (leafExpTypes e1) (leafExpTypes e2)
-leafExpTypes (CmpOpExp _ e1 e2) =
-  S.union (leafExpTypes e1) (leafExpTypes e2)
-leafExpTypes (FunExp _ pes _) =
-  S.unions $ map leafExpTypes pes
