@@ -67,7 +67,7 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->load_ptx_from = NULL;
 
   cfg->default_block_size = 256;
-  cfg->default_grid_size = 128;
+  cfg->default_grid_size = 256;
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
 
