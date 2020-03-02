@@ -67,18 +67,23 @@ jobs:
       set -e
       export PATH=$HOME/.local/bin:$PATH
       futhark test -C --no-terminal --backend=opencl --exclude=no_opencl tests examples
-      futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
-    displayName: Compile with backend=opencl
+    displayName: Compile tests with backend=opencl
 
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
       futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
-      futhark test -C --no-terminal --backend=cuda --exclude=no_opencl futhark-benchmarks
-    displayName: Compile with backend=cuda
+    displayName: Compile tests with backend=cuda
 
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
       futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
-    displayName: Compile and run with backend=python
+    displayName: Compile tests and run with backend=python
+
+
+  - script: |
+      set -e
+      export PATH=$HOME/.local/bin:$PATH
+      futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
+    displayName: Compile benchmarks with backend=opencl
