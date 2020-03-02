@@ -64,12 +64,14 @@ copyScalarFromDev = "copy_scalar_from_dev"
 
 cliOptions :: [Option]
 cliOptions =
-  [] --TODO
+  [
+
+  ] --TODO
 
 writeOpenGLScalar :: GC.WriteScalar OpenGL ()
 writeOpenGLScalar mem i t "device" _ val = do
-  --TODO{
   val' <- newVName "write_tmp"
+  --TODO{
   let (decl, blocking) =
         case val of
           C.Const{} -> ([C.citem|static $ty:t $id:val' = $exp:val;|], [C.cexp|CL_FALSE|])
@@ -104,8 +106,8 @@ readOpenGLScalar _ _ _ space _ =
 allocateOpenGLBuffer :: GC.Allocate OpenGL ()
 allocateOpenGLBuffer mem size tag "device" =
   --TODO{
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_alloc(&ctx->opencl,
-                                          $exp:size, $exp:tag, &$exp:mem));|]
+  GC.stm [C.cstm|opengl_alloc(&ctx->opengl,
+                                          $exp:size, $exp:tag, &$exp:mem);|]
   --TODO}
 allocateOpenGLBuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space."
@@ -113,7 +115,7 @@ allocateOpenGLBuffer _ _ _ space =
 deallocateOpenGLBuffer :: GC.Deallocate OpenGL ()
 deallocateOpenGLBuffer mem tag "device" =
   --TODO{
-    GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(opencl_free(&ctx->opencl, $exp:mem, $exp:tag));|]
+    GC.stm [C.cstm|opengl_free(&ctx->opengl,  $exp:mem, $exp:tag);|]
   --TODO}
 deallocateOpenGLBuffer _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
@@ -153,9 +155,6 @@ copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
                             $exp:srcidx, $exp:destidx,
                             $exp:nbytes,
                             0, NULL, $exp:( copyDevToDev)));
-      if (ctx->debugging) {
-        OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
-      }
     }
   }|]
   --TODO}
@@ -168,7 +167,7 @@ copyOpenGLMemory _ _ destspace _ _ srcspace _ =
 
 openglMemoryType :: GC.MemoryType OpenGL ()
 --TODO{
-openglMemoryType "device" = pure [C.cty|typename cl_mem|]
+openglMemoryType "device" = pure [C.cty|typename GLuint|]
 --TODO}
 openglMemoryType space =
   error $ "OpenGL backend does not support '" ++ space ++ "' memory space."
