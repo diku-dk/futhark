@@ -133,7 +133,7 @@ expCompiler dest e =
 
 callKernelCopy :: CopyCompiler ExplicitMemory Imp.HostOp
 callKernelCopy bt
-  destloc@(MemLocation destmem destshape destIxFun)
+  destloc@(MemLocation destmem _ destIxFun)
   srcloc@(MemLocation srcmem srcshape srcIxFun)
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
@@ -147,10 +147,6 @@ callKernelCopy bt
          Imp.ExpArg src_elems, Imp.ExpArg dest_elems]
 
   | bt_size <- primByteSize bt,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) destshape) destIxFun,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) srcshape) srcIxFun,
     Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-

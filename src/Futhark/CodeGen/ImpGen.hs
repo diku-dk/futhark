@@ -957,11 +957,7 @@ copy bt pat src = do
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler lore op
 defaultCopy bt dest src
-  | ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) destshape) destIxFun,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) srcshape) srcIxFun,
-    Just destoffset <-
+  | Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
@@ -975,7 +971,7 @@ defaultCopy bt dest src
       copyElementWise bt dest src
   where bt_size = primByteSize bt
         num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
-        MemLocation destmem destshape destIxFun = dest
+        MemLocation destmem _ destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
 copyElementWise :: CopyCompiler lore op
