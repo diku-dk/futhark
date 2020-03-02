@@ -770,14 +770,17 @@ buildRetType env pats = comb
 
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> PatternType
-typeFromSV (Dynamic tp)           = tp
-typeFromSV (LambdaSV _ _ _ _ env) = typeFromEnv env
-typeFromSV (RecordSV ls)          = Scalar $ Record $ M.fromList $ map (fmap typeFromSV) ls
-typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
+typeFromSV (Dynamic tp) = tp
+typeFromSV (LambdaSV sizes _ _ _ env) =
+  unscopeType (S.fromList sizes) $ typeFromEnv env
+typeFromSV (RecordSV ls) =
+  Scalar $ Record $ M.fromList $ map (fmap typeFromSV) ls
+typeFromSV (DynamicFun (_, sv) _) =
+  typeFromSV sv
 typeFromSV (SumSV name svs fields) =
   Scalar $ Sum $ M.insert name (map typeFromSV svs) $ M.fromList fields
-typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
-                                         ++ "static value of an intrinsic."
+typeFromSV IntrinsicSV =
+  error "Tried to get the type from the static value of an intrinsic."
 
 typeFromEnv :: Env -> PatternType
 typeFromEnv = Scalar . Record . M.fromList .
