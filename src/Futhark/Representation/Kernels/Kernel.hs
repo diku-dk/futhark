@@ -174,8 +174,7 @@ data KernelResult = Returns ResultManifest SubExp
                   | WriteReturns
                     [SubExp] -- Size of array.  Must match number of dims.
                     VName -- Which array
-                    [([SubExp], SubExp)]
-                    -- Arbitrary number of index/value pairs.
+                    [([SubExp], SubExp)] -- Arbitrary number of index/value pairs.
                   | ConcatReturns
                     SplitOrdering -- Permuted?
                     SubExp -- The final size.

@@ -16,7 +16,6 @@
 module Futhark.Optimise.BlkRegTiling
        ( mmmTiling2D )
        where
-
 import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Set as S
@@ -33,9 +32,16 @@ import Futhark.Transform.Rename
 import Futhark.Representation.AST.Attributes.Names
 
 import Debug.Trace
+import Text.PrettyPrint.Mainland.Class
 
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
+
+_pretty :: Pretty a => a -> String
+_pretty = (++ "\n\n====================="
+           ++ "========================="
+           ++ "========================="
+           ++ "=====================\n\n") . pretty
 
 mmmTiling2D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
 mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker_body))))
@@ -72,29 +78,46 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (gidx, m_X) : (gidy, m_Y) : _ <- reverse $ unSegSpace space,
+    (gidx, width_B) : (gidy, height_A) : _ <- reverse $ unSegSpace space,
+
+    -- sanity check that the reduce part is not missing
+    not (null red_nes) = do
+
+        ty_name <- nameFromString . pretty <$> newVName "Ty"         -- these type check
+        tx_name <- nameFromString . pretty <$> newVName "Tx"
+        tk_name <- nameFromString . pretty <$> newVName "Tk"
+        ry_name <- nameFromString . pretty <$> newVName "Ry"
+        rx_name <- nameFromString . pretty <$> newVName "Rx"
+        rk_name <- nameFromString . pretty <$> newVName "Rk"
+        ty <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile -- these do not >:(
+        tx <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+        tk <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
+        ry <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeLocalMemory
+        rx <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeLocalMemory
+        rk <- letSubExp "Rk" $ Op $ SizeOp $ GetSize rk_name SizeLocalMemory
 
 
-    -- sanity check that the reduce part is not missing (it shouldn't be)
-    not (null red_nes) =
-      let let_binding = Let (Pattern {patternContextElements = [],
-                                      patternValueElements =
-                                      [PatElem {patElemName = (VName (nameFromString "foo") 7),
-                                                patElemAttr = Prim (IntType Int32)}]})
-                            aux (BasicOp (SubExp (Constant (IntValue (Int32Value 3)))))
- 
-      in trace ("pat:\n"                              ++ pretty pat ++
-           "\n\n-----\n\nspace:\n"                    ++ pretty space ++
-           "\n\n-----\n\nold_ker_body:\n"             ++ pretty old_ker_body ++
-           "\n\n-----\n\ncode2':\n"                   ++ pretty code2' ++
-           "\n\n-----\n\nVariant arrays:\n"           ++ pretty arr_var_dims ++
-           "\n\n-----\n\nVariance table:\n"           ++ pretty variance ++
-           "\n\n-----\n\nreduce result variance:\n"   ++ pretty res_red_var ++
-           "\n\n-----\n\nindirect-slice table:\n"     ++ pretty arr_tab0 ++
-           "\n\n-----\n\n(gidx, m_X) : (gidy, m_Y)\n" ++ pretty (reverse $ unSegSpace space) ++
-           "\n\n\nstm:\n" ++ pretty stm)
+        ty_ry      <- letSubExp "ty_ry" $ BasicOp $ BinOp (Mul Int32) ty ry
+        tx_rx      <- letSubExp "tx_rx" $ BasicOp $ BinOp (Mul Int32) tx rx
+        group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
 
-           $ return (Just (oneStm let_binding, stm))
+        grid_dimx <- letSubExp "grid_dimx" =<< eDivRoundingUp Int32 (eSubExp width_B)  tx_rx
+        grid_dimy <- letSubExp "grid_dimy" =<< eDivRoundingUp Int32 (eSubExp height_A) ty_ry
+
+        num_groups <- letSubExp "num_groups_top" $ BasicOp $ BinOp (Mul Int32) grid_dimx grid_dimy
+
+
+        traceM (">> pat:\n"                      ++ _pretty pat          ++
+                ">> space:\n"                    ++ _pretty space        ++
+                ">> old_ker_body:\n"             ++ _pretty old_ker_body ++
+                ">> code2':\n"                   ++ _pretty code2'       ++
+                ">> Variant arrays:\n"           ++ _pretty arr_var_dims ++
+                ">> Variance table:\n"           ++ _pretty variance     ++
+                ">> reduce result variance:\n"   ++ _pretty res_red_var  ++
+                ">> indirect-slice table:\n"     ++ _pretty arr_tab0     ++
+                ">> (gidx, m_X) : (gidy, m_Y)\n" ++ _pretty [(gidx, width_B), (gidy, height_A)] ++
+                ">> entire stm:\n"               ++ _pretty stm)
+        return Nothing
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
@@ -116,14 +139,14 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker
             Array _ (Shape [_]) _ <- p_tp =
               Just (ss, M.insert p_nm (arr_nm,slc,p_tp) tab)
 
-        processIndirections _ res_red_var acc stm@(Let patt _ _)
+        processIndirections _ res_red_var acc stm'@(Let patt _ _)
           | Just (ss, tab) <- acc,
             ps <- patternValueElements patt,
             all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
-              Just (ss Seq.|> stm, tab)
+              Just (ss Seq.|> stm', tab)
           | otherwise = Nothing
 
-mmmTiling2D _ = return Nothing
+mmmTiling2D _ = trace "nej" $ return Nothing
 
 ---------------
 --- HELPERS ---
@@ -229,14 +252,27 @@ defVarianceInStm variance bnd =
         look variance' v = oneName v <> M.findWithDefault mempty v variance'
         binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
 
+-- sufficientGroups :: [(VName, SubExp, VName, SubExp)] -- gspace
 sufficientGroups :: MonadBinder m =>
-                    [(VName, SubExp, VName, SubExp)] -> SubExp
-                 -> m (SubExp, SubExp)
+                    [(VName, SubExp, VName, SubExp)] -- gspace
+                 -> SubExp                           -- group_size
+                 -> m (SubExp, SubExp)               -- (x, y) grid dimensions?
 sufficientGroups gspace group_size = do
+
   groups_in_dims <- forM gspace $ \(_, gd, _, ld) ->
-    letSubExp "groups_in_dim" =<< eDivRoundingUp Int32 (eSubExp gd) (eSubExp ld)
+                      letSubExp "groups_in_dim" =<<
+                      eDivRoundingUp Int32 (eSubExp gd) (eSubExp ld)
+
   num_groups <- letSubExp "num_groups" =<<
                 foldBinOp (Mul Int32) (constant (1::Int32)) groups_in_dims
-  num_threads <- letSubExp "num_threads" $
-                 BasicOp $ BinOp (Mul Int32) num_groups group_size
+
+  num_threads <- letSubExp "num_threads" (BasicOp (BinOp (Mul Int32) num_groups group_size))
+
+  traceM ("num_threads:\n" ++ _pretty num_threads ++
+          "num_groups:\n"  ++ _pretty num_groups)
+
   return (num_threads, num_groups)
+
+
+
+
