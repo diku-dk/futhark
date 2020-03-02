@@ -12,7 +12,6 @@ module Futhark.Pass.ExplicitAllocations
        )
 where
 
-import qualified Control.Monad.Fail as Fail
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
@@ -140,9 +139,6 @@ newtype AllocM fromlore tolore a =
              HasScope tolore,
              LocalScope tolore,
              MonadReader (AllocEnv fromlore tolore))
-
-instance Fail.MonadFail (AllocM fromlore tolore) where
-  fail = error . ("AllocM.fail: "++)
 
 instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
          MonadBinder (AllocM fromlore tolore) where
@@ -325,6 +321,13 @@ memForBindee ident space = do
   where  memname = baseString (identName ident) <> "_mem"
          t       = identType ident
 
+lookupMemSpace :: (HasScope lore m, Monad m) => VName -> m Space
+lookupMemSpace v = do
+  t <- lookupType v
+  case t of
+    Mem space -> return space
+    _ -> error $ "lookupMemSpace: " ++ pretty v ++ " is not a memory block."
+
 directIndexFunction :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIndexFunction bt shape u mem t =
   MemArray bt shape u $ ArrayIn mem $
@@ -383,7 +386,7 @@ allocInMergeParams variant merge m = do
   where allocInMergeParam (mergeparam, Var v)
           | Array bt shape u <- paramDeclType mergeparam = do
               (mem, ixfun) <- lift $ lookupArraySummary v
-              Mem space <- lift $ lookupType mem
+              space <- lift $ lookupMemSpace mem
               reuse <- asks aggressiveReuse
               if space /= Space "local" &&
                  reuse &&
@@ -409,7 +412,7 @@ ensureArrayIn :: (Allocable fromlore tolore,
                  Type -> VName -> IxFun -> SubExp
               -> AllocM fromlore tolore SubExp
 ensureArrayIn _ _ _ (Constant v) =
-  fail $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
+  error $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
 ensureArrayIn t mem ixfun (Var v) = do
   (src_mem, src_ixfun) <- lookupArraySummary v
   if src_mem == mem && src_ixfun == ixfun
@@ -426,7 +429,7 @@ ensureDirectArray :: (Allocable fromlore tolore,
                      Maybe Space -> VName -> AllocM fromlore tolore (VName, SubExp)
 ensureDirectArray space_ok v = do
   (mem, ixfun) <- lookupArraySummary v
-  Mem mem_space <- lookupType mem
+  mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   if IxFun.isDirect ixfun && maybe True (==mem_space) space_ok
     then return (mem, Var v)
@@ -510,7 +513,7 @@ handleHostOp :: HostOp Kernels (SOAC Kernels)
 handleHostOp (SizeOp op) =
   return $ Inner $ SizeOp op
 handleHostOp (OtherOp op) =
-  fail $ "Cannot allocate memory in SOAC: " ++ pretty op
+  error $ "Cannot allocate memory in SOAC: " ++ pretty op
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
 

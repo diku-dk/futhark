@@ -315,7 +315,7 @@ protectIf _ _ _ stm =
 
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem{} =
-  fail "emptyOfType: Cannot hoist non-existential memory."
+  error "emptyOfType: Cannot hoist non-existential memory."
 emptyOfType _ (Prim pt) =
   return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
 emptyOfType ctx_names (Array pt shape _) = do

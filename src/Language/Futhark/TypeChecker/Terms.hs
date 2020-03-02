@@ -21,7 +21,6 @@ import Control.Monad.Except
 import Control.Monad.State
 import Control.Monad.RWS hiding (Sum)
 import Control.Monad.Writer hiding (Sum)
-import qualified Control.Monad.Fail as Fail
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.Either
@@ -287,10 +286,6 @@ newtype TermTypeM a = TermTypeM (RWST
             MonadWriter Occurences,
             MonadState TermTypeState,
             MonadError TypeError)
-
-instance Fail.MonadFail TermTypeM where
-  fail = typeError (noLoc :: SrcLoc) mempty .
-         (("unknown failure (likely a compiler bug): "<>) . text)
 
 instance MonadUnify TermTypeM where
   getConstraints = gets stateConstraints
@@ -1466,10 +1461,11 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   e_arg <- checkArg e
   case ftype of
     Scalar (Arrow as1 m1 t1 (Scalar (Arrow as2 m2 t2 ret))) -> do
-      (t2', Scalar (Arrow _ _ t1' rettype), argext, _) <-
-        checkApply loc (Just op') (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
+      (t2', _, argext, _) <-
+        checkApply loc (Just op')
+        (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
       return $ OpSectionRight op' (Info ftype) (argExp e_arg)
-        (Info $ toStruct t1', Info (toStruct t2', argext)) (Info rettype) loc
+        (Info $ toStruct t1, Info (toStruct t2', argext)) (Info ret) loc
     _ -> typeError loc mempty $
          "Operator section with invalid operator of type" <+> ppr ftype
 
