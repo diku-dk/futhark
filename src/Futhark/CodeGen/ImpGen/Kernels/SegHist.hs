@@ -885,7 +885,8 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
         .&&. Imp.vi32 hist_M .>. 0
 
       groups_per_segment
-        | segmented = 1
+        | segmented = num_groups' `quotRoundingUp`
+                      Imp.Count (product (map (toExp' int32) segment_dims))
         | otherwise = num_groups'
 
       run = do
