@@ -993,8 +993,8 @@ copyArrayDWIM :: PrimType
               -> MemLocation -> [DimIndex Imp.Exp]
               -> ImpM lore op (Imp.Code op)
 copyArrayDWIM bt
-  destlocation@(MemLocation _ destshape dest_ixfun) destslice
-  srclocation@(MemLocation _ srcshape src_ixfun) srcslice
+  destlocation@(MemLocation _ destshape _) destslice
+  srclocation@(MemLocation _ srcshape _) srcslice
 
   | Just destis <- mapM dimFix destslice,
     Just srcis <- mapM dimFix srcslice,
@@ -1011,10 +1011,10 @@ copyArrayDWIM bt
   | otherwise = do
       let destlocation' =
             sliceArray destlocation $
-            fullSliceNum (IxFun.shape dest_ixfun) destslice
+            fullSliceNum (map (toExp' int32) destshape) destslice
           srclocation'  =
             sliceArray srclocation $
-            fullSliceNum (IxFun.shape src_ixfun) srcslice
+            fullSliceNum (map (toExp' int32) srcshape) srcslice
           destrank = length (memLocationShape destlocation')
           srcrank = length (memLocationShape srclocation')
       if destrank /= srcrank

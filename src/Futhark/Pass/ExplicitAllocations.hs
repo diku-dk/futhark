@@ -682,10 +682,11 @@ allocInLoopForm (ForLoop i it n loopvars) =
   where allocInLoopVar (p,a) = do
           (mem, ixfun) <- lookupArraySummary a
           case paramType p of
-            Array bt shape u ->
+            Array bt shape u -> do
+              dims <- map (primExpFromSubExp int32) . arrayDims <$> lookupType a
               let ixfun' = IxFun.slice ixfun $
-                           fullSliceNum (IxFun.shape ixfun) [DimFix $ LeafExp i int32]
-              in return (p { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun' }, a)
+                           fullSliceNum dims [DimFix $ LeafExp i int32]
+              return (p { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun' }, a)
             Prim bt ->
               return (p { paramAttr = MemPrim bt }, a)
             Mem space ->
@@ -722,12 +723,12 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
               let t = paramType x `arrayOfRow` twice_num_threads
               mem <- allocForArray t DefaultSpace
               -- XXX: this iota ixfun is a bit inefficient; leading to uncoalesced access.
-              let ixfun_base = IxFun.iota $
-                               map (primExpFromSubExp int32) (arrayDims t)
+              let base_dims = map (primExpFromSubExp int32) (arrayDims t)
+                  ixfun_base = IxFun.iota base_dims
                   ixfun_x = IxFun.slice ixfun_base $
-                            fullSliceNum (IxFun.shape ixfun_base) [DimFix my_id]
+                            fullSliceNum base_dims [DimFix my_id]
                   ixfun_y = IxFun.slice ixfun_base $
-                            fullSliceNum (IxFun.shape ixfun_base) [DimFix other_id]
+                            fullSliceNum base_dims [DimFix other_id]
               return (x { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_x },
                       y { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_y })
             Prim bt ->
