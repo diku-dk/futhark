@@ -331,9 +331,9 @@ allocsForPattern sizeidents validents rts hints = do
 
                     return (patels, ixfn)
 
-        onlyExts :: (Ext a, PrimType) -> S.Set (Int, PrimType)
-        onlyExts (Free _, _) = S.empty
-        onlyExts (Ext i, t) = S.singleton (i, t)
+onlyExts :: (Ext a, PrimType) -> S.Set (Int, PrimType)
+onlyExts (Free _, _) = S.empty
+onlyExts (Ext i, t) = S.singleton (i, t)
 
 
 instantiateIxFun :: Monad m => ExtIxFun -> m IxFun
@@ -679,17 +679,17 @@ allocInExp (If cond tbranch0 fbranch0 (IfAttr rets ifsort)) = do
         res_if_expr = If cond tbranch'' fbranch'' $ IfAttr rets'' ifsort
     return res_if_expr
       where generalize :: (Maybe Space, Maybe MemBind) -> (Maybe Space, Maybe MemBind)
-                       -> (Maybe Space, Maybe (Int, ExtIxFun, M.Map Int (PrimExp VName, PrimExp VName)))
+                       -> (Maybe Space, Maybe (ExtIxFun, [(PrimExp VName, PrimExp VName)]))
             generalize (Just sp1, Just (ArrayIn _ ixf1)) (Just sp2, Just (ArrayIn _ ixf2)) =
               if sp1 /= sp2 then (Just sp1, Nothing)
-              else case IxFun.leastGeneralGeneralization 0 ixf1 ixf2 of
-                Just (k, ixf, tab) -> (Just sp1, Just (k, ixf, tab))
+              else case IxFun.leastGeneralGeneralization ixf1 ixf2 of
+                Just (ixf, m) -> (Just sp1, Just (ixf, m))
                 Nothing -> (Just sp1, Nothing)
             generalize (mbsp1, _) _ = (mbsp1, Nothing)
 
-            selectSub :: ((a, a) -> a) -> Maybe (Int, ExtIxFun, M.Map Int (a, a)) ->
-                         Maybe (Int, ExtIxFun, M.Map Int a)
-            selectSub f (Just (k, ixfn, tab)) = Just (k, ixfn, M.map f tab)
+            selectSub :: ((a, a) -> a) -> Maybe (ExtIxFun, [(a, a)]) ->
+                         Maybe (ExtIxFun, [a])
+            selectSub f (Just (ixfn, m)) = Just (ixfn, map f m)
             selectSub _ Nothing = Nothing
 
             -- | Just introduces the new representation (index functions); but
@@ -722,55 +722,66 @@ allocInExp e = mapExpM alloc e
 
 addResCtxInIfBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                      [ExtType] -> Body tolore -> [Maybe Space] ->
-                     [Maybe (Int, ExtIxFun, M.Map Int (PrimExp VName))] ->
+                     [Maybe (ExtIxFun, [PrimExp VName])] ->
                      AllocM fromlore tolore (Body tolore, [BodyReturns])
 addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
   let num_vals = length ifrets
-      (ctx_res, val_res) = splitFromEnd num_vals res
-      ext_ini = S.size $ shapeContext ifrets
+      (_, val_res) = splitFromEnd num_vals res
   ((res', bodyrets'), all_body_stms) <- collectStms $ do
     mapM_ addStm bnds
-    (val_res', mem_ctx_res, bodyrets, _) <-
-      foldM helper ([], [], [], ext_ini) (zip4 ifrets val_res substs spaces)
-    return (ctx_res <> mem_ctx_res <> val_res', bodyrets)
+    (val_res', ext_ses_res, mem_ctx_res, bodyrets, total_existentials) <-
+      foldM helper ([], [], [], [], 0) (zip4 ifrets val_res substs spaces)
+    return (ext_ses_res <> mem_ctx_res <> val_res',
+             -- We need to adjust the ReturnsNewBlock existentials, because they
+             -- should always be numbered _after_ all other existentials in the
+             -- return values.
+            reverse $ fst $ foldl adjustNewBlockExistential ([], total_existentials) bodyrets)
   body' <- mkBodyM all_body_stms res'
   return (body', bodyrets')
     where
-      helper (res_acc, ctx_acc, br_acc, k) (ifr, r, mbixfsub, sp) =
+      helper (res_acc, ext_acc, ctx_acc, br_acc, k) (ifr, r, mbixfsub, sp) =
         case mbixfsub of
           Nothing -> do
             -- does NOT generalize/antiunify; ensure direct
             r' <- ensureDirect sp r
             mem_ctx_r <- bodyReturnMemCtx r'
-            let (body_ret, i) = inspect k ifr sp
+            let body_ret = inspect ifr sp
             return (res_acc ++ [r'],
+                    ext_acc,
                     ctx_acc ++ mem_ctx_r,
                     br_acc ++ [body_ret],
-                    k + i)
-          Just (i, ixfn, tab) -> do -- generalizes
+                    k)
+          Just (ixfn, m) -> do -- generalizes
+            let i = length m
             ext_ses <- mapM (primExpToSubExp "ixfn_exist"
-                             (return . BasicOp . SubExp . Var)) $
-                       M.elems tab
+                             (return . BasicOp . SubExp . Var))
+                       m
             mem_ctx_r <- bodyReturnMemCtx r
             let sp' = fromMaybe DefaultSpace sp
                 ixfn' = fmap (adjustExtPE k) ixfn
                 exttp = case ifr of
-                          Array pt shp u ->
-                            MemArray pt shp u $
-                            ReturnsNewBlock sp' (k + i) ixfn'
+                          Array pt shp' u ->
+                            MemArray pt shp' u $
+                            ReturnsNewBlock sp' 0 ixfn'
                           _ -> error "Impossible case reached in addResCtxInIfBody"
             return (res_acc ++ [r],
-                    ctx_acc ++ ext_ses ++ mem_ctx_r,
+                    ext_acc ++ ext_ses,
+                    ctx_acc ++ mem_ctx_r,
                     br_acc ++ [exttp],
-                    k + i + 1)
+                    k + i)
 
-      inspect i (Array pt shape u) space =
+      adjustNewBlockExistential :: ([BodyReturns], Int) -> BodyReturns -> ([BodyReturns], Int)
+      adjustNewBlockExistential (acc, k) (MemArray pt shp u (ReturnsNewBlock space _ ixfun)) =
+        (MemArray pt shp u (ReturnsNewBlock space k ixfun) : acc, k + 1)
+      adjustNewBlockExistential (acc, k) x = (x : acc, k)
+
+      inspect (Array pt shape u) space =
         let space' = fromMaybe DefaultSpace space
-            bodyret = MemArray pt shape u $ ReturnsNewBlock space' i $
+            bodyret = MemArray pt shape u $ ReturnsNewBlock space' 0 $
               IxFun.iota $ map convert $ shapeDims shape
-        in (bodyret, 1)
-      inspect _ (Prim pt) _ = (MemPrim pt, 0)
-      inspect _ (Mem space) _ = (MemMem space, 0)
+        in bodyret
+      inspect (Prim pt) _ = MemPrim pt
+      inspect (Mem space) _ = MemMem space
 
       convert (Ext i) = LeafExp (Ext i) int32
       convert (Free v) = Free <$> primExpFromSubExp int32 v
