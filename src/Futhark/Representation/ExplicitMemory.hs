@@ -590,11 +590,6 @@ matchReturnType rettype res ts = do
                   (MemArray y_pt y_shape _ y_ret)
         | x_pt == y_pt, shapeRank x_shape == shapeRank y_shape = do
             zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
-            unless (map extDim (shapeDims x_shape) == IxFun.shape (memReturnIxFun x_ret)) $
-              throwError $ unlines [ "Index function does not match type."
-                                   , "Shape of type: " ++ pretty x_shape
-                                   , "Shape of index function: " ++ pretty (IxFun.shape (memReturnIxFun x_ret))
-                                   ]
             checkMemReturn x_ret y_ret
               where extDim (Ext v) = LeafExp (Ext v) int32
                     extDim (Free se) = Free <$> primExpFromSubExp int32 se
