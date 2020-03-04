@@ -606,6 +606,11 @@ matchReturnType rettype res ts = do
           throwError $ unwords ["Expected ext dim", pretty i, "=>", pretty x,
                                 "but got", pretty y]
 
+      extsInMemInfo :: MemInfo ExtSize u MemReturn -> S.Set Int
+      extsInMemInfo (MemArray _ shp _ ret) =
+        extInShape shp <> extInMemReturn ret
+      extsInMemInfo _ = S.empty
+
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
           | x_mem == y_mem = do
               let x_ixfun' = substConstsInExtIndFun x_ixfun
@@ -648,6 +653,13 @@ matchReturnType rettype res ts = do
                       , "  " ++ prettyTuple ts
                       , s
                       ]
+
+  unless (length (S.unions $ map extsInMemInfo rettype)  == length ctx_res) $
+    TC.bad $ TC.TypeError $ "Too many context parameters for the number of " ++
+    "existentials in the return type! type:\n  " ++
+    prettyTuple rettype ++
+    "\ncannot match context parameters:\n  " ++ prettyTuple ctx_res
+
 
   either bad return =<< runExceptT (zipWithM_ checkReturn rettype val_ts)
 
@@ -702,20 +714,21 @@ matchPatternToExp pat e = do
           extInShape shape <> maybe S.empty extInMemReturn mem_return
         extInExpReturns _ = mempty
 
-        extInShape :: ShapeBase (Ext SubExp) -> S.Set Int
-        extInShape shape = S.fromList $ mapMaybe isExt $ shapeDims shape
 
-        extInMemReturn :: MemReturn -> S.Set Int
-        extInMemReturn (ReturnsInBlock _ extixfn) = extInIxFn extixfn
-        extInMemReturn (ReturnsNewBlock _ i extixfn) =
-          S.singleton i <> extInIxFn extixfn
+extInShape :: ShapeBase (Ext SubExp) -> S.Set Int
+extInShape shape = S.fromList $ mapMaybe isExt $ shapeDims shape
 
-        extInIxFn :: ExtIxFun -> S.Set Int
-        extInIxFn ixfun = S.fromList $ concatMap (mapMaybe isExt . toList) ixfun
+extInMemReturn :: MemReturn -> S.Set Int
+extInMemReturn (ReturnsInBlock _ extixfn) = extInIxFn extixfn
+extInMemReturn (ReturnsNewBlock _ i extixfn) =
+  S.singleton i <> extInIxFn extixfn
 
-        isExt :: Ext a -> Maybe Int
-        isExt (Ext i) = Just i
-        isExt _ = Nothing
+extInIxFn :: ExtIxFun -> S.Set Int
+extInIxFn ixfun = S.fromList $ concatMap (mapMaybe isExt . toList) ixfun
+
+isExt :: Ext a -> Maybe Int
+isExt (Ext i) = Just i
+isExt _ = Nothing
 
 
 varMemInfo :: ExplicitMemorish lore =>
