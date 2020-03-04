@@ -316,7 +316,6 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
     min_size = sizeof(int);
   }
 
-
   if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
     // Successfully found a free block.  Is it big enough?
     //
@@ -332,7 +331,8 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
     }
   }
 
-  *mem_out = glGenBuffers(size, ctx->SSBOs);
+  glGenBuffers(size, &ctx->SSBOs);
+  *mem_out = ctx->SSBOs;
 
   error = glGetError();
   if (error != GL_NO_ERROR) {
@@ -360,7 +360,7 @@ static GLenum opengl_free(struct opengl_context *ctx,
 
   // If there is already a block with this tag, then remove it.
   if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
-    glDeleteBuffers(size, existing_mem);
+    glDeleteBuffers(size, &existing_mem);
     error = glGetError();
     if (error != GL_NO_ERROR) {
       return error;
@@ -376,7 +376,7 @@ static GLenum opengl_free(struct opengl_context *ctx,
 
 }
 
-static GLenum opengl_free_all(struct opencl_context *ctx) {
+static GLenum opengl_free_all(struct opengl_context *ctx) {
   GLuint mem;
   GLenum error;
   free_list_pack(&ctx->free_list);
