@@ -403,10 +403,6 @@ fixExtIxFun i e = fmap $ replaceInPrimExp update
 leafExp :: Int -> PrimExp (Ext a)
 leafExp i = LeafExp (Ext i) int32
 
-memReturnIxFun :: MemReturn -> ExtIxFun
-memReturnIxFun (ReturnsInBlock _ ixfun) = ixfun
-memReturnIxFun (ReturnsNewBlock _ _ ixfun) = ixfun
-
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
 existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
   where ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0..]
@@ -591,8 +587,6 @@ matchReturnType rettype res ts = do
         | x_pt == y_pt, shapeRank x_shape == shapeRank y_shape = do
             zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
             checkMemReturn x_ret y_ret
-              where extDim (Ext v) = LeafExp (Ext v) int32
-                    extDim (Free se) = Free <$> primExpFromSubExp int32 se
       checkReturn x y =
         throwError $ unwords ["Expected ", pretty x, " but got ", pretty y]
 
