@@ -172,7 +172,54 @@ static char* opengl_succeed_nonfatal(unsigned int ret,
 }
 
 static void setup_size_opengl(struct opengl_context *ctx) {
- // TODO
+
+   int max_shared_memory;
+   int max_group_size;
+   int max_num_groups;
+
+   glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE,
+                 &max_shared_memory);
+   glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_SIZE,
+                 &max_group_size);
+   glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS,
+                 &max_num_groups);
+
+   ctx->max_threshold     = 0;
+   ctx->max_shared_memory = max_shared_memory;
+   ctx->max_group_size    = max_group_size;
+   ctx->max_num_groups    = max_num_groups;
+
+  // Go through all the sizes, clamp them to the valid range,
+  // or set them to the default.
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    const char *size_class = ctx->cfg.size_classes[i];
+    size_t *size_value = &ctx->cfg.size_values[i];
+    const char* size_name = ctx->cfg.size_names[i];
+    size_t max_value, default_value;
+    if (strstr(size_class, "group_size") == size_class) {
+      max_value = max_group_size;
+      default_value = ctx->cfg.default_group_size;
+    } else if (strstr(size_class, "num_groups") == size_class) {
+      max_value = max_group_size; // Futhark assumes this constraint.
+      default_value = ctx->cfg.default_num_groups;
+    } else if (strstr(size_class, "tile_size") == size_class) {
+      max_value = sqrt(max_group_size);
+      default_value = ctx->cfg.default_tile_size;
+    } else if (strstr(size_class, "threshold") == size_class) {
+      max_value = 0; // No limit.
+      default_value = ctx->cfg.default_threshold;
+    } else {
+      // Bespoke sizes have no limit or default.
+      max_value = 0;
+    }
+    if (*size_value == 0) {
+      *size_value = default_value;
+    } else if (max_value > 0 && *size_value > max_value) {
+      fprintf(stderr, "Note: Device limits %s to %d (down from %d)\n",
+              size_name, (int)max_value, (int)*size_value);
+      *size_value = max_value;
+    }
+  }
 }
 
 static void setup_opengl(struct opengl_context *ctx,
@@ -252,6 +299,9 @@ static void setup_opengl(struct opengl_context *ctx,
       fprintf(stderr, "glad: Failed to initialize OpenGL context\n");
       exit(1);
     }
+
+  setup_size_opengl(ctx);
+
 }
 
 static GLenum opengl_alloc(struct opengl_context *ctx,
