@@ -15,10 +15,18 @@
     }                                             \
   }
 
-typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
-typedef Bool (*glXMakeContextCurrentARBProc)(Display*, GLXDrawable, GLXDrawable, GLXContext);
+typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*,
+                                                    GLXFBConfig,
+                                                    GLXContext,
+                                                    Bool,
+                                                    const int*);
+typedef Bool (*glXMakeContextCurrentARBProc)(Display*,
+                                             GLXDrawable,
+                                             GLXDrawable,
+                                             GLXContext);
+
 static glXCreateContextAttribsARBProc glXCreateContextAttribsARB = 0;
-static glXMakeContextCurrentARBProc glXMakeContextCurrentARB = 0;
+static glXMakeContextCurrentARBProc glXMakeContextCurrentARB     = 0;
 
 struct opengl_config {
   int debugging;
@@ -76,6 +84,8 @@ static void opengl_config_init(struct opengl_config *cfg,
 }
 
 struct opengl_context {
+
+  GLuint SSBOs;
 
   struct opengl_config cfg;
 
@@ -190,7 +200,8 @@ static void setup_opengl(struct opengl_context *ctx,
   }
 
   /* get framebuffer configs, any is usable (might want to add proper attribs) */
-  if ( !(fbc = glXChooseFBConfig(dpy, DefaultScreen(dpy), visual_attribs, &fbcount) ) ) {
+  if ( !(fbc = glXChooseFBConfig(dpy, DefaultScreen(dpy), visual_attribs,
+                                 &fbcount) ) ) {
     fprintf(stderr, "Failed to get FBConfig\n");
     exit(1);
   }
@@ -207,7 +218,8 @@ static void setup_opengl(struct opengl_context *ctx,
   }
 
   /* create a context using glXCreateContextAttribsARB */
-  if ( !( glctx = glXCreateContextAttribsARB(dpy, fbc[0], 0, True, context_attribs)) ) {
+  if ( !( glctx = glXCreateContextAttribsARB(dpy, fbc[0], 0, True,
+                                             context_attribs)) ) {
     fprintf(stderr, "Failed to create opengl context\n");
     XFree(fbc);
     exit(1);
@@ -226,10 +238,11 @@ static void setup_opengl(struct opengl_context *ctx,
 
   /* try to make it the current context */
   if ( !glXMakeContextCurrent(dpy, pbuf, pbuf, glctx) ) {
-    /* some drivers does not support context without default framebuffer, so fallback on
-    *  using the default window.
+    /* some drivers does not support context without default framebuffer,
+    *  so fallback on using the default window.
     */
-    if ( !glXMakeContextCurrent(dpy, DefaultRootWindow(dpy), DefaultRootWindow(dpy), glctx) ) {
+    if ( !glXMakeContextCurrent(dpy, DefaultRootWindow(dpy),
+                                DefaultRootWindow(dpy), glctx) ) {
       fprintf(stderr, "failed to make current\n");
       exit(1);
     }
@@ -241,17 +254,91 @@ static void setup_opengl(struct opengl_context *ctx,
     }
 }
 
-static int opengl_alloc(struct opengl_context *ctx,
-                        size_t      min_size,
-                        const char *tag,
-                        GLenum      *mem_out) {
-  return 0;
+static GLenum opengl_alloc(struct opengl_context *ctx,
+                           size_t      min_size,
+                           const char *tag,
+                           GLuint     *mem_out) {
+
+  GLenum error;
+  size_t size;
+
+  if (min_size < sizeof(int)) {
+    min_size = sizeof(int);
+  }
+
+
+  if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
+    // Successfully found a free block.  Is it big enough?
+    //
+    // FIXME: See `opencl_alloc(...)` in `opencl.h`
+    if (size >= min_size) {
+      return GL_NO_ERROR;
+    } else {
+      glDeleteBuffers(size, mem_out);
+      error = glGetError();
+      if (error != GL_NO_ERROR) {
+        return error;
+      }
+    }
+  }
+
+  *mem_out = glGenBuffers(size, ctx->SSBOs);
+
+  error = glGetError();
+  if (error != GL_NO_ERROR) {
+    return error;
+  }
+
+  int x = 2;
+  //TODO: binding
+  //glBindBuffer(GL_SHADER_STORAGE_BUFFER, ctx->SSBOs);
+
+  glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(x), &x,
+               GL_DYNAMIC_DRAW);
+
+  error = glGetError();
+
+  return error;
 }
 
-static int opengl_free(struct opengl_context *ctx,
-                       GLenum      mem, 
-                       const char *tag) {
-  return 0;
+static GLenum opengl_free(struct opengl_context *ctx,
+                          GLuint      mem,
+                          const char *tag) {
+  size_t size;
+  GLuint existing_mem;
+  GLenum error;
+
+  // If there is already a block with this tag, then remove it.
+  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
+    glDeleteBuffers(size, existing_mem);
+    error = glGetError();
+    if (error != GL_NO_ERROR) {
+      return error;
+    }
+  }
+
+  //TODO: get object info
+  error = glGetError();
+
+  if (error == GL_NO_ERROR) {
+    free_list_insert(&ctx->free_list, size, mem, tag);
+  }
+
+}
+
+static GLenum opengl_free_all(struct opencl_context *ctx) {
+  GLuint mem;
+  GLenum error;
+  free_list_pack(&ctx->free_list);
+    while (free_list_first(&ctx->free_list, &mem) == 0) {
+      //glDeleteBuffers(size, mem); //TODO: get size
+      error = glGetError();
+      if (error != GL_NO_ERROR) {
+        return error;
+      }
+    }
+
+  return GL_NO_ERROR;
 }
 
 // End of opengl.h.
