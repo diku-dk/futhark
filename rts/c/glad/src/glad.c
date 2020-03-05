@@ -1,4 +1,4 @@
-// // Start of glad.c.
+// Start of glad.c.
 
 /*
 
