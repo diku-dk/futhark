@@ -32,7 +32,7 @@ import Futhark.Transform.Rename
 import Futhark.Representation.AST.Attributes.Names
 
 import Debug.Trace
-import Text.PrettyPrint.Mainland.Class
+import Futhark.Util.Pretty
 
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
@@ -43,9 +43,10 @@ _pretty = (++ "\n\n====================="
            ++ "========================="
            ++ "=====================\n\n") . pretty
 
+-- mmmTiling2D lvl space ts kbody
 mmmTiling2D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
-mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker_body))))
-  | KernelBody () kstms kres <- old_ker_body,
+mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbody))))
+  | KernelBody () kstms kres <- old_kbody,
 
     -- build the variance table, that records, for
     -- each variable name, the variables it depends on
@@ -78,46 +79,66 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_ker
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (gidx, width_B) : (gidy, height_A) : _ <- reverse $ unSegSpace space,
+    (gidx, width_B) : (gidy, height_A) : rem_outer_dims <- reverse $ unSegSpace space,
 
     -- sanity check that the reduce part is not missing
+
     not (null red_nes) = do
+      (stm', stms) <- runBinder $ do
 
-        ty_name <- nameFromString . pretty <$> newVName "Ty"         -- these type check
-        tx_name <- nameFromString . pretty <$> newVName "Tx"
-        tk_name <- nameFromString . pretty <$> newVName "Tk"
-        ry_name <- nameFromString . pretty <$> newVName "Ry"
-        rx_name <- nameFromString . pretty <$> newVName "Rx"
-        rk_name <- nameFromString . pretty <$> newVName "Rk"
-        ty <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile -- these do not >:(
-        tx <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
-        tk <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
-        ry <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeLocalMemory
-        rx <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeLocalMemory
-        rk <- letSubExp "Rk" $ Op $ SizeOp $ GetSize rk_name SizeLocalMemory
+        -- ty_name  <- nameFromString . pretty <$> newVName "Ty"
+        -- tx_name  <- nameFromString . pretty <$> newVName "Tx"
+        -- ry_name  <- nameFromString . pretty <$> newVName "Ry"
+        -- rx_name  <- nameFromString . pretty <$> newVName "Rx"
+        gid_x    <- newVName "gid_x"
+        gid_y    <- newVName "gid_y"
+        gid_flat <- newVName "gid_flat"
 
+        ty <- letSubExp "Ty" $ BasicOp $ SubExp $ intConst Int32 16 -- Op $ SizeOp $ GetSize ty_name SizeTile
+        tx <- letSubExp "Tx" $ BasicOp $ SubExp $ intConst Int32 8  -- Op $ SizeOp $ GetSize tx_name SizeTile
+        ry <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 4  -- Op $ SizeOp $ GetSize ty_name SizeTile
+        rx <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 4  -- Op $ SizeOp $ GetSize tx_name SizeTile
 
-        ty_ry      <- letSubExp "ty_ry" $ BasicOp $ BinOp (Mul Int32) ty ry
-        tx_rx      <- letSubExp "tx_rx" $ BasicOp $ BinOp (Mul Int32) tx rx
+        tx_rx <- letSubExp "tx_rx" $ BasicOp $ BinOp (Mul Int32) tx rx -- tx rx 
+        ty_ry <- letSubExp "ty_ry" $ BasicOp $ BinOp (Mul Int32) ty ry -- ty ry 
+
         group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
 
-        grid_dimx <- letSubExp "grid_dimx" =<< eDivRoundingUp Int32 (eSubExp width_B)  tx_rx
-        grid_dimy <- letSubExp "grid_dimy" =<< eDivRoundingUp Int32 (eSubExp height_A) ty_ry
+        grid_dimy <- letSubExp "grid_dimy" =<< eDivRoundingUp Int32 (eSubExp height_A) (eSubExp ty_ry)
+        grid_dimx <- letSubExp "grid_dimx" =<< eDivRoundingUp Int32 (eSubExp width_B)  (eSubExp tx_rx)
 
-        num_groups <- letSubExp "num_groups_top" $ BasicOp $ BinOp (Mul Int32) grid_dimx grid_dimy
+        num_groups_top <- letSubExp "num_groups_top" $ BasicOp $ BinOp (Mul Int32) grid_dimx grid_dimy
+
+        --
+        -- create seggroup with segthreadprivate inside
+        --
+        let lvl'   = SegGroup (Count num_groups_top) (Count group_size) SegNoVirt
+        let space' = SegSpace gid_flat [(gid_x, grid_dimx), (gid_y, grid_dimy)]
+
+        tmp_zero <- letSubExp "tmp_zero" $ BasicOp $ SubExp $ intConst Int32 0
+        tmp_rep  <- letSubExp "tmp_rep"  $ BasicOp $ Replicate (Shape [rx]) tmp_zero
+        zeroes   <- letSubExp "zeroes" $ BasicOp (Replicate (Shape [ry]) tmp_rep)
 
 
-        traceM (">> pat:\n"                      ++ _pretty pat          ++
-                ">> space:\n"                    ++ _pretty space        ++
-                ">> old_ker_body:\n"             ++ _pretty old_ker_body ++
-                ">> code2':\n"                   ++ _pretty code2'       ++
-                ">> Variant arrays:\n"           ++ _pretty arr_var_dims ++
-                ">> Variance table:\n"           ++ _pretty variance     ++
-                ">> reduce result variance:\n"   ++ _pretty res_red_var  ++
-                ">> indirect-slice table:\n"     ++ _pretty arr_tab0     ++
-                ">> (gidx, m_X) : (gidy, m_Y)\n" ++ _pretty [(gidx, width_B), (gidy, height_A)] ++
-                ">> entire stm:\n"               ++ _pretty stm)
-        return Nothing
+        -- for now, just fill in the original kernel body
+
+        result <- letSubExp "zeroes" $ Op $ SegOp $ SegMap lvl' space' ts $ old_kbody
+
+        return $ Let pat aux $ Op $ SegOp $ SegMap lvl' space ts old_kbody
+
+      trace (
+             -- ">> pat:\n"                      ++ _pretty pat          ++
+             -- ">> space:\n"                    ++ _pretty space        ++
+             -- ">> old_kbody:\n"                ++ _pretty old_kbody ++
+             -- ">> code2':\n"                   ++ _pretty code2'       ++
+             -- ">> Variant arrays:\n"           ++ _pretty arr_var_dims ++
+             -- ">> Variance table:\n"           ++ _pretty variance     ++
+             -- ">> reduce result variance:\n"   ++ _pretty res_red_var  ++
+             -- ">> indirect-slice table:\n"     ++ _pretty arr_tab0     ++
+             -- ">> (gidx, m_X) : (gidy, m_Y)\n" ++ _pretty [(gidx, width_B), (gidy, height_A)] ++
+             ">> stms:\n"                     ++ _pretty stms ++
+             ">> stm':\n"                     ++ _pretty stm')
+             $ return $ Just (stms, stm')
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
@@ -276,3 +297,44 @@ sufficientGroups gspace group_size = do
 
 
 
+    -- not (null red_nes) = do
+
+      -- ty_name <- nameFromString . pretty <$> newVName "Ty"
+      -- ty_name <- newVName "Ty"
+      -- tx_name <- newVName "Tx"
+      -- ry_name <- newVName "Ry"
+      -- rx_name <- newVName "Rx"
+      -- ty_ry_name <- newVName "TyRy"
+      -- tx_rx_name <- newVName "TxRx"
+      -- group_size_name <- newVName "group_size"
+      --
+      -- let ty = mkLet [] [Ident ty_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (16 :: Int32)
+      -- let tx = mkLet [] [Ident tx_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (16 :: Int32)
+      -- let ry = mkLet [] [Ident ry_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (4  :: Int32)
+      -- let rx = mkLet [] [Ident rx_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (4  :: Int32)
+      --
+      -- let group_size = mkLet [] [Ident ty_name $ Prim $ IntType Int32] -- ty*tx
+      -- let ty_ry      = mkLet [] [Ident tx_name $ Prim $ IntType Int32] -- ty*ry
+      -- let tx_rx      = mkLet [] [Ident ry_name $ Prim $ IntType Int32] -- tx*rx
+      --
+      -- let statements = [ty, tx, ry, rx]
+      -- -- SegGroup
+      -- trace (pretty $ stmsFromList statements) $ return $ Just (stmsFromList statements, stm)
+
+          -- group_size = mkLet [] [Ident group_size_name $ Prim Int32]
+          --                (primExpFromSubExp (Prim Int32) ty * primExpFromSubExp (Prim Int32) tx)
+          --
+          -- tx_rx      = mkLet [] [Ident tx_rx_name $ Prim Int32]
+          --                (primExpFromSubExp (Prim Int32) tx * primExpFromSubExp (Prim Int32) rx)
+          --
+          -- tx = mkLet [] [Ident tx_name $ Prim $ IntType Int32] IntValue $ Int32Value 8
+          -- ry = mkLet [] [Ident ry_name $ Prim $ IntType Int32] IntValue $ Int32Value 4
+          -- rx = mkLet [] [Ident rx_name $ Prim $ IntType Int32] IntValue $ Int32Value 4
+          -- ty_ry      = mkLet [] [Ident ty_ry_name $ Prim Int32]
+          --                (primExpFromSubExp (Prim Int32) ty * primExpFromSubExp (Prim Int32) ry)
+
+
+
+      -- let a = constant (3 :: Int32)
+          -- b = constant (4 :: Int32)
+          -- x = (primExpFromSubExp (IntType Int32) a * primExpFromSubExp (IntType Int32) b)
