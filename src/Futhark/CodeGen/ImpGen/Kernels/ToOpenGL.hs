@@ -29,7 +29,6 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenGL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenGL as ImpOpenGL
 import Futhark.MonadFreshNames
-import Futhark.Representation.ExplicitMemory (allScalarMemory)
 import Futhark.Util (zEncodeString)
 
 kernelsToOpenGL :: ImpKernels.Program
