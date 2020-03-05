@@ -56,10 +56,10 @@ compileProg prog = do
                                    ]
 
 copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
-copyDevToDev = "copy_dev_to_dev"
-copyDevToHost = "copy_dev_to_host"
-copyHostToDev = "copy_host_to_dev"
-copyScalarToDev = "copy_scalar_to_dev"
+copyDevToDev      = "copy_dev_to_dev"
+copyDevToHost     = "copy_dev_to_host"
+copyHostToDev     = "copy_host_to_dev"
+copyScalarToDev   = "copy_scalar_to_dev"
 copyScalarFromDev = "copy_scalar_from_dev"
 
 cliOptions :: [Option]
@@ -71,52 +71,41 @@ cliOptions =
 writeOpenGLScalar :: GC.WriteScalar OpenGL ()
 writeOpenGLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
-  --TODO{
-  let (decl, blocking) =
-        case val of
-          C.Const{} -> ([C.citem|static $ty:t $id:val' = $exp:val;|], [C.cexp|CL_FALSE|])
-          _         -> ([C.citem|$ty:t $id:val' = $exp:val;|], [C.cexp|CL_TRUE|])
-  GC.stm [C.cstm|{$item:decl
-                  OPENCL_SUCCEED_OR_RETURN(
-                    clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, $exp:blocking,
-                                         $exp:i * sizeof($ty:t), sizeof($ty:t),
-                                         &$id:val',
-                                         0, NULL, $exp:( copyScalarToDev)));
-                }|]
---TODO}
+  GC.stm [C.cstm|glMapBufferRange(GL_SHADER_STORAGE_BUFFER,
+                                  $exp:i,
+                                  sizeof($ty:t),
+                                  GL_MAP_WRITE_BIT
+                                 );
+                |]
+  -- TODO: Might need to sync and unmap here.
 writeOpenGLScalar _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
 readOpenGLScalar :: GC.ReadScalar OpenGL ()
 readOpenGLScalar mem i t "device" _ = do
-  --TODO{
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(
-                   clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem, CL_TRUE,
-                                       $exp:i * sizeof($ty:t), sizeof($ty:t),
-                                       &$id:val,
-                                       0, NULL, $exp:( copyScalarFromDev)));
-              |]
+  GC.stm [C.cstm|glMapBufferRange(GL_SHADER_STORAGE_BUFFER,
+                                  $exp:i,
+                                  sizeof($ty:t),
+                                  GL_MAP_READ_BIT
+                                 );
+                |]
+  -- TODO: Might need to sync and unmap here.
   return [C.cexp|$id:val|]
-  --TODO}
 readOpenGLScalar _ _ _ space _ =
   error $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenGLBuffer :: GC.Allocate OpenGL ()
 allocateOpenGLBuffer mem size tag "device" =
-  --TODO{
   GC.stm [C.cstm|opengl_alloc(&ctx->opengl,
                                           $exp:size, $exp:tag, &$exp:mem);|]
-  --TODO}
 allocateOpenGLBuffer _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space."
 
 deallocateOpenGLBuffer :: GC.Deallocate OpenGL ()
 deallocateOpenGLBuffer mem tag "device" =
-  --TODO{
     GC.stm [C.cstm|opengl_free(&ctx->opengl,  $exp:mem, $exp:tag);|]
-  --TODO}
 deallocateOpenGLBuffer _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
 
@@ -211,6 +200,7 @@ staticOpenGLArray name "device" t vs = do
 staticOpenGLArray _ space _ _ =
   error $ "OpenGL backend cannot create static array in memory space '" ++ space ++ "'"
 
+-- TODO:
 callShader :: GC.OpCompiler OpenGL ()
 callShader (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
