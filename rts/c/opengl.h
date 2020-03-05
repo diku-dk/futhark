@@ -334,7 +334,7 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
 
   glGenBuffers(1, &ssbo);
 
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, &ssbo);
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
 
   error = glGetError();
   if (error != GL_NO_ERROR) {
@@ -344,9 +344,9 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
   glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL,
                GL_DYNAMIC_DRAW);
 
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, &ssbo);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ssbo);
 
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, &ssbo);
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
 
   error = glGetError();
 
@@ -386,7 +386,7 @@ static GLenum opengl_free_all(struct opengl_context *ctx) {
   GLenum error;
   free_list_pack(&ctx->free_list);
     while (free_list_first(&ctx->free_list, &mem) == 0) {
-      glDeleteBuffers(1, mem);
+      glDeleteBuffers(1, &mem);
       error = glGetError();
       if (error != GL_NO_ERROR) {
         return error;
