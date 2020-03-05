@@ -7,8 +7,9 @@ module Futhark.CodeGen.Backends.CCUDA
   , GC.asExecutable
   ) where
 
-import qualified Language.C.Quote.OpenCL as C
+import Control.Monad
 import Data.List
+import qualified Language.C.Quote.OpenCL as C
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
@@ -27,14 +28,14 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program cuda_code cuda_prelude kernel_names _ sizes prog') ->
+    Right (Program cuda_code cuda_prelude kernel_names _ sizes failures prog') ->
       let extra = generateBoilerplate cuda_code cuda_prelude
-                                      kernel_names sizes
+                                      kernel_names sizes failures
       in Right <$> GC.compileProg operations extra cuda_includes
                    [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()
-    operations = GC.Operations
+    operations = GC.defaultOperations
                  { GC.opsWriteScalar = writeCUDAScalar
                  , GC.opsReadScalar  = readCUDAScalar
                  , GC.opsAllocate    = allocateCUDABuffer
@@ -102,6 +103,7 @@ readCUDAScalar mem idx t "device" _ = do
                                 $exp:mem + $exp:idx * sizeof($ty:t),
                                 sizeof($ty:t)));
                 |]
+  GC.stm [C.cstm|if (futhark_context_sync(ctx) != 0) { return 1; }|]
   return [C.cexp|$id:val|]
 readCUDAScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
@@ -184,7 +186,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeTile = "tile_size"
     cudaSizeClass SizeLocalMemory = "shared_memory"
     cudaSizeClass (SizeBespoke x _) = pretty x
-callKernel (LaunchKernel name args num_blocks block_size) = do
+callKernel (LaunchKernel safety name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"
   time_end <- newVName "time_end"
@@ -202,9 +204,14 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
   let perm_args
         | length num_blocks == 3 = [ [C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|] ]
         | otherwise = []
-  let args'' = perm_args ++ [ [C.cinit|&$id:a|] | a <- args' ]
+      failure_args = take (numFailureParams safety)
+                     [[C.cinit|&ctx->global_failure|],
+                      [C.cinit|&ctx->failure_is_an_option|],
+                      [C.cinit|&ctx->global_failure_args|]]
+      args'' = perm_args ++ failure_args ++ [ [C.cinit|&$id:a|] | a <- args' ]
       sizes_nonzero = expsNotZero [grid_x, grid_y, grid_z,
                       block_x, block_y, block_z]
+
   GC.stm [C.cstm|
     if ($exp:sizes_nonzero) {
       int perm[3] = { 0, 1, 2 };
@@ -247,6 +254,10 @@ callKernel (LaunchKernel name args num_blocks block_size) = do
                 $string:name, $id:time_end - $id:time_start);
       }
     }|]
+
+  when (safety >= SafetyFull) $
+    GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
+
   where
     mkDims [] = ([C.cexp|0|] , [C.cexp|0|], [C.cexp|0|])
     mkDims [x] = (x, [C.cexp|1|], [C.cexp|1|])

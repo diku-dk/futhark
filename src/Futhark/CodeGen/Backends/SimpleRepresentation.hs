@@ -5,8 +5,6 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , tupleFieldExp
   , funName
   , defaultMemBlockType
-  , intTypeToCType
-  , floatTypeToCType
   , primTypeToCType
   , signedPrimTypeToCType
 
@@ -104,9 +102,11 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         taggedI s Int32 = s ++ "32"
         taggedI s Int64 = s ++ "64"
 
-        mkAdd = simpleIntOp "add" [C.cexp|x + y|]
-        mkSub = simpleIntOp "sub" [C.cexp|x - y|]
-        mkMul = simpleIntOp "mul" [C.cexp|x * y|]
+        -- Use unsigned types for add/sub/mul so we can do
+        -- well-defined overflow.
+        mkAdd = simpleUintOp "add" [C.cexp|x + y|]
+        mkSub = simpleUintOp "sub" [C.cexp|x - y|]
+        mkMul = simpleUintOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
@@ -204,54 +204,54 @@ cIntPrimFuns :: [C.Definition]
 cIntPrimFuns =
   [C.cunit|
 $esc:("#if defined(__OPENCL_VERSION__)")
-   typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return popcount(x);
    }
-   typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "popc16") (typename int16_t x) {
       return popcount(x);
    }
-   typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "popc32") (typename int32_t x) {
       return popcount(x);
    }
-   typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "popc64") (typename int64_t x) {
       return popcount(x);
    }
 $esc:("#elif defined(__CUDA_ARCH__)")
-   typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return __popc(zext_i8_i32(x));
    }
-   typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "popc16") (typename int16_t x) {
       return __popc(zext_i16_i32(x));
    }
-   typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "popc32") (typename int32_t x) {
       return __popc(x);
    }
-   typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "popc64") (typename int64_t x) {
       return __popcll(x);
    }
 $esc:("#else")
-   typename int32_t $id:(funName' "popc8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "popc8") (typename int8_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
     }
-   typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "popc16") (typename int16_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
    }
-   typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "popc32") (typename int32_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
      }
      return c;
    }
-   typename int32_t $id:(funName' "popc64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "popc64") (typename int64_t x) {
      int c = 0;
      for (; x; ++c) {
        x &= x - 1;
@@ -261,33 +261,33 @@ $esc:("#else")
 $esc:("#endif")
 
 $esc:("#if defined(__OPENCL_VERSION__)")
-   typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
       return clz(x);
    }
-   typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "clz16") (typename int16_t x) {
       return clz(x);
    }
-   typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "clz32") (typename int32_t x) {
       return clz(x);
    }
-   typename int32_t $id:(funName' "clz64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "clz64") (typename int64_t x) {
       return clz(x);
    }
 $esc:("#elif defined(__CUDA_ARCH__)")
-   typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
       return __clz(zext_i8_i32(x))-24;
    }
-   typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "clz16") (typename int16_t x) {
       return __clz(zext_i16_i32(x))-16;
    }
-   typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "clz32") (typename int32_t x) {
       return __clz(x);
    }
-   typename int32_t $id:(funName' "clz64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "clz64") (typename int64_t x) {
       return __clzll(x);
    }
 $esc:("#else")
-   typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+   static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
@@ -297,7 +297,7 @@ $esc:("#else")
     }
     return n;
    }
-   typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+   static typename int32_t $id:(funName' "clz16") (typename int16_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
@@ -307,7 +307,7 @@ $esc:("#else")
     }
     return n;
    }
-   typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+   static typename int32_t $id:(funName' "clz32") (typename int32_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
@@ -317,7 +317,7 @@ $esc:("#else")
     }
     return n;
    }
-   typename int32_t $id:(funName' "clz64") (typename int64_t x) {
+   static typename int32_t $id:(funName' "clz64") (typename int64_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {

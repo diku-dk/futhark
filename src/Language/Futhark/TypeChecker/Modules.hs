@@ -1,4 +1,5 @@
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Language.Futhark.TypeChecker.Modules
   ( matchMTys
   , newNamesForMTy
@@ -181,12 +182,12 @@ refineEnv loc tset env tname ps t
                               TypeSub $ TypeAbbr l cur_ps t),
                               (v, TypeSub $ TypeAbbr l ps t)])
                 env)
-      else typeError loc mempty $ "Cannot refine a type having " <>
+      else typeError loc mempty $ "Cannot refine a type having" <+>
            tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
   | otherwise =
-      typeError loc mempty $ pretty tname ++ " is not an abstract type in the module type."
+      typeError loc mempty $ ppr tname <+> "is not an abstract type in the module type."
   where tpMsg [] = "no type parameters"
-        tpMsg xs = "type parameters " <> unwords (map pretty xs)
+        tpMsg xs = "type parameters" <+> spread (map ppr xs)
 
 paramsMatch :: [TypeParam] -> [TypeParam] -> Bool
 paramsMatch ps1 ps2 = length ps1 == length ps2 && all match (zip ps1 ps2)
@@ -235,18 +236,18 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
         missingType loc $ fmap baseName name
   where mismatchedLiftedness name_l abs name mod_t =
           Left $ TypeError loc Nothing mempty $
-          unlines ["Module defines",
-                   sindent $ ppTypeAbbr abs name mod_t,
-                   "but module type requires " ++ what ++ "."]
+          "Module defines" </>
+          indent 2 (ppTypeAbbr abs name mod_t) </>
+          "but module type requires" <+> text what <> "."
           where what = case name_l of Unlifted -> "a non-lifted type"
                                       SizeLifted -> "a size-lifted type"
                                       Lifted -> "a lifted type"
 
         anonymousSizes abs name mod_t =
           Left $ TypeError loc Nothing mempty $
-          unlines ["Module defines",
-                   sindent $ ppTypeAbbr abs name mod_t,
-                   "which contains anonymous sizes, but module type requires non-lifted type."]
+          "Module defines" </>
+          indent 2 (ppTypeAbbr abs name mod_t) </>
+          "which contains anonymous sizes, but module type requires non-lifted type."
 
         emptyDims :: StructType -> Bool
         emptyDims = isNothing . traverseDims onDim
@@ -290,17 +291,17 @@ resolveMTyNames = resolveMTyNames'
 missingType :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingType loc name =
   Left $ TypeError loc Nothing mempty $
-  "Module does not define a type named " ++ pretty name ++ "."
+  "Module does not define a type named" <+> ppr name <> "."
 
 missingVal :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingVal loc name =
   Left $ TypeError loc Nothing mempty $
-  "Module does not define a value named " ++ pretty name ++ "."
+  "Module does not define a value named" <+> ppr name <> "."
 
 missingMod :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingMod loc name =
   Left $ TypeError loc Nothing mempty $
-  "Module does not define a module named " ++ pretty name ++ "."
+  "Module does not define a module named" <+> ppr name <> "."
 
 mismatchedType :: SrcLoc
                -> [VName]
@@ -309,23 +310,20 @@ mismatchedType :: SrcLoc
                -> (Liftedness, [TypeParam], StructType)
                -> Either TypeError b
 mismatchedType loc abs name spec_t env_t =
-  Left $ TypeError loc Nothing mempty $ intercalate "\n"
-  ["Module defines",
-   sindent $ ppTypeAbbr abs name env_t,
-   "but module type requires",
-   sindent $ ppTypeAbbr abs name spec_t]
+  Left $ TypeError loc Nothing mempty $
+  "Module defines" </>
+  indent 2 (ppTypeAbbr abs name env_t) </>
+  "but module type requires" </>
+  indent 2 (ppTypeAbbr abs name spec_t)
 
-sindent :: String -> String
-sindent = intercalate "\n" . map ("  "++) . lines
-
-ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructType) -> String
+ppTypeAbbr :: [VName] -> VName -> (Liftedness, [TypeParam], StructType) -> Doc
 ppTypeAbbr abs name (l, ps, Scalar (TypeVar () _ tn args))
   | typeLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-      pretty $ text "type" <> ppr l <+> pprName name <+>
+      "type" <> ppr l <+> pprName name <+>
       spread (map ppr ps)
 ppTypeAbbr _ name (l, ps, t) =
-  pretty $ text "type" <> ppr l <+> pprName name <+>
+  "type" <> ppr l <+> pprName name <+>
   spread (map ppr ps) <+> equals <+/>
   nest 2 (align (ppr t))
 
@@ -432,6 +430,15 @@ matchMTys orig_mty orig_mty_sig =
       -- We have to create substitutions for the type parameters, too.
       unless (length spec_ps == length ps) $ nomatch spec_t
       param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
+
+      case S.toList (mustBeExplicitInType t) `intersect` map typeParamName ps of
+        [] -> return ()
+        d:_ -> Left $ TypeError loc Nothing mempty $
+               "Type" </>
+               indent 2 (ppTypeAbbr [] name (l, ps, t)) </>
+               textwrap "cannot be made abstract because size parameter" <+/> pquote (pprName d) <+/>
+               textwrap "is not used as an array size in the definition."
+
       let spec_t' = substituteTypes (param_substs<>abs_subst_to_type) spec_t
       if spec_t' == t
         then return (spec_name, name)
@@ -458,10 +465,10 @@ matchMTys orig_mty orig_mty_sig =
       case matchValBinding loc spec_v v of
         Nothing -> return (spec_name, name)
         Just problem ->
-          Left $ TypeError loc Nothing mempty $ pretty $
-          text "Module type specifies" </>
+          Left $ TypeError loc Nothing mempty $
+          "Module type specifies" </>
           indent 2 (ppValBind spec_name spec_v) </>
-          text "but module provides" </>
+          "but module provides" </>
           indent 2 (ppValBind spec_name v) </>
           maybe mempty text problem
 
@@ -476,7 +483,7 @@ matchMTys orig_mty orig_mty_sig =
                 | otherwise -> Just Nothing
 
     ppValBind v (BoundV tps t) =
-      text "val" <+> pprName v <+> spread (map ppr tps) <+> colon </>
+      "val" <+> pprName v <+> spread (map ppr tps) <+> colon </>
       indent 2 (align (ppr t))
 
 applyFunctor :: SrcLoc -> FunSig -> MTy

@@ -276,11 +276,17 @@ onExp e = do
   case either (Left . T.prettyTypeError) Right $
        T.checkExp imports src tenv e of
     Left err -> liftIO $ putStrLn err
-    Right (_, e') -> do
-      r <- runInterpreter $ I.interpretExp ienv e'
-      case r of
-        Left err -> liftIO $ print err
-        Right v -> liftIO $ putStrLn $ pretty v
+    Right (tparams, e')
+      | null tparams -> do
+          r <- runInterpreter $ I.interpretExp ienv e'
+          case r of
+            Left err -> liftIO $ print err
+            Right v -> liftIO $ putStrLn $ pretty v
+
+      | otherwise -> liftIO $ do
+          putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
+          putStrLn $ "The following types are ambiguous: " ++
+            intercalate ", " (map (prettyName . typeParamName) tparams)
 
 prettyBreaking :: Breaking -> String
 prettyBreaking b =

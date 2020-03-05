@@ -4,13 +4,13 @@
 #define OPENCL_SUCCEED_NONFATAL(e) opencl_succeed_nonfatal(e, #e, __FILE__, __LINE__)
 // Take care not to override an existing error.
 #define OPENCL_SUCCEED_OR_RETURN(e) {             \
-    char *error = OPENCL_SUCCEED_NONFATAL(e);     \
-    if (error) {                                  \
+    char *serror = OPENCL_SUCCEED_NONFATAL(e);    \
+    if (serror) {                                 \
       if (!ctx->error) {                          \
-        ctx->error = error;                       \
+        ctx->error = serror;                      \
         return bad;                               \
       } else {                                    \
-        free(error);                              \
+        free(serror);                             \
       }                                           \
     }                                             \
   }

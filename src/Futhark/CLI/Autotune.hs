@@ -39,7 +39,9 @@ compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
   futhark <- maybe getExecutablePath return $ optFuthark opts
   return $ CompileOptions { compFuthark = futhark
-                          , compBackend = optBackend opts }
+                          , compBackend = optBackend opts
+                          , compOptions = mempty
+                          }
 
 runOptions :: Path -> Int -> AutotuneOptions -> RunOptions
 runOptions path timeout_s opts =

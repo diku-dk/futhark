@@ -30,6 +30,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Diet(..)
          , ErrorMsg (..)
          , ErrorMsgPart (..)
+         , errorMsgArgTypes
 
          -- * Values
          , PrimValue(..)
@@ -146,6 +147,10 @@ instance ArrayShape Rank where
 -- between host memory ('DefaultSpace') and GPU space.
 data Space = DefaultSpace
            | Space SpaceId
+           | ScalarSpace [SubExp] PrimType
+             -- ^ A special kind of memory that is a statically sized
+             -- array of some primitive type.  Used for private memory
+             -- on GPUs.
              deriving (Show, Eq, Ord)
 
 -- | A string representing a specific non-default memory space.
@@ -342,3 +347,10 @@ instance Foldable ErrorMsgPart where
 instance Traversable ErrorMsgPart where
   traverse _ (ErrorString s) = pure $ ErrorString s
   traverse f (ErrorInt32 a) = ErrorInt32 <$> f a
+
+-- | How many non-constant parts does the error message have, and what
+-- is their type?
+errorMsgArgTypes :: ErrorMsg a -> [PrimType]
+errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
+  where onPart ErrorString{} = Nothing
+        onPart ErrorInt32{} = Just $ IntType Int32

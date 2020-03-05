@@ -16,7 +16,7 @@ module Futhark.CodeGen.ImpCode
   , ExternalValue (..)
   , Param (..)
   , paramName
-  , Size (..)
+  , SubExp(..)
   , MemSize
   , DimSize
   , Type (..)
@@ -33,6 +33,7 @@ module Futhark.CodeGen.ImpCode
   , index
   , ErrorMsg(..)
   , ErrorMsgPart(..)
+  , errorMsgArgTypes
   , ArrayContents(..)
 
     -- * Typed enumerations
@@ -41,11 +42,6 @@ module Futhark.CodeGen.ImpCode
   , elements
   , bytes
   , withElemType
-
-    -- * Converting from sizes
-  , dimSizeToExp
-
-    -- * Analysis
 
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
@@ -62,19 +58,16 @@ import Data.Traversable
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
 import Futhark.Representation.AST.Syntax
-  (Space(..), SpaceId, ErrorMsg(..), ErrorMsgPart(..))
+  (SubExp(..), Space(..), SpaceId,
+   ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Analysis.PrimExp
 import Futhark.Util.Pretty hiding (space)
 import Futhark.Representation.Kernels.Sizes (Count(..))
 
-data Size = ConstSize Int64
-          | VarSize VName
-          deriving (Eq, Show)
-
-type MemSize = Size
-type DimSize = Size
+type MemSize = SubExp
+type DimSize = SubExp
 
 data Type = Scalar PrimType | Mem Space
 
@@ -234,12 +227,6 @@ withElemType :: Count Elements Exp -> PrimType -> Count Bytes Exp
 withElemType (Count e) t =
   bytes $ ConvOpExp (SExt Int32 Int64) e * LeafExp (SizeOf t) (IntType Int64)
 
-dimSizeToExp :: DimSize -> Count Elements Exp
-dimSizeToExp (VarSize v) =
-  elements $ LeafExp (ScalarVar v) (IntType Int32)
-dimSizeToExp (ConstSize x) =
-  elements $ ValueExp $ IntValue $ Int32Value $ fromIntegral x
-
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
@@ -268,12 +255,8 @@ instance Pretty op => Pretty (FunctionT op) where
           block = indent 2 . stack . map ppr
 
 instance Pretty Param where
-  ppr (ScalarParam name ptype) =
-    ppr ptype <+> ppr name
-  ppr (MemParam name space) =
-    text "mem" <> space' <+> ppr name
-    where space' = case space of Space s      -> text "@" <> text s
-                                 DefaultSpace -> mempty
+  ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
+  ppr (MemParam name space) = text "mem" <> ppr space <+> ppr name
 
 instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
@@ -281,12 +264,10 @@ instance Pretty ValueDesc where
     where ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
   ppr (ArrayValue mem space et ept shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> space' <+> ept'
+    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> ppr space <+> ept'
     where f e s = brackets $ s <> comma <> ppr e
           ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
-          space' = case space of Space s      -> text "@" <> text s
-                                 DefaultSpace -> mempty
 
 
 instance Pretty ExternalValue where
@@ -294,10 +275,6 @@ instance Pretty ExternalValue where
   ppr (OpaqueValue desc vs) =
     text "opaque" <+> text desc <+>
     nestedBlock "{" "}" (stack $ map ppr vs)
-
-instance Pretty Size where
-  ppr (ConstSize x) = ppr x
-  ppr (VarSize v)   = ppr v
 
 instance Pretty ArrayContents where
   ppr (ArrayValues vs) = braces (commasep $ map ppr vs)
@@ -316,7 +293,7 @@ instance Pretty op => Pretty (Code op) where
     indent 2 (ppr body) </>
     text "}"
   ppr (DeclareMem name space) =
-    text "var" <+> ppr name <> text ": mem" <> parens (ppr space)
+    text "var" <+> ppr name <> text ": mem" <> ppr space
   ppr (DeclareScalar name vol t) =
     text "var" <+> ppr name <> text ":" <+> vol' <> ppr t
     where vol' = case vol of Volatile -> text "volatile "
@@ -370,10 +347,8 @@ instance Pretty ExpLeaf where
   ppr (ScalarVar v) =
     ppr v
   ppr (Index v is bt space vol) =
-    ppr v <> langle <> vol' <> ppr bt <> space' <> rangle <> brackets (ppr is)
-    where space' = case space of DefaultSpace -> mempty
-                                 Space s      -> text "@" <> text s
-          vol' = case vol of Volatile -> text "volatile "
+    ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
+    where vol' = case vol of Volatile -> text "volatile "
                              Nonvolatile -> mempty
 
   ppr (SizeOf t) =
@@ -466,14 +441,14 @@ instance FreeIn a => FreeIn (Code a) where
     fvBind (oneName i) $ freeIn' bound <> freeIn' body
   freeIn' (While cond body) =
     freeIn' cond <> freeIn' body
-  freeIn' DeclareMem{} =
-    mempty
+  freeIn' (DeclareMem _ space) =
+    freeIn' space
   freeIn' DeclareScalar{} =
     mempty
   freeIn' DeclareArray{} =
     mempty
-  freeIn' (Allocate name size _) =
-    freeIn' name <> freeIn' size
+  freeIn' (Allocate name size space) =
+    freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
   freeIn' (Copy dest x _ src y _ n) =
@@ -488,8 +463,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' dests <> freeIn' args
   freeIn' (If cond t f) =
     freeIn' cond <> freeIn' t <> freeIn' f
-  freeIn' (Assert e _ _) =
-    freeIn' e
+  freeIn' (Assert e msg _) =
+    freeIn' e <> foldMap freeIn' msg
   freeIn' (Op op) =
     freeIn' op
   freeIn' (Comment _ code) =
@@ -505,7 +480,3 @@ instance FreeIn ExpLeaf where
 instance FreeIn Arg where
   freeIn' (MemArg m) = freeIn' m
   freeIn' (ExpArg e) = freeIn' e
-
-instance FreeIn Size where
-  freeIn' (VarSize name) = fvName name
-  freeIn' (ConstSize _) = mempty

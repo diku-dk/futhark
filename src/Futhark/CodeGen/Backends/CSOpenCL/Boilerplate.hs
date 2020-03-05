@@ -7,7 +7,7 @@ module Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
 
 import qualified Data.Map as M
 
-import Futhark.CodeGen.ImpCode.OpenCL hiding (Index, If)
+import Futhark.CodeGen.ImpCode.OpenCL hiding (Index, If, SubExp(..))
 import Futhark.CodeGen.Backends.GenericCSharp as CS
 import Futhark.CodeGen.Backends.GenericCSharp.AST as AST
 import Futhark.CodeGen.OpenCL.Heuristics
@@ -20,14 +20,41 @@ stringT = Primitive StringT
 intArrayT = Composite $ ArrayT intT
 stringArrayT = Composite $ ArrayT stringT
 
-generateBoilerplate :: String -> String -> [String] -> [PrimType]
+errorMsgNumArgs :: ErrorMsg a -> Int
+errorMsgNumArgs = length . errorMsgArgTypes
+
+formatEscape :: String -> String
+formatEscape = concatMap escapeChar
+  where escapeChar '{' = "{{"
+        escapeChar '}' = "}}"
+        escapeChar c = [c]
+
+failureCase :: Integer -> FailureMsg -> CSStmt
+failureCase i (FailureMsg (ErrorMsg parts) backtrace) =
+  If (BinOp "==" (Var "failure_idx") (Integer i))
+  [ let (formatstr, formatargs) = onParts 0 parts
+    in AST.Assert (AST.Bool False) $
+       String (formatstr ++ "\nBacktrace:\n" ++ formatEscape backtrace) :
+       formatargs
+  ]
+  []
+  where onParts _ [] = ("", [])
+        onParts j (ErrorString s : parts') =
+          let (formatstr, formatargs) = onParts j parts'
+          in (s ++ formatstr, formatargs)
+        onParts j (ErrorInt32 _ : parts') =
+          let (formatstr, formatargs) = onParts (j+1) parts'
+          in ("{" ++ show j ++ "}" ++ formatstr, Index (Var "args") (IdxExp $ Integer j) : formatargs)
+
+generateBoilerplate :: String -> String -> M.Map KernelName Safety -> [PrimType]
                     -> M.Map Name SizeClass
+                    -> [FailureMsg]
                     -> CS.CompilerM OpenCL () ()
-generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
+generateBoilerplate opencl_code opencl_prelude kernels types sizes failures = do
   final_inits <- CS.contextFinalInits
 
   let (opencl_fields, opencl_inits, top_decls, later_top_decls) =
-        openClDecls kernel_names opencl_code opencl_prelude
+        openClDecls kernels opencl_code opencl_prelude
 
   CS.stm top_decls
 
@@ -133,6 +160,9 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     , (Primitive $ CSInt Int64T, "PeakMemUsageDevice")
     , (Primitive BoolT, "DetailMemory")
     , (Primitive BoolT, "Debugging")
+    , (CustomT "CLMemoryHandle", "GlobalFailure")
+    , (intT, "GlobalFailureIsAnOption")
+    , (CustomT "CLMemoryHandle", "GlobalFailureArgs")
     , (CustomT "OpenCLContext", "OpenCL")
     , (CustomT "Sizes", "Sizes") ]
     ++ opencl_fields
@@ -155,7 +185,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
       set_sizes = zipWith (\i k -> Reassign (Field (Var "Ctx.Sizes") (zEncodeString $ pretty k))
                                             (Index (Var "Cfg.Sizes") (IdxExp $ (Integer . toInteger) i)))
                           [(0::Int)..] $ M.keys sizes
-
+      max_failure_args =
+        foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
   CS.stm $ CS.privateFunDef new_ctx VoidT [(CustomT cfg, "Cfg")] $
     [ AssignTyped (CustomT "ComputeErrorCode") (Var "error") Nothing
@@ -168,35 +199,80 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
     [ AssignTyped (CustomT "CLProgramHandle") (Var "prog")
         (Just $ CS.simpleCall "SetupOpenCL" [ Ref $ Var "Ctx"
                                             , Var "OpenCLProgram"
-                                            , Var "RequiredTypes"])]
-    ++ concatMap loadKernelByName kernel_names
+                                            , Var "RequiredTypes"])] ++
+    [ Reassign (Var "Ctx.GlobalFailureIsAnOption") (Integer 0)
+    , Unsafe
+      [ Exp $ CS.simpleCall "OPENCL_SUCCEED"
+        [CS.simpleCall "OpenCLAllocActual" [ Ref $ Var "Ctx"
+                                           , Integer 4
+                                           , Ref $ Var "Ctx.GlobalFailure"]]
+      , AssignTyped intT (Var "no_failure") (Just (Integer (-1)))
+      , Exp $ CS.simpleCall "OPENCL_SUCCEED"
+        [CS.simpleCall "CL10.EnqueueWriteBuffer"
+         [ Var "Ctx.OpenCL.Queue", Var "Ctx.GlobalFailure", AST.Bool True
+         , CS.toIntPtr $ Integer 0
+         , CS.toIntPtr $ Integer 4
+         , CS.toIntPtr $ Addr (Var "no_failure")
+         , Integer 0, Null, Null]]
+
+     , Exp $ CS.simpleCall "OPENCL_SUCCEED"
+       [CS.simpleCall "OpenCLAllocActual" [ Ref $ Var "Ctx"
+                                          , Integer $ toInteger $ 4 * (max_failure_args + 1)
+                                          , Ref $ Var "Ctx.GlobalFailureArgs"]]]]
+    ++ concatMap loadKernel (M.toList kernels)
     ++ final_inits
     ++ set_sizes
 
-  CS.stm $ CS.privateFunDef sync_ctx intT []
-    [ Exp $ CS.simpleCall "OPENCL_SUCCEED" [CS.simpleCall "CL10.Finish" [Var "Ctx.OpenCL.Queue"]]
-    , Return $ Integer 0 ]
+  CS.stm $ CS.privateFunDef sync_ctx VoidT []
+    [ AssignTyped intT (Var "failure_idx") (Just $ CS.simpleInitClass (pretty intT) [])
+    , Unsafe [ CS.assignScalarPointer (Var "failure_idx") (Var "ptr")
+             , Reassign (Var "Ctx.GlobalFailureIsAnOption") (Integer 0)
+             , Exp $ CS.simpleCall "OPENCL_SUCCEED" [
+                 CS.simpleCall "CL10.EnqueueReadBuffer"
+                 [ Var "Ctx.OpenCL.Queue", Var "Ctx.GlobalFailure", AST.Bool True
+                 , CS.toIntPtr $ Integer 0
+                 , CS.toIntPtr $ Integer 4
+                 , CS.toIntPtr $ Var "ptr"
+                , Integer 0, Null, Null]
+                ]
+            ]
 
-  CS.debugReport $ openClReport kernel_names
+    , If (BinOp "!=" (Var "failure_idx") (Integer (-1)))
+      ([ AssignTyped intArrayT (Var "args") $ Just $ CreateArray intT $
+         Left $ max_failure_args + 1
+       , Unsafe [
+           Fixed (Var "ptr") (Addr (Index (Var "args") $ IdxExp $ Integer 0))
+           [Exp $ CS.simpleCall "CL10.EnqueueReadBuffer"
+            [ Var "Ctx.OpenCL.Queue", Var "Ctx.GlobalFailureArgs", AST.Bool True
+            , CS.toIntPtr $ Integer 0
+            , CS.toIntPtr $ Integer $ toInteger $ 4 * max_failure_args
+            , CS.toIntPtr $ Var "ptr"
+            , Integer 0, Null, Null]]]] ++
+        zipWith failureCase [0..] failures)
+      []
+    ]
+
+  CS.debugReport $ openClReport $ M.keys kernels
 
 
-openClDecls :: [String] -> String -> String
+openClDecls :: M.Map KernelName Safety -> String -> String
             -> ([(CSType, String)], [CSStmt], CSStmt, [CSStmt])
-openClDecls kernel_names opencl_program opencl_prelude =
+openClDecls kernels opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where ctx_fields =
           [ (intT, "TotalRuns")
           , (Primitive $ CSInt Int64T, "TotalRuntime")]
           ++ concatMap (\name -> [(CustomT "CLKernelHandle", name)
                                  ,(longT, kernelRuntime name)
-                                 ,(intT, kernelRuns name)]) kernel_names
+                                 ,(intT, kernelRuns name)])
+          (M.keys kernels)
 
         ctx_inits =
           [ Reassign (Var $ ctx "TotalRuns") (Integer 0)
           , Reassign (Var $ ctx "TotalRuntime") (Integer 0) ]
           ++ concatMap (\name -> [ Reassign (Var $ (ctx . kernelRuntime) name) (Integer 0)
-                                 , Reassign (Var $ (ctx . kernelRuns) name) (Integer 0)]
-                  ) kernel_names
+                                 , Reassign (Var $ (ctx . kernelRuns) name) (Integer 0)])
+          (M.keys kernels)
 
 
         futhark_context = CS.publicName "Context"
@@ -209,8 +285,8 @@ openClDecls kernel_names opencl_program opencl_prelude =
           AssignTyped stringArrayT (Var "OpenCLProgram")
               (Just $ Collection "string[]" [String $ opencl_prelude ++ opencl_program])
 
-loadKernelByName :: String -> [CSStmt]
-loadKernelByName name =
+loadKernel :: (String, Safety) -> [CSStmt]
+loadKernel (name, _) =
   [ Reassign (Var $ ctx name)
       (CS.simpleCall "CL10.CreateKernel" [Var "prog", String name, Out $ Var "error"])
   , AST.Assert (BinOp "==" (Var "error") (Integer 0)) []

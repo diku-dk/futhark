@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
 import Data.Maybe
 import Data.List
+import Data.Ord
 import qualified Data.Text as T
 import System.Console.GetOpt
 import System.Directory
@@ -32,6 +33,7 @@ data BenchOptions = BenchOptions
                    , optRunner :: String
                    , optRuns :: Int
                    , optExtraOptions :: [String]
+                   , optCompilerOptions :: [String]
                    , optJSON :: Maybe FilePath
                    , optTimeout :: Int
                    , optSkipCompilation :: Bool
@@ -43,7 +45,7 @@ data BenchOptions = BenchOptions
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "c" Nothing "" 10 [] Nothing (-1) False
+initialBenchOptions = BenchOptions "c" Nothing "" 10 [] [] Nothing (-1) False
                       ["nobench", "disable"] [] Nothing (Just "tuning") Nothing
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
@@ -63,7 +65,8 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  results <- concat <$> mapM (runBenchmark opts) compiled_benchmarks
+  results <- concat <$> mapM (runBenchmark opts)
+             (sortBy (comparing fst) compiled_benchmarks)
   case optJSON opts of
     Nothing -> return ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
@@ -88,7 +91,9 @@ compileOptions :: BenchOptions -> IO CompileOptions
 compileOptions opts = do
   futhark <- maybe getExecutablePath return $ optFuthark opts
   return $ CompileOptions { compFuthark = futhark
-                          , compBackend = optBackend opts }
+                          , compBackend = optBackend opts
+                          , compOptions = optCompilerOptions opts
+                          }
 
 compileBenchmark :: BenchOptions -> (FilePath, ProgramTest)
                  -> IO (Either SkipReason (FilePath, [InputOutputs]))
@@ -213,6 +218,12 @@ commandLineOptions = [
                config { optExtraOptions = opt : optExtraOptions config })
      "OPT")
     "Pass this option to programs being run."
+  , Option [] ["pass-compiler-option"]
+    (ReqArg (\opt ->
+               Right $ \config ->
+               config { optCompilerOptions = opt : optCompilerOptions config })
+     "OPT")
+    "Pass this option to the compiler (or typechecker if in -t mode)."
   , Option [] ["json"]
     (ReqArg (\file ->
                Right $ \config -> config { optJSON = Just file})

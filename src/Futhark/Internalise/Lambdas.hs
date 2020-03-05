@@ -57,8 +57,9 @@ internaliseStreamMapLambda internaliseLambda lam args = do
       outer = (`setOuterSize` I.Var chunk_size)
   localScope (scopeOfLParams [chunk_param]) $ do
     argtypes <- mapM I.subExpType args
-    (orig_chunk_param : params, orig_body, rettype) <-
+    (lam_params, orig_body, rettype) <-
       internaliseLambda lam $ I.Prim int32 : map outer argtypes
+    let orig_chunk_param : params = lam_params
     body <- runBodyBinder $ do
       letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
@@ -106,8 +107,8 @@ bindMapShapes indexArg extra_args inner_shapes sizefun args outer_shape
       let sizefun_safe =
             all (I.safeExp . I.stmExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
-            not $ any (`nameIn` freeIn (I.lambdaBody sizefun')) $
-            map I.paramName $ lambdaParams sizefun'
+            not $ any ((`nameIn` freeIn (I.lambdaBody sizefun')) . I.paramName) $
+            lambdaParams sizefun'
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'
                 forM_ (zip inner_shapes ses) $ \(v, se) ->
@@ -152,8 +153,9 @@ internaliseStreamLambda internaliseLambda lam rowts = do
   let chunk_param = I.Param chunk_size $ I.Prim int32
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
   localScope (scopeOfLParams [chunk_param]) $ do
-    (orig_chunk_param : params, orig_body, _) <-
+    (lam_params, orig_body, _) <-
       internaliseLambda lam $ I.Prim int32 : chunktypes
+    let orig_chunk_param : params = lam_params
     body <- runBodyBinder $ do
       letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
@@ -188,5 +190,5 @@ internalisePartitionLambda internaliseLambda k lam args = do
 
         lambdaWithIncrement :: I.Body -> InternaliseM I.Body
         lambdaWithIncrement lam_body = runBodyBinder $ do
-          [eq_class] <- bodyBind lam_body
+          eq_class <- head <$> bodyBind lam_body
           resultBody <$> mkResult eq_class 0

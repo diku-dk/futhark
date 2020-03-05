@@ -86,8 +86,8 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 1D tiling of redomap.
       | (gtid, kdim) : top_space_rev <- reverse $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
-        all (not . nameIn gtid .
-             flip (M.findWithDefault mempty) variance) arrs,
+        not $ any (nameIn gtid .
+                   flip (M.findWithDefault mempty) variance) arrs,
         not $ gtid `nameIn` branch_variant,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
@@ -273,7 +273,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 
         mergeinit' <-
           fmap (map Var) $ certifying (stmAuxCerts aux) $
-          tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultNoSimplify $
+          tilingSegMap tiling "tiled_loopinit" (scalarLevel tiling) ResultPrivate $
           \in_bounds slice ->
             fmap (map Var) $ protectOutOfBounds "loopinit" in_bounds merge_ts $ do
             addPrivStms slice inloop_privstms
@@ -304,7 +304,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
 doPrelude :: Tiling -> Stms Kernels -> [VName] -> Binder Kernels [VName]
 doPrelude tiling prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
-  tilingSegMap tiling "prelude" (scalarLevel tiling) ResultMaySimplify $
+  tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
   \in_bounds _slice -> do
     ts <- mapM lookupType prestms_live
     fmap (map Var) $ letTupExp "pre" =<<
@@ -399,7 +399,7 @@ type DoTiling gtids kdims =
 
 scalarLevel :: Tiling -> SegLevel
 scalarLevel tiling =
-  SegThreadScalar (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
+  SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
   where lvl = tilingLevel tiling
 
 protectOutOfBounds :: String -> PrimExp VName -> [Type] -> Binder Kernels [SubExp]
@@ -412,7 +412,7 @@ postludeGeneric :: Tiling -> PrivStms
                 -> Stms Kernels -> Result -> [Type]
                 -> Binder Kernels [VName]
 postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
-  tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultMaySimplify $ \in_bounds slice -> do
+  tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
     forM_ (zip (patternNames pat) accs') $ \(us, everyone) ->
       letBindNames_ [us] $ BasicOp $ Index everyone slice
@@ -457,7 +457,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
 
       -- We don't use a Replicate here, because we want to enforce a
       -- scalar memory space.
-      mergeinits <- tilingSegMap tiling "mergeinit" (scalarLevel tiling) ResultNoSimplify $ \in_bounds slice ->
+      mergeinits <- tilingSegMap tiling "mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
         -- Constant neutral elements (a common case) do not need protection from OOB.
         if freeIn red_nes == mempty
           then return red_nes
@@ -592,7 +592,7 @@ processTile1D
 
   let tile = map fst tiles_and_perm
 
-  segMap1D "acc" (SegThreadScalar num_groups group_size SegNoVirt) ResultMaySimplify $ \ltid -> do
+  segMap1D "acc" (SegThread num_groups group_size SegNoVirt) ResultPrivate $ \ltid -> do
 
     reconstructGtids1D group_size gtid gid ltid
     addPrivStms [DimFix $ Var ltid] privstms
@@ -798,8 +798,8 @@ processTile2D
   -- Might be truncated in case of a partial tile.
   actual_tile_size <- arraysSize 0 <$> mapM (lookupType . fst) tiles_and_perms
 
-  segMap2D "acc" (SegThreadScalar num_groups group_size SegNoVirt)
-    ResultMaySimplify (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
+  segMap2D "acc" (SegThread num_groups group_size SegNoVirt)
+    ResultPrivate (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
     reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
 
     addPrivStms [DimFix $ Var ltid_x, DimFix $ Var ltid_y] privstms

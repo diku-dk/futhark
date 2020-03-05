@@ -137,7 +137,7 @@ instance ASTMappable (ExpBase Info VName) where
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
   astMap tv (Lambda params body ret t loc) =
     Lambda <$> mapM (astMap tv) params <*>
-    astMap tv body <*> traverse (astMap tv) ret <*>
+    mapOnExp tv body <*> traverse (astMap tv) ret <*>
     traverse (traverse $ mapOnStructType tv) t <*> pure loc
   astMap tv (OpSection name t loc) =
     OpSection <$> mapOnQualName tv name <*>

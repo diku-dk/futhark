@@ -41,7 +41,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
-import qualified Control.Monad.Fail as Fail
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.SOACS
@@ -105,9 +104,6 @@ instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) wh
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
-instance Fail.MonadFail InternaliseM where
-  fail = error . ("InternaliseM: "++)
-
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
   mkExpAttrM pat e = InternaliseM $ mkExpAttrM pat e
@@ -150,7 +146,7 @@ lookupFunction' fname = gets $ M.lookup fname . stateFunTable
 
 lookupFunction :: VName -> InternaliseM FunInfo
 lookupFunction fname = maybe bad return =<< lookupFunction' fname
-  where bad = fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
+  where bad = error $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
 lookupConst :: VName -> InternaliseM (Maybe ConstInfo)
 lookupConst fname = gets $ M.lookup fname . stateConstTable

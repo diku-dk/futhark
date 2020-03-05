@@ -166,7 +166,7 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
   freeIn' (a,b,c) = freeIn' a <> freeIn' b <> freeIn' c
 
 instance FreeIn a => FreeIn [a] where
-  freeIn' = fold . fmap freeIn'
+  freeIn' = foldMap freeIn'
 
 instance (FreeAttr (ExpAttr lore),
           FreeAttr (BodyAttr lore),
@@ -214,7 +214,7 @@ instance (FreeAttr (ExpAttr lore),
     freeIn' cs <> precomputed attr (freeIn' attr <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm lore) => FreeIn (Stms lore) where
-  freeIn' = fold . fmap freeIn'
+  freeIn' = foldMap freeIn'
 
 instance FreeIn Names where
   freeIn' = fvNames
@@ -235,6 +235,11 @@ instance FreeIn SubExp where
   freeIn' (Var v) = freeIn' v
   freeIn' Constant{} = mempty
 
+instance FreeIn Space where
+  freeIn' (ScalarSpace d _) = freeIn' d
+  freeIn' DefaultSpace = mempty
+  freeIn' (Space _) = mempty
+
 instance FreeIn d => FreeIn (ShapeBase d) where
   freeIn' = freeIn' . shapeDims
 
@@ -244,7 +249,7 @@ instance FreeIn d => FreeIn (Ext d) where
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Array _ shape _) = freeIn' shape
-  freeIn' (Mem _)           = mempty
+  freeIn' (Mem s)           = freeIn' s
   freeIn' (Prim _)          = mempty
 
 instance FreeIn attr => FreeIn (Param attr) where

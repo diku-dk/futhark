@@ -13,8 +13,6 @@ module Futhark.CodeGen.ImpGen
   , AllocCompiler
   , Operations (..)
   , defaultOperations
-  , ValueDestination
-  , arrayDestination
   , MemLocation (..)
   , MemEntry (..)
   , ScalarEntry (..)
@@ -44,7 +42,6 @@ module Futhark.CodeGen.ImpGen
     -- * Building Blocks
   , ToExp(..)
   , compileAlloc
-  , subExpToDimSize
   , everythingVolatile
   , compileBody
   , compileBody'
@@ -53,15 +50,11 @@ module Futhark.CodeGen.ImpGen
   , compileStms
   , compileExp
   , defCompileExp
-  , offsetArray
-  , strideArray
   , fullyIndexArray
   , fullyIndexArray'
-  , Imp.dimSizeToExp
-  , dimSizeToSubExp
   , copy
   , copyDWIM
-  , copyDWIMDest
+  , copyDWIMFix
   , copyElementWise
   , typeSize
 
@@ -91,7 +84,6 @@ import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM, State)
 import Control.Monad.Writer hiding (mapM, forM)
 import Control.Monad.Except hiding (mapM, forM)
-import qualified Control.Monad.Fail as Fail
 import Data.Either
 import Data.Traversable
 import qualified Data.Map.Strict as M
@@ -123,7 +115,6 @@ type ExpCompiler lore op = Pattern lore -> Exp lore -> ImpM lore op ()
 type CopyCompiler lore op = PrimType
                            -> MemLocation
                            -> MemLocation
-                           -> Count Elements Imp.Exp -- ^ Number of row elements of the source.
                            -> ImpM lore op ()
 
 -- | An alternate way of compiling an allocation.
@@ -195,9 +186,6 @@ data ValueDestination = ScalarDestination VName
                         -- takes care of this array.
                       deriving (Show)
 
-arrayDestination :: MemLocation -> ValueDestination
-arrayDestination = ArrayDestination . Just
-
 data Env lore op = Env {
     envExpCompiler :: ExpCompiler lore op
   , envStmsCompiler :: StmsCompiler lore op
@@ -240,9 +228,6 @@ newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) (State lore op) 
             MonadWriter (Imp.Code op),
             MonadError InternalError)
 
-instance Fail.MonadFail (ImpM lore op) where
-  fail = error . ("ImpM.fail: "++)
-
 instance MonadFreshNames (ImpM lore op) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
@@ -256,7 +241,7 @@ instance HasScope SOACS (ImpM lore op) where
           entryType (ArrayVar _ arrayEntry) =
             Array
             (entryArrayElemType arrayEntry)
-            (Shape $ map dimSizeToSubExp $ entryArrayShape arrayEntry)
+            (Shape $ entryArrayShape arrayEntry)
             NoUniqueness
           entryType (ScalarVar _ scalarEntry) =
             Prim $ entryScalarType scalarEntry
@@ -341,10 +326,9 @@ compileInParam fparam = case paramAttr fparam of
     return $ Left $ Imp.ScalarParam name bt
   MemMem space ->
     return $ Left $ Imp.MemParam name space
-  MemArray bt shape _ (ArrayIn mem ixfun) -> do
-    shape' <- mapM subExpToDimSize $ shapeDims shape
+  MemArray bt shape _ (ArrayIn mem ixfun) ->
     return $ Right $ ArrayDecl name bt $
-      MemLocation mem shape' $ fmap (toExp' int32) ixfun
+    MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
   where name = paramName fparam
 
 data ArrayDecl = ArrayDecl VName PrimType MemLocation
@@ -457,11 +441,11 @@ compileOutParams orig_rts orig_epts = do
               tell ([Imp.ScalarParam out int32],
                     M.singleton x $ ScalarDestination out)
               put (memseen, M.insert x out arrseen)
-              return $ Imp.VarSize out
+              return $ Var out
             Just out ->
-              return $ Imp.VarSize out
+              return $ Var out
         inspectExtSize (Free se) =
-          imp $ subExpToDimSize se
+          return se
 
 compileFunDef :: ExplicitMemorish lore =>
                  FunDef lore
@@ -489,9 +473,10 @@ compileBody pat (Body _ bnds ses) = do
   compileStms (freeIn ses) bnds $
     forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
-compileBody' :: (ExplicitMemorish lore, attr ~ LetAttr lore)
-             => [Param attr] -> Body lore -> ImpM lore op ()
-compileBody' = compileBody . patternFromParams
+compileBody' :: [Param attr] -> Body lore -> ImpM lore op ()
+compileBody' params (Body _ bnds ses) =
+  compileStms (freeIn ses) bnds $
+    forM_ (zip params ses) $ \(param, se) -> copyDWIM (paramName param) [] se []
 
 compileLoopBody :: Typed attr => [Param attr] -> Body lore -> ImpM lore op ()
 compileLoopBody mergeparams (Body _ bnds ses) = do
@@ -592,7 +577,7 @@ defCompileExp pat (DoLoop ctx val form body) = do
     ForLoop i it bound loopvars -> do
       let setLoopParam (p,a)
             | Prim _ <- paramType p =
-                copyDWIM (paramName p) [] (Var a) [Imp.vi32 i]
+                copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.vi32 i]
             | otherwise =
                 return ()
 
@@ -647,7 +632,7 @@ defCompileBasicOp _ (Assert e msg loc) = do
 
 defCompileBasicOp (Pattern _ [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-      copyDWIM (patElemName pe) [] (Var src) $ map (toExp' int32) idxs
+      copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toExp' int32) idxs
 
 defCompileBasicOp _ Index{} =
   return ()
@@ -658,7 +643,7 @@ defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
-  copy_elem <- collect $ copyDWIM (patElemName pe) (map Imp.vi32 is) se []
+  copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi32) is) se []
   emit $ foldl (.) id (zipWith (`Imp.For` Int32) is ds') copy_elem
 
 defCompileBasicOp _ Scratch{} =
@@ -671,7 +656,7 @@ defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
   sFor "i" n' $ \i -> do
     let i' = ConvOpExp (SExt Int32 it) i
     x <- dPrimV "x" $ e' + i' * s'
-    copyDWIM (patElemName pe) [i] (Var x) []
+    copyDWIM (patElemName pe) [DimFix i] (Var x) []
 
 defCompileBasicOp (Pattern _ [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
@@ -696,8 +681,8 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
       let srcloc = entryArrayLocation yentry
           rows = case drop i $ entryArrayShape yentry of
                   []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
-                  r:_ -> unCount $ Imp.dimSizeToExp r
-      copy (elemType $ patElemType pe) destloc srcloc $ arrayOuterSize yentry
+                  r:_ -> toExp' int32 r
+      copy (elemType $ patElemType pe) destloc srcloc
       emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
 defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
@@ -707,14 +692,14 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
       let t = primValueType v
       static_array <- newVName "static_array"
       emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
-      let static_src = MemLocation static_array [Imp.ConstSize $ fromIntegral $ length es] $
+      let static_src = MemLocation static_array [intConst Int32 $ fromIntegral $ length es] $
                        IxFun.iota [fromIntegral $ length es]
           entry = MemVar Nothing $ MemEntry dest_space
       addVar static_array entry
-      copy t dest_mem static_src $ fromIntegral $ length es
+      copy t dest_mem static_src
   | otherwise =
     forM_ (zip [0..] es) $ \(i,e) ->
-      copyDWIM (patElemName pe) [fromInteger i] e []
+      copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
 
   where isLiteral (Constant v) = Just v
         isLiteral _ = Nothing
@@ -804,8 +789,7 @@ memBoundToVarEntry e (MemPrim bt) =
 memBoundToVarEntry e (MemMem space) =
   return $ MemVar e $ MemEntry space
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
-  shape' <- mapM subExpToDimSize $ shapeDims shape
-  let location = MemLocation mem shape' $ fmap (toExp' int32) ixfun
+  let location = MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
   return $ ArrayVar e ArrayEntry { entryArrayLocation = location
                                  , entryArrayElemType = bt
                                  }
@@ -851,16 +835,6 @@ funcallTargets (Destination _ dests) =
           return []
         funcallTarget (MemoryDestination name) =
           return [name]
-
-subExpToDimSize :: SubExp -> ImpM lore op Imp.DimSize
-subExpToDimSize (Var v) =
-  return $ Imp.VarSize v
-subExpToDimSize (Constant (IntValue (Int64Value i))) =
-  return $ Imp.ConstSize $ fromIntegral i
-subExpToDimSize (Constant (IntValue (Int32Value i))) =
-  return $ Imp.ConstSize $ fromIntegral i
-subExpToDimSize Constant{} =
-  compilerBugS "Size subexp is not an int32 or int64 constant."
 
 -- | Compile things to 'Imp.Exp'.
 class ToExp a where
@@ -929,18 +903,15 @@ lookupMemory name = do
     _              -> compilerBugS $ "Unknown memory block: " ++ pretty name
 
 destinationFromPattern :: ExplicitMemorish lore => Pattern lore -> ImpM lore op Destination
-destinationFromPattern pat = fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $
-                             patternElements pat
-  where ctx_names = patternContextNames pat
-        inspect patElem = do
+destinationFromPattern pat =
+  fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $
+  patternElements pat
+  where inspect patElem = do
           let name = patElemName patElem
           entry <- lookupVar name
           case entry of
-            ArrayVar _ (ArrayEntry (MemLocation mem shape ixfun) _) ->
-              return $ ArrayDestination $
-              if mem `elem` ctx_names
-              then Nothing
-              else Just $ MemLocation mem shape ixfun
+            ArrayVar _ (ArrayEntry MemLocation{} _) ->
+              return $ ArrayDestination Nothing
             MemVar{} ->
               return $ MemoryDestination name
 
@@ -957,8 +928,13 @@ fullyIndexArray' :: MemLocation -> [Imp.Exp]
                  -> ImpM lore op (VName, Imp.Space, Count Elements Imp.Exp)
 fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
+  let indices' = case space of
+                   ScalarSpace ds _ ->
+                     let (zero_is, is) = splitFromEnd (length ds) indices
+                     in map (const 0) zero_is ++ is
+                   _ -> indices
   return (mem, space,
-          elements $ IxFun.index ixfun indices)
+          elements $ IxFun.index ixfun indices')
 
 sliceArray :: MemLocation
            -> Slice Imp.Exp
@@ -969,40 +945,17 @@ sliceArray (MemLocation mem shape ixfun) slice =
         update (_:ds) (DimFix{}:is) = update ds is
         update _      _               = []
 
-offsetArray :: MemLocation
-            -> Imp.Exp
-            -> MemLocation
-offsetArray (MemLocation mem shape ixfun) offset =
-  MemLocation mem shape $ IxFun.offsetIndex ixfun offset
-
-strideArray :: MemLocation
-            -> Imp.Exp
-            -> MemLocation
-strideArray (MemLocation mem shape ixfun) stride =
-  MemLocation mem shape $ IxFun.strideIndex ixfun stride
-
-arrayOuterSize :: ArrayEntry -> Count Elements Imp.Exp
-arrayOuterSize = arrayDimSize 0
-
-arrayDimSize :: Int -> ArrayEntry -> Count Elements Imp.Exp
-arrayDimSize i =
-  product . map Imp.dimSizeToExp . take 1 . drop i . entryArrayShape
-
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler lore op
-copy bt pat src n = do
+copy bt pat src = do
   cc <- asks envCopyCompiler
-  cc bt pat src n
+  cc bt pat src
 
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler lore op
-defaultCopy bt dest src n
-  | ixFunMatchesInnerShape
-      (Shape $ map dimSizeToExp destshape) destIxFun,
-    ixFunMatchesInnerShape
-      (Shape $ map dimSizeToExp srcshape) srcIxFun,
-    Just destoffset <-
+defaultCopy bt dest src
+  | Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
@@ -1011,39 +964,40 @@ defaultCopy bt dest src n
         emit $ Imp.Copy
           destmem (bytes destoffset) destspace
           srcmem (bytes srcoffset) srcspace $
-          (n * row_size) `withElemType` bt
+          num_elems `withElemType` bt
   | otherwise =
-      copyElementWise bt dest src n
+      copyElementWise bt dest src
   where bt_size = primByteSize bt
-        row_size = product $ map Imp.dimSizeToExp $ drop 1 srcshape
-        MemLocation destmem destshape destIxFun = dest
+        num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
+        MemLocation destmem _ destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
 copyElementWise :: CopyCompiler lore op
-copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
-    is <- replicateM (IxFun.rank destIxFun) (newVName "i")
+copyElementWise bt dest src = do
+    let bounds = map (toExp' int32) $ memLocationShape src
+    is <- replicateM (length bounds) (newVName "i")
     let ivars = map Imp.vi32 is
-        destidx = IxFun.index destIxFun ivars
-        srcidx = IxFun.index srcIxFun ivars
-        bounds = map unCount $ n : drop 1 (map Imp.dimSizeToExp srcshape)
-    srcspace <- entryMemSpace <$> lookupMemory srcmem
-    destspace <- entryMemSpace <$> lookupMemory destmem
+    (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
+    (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
     vol <- asks envVolatility
     emit $ foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
-      Imp.Write destmem (elements destidx) bt destspace vol $
-      Imp.index srcmem (elements srcidx) bt srcspace vol
+      Imp.Write destmem destidx bt destspace vol $
+      Imp.index srcmem srcidx bt srcspace vol
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.
 copyArrayDWIM :: PrimType
-              -> MemLocation -> [Imp.Exp]
-              -> MemLocation -> [Imp.Exp]
+              -> MemLocation -> [DimIndex Imp.Exp]
+              -> MemLocation -> [DimIndex Imp.Exp]
               -> ImpM lore op (Imp.Code op)
 copyArrayDWIM bt
-  destlocation@(MemLocation _ destshape dest_ixfun) destis
-  srclocation@(MemLocation _ srcshape src_ixfun) srcis
+  destlocation@(MemLocation _ destshape _) destslice
+  srclocation@(MemLocation _ srcshape _) srcslice
 
-  | length srcis == length srcshape, length destis == length destshape = do
+  | Just destis <- mapM dimFix destslice,
+    Just srcis <- mapM dimFix srcslice,
+    length srcis == length srcshape,
+    length destis == length destshape = do
   (targetmem, destspace, targetoffset) <-
     fullyIndexArray' destlocation destis
   (srcmem, srcspace, srcoffset) <-
@@ -1055,49 +1009,52 @@ copyArrayDWIM bt
   | otherwise = do
       let destlocation' =
             sliceArray destlocation $
-            fullSliceNum (IxFun.shape dest_ixfun) $ map DimFix destis
+            fullSliceNum (map (toExp' int32) destshape) destslice
           srclocation'  =
             sliceArray srclocation $
-            fullSliceNum (IxFun.shape src_ixfun) $ map DimFix srcis
+            fullSliceNum (map (toExp' int32) srcshape) srcslice
           destrank = length (memLocationShape destlocation')
           srcrank = length (memLocationShape srclocation')
       if destrank /= srcrank
-        then fail $ "copyArrayDWIM: cannot copy to " ++
+        then error $ "copyArrayDWIM: cannot copy to " ++
              pretty (memLocationName destlocation') ++
              " from " ++ pretty (memLocationName srclocation') ++
              " because ranks do not match (" ++ pretty destrank ++
              " vs " ++ pretty srcrank ++ ")"
       else if destlocation' == srclocation'
         then return mempty -- Copy would be no-op.
-        else collect $ copy bt destlocation' srclocation' $
-             product $ map Imp.dimSizeToExp $
-             take 1 $ drop (length srcis) srcshape
+        else collect $ copy bt destlocation' srclocation'
 
 -- | Like 'copyDWIM', but the target is a 'ValueDestination'
 -- instead of a variable name.
-copyDWIMDest :: ValueDestination -> [Imp.Exp] -> SubExp -> [Imp.Exp]
+copyDWIMDest :: ValueDestination -> [DimIndex Imp.Exp] -> SubExp -> [DimIndex Imp.Exp]
              -> ImpM lore op ()
 
 copyDWIMDest _ _ (Constant v) (_:_) =
   compilerBugS $
   unwords ["copyDWIMDest: constant source", pretty v, "cannot be indexed."]
-copyDWIMDest pat dest_is (Constant v) [] =
-  case pat of
-  ScalarDestination name ->
-    emit $ Imp.SetScalar name $ Imp.ValueExp v
-  MemoryDestination{} ->
-    compilerBugS $
-    unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
-  ArrayDestination (Just dest_loc) -> do
-    (dest_mem, dest_space, dest_i) <-
-      fullyIndexArray' dest_loc dest_is
-    vol <- asks envVolatility
-    emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
-  ArrayDestination Nothing ->
-    compilerBugS "copyDWIMDest: ArrayDestination Nothing"
+copyDWIMDest pat dest_slice (Constant v) [] =
+  case mapM dimFix dest_slice of
+    Nothing ->
+      compilerBugS $
+      unwords ["copyDWIMDest: constant source", pretty v, "with slice destination."]
+    Just dest_is ->
+      case pat of
+        ScalarDestination name ->
+          emit $ Imp.SetScalar name $ Imp.ValueExp v
+        MemoryDestination{} ->
+          compilerBugS $
+          unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
+        ArrayDestination (Just dest_loc) -> do
+          (dest_mem, dest_space, dest_i) <-
+            fullyIndexArray' dest_loc dest_is
+          vol <- asks envVolatility
+          emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
+        ArrayDestination Nothing ->
+          compilerBugS "copyDWIMDest: ArrayDestination Nothing"
   where bt = primValueType v
 
-copyDWIMDest dest dest_is (Var src) src_is = do
+copyDWIMDest dest dest_slice (Var src) src_slice = do
   src_entry <- lookupVar src
   case (dest, src_entry) of
     (MemoryDestination mem, MemVar _ (MemEntry space)) ->
@@ -1111,33 +1068,43 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       compilerBugS $
       unwords ["copyDWIMDest: source", pretty src, "is a memory block."]
 
-    (_, ScalarVar _ (ScalarEntry _)) | not $ null src_is ->
+    (_, ScalarVar _ (ScalarEntry _)) | not $ null src_slice ->
       compilerBugS $
-      unwords ["copyDWIMDest: prim-typed source", pretty src, "with nonzero indices", pretty src_is]
+      unwords ["copyDWIMDest: prim-typed source", pretty src, "with slice", pretty src_slice]
 
-    (ScalarDestination name, _) | not $ null dest_is ->
+    (ScalarDestination name, _) | not $ null dest_slice ->
       compilerBugS $
-      unwords ["copyDWIMDest: prim-typed target", pretty name, "with nonzero indices", pretty dest_is]
+      unwords ["copyDWIMDest: prim-typed target", pretty name, "with slice", pretty dest_slice]
 
     (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
       emit $ Imp.SetScalar name $ Imp.var src pt
 
-    (ScalarDestination name, ArrayVar _ arr) -> do
-      let bt = entryArrayElemType arr
-      (mem, space, i) <-
-        fullyIndexArray' (entryArrayLocation arr) src_is
-      vol <- asks envVolatility
-      emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
+    (ScalarDestination name, ArrayVar _ arr)
+      | Just src_is <- mapM dimFix src_slice -> do
+          let bt = entryArrayElemType arr
+          (mem, space, i) <-
+            fullyIndexArray' (entryArrayLocation arr) src_is
+          vol <- asks envVolatility
+          emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
+      | otherwise ->
+          compilerBugS $
+          unwords ["copyDWIMDest: prim-typed target and array-typed source", pretty src,
+                   "with slice", pretty src_slice]
 
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
       let src_loc = entryArrayLocation src_arr
           bt = entryArrayElemType src_arr
-      emit =<< copyArrayDWIM bt dest_loc dest_is src_loc src_is
+      emit =<< copyArrayDWIM bt dest_loc dest_slice src_loc src_slice
 
-    (ArrayDestination (Just dest_loc), ScalarVar _ (ScalarEntry bt)) -> do
-      (dest_mem, dest_space, dest_i) <- fullyIndexArray' dest_loc dest_is
-      vol <- asks envVolatility
-      emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
+    (ArrayDestination (Just dest_loc), ScalarVar _ (ScalarEntry bt))
+      | Just dest_is <- mapM dimFix dest_slice -> do
+          (dest_mem, dest_space, dest_i) <- fullyIndexArray' dest_loc dest_is
+          vol <- asks envVolatility
+          emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
+      | otherwise ->
+          compilerBugS $
+          unwords ["copyDWIMDest: array-typed target and prim-typed source", pretty src,
+                   "with slice", pretty dest_slice]
 
     (ArrayDestination Nothing, _) ->
       return () -- Nothing to do; something else set some memory
@@ -1147,9 +1114,9 @@ copyDWIMDest dest dest_is (Var src) src_is = do
 -- indexeded.  If so, they better be arrays of enough dimensions.
 -- This function will generally just Do What I Mean, and Do The Right
 -- Thing.  Both destination and source must be in scope.
-copyDWIM :: VName -> [Imp.Exp] -> SubExp -> [Imp.Exp]
+copyDWIM :: VName -> [DimIndex Imp.Exp] -> SubExp -> [DimIndex Imp.Exp]
          -> ImpM lore op ()
-copyDWIM dest dest_is src src_is = do
+copyDWIM dest dest_slice src src_slice = do
   dest_entry <- lookupVar dest
   let dest_target =
         case dest_entry of
@@ -1161,7 +1128,12 @@ copyDWIM dest dest_is src src_is = do
 
           MemVar _ _ ->
             MemoryDestination dest
-  copyDWIMDest dest_target dest_is src src_is
+  copyDWIMDest dest_target dest_slice src src_slice
+
+-- | As 'copyDWIM', but implicitly 'DimFix'es the indexes.
+copyDWIMFix :: VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> ImpM lore op ()
+copyDWIMFix dest dest_is src src_is =
+  copyDWIM dest (map DimFix dest_is) src (map DimFix src_is)
 
 -- | @compileAlloc pat size space@ allocates @n@ bytes of memory in @space@,
 -- writing the result to @dest@, which must be a single
@@ -1177,13 +1149,6 @@ compileAlloc (Pattern [] [mem]) e space = do
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
   compilerBugS $ "compileAlloc: Invalid pattern: " ++ pretty pat
-
-dimSizeToSubExp :: Imp.Size -> SubExp
-dimSizeToSubExp (Imp.ConstSize n) = constant n
-dimSizeToSubExp (Imp.VarSize v) = Var v
-
-dimSizeToExp :: Imp.Size -> Imp.Exp
-dimSizeToExp = toExp' int32 . primExpFromSubExp int32 . dimSizeToSubExp
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format.

@@ -32,7 +32,7 @@ hlintable() {
 
 hlint_check() {
     # Some hlint-suggestions are terrible, so ignore them here.
-    hlint -i "Use import/export shortcut" -i "Use const" -i "Use tuple-section" "$1"
+    hlint -i "Use import/export shortcut" -i "Use const" -i "Use tuple-section" -i "Too strict maybe" "$1"
 }
 
 no_trailing_blank_lines() {

@@ -4,6 +4,7 @@ module Futhark.Analysis.PrimExp.Convert
   (
     primExpToExp
   , primExpFromExp
+  , primExpToSubExp
   , primExpFromSubExp
   , primExpFromSubExpM
   , replaceInPrimExp
@@ -76,10 +77,9 @@ primExpFromExp f (Apply fname args ts _)
       FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
-primExpFromSubExpM :: Fail.MonadFail m =>
-                      (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
+primExpFromSubExpM :: Applicative m => (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
 primExpFromSubExpM f (Var v) = f v
-primExpFromSubExpM _ (Constant v) = return $ ValueExp v
+primExpFromSubExpM _ (Constant v) = pure $ ValueExp v
 
 -- | Convert 'SubExp's of a given type.
 primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName

@@ -58,7 +58,7 @@ is a double-precision float.
 
 .. productionlist::
    int_type: "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-   float_type: "f8" | "f16" | "f32" | "f64"
+   float_type: "f32" | "f64"
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
@@ -190,7 +190,7 @@ presently not allowed.  See `Type Abbreviations`_ for further details.
    param_type: `type` | "(" `id` ":" `type` ")"
 
 Functions are classified via function types, but they are not fully
-first class.  See `Higher-order functions`_ for the details.
+first class.  See :ref:`hofs` for the details.
 
 .. productionlist::
    stringlit: '"' `stringchar` '"'
@@ -939,6 +939,8 @@ An *operator section* that is equivalent to ``\x -> x.a.b.c``.
 
 An *operator section* that is equivalent to ``\x -> x[i,j]``.
 
+.. _hofs:
+
 Higher-order functions
 ----------------------
 
@@ -1141,42 +1143,56 @@ Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
 
-Constructivity restriction
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Causality restriction
+~~~~~~~~~~~~~~~~~~~~~
 
 Conceptually, size parameters are assigned their value by reading the
 sizes of concrete values passed along as parameters.  This means that
-any size parameter must be used as the size of some non-functional
-parameter, as functions do not on their own have sizes.  This is an
-error::
+any size parameter must be used as the size of some parameter.  This
+is an error::
 
   let f [n] (x: i32) = n
 
-Similarly, this is also an error, because ``n`` is not used as the
-size of an array value::
+The following is not an error::
 
   let f [n] (g: [n]i32 -> [n]i32) = ...
 
-However, the following is permitted::
+However, using this function comes with a constraint: whenever an
+application ``f x`` occurs, the value of the size parameter must be
+inferable.  Specifically, this value must have been used as the size
+of an array *before* the ``f x`` application is encountered.  The
+notion of "before" is subtle, as there is no evaluation ordering of a
+Futhark expression, *except* that a ``let``-binding is always
+evaluated before its body, and the argument to a function is always
+evaluated before the function.
 
-  let f [n] (g: [n]i32 -> [n]i32) (arr: [n]i32) = ...
+The causality restriction only occurs when a function has size
+parameters whose first use is *not* as a concrete array size.  For
+example, it does not apply to uses of the following function::
 
-Array literals
-..............
+  let f [n] (arr: [n]i32) (g: [n]i32 -> [n]i32) = ...
 
-When constructing an *empty* array, the compiler must still be able to
-determine the element size of the array at run-time.  Concretely, if
-the element type is polymorphic, a function parameter of that
-polymorphic type (or an array, record, or sum containing it) must
-exist.  This is illegal::
+This is because the proper value of ``n`` can be read directly from
+the actual size of the array.
 
-  let empty 'a (x: i32) = (x, [] : [0]a)
+Empty array literals
+~~~~~~~~~~~~~~~~~~~~
 
-This restriction does not exist for *non-empty* array literals,
-because in those cases the actual provided elements have a size.
+Just as with size-polymorphic functions, when constructing an empty
+array, we must know the exact size of the (missing) elements.  For
+example, in the following proram we are forcing the elements of ``a``
+to be the same as the elements of ``b``, but the size of the elements
+of ``b`` are not known at the time ``a`` is constructed::
+
+  let main (b: bool) (xs: []i32) =
+    let a = [] : [][]i32
+    let b = [filter (>0) xs]
+    in a[0] == b[0]
+
+The result is a type error.
 
 Sum types
-.........
+~~~~~~~~~
 
 When constructing a value of a sum type, the compiler must still be
 able to determine the size of the constructors that are *not* used.
@@ -1188,8 +1204,8 @@ This is illegal::
     let v : sum = #foo xs
     in xs
 
-Abstract types
-..............
+Modules
+~~~~~~~
 
 When matching a module with a module type (see :ref:`module-system`),
 a non-lifted abstract type (i.e. one that is declared with ``type``
@@ -1202,8 +1218,8 @@ the following::
 Then we can construct an array of values of type ``m.t`` without
 worrying about constructing an irregular array.
 
-Interactions with higher-order functions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Higher-order functions
+~~~~~~~~~~~~~~~~~~~~~~
 
 When a higher-order function takes a functional argument whose return
 type is a non-lifted type parameter, any instantiation of that type

@@ -75,7 +75,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
           splitAt (length nes) $ lambdaParams scan_op
 
     forM_ (zip scan_x_params nes) $ \(p, ne) ->
-      copyDWIM (paramName p) [] ne []
+      copyDWIMFix (paramName p) [] ne []
 
     sFor "j" elems_per_thread $ \j -> do
       chunk_offset <- dPrimV "chunk_offset" $
@@ -92,13 +92,13 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
             let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
             sComment "write to-scan values to parameters" $
               forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-              copyDWIM (paramName p) [] (kernelResultSubExp se) []
+              copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
             sComment "write mapped values results to global memory" $
               forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
-              copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
+              copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
               (kernelResultSubExp se) []
           when_out_of_bounds = forM_ (zip scan_y_params nes) $ \(p, ne) ->
-            copyDWIM (paramName p) [] ne []
+            copyDWIMFix (paramName p) [] ne []
 
       sComment "threads in bounds read input; others get neutral element" $
         sIf in_bounds when_in_bounds when_out_of_bounds
@@ -106,7 +106,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
       sComment "combine with carry and write to local memory" $
         compileStms mempty (bodyStms $ lambdaBody scan_op) $
         forM_ (zip local_arrs $ bodyResult $ lambdaBody scan_op) $ \(arr, se) ->
-          copyDWIM arr [kernelLocalThreadId constants] se []
+          copyDWIMFix arr [kernelLocalThreadId constants] se []
 
       let crossesSegment' = do
             f <- crossesSegment
@@ -115,22 +115,24 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
                   to' = to + Imp.var chunk_offset int32
               in f from' to'
 
+      sOp Imp.ErrorSync -- Also implicitly barrier.
+
       groupScan constants crossesSegment'
         (kernelGroupSize constants) scan_op_renamed local_arrs
 
       sComment "threads in bounds write partial scan result" $
         sWhen in_bounds $ forM_ (zip pes local_arrs) $ \(pe, arr) ->
-        copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
+        copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
         (Var arr) [kernelLocalThreadId constants]
 
       sOp Imp.LocalBarrier
 
       let load_carry =
             forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
-            copyDWIM (paramName p) [] (Var arr) [kernelGroupSize constants - 1]
+            copyDWIMFix (paramName p) [] (Var arr) [kernelGroupSize constants - 1]
           load_neutral =
             forM_ (zip nes scan_x_params) $ \(ne, p) ->
-            copyDWIM (paramName p) [] ne []
+            copyDWIMFix (paramName p) [] ne []
 
       sComment "first thread reads last element as carry-in for next iteration" $
         sWhen (kernelLocalThreadId constants .==. 0) $
@@ -173,10 +175,10 @@ scanStage2 (Pattern _ pes) elems_per_group num_groups crossesSegment space scan_
     let in_bounds =
           foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
         when_in_bounds = forM_ (zip local_arrs pes) $ \(arr, pe) ->
-          copyDWIM arr [kernelLocalThreadId constants]
+          copyDWIMFix arr [kernelLocalThreadId constants]
           (Var $ patElemName pe) $ map (`Imp.var` int32) gtids
         when_out_of_bounds = forM_ (zip local_arrs nes) $ \(arr, ne) ->
-          copyDWIM arr [kernelLocalThreadId constants] ne []
+          copyDWIMFix arr [kernelLocalThreadId constants] ne []
 
     sComment "threads in bound read carries; others get neutral element" $
       sIf in_bounds when_in_bounds when_out_of_bounds
@@ -186,7 +188,7 @@ scanStage2 (Pattern _ pes) elems_per_group num_groups crossesSegment space scan_
 
     sComment "threads in bounds write scanned carries" $
       sWhen in_bounds $ forM_ (zip pes local_arrs) $ \(pe, arr) ->
-      copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids)
+      copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
       (Var arr) [kernelLocalThreadId constants]
 
 scanStage3 :: Pattern ExplicitMemory
@@ -226,12 +228,12 @@ scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
       let (scan_x_params, scan_y_params) =
             splitAt (length nes) $ lambdaParams scan_op
       forM_ (zip scan_x_params pes) $ \(p, pe) ->
-        copyDWIM (paramName p) [] (Var $ patElemName pe) carry_in_idx
+        copyDWIMFix (paramName p) [] (Var $ patElemName pe) carry_in_idx
       forM_ (zip scan_y_params pes) $ \(p, pe) ->
-        copyDWIM (paramName p) [] (Var $ patElemName pe) $ map (`Imp.var` int32) gtids
+        copyDWIMFix (paramName p) [] (Var $ patElemName pe) $ map (`Imp.var` int32) gtids
       compileBody' scan_x_params $ lambdaBody scan_op
       forM_ (zip scan_x_params pes) $ \(p, pe) ->
-        copyDWIM (patElemName pe) (map (`Imp.var` int32) gtids) (Var $ paramName p) []
+        copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids) (Var $ paramName p) []
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.

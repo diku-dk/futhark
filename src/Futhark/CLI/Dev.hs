@@ -3,6 +3,7 @@
 module Futhark.CLI.Dev (main) where
 
 import Data.Maybe
+import Data.List
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
@@ -292,6 +293,9 @@ commandLineOptions =
   , Option [] ["ast"]
     (NoArg $ Right $ \opts -> opts { futharkPrintAST = True })
     "Output ASTs instead of prettyprinted programs."
+  , Option [] ["safe"]
+    (NoArg $ Right $ changeFutharkConfig $ \opts -> opts { futharkSafe = True })
+    "Ignore 'unsafe'."
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAndRemoveDeadFunctions []
@@ -343,7 +347,12 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               Right () -> return ()
         compile _      _      =
           Nothing
-        m file config =
+        m file config = do
+          let p :: (Show a, PP.Pretty a) => [a] -> IO ()
+              p = mapM_ putStrLn .
+                  intersperse "" .
+                  map (if futharkPrintAST config then show else pretty)
+
           case futharkPipeline config of
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
@@ -359,17 +368,16 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                            else pretty $ fileProg fm
             Defunctorise -> do
               (_, imports, src) <- readProgram file
-              liftIO $ mapM_ (putStrLn . if futharkPrintAST config then show else pretty) $
-                evalState (Defunctorise.transformProg imports) src
+              liftIO $ p $ evalState (Defunctorise.transformProg imports) src
             Monomorphise -> do
               (_, imports, src) <- readProgram file
-              liftIO $ mapM_ (putStrLn . if futharkPrintAST config then show else pretty) $
+              liftIO $ p $
                 flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
             Defunctionalise -> do
               (_, imports, src) <- readProgram file
-              liftIO $ mapM_ (putStrLn . if futharkPrintAST config then show else pretty) $
+              liftIO $ p $
                 flip evalState src $
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
