@@ -527,7 +527,7 @@ defuncLet dims ps@(pat:pats) body rettype
 
 defuncLet _ [] body rettype = do
   (body', sv) <- defuncExp body
-  return ([], [], body', imposeType sv rettype )
+  return ([], [], body', imposeType sv rettype)
   where imposeType Dynamic{} t =
           Dynamic $ fromStruct t
         imposeType (RecordSV fs1) (Scalar (Record fs2)) =

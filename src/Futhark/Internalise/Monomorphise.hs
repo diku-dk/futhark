@@ -517,6 +517,25 @@ explicitSizes t1 t2 =
             _                  -> return ()
           return d1
 
+-- Monomorphising higher-order functions can result in function types
+-- where the same named parameter occurs in multiple spots.  When
+-- monomorphising we don't really need those parameter names anymore,
+-- and the defunctionaliser can be confused if there are duplicates
+-- (it doesn't handle shadowing), so let's just remove all parameter
+-- names here.  This is safe because a MonoType does not contain sizes
+-- anyway.
+noNamedParams :: MonoType -> MonoType
+noNamedParams = f
+  where f (Array () u t shape) = Array () u (f' t) shape
+        f (Scalar t) = Scalar $ f' t
+        f' (Arrow () _ t1 t2) =
+          Arrow () Unnamed (f t1) (f t2)
+        f' (Record fs) =
+          Record $ fmap f fs
+        f' (Sum cs) =
+          Sum $ fmap (map f) cs
+        f' t = t
+
 -- | Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
@@ -525,7 +544,7 @@ monomorphiseBinding :: Bool -> PolyBinding -> MonoType
 monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, retext, body, loc)) t =
   replaceRecordReplacements rr $ do
   let bind_t = foldFunType (map patternStructType params) rettype
-  (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) t
+  (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams t
   let substs' = M.map Subst substs
       rettype' = substTypesAny (`M.lookup` substs') rettype
       substPatternType =
