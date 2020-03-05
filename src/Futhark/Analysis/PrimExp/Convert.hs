@@ -4,6 +4,7 @@ module Futhark.Analysis.PrimExp.Convert
   (
     primExpToExp
   , primExpFromExp
+  , primExpToSubExp
   , primExpFromSubExp
   , primExpFromSubExpM
   , replaceInPrimExp
