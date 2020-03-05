@@ -308,7 +308,6 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
                            size_t      min_size,
                            const char *tag,
                            GLuint     *mem_out) {
-
   GLenum error;
   size_t size;
 
@@ -331,22 +330,27 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
     }
   }
 
-  glGenBuffers(size, &ctx->SSBOs);
-  *mem_out = ctx->SSBOs;
+  GLuint ssbo;
+
+  glGenBuffers(1, &ssbo);
+
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, &ssbo);
 
   error = glGetError();
   if (error != GL_NO_ERROR) {
     return error;
   }
 
-  int x = 2;
-  //TODO: binding
-  //glBindBuffer(GL_SHADER_STORAGE_BUFFER, ctx->SSBOs);
-
-  glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(x), &x,
+  glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL,
                GL_DYNAMIC_DRAW);
 
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, &ssbo);
+
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, &ssbo);
+
   error = glGetError();
+
+  *mem_out = ssbo;
 
   return error;
 }
@@ -360,7 +364,7 @@ static GLenum opengl_free(struct opengl_context *ctx,
 
   // If there is already a block with this tag, then remove it.
   if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
-    glDeleteBuffers(size, &existing_mem);
+    glDeleteBuffers(1, &existing_mem);
     error = glGetError();
     if (error != GL_NO_ERROR) {
       return error;
@@ -374,6 +378,7 @@ static GLenum opengl_free(struct opengl_context *ctx,
     free_list_insert(&ctx->free_list, size, mem, tag);
   }
 
+  return error;
 }
 
 static GLenum opengl_free_all(struct opengl_context *ctx) {
@@ -381,7 +386,7 @@ static GLenum opengl_free_all(struct opengl_context *ctx) {
   GLenum error;
   free_list_pack(&ctx->free_list);
     while (free_list_first(&ctx->free_list, &mem) == 0) {
-      //glDeleteBuffers(size, mem); //TODO: get size
+      glDeleteBuffers(1, mem);
       error = glGetError();
       if (error != GL_NO_ERROR) {
         return error;
