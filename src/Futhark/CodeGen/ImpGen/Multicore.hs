@@ -6,11 +6,17 @@ module Futhark.CodeGen.ImpGen.Multicore
 
 import Control.Monad
 
+import Prelude hiding (quot, rem)
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+
+import Futhark.Util (chunks)
+import Futhark.Transform.Rename
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
+
+import Futhark.CodeGen.ImpGen.Kernels.Base
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError Imp.Program)
@@ -27,14 +33,73 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
         opCompiler _ (Inner (OtherOp ())) =
           return ()
 
+-- |
+-- These are copied from SegRed.hs but the module doesn't export them
+-- so I copied them for now, Should fix this
+
+my_groupResultArrays space (Count size) reds =
+  forM reds $ \(SegRedOp _ lam _ shape) ->
+    forM (lambdaReturnType lam) $ \t -> do
+    let pt = elemType t
+        full_shape = Shape [size] <> shape <> arrayShape t
+        -- Move the groupsize dimension last to ensure coalesced
+        -- memory access.
+        perm = [1..shapeRank full_shape-1] ++ [0]
+    sAllocArrayPerm "group_res_arr" pt full_shape space perm
+
+
+-- | A SegRedOp with auxiliary information.
+data MySegRedOpSlug =
+  MySegRedOpSlug
+  { slugOp :: SegRedOp ExplicitMemory
+  , slugArrs :: [VName]
+    -- ^ The arrays used for computing the intra-group reduction
+    -- (either local or global memory).
+  , slugAccs :: [(VName, [Imp.Exp])]
+    -- ^ Places to store accumulator in stage 1 reduction.
+  }
+
+my_slugBody :: MySegRedOpSlug -> Body ExplicitMemory
+my_slugBody = lambdaBody . segRedLambda . slugOp
+
+my_slugParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
+my_slugParams = lambdaParams . segRedLambda . slugOp
+
+my_slugNeutral :: MySegRedOpSlug -> [SubExp]
+my_slugNeutral = segRedNeutral . slugOp
+
+my_slugShape :: MySegRedOpSlug -> Shape
+my_slugShape = segRedShape . slugOp
+
+my_slugsComm :: [MySegRedOpSlug] -> Commutativity
+my_slugsComm = mconcat . map (segRedComm . slugOp)
+
+my_accParams, nextParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
+my_accParams slug = take (length (my_slugNeutral slug)) $ my_slugParams slug
+nextParams slug = drop (length (my_slugNeutral slug)) $ my_slugParams slug
+
+
+mySegRedOpSlug (op, group_res_arrs) =
+  MySegRedOpSlug op group_res_arrs <$>
+  mapM mkAcc (lambdaParams (segRedLambda op))
+  where mkAcc p
+          | Prim t <- paramType p,
+            shapeRank (segRedShape op) == 0 = do
+              acc <- dPrim (baseString (paramName p) <> "_acc") t
+              return (acc, [])
+          | otherwise = do
+              acc <- dPrim (baseString (paramName p) <> "_acc_z") (IntType Int32)
+              return (acc, [0, 0])
+
+
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
 compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
+  body' <-   collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
 
-  body <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     compileStms (freeIn kres) kstms $ do
       let writeResult pe (Returns _ se) =
             copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
@@ -42,6 +107,59 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
             error $ "writeResult: cannot handle " ++ pretty res
       zipWithM_ writeResult (patternElements pat) kres
 
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') body
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') body'
+
+compileSegOp pat (SegRed lvl space (reds) _ (body)) = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  reds_group_res_arrs <- my_groupResultArrays DefaultSpace (num_groups) reds
+
+  let body'' red_cont = compileStms (freeIn $ kernelBodyLore body)(kernelBodyStms body) $ do
+        let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult body
+        red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+
+  -- Creates tempoary accumulator variables
+  slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
+
+  dScope Nothing $ scopeOfLParams $ concatMap my_slugParams slugs
+
+  -- Initialize  neutral element accumualtor
+  sComment "neutral-initialise the accumulators" $
+    forM_ slugs $ \slug ->
+    forM_ (zip (slugAccs slug) (my_slugNeutral slug)) $ \((acc, acc_is), ne) ->
+    sLoopNest (my_slugShape slug) $ \vec_is ->
+    copyDWIMFix acc (acc_is++vec_is) ne []
+
+  body' <- collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
+    sComment "apply map function" $
+      body'' $ \all_red_res -> do
+      let slugs_res = chunks (map (length . my_slugNeutral) slugs) all_red_res
+      emit $ Imp.DebugPrint "\n# SegRed -- test" $ Nothing
+      forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
+        sLoopNest (my_slugShape slug) $ \vec_is -> do
+        sComment "load accumulator" $
+          forM_ (zip (my_accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+          copyDWIMFix (paramName p) [] (Var acc) (acc_is)
+        sComment "load new values" $
+          forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+          copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+        sComment "apply reduction operator" $
+          compileStms mempty (bodyStms $ my_slugBody slug) $
+          sComment "store in accumulator" $
+          forM_ (zip
+                  (slugAccs slug)
+                  (bodyResult $ my_slugBody slug)) $ \((acc, acc_is), se) -> do
+          copyDWIMFix acc (acc_is ++ vec_is) se []
+          forM_ (zip (patternElements pat) (bodyResult $ my_slugBody slug)) $ \(pe, se') -> do
+            copyDWIMFix (patElemName pe) [] se' []
+
+  emit $ Imp.Op $ Imp.ParRed (segFlat space) (product ns') body'
+
+  where num_groups = segNumGroups lvl
+        group_size = segGroupSize lvl
+
+
 compileSegOp _ op =
   error $ "compileSegOp: unhandled: " ++ pretty op

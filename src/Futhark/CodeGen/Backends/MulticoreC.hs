@@ -140,3 +140,10 @@ compileOp (ParLoop i e body) = do
            [C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
                    $items:body'
                  }|]]
+
+compileOp (ParRed i e body) = do
+  e' <- GC.compileExp e
+  body' <- GC.blockScope $ GC.compileCode body
+  GC.stm [C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
+                   $items:body'
+                 }|]

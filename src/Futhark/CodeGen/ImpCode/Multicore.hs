@@ -27,11 +27,17 @@ type Code = Imp.Code Multicore
 -- | A parallel operation.
 data Multicore =
   ParLoop VName Imp.Exp Code
+  | ParRed VName Imp.Exp Code
 
 instance Pretty Multicore where
   ppr (ParLoop i e body) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr body)
+  ppr (ParRed i e body) =
+    text "parred" <+> ppr i <+> langle <+> ppr e <+>
+    nestedBlock "{" "}" (ppr body)
+
 
 instance FreeIn Multicore where
   freeIn' (ParLoop _ e body) = freeIn' e <> freeIn' body
+  freeIn' (ParRed _ e body) = freeIn' e <> freeIn' body
