@@ -984,7 +984,7 @@ patternVars = mconcat . map ident . S.toList . patternIdents
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind entry@Just{} name _ (Info (rettype, retext)) tparams params body _ loc)
+defuncValBind (ValBind entry name _ (Info (rettype, retext)) tparams params body _ loc)
   | Scalar Arrow{} <- rettype = do
       (body_pats, body', rettype') <- etaExpand (fromStruct rettype) body
       -- FIXME: we should also handle non-constant size annotations
