@@ -23,6 +23,8 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
 
   let free_list_h = $(embedStringFile "rts/c/free_list.h")
       openGL_h    = $(embedStringFile "rts/c/opengl.h")
+      glad_h      = $(embedStringFile "rts/c/glad/include/glad/glad.h")
+      glad_c      = $(embedStringFile "rts/c/glad/src/glad.c")
       -- fragments might need ctx_fields, ctx_inits and openGL_load
       fragments   = map (\s -> [C.cinit|$string:s|])
                         $ chunk 2000 (opengl_prelude ++ opengl_code)
@@ -39,6 +41,8 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                          $esc:("typedef GLuint fl_mem_t;")
                          $esc:free_list_h
                          $esc:openGL_h
+                         $esc:glad_h
+                         $esc:glad_c
                          const char *opengl_program[] = {$inits:fragments, NULL};|]
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
