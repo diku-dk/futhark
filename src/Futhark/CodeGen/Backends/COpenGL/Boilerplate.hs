@@ -34,15 +34,15 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       num_sizes        = M.size sizes
 
-  GC.earlyDecls [C.cunit|$esc:("#include <X11/X.h>")
+  GC.earlyDecls [C.cunit|$esc:glad_h
+                         $esc:glad_c
+                         $esc:("#include <X11/X.h>")
                          $esc:("#include <X11/Xlib.h>")
                          $esc:("#include <GL/gl.h>")
                          $esc:("#include <GL/glx.h>")
                          $esc:("typedef GLuint fl_mem_t;")
                          $esc:free_list_h
                          $esc:openGL_h
-                         $esc:glad_h
-                         $esc:glad_c
                          const char *opengl_program[] = {$inits:fragments, NULL};|]
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
