@@ -18,6 +18,9 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
+-- one pass scan will be implemented here
+
+
 makeLocalArrays :: Count GroupSize SubExp -> SubExp -> [SubExp] -> Lambda ExplicitMemory
                 -> InKernelGen [VName]
 makeLocalArrays (Count group_size) num_threads nes scan_op = do
