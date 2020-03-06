@@ -13,13 +13,13 @@ compile-simple-cuda:
 	$(FUTHARK) cuda tests/scan/simple.fut
 
 run-simple:
-	echo "[1,2,3,4,5,6,7,8]" | ./simple
+	echo "[1,2,3,4,5,6,7,8]" | ./tests/scan/simple
 
 dump-simple:
-	./simple --dump-opencl simple-kernel.c
+	./tests/scan/simple --dump-opencl tests/scan/simple-kernel.c
 
 test: $(SIZES:%=kA-%.data)
 	$(FUTHARK) test --backend=opencl tests/scan/simple.fut
 
 kA-%.data:
-	futhark dataset --i32-bounds=-10000:10000 -g [$*]i32 > $@
+	futhark dataset --i32-bounds=-10000:10000 -g [$*]i32 > tests/scan/$@
