@@ -25,9 +25,8 @@ type Function = Imp.Function Multicore
 type Code = Imp.Code Multicore
 
 -- | A parallel operation.
-data Multicore =
-  ParLoop VName Imp.Exp Code
-  | ParRed VName Imp.Exp Code
+data Multicore = ParLoop VName Imp.Exp Code
+               | ParRed VName Imp.Exp Code
 
 instance Pretty Multicore where
   ppr (ParLoop i e body) =

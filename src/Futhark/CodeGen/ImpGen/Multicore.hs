@@ -11,12 +11,11 @@ import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 
 import Futhark.Util (chunks)
-import Futhark.Transform.Rename
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
 
-import Futhark.CodeGen.ImpGen.Kernels.Base
+
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError Imp.Program)
@@ -33,11 +32,16 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
         opCompiler _ (Inner (OtherOp ())) =
           return ()
 
+
 -- |
 -- These are copied from SegRed.hs but the module doesn't export them
 -- so I copied them for now, Should fix this
-
-my_groupResultArrays space (Count size) reds =
+myGroupResultArrays :: Traversable t =>
+                        Space
+                     -> Count u SubExp
+                     -> t (SegRedOp lore1)
+                     -> ImpM lore2 op (t [VName])
+myGroupResultArrays space (Count size) reds =
   forM reds $ \(SegRedOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
@@ -46,6 +50,7 @@ my_groupResultArrays space (Count size) reds =
         -- memory access.
         perm = [1..shapeRank full_shape-1] ++ [0]
     sAllocArrayPerm "group_res_arr" pt full_shape space perm
+
 
 
 -- | A SegRedOp with auxiliary information.
@@ -78,7 +83,8 @@ my_accParams, nextParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
 my_accParams slug = take (length (my_slugNeutral slug)) $ my_slugParams slug
 nextParams slug = drop (length (my_slugNeutral slug)) $ my_slugParams slug
 
-
+mySegRedOpSlug :: (SegRedOp ExplicitMemory, [VName])
+                        -> ImpM lore op MySegRedOpSlug
 mySegRedOpSlug (op, group_res_arrs) =
   MySegRedOpSlug op group_res_arrs <$>
   mapM mkAcc (lambdaParams (segRedLambda op))
@@ -87,9 +93,8 @@ mySegRedOpSlug (op, group_res_arrs) =
             shapeRank (segRedShape op) == 0 = do
               acc <- dPrim (baseString (paramName p) <> "_acc") t
               return (acc, [])
-          | otherwise = do
-              acc <- dPrim (baseString (paramName p) <> "_acc_z") (IntType Int32)
-              return (acc, [0, 0])
+          | otherwise =
+              error "couldn't determine type"
 
 
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
@@ -97,7 +102,7 @@ compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
 compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
-  body' <-   collect $ do
+  body' <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
 
     compileStms (freeIn kres) kstms $ do
@@ -109,18 +114,66 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') body'
 
-compileSegOp pat (SegRed lvl space (reds) _ (body)) = do
+
+compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
+
+  emit $ Imp.DebugPrint "\n# SegScan -- start"  Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  reds_group_res_arrs <- my_groupResultArrays DefaultSpace (num_groups) reds
+  -- Desclare neutral element
+  dScope Nothing $ scopeOfLParams $ lambdaParams lore
+
+  let (scan_x_params, scan_y_params) =
+        splitAt (length subexps) $ lambdaParams lore
+
+  -- Set neutral element value
+  forM_ (zip scan_x_params subexps) $ \(p, ne) ->
+      copyDWIMFix (paramName p) [] ne []
+
+  body' <- collect $ do
+    emit $ Imp.DebugPrint "\n# body -- start"  Nothing
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
+
+    sComment "Read value" $ compileStms mempty (kernelBodyStms kbody) $ do
+          let (scan_res, _map_res) = splitAt (length subexps) $ kernelBodyResult kbody
+          sComment "write to-scan values to parameters" $
+            forM_ (zip scan_y_params scan_res) $ \(p, se) ->
+            copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
+
+    sComment "combine with carry and write to local memory" $
+      compileStms mempty (bodyStms $ lambdaBody lore) $
+      forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lore) $ \(pe, se) -> do
+      copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+      forM_ (zip scan_x_params $ bodyResult $ lambdaBody lore) $ \(p, ne) ->
+        copyDWIMFix (paramName p) [] ne []
+
+    emit $ Imp.DebugPrint "\n# body -- end"  Nothing
+
+  emit $ Imp.Op $ Imp.ParRed (segFlat space) (product ns') body'
+  emit $ Imp.DebugPrint "\n# SegScan -- end"  Nothing
+
+
+compileSegOp pat (SegRed lvl space reds _ body) = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  reds_group_res_arrs <- myGroupResultArrays DefaultSpace num_groups reds
 
   let body'' red_cont = compileStms (freeIn $ kernelBodyLore body)(kernelBodyStms body) $ do
-        let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult body
+        let (red_res, _) = splitAt (segRedResults reds) $ kernelBodyResult body
         red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
 
-  -- Creates tempoary accumulator variables
+  num_groups' <- traverse toExp num_groups
+  group_size' <- traverse toExp group_size
+
+  emit $ Imp.DebugPrint "num_groups" $ Just $ Imp.unCount num_groups'
+  emit $ Imp.DebugPrint "group_size" $ Just $ Imp.unCount group_size'
+
+  -- Creates accumulator variables
   slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
+
+  emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
 
   dScope Nothing $ scopeOfLParams $ concatMap my_slugParams slugs
 
@@ -136,12 +189,12 @@ compileSegOp pat (SegRed lvl space (reds) _ (body)) = do
     sComment "apply map function" $
       body'' $ \all_red_res -> do
       let slugs_res = chunks (map (length . my_slugNeutral) slugs) all_red_res
-      emit $ Imp.DebugPrint "\n# SegRed -- test" $ Nothing
+      emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
       forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
         sLoopNest (my_slugShape slug) $ \vec_is -> do
         sComment "load accumulator" $
           forM_ (zip (my_accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-          copyDWIMFix (paramName p) [] (Var acc) (acc_is)
+          copyDWIMFix (paramName p) [] (Var acc) acc_is
         sComment "load new values" $
           forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
           copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
@@ -152,13 +205,17 @@ compileSegOp pat (SegRed lvl space (reds) _ (body)) = do
                   (slugAccs slug)
                   (bodyResult $ my_slugBody slug)) $ \((acc, acc_is), se) -> do
           copyDWIMFix acc (acc_is ++ vec_is) se []
-          forM_ (zip (patternElements pat) (bodyResult $ my_slugBody slug)) $ \(pe, se') -> do
+          forM_ (zip (patternElements pat) (bodyResult $ my_slugBody slug)) $ \(pe, se') ->
             copyDWIMFix (patElemName pe) [] se' []
 
   emit $ Imp.Op $ Imp.ParRed (segFlat space) (product ns') body'
 
-  where num_groups = segNumGroups lvl
-        group_size = segGroupSize lvl
+  where
+    -- num_groups = segNumGroups $ SegThread {segNumGroups = Count $ Constant $ IntValue $ Int32Value 0,
+    --                                        segGroupSize = Count $ Constant $ IntValue $ Int32Value 0,
+    --                                        segVirt = SegVirt}
+    num_groups = segNumGroups lvl
+    group_size = segGroupSize lvl
 
 
 compileSegOp _ op =
