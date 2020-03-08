@@ -1,19 +1,6 @@
 // Start of opengl.h.
 
-#define OPENGL_SUCCEED_FATAL(e) opengl_succeed_fatal(e, #e, __FILE__, __LINE__)
-#define OPENGL_SUCCEED_NONFATAL(e) opengl_succeed_nonfatal(e, #e, __FILE__, __LINE__)
-// Take care not to override an existing error.
-#define OPENGL_SUCCEED_OR_RETURN(e) {             \
-    char *error = OPENGL_SUCCEED_NONFATAL(e);     \
-    if (error) {                                  \
-      if (!ctx->error) {                          \
-        ctx->error = error;                       \
-        return bad;                               \
-      } else {                                    \
-        free(error);                              \
-      }                                           \
-    }                                             \
-  }
+#define OPENGL_SUCCEED(e) opengl_succeed(e, #e, __FILE__, __LINE__)
 
 typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*,
                                                     GLXFBConfig,
@@ -26,7 +13,7 @@ typedef Bool (*glXMakeContextCurrentARBProc)(Display*,
                                              GLXContext);
 
 static glXCreateContextAttribsARBProc glXCreateContextAttribsARB = 0;
-static glXMakeContextCurrentARBProc glXMakeContextCurrentARB     = 0;
+static glXMakeContextCurrentARBProc   glXMakeContextCurrentARB   = 0;
 
 struct opengl_config {
   int debugging;
@@ -149,45 +136,34 @@ static const char* opengl_error_string(GLenum err) {
   }
 }
 
-static void opengl_succeed_fatal(GLenum ret,
-                                 const char *call,
-                                 const char *file,
-                                 int line) {
+static void opengl_succeed(GLenum ret,
+                           const char *call,
+                           const char *file,
+                           int line) {
   if (ret != GL_NO_ERROR) {
     panic(-1, "%s:%d: OpenGL call\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, opengl_error_string(ret));
   }
 }
 
-static char* opengl_succeed_nonfatal(unsigned int ret,
-                                     const char *call,
-                                     const char *file,
-                                     int line) {
-  if (ret != GL_NO_ERROR) {
-    return msgprintf("%s:%d: OpenGL call\n  %s\nfailed with error code %d (%s)\n",
-                     file, line, call, ret, opengl_error_string(ret));
-  } else {
-    return NULL;
-  }
-}
-
 static void setup_size_opengl(struct opengl_context *ctx) {
 
    int max_shared_memory;
-   int max_group_size;
    int max_num_groups;
+   int max_group_size;
 
    glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE,
                  &max_shared_memory);
-   glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_SIZE,
-                 &max_group_size);
    glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS,
                  &max_num_groups);
+   glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0,
+                   &max_group_size);
+   OPENGL_SUCCEED(glGetError());
 
    ctx->max_threshold     = 0;
    ctx->max_shared_memory = max_shared_memory;
-   ctx->max_group_size    = max_group_size;
    ctx->max_num_groups    = max_num_groups;
+   ctx->max_group_size    = max_group_size;
 
   // Go through all the sizes, clamp them to the valid range,
   // or set them to the default.
@@ -301,6 +277,7 @@ static void setup_opengl(struct opengl_context *ctx,
     }
 
   setup_size_opengl(ctx);
+  OPENGL_SUCCEED(glGetError());
 
 }
 
@@ -333,8 +310,10 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
   GLuint ssbo;
 
   glGenBuffers(1, &ssbo);
+  OPENGL_SUCCEED(glGetError());
 
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+  OPENGL_SUCCEED(glGetError());
 
   error = glGetError();
   if (error != GL_NO_ERROR) {
@@ -343,10 +322,13 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
 
   glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL,
                GL_DYNAMIC_DRAW);
+  OPENGL_SUCCEED(glGetError());
 
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ssbo);
+  OPENGL_SUCCEED(glGetError());
 
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+  OPENGL_SUCCEED(glGetError());
 
   error = glGetError();
 
