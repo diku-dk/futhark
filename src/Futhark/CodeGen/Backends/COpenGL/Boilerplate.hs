@@ -230,8 +230,6 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
      [C.cedecl|struct $id:s {
                          int detail_memory;
                          int debugging;
-                         int profiling;
-                         int profiling_paused;
                          int logging;
                          typename lock_t lock;
                          char *error;
@@ -241,13 +239,29 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                          struct sizes sizes;
                        };|])
 
+  GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
+                     ctx->opengl.cfg    = cfg->opengl;
+                     ctx->detail_memory = cfg->opengl.debugging;
+                     ctx->debugging     = cfg->opengl.debugging;
+                     ctx->logging       = cfg->opengl.logging;
+                     ctx->error         = NULL;
+
+                     $stms:init_fields
+                     //$stms:ctx_opengl_inits
+  }|]
+
   let set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
                           [(0::Int)..] $ M.keys sizes
 
---TODO:
--- GC.libDecl
+  final_inits <- GC.contextFinalInits
 
--- GC.libDecl
+  GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx) {
+
+
+
+                     $stms:final_inits
+                     $stms:set_sizes
+  }|]
 
   GC.publicDef_ "context_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
@@ -257,8 +271,9 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                             return NULL;
                           }
 
+                          init_context_early(cfg, ctx);
                           setup_opengl(&ctx->opengl, opengl_program, cfg->build_opts);
-
+                          init_context_late(cfg, ctx);
                           return ctx;
                        }|])
 
