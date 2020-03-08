@@ -222,7 +222,8 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                        }|])
 
   (fields, init_fields) <- GC.contextContents
-  let ctx_opengl_fields = map (\k -> [C.csdecl|typename CUfunction $id:k;|])
+  -- FIXME:
+  let ctx_opengl_fields = map (\k -> [C.csdecl| unsigned int $id:k;|])
                               shader_names
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
@@ -230,6 +231,8 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
      [C.cedecl|struct $id:s {
                          int detail_memory;
                          int debugging;
+                         int profiling;
+                         int profiling_paused;
                          int logging;
                          typename lock_t lock;
                          char *error;
@@ -240,11 +243,13 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                        };|])
 
   GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
-                     ctx->opengl.cfg    = cfg->opengl;
-                     ctx->detail_memory = cfg->opengl.debugging;
-                     ctx->debugging     = cfg->opengl.debugging;
-                     ctx->logging       = cfg->opengl.logging;
-                     ctx->error         = NULL;
+                     ctx->opengl.cfg       = cfg->opengl;
+                     ctx->detail_memory    = cfg->opengl.debugging;
+                     ctx->debugging        = cfg->opengl.debugging;
+                     ctx->profiling        = cfg->opengl.profiling;
+                     ctx->profiling_paused = 0;
+                     ctx->logging          = cfg->opengl.logging;
+                     ctx->error            = NULL;
 
                      $stms:init_fields
                      //$stms:ctx_opengl_inits
