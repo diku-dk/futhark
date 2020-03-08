@@ -153,9 +153,10 @@ openglMemoryType space =
 
 staticOpenGLArray :: GC.StaticArray OpenGL ()
 staticOpenGLArray name "device" t vs = do
-  --TODO{
   let ct = GC.primTypeToCType t
   name_realtype <- newVName $ baseString name ++ "_realtype"
+  mapped_mem <- newVName "mapped_src_memory"
+  mem_t <- openglMemoryType "device"
   num_elems <- case vs of
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
@@ -168,24 +169,21 @@ staticOpenGLArray name "device" t vs = do
   GC.contextField (pretty name) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
   GC.atInit [C.cstm|{
-    typename cl_int success;
     ctx->$id:name.references = NULL;
     ctx->$id:name.size = 0;
-    ctx->$id:name.mem =
-      clCreateBuffer(ctx->opencl.ctx, CL_MEM_READ_WRITE,
-                     ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct), NULL,
-                     &success);
-    OPENCL_SUCCEED_OR_RETURN(success);
+    opengl_alloc(&ctx->opengl,
+                 ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct),
+                 $string:(pretty name),
+                 &ctx->$id:name.mem);
     if ($int:num_elems > 0) {
-      OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueWriteBuffer(ctx->opencl.queue, ctx->$id:name.mem, CL_TRUE,
-                             0, $int:num_elems*sizeof($ty:ct),
-                             $id:name_realtype,
-                             0, NULL, NULL));
+      $ty:mem_t *$id:mapped_mem;
+      $id:mapped_mem =
+        ($ty:mem_t*)glMapNamedBuffer(ctx->$id:name.mem, GL_READ_ONLY);
+      memcpy($id:mapped_mem, &$id:name_realtype, $int:num_elems*sizeof($ty:ct));
+      glUnmapNamedBuffer(ctx->$id:name.mem);
     }
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
-  --TODO}
 
 staticOpenGLArray _ space _ _ =
   error $ "OpenGL backend cannot create static array in memory space '" ++ space ++ "'"
