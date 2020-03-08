@@ -38,15 +38,15 @@ compileProg prog = do
                 cliOptions prog'
   where operations :: GC.Operations OpenGL ()
         operations = GC.Operations
-                     { GC.opsCompiler = callShader
+                     { GC.opsCompiler    = callShader
                      , GC.opsWriteScalar = writeOpenGLScalar
-                     , GC.opsReadScalar = readOpenGLScalar
-                     , GC.opsAllocate = allocateOpenGLBuffer
-                     , GC.opsDeallocate = deallocateOpenGLBuffer
-                     , GC.opsCopy = copyOpenGLMemory
+                     , GC.opsReadScalar  = readOpenGLScalar
+                     , GC.opsAllocate    = allocateOpenGLBuffer
+                     , GC.opsDeallocate  = deallocateOpenGLBuffer
+                     , GC.opsCopy        = copyOpenGLMemory
                      , GC.opsStaticArray = staticOpenGLArray
-                     , GC.opsMemoryType = openglMemoryType
-                     , GC.opsFatMemory = True
+                     , GC.opsMemoryType  = openglMemoryType
+                     , GC.opsFatMemory   = True
                      }
         include_opengl_h = unlines []
 
@@ -105,54 +105,49 @@ deallocateOpenGLBuffer _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
 
 copyOpenGLMemory :: GC.Copy OpenGL ()
-copyOpenGLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
-  --TODO{
+copyOpenGLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes = do
+  mapped_mem <- newVName "mapped_src_memory"
+  mem_t      <- openglMemoryType "device"
+  GC.decl [C.cdecl|$ty:mem_t *$id:mapped_mem;|]
   GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem, CL_TRUE,
-                            $exp:srcidx, $exp:nbytes,
-                            $exp:destmem + $exp:destidx,
-                            0, NULL, $exp:( copyHostToDev)));
-   }
-  |]
-  --TODO}
-copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
-  --TODO{
+      $id:mapped_mem =
+        ($ty:mem_t*)glMapNamedBuffer($exp:srcmem, GL_READ_ONLY);
+   }|]
+  GC.copyMemoryDefaultSpace destmem destidx [C.cexp|$id:mapped_mem|] srcidx nbytes
+  GC.stm [C.cstm|
+  if ($exp:nbytes > 0) {
+    glUnmapNamedBuffer($exp:srcmem);
+  }|]
+copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes = do
+  mapped_mem <- newVName "mapped_dest_memory"
+  mem_t      <- openglMemoryType "device"
+  GC.decl [C.cdecl|$ty:mem_t *$id:mapped_mem;|]
   GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueWriteBuffer(ctx->opencl.queue, $exp:destmem, CL_TRUE,
-                             $exp:destidx, $exp:nbytes,
-                             $exp:srcmem + $exp:srcidx,
-                             0, NULL, $exp:( copyDevToHost)));
-    }
-  |]
-  --TODO}
+      $id:mapped_mem =
+        ($ty:mem_t*)glMapNamedBuffer($exp:destmem, GL_WRITE_ONLY);
+    }|]
+  GC.copyMemoryDefaultSpace [C.cexp|$id:mapped_mem|] destidx srcmem srcidx nbytes
+  GC.stm [C.cstm|
+    if ($exp:nbytes > 0) {
+      glUnmapNamedBuffer($exp:destmem);
+    }|]
 copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
-  --TODO{
   GC.stm [C.cstm|{
     if ($exp:nbytes > 0) {
-      OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueCopyBuffer(ctx->opencl.queue,
-                            $exp:srcmem, $exp:destmem,
-                            $exp:srcidx, $exp:destidx,
-                            $exp:nbytes,
-                            0, NULL, $exp:( copyDevToDev)));
+      glCopyNamedBufferSubData($exp:srcmem, $exp:destmem,
+                               $exp:srcidx, $exp:destidx,
+                               $exp:nbytes);
     }
   }|]
-  --TODO}
 copyOpenGLMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
-  --TODO{
   GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-  --TODO}
 copyOpenGLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 openglMemoryType :: GC.MemoryType OpenGL ()
---TODO{
-openglMemoryType "device" = pure [C.cty|typename GLuint|]
---TODO}
+openglMemoryType "device" = pure [C.cty|unsigned int|]
 openglMemoryType space =
   error $ "OpenGL backend does not support '" ++ space ++ "' memory space."
 
