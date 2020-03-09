@@ -4,9 +4,9 @@ module Futhark.CLI.Autotune (main) where
 
 import Control.Monad
 import qualified Data.ByteString.Char8 as SBS
-import Data.Time.Clock.POSIX
 import Data.Tree
 import Data.List
+import qualified Data.Set as S
 import Data.Maybe
 import Text.Read (readMaybe)
 import Text.Regex.TDFA
@@ -71,7 +71,7 @@ comparisons = mapMaybe isComparison . lines
 data RunPurpose = RunSample -- ^ Only a single run.
                 | RunBenchmark -- ^ As many runs as needed.
 
-type RunDataset = Path -> RunPurpose -> IO (Either String ([(String, Int)], Double))
+type RunDataset = Int -> Path -> RunPurpose -> IO (Either String ([(String, Int)], Double))
 
 type DatasetName = String
 
@@ -106,30 +106,24 @@ prepare opts prog = do
 
           _ -> Nothing
 
-  -- We wish to let datasets run for the untuned time + 20% + 1 second.
-  let timeout elapsed = ceiling (elapsed * 1.2) + 1
-
   fmap concat $ forM truns $ \ios ->
     forM (mapMaybe (runnableDataset $ iosEntryPoint ios)
                    (iosTestRuns ios)) $
       \(dataset, do_run) -> do
-      bef <- toRational <$> getPOSIXTime
       res <- do_run 60000 [] RunBenchmark
-      aft <- toRational <$> getPOSIXTime
       case res of Left err -> do
                     putStrLn $ "Error when running " ++ prog ++ ":"
                     putStrLn err
                     exitFailure
-                  Right _ -> do
-                    let t = timeout $ aft - bef
-                    putStrLn $ "Calculated timeout for " ++ dataset ++
-                      " : " ++ show t ++ "s"
-                    return (dataset, do_run t, iosEntryPoint ios)
+                  Right _ ->
+                    return (dataset, do_run, iosEntryPoint ios)
 
   where run entry_point trun expected timeout path purpose = do
           let opts' = case purpose of RunSample -> opts { optRuns = 1 }
                                       RunBenchmark -> opts
 
+              averageRuntime :: ([RunResult], T.Text) ->
+                                ([(String, Int)], Double)
               averageRuntime (runres, errout) =
                 (comparisons (T.unpack errout),
                  fromIntegral (sum (map runMicroseconds runres)) /
@@ -149,10 +143,6 @@ prepare opts prog = do
 
 data DatasetResult = DatasetResult [(String, Int)] Double
              deriving Show
-
---- Finding initial comparisons.
-
---- Extracting threshold hierarchy.
 
 type ThresholdForest = Forest (String, Bool)
 
@@ -207,80 +197,110 @@ thresholdForest prog = do
 
 --- Doing the atual tuning
 
-intersectRanges :: [(Int, Int)] -> (Int, Int)
-intersectRanges = foldl' f (thresholdMin, thresholdMax)
-  where f (xmin, xmax) (ymin, ymax) =
-          -- XXX: what happens when the intersection is empty?
-          (xmin `max` ymin,
-           xmax `min` ymax)
-
 tuneThreshold :: AutotuneOptions
               -> [(DatasetName, RunDataset, T.Text)]
               -> Path -> (String, Path)
               -> IO Path
-tuneThreshold opts datasets already_tuned (v, v_path) = do
-  ranges <-
-    forM datasets $ \(dataset_name, run, entry_point) ->
+tuneThreshold opts datasets already_tuned (v, _v_path) = do
+  putStrLn $ unwords ["Tuning threshold", v]
 
-    if not $ isPrefixOf (T.unpack entry_point ++ ".") v then do
-        when (optVerbose opts > 0) $
-          putStrLn $ unwords [v, "is irrelevant for", T.unpack entry_point]
-        return (thresholdMin, thresholdMax)
-    else do
+  (e_pars', _) <- getAllEPars already_tuned v
+  let e_pars = S.toList $ S.insert thresholdMax $ S.insert thresholdMin e_pars'
 
-      putStrLn $ unwords ["Tuning", v, "on entry point", T.unpack entry_point,
-                          "and dataset", dataset_name]
+  when (optVerbose opts > 0) $
+    putStrLn $ unwords ["Got e_pars:", show e_pars]
 
-      sample_run <- run path RunSample
+  when (optVerbose opts > 0) $
+    putStrLn $ unwords ["Computing baseline with e_par", show $ head e_pars]
 
-      case sample_run of
-        Left err -> do
-          -- If the sampling run fails, we treat it as zero information.
-          -- One of our ancestor thresholds will have be set such that
-          -- this path is never taken.
-          when (optVerbose opts > 0) $ putStrLn $
-            "Sampling run failed:\n" ++ err
-          return (thresholdMin, thresholdMax)
-        Right (cmps, _) ->
-          case lookup v cmps of
+  baseline <- benchmarkThresholdChoice 60000 (head e_pars)
+
+  case baseline of
+    Just baseline' -> do
+      best_e_par <- binarySearch baseline' $ tail e_pars
+
+      return $ (v, best_e_par) : already_tuned
+
+    Nothing ->
+      error $ unwords ["Couldn't get baseline for", v]
+
+  where
+    binarySearch :: (Int, Int) -> [Int] -> IO Int
+    binarySearch (best_t, best) xs =
+      case splitAt (length xs `div` 2) xs of
+        (_, []) -> return best
+        (lower, middle : upper) -> do
+          when (optVerbose opts > 0) $
+            putStrLn $ unwords ["Trying e_par", show middle]
+          candidate <- benchmarkThresholdChoice (timeout best_t) middle
+          case candidate of
+            -- We search from the bottom, so if the new number is better than
+            -- the previous, we recurse into the upper half
+            Just (new_t, _)
+              | new_t < best_t ->
+                  binarySearch (new_t, middle) upper
+              | otherwise ->
+                  binarySearch (best_t, best) lower
             Nothing -> do
-              -- A missing comparison is not necessarily a bug - it may
-              -- simply mean that this comparison is inside a loop or
-              -- branch that is never reached for this dataset.  In such
-              -- cases, the optimal range is universal.
-              when (optVerbose opts > 0) $ putStrLn "Irrelevant for dataset.\n"
-              return (thresholdMin, thresholdMax)
-            Just e_par -> do
-              t_run <- run path_t RunBenchmark
-              f_run <- run path_f RunBenchmark
+              when (optVerbose opts > 2) $
+                putStrLn $ unwords ["Timing failed for candidate", show middle]
 
-              let prefer_t = (thresholdMin, e_par)
-                  prefer_f = (e_par+1, thresholdMax)
+              binarySearch (best_t, best) lower
 
-              case (t_run, f_run) of
-                (Left err, _) -> do
-                  when (optVerbose opts > 0) $
-                    putStrLn $ "True comparison run failed:\n" ++ err
-                  return prefer_f
-                (_, Left err) -> do
-                  when (optVerbose opts > 0) $
-                    putStrLn $ "False comparison run failed:\n" ++ err
-                  return prefer_t
-                (Right (_, runtime_t), Right (_, runtime_f)) ->
-                  if runtime_t < runtime_f
-                  then do when (optVerbose opts > 0) $
-                            putStrLn "True branch is fastest."
-                          return prefer_t
-                  else do when (optVerbose opts > 0) $
-                            putStrLn "False branch is fastest."
-                          return prefer_f
+    timeout :: Int -> Int
+    timeout elapsed = ceiling (fromIntegral elapsed * 1.2 :: Double) + 1
 
-  let (_lower, upper) = intersectRanges ranges
-  return $ (v,upper) : already_tuned
+    aggregateResults :: [Maybe Int] -> Maybe Int
+    aggregateResults xs = sum <$> sequence xs
 
-  where path = already_tuned ++ v_path
-        path_t = (v, thresholdMin) : path
-        path_f = (v, thresholdMax) : path
+    benchmarkThresholdChoice :: Int -> Int -> IO (Maybe (Int, Int))
+    benchmarkThresholdChoice best_t e_par = do
+      benchmarks <- forM datasets $ \(dataset_name, run, entry_point) ->
+        if not $ isPrefixOf (T.unpack entry_point ++ ".") v then do
+          when (optVerbose opts > 0) $
+            putStrLn $ unwords [v, "is irrelevant for", T.unpack entry_point]
+          return $ Just 0
+        else do
+          when (optVerbose opts > 1) $
+            putStrLn $ unwords ["Running against dataset:", dataset_name]
+          result <- run (timeout best_t) ((v, e_par) : already_tuned) RunBenchmark
+          case result of
+            Left err -> do
+              when (optVerbose opts > 0) $
+                putStrLn $ "A run failed:\n" ++ err
+              return Nothing
+
+            Right (_, runtime_t) ->
+              return $ Just $ ceiling runtime_t
+
+      let total_runtime = aggregateResults benchmarks
+      return $ (,) <$> total_runtime <*> pure e_par
+
+    getAllEPars :: Path -> String -> IO (S.Set Int, Int)
+    getAllEPars path threshold = do
+      result <- forM datasets $ \(_dataset_name, run, entry_point) ->
+        if not $ isPrefixOf (T.unpack entry_point ++ ".") threshold then do
+          when (optVerbose opts > 0) $
+            putStrLn $ unwords [threshold, "is irrelevant for", T.unpack entry_point]
+          return (S.empty, 0)
+
+        else do
+          sample_run <- run 60000 path RunSample
+          case sample_run of
+            Left err -> do
+              -- If the sampling run fails, we treat it as zero information.
+              -- One of our ancestor thresholds will have be set such that
+              -- this path is never taken.
+              when (optVerbose opts > 0) $ putStrLn $
+                "Sampling run failed:\n" ++ err
+              return (S.empty, 0)
+            Right (cmps, run_t) ->
+              return (S.map snd $ S.filter ((==) threshold . fst) $ S.fromList cmps,
+                      ceiling run_t)
+
+      let (cmps, run_ts) = unzip result
+
+      return (S.unions cmps, sum run_ts)
 
 --- CLI
 
