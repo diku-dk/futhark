@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-egmap LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | Perform a restricted form of loop tiling within SegMaps.  We only
 -- tile primitive types, to avoid excessive local memory use.
@@ -777,14 +777,14 @@ segMap2D :: String           -- desc
              -> Binder Kernels [SubExp])
          -> Binder Kernels [VName]
 segMap2D desc lvl manifest (dim_x, dim_y) f = do
-  ltid_x <- newVName "segMap2D.ltid_x"
-  ltid_y <- newVName "segMap2D.ltid_y"
+  ltid_x    <- newVName "segMap2D.ltid_x"
+  ltid_y    <- newVName "segMap2D.ltid_y"
   ltid_flat <- newVName "segMap2D.ltid_flat"
   let space = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
   ((ts, res), stms) <- runBinder $ do
     res <- f (ltid_x, ltid_y)
-    ts <- mapM subExpType res
+    ts  <- mapM subExpType res
     return (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
 
