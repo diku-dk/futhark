@@ -311,7 +311,7 @@ compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
 compileProg ops space prog =
   modifyNameSource $ \src ->
-  case foldM compileFunDef' (newState src) (progFunctions prog) of
+  case foldM compileFunDef' (newState src) (progFuns prog) of
     Left err -> (Left err, src)
     Right s -> (Right $ stateFunctions s, stateNameSource s)
   where compileFunDef' s fdef = do

@@ -372,5 +372,5 @@ data EntryPointType = TypeUnsigned
                     deriving (Eq, Show, Ord)
 
 -- | An entire Futhark program.
-newtype Prog lore = Prog { progFunctions :: [FunDef lore] }
+newtype Prog lore = Prog { progFuns :: [FunDef lore] }
                     deriving (Eq, Ord, Show)
