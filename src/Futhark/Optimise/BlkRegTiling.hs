@@ -43,6 +43,9 @@ _pretty = (++ "\n\n====================="
            ++ "========================="
            ++ "=====================\n\n") . pretty
 
+
+
+
 -- mmmTiling2D lvl space ts kbody
 mmmTiling2D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
 mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbody))))
@@ -59,7 +62,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
     Let pat_redomap aux_redomap (Op _) <- screma_stmt,
 
     -- checks that the Screma SOAC is actually a redomap and normalizes it
-    Just (w, arrs, (red_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
+    Just (common_dim, arrs, (red_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
 
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
@@ -82,63 +85,164 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
     (gidx, width_B) : (gidy, height_A) : rem_outer_dims <- reverse $ unSegSpace space,
 
     -- sanity check that the reduce part is not missing
-
     not (null red_nes) = do
-      (stm', stms) <- runBinder $ do
 
-        -- ty_name  <- nameFromString . pretty <$> newVName "Ty"
-        -- tx_name  <- nameFromString . pretty <$> newVName "Tx"
-        -- ry_name  <- nameFromString . pretty <$> newVName "Ry"
-        -- rx_name  <- nameFromString . pretty <$> newVName "Rx"
-        gid_x    <- newVName "gid_x"
+      ------------------------------------
+      -- in this binder: outer seggroup --
+      ------------------------------------
+      (new_kernel, host_stms) <- runBinder $ do -- host code
+
+        ty_name  <- nameFromString . pretty <$> newVName "Ty"
+        tx_name  <- nameFromString . pretty <$> newVName "Tx"
+        tk_name  <- nameFromString . pretty <$> newVName "Tk"
+        ry_name  <- nameFromString . pretty <$> newVName "Ry"
+        rx_name  <- nameFromString . pretty <$> newVName "Rx"
+
         gid_y    <- newVName "gid_y"
+        gid_x    <- newVName "gid_x"
         gid_flat <- newVName "gid_flat"
+        tid_y    <- newVName "tid_y"
+        tid_x    <- newVName "tid_x"
+        tid_flat <- newVName "tid_flat"
 
-        ty <- letSubExp "Ty" $ BasicOp $ SubExp $ intConst Int32 16 -- Op $ SizeOp $ GetSize ty_name SizeTile
-        tx <- letSubExp "Tx" $ BasicOp $ SubExp $ intConst Int32 8  -- Op $ SizeOp $ GetSize tx_name SizeTile
-        ry <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 4  -- Op $ SizeOp $ GetSize ty_name SizeTile
-        rx <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 4  -- Op $ SizeOp $ GetSize tx_name SizeTile
+        ty <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
+        tx <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+        tk <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
+        ry <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ty_name SizeTile
+        rx <- letSubExp "Rx" $ Op $ SizeOp $ GetSize tx_name SizeTile
 
-        tx_rx <- letSubExp "tx_rx" $ BasicOp $ BinOp (Mul Int32) tx rx -- tx rx 
-        ty_ry <- letSubExp "ty_ry" $ BasicOp $ BinOp (Mul Int32) ty ry -- ty ry 
+        tx_rx <- letSubExp "tx_rx" $ BasicOp $ BinOp (Mul Int32) tx rx -- tx rx
+        ty_ry <- letSubExp "ty_ry" $ BasicOp $ BinOp (Mul Int32) ty ry -- ty ry
 
         group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
 
         grid_dimy <- letSubExp "grid_dimy" =<< eDivRoundingUp Int32 (eSubExp height_A) (eSubExp ty_ry)
         grid_dimx <- letSubExp "grid_dimx" =<< eDivRoundingUp Int32 (eSubExp width_B)  (eSubExp tx_rx)
+        grid_size <- letSubExp "grid_size" $ BasicOp $ BinOp (Mul Int32) grid_dimx grid_dimy
 
-        num_groups_top <- letSubExp "num_groups_top" $ BasicOp $ BinOp (Mul Int32) grid_dimx grid_dimy
+        -----------------------------------------------------------
+        -- in this binder: first segmap, zero-initializing cssss --
+        -----------------------------------------------------------
+        (ret_segmap0, stms_segmap0) <- runBinder $ do
 
-        --
-        -- create seggroup with segthreadprivate inside
-        --
-        let lvl'   = SegGroup (Count num_groups_top) (Count group_size) SegNoVirt
-        let space' = SegSpace gid_flat [(gid_x, grid_dimx), (gid_y, grid_dimy)]
+          --------------------------------------------------
+          -- in this binder: [ry][rx] replicate of zeroes --
+          --------------------------------------------------
+          ((shape_rep, ret_rep), stms_rep) <- runBinder $ do
+            let shape_rep = Shape [ry, rx]
+            tmp_zero <- letSubExp "tmp_zero" $ BasicOp $ SubExp $ intConst Int32 0
+            rep      <- letSubExp "css"      $ BasicOp $ Replicate shape_rep tmp_zero
+            return $ (shape_rep, [Returns ResultPrivate rep])
+          ------------------------------------------------------------------------
 
-        tmp_zero <- letSubExp "tmp_zero" $ BasicOp $ SubExp $ intConst Int32 0
-        tmp_rep  <- letSubExp "tmp_rep"  $ BasicOp $ Replicate (Shape [rx]) tmp_zero
-        zeroes   <- letSubExp "zeroes" $ BasicOp (Replicate (Shape [ry]) tmp_rep)
+          let rep_kbody = KernelBody () stms_rep ret_rep
+
+          segmap0 <- letSubExp "cssss" $ Op $ SegOp $ SegMap
+            (SegThread (Count grid_size) (Count group_size) SegNoVirt)
+            (SegSpace tid_flat [(tid_y, ty), (tid_x, tx)])
+            [Array int32 shape_rep $ NoUniqueness]
+            rep_kbody
+
+          return $ Returns ResultPrivate segmap0
+        ------------------------------------------------------------------------------------
+
+        let segmap0_body = KernelBody () stms_segmap0 [ret_segmap0]
+
+        -----------------------------------
+        -- in this binder: outer kk loop --
+        -----------------------------------
+        (ret_loop_kk, stms_loop_kk) <- runBinder $ do -- build first for loop
+
+          kk       <- newVName "kk"
+          kk_bound <- letSubExp "kk_bound" =<<
+            eDivRoundingUp Int32 (eSubExp common_dim) (eSubExp tk)
+          let loop_kk_form = ForLoop kk Int32 kk_bound []
+
+          ---------------------------------------------------------------------------
+          -- in this binder: kk loop body (copy from global to shared mem; k loop) --
+          ---------------------------------------------------------------------------
+          (ret_loop_kk_body, stms_loop_kk_body) <- runBinder $ do
 
 
-        -- for now, just fill in the original kernel body
+            -- insert copies from global to shared mem of A and B
+            -- a_shr <- copy ...
+            -- b_shr <- copy ...
 
-        result <- letSubExp "zeroes" $ Op $ SegOp $ SegMap lvl' space' ts $ old_kbody
+            k <- newVName "k"
+            let loop_k_form = ForLoop k Int32 tk []
 
-        return $ Let pat aux $ Op $ SegOp $ SegMap lvl' space ts old_kbody
+            ------------------------------------------------------------
+            -- in this binder: k loop body (copying A and B from      --
+            --                 global to shared mem; compute redomap) --
+            ------------------------------------------------------------
+            (ret_loop_k_body, stms_loop_k_body) <- runBinder $ do
 
-      trace (
-             -- ">> pat:\n"                      ++ _pretty pat          ++
-             -- ">> space:\n"                    ++ _pretty space        ++
-             -- ">> old_kbody:\n"                ++ _pretty old_kbody ++
-             -- ">> code2':\n"                   ++ _pretty code2'       ++
-             -- ">> Variant arrays:\n"           ++ _pretty arr_var_dims ++
-             -- ">> Variance table:\n"           ++ _pretty variance     ++
-             -- ">> reduce result variance:\n"   ++ _pretty res_red_var  ++
-             -- ">> indirect-slice table:\n"     ++ _pretty arr_tab0     ++
-             -- ">> (gidx, m_X) : (gidy, m_Y)\n" ++ _pretty [(gidx, width_B), (gidy, height_A)] ++
-             ">> stms:\n"                     ++ _pretty stms ++
-             ">> stm':\n"                     ++ _pretty stm')
-             $ return $ Just (stms, stm')
+              {--
+              -- insert copies from shared to private mem of A and B
+              let shape_asss = Shape [ry, k] -- dummy
+              let shape_bsss = Shape [k, rx] -- dummy
+
+              ------------------------------------------------------------------------------
+              -- in this binder: build the segmap which copies from shared to private mem --
+              ------------------------------------------------------------------------------
+              (ret_segmap1, stms_segmap1) <- runBinder $ do
+                foo <- letSubExp ...
+                return ...
+
+              let segmap1_body = KernelBody () stms_segmap1 [ret_segmap1]
+
+              (asss, bssss) <- letSubExp "asss" $ Op $ SegOp $ SegMap
+                               (SegThread (Count grid_size) (Count group_size) SegNoVirt)
+                               (SegSpace tid_flat [(tid_y, ty), (tid_x, tx)]) -- TODO: can we reuse these?
+                               [Array int32 shape_a_shr $ NoUniqueness,
+                                Array int32 shape_b_shr $ NoUniqueness]
+                               segmap1_body
+
+              --}
+              foo <- letSubExp "foo" $ BasicOp $ SubExp $ intConst Int32 42
+              return foo
+            ------------------------------------------------------------------------
+
+
+            let loop_k_body = mkBody stms_loop_k_body [ret_loop_k_body]
+            loop_k_init <- letSubExp "foo" $ BasicOp $ SubExp $ intConst Int32 43 -- dummy
+
+            loop_k <- letSubExp "loop_k" $
+                        DoLoop [] [{-(FParam ..., loop_k_init) -}] loop_k_form loop_k_body
+
+            return loop_k -- mkBody needs a 'Result', not a KernelResult (ask Troels)
+          ------------------------------------------------------------------------
+
+
+          let loop_kk_body = mkBody stms_loop_kk_body [ret_loop_kk_body]
+
+          -- let loop_kk_init = kernelResultSubExp ret_segmap0
+          loop_kk_init <- letSubExp "foo" $ BasicOp $ SubExp $ intConst Int32 0 -- dummy
+
+          loop_kk <- letSubExp "loop_kk" $
+                       DoLoop [] [{- (FParam ..., loop_kk_init) -}] loop_kk_form loop_kk_body
+
+          return $ Returns ResultPrivate ret_loop_kk_body -- TODO: what exactly to return here?
+        ------------------------------------------------------------------------
+
+        let all_stms = stms_segmap0 <> stms_loop_kk
+
+        let new_kbody = KernelBody () all_stms
+                                   [ret_loop_kk] -- dummy
+
+        let ts' = ts -- for now, just ts - but should probably remain so?
+        return $ Let pat aux $ Op $ SegOp $
+                   SegMap (SegGroup (Count grid_size) (Count group_size) SegNoVirt)
+                          (SegSpace gid_flat [(gid_y, grid_dimy), (gid_x, grid_dimx)])
+                          ts' new_kbody
+      ------------------------------------------------------------------------
+
+
+      trace (">> host_stms:\n"  ++ _pretty host_stms ++
+             ">> new_kernel:\n" ++ _pretty new_kernel)
+            $ return $ Just (host_stms, new_kernel)
+
+
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
@@ -296,45 +400,90 @@ sufficientGroups gspace group_size = do
 
 
 
-
     -- not (null red_nes) = do
-
-      -- ty_name <- nameFromString . pretty <$> newVName "Ty"
-      -- ty_name <- newVName "Ty"
-      -- tx_name <- newVName "Tx"
-      -- ry_name <- newVName "Ry"
-      -- rx_name <- newVName "Rx"
-      -- ty_ry_name <- newVName "TyRy"
-      -- tx_rx_name <- newVName "TxRx"
-      -- group_size_name <- newVName "group_size"
-      --
-      -- let ty = mkLet [] [Ident ty_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (16 :: Int32)
-      -- let tx = mkLet [] [Ident tx_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (16 :: Int32)
-      -- let ry = mkLet [] [Ident ry_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (4  :: Int32)
-      -- let rx = mkLet [] [Ident rx_name $ Prim $ IntType Int32] $ BasicOp $ SubExp $ constant (4  :: Int32)
-      --
-      -- let group_size = mkLet [] [Ident ty_name $ Prim $ IntType Int32] -- ty*tx
-      -- let ty_ry      = mkLet [] [Ident tx_name $ Prim $ IntType Int32] -- ty*ry
-      -- let tx_rx      = mkLet [] [Ident ry_name $ Prim $ IntType Int32] -- tx*rx
-      --
-      -- let statements = [ty, tx, ry, rx]
-      -- -- SegGroup
-      -- trace (pretty $ stmsFromList statements) $ return $ Just (stmsFromList statements, stm)
-
-          -- group_size = mkLet [] [Ident group_size_name $ Prim Int32]
-          --                (primExpFromSubExp (Prim Int32) ty * primExpFromSubExp (Prim Int32) tx)
-          --
-          -- tx_rx      = mkLet [] [Ident tx_rx_name $ Prim Int32]
-          --                (primExpFromSubExp (Prim Int32) tx * primExpFromSubExp (Prim Int32) rx)
-          --
-          -- tx = mkLet [] [Ident tx_name $ Prim $ IntType Int32] IntValue $ Int32Value 8
-          -- ry = mkLet [] [Ident ry_name $ Prim $ IntType Int32] IntValue $ Int32Value 4
-          -- rx = mkLet [] [Ident rx_name $ Prim $ IntType Int32] IntValue $ Int32Value 4
-          -- ty_ry      = mkLet [] [Ident ty_ry_name $ Prim Int32]
-          --                (primExpFromSubExp (Prim Int32) ty * primExpFromSubExp (Prim Int32) ry)
-
-
-
-      -- let a = constant (3 :: Int32)
-          -- b = constant (4 :: Int32)
-          -- x = (primExpFromSubExp (IntType Int32) a * primExpFromSubExp (IntType Int32) b)
+    --
+    --   (new_kernel, host_stms) <- runBinder $ do
+    --     ty_name  <- nameFromString . pretty <$> newVName "Ty"
+    --     tx_name  <- nameFromString . pretty <$> newVName "Tx"
+    --     tk_name  <- nameFromString . pretty <$> newVName "Tk"
+    --     ry_name  <- nameFromString . pretty <$> newVName "Ry"
+    --     rx_name  <- nameFromString . pretty <$> newVName "Rx"
+    --     gid_y    <- newVName "gid_y"
+    --     gid_x    <- newVName "gid_x"
+    --     gid_flat <- newVName "gid_flat"
+    --     tid_y    <- newVName "tid_y"
+    --     tid_x    <- newVName "tid_x"
+    --     tid_flat <- newVName "tid_flat"
+    --
+    --     ty    <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
+    --     tx    <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+    --     tk    <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
+    --     ry    <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ty_name SizeTile
+    --     rx    <- letSubExp "Rx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+    --     tx_rx <- letSubExp "tx_rx" $ BasicOp $ BinOp (Mul Int32) tx rx -- tx rx
+    --     ty_ry <- letSubExp "ty_ry" $ BasicOp $ BinOp (Mul Int32) ty ry -- ty ry
+    --
+    --     group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
+    --
+    --     grid_dimy <- letSubExp "grid_dimy" =<< eDivRoundingUp Int32 (eSubExp height_A) (eSubExp ty_ry)
+    --     grid_dimx <- letSubExp "grid_dimx" =<< eDivRoundingUp Int32 (eSubExp width_B)  (eSubExp tx_rx)
+    --     grid_size <- letSubExp "grid_size" $ BasicOp $ BinOp (Mul Int32) grid_dimx grid_dimy
+    --
+    --     (skrald, init_stms) <- runBinder $ do
+    --
+    --       -- create first inner segmap_thread
+    --       tmp_zero <- letSubExp "tmp_zero" $ BasicOp $ SubExp $ intConst Int32 0
+    --
+    --       let rep_exp = BasicOp $ Replicate (Shape [ry, rx]) tmp_zero
+    --       rep <- letSubExp "zero_rep" rep_exp
+    --
+    --       rep_name <- newVName "rep"
+    --       let rep_type = Array (IntType Int32) (Shape [ry, rx]) NoUniqueness
+    --       let rep_pat  = Pattern [] [PatElem rep_name rep_type]
+    --       let rep_aux  = StmAux (Certificates []) ()
+    --       let rep_stm  = Let rep_pat rep_aux rep_exp
+    --
+    --       let init_kbody = KernelBody () (stmsFromList [rep_stm]) [Returns ResultPrivate rep]
+    --
+    --       let lvl_t   = SegThread (Count grid_size) (Count group_size) SegNoVirt
+    --       let space_t = SegSpace tid_flat [(tid_y, ty), (tid_x, tx)]
+    --
+    --       zero_init_name <- newVName "zero_init"
+    --       -- let zero_init_type = Array (IntType Int32) (Shape [ty, tx, ry, rx]) NoUniqueness
+    --       -- let zero_init_pat  = Pattern [] [PatElem zero_init_name zero_init_type]
+    --       -- let zero_init_aux  = StmAux (Certificates []) ()
+    --       -- let zero_init_stm  = Let zero_init_pat zero_init_aux $ Op $ SegOp $ SegMap lvl_t space_t [rep_type] init_kbody
+    --
+    --       -- create outer segmap_group
+    --
+    --       -- let new_kbody = KernelBody () (stmsFromList [zero_init_stm]) [Returns ResultNoSimplify dummy_subexp]
+    --
+    --       kk       <- newVName "kk"
+    --       -- kk_bound <- letSubExp "kk_bound" =<< eDivRoundingUp Int32 (eSubExp w) (eSubExp tk)
+    --       -- let my_loop = ForLoop kk (Int32) kk_bound
+    --
+    --       trace (">> kk:\n"       ++ _pretty kk ++ "\n")
+    --              --">> kk_bound:\n" ++ _pretty kk_bound)
+    --             $ return $ Let pat aux $ Op $ SegOp $ SegMap lvl space [rep_type] old_kbody -- new_kbody
+    --
+    --     -- init_stms
+    --     let lvl'   = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+    --     let space' = SegSpace gid_flat [(gid_y, grid_dimy), (gid_x, grid_dimx)]
+    --
+    --     dummy_subexp <- letSubExp "dummy" $ BasicOp $ SubExp $ intConst Int32 3
+    --     let new_kbody = KernelBody () init_stms [Returns ResultNoSimplify dummy_subexp]
+    --
+    --     -- Let pat aux $ Op $ SegOp $ SegMap lvl' space' [rep_type] new_kbody
+    --     return $ Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts new_kbody
+    --
+    --   trace (
+    --          -- ">> Variant arrays:\n"           ++ _pretty arr_var_dims ++
+    --          -- ">> Variance table:\n"           ++ _pretty variance     ++
+    --          -- ">> reduce result variance:\n"   ++ _pretty res_red_var  ++
+    --          -- ">> indirect-slice table:\n"     ++ _pretty arr_tab0     ++
+    --          -- ">> (gidx, m_X) : (gidy, m_Y)\n" ++ _pretty [(gidx, width_B), (gidy, height_A)] ++
+    --          ">> kstms:\n"                    ++ _pretty kstms ++
+    --          ">> stms:\n"                     ++ _pretty host_stms ++
+    --          ">> stm':\n"                     ++ _pretty new_kernel)
+    --
+    --          $ return $ Just (host_stms, new_kernel)
