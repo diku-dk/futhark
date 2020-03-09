@@ -150,14 +150,14 @@ static void setup_size_opengl(struct opengl_context *ctx) {
 
    int max_shared_memory;
    int max_num_groups;
-   int max_group_size;
+   int max_group_size = 128;
 
    glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE,
                  &max_shared_memory);
    glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS,
                  &max_num_groups);
-   glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0,
-                   &max_group_size);
+   //glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0,
+   //                &max_group_size);
    OPENGL_SUCCEED(glGetError());
 
    ctx->max_threshold     = 0;
