@@ -30,7 +30,7 @@ data Rephraser m from to
               }
 
 rephraseProg :: Monad m => Rephraser m from to -> Prog from -> m (Prog to)
-rephraseProg rephraser = fmap Prog . mapM (rephraseFunDef rephraser) . progFunctions
+rephraseProg rephraser = fmap Prog . mapM (rephraseFunDef rephraser) . progFuns
 
 rephraseFunDef :: Monad m => Rephraser m from to -> FunDef from -> m (FunDef to)
 rephraseFunDef rephraser fundec = do

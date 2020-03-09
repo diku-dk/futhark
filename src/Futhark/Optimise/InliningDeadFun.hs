@@ -170,7 +170,7 @@ inlineAndRemoveDeadFunctions =
        }
   where pass prog = do
           let cg = buildCallGraph prog
-          Prog <$> aggInlining cg (progFunctions prog)
+          Prog <$> aggInlining cg (progFuns prog)
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
@@ -182,6 +182,6 @@ removeDeadFunctions =
        }
   where pass prog =
           let cg        = buildCallGraph prog
-              live_funs = filter (isFunInCallGraph cg) (progFunctions prog)
+              live_funs = filter (isFunInCallGraph cg) (progFuns prog)
           in Prog live_funs
         isFunInCallGraph cg fundec = isJust $ M.lookup (funDefName fundec) cg

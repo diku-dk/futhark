@@ -189,7 +189,7 @@ extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
-       , passFunction = fmap Prog . mapM transformFunDef . progFunctions
+       , passFunction = fmap Prog . mapM transformFunDef . progFuns
        }
 
 -- In order to generate more stable threshold names, we keep track of

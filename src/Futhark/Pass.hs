@@ -80,7 +80,7 @@ intraproceduralTransformation :: (FunDef fromlore -> PassM (FunDef tolore))
                               -> Prog fromlore -> PassM (Prog tolore)
 intraproceduralTransformation ft prog =
   either onError onSuccess <=< modifyNameSource $ \src ->
-  case partitionEithers $ parMap rpar (onFunction src) (progFunctions prog) of
+  case partitionEithers $ parMap rpar (onFunction src) (progFuns prog) of
     ([], rs) -> let (funs, logs, srcs) = unzip3 rs
                 in (Right (Prog funs, mconcat logs), mconcat srcs)
     ((err,log,src'):_, _) -> (Left (err, log), src')
