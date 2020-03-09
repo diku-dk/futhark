@@ -66,29 +66,32 @@ cliOptions =
 writeOpenGLScalar :: GC.WriteScalar OpenGL ()
 writeOpenGLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
-  GC.stm [C.cstm|glMapBufferRange(GL_SHADER_STORAGE_BUFFER,
-                                  $exp:i,
-                                  sizeof($ty:t),
-                                  GL_MAP_WRITE_BIT
-                                 );
+  GC.stm [C.cstm|glNamedBufferSubData($exp:mem,
+                                      $exp:i,
+                                      sizeof($ty:t),
+                                      &$exp:val'
+                                     );
                 |]
   GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
-  -- TODO: Might need to sync and unmap here.
+  -- TODO: Might need to sync here.
 writeOpenGLScalar _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
 readOpenGLScalar :: GC.ReadScalar OpenGL ()
 readOpenGLScalar mem i t "device" _ = do
   val <- newVName "read_res"
-  GC.decl [C.cdecl|$ty:t $id:val;|]
-  GC.stm [C.cstm|glMapBufferRange(GL_SHADER_STORAGE_BUFFER,
+  GC.decl [C.cdecl|$ty:t *$id:val;|]
+  GC.stm [C.cstm|$id:val =
+    ($ty:t*)glMapNamedBufferRange($exp:mem,
                                   $exp:i,
                                   sizeof($ty:t),
                                   GL_MAP_READ_BIT
                                  );
                 |]
   GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
-  -- TODO: Might need to sync and unmap here.
+  GC.stm [C.cstm|glUnmapNamedBuffer($exp:mem);|]
+  GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
+  -- TODO: Might need to sync here.
   return [C.cexp|$id:val|]
 readOpenGLScalar _ _ _ space _ =
   error $ "Cannot read from '" ++ space ++ "' memory space."
@@ -102,7 +105,7 @@ allocateOpenGLBuffer _ _ _ space =
 
 deallocateOpenGLBuffer :: GC.Deallocate OpenGL ()
 deallocateOpenGLBuffer mem tag "device" =
-    GC.stm [C.cstm|opengl_free(&ctx->opengl, $exp:mem, $exp:tag);|]
+  GC.stm [C.cstm|opengl_free(&ctx->opengl, $exp:mem, $exp:tag);|]
 deallocateOpenGLBuffer _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
 
@@ -162,8 +165,6 @@ staticOpenGLArray :: GC.StaticArray OpenGL ()
 staticOpenGLArray name "device" t vs = do
   let ct = GC.primTypeToCType t
   name_realtype <- newVName $ baseString name ++ "_realtype"
-  mapped_mem <- newVName "mapped_src_memory"
-  mem_t <- openglMemoryType "device"
   num_elems <- case vs of
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
@@ -184,13 +185,10 @@ staticOpenGLArray name "device" t vs = do
                  &ctx->$id:name.mem);
     OPENGL_SUCCEED(glGetError());
     if ($int:num_elems > 0) {
-      $ty:mem_t *$id:mapped_mem;
-      $id:mapped_mem =
-        ($ty:mem_t*)glMapNamedBuffer(ctx->$id:name.mem, GL_READ_ONLY);
-      memcpy($id:mapped_mem, &$id:name_realtype, $int:num_elems*sizeof($ty:ct));
-      glUnmapNamedBuffer(ctx->$id:name.mem);
+      glNamedBufferSubData(ctx->$id:name.mem, 0, $int:num_elems*sizeof($ty:ct),
+                           $id:name_realtype);
+      OPENGL_SUCCEED(glGetError());
     }
-    OPENGL_SUCCEED(glGetError());
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
 
