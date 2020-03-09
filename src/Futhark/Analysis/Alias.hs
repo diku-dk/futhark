@@ -28,7 +28,7 @@ import Futhark.Representation.Aliases
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis :: (Attributes lore, CanBeAliased (Op lore)) =>
                  Prog lore -> Prog (Aliases lore)
-aliasAnalysis = Prog . map analyseFun . progFunctions
+aliasAnalysis = Prog . map analyseFun . progFuns
 
 analyseFun :: (Attributes lore, CanBeAliased (Op lore)) =>
               FunDef lore -> FunDef (Aliases lore)

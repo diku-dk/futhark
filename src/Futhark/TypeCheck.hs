@@ -464,10 +464,10 @@ checkProg prog = do
         local (\env -> env { envFtable = ftable }) $
         checkFun fun
   (ftable, _) <- runTypeM typeenv buildFtable
-  sequence_ $ parMap rpar (onFunction ftable) $ progFunctions prog
+  sequence_ $ parMap rpar (onFunction ftable) $ progFuns prog
   where
     buildFtable = do table <- initialFtable prog
-                     foldM expand table $ progFunctions prog
+                     foldM expand table $ progFuns prog
     expand ftable (FunDef _ name ret params _)
       | M.member name ftable =
           bad $ DupDefinitionError name

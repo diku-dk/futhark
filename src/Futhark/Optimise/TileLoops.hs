@@ -22,7 +22,7 @@ import Futhark.Tools
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
-            fmap Prog . mapM optimiseFunDef . progFunctions
+            fmap Prog . mapM optimiseFunDef . progFuns
 
 optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 optimiseFunDef fundec = do

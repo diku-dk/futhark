@@ -36,7 +36,7 @@ import Futhark.Util (mapAccumLM)
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $
-  fmap Prog . mapM transformFunDef . progFunctions
+  fmap Prog . mapM transformFunDef . progFuns
   -- Cannot use intraproceduralTransformation because it might create
   -- duplicate size keys (which are not fixed by renamer, and size
   -- keys must currently be globally unique).

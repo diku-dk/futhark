@@ -19,7 +19,6 @@ module Futhark.Representation.AST.Attributes
   , builtInFunctions
 
   -- * Extra tools
-  , funDefByName
   , asBasicOp
   , safeExp
   , subExpVars
@@ -64,10 +63,6 @@ isBuiltInFunction fnm = fnm `M.member` builtInFunctions
 builtInFunctions :: M.Map Name (PrimType,[PrimType])
 builtInFunctions = M.fromList $ map namify $ M.toList primFuns
   where namify (k,(paramts,ret,_)) = (nameFromString k, (ret, paramts))
-
--- | Find the function of the given name in the Futhark program.
-funDefByName :: Name -> Prog lore -> Maybe (FunDef lore)
-funDefByName fname = find ((fname ==) . funDefName) . progFunctions
 
 -- | If the expression is a 'BasicOp', return that 'BasicOp', otherwise 'Nothing'.
 asBasicOp :: Exp lore -> Maybe (BasicOp lore)

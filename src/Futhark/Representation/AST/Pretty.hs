@@ -266,7 +266,7 @@ instance PrettyLore lore => Pretty (FunDef lore) where
               | otherwise    = "fun"
 
 instance PrettyLore lore => Pretty (Prog lore) where
-  ppr = stack . punctuate line . map ppr . progFunctions
+  ppr = stack . punctuate line . map ppr . progFuns
 
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se
