@@ -20,7 +20,7 @@ jobs:
   - script: |
       set -e
       sudo apt update
-      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy hpack
+      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy
     displayName: Install OS-level dependencies
 
   - script: |
@@ -36,7 +36,6 @@ jobs:
   - script: |
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
-      hpack
       cabal update
       cabal install --only-dependencies
     displayName: Build Haskell dependencies
