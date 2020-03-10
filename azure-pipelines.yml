@@ -6,7 +6,43 @@
 # https://docs.haskellstack.org/en/stable/azure_ci/
 
 jobs:
-- job: build
+- job: build_windows
+  pool:
+    vmImage: windows-2019
+
+  timeoutInMinutes: 120
+
+  variables:
+    GHC_VERSION: "8.10.1"
+    CABAL_VERSION: "3.0.0.0"
+    CABAL_DIR: ""
+    CABAL_STORE_DIR: "C:\\sd"
+
+  steps:
+
+  - checkout: self
+    submodules: true
+
+  - bash: |
+      choco install -y msys2
+    displayName: Install MSYS2
+
+  - bash: |
+      choco install -y ghc --version=$(GHC_VERSION)
+    displayName: Install GHC
+
+  - bash: |
+      choco install -y cabal
+    displayName: Install cabal
+
+  - bash: |
+      export PATH=`cygpath $ProgramData`/chocolatey/lib/ghc/tools/ghc-$(GHC_VERSION)/bin:$PATH
+      echo $PATH
+      cabal update
+      cabal install -j1
+    displayName: Build Futhark compiler
+
+- job: build_linux
   pool:
     vmImage: ubuntu-18.04
 
@@ -59,12 +95,6 @@ jobs:
       export PATH=$HOME/.ghcup/bin:$PATH
       cabal test
     displayName: Run unit tests
-
-  # - script: |
-  #     export PATH=$HOME/.local/bin:$PATH
-  #     stack install
-  #     futhark test --no-terminal --no-tuning tests examples
-  #   displayName: Compile and run tests
 
   - script: |
       set -e
