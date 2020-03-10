@@ -200,6 +200,11 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
       "All function parameters must have non-anonymous sizes." </>
       "Hint: add size parameters to" <+> pquote (pprName name') <> "."
 
+    let (params, _) = unfoldFunType $ unInfo $ expandedType vtype'
+    when (null params && any isSizeParam tparams) $
+      typeError loc mempty
+      "Size parameters are only allowed on bindings that also have value parameters."
+
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
           mempty { envVtable = M.singleton name' binding
