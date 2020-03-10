@@ -309,6 +309,8 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
 
   GLuint ssbo;
 
+  // We might now use mapping and binding in the future
+  //glCreateBuffers(1, &ssbo);
   glGenBuffers(1, &ssbo);
   OPENGL_SUCCEED(glGetError());
 
@@ -320,7 +322,8 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
     return error;
   }
 
-  glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL,
+  //glNamedBufferData(ssbo, min_size, NULL, GL_DYNAMIC_DRAW);
+  glBufferData(GL_SHADER_STORAGE_BUFFER, min_size, NULL,
                GL_DYNAMIC_DRAW);
   OPENGL_SUCCEED(glGetError());
 
