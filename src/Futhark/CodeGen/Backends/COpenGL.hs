@@ -66,6 +66,7 @@ cliOptions =
 writeOpenGLScalar :: GC.WriteScalar OpenGL ()
 writeOpenGLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
+  GC.decl [C.cdecl|$ty:t $id:val' = $exp:val;|]
   GC.stm [C.cstm|glNamedBufferSubData($exp:mem,
                                       $exp:i,
                                       sizeof($ty:t),
@@ -83,7 +84,7 @@ readOpenGLScalar mem i t "device" _ = do
   GC.decl [C.cdecl|$ty:t *$id:val;|]
   GC.stm [C.cstm|$id:val =
     ($ty:t*)glMapNamedBufferRange($exp:mem,
-                                  $exp:i,
+                                  $exp:i * sizeof($ty:t),
                                   sizeof($ty:t),
                                   GL_MAP_READ_BIT
                                  );
@@ -92,7 +93,7 @@ readOpenGLScalar mem i t "device" _ = do
   GC.stm [C.cstm|glUnmapNamedBuffer($exp:mem);|]
   GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
   -- TODO: Might need to sync here.
-  return [C.cexp|$id:val|]
+  return [C.cexp|*$id:val|]
 readOpenGLScalar _ _ _ space _ =
   error $ "Cannot read from '" ++ space ++ "' memory space."
 
