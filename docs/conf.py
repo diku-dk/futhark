@@ -60,13 +60,12 @@ copyright = '2013-2019, DIKU, University of Copenhagen'
 #
 # The short X.Y version.
 
-# No reason for a full YAML parser; let's just hack it.
+# No reason for a cabal file parser; let's just hack it.
 def get_version():
-    # Get lines
-    lines = open('../package.yaml', 'r').read().split('\n')
-    # Find version line.
-    version_line = lines[1]
-    return re.search('version: "(.*)"', version_line).group(1)
+    # Get cabal file
+    cabal_file = open('../futhark.cabal', 'r').read()
+    # Extract version
+    return re.search('version:[ ]*([^ ]*)', cabal_file).group(1)
 
 version = get_version()
 # The full version, including alpha/beta/rc tags.
