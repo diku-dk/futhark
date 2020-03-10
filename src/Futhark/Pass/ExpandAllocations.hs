@@ -492,6 +492,7 @@ unAllocKernelsStms = unAllocStms False
 
     unAllocOp Alloc{} = Left "unAllocOp: unhandled Alloc"
     unAllocOp (Inner OtherOp{}) = Left "unAllocOp: unhandled OtherOp"
+    unAllocOp (Inner (LocalMemUsed v)) = return $ LocalMemUsed v
     unAllocOp (Inner (SizeOp op)) =
       return $ SizeOp op
     unAllocOp (Inner (SegOp op)) = SegOp <$> mapSegOpM mapper op

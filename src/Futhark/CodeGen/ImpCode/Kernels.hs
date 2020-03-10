@@ -50,6 +50,8 @@ data HostOp = CallKernel Kernel
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
             | GetSizeMax VName SizeClass
+            | LocalMemUsed VName Name
+              -- ^ Kernel name.
             deriving (Show)
 
 -- | A generic kernel containing arbitrary kernel code.
@@ -121,6 +123,8 @@ instance Pretty HostOp where
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
     text "<" <+> ppr x
+  ppr (LocalMemUsed v k) =
+    ppr v <+> text "<-" <+> text "local_mem_used" <> parens (ppr k)
   ppr (CallKernel c) =
     ppr c
 
@@ -133,6 +137,7 @@ instance FreeIn HostOp where
     freeIn' dest
   freeIn' (GetSize dest _ _) =
     freeIn' dest
+  freeIn' LocalMemUsed{} = mempty
 
 instance FreeIn Kernel where
   freeIn' kernel = freeIn' (kernelBody kernel) <>

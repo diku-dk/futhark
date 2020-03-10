@@ -631,7 +631,8 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
 
       (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
 
-    Just ((_intra_min_par, intra_avail_par), group_size, log, intra_prelude, intra_stms) -> do
+    Just ((_intra_min_par, intra_avail_par), group_size, log,
+          intra_prelude, intra_k, intra_stm) -> do
       addLog log
       -- We must check that all intra-group parallelism fits in a group.
       ((intra_ok, intra_suff_key), intra_suff_stms) <- do
@@ -646,15 +647,25 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
 
           max_group_size <-
             letSubExp "max_group_size" $ Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup
+          group_fits <- letSubExp "group_fits" $ BasicOp $
+                        CmpOp (CmpSle Int32) group_size max_group_size
+
+          max_local_mem <- letSubExp "max_local_mem" $
+                           Op $ SizeOp $ Out.GetSizeMax Out.SizeLocalMemory
+          used_local_mem <- letSubExp "used_local_mem" $
+                            Op $ LocalMemUsed intra_k
+          mem_fits <- letSubExp "mem_fits" $ BasicOp $
+                      CmpOp (CmpSle Int32) used_local_mem max_local_mem
+
           fits <- letSubExp "fits" $ BasicOp $
-                  CmpOp (CmpSle Int32) group_size max_group_size
+                  BinOp LogAnd group_fits mem_fits
 
           addStms check_suff_stms
 
           intra_ok <- letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits intra_suff
           return (intra_ok, suff_key)
 
-      group_par_body <- renameBody $ mkBody intra_stms res
+      group_par_body <- renameBody $ mkBody (oneStm intra_stm) res
 
       par_body <- renameBody =<< mkBody <$>
                   mk_par_stms ([(outer_suff_key, False),

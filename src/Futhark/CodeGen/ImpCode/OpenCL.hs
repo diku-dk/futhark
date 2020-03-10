@@ -99,6 +99,7 @@ data OpenCL = LaunchKernel Safety KernelName [KernelArg] [Exp] [Exp]
             | GetSize VName Name
             | CmpSizeLe VName Name Exp
             | GetSizeMax VName SizeClass
+            | LocalMemUsed VName Exp
             deriving (Show)
 
 -- | The target platform when compiling imperative code to a 'Program'

@@ -358,7 +358,8 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
     w' <- toExp w
     dPrimVE "hist_H_chk" $ w' `quotRoundingUp` hist_S
 
-  sKernelThread "seghist_global" num_groups group_size (segFlat space) $ \constants -> do
+  sKernelThread "seghist_global" num_groups group_size
+    (segFlat space) NoHandle $ \constants -> do
     -- Compute subhistogram index for each thread, per histogram.
     subhisto_inds <- forM slugs $ \slug ->
       dPrimVE "subhisto_ind" $
@@ -529,7 +530,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
     w' <- toExp w
     dPrimV "hist_H_chk" $ w' `quotRoundingUp` hist_S
 
-  sKernelThread "seghist_local" num_groups group_size (segFlat space) $ \constants ->
+  sKernelThread "seghist_local" num_groups group_size (segFlat space) NoHandle $ \constants ->
     virtualiseGroups constants SegVirt (unCount groups_per_segment * num_segments) $ \group_id_var -> do
 
     let group_id = Imp.vi32 group_id_var
@@ -998,7 +999,7 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
 
         flat_gtid <- newVName "flat_gtid"
 
-        let lvl = SegThread num_groups group_size SegVirt
+        let lvl = SegThread num_groups group_size NoHandle SegVirt
             segred_space =
               SegSpace flat_gtid $
               segment_dims ++

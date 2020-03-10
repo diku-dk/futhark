@@ -64,6 +64,9 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 
+opCompiler (Pattern _ [pe]) (Inner (LocalMemUsed k)) =
+  sOp $ Imp.LocalMemUsed (patElemName pe) $ nameFromString $ pretty k
+
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
   fname <- asks envFunction
   max_num_groups <- dPrim "max_num_groups" int32
@@ -106,7 +109,7 @@ segOpCompiler pat (SegRed lvl@SegThread{} space reds _ kbody) =
   compileSegRed pat lvl space reds kbody
 segOpCompiler pat (SegScan lvl@SegThread{} space scan_op nes _ kbody) =
   compileSegScan pat lvl space scan_op nes kbody
-segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody) =
+segOpCompiler pat (SegHist (SegThread num_groups group_size _ _) space ops _ kbody) =
   compileSegHist pat num_groups group_size space ops kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat

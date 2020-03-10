@@ -14,7 +14,8 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.Error
-import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
+import Futhark.Representation.ExplicitMemory
+  hiding (GetSize, CmpSizeLe, GetSizeMax, LocalMemUsed)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -264,6 +265,9 @@ callKernel (CmpSizeLe v key x) = do
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
   in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
+callKernel (LocalMemUsed v e) = do
+  e' <- GC.compileExp e
+  GC.stm [C.cstm|$id:v = $exp:e';|]
 
 callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
 

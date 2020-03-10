@@ -23,6 +23,7 @@ module Futhark.Representation.Kernels.Kernel
        -- * Segmented operations
        , SegOp(..)
        , SegLevel(..)
+       , SegHandle(..)
        , SegVirt(..)
        , segLevel
        , segSpace
@@ -359,12 +360,22 @@ instance Pretty KernelResult where
 data SegVirt = SegVirt | SegNoVirt
              deriving (Eq, Ord, Show)
 
--- | At which level the *body* of a 'SegOp' executes.
+-- | A kernel handle is a way to reference this particular 'SegOp',
+-- most importantly by 'LocalMemUsed'.  A 'SegOp' need not have one of
+-- these.
+data SegHandle = SegHandle VName | NoHandle
+               deriving (Eq, Ord, Show)
+
+-- | At which level the *body* of a 'SegOp' executes.  The @segHandle@
+-- field can be set if we desire this 'SegOp' to be seen as a "top level
+-- kernel".  This just means it can be inspected by 'LocalMemUsed'.
 data SegLevel = SegThread { segNumGroups :: Count NumGroups SubExp
                           , segGroupSize :: Count GroupSize SubExp
+                          , segHandle :: SegHandle
                           , segVirt :: SegVirt }
               | SegGroup { segNumGroups :: Count NumGroups SubExp
                          , segGroupSize :: Count GroupSize SubExp
+                         , segHandle :: SegHandle
                          , segVirt :: SegVirt }
               deriving (Eq, Ord, Show)
 
@@ -634,16 +645,16 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
 
 mapOnSegLevel :: Monad m =>
                  SegOpMapper flore tlore m -> SegLevel -> m SegLevel
-mapOnSegLevel tv (SegThread num_groups group_size virt) =
+mapOnSegLevel tv (SegThread num_groups group_size k virt) =
   SegThread
   <$> traverse (mapOnSegOpSubExp tv) num_groups
   <*> traverse (mapOnSegOpSubExp tv) group_size
-  <*> pure virt
-mapOnSegLevel tv (SegGroup num_groups group_size virt) =
+  <*> pure k <*> pure virt
+mapOnSegLevel tv (SegGroup num_groups group_size k virt) =
   SegGroup
   <$> traverse (mapOnSegOpSubExp tv) num_groups
   <*> traverse (mapOnSegOpSubExp tv) group_size
-  <*> pure virt
+  <*> pure k <*> pure virt
 
 mapOnSegOpType :: Monad m =>
                   SegOpMapper flore tlore m -> Type -> m Type
@@ -738,15 +749,22 @@ ppSegLevel lvl =
     SegNoVirt -> mempty
     SegVirt -> PP.semi <+> text "virtualise"
 
+ppSeg :: PP.Doc -> SegLevel -> PP.Doc
+ppSeg what lvl =
+  what <> "_" <> ppr lvl <> suffix
+  where suffix = case segHandle lvl of
+                   NoHandle -> mempty
+                   SegHandle k -> parens $ ppr k
+
 instance PrettyLore lore => PP.Pretty (SegOp lore) where
   ppr (SegMap lvl space ts body) =
-    text "segmap_" <> ppr lvl </>
+    ppSeg "segmap" lvl </>
     ppSegLevel lvl </>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegRed lvl space reds ts body) =
-    text "segred_" <> ppr lvl </>
+    ppSeg "segred" lvl </>
     ppSegLevel lvl </>
     PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp reds)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
@@ -759,7 +777,7 @@ instance PrettyLore lore => PP.Pretty (SegOp lore) where
                                        Noncommutative -> mempty
 
   ppr (SegScan lvl space scan_op nes ts body) =
-    text "segscan_" <> ppr lvl </>
+    ppSeg "segscan" lvl </>
     ppSegLevel lvl </>
     PP.parens (ppr scan_op <> PP.comma </>
                PP.braces (PP.commasep $ map ppr nes)) </>
@@ -767,7 +785,7 @@ instance PrettyLore lore => PP.Pretty (SegOp lore) where
     PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegHist lvl space ops ts body) =
-    text "seghist_" <> ppr lvl </>
+    ppSeg "seghist" lvl </>
     ppSegLevel lvl </>
     PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
@@ -1002,6 +1020,7 @@ data HostOp lore op
   = SegOp (SegOp lore)
     -- ^ A segmented operation.
   | SizeOp SizeOp
+  | LocalMemUsed VName
   | OtherOp op
   deriving (Eq, Ord, Show)
 
@@ -1010,46 +1029,56 @@ instance (Attributes lore, Substitute op) => Substitute (HostOp lore op) where
     SegOp $ substituteNames substs op
   substituteNames substs (OtherOp op) =
     OtherOp $ substituteNames substs op
+  substituteNames substs (LocalMemUsed v) =
+    LocalMemUsed $ substituteNames substs v
   substituteNames substs (SizeOp op) =
     SizeOp $ substituteNames substs op
 
 instance (Attributes lore, Rename op) => Rename (HostOp lore op) where
   rename (SegOp op) = SegOp <$> rename op
   rename (OtherOp op) = OtherOp <$> rename op
+  rename (LocalMemUsed v) = LocalMemUsed <$> rename v
   rename (SizeOp op) = SizeOp <$> rename op
 
 instance (Attributes lore, IsOp op) => IsOp (HostOp lore op) where
   safeOp (SegOp op) = safeOp op
   safeOp (OtherOp op) = safeOp op
   safeOp (SizeOp op) = safeOp op
+  safeOp LocalMemUsed{} = False -- Important to avoid hoisting.
 
   cheapOp (SegOp op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
   cheapOp (SizeOp op) = cheapOp op
+  cheapOp LocalMemUsed{} = False
 
 instance TypedOp op => TypedOp (HostOp lore op) where
   opType (SegOp op) = opType op
   opType (OtherOp op) = opType op
   opType (SizeOp op) = opType op
+  opType LocalMemUsed{} = pure [Prim int32]
 
 instance (Aliased lore, AliasedOp op, Attributes lore) => AliasedOp (HostOp lore op) where
   opAliases (SegOp op) = opAliases op
   opAliases (OtherOp op) = opAliases op
   opAliases (SizeOp op) = opAliases op
+  opAliases LocalMemUsed{} = [mempty]
 
   consumedInOp (SegOp op) = consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
   consumedInOp (SizeOp op) = consumedInOp op
+  consumedInOp LocalMemUsed{} = mempty
 
 instance (Attributes lore, RangedOp op) => RangedOp (HostOp lore op) where
   opRanges (SegOp op) = opRanges op
   opRanges (OtherOp op) = opRanges op
   opRanges (SizeOp op) = opRanges op
+  opRanges LocalMemUsed{} = [unknownRange]
 
 instance (Attributes lore, FreeIn op) => FreeIn (HostOp lore op) where
   freeIn' (SegOp op) = freeIn' op
   freeIn' (OtherOp op) = freeIn' op
   freeIn' (SizeOp op) = freeIn' op
+  freeIn' LocalMemUsed{} = mempty -- Not an error.
 
 instance (CanBeAliased (Op lore), CanBeAliased op, Attributes lore) => CanBeAliased (HostOp lore op) where
   type OpWithAliases (HostOp lore op) = HostOp (Aliases lore) (OpWithAliases op)
@@ -1057,10 +1086,12 @@ instance (CanBeAliased (Op lore), CanBeAliased op, Attributes lore) => CanBeAlia
   addOpAliases (SegOp op) = SegOp $ addOpAliases op
   addOpAliases (OtherOp op) = OtherOp $ addOpAliases op
   addOpAliases (SizeOp op) = SizeOp op
+  addOpAliases (LocalMemUsed v) = LocalMemUsed v
 
   removeOpAliases (SegOp op) = SegOp $ removeOpAliases op
   removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
   removeOpAliases (SizeOp op) = SizeOp op
+  removeOpAliases (LocalMemUsed v) = LocalMemUsed v
 
 instance (CanBeRanged (Op lore), CanBeRanged op, Attributes lore) => CanBeRanged (HostOp lore op) where
   type OpWithRanges (HostOp lore op) = HostOp (Ranges lore) (OpWithRanges op)
@@ -1068,10 +1099,12 @@ instance (CanBeRanged (Op lore), CanBeRanged op, Attributes lore) => CanBeRanged
   addOpRanges (SegOp op) = SegOp $ addOpRanges op
   addOpRanges (OtherOp op) = OtherOp $ addOpRanges op
   addOpRanges (SizeOp op) = SizeOp op
+  addOpRanges (LocalMemUsed v) = LocalMemUsed v
 
   removeOpRanges (SegOp op) = SegOp $ removeOpRanges op
   removeOpRanges (OtherOp op) = OtherOp $ removeOpRanges op
   removeOpRanges (SizeOp op) = SizeOp op
+  removeOpRanges (LocalMemUsed v) = LocalMemUsed v
 
 instance (CanBeWise (Op lore), CanBeWise op, Attributes lore) => CanBeWise (HostOp lore op) where
   type OpWithWisdom (HostOp lore op) = HostOp (Wise lore) (OpWithWisdom op)
@@ -1079,6 +1112,7 @@ instance (CanBeWise (Op lore), CanBeWise op, Attributes lore) => CanBeWise (Host
   removeOpWisdom (SegOp op) = SegOp $ removeOpWisdom op
   removeOpWisdom (OtherOp op) = OtherOp $ removeOpWisdom op
   removeOpWisdom (SizeOp op) = SizeOp op
+  removeOpWisdom (LocalMemUsed v) = LocalMemUsed v
 
 instance (Attributes lore, ST.IndexOp op) => ST.IndexOp (HostOp lore op) where
   indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
@@ -1089,11 +1123,13 @@ instance (PrettyLore lore, PP.Pretty op) => PP.Pretty (HostOp lore op) where
   ppr (SegOp op) = ppr op
   ppr (OtherOp op) = ppr op
   ppr (SizeOp op) = ppr op
+  ppr (LocalMemUsed v) = text "local_mem_used" <> parens (ppr v)
 
 instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (HostOp lore op) where
   opMetrics (SegOp op) = opMetrics op
   opMetrics (OtherOp op) = opMetrics op
   opMetrics (SizeOp op) = opMetrics op
+  opMetrics LocalMemUsed{} = seen "LocalMemUsed"
 
 typeCheckHostOp :: TC.Checkable lore =>
                    (SegLevel -> OpWithAliases (Op lore) -> TC.TypeM lore ())
@@ -1106,3 +1142,4 @@ typeCheckHostOp checker lvl _ (SegOp op) =
   typeCheckSegOp lvl op
 typeCheckHostOp _ _ f (OtherOp op) = f op
 typeCheckHostOp _ _ _ (SizeOp op) = typeCheckSizeOp op
+typeCheckHostOp _ _ _ LocalMemUsed{} = return ()

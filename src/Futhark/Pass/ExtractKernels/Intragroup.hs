@@ -42,7 +42,9 @@ import Futhark.Util.Log
 intraGroupParallelise :: (MonadFreshNames m, LocalScope Out.Kernels m) =>
                          KernelNest -> Lambda
                       -> m (Maybe ((SubExp, SubExp), SubExp, Log,
-                                   Out.Stms Out.Kernels, Out.Stms Out.Kernels))
+                                   Out.Stms Out.Kernels,
+                                   VName,
+                                   Out.Stm Out.Kernels))
 intraGroupParallelise knest lam = runMaybeT $ do
   (ispace, inps) <- lift $ flatKernel knest
 
@@ -53,7 +55,8 @@ intraGroupParallelise knest lam = runMaybeT $ do
   let body = lambdaBody lam
 
   group_size <- newVName "computed_group_size"
-  let intra_lvl = SegThread (Count num_groups) (Count $ Var group_size) SegNoVirt
+  let intra_lvl =
+        SegThread (Count num_groups) (Count $ Var group_size) NoHandle SegNoVirt
 
   (wss_min, wss_avail, log, kbody) <-
     lift $ localScope (scopeOfLParams $ lambdaParams lam) $
@@ -94,16 +97,18 @@ intraGroupParallelise knest lam = runMaybeT $ do
     space <- mkSegSpace ispace
     return (intra_avail_par, space, read_input_stms)
 
-  let kbody' = kbody { kernelBodyStms = read_input_stms <> kernelBodyStms kbody }
+  kernel_id <- newVName "intra_kernel"
 
   let nested_pat = loopNestingPattern first_nest
       rts = map (length ispace `stripArray`) $ patternTypes nested_pat
-      lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
+      lvl = SegGroup (Count num_groups) (Count $ Var group_size)
+            (SegHandle kernel_id) SegNoVirt
+      kbody' = kbody { kernelBodyStms = read_input_stms <> kernelBodyStms kbody }
       kstm = Let nested_pat (StmAux cs ()) $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   return ((intra_min_par, intra_avail_par), Var group_size, log,
-           prelude_stms, oneStm kstm)
+           prelude_stms, kernel_id, kstm)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
@@ -146,7 +151,6 @@ intraGroupBody lvl body = do
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
 intraGroupStm lvl stm@(Let pat aux e) = do
   scope <- askScope
-  let lvl' = SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
 
   case e of
     DoLoop ctx val form loopbody ->
@@ -193,7 +197,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       let scanfun' = soacsLambdaToKernels scanfun
           mapfun' = soacsLambdaToKernels mapfun
       certifying (stmAuxCerts aux) $
-        addStms =<< segScan lvl' pat w scanfun' mapfun' nes arrs [] []
+        addStms =<< segScan lvl pat w scanfun' mapfun' nes arrs [] []
       parallelMin [w]
 
     Op (Screma w form arrs)
@@ -202,7 +206,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       let red_lam' = soacsLambdaToKernels red_lam
           map_lam' = soacsLambdaToKernels map_lam
       certifying (stmAuxCerts aux) $
-        addStms =<< segRed lvl' pat w [SegRedOp comm red_lam' nes mempty] map_lam' arrs [] []
+        addStms =<< segRed lvl pat w [SegRedOp comm red_lam' nes mempty] map_lam' arrs [] []
       parallelMin [w]
 
 
@@ -213,7 +217,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
       let bucket_fun' = soacsLambdaToKernels bucket_fun
       certifying (stmAuxCerts aux) $
-        addStms =<< segHist lvl' pat w [] [] ops' bucket_fun' arrs
+        addStms =<< segHist lvl pat w [] [] ops' bucket_fun' arrs
       parallelMin [w]
 
     Op (Stream w (Sequential accs) lam arrs)
@@ -246,7 +250,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $ do
         let ts = map rowType $ patternTypes pat
             body = KernelBody () kstms krets
-        letBind_ pat $ Op $ SegOp $ SegMap lvl' space ts body
+        letBind_ pat $ Op $ SegOp $ SegMap lvl space ts body
 
       parallelMin [w]
 

@@ -399,7 +399,7 @@ type DoTiling gtids kdims =
 
 scalarLevel :: Tiling -> SegLevel
 scalarLevel tiling =
-  SegThread (segNumGroups lvl) (segGroupSize lvl) SegNoVirt
+  SegThread (segNumGroups lvl) (segGroupSize lvl) NoHandle SegNoVirt
   where lvl = tilingLevel tiling
 
 protectOutOfBounds :: String -> PrimExp VName -> [Type] -> Binder Kernels [SubExp]
@@ -552,7 +552,7 @@ readTile1D
   tile_size gid gtid num_groups group_size
   kind privstms tile_id arrs_and_perms =
 
-  segMap1D "full_tile" (SegThread num_groups group_size SegNoVirt) ResultNoSimplify $ \ltid -> do
+  segMap1D "full_tile" (SegThread num_groups group_size NoHandle SegNoVirt) ResultNoSimplify $ \ltid -> do
     j <- letSubExp "j" =<<
          toExp (primExpFromSubExp int32 tile_id *
                 primExpFromSubExp int32 tile_size +
@@ -592,7 +592,7 @@ processTile1D
 
   let tile = map fst tiles_and_perm
 
-  segMap1D "acc" (SegThread num_groups group_size SegNoVirt) ResultPrivate $ \ltid -> do
+  segMap1D "acc" (SegThread num_groups group_size NoHandle SegNoVirt) ResultPrivate $ \ltid -> do
 
     reconstructGtids1D group_size gtid gid ltid
     addPrivStms [DimFix $ Var ltid] privstms
@@ -650,7 +650,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
 
   (lvl, space) <-
     if null dims_on_top
-    then return (SegGroup (segNumGroups initial_lvl) (segGroupSize initial_lvl) $ segVirt initial_lvl,
+    then return (SegGroup (segNumGroups initial_lvl) (segGroupSize initial_lvl)
+                 (segHandle initial_lvl) (segVirt initial_lvl),
                  SegSpace gid_flat [(gid, unCount $ segNumGroups initial_lvl)])
     else do
       group_size <- letSubExp "computed_group_size" $
@@ -663,7 +664,7 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
       num_groups <- letSubExp "computed_num_groups" =<<
                     foldBinOp (Mul Int32) ldim (map snd dims_on_top)
 
-      return (SegGroup (Count num_groups) (Count group_size) SegNoVirt,
+      return (SegGroup (Count num_groups) (Count group_size) NoHandle SegNoVirt,
               SegSpace gid_flat $ dims_on_top ++ [(gid, ldim)])
   let tile_size = unCount $ segGroupSize lvl
 
@@ -744,7 +745,7 @@ readTile2D :: (SubExp, SubExp) -> (VName, VName) -> (VName, VName) -> SubExp
            -> [(VName, [Int])]
            -> Binder Kernels [VName]
 readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups group_size kind privstms tile_id arrs_and_perms =
-  segMap2D "full_tile" (SegThread num_groups group_size SegNoVirt)
+  segMap2D "full_tile" (SegThread num_groups group_size NoHandle SegNoVirt)
   ResultNoSimplify (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
     i <- letSubExp "i" =<<
          toExp (primExpFromSubExp int32 tile_id *
@@ -798,7 +799,7 @@ processTile2D
   -- Might be truncated in case of a partial tile.
   actual_tile_size <- arraysSize 0 <$> mapM (lookupType . fst) tiles_and_perms
 
-  segMap2D "acc" (SegThread num_groups group_size SegNoVirt)
+  segMap2D "acc" (SegThread num_groups group_size NoHandle SegNoVirt)
     ResultPrivate (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
     reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
 
@@ -861,7 +862,7 @@ processResidualTile2D
         (zip tile (map snd arrs_and_perms)) accs
 
 tiling2d :: [(VName,SubExp)] -> DoTiling (VName, VName) (SubExp, SubExp)
-tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
+tiling2d dims_on_top initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   gid_x <- newVName "gid_x"
   gid_y <- newVName "gid_y"
 
@@ -879,7 +880,8 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
                 (num_groups_y : map snd dims_on_top)
 
   gid_flat <- newVName "gid_flat"
-  let lvl = SegGroup (Count num_groups) (Count group_size) SegNoVirt
+  let lvl = SegGroup (Count num_groups) (Count group_size)
+            (segHandle initial_lvl) SegNoVirt
       space = SegSpace gid_flat $
               dims_on_top ++ [(gid_x, num_groups_x), (gid_y, num_groups_y)]
 

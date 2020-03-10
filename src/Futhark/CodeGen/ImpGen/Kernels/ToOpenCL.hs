@@ -10,7 +10,6 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 
 import Control.Monad.State
 import Control.Monad.Identity
-import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
@@ -38,10 +37,17 @@ kernelsToOpenCL = translateKernels TargetOpenCL
 translateKernels :: KernelTarget
                  -> ImpKernels.Program
                  -> Either InternalError ImpOpenCL.Program
-translateKernels target (ImpKernels.Functions funs) = do
+translateKernels target prog@(ImpKernels.Functions funs) = do
   (prog', ToOpenCL kernels used_types sizes failures) <-
-    flip runStateT initialOpenCL $ fmap Functions $ forM funs $ \(fname, fun) ->
-    (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
+    runOnKernelM $ do
+    -- We handle all the kernels in advance, so we can compute their
+    -- local memory requiremens.
+    kernels <- fmap M.fromList $ forM (getKernels prog) $ \k -> do
+      k' <- onKernel target k
+      return (kernelName k, k')
+
+    fmap Functions $ forM funs $ \(fname, fun) ->
+      (fname,) <$> traverse (onHostOp kernels) fun
   let kernels' = M.map fst kernels
       opencl_code = openClCode $ map snd $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target used_types
@@ -98,14 +104,19 @@ data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (Safety, C.Func)
 initialOpenCL :: ToOpenCL
 initialOpenCL = ToOpenCL mempty mempty mempty mempty
 
-type OnKernelM = ReaderT Name (StateT ToOpenCL (Either InternalError))
+type OnKernelM = StateT ToOpenCL (Either InternalError)
+
+runOnKernelM :: OnKernelM a -> Either InternalError (a, ToOpenCL)
+runOnKernelM m = runStateT m initialOpenCL
 
 addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =
   modify $ \s -> s { clSizes = M.insert key sclass $ clSizes s }
 
-onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
-onHostOp target (CallKernel k) = onKernel target k
+onHostOp :: M.Map Name (OpenCL, Count Bytes Exp) -> HostOp -> OnKernelM OpenCL
+onHostOp kernels (ImpKernels.CallKernel k)
+  | Just (call, _) <- M.lookup (kernelName k) kernels = return call
+  | otherwise = error $ "Unhandled: CallKernel " ++ pretty k
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
   addSize key size_class
   return $ ImpOpenCL.GetSize v key
@@ -114,8 +125,13 @@ onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
   return $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
+onHostOp kernels (ImpKernels.LocalMemUsed v k)
+  | Just (_, used) <- M.lookup k kernels =
+      pure $ ImpOpenCL.LocalMemUsed v $ unCount used
+  | otherwise =
+      error $ "Unhandled: LocalMemUsed " ++ pretty k
 
-onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
+onKernel :: KernelTarget -> Kernel -> OnKernelM (OpenCL, Count Bytes Exp)
 
 onKernel target kernel = do
   failures <- gets clFailures
@@ -217,7 +233,8 @@ onKernel target kernel = do
   let args = catMaybes local_memory_args ++
              kernelArgs kernel
 
-  return $ LaunchKernel safety name args num_groups group_size
+  return (LaunchKernel safety name args num_groups group_size,
+          usedLocalMemory $ kernelLocalMemory kstate)
   where name = nameToString $ kernelName kernel
         num_groups = kernelNumGroups kernel
         group_size = kernelGroupSize kernel
@@ -255,6 +272,9 @@ constDef (ConstUse v e) = Just ([C.citem|$escstm:def|],
         def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ pretty e' ++ ")"
         undef = "#undef " ++ pretty (C.toIdent v mempty)
 constDef _ = Nothing
+
+usedLocalMemory :: [LocalMemoryUse] -> Count Bytes Exp
+usedLocalMemory = sum . map snd
 
 openClCode :: [C.Func] -> String
 openClCode kernels =

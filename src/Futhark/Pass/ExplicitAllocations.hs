@@ -546,6 +546,8 @@ handleHostOp (SizeOp op) =
   return $ Inner $ SizeOp op
 handleHostOp (OtherOp op) =
   error $ "Cannot allocate memory in SOAC: " ++ pretty op
+handleHostOp (LocalMemUsed v) =
+  return $ Inner $ LocalMemUsed v
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
 

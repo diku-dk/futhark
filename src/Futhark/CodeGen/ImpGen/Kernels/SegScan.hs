@@ -64,7 +64,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
             (to-from) .>. (to `rem` segment_size)
           _ -> Nothing
 
-  sKernelThread "scan_stage1" num_groups' group_size' (segFlat space) $ \constants -> do
+  sKernelThread "scan_stage1" num_groups' group_size' (segFlat space) NoHandle $ \constants -> do
     local_arrs <-
       makeLocalArrays group_size (Var num_threads) nes scan_op
 
@@ -163,7 +163,7 @@ scanStage2 (Pattern _ pes) elems_per_group num_groups crossesSegment space scan_
         Just $ \from to ->
           f ((from + 1) * elems_per_group - 1) ((to + 1) * elems_per_group - 1)
 
-  sKernelThread  "scan_stage2" 1 group_size' (segFlat space) $ \constants -> do
+  sKernelThread  "scan_stage2" 1 group_size' (segFlat space) NoHandle $ \constants -> do
     local_arrs <- makeLocalArrays group_size (unCount group_size)
                   nes scan_op
 

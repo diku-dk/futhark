@@ -52,6 +52,9 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                  -> HostOp lore op
                  -> Engine.SimpleM lore (HostOp (Wise lore) (OpWithWisdom op), Stms (Wise lore))
 
+simplifyKernelOp _ (LocalMemUsed v) =
+  return (LocalMemUsed v, mempty) -- Intentional!
+
 simplifyKernelOp f (OtherOp op) = do
   (op', stms) <- f op
   return (OtherOp op', stms)
@@ -190,12 +193,12 @@ instance Engine.Simplifiable SplitOrdering where
     SplitStrided <$> Engine.simplify stride
 
 instance Engine.Simplifiable SegLevel where
-  simplify (SegThread num_groups group_size virt) =
+  simplify (SegThread num_groups group_size k virt) =
     SegThread <$> traverse Engine.simplify num_groups <*>
-    traverse Engine.simplify group_size <*> pure virt
-  simplify (SegGroup num_groups group_size virt) =
+    traverse Engine.simplify group_size <*> pure k <*> pure virt
+  simplify (SegGroup num_groups group_size k virt) =
     SegGroup <$> traverse Engine.simplify num_groups <*>
-    traverse Engine.simplify group_size <*> pure virt
+    traverse Engine.simplify group_size <*> pure k <*> pure virt
 
 instance Engine.Simplifiable SegSpace where
   simplify (SegSpace phys dims) =

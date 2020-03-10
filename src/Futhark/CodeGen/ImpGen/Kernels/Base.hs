@@ -1039,14 +1039,18 @@ virtualiseGroups constants SegVirt required_groups m = do
 
 sKernelThread, sKernelGroup :: String
                             -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
-                            -> VName
+                            -> VName -> SegHandle
                             -> (KernelConstants -> InKernelGen ())
                             -> CallKernelGen ()
 (sKernelThread, sKernelGroup) = (sKernel' threadOperations kernelGlobalThreadId,
                                  sKernel' groupOperations kernelGroupId)
-  where sKernel' ops flatf name num_groups group_size v f = do
+  where sKernel' ops flatf name num_groups group_size v h f = do
           (constants, set_constants) <- kernelInitialisationSimple num_groups group_size
-          let name' = nameFromString $ name ++ "_" ++ show (baseTag v)
+          let name' =
+                case h of NoHandle ->
+                            nameFromString $ name ++ "_" ++ show (baseTag v)
+                          SegHandle k ->
+                            nameFromString $ pretty k
           sKernel (ops constants) constants name' $ do
             set_constants
             dPrimV_ v $ flatf constants

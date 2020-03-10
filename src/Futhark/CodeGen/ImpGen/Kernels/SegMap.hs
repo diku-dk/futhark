@@ -31,7 +31,8 @@ compileSegMap pat lvl space kbody = do
   case lvl of
 
     SegThread{} ->
-      sKernelThread "segmap" num_groups' group_size' (segFlat space) $ \constants -> do
+      sKernelThread "segmap" num_groups' group_size'
+      (segFlat space) (segHandle lvl) $ \constants -> do
       let virt_num_groups = product dims' `quotRoundingUp` unCount group_size'
       virtualiseGroups constants (segVirt lvl) virt_num_groups $ \group_id -> do
         let global_tid = Imp.vi32 group_id * unCount group_size' +
@@ -45,7 +46,8 @@ compileSegMap pat lvl space kbody = do
           kernelBodyResult kbody
 
     SegGroup{} ->
-      sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ \constants -> do
+      sKernelGroup "segmap_intragroup" num_groups' group_size'
+      (segFlat space) (segHandle lvl) $ \constants -> do
       let virt_num_groups = product dims'
       virtualiseGroups constants (segVirt lvl) virt_num_groups $ \group_id -> do
 

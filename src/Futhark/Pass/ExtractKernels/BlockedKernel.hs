@@ -68,6 +68,7 @@ segThread desc =
   SegThread
     <$> (Count <$> getSize (desc ++ "_num_groups") SizeNumGroups)
     <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
+    <*> pure NoHandle
     <*> pure SegVirt
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
@@ -92,10 +93,10 @@ segThreadCapped ws desc r = do
                        letSubExp "segmap_usable_groups_64" =<<
                        eDivRoundingUp Int64 (eSubExp w64)
                        (eSubExp =<< asIntS Int64 group_size)
-      return $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
+      return $ SegThread (Count usable_groups) (Count group_size) NoHandle SegNoVirt
     NoRecommendation v -> do
       (num_groups, _) <- numberOfGroups desc w64 group_size
-      return $ SegThread (Count num_groups) (Count group_size) v
+      return $ SegThread (Count num_groups) (Count group_size) NoHandle v
 
 mkSegSpace :: MonadFreshNames m => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
