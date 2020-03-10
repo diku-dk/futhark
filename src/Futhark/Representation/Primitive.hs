@@ -1187,27 +1187,27 @@ prettySigned _ t = pretty t
 
 mul_hi8 :: IntValue -> IntValue -> Int8
 mul_hi8 a b =
-  let a' = intToWord64 a in
-    let b' = intToWord64 b in
-      fromIntegral (shiftR (a' * b') 8)
+  let a' = intToWord64 a
+      b' = intToWord64 b
+  in fromIntegral (shiftR (a' * b') 8)
 
 mul_hi16 :: IntValue -> IntValue -> Int16
 mul_hi16 a b =
-  let a' = intToWord64 a in
-    let b' = intToWord64 b in
-      fromIntegral (shiftR (a' * b') 16)
+  let a' = intToWord64 a
+      b' = intToWord64 b
+  in fromIntegral (shiftR (a' * b') 16)
 
 mul_hi32 :: IntValue -> IntValue -> Int32
 mul_hi32 a b =
-  let a' = intToWord64 a in
-    let b' = intToWord64 b in
-      fromIntegral (shiftR (a' * b') 32)
+  let a' = intToWord64 a
+      b' = intToWord64 b
+  in fromIntegral (shiftR (a' * b') 32)
 
 mul_hi64 :: IntValue -> IntValue -> Int64
 mul_hi64 a b =
-  let a' = (toInteger . intToWord64) a in
-    let b' = (toInteger . intToWord64) b in
-      fromIntegral (shiftR (a' * b') 64)
+  let a' = (toInteger . intToWord64) a
+      b' = (toInteger . intToWord64) b
+  in fromIntegral (shiftR (a' * b') 64)
 
 mad_hi8 :: IntValue -> IntValue -> Int8 -> Int8
 mad_hi8 a b c = (mul_hi8 a b) + c
