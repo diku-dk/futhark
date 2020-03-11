@@ -273,6 +273,23 @@ $esc:("#if defined(__OPENCL_VERSION__)")
    static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
       return mul_hi(a, b);
    }
+$esc:("#elif defined(__CUDA_ARCH__)")
+   static typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
+     typename uint16_t aa = a;
+     typename uint16_t bb = b;
+     return (aa * bb) >> 8;
+   }
+   static typename uint16_t $id:(funName' "mul_hi16") (typename uint16_t a, typename uint16_t b) {
+     typename uint32_t aa = a;
+     typename uint32_t bb = b;
+     return (aa * bb) >> 16;
+   }
+   static typename uint32_t $id:(funName' "mul_hi32") (typename uint32_t a, typename uint32_t b) {
+      return mulhi(a, b);
+   }
+   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+      return mul64hi(a, b);
+   }
 $esc:("#else")
    static typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
      typename uint16_t aa = a;
