@@ -261,6 +261,71 @@ $esc:("#else")
 $esc:("#endif")
 
 $esc:("#if defined(__OPENCL_VERSION__)")
+   static typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
+      return mul_hi(a, b);
+   }
+   static typename uint16_t $id:(funName' "mul_hi16") (typename uint16_t a, typename uint16_t b) {
+      return mul_hi(a, b);
+   }
+   static typename uint32_t $id:(funName' "mul_hi32") (typename uint32_t a, typename uint32_t b) {
+      return mul_hi(a, b);
+   }
+   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+      return mul_hi(a, b);
+   }
+$esc:("#else")
+   static typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
+     typename uint16_t aa = a;
+     typename uint16_t bb = b;
+     return (aa * bb) >> 8;
+    }
+   static typename uint16_t $id:(funName' "mul_hi16") (typename uint16_t a, typename uint16_t b) {
+     typename uint32_t aa = a;
+     typename uint32_t bb = b;
+     return (aa * bb) >> 16;
+    }
+   static typename uint32_t $id:(funName' "mul_hi32") (typename uint32_t a, typename uint32_t b) {
+     typename uint64_t aa = a;
+     typename uint64_t bb = b;
+     return (aa * bb) >> 32;
+    }
+   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+     typename __uint128_t aa = a;
+     typename __uint128_t bb = b;
+     return (aa * bb) >> 64;
+    }
+$esc:("#endif")
+
+$esc:("#if defined(__OPENCL_VERSION__)")
+   static typename uint8_t $id:(funName' "mad_hi8") (typename uint8_t a, typename uint8_t b, typename uint8_t c) {
+      return mad_hi(a, b, c);
+   }
+   static typename uint16_t $id:(funName' "mad_hi16") (typename uint16_t a, typename uint16_t b, typename uint16_t c) {
+      return mad_hi(a, b, c);
+   }
+   static typename uint32_t $id:(funName' "mad_hi32") (typename uint32_t a, typename uint32_t b, typename uint32_t c) {
+      return mad_hi(a, b, c);
+   }
+   static typename uint64_t $id:(funName' "mad_hi64") (typename uint64_t a, typename uint64_t b, typename uint64_t c) {
+      return mad_hi(a, b, c);
+   }
+$esc:("#else")
+   static typename uint8_t $id:(funName' "mad_hi8") (typename uint8_t a, typename uint8_t b, typename uint8_t c) {
+     return futrts_mul_hi8(a, b) + c;
+    }
+   static typename uint16_t $id:(funName' "mad_hi16") (typename uint16_t a, typename uint16_t b, typename uint16_t c) {
+     return futrts_mul_hi16(a, b) + c;
+    }
+   static typename uint32_t $id:(funName' "mad_hi32") (typename uint32_t a, typename uint32_t b, typename uint32_t c) {
+     return futrts_mul_hi32(a, b) + c;
+    }
+   static typename uint64_t $id:(funName' "mad_hi64") (typename uint64_t a, typename uint64_t b, typename uint64_t c) {
+     return futrts_mul_hi64(a, b) + c;
+    }
+$esc:("#endif")
+
+
+$esc:("#if defined(__OPENCL_VERSION__)")
    static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
       return clz(x);
    }

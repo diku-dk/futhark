@@ -96,6 +96,9 @@ module type integral = {
   -- | Count number of one bits.
   val popc: t -> i32
 
+  val mul_hi: t -> t -> t
+  val mad_hi: t -> t -> t -> t
+
   -- | Count number of zero bits preceding the most significant set
   -- bit.
   val clz: t -> i32
@@ -261,6 +264,8 @@ module i8: (size with t = i8) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc8
+  let mul_hi a b = intrinsics.mul_hi8 (i8 a, i8 b)
+  let mad_hi a b c = intrinsics.mad_hi8 (i8 a, i8 b, i8 c)
   let clz = intrinsics.clz8
 
   let iota (n: i8) = 0i8..1i8..<n
@@ -333,6 +338,8 @@ module i16: (size with t = i16) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc16
+  let mul_hi a b = intrinsics.mul_hi16 (i16 a, i16 b)
+  let mad_hi a b c = intrinsics.mad_hi16 (i16 a, i16 b, i16 c)
   let clz = intrinsics.clz16
 
   let iota (n: i16) = 0i16..1i16..<n
@@ -408,6 +415,8 @@ module i32: (size with t = i32) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc32
+  let mul_hi a b = intrinsics.mul_hi32 (i32 a, i32 b)
+  let mad_hi a b c = intrinsics.mad_hi32 (i32 a, i32 b, i32 c)
   let clz = intrinsics.clz32
 
   let iota (n: i32) = 0..1..<n
@@ -483,6 +492,8 @@ module i64: (size with t = i64) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
   let popc = intrinsics.popc64
+  let mul_hi a b = intrinsics.mul_hi64 (i64 a, i64 b)
+  let mad_hi a b c = intrinsics.mad_hi64 (i64 a, i64 b, i64 c)
   let clz = intrinsics.clz64
 
   let iota (n: i64) = 0i64..1i64..<n
@@ -558,6 +569,8 @@ module u8: (size with t = u8) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc8 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi8 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi8 (sign a, sign b, sign c))
   let clz x = intrinsics.clz8 (sign x)
 
   let iota (n: u8) = 0u8..1u8..<n
@@ -633,6 +646,8 @@ module u16: (size with t = u16) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc16 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi16 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi16 (sign a, sign b, sign c))
   let clz x = intrinsics.clz16 (sign x)
 
   let iota (n: u16) = 0u16..1u16..<n
@@ -708,6 +723,8 @@ module u32: (size with t = u32) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc32 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi32 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi32 (sign a, sign b, sign c))
   let clz x = intrinsics.clz32 (sign x)
 
   let iota (n: u32) = 0u32..1u32..<n
@@ -783,6 +800,8 @@ module u64: (size with t = u64) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc64 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi64 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi64 (sign a, sign b, sign c))
   let clz x = intrinsics.clz64 (sign x)
 
   let iota (n: u64) = 0u64..1u64..<n
