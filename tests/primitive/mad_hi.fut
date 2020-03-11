@@ -1,6 +1,5 @@
 -- Test u8.mad_hi
 -- ==
--- tags { no_csharp }
 -- entry: test_u8_mad_hi
 -- input  { [10u8, 20u8, 2u8, 1u8, 2u8, 3u8, 2u8, 8u8 ]
 --          [10u8, 20u8, 127u8, 255u8, 255u8, 127u8, 128u8, 128u8]
