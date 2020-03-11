@@ -148,6 +148,9 @@ data Checking
   | CheckingPattern UncheckedPattern InferredType
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
+  | CheckingRecordUpdate [Name] StructType StructType
+  | CheckingRequired [StructType] StructType
+  | CheckingBranches StructType StructType
 
 instance Pretty Checking where
   ppr (CheckingApply f e expected actual) =
@@ -169,7 +172,7 @@ instance Pretty Checking where
     "Actual:  " <+> align (ppr actual)
 
   ppr (CheckingAscription expected actual) =
-    "Expression does not have ascribed type." </>
+    "Expression does not have expected type from explicit ascription." </>
     "Expected:" <+> align (ppr expected) </>
     "Actual:  " <+> align (ppr actual)
 
@@ -197,6 +200,26 @@ instance Pretty Checking where
     "Initial loop values do not have expected type." </>
     "Expected:" <+> align (ppr expected) </>
     "Actual:  " <+> align (ppr actual)
+
+  ppr (CheckingRecordUpdate fs expected actual) =
+    "Type mismatch when updating record field" <+> pquote fs' <> "." </>
+    "Existing:" <+> align (ppr expected) </>
+    "New:     " <+> align (ppr actual)
+    where fs' = mconcat $ punctuate "." $ map ppr fs
+
+  ppr (CheckingRequired [expected] actual) =
+    "Expression must must have type" <+> ppr expected <> "." </>
+    "Actual type:" <+> align (ppr actual)
+
+  ppr (CheckingRequired expected actual) =
+    "Type of expression must must be one of " <+> expected' <> "." </>
+    "Actual type:" <+> align (ppr actual)
+    where expected' = commasep (map ppr expected)
+
+  ppr (CheckingBranches t1 t2) =
+    "Conditional branches differ in type." </>
+    "Former:" <+> ppr t1 </>
+    "Latter:" <+> ppr t2
 
 -- | Whether something is a global or a local variable.
 data Locality = Local | Global
@@ -328,16 +351,6 @@ instance MonadUnify TermTypeM where
       Rigid rsrc -> constrain dim $ UnknowableSize loc rsrc
       Nonrigid -> constrain dim $ Size Nothing $ mkUsage' loc
     return dim
-
-instance MonadBreadCrumbs TermTypeM where
-  breadCrumb bc = local onEnv
-    where onEnv env = env { termBreadCrumbs = bcs' }
-            where bcs' =
-                    case (bc, termBreadCrumbs env) of
-                      (MatchingFields xs, MatchingFields ys : bcs) ->
-                        MatchingFields (ys++xs) : bcs
-                      (_, bcs) -> bc : bcs
-  getBreadCrumbs = asks termBreadCrumbs
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c m = m `catchError` (throwError . onError)
@@ -498,7 +511,8 @@ instance MonadTypeChecker TermTypeM where
 
   checkNamedDim loc v = do
     (v', t) <- lookupVar loc v
-    unify (mkUsage loc "use as array size") (toStruct t) $
+    onFailure (CheckingRequired [Scalar $ Prim $ Signed Int32] (toStruct t)) $
+      unify (mkUsage loc "use as array size") (toStruct t) $
       Scalar $ Prim $ Signed Int32
     return v'
 
@@ -621,11 +635,9 @@ uniqueReturnAliased fname loc =
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
 -- one of them.
 unifyBranchTypes :: SrcLoc -> PatternType -> PatternType -> TermTypeM (PatternType, [VName])
-unifyBranchTypes loc e1_t e2_t =
-  breadCrumb (Matching $
-              "When matching the types of branches at" <+>
-              text (locStr loc) <> ".") $
-  unifyMostCommon (mkUsage loc "unification of branch results") e1_t e2_t
+unifyBranchTypes loc t1 t2 =
+  onFailure (CheckingBranches (toStruct t1) (toStruct t2)) $
+  unifyMostCommon (mkUsage loc "unification of branch results") t1 t2
 
 unifyBranches :: SrcLoc -> Exp -> Exp -> TermTypeM (PatternType, [VName])
 unifyBranches loc e1 e2 = do
@@ -1220,8 +1232,10 @@ checkExp (If e1 e2 e3 _ loc) =
 
   where checkCond = do
           e1' <- checkExp e1
-          unify (mkUsage (srclocOf e1') "use as 'if' condition")
-            (Scalar $ Prim Bool) . toStruct =<< expType e1'
+          let bool = Scalar $ Prim Bool
+          e1_t <- toStruct <$> expType e1'
+          onFailure (CheckingRequired [bool] e1_t) $
+            unify (mkUsage (srclocOf e1') "use as 'if' condition") bool e1_t
           return e1'
 
 checkExp (Parens e loc) =
@@ -1387,8 +1401,10 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   let usage = mkUsage loc "record update"
   r <- foldM (flip $ mustHaveField usage) a fields
   ve_t <- expType ve'
-  unify usage (anySizes $ toStruct r)
-              (anySizes $ toStruct ve_t)
+  let r' = anySizes $ toStruct r
+      ve_t' = anySizes $ toStruct ve_t
+  onFailure (CheckingRecordUpdate fields r' ve_t') $
+    unify usage r' ve_t'
   maybe_a' <- onRecordField (const ve_t) fields <$> expTypeFully src'
   case maybe_a' of
     Just a' -> return $ RecordUpdate src' fields ve' (Info a') loc
@@ -1896,7 +1912,7 @@ wildPattern (PatternConstr n t ps loc) pos um = wildConstr <$> um
         wildOut p = Wildcard (Info (patternType p)) (srclocOf p)
 wildPattern _ _ um = um
 
-checkUnmatched :: (MonadBreadCrumbs m, MonadTypeChecker m) => Exp -> m ()
+checkUnmatched :: Exp -> TermTypeM ()
 checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
   where checkUnmatched' (Match _ cs _ loc) =
           let ps = fmap (\(CasePat p _ _) -> p) cs
