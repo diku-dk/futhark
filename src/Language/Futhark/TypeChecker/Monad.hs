@@ -209,15 +209,16 @@ localEnv env = local $ \ctx ->
 -- checker currently performing.  This is used to give better error
 -- messages.
 data BreadCrumb = MatchingTypes StructType StructType
-                | MatchingFields Name
+                | MatchingFields [Name]
                 | Matching Doc
 
 instance Pretty BreadCrumb where
   ppr (MatchingTypes t1 t2) =
     "When matching type" </> indent 2 (ppr t1) </>
     "with" </> indent 2 (ppr t2)
-  ppr (MatchingFields field) =
-    "When matching types of record field" <+> pquote (ppr field) <> dot
+  ppr (MatchingFields fields) =
+    "When matching types of record field" <+>
+    pquote (mconcat $ punctuate "." $ map ppr fields) <> dot
   ppr (Matching s) =
     s
 
