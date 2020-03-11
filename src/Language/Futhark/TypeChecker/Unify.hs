@@ -62,8 +62,8 @@ mkUsage' :: SrcLoc -> Usage
 mkUsage' = Usage Nothing
 
 instance Pretty Usage where
-  ppr (Usage Nothing loc) = "use at " <> text (locStr loc)
-  ppr (Usage (Just s) loc) = text s <+> "at" <+> text (locStr loc)
+  ppr (Usage Nothing loc) = "use at " <> textwrap (locStr loc)
+  ppr (Usage (Just s) loc) = textwrap s <+/> "at" <+> textwrap (locStr loc)
 
 instance Located Usage where
   locOf (Usage _ loc) = locOf loc
@@ -292,9 +292,7 @@ unifyWith :: MonadUnify m =>
               (VName -> Maybe Int) ->
               DimDecl VName -> DimDecl VName -> m ())
           -> Usage -> StructType -> StructType -> m ()
-unifyWith onDims usage orig_t1 orig_t2 =
-  breadCrumb (MatchingTypes orig_t1 orig_t2) $
-  subunify False mempty orig_t1 orig_t2
+unifyWith onDims usage = subunify False mempty
   where
     swap True x y = (y, x)
     swap False x y = (x, y)
@@ -307,14 +305,9 @@ unifyWith onDims usage orig_t1 orig_t2 =
 
       let nonrigid v = isNonRigid v constraints
 
-          failure
-            -- This case is to avoid repeating the types that are also
-            -- shown in the breadcrumb.
-            | t1 == orig_t1, t2 == orig_t2 =
-                typeError (srclocOf usage) mempty "Types do not match."
-            | otherwise =
-                typeError (srclocOf usage) mempty $ "Couldn't match expected type" </>
-                indent 2 (ppr t1') </> "with actual type" </> indent 2 (ppr t2')
+          failure =
+            typeError (srclocOf usage) mempty $ "Couldn't match expected type" </>
+            indent 2 (ppr t1') </> "with actual type" </> indent 2 (ppr t2')
 
           -- Remove any of the intermediate dimensions we added just
           -- for unification purposes.
@@ -339,12 +332,13 @@ unifyWith onDims usage orig_t1 orig_t2 =
          Scalar (Record arg_fs))
           | M.keys fs == M.keys arg_fs ->
               forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(k, (k_t1, k_t2)) ->
-              breadCrumb (MatchingFields k) $ subunify ord bound k_t1 k_t2
+              breadCrumb (MatchingFields [k]) $ subunify ord bound k_t1 k_t2
 
         (Scalar (TypeVar _ _ (TypeName _ tn) targs),
          Scalar (TypeVar _ _ (TypeName _ arg_tn) arg_targs))
           | tn == arg_tn, length targs == length arg_targs ->
-              zipWithM_ unifyTypeArg targs arg_targs
+            breadCrumb (Matching "When matching type arguments") $
+            zipWithM_ unifyTypeArg targs arg_targs
 
         (Scalar (TypeVar _ _ (TypeName [] v1) []),
          Scalar (TypeVar _ _ (TypeName [] v2) [])) ->
@@ -369,8 +363,10 @@ unifyWith onDims usage orig_t1 orig_t2 =
           (a1', a1_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r1 a1
           (a2', a2_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r2 a2
           let bound' = bound <> mapMaybe pname [p1, p2] <> a1_dims <> a2_dims
-          subunify (not ord) bound a1' a2'
-          subunify ord bound' b1' b2'
+          breadCrumb (Matching "When matching parameter types") $
+            subunify (not ord) bound a1' a2'
+          breadCrumb (Matching "When matching return types") $
+            subunify ord bound' b1' b2'
           where (b1', b2') =
                   -- Replace one parameter name with the other in the
                   -- return type, in case of dependent types.  I.e.,
@@ -399,7 +395,8 @@ unifyWith onDims usage orig_t1 orig_t2 =
         (Scalar (Sum cs),
          Scalar (Sum arg_cs))
           | M.keys cs == M.keys arg_cs ->
-              unifySharedConstructors usage cs arg_cs
+            breadCrumb (Matching "When matching constructors") $
+            unifySharedConstructors usage cs arg_cs
 
         _ | t1' == t2' -> return ()
           | otherwise -> failure
@@ -493,7 +490,7 @@ linkVarToType usage vn lvl tp = do
         typeError usage mempty $ "Type variable" <+> pprName vn <+>
         "cannot be instantiated with type containing anonymous sizes:" </>
         indent 2 (ppr tp) </>
-        textwrap "This is usually because the size of arrays returned a higher-order function argument cannot be determined statically.  Add type annotation to clarify."
+        textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size beind a value parameter.  Add type annotation to clarify."
 
     Just (Equality _) ->
       equalityType usage tp'
@@ -505,11 +502,11 @@ linkVarToType usage vn lvl tp = do
               | not $ isRigid v constraints ->
                   linkVarToTypes usage v ts
             _ ->
-              typeError usage mempty $ "Cannot unify" <+> pquote (pprName vn) <+>
+              typeError usage mempty $ "Cannot instantiate" <+> pquote (pprName vn) <+>
               "with type" </> indent 2 (ppr tp) </> "as" <+>
               pquote (pprName vn) <+> "must be one of" <+>
-              commasep (map ppr ts) <+>
-              "due to" <+> ppr old_usage <> "."
+              commasep (map ppr ts) <+/>
+              "due to" <+/> ppr old_usage <> "."
 
     Just (HasFields required_fields old_usage) ->
       case tp of
@@ -523,7 +520,7 @@ linkVarToType usage vn lvl tp = do
               (lvl, HasFields required_fields old_usage)
         _ ->
           typeError usage mempty $
-          "Cannot unify" <+> pquote (pprName vn) <+> "with type" </>
+          "Cannot instantiate" <+> pquote (pprName vn) <+> "with type" </>
           indent 2 (ppr tp) </>
           "as" <+> pquote (pprName vn) <+> "must be a record with fields" </>
           ppr (Record required_fields) </>

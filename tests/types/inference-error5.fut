@@ -1,5 +1,5 @@
 -- A type parameter cannot be inferred as a specific type.
 -- ==
--- error: Types do not match
+-- error: does not have expected type
 
 let f 't (x: i32): t = x

@@ -139,27 +139,39 @@ altOccurences occurs1 occurs2 =
 
 --- Scope management
 
-data Checking = CheckingApply (Maybe (QualName VName)) Exp
-              | CheckingReturn
-              | CheckingAscription
-              | CheckingLetGeneralise Name
-              | CheckingParams (Maybe Name)
-              | CheckingPattern UncheckedPattern InferredType
+data Checking
+  = CheckingApply (Maybe (QualName VName)) Exp StructType StructType
+  | CheckingReturn StructType StructType
+  | CheckingAscription StructType StructType
+  | CheckingLetGeneralise Name
+  | CheckingParams (Maybe Name)
+  | CheckingPattern UncheckedPattern InferredType
+  | CheckingLoopBody StructType StructType
+  | CheckingLoopInitial StructType StructType
 
 instance Pretty Checking where
-  ppr (CheckingApply Nothing e) =
-    "Cannot apply function to argument" <+>
-    pquote (shorten $ oneLine $ ppr e) <> "."
+  ppr (CheckingApply f e expected actual) =
+    header </>
+    "Expected:" <+> align (ppr expected) </>
+    "Actual:  " <+> align (ppr actual)
+    where header =
+            case f of
+              Nothing ->
+                "Cannot apply function to" <+>
+                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
+              Just fname ->
+                "Cannot apply" <+> pquote (ppr fname) <+> "to" <+>
+                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
 
-  ppr (CheckingApply (Just fname) e) =
-    "Cannot apply" <+> pquote (ppr fname) <+> "to argument" <+>
-    pquote (shorten $ oneLine $ ppr e) <> "."
+  ppr (CheckingReturn expected actual) =
+    "Function body does not have expected type." </>
+    "Expected:" <+> align (ppr expected) </>
+    "Actual:  " <+> align (ppr actual)
 
-  ppr CheckingReturn =
-    "Function body does not have indicated type."
-
-  ppr CheckingAscription =
-    "Expression does not have ascribed type."
+  ppr (CheckingAscription expected actual) =
+    "Expression does not have ascribed type." </>
+    "Expected:" <+> align (ppr expected) </>
+    "Actual:  " <+> align (ppr actual)
 
   ppr (CheckingLetGeneralise fname) =
     "Cannot generalise type of" <+> pquote (ppr fname) <> "."
@@ -175,6 +187,16 @@ instance Pretty Checking where
     "Pattern" <+> pquote (ppr pat) <+>
     "cannot match value of type" </>
     indent 2 (ppr t)
+
+  ppr (CheckingLoopBody expected actual) =
+    "Loop body does not have expected type." </>
+    "Expected:" <+> align (ppr expected) </>
+    "Actual:  " <+> align (ppr actual)
+
+  ppr (CheckingLoopInitial expected actual) =
+    "Initial loop values do not have expected type." </>
+    "Expected:" <+> align (ppr expected) </>
+    "Actual:  " <+> align (ppr actual)
 
 -- | Whether something is a global or a local variable.
 data Locality = Local | Global
@@ -308,8 +330,13 @@ instance MonadUnify TermTypeM where
     return dim
 
 instance MonadBreadCrumbs TermTypeM where
-  breadCrumb bc = local $ \env ->
-    env { termBreadCrumbs = bc : termBreadCrumbs env }
+  breadCrumb bc = local onEnv
+    where onEnv env = env { termBreadCrumbs = bcs' }
+            where bcs' =
+                    case (bc, termBreadCrumbs env) of
+                      (MatchingFields xs, MatchingFields ys : bcs) ->
+                        MatchingFields (ys++xs) : bcs
+                      (_, bcs) -> bc : bcs
   getBreadCrumbs = asks termBreadCrumbs
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
@@ -976,7 +1003,9 @@ checkAscript loc decl e shapef = do
   (decl_t_nonrigid, _) <-
     instantiateEmptyArrayDims loc "impl" Nonrigid $ shapef $
     unInfo $ expandedType decl'
-  unify (mkUsage loc "size coercion") decl_t_nonrigid (toStruct t)
+
+  onFailure (CheckingAscription (unInfo $ expandedType decl') (toStruct t)) $
+    unify (mkUsage loc "type ascription") decl_t_nonrigid (toStruct t)
 
   -- We also have to make sure that uniqueness matches.  This is done
   -- explicitly, because uniqueness is ignored by unification.
@@ -1130,11 +1159,11 @@ checkExp (Range start maybe_step end _ loc) = do
 
   return $ Range start' maybe_step' end' ret loc
 
-checkExp (Ascript e decl loc) = onFailure CheckingAscription $ do
+checkExp (Ascript e decl loc) = do
   (decl', e') <- checkAscript loc decl e id
   return $ Ascript e' decl' loc
 
-checkExp (Coerce e decl _ loc) = onFailure CheckingAscription $ do
+checkExp (Coerce e decl _ loc) = do
   -- We instantiate the declared types with all dimensions as nonrigid
   -- fresh type variables, which we then use to unify with the type of
   -- 'e'.  This lets 'e' have whatever sizes it wants, but the overall
@@ -1519,7 +1548,8 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
         pat_t <- normTypeFully $ patternType mergepat'
         -- We are ignoring the dimensions here, because any mismatches
         -- should be turned into fresh size variables.
-        expect (mkUsage (srclocOf loopbody) "matching loop body to loop pattern")
+        onFailure (CheckingLoopBody (toStruct (anySizes pat_t)) (toStruct loopbody_t)) $
+          expect (mkUsage (srclocOf loopbody) "matching loop body to loop pattern")
           (toStruct (anySizes pat_t))
           (toStruct loopbody_t)
         pat_t' <- normTypeFully pat_t
@@ -1646,8 +1676,10 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
                       patternType mergepat''
   (merge_t', _) <-
     instantiateEmptyArrayDims loc "loopres" Nonrigid $ toStruct loopt_anydims
-  unify (mkUsage (srclocOf mergeexp') "matching initial loop values to pattern")
-    merge_t' . toStruct =<< expTypeFully mergeexp'
+  mergeexp_t <- toStruct <$> expTypeFully mergeexp'
+  onFailure (CheckingLoopInitial (toStruct loopt_anydims) mergeexp_t) $
+    unify (mkUsage (srclocOf mergeexp') "matching initial loop values to pattern")
+    merge_t' mergeexp_t
 
   (loopt, retext) <- instantiateDimsInType loc RigidLoop loopt_anydims
   -- We set all of the uniqueness to be unique.  This is intentional,
@@ -2057,7 +2089,7 @@ instantiateDimsInReturnType tloc fname =
 checkApply :: SrcLoc -> Maybe (QualName VName) -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
 checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) =
-  onFailure (CheckingApply fname argexp) $ do
+  onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
   -- Perform substitutions of instantiated variables in the types.
@@ -2730,7 +2762,7 @@ checkFunBody params body maybe_rettype loc = do
                       body_t
 
       let usage = mkUsage (srclocOf body) "return type annotation"
-      onFailure CheckingReturn $
+      onFailure (CheckingReturn rettype (toStruct body_t')) $
         expect usage rettype_withdims $ toStruct body_t'
 
       -- We also have to make sure that uniqueness matches.  This is done
