@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+<<<<<<< HEAD
   * The `f32` and `f64` modules now also define `sinh`, `cosh`,
     `tanh`, `asinh`, `acosh`, and `atanh` functions.
 
@@ -52,14 +53,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+=======
+>>>>>>> This belongs in the Removed section.
   * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,
     `steps`, and `range` from the prelude.
 
 ### Changed
 
+<<<<<<< HEAD
   * `"futlib"` is now called `"prelude"`, and it is now an error to
     import it explicitly.
 
+=======
+>>>>>>> This belongs in the Removed section.
 ### Fixed
 
   * Corrected address calculations in `csharp` backend.
