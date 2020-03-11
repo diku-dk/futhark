@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark bench` now accepts `--pass-compiler-option`.
 
+  * The integer modules now have `mad_hi` and `mul_hi` functions for
+    getting the upper part of multiplications.  Thanks to Chhi'mèd
+    Künzang (@porcuquine) for the contribution!
+
 ### Removed
 
 ### Changed
