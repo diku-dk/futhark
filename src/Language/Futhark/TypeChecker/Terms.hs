@@ -36,9 +36,12 @@ import Prelude hiding (mod)
 import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
-import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
-import Language.Futhark.TypeChecker.Unify hiding (Usage)
+import Language.Futhark.TypeChecker.Monad
+  hiding (BoundV, checkQualNameWithEnv, typeError)
+import Language.Futhark.TypeChecker.Types
+  hiding (checkTypeDecl)
+import Language.Futhark.TypeChecker.Unify
+  hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
 import Futhark.Util.Pretty hiding (space, bool, group)
@@ -161,10 +164,10 @@ instance Pretty Checking where
             case f of
               Nothing ->
                 "Cannot apply function to" <+>
-                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
+                pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
               Just fname ->
                 "Cannot apply" <+> pquote (ppr fname) <+> "to" <+>
-                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
+                pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
 
   ppr (CheckingReturn expected actual) =
     "Function body does not have expected type." </>
@@ -237,8 +240,7 @@ data ValBinding = BoundV Locality [TypeParam] PatternType
 -- 'TermScope' will be extended during type-checking as bindings come into
 -- scope.
 data TermEnv = TermEnv { termScope :: TermScope
-                       , termBreadCrumbs :: [BreadCrumb]
-                         -- ^ Most recent first.
+                       , termChecking :: Maybe Checking
                        , termLevel :: Level
                        }
 
@@ -352,17 +354,41 @@ instance MonadUnify TermTypeM where
       Nonrigid -> constrain dim $ Size Nothing $ mkUsage' loc
     return dim
 
+  unifyError loc notes bcs doc = do
+    checking <- asks termChecking
+    case checking of
+      Just checking' ->
+        throwError $ TypeError (srclocOf loc) notes $
+        ppr checking' <> line </> doc <> ppr bcs
+      Nothing ->
+        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+
+  matchError loc notes bcs t1 t2 = do
+    checking <- asks termChecking
+    case checking of
+      Just checking'
+        | hasNoBreadCrumbs bcs ->
+            throwError $ TypeError (srclocOf loc) notes $
+            ppr checking'
+        | otherwise ->
+            throwError $ TypeError (srclocOf loc) notes $
+            ppr checking' <> line </> doc <> ppr bcs
+      Nothing ->
+        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+    where doc = "Types" </>
+                indent 2 (ppr t1) </>
+                "and" </>
+                indent 2 (ppr t2) </>
+                "do not match."
+
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
-onFailure c m = m `catchError` (throwError . onError)
-  where onError (TypeError loc Nothing notes msg) =
-          TypeError loc (Just $ ppr c) notes msg
-        onError err = err
+onFailure c = local $ \env -> env { termChecking = Just c }
 
 runTermTypeM :: TermTypeM a -> TypeM (a, Occurences)
 runTermTypeM (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   let initial_tenv = TermEnv { termScope = initial_scope
-                             , termBreadCrumbs = mempty
+                             , termChecking = Nothing
                              , termLevel = 0
                              }
   evalRWST m initial_tenv $ TermTypeState mempty 0 mempty
@@ -377,6 +403,15 @@ incCounter :: TermTypeM Int
 incCounter = do s <- get
                 put s { stateCounter = stateCounter s + 1 }
                 return $ stateCounter s
+
+typeError :: Located loc => loc -> Notes -> Doc -> TermTypeM a
+typeError loc notes s = do
+  checking <- asks termChecking
+  case checking of
+    Just checking' ->
+      throwError $ TypeError (srclocOf loc) notes (ppr checking' <> line </> s)
+    Nothing ->
+      throwError $ TypeError (srclocOf loc) notes s
 
 extSize :: SrcLoc -> SizeSource -> TermTypeM (DimDecl VName, Maybe VName)
 extSize loc e = do
@@ -1226,7 +1261,7 @@ checkExp (If e1 e2 e3 _ loc) =
   let t' = addAliases brancht (`S.difference` S.map AliasBound (allConsumed dflow))
 
   zeroOrderType (mkUsage loc "returning value of this type from 'if' expression")
-    "returned from branch" t'
+    "type returned from branch" t'
 
   return $ If e1' e2' e3' (Info t', Info retext) loc
 
@@ -1296,7 +1331,7 @@ checkExp (LetPat pat e body _ loc) =
     t <- expType e'
     case anyConsumption e_occs of
       Just c ->
-        let msg = "of value computed with consumption at " ++ locStr (location c)
+        let msg = "type computed with consumption at " ++ locStr (location c)
         in zeroOrderType (mkUsage loc "consumption in right-hand side of 'let'-binding") msg t
       _ -> return ()
 
@@ -1530,7 +1565,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
 
   zeroOrderType (mkUsage (srclocOf mergeexp) "use as loop variable")
-    "used as loop variable" =<< expTypeFully mergeexp'
+    "type used as loop variable" =<< expTypeFully mergeexp'
 
   -- The handling of dimension sizes is a bit intricate, but very
   -- similar to checking a function, followed by checking a call to
@@ -1832,7 +1867,8 @@ checkExp (Match e cs _ loc) =
   sequentially (checkExp e) $ \e' _ -> do
     mt <- expTypeFully e'
     (cs', t, retext) <- checkCases mt cs
-    zeroOrderType (mkUsage loc "being returned 'match'") "returned from pattern match" t
+    zeroOrderType (mkUsage loc "being returned 'match'")
+      "type returned from pattern match" t
     return $ Match e' cs' (Info t, Info retext) loc
 
 checkCases :: PatternType
@@ -2133,7 +2169,7 @@ checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, 
 
   case anyConsumption dflow of
     Just c ->
-      let msg = "of value computed with consumption at " ++ locStr (location c)
+      let msg = "type of expression with consumption at " ++ locStr (location c)
       in zeroOrderType (mkUsage argloc "potential consumption in expression") msg tp1
     _ -> return ()
 
@@ -2343,7 +2379,7 @@ causalityCheck binding_body = do
             _                           -> Nothing
 
         causality what loc d dloc t =
-          Left $ TypeError loc Nothing mempty $
+          Left $ TypeError loc mempty $
           "Causality check: size" <+/> pquote (pprName d) <+/>
           "needed for type of" <+> what <> colon </>
           indent 2 (ppr t) </>
@@ -2880,7 +2916,7 @@ arrayOfM :: (Pretty (ShapeDecl dim), Monoid as) =>
          -> TypeBase dim as -> ShapeDecl dim -> Uniqueness
          -> TermTypeM (TypeBase dim as)
 arrayOfM loc t shape u = do
-  zeroOrderType (mkUsage loc "use as array element") "used in array" t
+  zeroOrderType (mkUsage loc "use as array element") "type used in array" t
   return $ arrayOf t shape u
 
 patternNames :: Pattern -> S.Set VName
