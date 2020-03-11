@@ -12,8 +12,9 @@ module Language.Futhark.TypeChecker.Unify
   , MonadUnify(..)
   , Rigidity(..)
   , RigidSource(..)
-  , BreadCrumb(..)
-  , typeError
+  , BreadCrumbs
+  , noBreadCrumbs
+  , hasNoBreadCrumbs
   , dimNotes
   , mkTypeVarName
 
@@ -244,7 +245,7 @@ typeNotes ctx =
   fmap mconcat . mapM (dimNotes ctx . NamedDim . qualName) .
   S.toList . typeDimNames
 
-class MonadError TypeError m => MonadUnify m where
+class Monad m => MonadUnify m where
   getConstraints :: m Constraints
   putConstraints :: Constraints -> m ()
   modifyConstraints :: (Constraints -> Constraints) -> m ()
@@ -256,6 +257,12 @@ class MonadError TypeError m => MonadUnify m where
   newDimVar :: SrcLoc -> Rigidity -> String -> m VName
 
   curLevel :: m Level
+
+  matchError :: Located loc => loc -> Notes -> BreadCrumbs
+             -> StructType -> StructType -> m a
+
+  unifyError :: Located loc => loc -> Notes -> BreadCrumbs
+             -> Doc -> m a
 
 normTypeFully :: (Substitutable a, MonadUnify m) => a -> m a
 normTypeFully t = do constraints <- getConstraints
@@ -329,17 +336,7 @@ unifyWith onDims usage = subunify False mempty
 
       let nonrigid v = isNonRigid v constraints
 
-          -- Produce an empty error message if the unification has not
-          -- done anything interesting (understood as there being no
-          -- breadcrumbs).  This keeps type errors nice and concise in
-          -- the common case.
-          failure =
-            typeError (srclocOf usage) mempty $
-            if hasNoBreadCrumbs bcs
-            then mempty
-            else "Couldn't match expected type" </>
-                 indent 2 (ppr t1') </> "with actual type" </> indent 2 (ppr t2') <>
-                 ppr bcs
+          failure = matchError (srclocOf usage) mempty bcs t1' t2'
 
           -- Remove any of the intermediate dimensions we added just
           -- for unification purposes.
@@ -351,7 +348,7 @@ unifyWith onDims usage = subunify False mempty
             onDims' bcs' (swap ord d1 d2)
           unifyTypeArg bcs' (TypeArgType t _) (TypeArgType arg_t _) =
             subunify ord bound bcs' t arg_t
-          unifyTypeArg _ _ _ = typeError usage mempty
+          unifyTypeArg bcs' _ _ = unifyError usage mempty bcs'
             "Cannot unify a type argument with a dimension argument (or vice versa)."
 
           onDims' bcs' (d1, d2) =
@@ -446,9 +443,9 @@ unifyDims usage bcs _ nonrigid d1 (NamedDim (QualName _ d2))
       linkVarToDim usage bcs d2 lvl2 d1
 unifyDims usage bcs _ _ d1 d2 = do
   notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
-  typeError usage notes $
+  unifyError usage notes bcs $
     "Dimensions" <+> pquote (ppr d1) <+>
-    "and" <+> pquote (ppr d2) <+> "do not match." <> ppr bcs
+    "and" <+> pquote (ppr d2) <+> "do not match."
 
 -- | Unifies two types.
 unify :: MonadUnify m => Usage -> StructType -> StructType -> m ()
@@ -468,8 +465,8 @@ expect usage = unifyWith onDims usage noBreadCrumbs
               linkVarToDim usage bcs d2 lvl2 d1
         onDims bcs _ _ d1 d2 = do
           notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
-          typeError usage notes $ "Dimensions" <+> pquote (ppr d1) <+>
-            "and" <+> pquote (ppr d2) <+> "do not match." <> ppr bcs
+          unifyError usage notes bcs $ "Dimensions" <+> pquote (ppr d1) <+>
+            "and" <+> pquote (ppr d2) <+> "do not match."
 
         boundParam bound (NamedDim (QualName _ d)) = d `elem` bound
         boundParam _ _ = False
@@ -484,8 +481,8 @@ occursCheck :: MonadUnify m =>
             -> VName -> StructType -> m ()
 occursCheck usage bcs vn tp =
   when (vn `S.member` typeVars tp) $
-  typeError usage mempty $ "Occurs check: cannot instantiate" <+>
-  pprName vn <+> "with" <+> ppr tp <> "." <> ppr bcs
+  unifyError usage mempty bcs $ "Occurs check: cannot instantiate" <+>
+  pprName vn <+> "with" <+> ppr tp <> "."
 
 scopeCheck :: MonadUnify m =>
               Usage -> BreadCrumbs
@@ -508,11 +505,11 @@ scopeCheck usage bcs vn max_lvl tp = do
 
         scopeViolation v = do
           notes <- typeNotes usage tp
-          typeError usage notes $ "Cannot unify type" </>
+          unifyError usage notes bcs $ "Cannot unify type" </>
             indent 2 (ppr tp) </>
             "with" <+> pquote (pprName vn) <+> "(scope violation)." </>
             "This is because" <+> pquote (pprName v) <+>
-            "is rigidly bound in a deeper scope." <> ppr bcs
+            "is rigidly bound in a deeper scope."
 
 linkVarToType :: MonadUnify m =>
                  UnifyDims m -> Usage -> BreadCrumbs
@@ -527,13 +524,18 @@ linkVarToType onDims usage bcs vn lvl tp = do
   case snd <$> M.lookup vn constraints of
 
     Just (NoConstraint Unlifted unlift_usage) -> do
-      zeroOrderTypeWith usage bcs (pretty unlift_usage) tp'
+      let bcs' = breadCrumb
+                 (Matching $ "When verifying that" <+> pquote (pprName vn) <+>
+                  textwrap "is not instantiated with a function type, due to" <+>
+                  ppr unlift_usage)
+                 bcs
+      zeroOrderTypeWith usage bcs' tp'
 
       when (hasEmptyDims tp') $
-        typeError usage mempty $ "Type variable" <+> pprName vn <+>
+        unifyError usage mempty bcs $ "Type variable" <+> pprName vn <+>
         "cannot be instantiated with type containing anonymous sizes:" </>
         indent 2 (ppr tp) </>
-        textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size beind a value parameter.  Add type annotation to clarify." <> ppr bcs
+        textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size beind a value parameter.  Add type annotation to clarify."
 
     Just (Equality _) ->
       equalityType usage tp'
@@ -545,7 +547,7 @@ linkVarToType onDims usage bcs vn lvl tp = do
               | not $ isRigid v constraints ->
                   linkVarToTypes usage v ts
             _ ->
-              typeError usage mempty $ "Cannot instantiate" <+> pquote (pprName vn) <+>
+              unifyError usage mempty bcs $ "Cannot instantiate" <+> pquote (pprName vn) <+>
               "with type" </> indent 2 (ppr tp) </> "as" <+>
               pquote (pprName vn) <+> "must be one of" <+>
               commasep (map ppr ts) <+/>
@@ -562,7 +564,7 @@ linkVarToType onDims usage bcs vn lvl tp = do
               modifyConstraints $ M.insert v
               (lvl, HasFields required_fields old_usage)
         _ ->
-          typeError usage mempty $
+          unifyError usage mempty bcs $
           "Cannot instantiate" <+> pquote (pprName vn) <+> "with type" </>
           indent 2 (ppr tp) </>
           "as" <+> pquote (pprName vn) <+> "must be a record with fields" </>
@@ -589,7 +591,8 @@ linkVarToType onDims usage bcs vn lvl tp = do
 
     _ -> return ()
 
-  where noSumType = typeError usage mempty "Cannot unify a sum type with a non-sum type"
+  where noSumType = unifyError usage mempty bcs
+                    "Cannot unify a sum type with a non-sum type"
 
 linkVarToDim :: MonadUnify m =>
                 Usage -> BreadCrumbs
@@ -604,11 +607,11 @@ linkVarToDim usage bcs vn lvl dim = do
           case c of
             ParamSize{} -> do
               notes <- dimNotes usage dim
-              typeError usage notes $
+              unifyError usage notes bcs $
                 "Cannot unify size variable" <+> pquote (ppr dim') <+>
                 "with" <+> pquote (pprName vn) <+> "(scope violation)." </>
                 "This is because" <+> pquote (ppr dim') <+>
-                "is rigidly bound in a deeper scope." <> ppr bcs
+                "is rigidly bound in a deeper scope."
             _ -> modifyConstraints $ M.insert (qualLeaf dim') (lvl, c)
     _ -> return ()
 
@@ -638,7 +641,8 @@ mustBeOneOf ts usage t = do
 
     _ -> failure
 
-  where failure = typeError usage mempty $ text "Cannot unify type" <+> pquote (ppr t) <+>
+  where failure = unifyError usage mempty noBreadCrumbs $
+                  text "Cannot unify type" <+> pquote (ppr t) <+>
                   "with any of " <> commasep (map ppr ts) <> "."
 
 linkVarToTypes :: MonadUnify m => Usage -> VName -> [PrimType] -> m ()
@@ -647,32 +651,33 @@ linkVarToTypes usage vn ts = do
   case vn_constraint of
     Just (lvl, Overloaded vn_ts vn_usage) ->
       case ts `intersect` vn_ts of
-        [] -> typeError usage mempty $ "Type constrained to one of" <+>
+        [] -> unifyError usage mempty noBreadCrumbs $
+              "Type constrained to one of" <+>
               commasep (map ppr ts) <+> "but also one of" <+>
               commasep (map ppr vn_ts) <+> "due to" <+> ppr vn_usage <> "."
         ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
 
     Just (_, HasConstrs _ vn_usage) ->
-      typeError usage mempty $ "Type constrained to one of" <+>
-      commasep (map ppr ts) <> ", but also inferred to be sum type due to" <+>
-      ppr vn_usage <> "."
+      unifyError usage mempty noBreadCrumbs $
+      "Type constrained to one of" <+> commasep (map ppr ts) <>
+      ", but also inferred to be sum type due to" <+> ppr vn_usage <> "."
 
     Just (_, HasFields _ vn_usage) ->
-      typeError usage mempty $ "Type constrained to one of" <+>
-      commasep (map ppr ts) <> ", but also inferred to be record due to" <+>
-      ppr vn_usage <> "."
+      unifyError usage mempty noBreadCrumbs $
+      "Type constrained to one of" <+> commasep (map ppr ts) <>
+      ", but also inferred to be record due to" <+> ppr vn_usage <> "."
 
     Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
 
     Nothing ->
-      typeError usage mempty $
+      unifyError usage mempty noBreadCrumbs $
       "Cannot constrain type to one of" <+> commasep (map ppr ts)
 
 equalityType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
                 Usage -> TypeBase dim as -> m ()
 equalityType usage t = do
   unless (orderZero t) $
-    typeError usage mempty $
+    unifyError usage mempty noBreadCrumbs $
     "Type " <+> pquote (ppr t) <+> "does not support equality (is higher-order)."
   mapM_ mustBeEquality $ typeVars t
   where mustBeEquality vn = do
@@ -682,7 +687,7 @@ equalityType usage t = do
               mustBeEquality vn'
             Just (_, Constraint vn_t cusage)
               | not $ orderZero vn_t ->
-                  typeError usage mempty $
+                  unifyError usage mempty noBreadCrumbs $
                   "Type" <+> pquote (ppr t) <+> "does not support equality." </>
                   "Constrained to be higher-order due to" <+> ppr cusage <+> "."
               | otherwise -> return ()
@@ -695,35 +700,32 @@ equalityType usage t = do
             Just (_, HasConstrs cs _) ->
               mapM_ (equalityType usage) $ concat $ M.elems cs
             _ ->
-              typeError usage mempty $
+              unifyError usage mempty noBreadCrumbs $
               "Type" <+> pprName vn <+> "does not support equality."
 
 zeroOrderTypeWith :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
-                     Usage -> BreadCrumbs -> String -> TypeBase dim as -> m ()
-zeroOrderTypeWith usage bcs desc t = do
+                     Usage -> BreadCrumbs -> TypeBase dim as -> m ()
+zeroOrderTypeWith usage bcs t = do
   unless (orderZero t) $
-    typeError usage mempty $ "Type" <+> text desc <+>
-    "must not be functional, but is" <+> pquote (ppr t) <> "." <> ppr bcs
+    unifyError usage mempty bcs $
+    "Type" </> indent 2 (ppr t) </> "found to be functional."
   mapM_ mustBeZeroOrder . S.toList . typeVars $ t
   where mustBeZeroOrder vn = do
           constraints <- getConstraints
           case M.lookup vn constraints of
-            Just (_, Constraint vn_t old_usage)
-              | not $ orderZero t ->
-                typeError usage mempty $ "Type" <+> text desc <+>
-                "must be non-function, but inferred to be" <+>
-                pquote (ppr vn_t) <+> "due to" <+> ppr old_usage <> "."
             Just (lvl, NoConstraint _ _) ->
               modifyConstraints $ M.insert vn (lvl, NoConstraint Unlifted usage)
             Just (_, ParamType Lifted ploc) ->
-              typeError usage mempty $ "Type" <+> text desc <+>
-              "must be non-function, but type parameter" <+> pquote (pprName vn) <+> "at" <+>
+              unifyError usage mempty bcs $ "Type parameter" <+>
+              pquote (pprName vn) <+> "at" <+>
               text (locStr ploc) <+> "may be a function."
             _ -> return ()
 
 zeroOrderType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
                  Usage -> String -> TypeBase dim as -> m ()
-zeroOrderType usage = zeroOrderTypeWith usage noBreadCrumbs
+zeroOrderType usage desc =
+  zeroOrderTypeWith usage $ breadCrumb bc noBreadCrumbs
+  where bc = Matching $ "When checking" <+> textwrap desc
 
 unifySharedConstructors :: MonadUnify m =>
                            UnifyDims m -> Usage -> BreadCrumbs
@@ -738,9 +740,8 @@ unifySharedConstructors onDims usage bcs cs1 cs2 =
               let bcs' = breadCrumb (MatchingConstructor c) bcs
               zipWithM_ (unifyWith onDims usage bcs') f1 f2
           | otherwise =
-              typeError usage mempty $
-              "Cannot unify constructor" <+> pquote (pprName c) <> "." <>
-              ppr bcs
+              unifyError usage mempty bcs $
+              "Cannot unify constructor" <+> pquote (pprName c) <> "."
 
 -- | In @mustHaveConstr usage c t fs@, the type @t@ must have a
 -- constructor named @c@ that takes arguments of types @ts@.
@@ -759,18 +760,18 @@ mustHaveConstr usage c t fs = do
           Just fs'
             | length fs == length fs' -> zipWithM_ (unify usage) fs fs'
             | otherwise ->
-                typeError usage mempty $
+                unifyError usage mempty noBreadCrumbs $
                 "Different arity for constructor" <+> pquote (ppr c) <> "."
 
     Scalar (Sum cs) ->
       case M.lookup c cs of
         Nothing ->
-          typeError usage mempty $
+          unifyError usage mempty noBreadCrumbs $
           "Constuctor" <+> pquote (ppr c) <+> "not present in type."
         Just fs'
             | length fs == length fs' -> zipWithM_ (unify usage) fs fs'
             | otherwise ->
-                typeError usage mempty $
+                unifyError usage mempty noBreadCrumbs $
                 "Different arity for constructor" <+> pquote (ppr c) <+> "."
 
     _ -> do unify usage t $ Scalar $ Sum $ M.singleton c fs
@@ -800,7 +801,7 @@ mustHaveFieldWith onDims usage bcs l t = do
           unify usage l_type' $ toStruct t'
           return t'
       | otherwise ->
-          typeError usage mempty $
+          unifyError usage mempty bcs $
             "Attempt to access field" <+> pquote (ppr l) <+> " of value of type" <+>
             ppr (toStructural t) <> "."
     _ -> do unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
@@ -885,6 +886,17 @@ instance MonadUnify UnifyM where
     return dim
 
   curLevel = pure 0
+
+  unifyError loc notes bcs doc =
+    typeError loc notes $ doc <> ppr bcs
+
+  matchError loc notes bcs t1 t2 =
+    typeError loc notes $ doc <> ppr bcs
+    where doc = "Types" </>
+                indent 2 (ppr t1) </>
+                "and" </>
+                indent 2 (ppr t2) </>
+                "do not match."
 
 -- | Construct a the name of a new type variable given a base
 -- description and a tag number (note that this is distinct from
