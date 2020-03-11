@@ -1167,7 +1167,8 @@ compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) (IntType Int8) _ _) _) =
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt _ _) _) = do
   iexp' <- compileExp iexp
   let bt' = compilePrimType bt
-  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp']
+      iexp'' = BinOp "*" iexp' (sizeOf (compilePrimTypeToAST bt))
+  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp'']
 
 compileExp (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike x y
@@ -1347,9 +1348,11 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
   let dest' = Var $ compileName dest
-  let elemtype' = compileTypecast elemtype
-  let ctype = elemtype' elemexp'
-  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
+      elemtype' = compileTypecast elemtype
+      ctype = elemtype' elemexp'
+      idx'' = BinOp "*" idx' (sizeOf (compilePrimTypeToAST elemtype))
+
+  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx'', ctype]
 
 compileCode Imp.Skip = return ()
 
