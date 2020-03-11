@@ -27,8 +27,6 @@ module Language.Futhark.TypeChecker.Monad
   , Notes
   , aNote
 
-  , BreadCrumb(..)
-  , MonadBreadCrumbs(..)
   , typeError
 
   , MonadTypeChecker(..)
@@ -205,40 +203,12 @@ localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
   in ctx { contextEnv = env' }
 
--- | A piece of information that describes what process the type
--- checker currently performing.  This is used to give better error
--- messages.
-data BreadCrumb = MatchingTypes StructType StructType
-                | MatchingFields [Name]
-                | Matching Doc
-
-instance Pretty BreadCrumb where
-  ppr (MatchingTypes t1 t2) =
-    "When matching type" </> indent 2 (ppr t1) </>
-    "with" </> indent 2 (ppr t2)
-  ppr (MatchingFields fields) =
-    "When matching types of record field" <+>
-    pquote (mconcat $ punctuate "." $ map ppr fields) <> dot
-  ppr (Matching s) =
-    s
-
--- | Tracking breadcrumbs to give a kind of "stack trace" in errors.
-class Monad m => MonadBreadCrumbs m where
-  breadCrumb :: BreadCrumb -> m a -> m a
-  breadCrumb _ m = m
-
-  getBreadCrumbs :: m [BreadCrumb]
-  getBreadCrumbs = return []
-
-typeError :: (Located loc, MonadError TypeError m, MonadBreadCrumbs m) =>
+typeError :: (Located loc, MonadError TypeError m) =>
              loc -> Notes -> Doc -> m a
-typeError loc notes s = do
-  bc <- getBreadCrumbs
-  let bc' | null bc = mempty
-          | otherwise = line <> stack (map ppr bc)
-  throwError $ TypeError (srclocOf loc) Nothing notes (ppr s <> bc')
+typeError loc notes s =
+  throwError $ TypeError (srclocOf loc) Nothing notes s
 
-class (MonadError TypeError m, MonadBreadCrumbs m) =>
+class MonadError TypeError m =>
       MonadTypeChecker m where
   warn :: Located loc => loc -> String -> m ()
 
@@ -270,10 +240,6 @@ bindSpaced names body = do
   names' <- mapM (newID . snd) names
   let mapping = M.fromList (zip names $ map qualName names')
   bindNameMap mapping body
-
-instance MonadBreadCrumbs TypeM where
-  breadCrumb _ m = m
-  getBreadCrumbs = pure mempty
 
 instance MonadTypeChecker TypeM where
   warn loc problem = tell $ singleWarning (srclocOf loc) problem
