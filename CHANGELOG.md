@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Corrected address calculations in `csharp` backend.
+
 ## [0.14.1]
 
 ### Added
