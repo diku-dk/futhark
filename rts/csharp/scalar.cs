@@ -394,6 +394,57 @@ int futhark_clzz64 (long x) {
     return n;
 }
 
+sbyte futhark_mul_hi8(sbyte a, sbyte b) {
+    ushort aa = (ushort)(byte)a;
+    ushort bb = (ushort)(byte)b;
+    return (sbyte)((aa * bb) >> 8);
+}
+
+short futhark_mul_hi16(short a, short b) {
+    uint aa = (uint)(ushort)a;
+    uint bb = (uint)(ushort)b;
+    return (short)((aa * bb) >> 16);
+}
+
+int futhark_mul_hi32(int a, int b) {
+    ulong aa = (ulong)(uint)a;
+    ulong bb = (ulong)(uint)b;
+    return (int)((aa * bb) >> 32);
+}
+
+// By Ben Voigt at
+// https://stackoverflow.com/questions/29722093/computing-the-high-bits-of-a-multiplication-in-c-sharp
+long futhark_mul_hi64(long xx, long yy) {
+    ulong x = (ulong)xx;
+    ulong y = (ulong)yy;
+    ulong accum = ((ulong)(uint)x) * ((ulong)(uint)y);
+    accum >>= 32;
+    ulong term1 = (x >> 32) * ((ulong)(uint)y);
+    ulong term2 = (y >> 32) * ((ulong)(uint)x);
+    accum += (uint)term1;
+    accum += (uint)term2;
+    accum >>= 32;
+    accum += (term1 >> 32) + (term2 >> 32);
+    accum += (x >> 32) * (y >> 32);
+    return (long)accum;
+}
+
+sbyte futhark_mad_hi8(sbyte a, sbyte b, sbyte c) {
+    return (sbyte)(futhark_mul_hi8(a,b) + c);
+}
+
+short futhark_mad_hi16(short a, short b, short c) {
+    return (short)(futhark_mul_hi16(a,b) + c);
+}
+
+int futhark_mad_hi32(int a, int b, int c) {
+    return futhark_mul_hi32(a,b) + c;
+}
+
+long futhark_mad_hi64(long a, long b, long c) {
+    return futhark_mul_hi64(a,b) + c;
+}
+
 private static bool llt (bool x, bool y){return (!x && y);}
 private static bool lle (bool x, bool y){return (!x || y);}
 
