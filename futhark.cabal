@@ -244,7 +244,7 @@ library
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists
-  build-tools-depends:
+  build-tools:
       alex
     , happy
   build-depends:
