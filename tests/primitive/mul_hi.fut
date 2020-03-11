@@ -1,5 +1,5 @@
 -- Test u8.mul_hi
--- tags { no_csharp no_python}
+-- tags { no_csharp }
 -- ==
 -- entry: test_u8_mul_hi
 -- input  { [10u8, 20u8, 2u8, 1u8, 2u8, 3u8, 2u8]

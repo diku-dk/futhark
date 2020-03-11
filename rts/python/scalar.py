@@ -280,6 +280,39 @@ def fpconv_f32_f64(x):
 def fpconv_f64_f32(x):
   return np.float32(x)
 
+def futhark_mul_hi8(a, b):
+  a = np.uint64(np.uint8(a))
+  b = np.uint64(np.uint8(b))
+  return np.int8((a*b) >> np.uint64(8))
+
+def futhark_mul_hi16(a, b):
+  a = np.uint64(np.uint16(a))
+  b = np.uint64(np.uint16(b))
+  return np.int16((a*b) >> np.uint64(16))
+
+def futhark_mul_hi32(a, b):
+  a = np.uint64(np.uint32(a))
+  b = np.uint64(np.uint32(b))
+  return np.int32((a*b) >> np.uint64(32))
+
+# This one is done with arbitrary-precision integers.
+def futhark_mul_hi64(a, b):
+  a = int(np.uint64(a))
+  b = int(np.uint64(b))
+  return np.int64(np.uint64(a*b >> 64))
+
+def futhark_mad_hi8(a, b, c):
+  return futhark_mul_hi8(a,b) + c
+
+def futhark_mad_hi16(a, b, c):
+  return futhark_mul_hi16(a,b) + c
+
+def futhark_mad_hi32(a, b, c):
+  return futhark_mul_hi32(a,b) + c
+
+def futhark_mad_hi64(a, b, c):
+  return futhark_mul_hi64(a,b) + c
+
 def futhark_log64(x):
   return np.float64(np.log(x))
 
