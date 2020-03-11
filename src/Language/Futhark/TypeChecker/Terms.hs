@@ -148,6 +148,9 @@ data Checking
   | CheckingPattern UncheckedPattern InferredType
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
+  | CheckingRecordUpdate [Name] StructType StructType
+  | CheckingRequired [StructType] StructType
+  | CheckingBranches StructType StructType
 
 instance Pretty Checking where
   ppr (CheckingApply f e expected actual) =
@@ -169,7 +172,7 @@ instance Pretty Checking where
     "Actual:  " <+> align (ppr actual)
 
   ppr (CheckingAscription expected actual) =
-    "Expression does not have ascribed type." </>
+    "Expression does not have expected type from explicit ascription." </>
     "Expected:" <+> align (ppr expected) </>
     "Actual:  " <+> align (ppr actual)
 
@@ -197,6 +200,26 @@ instance Pretty Checking where
     "Initial loop values do not have expected type." </>
     "Expected:" <+> align (ppr expected) </>
     "Actual:  " <+> align (ppr actual)
+
+  ppr (CheckingRecordUpdate fs expected actual) =
+    "Type mismatch when updating record field" <+> pquote fs' <> "." </>
+    "Existing:" <+> align (ppr expected) </>
+    "New:     " <+> align (ppr actual)
+    where fs' = mconcat $ punctuate "." $ map ppr fs
+
+  ppr (CheckingRequired [expected] actual) =
+    "Expression must must have type" <+> ppr expected <> "." </>
+    "Actual type:" <+> align (ppr actual)
+
+  ppr (CheckingRequired expected actual) =
+    "Type of expression must must be one of " <+> expected' <> "." </>
+    "Actual type:" <+> align (ppr actual)
+    where expected' = commasep (map ppr expected)
+
+  ppr (CheckingBranches t1 t2) =
+    "Conditional branches differ in type." </>
+    "Former:" <+> ppr t1 </>
+    "Latter:" <+> ppr t2
 
 -- | Whether something is a global or a local variable.
 data Locality = Local | Global
@@ -327,16 +350,6 @@ instance MonadUnify TermTypeM where
       Rigid rsrc -> constrain dim $ UnknowableSize loc rsrc
       Nonrigid -> constrain dim $ Size Nothing $ mkUsage' loc
     return dim
-
-instance MonadBreadCrumbs TermTypeM where
-  breadCrumb bc = local onEnv
-    where onEnv env = env { termBreadCrumbs = bcs' }
-            where bcs' =
-                    case (bc, termBreadCrumbs env) of
-                      (MatchingFields xs, MatchingFields ys : bcs) ->
-                        MatchingFields (ys++xs) : bcs
-                      (_, bcs) -> bc : bcs
-  getBreadCrumbs = asks termBreadCrumbs
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env { termChecking = Just c }
