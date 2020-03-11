@@ -42,10 +42,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
-### Changed
-
   * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,
     `steps`, and `range` from the prelude.
+
+### Changed
 
 ### Fixed
 
