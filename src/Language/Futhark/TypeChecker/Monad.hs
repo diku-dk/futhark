@@ -98,10 +98,13 @@ aNote = Notes . pure . Note . ppr
 -- | Information about an error during type checking.
 data TypeError = TypeError SrcLoc Notes Doc
 
-instance Pretty TypeError where
-  ppr (TypeError loc notes msg) =
-    "Error at" <+> text (locStr loc) <+> ":" </>
-    msg <> ppr notes
+prettyTypeErrorNoLoc :: TypeError -> String
+prettyTypeErrorNoLoc (TypeError _ notes msg) =
+  pretty $ msg <> ppr notes
+
+prettyTypeError :: TypeError -> String
+prettyTypeError e@(TypeError loc _ _) =
+  "Error at " ++ locStr loc ++ ":\n" ++ prettyTypeErrorNoLoc e
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
@@ -199,7 +202,7 @@ localEnv env = local $ \ctx ->
 typeError :: (Located loc, MonadError TypeError m) =>
              loc -> Notes -> Doc -> m a
 typeError loc notes s =
-  throwError $ TypeError (srclocOf loc) Nothing notes s
+  throwError $ TypeError (srclocOf loc) notes s
 
 class MonadError TypeError m =>
       MonadTypeChecker m where

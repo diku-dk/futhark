@@ -36,9 +36,12 @@ import Prelude hiding (mod)
 import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
-import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
-import Language.Futhark.TypeChecker.Unify hiding (Usage)
+import Language.Futhark.TypeChecker.Monad
+  hiding (BoundV, checkQualNameWithEnv, typeError)
+import Language.Futhark.TypeChecker.Types
+  hiding (checkTypeDecl)
+import Language.Futhark.TypeChecker.Unify
+  hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
 import Futhark.Util.Pretty hiding (space, bool, group)
@@ -161,10 +164,10 @@ instance Pretty Checking where
             case f of
               Nothing ->
                 "Cannot apply function to" <+>
-                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
+                pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
               Just fname ->
                 "Cannot apply" <+> pquote (ppr fname) <+> "to" <+>
-                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
+                pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
 
   ppr (CheckingReturn expected actual) =
     "Function body does not have expected type." </>
@@ -351,6 +354,33 @@ instance MonadUnify TermTypeM where
       Nonrigid -> constrain dim $ Size Nothing $ mkUsage' loc
     return dim
 
+  unifyError loc notes bcs doc = do
+    checking <- asks termChecking
+    case checking of
+      Just checking' ->
+        throwError $ TypeError (srclocOf loc) notes $
+        ppr checking' <> line </> doc <> ppr bcs
+      Nothing ->
+        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+
+  matchError loc notes bcs t1 t2 = do
+    checking <- asks termChecking
+    case checking of
+      Just checking'
+        | hasNoBreadCrumbs bcs ->
+            throwError $ TypeError (srclocOf loc) notes $
+            ppr checking'
+        | otherwise ->
+            throwError $ TypeError (srclocOf loc) notes $
+            ppr checking' <> line </> doc <> ppr bcs
+      Nothing ->
+        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
+    where doc = "Types" </>
+                indent 2 (ppr t1) </>
+                "and" </>
+                indent 2 (ppr t2) </>
+                "do not match."
+
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env { termChecking = Just c }
 
@@ -373,6 +403,15 @@ incCounter :: TermTypeM Int
 incCounter = do s <- get
                 put s { stateCounter = stateCounter s + 1 }
                 return $ stateCounter s
+
+typeError :: Located loc => loc -> Notes -> Doc -> TermTypeM a
+typeError loc notes s = do
+  checking <- asks termChecking
+  case checking of
+    Just checking' ->
+      throwError $ TypeError (srclocOf loc) notes (ppr checking' <> line </> s)
+    Nothing ->
+      throwError $ TypeError (srclocOf loc) notes s
 
 extSize :: SrcLoc -> SizeSource -> TermTypeM (DimDecl VName, Maybe VName)
 extSize loc e = do
