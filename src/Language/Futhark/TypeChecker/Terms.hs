@@ -148,9 +148,6 @@ data Checking
   | CheckingPattern UncheckedPattern InferredType
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
-  | CheckingRecordUpdate [Name] StructType StructType
-  | CheckingRequired [StructType] StructType
-  | CheckingBranches StructType StructType
 
 instance Pretty Checking where
   ppr (CheckingApply f e expected actual) =
@@ -161,10 +158,10 @@ instance Pretty Checking where
             case f of
               Nothing ->
                 "Cannot apply function to" <+>
-                pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
+                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
               Just fname ->
                 "Cannot apply" <+> pquote (ppr fname) <+> "to" <+>
-                pquote (shorten $ pretty $ flatten $ ppr e) <> " (invalid type)."
+                pquote (shorten $ oneLine $ ppr e) <> " (wrong type)."
 
   ppr (CheckingReturn expected actual) =
     "Function body does not have expected type." </>
@@ -172,7 +169,7 @@ instance Pretty Checking where
     "Actual:  " <+> align (ppr actual)
 
   ppr (CheckingAscription expected actual) =
-    "Expression does not have expected type from explicit ascription." </>
+    "Expression does not have ascribed type." </>
     "Expected:" <+> align (ppr expected) </>
     "Actual:  " <+> align (ppr actual)
 
@@ -200,26 +197,6 @@ instance Pretty Checking where
     "Initial loop values do not have expected type." </>
     "Expected:" <+> align (ppr expected) </>
     "Actual:  " <+> align (ppr actual)
-
-  ppr (CheckingRecordUpdate fs expected actual) =
-    "Type mismatch when updating record field" <+> pquote fs' <> "." </>
-    "Existing:" <+> align (ppr expected) </>
-    "New:     " <+> align (ppr actual)
-    where fs' = mconcat $ punctuate "." $ map ppr fs
-
-  ppr (CheckingRequired [expected] actual) =
-    "Expression must must have type" <+> ppr expected <> "." </>
-    "Actual type:" <+> align (ppr actual)
-
-  ppr (CheckingRequired expected actual) =
-    "Type of expression must must be one of " <+> expected' <> "." </>
-    "Actual type:" <+> align (ppr actual)
-    where expected' = commasep (map ppr expected)
-
-  ppr (CheckingBranches t1 t2) =
-    "Conditional branches differ in type." </>
-    "Former:" <+> ppr t1 </>
-    "Latter:" <+> ppr t2
 
 -- | Whether something is a global or a local variable.
 data Locality = Local | Global
@@ -351,32 +328,15 @@ instance MonadUnify TermTypeM where
       Nonrigid -> constrain dim $ Size Nothing $ mkUsage' loc
     return dim
 
-  unifyError loc notes bcs doc = do
-    checking <- asks termChecking
-    case checking of
-      Just checking' ->
-        throwError $ TypeError (srclocOf loc) notes $
-        ppr checking' <> line </> doc <> ppr bcs
-      Nothing ->
-        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
-
-  matchError loc notes bcs t1 t2 = do
-    checking <- asks termChecking
-    case checking of
-      Just checking'
-        | hasNoBreadCrumbs bcs ->
-            throwError $ TypeError (srclocOf loc) notes $
-            ppr checking'
-        | otherwise ->
-            throwError $ TypeError (srclocOf loc) notes $
-            ppr checking' <> line </> doc <> ppr bcs
-      Nothing ->
-        throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
-    where doc = "Types" </>
-                indent 2 (ppr t1) </>
-                "and" </>
-                indent 2 (ppr t2) </>
-                "do not match."
+instance MonadBreadCrumbs TermTypeM where
+  breadCrumb bc = local onEnv
+    where onEnv env = env { termBreadCrumbs = bcs' }
+            where bcs' =
+                    case (bc, termBreadCrumbs env) of
+                      (MatchingFields xs, MatchingFields ys : bcs) ->
+                        MatchingFields (ys++xs) : bcs
+                      (_, bcs) -> bc : bcs
+  getBreadCrumbs = asks termBreadCrumbs
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env { termChecking = Just c }
@@ -2154,9 +2114,7 @@ type ApplyOp = (Maybe (QualName VName), Int)
 
 checkApply :: SrcLoc -> ApplyOp -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
-checkApply loc (fname, _)
-           (Scalar (Arrow as pname tp1 tp2))
-           (argexp, argtype, dflow, argloc) =
+checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) =
   onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
