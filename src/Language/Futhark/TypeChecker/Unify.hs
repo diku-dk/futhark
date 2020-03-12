@@ -888,10 +888,10 @@ instance MonadUnify UnifyM where
   curLevel = pure 0
 
   unifyError loc notes bcs doc =
-    typeError loc notes $ doc <> ppr bcs
+    throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
 
   matchError loc notes bcs t1 t2 =
-    typeError loc notes $ doc <> ppr bcs
+    throwError $ TypeError (srclocOf loc) notes $ doc <> ppr bcs
     where doc = "Types" </>
                 indent 2 (ppr t1) </>
                 "and" </>
