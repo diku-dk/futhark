@@ -1230,14 +1230,32 @@ sizes.  This is why the type of ``map`` guarantees regular arrays::
   val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
 
 The type parameter ``b`` can only be replaced with a type that has
-known sizes, which means they must be the same for every application
-of the function.  In contrast, this is the type of the pipeline
-operator::
+non-anomymous sizes, which means they must be the same for every
+application of the function.  In contrast, this is the type of the
+pipeline operator::
 
   val (|>) '^a -> '^b : a -> (a -> b) -> b
 
 The provided function can return something with an anonymous size
 (such as ``filter``).
+
+A function whose return type has an unknown size
+................................................
+
+If a function (named or anonymous) is inferred to have a return type
+that contains an unknown size variable created *within* the function
+body, that size variable will be replaced with an anonymous size.  In
+most cases this is not important, but it means that an expression like
+the following is ill-typed::
+
+  map (\xs -> iota (length xs)) (xss : [n][m]i32)
+
+This is because the ``(length xs)`` expression gives rise to some
+fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
+[k]i32``, which is immediately turned into ``[n]t -> []i32`` because
+``k`` was generated inside its body.  A function of this type cannot
+be passed to ``map``, as explained before.  The solution is to bind
+``length`` to a name *before* the lambda.
 
 .. _in-place-updates:
 
