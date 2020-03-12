@@ -130,15 +130,15 @@ compileSegScan  (Pattern _ pes)
                 dPrimV "res" ne'
 
       -- p = 1
-      p <- dPrim "p" int32
-      p <-- 1
-      let pVar = Imp.var p int32
+      p1 <- dPrim "p1" int32
+      p1 <-- 1
+      let p1Var = Imp.var p1 int32
 
       -- while p < array.size
-      sWhile (pVar .<. arraysize) $ do
+      sWhile (p1Var .<. arraysize) $ do
 
         -- if tid >= p then res = op array[tid-p] array[tid]
-        sWhen (ltid .>=. pVar) $ do
+        sWhen (ltid .>=. p1Var) $ do
 
           dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
           let (scan_x_params, scan_y_params) = splitAt (length nes) $ lambdaParams scan_op
@@ -147,7 +147,7 @@ compileSegScan  (Pattern _ pes)
             copyDWIMFix (paramName param) [] (Var arr) [ltid]
 
           forM_ (zip scan_y_params exchange) $ \(param, arr) ->
-            copyDWIMFix (paramName param) [] (Var arr) [ltid - pVar]
+            copyDWIMFix (paramName param) [] (Var arr) [ltid - p1Var]
 
           compileStms mempty (bodyStms $ lambdaBody scan_op) $ do
             forM_ (zip ress (bodyResult $ lambdaBody scan_op)) $ \(res, sr) ->
@@ -156,12 +156,12 @@ compileSegScan  (Pattern _ pes)
         sOp Imp.LocalBarrier
 
         -- if tid >= p then array[tid] = res
-        sWhen (ltid .>=. pVar) $ do
+        sWhen (ltid .>=. p1Var) $ do
           forM_ (zip exchange ress) $ \(arr, res) ->
             copyDWIMFix arr [ltid] (Var res) []
         sOp Imp.LocalBarrier
 
-        p <-- pVar * 2
+        p1 <-- p1Var * 2
 
 
       -- get in the chunk
@@ -215,9 +215,9 @@ compileSegScan  (Pattern _ pes)
 
         sOp Imp.MemFenceGlobal
         -- if (warpscan[0] == STATUS_P && tid == 0) prefix = incprefix[WG_ID-1];
-        stat1 <- dPrim "stat1" int32
-        copyDWIMFix stat1 [] (Var warpscan) [0]
-        sIf (Imp.var stat1 int32 .==. 2)
+        status1 <- dPrim "status1" int32
+        copyDWIMFix status1 [] (Var warpscan) [0]
+        sIf (Imp.var status1 int32 .==. 2)
           -- if
           (sWhen (ltid .==. 0) (forM_ (zip prefix incprefix) $ \(pre,inc) ->
             copyDWIMFix pre [] (Var inc) [Imp.var wG_ID int32 - 1])) $ do
@@ -400,9 +400,9 @@ compileSegScan  (Pattern _ pes)
         sOp Imp.LocalBarrier
 
 
-      myacc <- forM nes $ \ne -> do
-                ne' <- toExp ne
-                dPrimV "myacc" ne'
+      -- myacc <- forM nes $ \ne -> do
+      --           ne' <- toExp ne
+      --           dPrimV "myacc" ne'
 
       -- dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
       -- let (scan_x_params1, scan_y_params1) = splitAt (length nes) $ lambdaParams scan_op
