@@ -1230,7 +1230,7 @@ sizes.  This is why the type of ``map`` guarantees regular arrays::
   val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
 
 The type parameter ``b`` can only be replaced with a type that has
-non-anonymous sizes, which means they must be the same for every
+non-anomymous sizes, which means they must be the same for every
 application of the function.  In contrast, this is the type of the
 pipeline operator::
 
