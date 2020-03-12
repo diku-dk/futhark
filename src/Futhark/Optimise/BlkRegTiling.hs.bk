@@ -42,6 +42,9 @@ _pretty = (++ "\n\n====================="
            ++ "========================="
            ++ "=====================\n\n") . pretty
 
+threadLvl :: SubExp -> SubExp -> SegLevel
+threadLvl grid_size group_size =
+  SegThread (Count grid_size) (Count group_size) SegNoVirt
 
 -- mmmTiling2D lvl space ts kbody
 mmmTiling2D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
@@ -100,12 +103,10 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
         gid_y    <- newVName "gid_y"
         gid_x    <- newVName "gid_x"
-        gtid_y   <- newVName "gtid_y"
-        gtid_x   <- newVName "gtid_x"
         gid_flat <- newVName "gid_flat"
-        -- tid_y    <- newVName "tid_y"
-        -- tid_x    <- newVName "tid_x"
-        -- tid_flat <- newVName "tid_flat"
+        tid_y    <- newVName "tid_y"
+        tid_x    <- newVName "tid_x"
+        tid_flat <- newVName "tid_flat"
 
         ty <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
         tx <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
@@ -113,8 +114,8 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
         ry <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeTile
         rx <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeTile
 
-        tx_rx <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx -- tx rx
-        ty_ry <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32) ty ry -- ty ry
+        tx_rx <- letSubExp "tx_rx" $ BasicOp $ BinOp (Mul Int32) tx rx -- tx rx
+        ty_ry <- letSubExp "ty_ry" $ BasicOp $ BinOp (Mul Int32) ty ry -- ty ry
 
         group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
 
@@ -127,13 +128,28 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
         -----------------------------------------------
         (ret_seggroup, stms_seggroup) <- runBinder $ do
 
-          acc_ : _ <- segMap2D "cssss" (segThread grid_size group_size)
-                       ResultPrivate (ty, tx) $ \(_,_) -> do
-                         css <- letSubExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
-                         return [css]
+          ------------------------------------------------------------
+          -- in this binder: [ry][rx] replicate of neutral elements --
+          ------------------------------------------------------------
+          -- ((type_css, ret_css), stms_css) <- runBinder $ do
+          --   css      <- letSubExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
+          --   type_css <- subExpType css
+          --   return (type_css, [Returns ResultPrivate css])
+          ------------------------------------------------------------------------
 
-          acc_t <- lookupType acc_
+          -- acc <- letSubExp "cssss" $ Op $ SegOp $ SegMap
+          --          (SegThread (Count grid_size) (Count group_size) SegNoVirt)
+          --          (SegSpace tid_flat [(tid_y, ty), (tid_x, tx)])
+          --          [type_css]
+          --          (KernelBody () stms_css ret_css)
+
+          acc_ : _ <- segMap2D "cssss" (threadLvl grid_size group_size)
+                        ResultPrivate (ty, tx) $ \(x, y) -> do
+                          css <- letSubExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
+                          return [css]
+
           acc <- letSubExp "acc" $ BasicOp $ SubExp $ Var acc_
+          acc_t <- subExpType acc
           let acc_attr = toDecl acc_t Unique -- needed for constructing FParams later
 
           kk       <- newVName "kk"
@@ -144,28 +160,29 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
           -------------------------------------------
           loop_kk_body <- runBodyBinder $ inScopeOf loop_kk_form $ do
 
-            -----------------------------------------------------------
-            -- segmap which copies A and B from global to shared mem --
-            -----------------------------------------------------------
-            -- A_shr :: [ty_ry][tk]t
-            a_shr : _ <- segMap2D "A_shr" (segThread grid_size group_size)
-                                  ResultNoSimplify (ty_ry, tk) $ \(x, y) -> do
-              reconstructGtids2D ty_ry (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
+            -----------------------------------------------------------------------------------
+            -- in this binder: body of segmap which copies A and B from global to shared mem --
+            -----------------------------------------------------------------------------------
+            -- ((type_copy, ret_copy), stms_copy) <- runBinder $ do
+            --   foo <- letSubExp "foo" $ BasicOp $ SubExp $ intConst Int32 43
+            --   type_foo <- subExpType foo
+            --   return (type_foo, [Returns ResultNoSimplify foo])
 
-              a_shr <- letSubExp "a_shr" $ BasicOp $ Index inp_A (SubExp)
-              return [a_shr]
+            -- copy A and B to shared using a segmap_thread
+            -- copy <- letSubExp "foo" $ Op $ SegOp $ SegMap
+            --           (SegThread (Count grid_size) (Count group_size) SegNoVirt)
+            --           (SegSpace tid_flat [(tid_y, ty), (tid_x, tx)])
+            --           [type_copy]
+            --           (KernelBody () stms_copy ret_copy)
+            a_shr : b_shr : _ <- segMap2D "foo" (threadLvl grid_size group_size)
+                                   ResultNoSimplify (ty, tx) $ \(x, y) -> do
+              a_shr <- letSubExp "a_shr" $ BasicOp $ SubExp $ intConst Int32 (-101)
+              b_shr <- letSubExp "b_shr" $ BasicOp $ SubExp $ intConst Int32 202
+              return [a_shr, b_shr]
 
-            -- B_shr :: [tk][tx_rx]t
-            b_shr : _ <- segMap2D "B_shr" (segThread grid_size group_size)
-                                   ResultNoSimplify (tk, tx_rx) $ \(x, y) -> do
-              reconstructGtids2D tx_rx (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
-              b_shr <- letSubExp "b_shr" $ BasicOp $ SubExp red_ne
-              return [b_shr]
-            ------------------------------------------------------------------------
 
             k <- newVName "k"
-            let loop_k_form = ForLoop k Int16 tk []
-
+            let loop_k_form = ForLoop k Int32 tk []
             ------------------------------------------
             -- in this binder: body of inner k loop --
             ------------------------------------------
@@ -174,15 +191,14 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
               return $ resultBody [acc]
             ------------------------------------------------------------------------
 
-            loop_k_init <- newParam "loop_k_init" acc_attr
+            loop_k_init <- newParam "loop_k_init" acc_attr -- $ Array int32 (Shape [ty, tx]) Unique-- acc_attr
 
             loop_k <- letSubExp "loop_k" $ DoLoop [] [(loop_k_init, acc)]
                                                   loop_k_form loop_k_body
             return $ resultBody [loop_k]
           ------------------------------------------------------------------------
 
-          loop_kk_init <- newParam "loop_kk_init" acc_attr
-
+          loop_kk_init <- newParam "loop_kk_init" acc_attr -- $ Array int32 (Shape [ty, tx]) Unique -- acc_attr
           loop_kk <- letSubExp "cssss" $ DoLoop [] [(loop_kk_init, acc)]
                                                 loop_kk_form loop_kk_body
 
@@ -203,6 +219,59 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
              ">> new_kernel:\n" ++ _pretty new_kernel)
             $ return $ Just (host_stms, new_kernel)
 
+
+
+-- (host_stms, new_kernel) <- runBinder $ do
+--   ty_name <- ...
+--   ty <- ...
+--   (seggroup_ret, seggroup_stms) <- runBinder $ do
+--     (zero_init_cs_ret, zero_init_cs_stms) <- runBinder $ do
+--       replicate
+--     segmap0 <- letSubExp ... SegMap zero_init_cs_stms
+--     let loop_kk_form = ForLoop []
+--
+--     loop_kk_body <- runBodyBinder $ do ...
+--
+--     loop_kk <- letTupExp "loop.." $ DoLoop [] [FParams ...] loop_kk_form loop_kk_body
+--
+--   let new_kbody = KernelBody () stms_seggroup ret_seggroup
+--   return $ Let pat aux ... SegMap ... new_kbody
+--
+-- return $ Just (host_stms, new_kernel)
+
+
+-- (host_stms, new_kernel) <- runBinder $ do
+--   ty_name <- ...
+--   ty <- ...
+--   (zero_init_cs_ret, zero_init_cs_stms) <- runBinder $ do
+--     replicate
+--   segmap0 <- letSubExp ... SegMap zero_init_cs_stms
+--   let loop_kk_form = ForLoop []
+--
+--   loop_kk_body <- runBodyBinder $ do ...
+--
+--   loop_kk <- letTupExp "loop.." $ DoLoop [] [FParams ...] loop_kk_form loop_kk_body
+--   return $ Let pat aux ... SegMap .. new_kbody
+--
+-- return $ Just (host_stms, new_kernel)
+
+
+--   (ret_loop_kk, stms_loop_kk) <- runBinder $ do
+--     -- setup LoopForm for loop of index kk
+--     (ret_loop_kk_body, stms_loop_kk_body) <- runBinder $ do
+--       -- insert copy from global to shared here
+--       (ret_loop_k, stms_loop_k) <- runBinder $ do
+--         -- setup LoopForm for loop of index k
+--         (ret_loop_k_body, stms_loop_k_body) <- runBinder $ do
+--           -- insert copy from shared to private mem here
+--           -- compute redomap
+--           -- ...
+--           -- return cssss
+--         -- construct DoLoop for loop of index k
+--         -- return DoLoop
+--       -- return cssss
+--     -- construct DoLoop for loop of index kk
+--     -- return DoLoop
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
@@ -234,14 +303,6 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
         ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
         ceilDiv x y = eDivRoundingUp Int32 (eSubExp x) (eSubExp y)
 
-        segThread :: SubExp -> SubExp -> SegLevel
-        segThread grid_size group_size =
-          SegThread (Count grid_size) (Count group_size) SegNoVirt
-
-        segGroup :: SubExp -> SubExp -> SegLevel
-        segGroup grid_size group_size =
-          SegGroup (Count grid_size) (Count group_size) SegNoVirt
-
 -- never matched due to the guard
 -- in TileLoops.optimiseStm
 -- mmmTiling2D _ = trace "nej" $ return Nothing
@@ -250,6 +311,9 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 --- HELPERS ---
 ---------------
 
+-- | Translates an LParam to an FParam
+translLParamToFParam :: LParam Kernels -> FParam Kernels
+translLParamToFParam = fmap (`toDecl` Nonunique)
 
 -- | Tries to identify the following pattern:
 --   code followed by some Screma followed by more code.
@@ -320,8 +384,8 @@ variantToOuterDim variance gid_outer nm =
 -- just in case you need the Screma being treated differently than
 -- by default; previously Cosmin had to enhance it when dealing with stream.
 varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-varianceInStm v0 bnd@(Let _ _ (Op (OtherOp (Screma _ _ _))))
-  | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap bnd =
+varianceInStm v0 bnd@(Let pat _ (Op (OtherOp (Screma _ _ _))))
+  | Just (w, arrs, (red_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap bnd =
     let v = defVarianceInStm v0 bnd
         red_args  = lambdaParams red_lam
         map_args  = lambdaParams map_lam
@@ -348,50 +412,6 @@ defVarianceInStm variance bnd =
         look variance' v = oneName v <> M.findWithDefault mempty v variance'
         binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
 
--- alternatively, import TileLoops?
-segMap2D :: String           -- desc
-         -> SegLevel         -- lvl
-         -> ResultManifest   -- manifest
-         -> (SubExp, SubExp) -- (dim_x, dim_y)
-         -> ((VName, VName)  -- f
-             -> Binder Kernels [SubExp])
-         -> Binder Kernels [VName]
-segMap2D desc lvl manifest (dim_x, dim_y) f = do
-  ltid_x    <- newVName "ltid_x"
-  ltid_y    <- newVName "ltid_y"
-  ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
-
-  ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_x, ltid_y)
-    ts  <- mapM subExpType res
-    return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
-
-  letTupExp desc $ Op $ SegOp $
-    SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
-
-
--- Reconstruct the original gtids from group and local IDs.
-reconstructGtids2D :: SubExp -> (VName, VName) -> (VName, VName) -> (VName, VName)
-                   -> Binder Kernels ()
-reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = do
-  -- Reconstruct the original gtids from gid_x/gid_y and ltid_x/ltid_y.
-  letBindNames_ [gtid_x] =<<
-    toExp (LeafExp gid_x int32 * primExpFromSubExp int32 tile_size +
-           LeafExp ltid_x int32)
-  letBindNames_ [gtid_y] =<<
-    toExp (LeafExp gid_y int32 * primExpFromSubExp int32 tile_size +
-            LeafExp ltid_y int32)
-
-
-
-
-
--- | Translates an LParam to an FParam
--- translLParamToFParam :: LParam Kernels -> FParam Kernels
--- translLParamToFParam = fmap (`toDecl` Nonunique)
-
 -- sufficientGroups :: MonadBinder m =>
 --                     [(VName, SubExp, VName, SubExp)] -- gspace
 --                  -> SubExp                           -- group_size
@@ -413,3 +433,24 @@ reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = 
 --   return (num_threads, num_groups)
 
 
+segMap2D :: String           -- desc
+         -> SegLevel         -- lvl
+         -> ResultManifest   -- manifest
+         -> (SubExp, SubExp) -- (dim_x, dim_y)
+         -> ((VName, VName)  -- f
+             -> Binder Kernels [SubExp])
+         -> Binder Kernels [VName]
+segMap2D desc lvl manifest (dim_x, dim_y) f = do
+  ltid_x    <- newVName "segMap2D.ltid_x"
+  ltid_y    <- newVName "segMap2D.ltid_y"
+  ltid_flat <- newVName "segMap2D.ltid_flat"
+  let space = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
+
+  ((ts, res), stms) <- runBinder $ do
+    res <- f (ltid_x, ltid_y)
+    ts  <- mapM subExpType res
+    return (ts, res)
+  Body _ stms' res' <- renameBody $ mkBody stms res
+
+  letTupExp desc $ Op $ SegOp $
+    SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
