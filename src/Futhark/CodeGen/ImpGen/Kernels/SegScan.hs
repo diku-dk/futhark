@@ -80,6 +80,7 @@ compileSegScan  (Pattern _ pes)
         sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd reg_dyn_id global_id 0 1
         copyDWIMFix block_id [0] (Var reg_dyn_id) []
 
+      sOp Imp.LocalBarrier
       wG_ID <- dPrim "wG_ID" int32
       copyDWIMFix wG_ID [] (Var block_id) [0]
 
@@ -163,6 +164,14 @@ compileSegScan  (Pattern _ pes)
         p <-- pVar * 2
 
 
+      -- get in the chunk
+      chunk <- forM xp $ \para -> do
+            let pt = elemType $ paramType para
+            dPrim "chunk" pt
+      forM_ (zip chunk exchange) $ \(ch, ex) ->
+            copyDWIMFix ch [] (Var ex) [ltid]
+
+
       -- int32_t prev_ind = (tid == 0) ? (get_local_size(0) - 1) : (tid - 1);
       let my_group_size = kernelGroupSize constants
       prev_ind <- dPrim "prev_ind" int32
@@ -215,9 +224,9 @@ compileSegScan  (Pattern _ pes)
 
           -- else
           read_offset <- dPrim "read_offset" int32
-          read_offset <-- Imp.var wG_ID int32 - 32
+          read_offset <-- Imp.var wG_ID int32 - waveSize
           loop_stop <- dPrim "loop_stop" int32
-          loop_stop <--  - 32
+          loop_stop <-- -1 * waveSize
 
           -- while (read_offset > LOOP_STOP) {
           sWhile (Imp.var read_offset int32 .>. Imp.var loop_stop int32) $ do
@@ -232,7 +241,7 @@ compileSegScan  (Pattern _ pes)
             let flagExp = Imp.var flag int32
             used <- dPrim "used" int8
             used <-- 0
-            sWhen (readiExp .>. 0) $ do
+            sWhen (readiExp .>=. 0) $ do
               copyDWIMFix flag [] (Var statusflgs) [readiExp]
               sWhen (flagExp .==. 2) $ do -- STATUS_P
                 forM_ (zip aggr incprefix) $ \(ag,inc) ->
@@ -247,13 +256,15 @@ compileSegScan  (Pattern _ pes)
             -- warpscan[tid]       = mkStatusUsed(used, flag);
             combined_flg <- dPrim "combined_flg" int8
             -- TODO: The msb is signed and have to be mult with -1 or bit shiftet or something
-            combined_flg <-- (Imp.var used int8 * 4) .|. Imp.var flag int8
+            -- combined_flg <-- (Imp.var used int8 * 4) .|. Imp.var flag int8
+            combined_flg <-- Imp.BinOpExp (Shl Int8) (Imp.var used int8) 2 .|. Imp.var flag int8
             copyDWIMFix warpscan [ltid] (Var combined_flg) []
             sOp Imp.MemFenceGlobal
 
 
             -- Perform reduce
-            wsmone <- dPrim "wsmone" int32
+            wsmone <- dPrim "wsmone" int8
+            -- wsmone <-- 0
             copyDWIMFix wsmone [] (Var warpscan) [waveSize-1]
             sUnless (Imp.var wsmone int32 .==. 2) $ do -- STATUS_P
 
@@ -295,11 +306,11 @@ compileSegScan  (Pattern _ pes)
                   copyDWIMFix tmp [] (Var warpscan) [acc_th]
 
                   stat1 <-- tmpVar .&. 3
-                  usd1 <-- Imp.BinOpExp (LShr Int32) tmpVar 2
+                  usd1 <-- Imp.BinOpExp (LShr Int8) tmpVar 2
 
                   copyDWIMFix tmp [] (Var warpscan) [cur_th]
                   stat2 <-- tmpVar .&. 3
-                  usd2 <-- Imp.BinOpExp (LShr Int32) tmpVar 2
+                  usd2 <-- Imp.BinOpExp (LShr Int8) tmpVar 2
 
                   sUnless (Imp.var stat2 int32 .==. 1) $ do
                     forM_ (zip agg1 nes) $ \(ag, ne) -> do
@@ -308,7 +319,7 @@ compileSegScan  (Pattern _ pes)
                     usd1 <-- 0
                     stat1 <-- Imp.var stat2 int8
                   usd1 <-- Imp.var usd1 int8 + Imp.var usd2 int8
-                  usd1 <-- Imp.BinOpExp (Shl Int32) (Imp.var usd1 int8) 2
+                  usd1 <-- Imp.BinOpExp (Shl Int8) (Imp.var usd1 int8) 2
                   usd1 <-- Imp.var usd1 int8 .|. Imp.var stat1 int8
                   copyDWIMFix warpscan [cur_th] (Var usd1) []
 
@@ -339,7 +350,7 @@ compileSegScan  (Pattern _ pes)
               sIf (flagExp .==. 2)
                 (read_offset <-- Imp.var loop_stop int32) $ do-- EXIT
                 used <-- Imp.BinOpExp (LShr Int32) (Imp.var usedflg_val int8) 2 -- get used: usd_flg >> 2
-                read_offset <-- Imp.var read_offset int32 - Imp.var usedflg_val int32
+                read_offset <-- Imp.var read_offset int32 - Imp.var used int32
               copyDWIMFix block_id [0] (Var read_offset) []
               -- update prefix
               forM_ (zip aggr exchange) $ \(ag,ex) ->
@@ -376,17 +387,17 @@ compileSegScan  (Pattern _ pes)
 
           sOp Imp.MemFenceGlobal
 
-          copyDWIMFix statusflgs [Imp.var wG_ID int32] (intConst Int8 3) [] -- STATUS_P
+          copyDWIMFix statusflgs [Imp.var wG_ID int32] (intConst Int8 2) [] -- STATUS_P
           forM_ (zip exchange prefix) $ \(exc, pre) ->
             copyDWIMFix exc [0] (Var pre) []
           forM_ (zip acc nes) $ \(a, ne) ->
             copyDWIMFix a [] ne []
 
       sUnless (Imp.var wG_ID int32 .==. 0) $ do
-        sOp Imp.MemFenceGlobal
+        sOp Imp.LocalBarrier
         forM_ (zip prefix exchange) $ \(pre,exc) ->
           copyDWIMFix pre [] (Var exc) [0]
-        sOp Imp.MemFenceGlobal
+        sOp Imp.LocalBarrier
 
 
       myacc <- forM nes $ \ne -> do
@@ -408,8 +419,8 @@ compileSegScan  (Pattern _ pes)
       let (scan_x_params2, scan_y_params2) = splitAt (length nes) $ lambdaParams scan_op_renamed
       forM_ (zip scan_x_params2 prefix) $ \(param, ma) ->
         copyDWIMFix (paramName param) [] (Var ma) []
-      forM_ (zip scan_y_params2 exchange) $ \(param, ex) ->
-        copyDWIMFix (paramName param) [] (Var ex) [ltid]
+      forM_ (zip scan_y_params2 chunk) $ \(param, ch) ->
+        copyDWIMFix (paramName param) [] (Var ch) []
       compileStms mempty (bodyStms $ lambdaBody scan_op_renamed) $ do
         forM_ (zip exchange (bodyResult $ lambdaBody scan_op_renamed)) $ \(e, sr) ->
           copyDWIMFix e [ltid] sr []
