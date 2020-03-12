@@ -502,8 +502,8 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
       let num_whole_tiles = tilingNumWholeTiles tiling
           tile_shape = tilingTileShape tiling
 
-      -- We don't use a Replicate here, because we want to enforce a
-      -- scalar memory space.
+      -- We don't use a Replicate here, because
+      -- we want to enforce a scalar memory space.
       mergeinits <- tilingSegMap tiling "tileGeneric.mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
         -- Constant neutral elements (a common case) do not need protection from OOB.
         if freeIn red_nes == mempty
