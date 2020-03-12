@@ -77,7 +77,11 @@ module type numeric = {
 module type integral = {
   include numeric
 
+  -- | Like `/`@term, but rounds towards zero.  This only matters when
+  -- one of the operands is negative.  May be more efficient.
   val //: t -> t -> t
+  -- | Like `%`@term, but rounds towards zero.  This only matters when
+  -- one of the operands is negative.  May be more efficient.
   val %%: t -> t -> t
 
   val &: t -> t -> t
@@ -96,8 +100,13 @@ module type integral = {
   -- | Count number of one bits.
   val popc: t -> i32
 
-  val mul_hi: t -> t -> t
-  val mad_hi: t -> t -> t -> t
+  -- | Computes `x * y` and returns the high half of the product of x
+  -- and y.
+  val mul_hi: (x: t) -> (y: t) -> t
+
+  -- | Computes `mul_hi a b + c`, but perhaps in a more efficient way,
+  -- depending on the target platform.
+  val mad_hi: (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Count number of zero bits preceding the most significant set
   -- bit.
