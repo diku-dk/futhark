@@ -36,12 +36,9 @@ import Prelude hiding (mod)
 import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad
-  hiding (BoundV, checkQualNameWithEnv, typeError)
-import Language.Futhark.TypeChecker.Types
-  hiding (checkTypeDecl)
-import Language.Futhark.TypeChecker.Unify
-  hiding (Usage)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
+import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
+import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
 import Futhark.Util.Pretty hiding (space, bool, group)
@@ -404,15 +401,6 @@ incCounter = do s <- get
                 put s { stateCounter = stateCounter s + 1 }
                 return $ stateCounter s
 
-typeError :: Located loc => loc -> Notes -> Doc -> TermTypeM a
-typeError loc notes s = do
-  checking <- asks termChecking
-  case checking of
-    Just checking' ->
-      throwError $ TypeError (srclocOf loc) notes (ppr checking' <> line </> s)
-    Nothing ->
-      throwError $ TypeError (srclocOf loc) notes s
-
 extSize :: SrcLoc -> SizeSource -> TermTypeM (DimDecl VName, Maybe VName)
 extSize loc e = do
   prev <- gets $ M.lookup e . stateDimTable
@@ -550,6 +538,14 @@ instance MonadTypeChecker TermTypeM where
       unify (mkUsage loc "use as array size") (toStruct t) $
       Scalar $ Prim $ Signed Int32
     return v'
+
+  typeError loc notes s = do
+    checking <- asks termChecking
+    case checking of
+      Just checking' ->
+        throwError $ TypeError (srclocOf loc) notes (ppr checking' <> line </> s)
+      Nothing ->
+        throwError $ TypeError (srclocOf loc) notes s
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do

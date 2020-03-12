@@ -27,8 +27,6 @@ module Language.Futhark.TypeChecker.Monad
   , Notes
   , aNote
 
-  , typeError
-
   , MonadTypeChecker(..)
   , checkName
   , badOnLeft
@@ -201,13 +199,7 @@ localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
   in ctx { contextEnv = env' }
 
-typeError :: (Located loc, MonadError TypeError m) =>
-             loc -> Notes -> Doc -> m a
-typeError loc notes s =
-  throwError $ TypeError (srclocOf loc) notes s
-
-class MonadError TypeError m =>
-      MonadTypeChecker m where
+class Monad m => MonadTypeChecker m where
   warn :: Located loc => loc -> String -> m ()
 
   newName :: VName -> m VName
@@ -229,6 +221,8 @@ class MonadError TypeError m =>
       Scalar (Prim (Signed Int32)) -> return v'
       _ -> typeError loc mempty $
            "Dimension declaration" <+> ppr v <+> "should be of type i32."
+
+  typeError :: Located loc => loc -> Notes -> Doc -> m a
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
@@ -285,6 +279,8 @@ instance MonadTypeChecker TypeM where
                         "Attempt to use function" <+> pprName name <+> "as value."
               Right t' -> return (qn', fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')
+
+  typeError loc notes s = throwError $ TypeError (srclocOf loc) notes s
 
 -- | Extract from a type either a function type comprising a list of
 -- parameter types and a return type, or a first-order type.
@@ -352,7 +348,7 @@ qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
               reachable qs' name env'
           | otherwise = False
 
-badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
+badOnLeft :: Either TypeError a -> TypeM a
 badOnLeft = either throwError return
 
 anySignedType :: [PrimType]
