@@ -26,8 +26,6 @@ module Language.Futhark.TypeChecker.Monad
   , Notes
   , aNote
 
-  , typeError
-
   , MonadTypeChecker(..)
   , checkName
   , badOnLeft
@@ -199,13 +197,7 @@ localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
   in ctx { contextEnv = env' }
 
-typeError :: (Located loc, MonadError TypeError m) =>
-             loc -> Notes -> Doc -> m a
-typeError loc notes s =
-  throwError $ TypeError (srclocOf loc) notes s
-
-class MonadError TypeError m =>
-      MonadTypeChecker m where
+class Monad m => MonadTypeChecker m where
   warn :: Located loc => loc -> String -> m ()
 
   newName :: VName -> m VName
