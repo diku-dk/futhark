@@ -56,6 +56,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Corrected address calculations in `csharp` backend.
 
+  * The C backends are now more careful about generating overflowing
+    integer operations (since this is undefined behaviour in C, but
+    defined in Futhark).
+
+  * `futhark dataset` no longer crashes uncontrollably when used
+    incorrectly (#849).
+
 ## [0.14.1]
 
 ### Added
