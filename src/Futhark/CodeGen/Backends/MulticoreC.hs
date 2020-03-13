@@ -19,8 +19,6 @@ import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
-import Futhark.CodeGen.Backends.SimpleRepresentation (funName')
-
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError GC.CParts)
 compileProg =
@@ -149,7 +147,7 @@ compileOp (ParLoop names decls i e body) = do
              $sdecls:fields
            };|])
 
-  f <- GC.publicMulticoreDef (funName' "parloop") GC.MiscDecl $ \s ->
+  f <- GC.publicMulticoreDef ("parloop") GC.MiscDecl $ \s ->
    ([C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i);|],
     [C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i) {
             $decls:(decl_and_get_vals)
@@ -158,10 +156,12 @@ compileOp (ParLoop names decls i e body) = do
    }|])
 
 
+  -- Declare and set values
+  GC.decl [C.cdecl|struct $id:ctx $id:ctx;|]
+  GC.stms [C.cstms|$stms:(set_vals ctx)|]
+
   GC.stms [[C.cstm|$pragma:("omp parallel for")|],
            [C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
-                   struct $id:ctx $id:ctx;
-                   $stms:(set_vals ctx)
                    $id:f(&$id:ctx, $id:i);
                  }|]]
 

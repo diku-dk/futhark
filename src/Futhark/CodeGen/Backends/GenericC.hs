@@ -422,11 +422,13 @@ publicDef_ s h f = void $ publicDef s h f
 publicMulticoreDef :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
                    -> CompilerM op s String
 publicMulticoreDef s h f = do
-  s' <- publicMulticoreName s
-  let (pub, priv) = f s'
+  s' <- newVName s
+  -- Surely must a better way to obtain a tag name string
+  s'' <- publicMulticoreName $ (baseString s') ++ "_" ++ (show $ baseTag s')
+  let (pub, priv) = f s''
   headerDecl h pub
   multicoreDecl priv
-  return s'
+  return s''
 
 
 headerDecl :: HeaderSection -> C.Definition -> CompilerM op s ()
@@ -478,7 +480,7 @@ publicName s = return $ "futhark_" ++ s
 
 -- | Public names must have a consitent prefix.
 publicMulticoreName :: String -> CompilerM op s String
-publicMulticoreName s = return $ "futhark_multicore_" ++ s
+publicMulticoreName s = return $ "futhark_mc_" ++ s
 
 -- | The generated code must define a struct with this name.
 contextType :: CompilerM op s C.Type
