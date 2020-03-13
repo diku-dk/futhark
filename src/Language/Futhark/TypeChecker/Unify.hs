@@ -363,6 +363,11 @@ unifyWith onDims usage = subunify False mempty
               forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(k, (k_t1, k_t2)) -> do
               let bcs' = breadCrumb (MatchingFields [k]) bcs
               subunify ord bound bcs' k_t1 k_t2
+          | otherwise -> do
+              let missing = filter (`notElem` M.keys arg_fs) (M.keys fs) ++
+                            filter (`notElem` M.keys fs) (M.keys arg_fs)
+              unifyError usage mempty bcs $
+                "Unshared fields:" <+> commasep (map ppr missing) <> "."
 
         (Scalar (TypeVar _ _ (TypeName _ tn) targs),
          Scalar (TypeVar _ _ (TypeName _ arg_tn) arg_targs))
