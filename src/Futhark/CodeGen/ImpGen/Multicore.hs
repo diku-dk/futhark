@@ -220,6 +220,7 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
+  -- zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
   body' <- collect $ do
    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
    compileStms (freeIn kres) kstms $ do
@@ -235,24 +236,10 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
 
   emit $ Imp.Op $ Imp.ParLoop (tail paramsNames) (tail cdecls) (segFlat space) (product ns') body'
 
-  emit $ Imp.DebugPrint "\n# SegScan -- tmp"  Nothing
-  where getType t = case t of
-                  Prim pt -> Imp.Scalar pt
-                  Mem space' -> Imp.Mem space'
-                  Array pt _ _ -> Imp.Scalar pt -- TODO: Fix this!
-        getCType t = case t of
+  where getCType t = case t of
                   Prim pt      -> primTypeToCType pt
                   Mem space'   -> fatMemType space'
                   Array pt _ _ -> primTypeToCType pt -- TODO: Fix this!
-        genParam (v, t) = case t of
-                  Prim pt      -> Imp.ScalarParam v pt
-                  Mem space'   -> Imp.MemParam v space'
-                  Array pt _ _ -> Imp.ScalarParam v pt
-        getVName v = case v of
-                  Imp.ScalarUse v _ -> v
-                  Imp.MemoryUse v   -> v
-                  Imp.ConstUse v _ -> v
-
 
 compileSegOp _ op =
   error $ "compileSegOp: unhandled: " ++ pretty op

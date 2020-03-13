@@ -423,7 +423,7 @@ publicMulticoreDef :: String -> HeaderSection -> (String -> (C.Definition, C.Def
                    -> CompilerM op s String
 publicMulticoreDef s h f = do
   s' <- newVName s
-  -- Surely must a better way to obtain a tag name string
+  -- TODO: Surely must a better way to obtain a tag name string
   s'' <- publicMulticoreName $ (baseString s') ++ "_" ++ (show $ baseTag s')
   let (pub, priv) = f s''
   headerDecl h pub
@@ -675,11 +675,10 @@ allocMem name size space on_failure = do
   refcount <- asks envFatMemory
   let name_s = pretty $ C.toExp name noLoc
   if refcount
-    then stms [[C.cstm|printf("Allocmem1\n");|],
-               [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
-                                                        $string:name_s)) {
-                                                        $stm:on_failure
-                     }|]]
+    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
+                                                       $string:name_s)) {
+                                                       $stm:on_failure
+                     }|]
     else alloc name
   where alloc dest = case space of
           Space sid ->
@@ -1834,7 +1833,6 @@ compileCode (For i it bound body) = do
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
-            printf("For\n");
             $items:body'
           }|]
 
@@ -1842,7 +1840,6 @@ compileCode (While cond body) = do
   cond' <- compileExp cond
   body' <- blockScope $ compileCode body
   stm [C.cstm|while ($exp:cond') {
-            printf("While\n");
             $items:body'
           }|]
 
@@ -1864,10 +1861,9 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
   size' <- compileExp size
   dest' <- rawMem dest
   src' <- rawMem src
-  stms [[C.cstm|printf("Copy1\n");|],
-       [C.cstm|memmove($exp:dest' + $exp:destoffset',
+  stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
                       $exp:src' + $exp:srcoffset',
-                      $exp:size');|]]
+                      $exp:size');|]
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
@@ -1882,15 +1878,13 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
            <$> compileExp idx
            <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
-  stms [[C.cstm|printf("Write2\n");|],
-        [C.cstm|$exp:deref = $exp:elemexp';|]]
+  stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
   dest' <- rawMem dest
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  stms [[C.cstm|printf("Write1\n");|],
-        [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]]
+  stm [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
@@ -1936,13 +1930,11 @@ compileCode (DeclareArray name (Space space) t vs) =
 compileCode (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
   | dest == x, Just f <- assignmentOperator op = do
       y' <- compileExp y
-      stms [[C.cstm|printf("SetScalar1\n");|],
-            [C.cstm|$exp:(f dest y');|]]
+      stm [C.cstm|$exp:(f dest y');|]
 
 compileCode (SetScalar dest src) = do
   src' <- compileExp src
-  stms [[C.cstm|printf("SetScalar2\n");|],
-        [C.cstm|$id:dest = $exp:src';|]]
+  stm [C.cstm|$id:dest = $exp:src';|]
 
 compileCode (SetMem dest src space) =
   setMem dest src space
