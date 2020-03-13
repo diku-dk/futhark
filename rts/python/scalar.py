@@ -346,6 +346,24 @@ def futhark_asin64(x):
 def futhark_atan64(x):
   return np.arctan(x)
 
+def futhark_cosh64(x):
+  return np.cosh(x)
+
+def futhark_sinh64(x):
+  return np.sinh(x)
+
+def futhark_tanh64(x):
+  return np.tanh(x)
+
+def futhark_acosh64(x):
+  return np.arccosh(x)
+
+def futhark_asinh64(x):
+  return np.arcsinh(x)
+
+def futhark_atanh64(x):
+  return np.arctanh(x)
+
 def futhark_atan2_64(x, y):
   return np.arctan2(x, y)
 
@@ -410,6 +428,24 @@ def futhark_asin32(x):
 
 def futhark_atan32(x):
   return np.arctan(x)
+
+def futhark_cosh32(x):
+  return np.cosh(x)
+
+def futhark_sinh32(x):
+  return np.sinh(x)
+
+def futhark_tanh32(x):
+  return np.tanh(x)
+
+def futhark_acosh32(x):
+  return np.arccosh(x)
+
+def futhark_asinh32(x):
+  return np.arcsinh(x)
+
+def futhark_atanh32(x):
+  return np.arctanh(x)
 
 def futhark_atan2_32(x, y):
   return np.arctan2(x, y)

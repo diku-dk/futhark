@@ -833,12 +833,20 @@ primFuns = M.fromList
   , f32 "log10_32" (logBase 10), f64 "log10_64" (logBase 10)
   , f32 "log2_32" (logBase 2), f64 "log2_64" (logBase 2)
   , f32 "exp32" exp, f64 "exp64" exp
+
   , f32 "sin32" sin, f64 "sin64" sin
+  , f32 "sinh32" sinh, f64 "sinh64" sinh
   , f32 "cos32" cos, f64 "cos64" cos
+  , f32 "cosh32" cosh, f64 "cosh64" cosh
   , f32 "tan32" tan, f64 "tan64" tan
+  , f32 "tanh32" tanh, f64 "tanh64" tanh
   , f32 "asin32" asin, f64 "asin64" asin
+  , f32 "asinh32" asinh, f64 "asinh64" asinh
   , f32 "acos32" acos, f64 "acos64" acos
+  , f32 "acosh32" acosh, f64 "acosh64" acosh
   , f32 "atan32" atan, f64 "atan64" atan
+  , f32 "atanh32" atanh, f64 "atanh64" atanh
+
   , f32 "round32" roundFloat, f64 "round64" roundDouble
   , f32 "ceil32" ceilFloat, f64 "ceil64" ceilDouble
   , f32 "floor32" floorFloat, f64 "floor64" floorDouble

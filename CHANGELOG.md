@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     getting the upper part of multiplications.  Thanks to Chhi'mèd
     Künzang (@porcuquine) for the contribution!
 
+  * The `f32` and `f64` modules now also define `sinh`, `cosh`,
+    `tanh`, `asinh`, `acosh`, and `atanh` functions.
+
 ### Removed
 
   * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,

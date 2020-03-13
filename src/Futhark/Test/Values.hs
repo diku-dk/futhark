@@ -555,6 +555,7 @@ comparePrimValue tol x y =
 minTolerance :: Fractional a => a
 minTolerance = 0.002 -- 0.2%
 
-tolerance :: (Ord a, Fractional a, UVec.Unbox a) => Vector a -> a
-tolerance = UVec.foldl tolerance' minTolerance
+tolerance :: (RealFloat a, UVec.Unbox a) => Vector a -> a
+tolerance = UVec.foldl tolerance' minTolerance . UVec.filter (not . nanOrInf)
   where tolerance' t v = max t $ minTolerance * v
+        nanOrInf x = isInfinite x || isNaN x

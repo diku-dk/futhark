@@ -510,6 +510,30 @@ cFloat32Funs = [C.cunit|
       return atan(x);
     }
 
+    static inline float $id:(funName' "cosh32")(float x) {
+      return cosh(x);
+    }
+
+    static inline float $id:(funName' "sinh32")(float x) {
+      return sinh(x);
+    }
+
+    static inline float $id:(funName' "tanh32")(float x) {
+      return tanh(x);
+    }
+
+    static inline float $id:(funName' "acosh32")(float x) {
+      return acosh(x);
+    }
+
+    static inline float $id:(funName' "asinh32")(float x) {
+      return asinh(x);
+    }
+
+    static inline float $id:(funName' "atanh32")(float x) {
+      return atanh(x);
+    }
+
     static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2(x,y);
     }
@@ -627,6 +651,30 @@ cFloat64Funs = [C.cunit|
 
     static inline double $id:(funName' "atan64")(double x) {
       return atan(x);
+    }
+
+    static inline double $id:(funName' "cosh64")(double x) {
+      return cosh(x);
+    }
+
+    static inline double $id:(funName' "sinh64")(double x) {
+      return sinh(x);
+    }
+
+    static inline double $id:(funName' "tanh64")(double x) {
+      return tanh(x);
+    }
+
+    static inline double $id:(funName' "acosh64")(double x) {
+      return acosh(x);
+    }
+
+    static inline double $id:(funName' "asinh64")(double x) {
+      return asinh(x);
+    }
+
+    static inline double $id:(funName' "atanh64")(double x) {
+      return atanh(x);
     }
 
     static inline double $id:(funName' "atan2_64")(double x, double y) {

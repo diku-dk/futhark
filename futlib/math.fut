@@ -134,13 +134,25 @@ module type real = {
 
   val sqrt: t -> t
   val exp: t -> t
-  val cos: t -> t
+
   val sin: t -> t
+  val cos: t -> t
   val tan: t -> t
+
   val asin: t -> t
   val acos: t -> t
   val atan: t -> t
+
+  val sinh: t -> t
+  val cosh: t -> t
+  val tanh: t -> t
+
+  val asinh: t -> t
+  val acosh: t -> t
+  val atanh: t -> t
+
   val atan2: t -> t -> t
+
   val gamma: t -> t
   val lgamma: t -> t
   -- | Linear interpolation.  The third argument must be in the range
@@ -878,12 +890,18 @@ module f64: (float with t = f64 with int_t = u64) = {
   let log2 (x: f64) = intrinsics.log2_64 x
   let log10 (x: f64) = intrinsics.log10_64 x
   let exp (x: f64) = intrinsics.exp64 x
-  let cos (x: f64) = intrinsics.cos64 x
   let sin (x: f64) = intrinsics.sin64 x
+  let cos (x: f64) = intrinsics.cos64 x
   let tan (x: f64) = intrinsics.tan64 x
   let acos (x: f64) = intrinsics.acos64 x
   let asin (x: f64) = intrinsics.asin64 x
   let atan (x: f64) = intrinsics.atan64 x
+  let sinh (x: f64) = intrinsics.sinh64 x
+  let cosh (x: f64) = intrinsics.cosh64 x
+  let tanh (x: f64) = intrinsics.tanh64 x
+  let acosh (x: f64) = intrinsics.acosh64 x
+  let asinh (x: f64) = intrinsics.asinh64 x
+  let atanh (x: f64) = intrinsics.atanh64 x
   let atan2 (x: f64) (y: f64) = intrinsics.atan2_64 (x, y)
   let gamma = intrinsics.gamma64
   let lgamma = intrinsics.lgamma64
@@ -977,12 +995,18 @@ module f32: (float with t = f32 with int_t = u32) = {
   let log2 (x: f32) = intrinsics.log2_32 x
   let log10 (x: f32) = intrinsics.log10_32 x
   let exp (x: f32) = intrinsics.exp32 x
-  let cos (x: f32) = intrinsics.cos32 x
   let sin (x: f32) = intrinsics.sin32 x
+  let cos (x: f32) = intrinsics.cos32 x
   let tan (x: f32) = intrinsics.tan32 x
   let acos (x: f32) = intrinsics.acos32 x
   let asin (x: f32) = intrinsics.asin32 x
   let atan (x: f32) = intrinsics.atan32 x
+  let sinh (x: f32) = intrinsics.sinh32 x
+  let cosh (x: f32) = intrinsics.cosh32 x
+  let tanh (x: f32) = intrinsics.tanh32 x
+  let acosh (x: f32) = intrinsics.acosh32 x
+  let asinh (x: f32) = intrinsics.asinh32 x
+  let atanh (x: f32) = intrinsics.atanh32 x
   let atan2 (x: f32) (y: f32) = intrinsics.atan2_32 (x, y)
   let gamma = intrinsics.gamma32
   let lgamma = intrinsics.lgamma32

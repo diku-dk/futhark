@@ -281,6 +281,12 @@ private static double futhark_tan64(double x){return Math.Tan(x);}
 private static double futhark_acos64(double x){return Math.Acos(x);}
 private static double futhark_asin64(double x){return Math.Asin(x);}
 private static double futhark_atan64(double x){return Math.Atan(x);}
+private static double futhark_cosh64(double x){return Math.Cosh(x);}
+private static double futhark_sinh64(double x){return Math.Sinh(x);}
+private static double futhark_tanh64(double x){return Math.Tanh(x);}
+private static double futhark_acosh64(double x){return Math.Acosh(x);}
+private static double futhark_asinh64(double x){return Math.Asinh(x);}
+private static double futhark_atanh64(double x){return Math.Atanh(x);}
 private static double futhark_atan2_64(double x, double y){return Math.Atan2(x, y);}
 private static double futhark_gamma64(double x){throw new NotImplementedException();}
 private static double futhark_lgamma64(double x){throw new NotImplementedException();}
@@ -300,6 +306,12 @@ private static float futhark_tan32(float x){return (float) Math.Tan(x);}
 private static float futhark_acos32(float x){return (float) Math.Acos(x);}
 private static float futhark_asin32(float x){return (float) Math.Asin(x);}
 private static float futhark_atan32(float x){return (float) Math.Atan(x);}
+private static float futhark_cosh32(float x){return (float) Math.Cosh(x);}
+private static float futhark_sinh32(float x){return (float) Math.Sinh(x);}
+private static float futhark_tanh32(float x){return (float) Math.Tanh(x);}
+private static float futhark_acosh32(float x){return (float) Math.Acosh(x);}
+private static float futhark_asinh32(float x){return (float) Math.Asinh(x);}
+private static float futhark_atanh32(float x){return (float) Math.Atanh(x);}
 private static float futhark_atan2_32(float x, float y){return (float) Math.Atan2(x, y);}
 private static float futhark_gamma32(float x){throw new NotImplementedException();}
 private static float futhark_lgamma32(float x){throw new NotImplementedException();}
