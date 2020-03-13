@@ -2290,8 +2290,10 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   let t = toStruct $ typeOf e'
   (tparams, _, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
-  fixOverloadedTypes
   e'' <- updateTypes e'
+  fixOverloadedTypes
+  checkUnmatched e''
+  causalityCheck e''
   return (tparams, e'')
 
 -- Verify that all sum type constructors and empty array literals have
