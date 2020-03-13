@@ -211,7 +211,6 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  -- zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
   body' <- collect $ do
    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
    compileStms (freeIn kres) kstms $ do

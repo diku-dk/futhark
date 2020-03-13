@@ -1523,13 +1523,14 @@ $edecls:early_decls
 
 $edecls:lib_decls
 
-$edecls:multicore_decls
 
 $edecls:(tupleDefinitions endstate)
 
 $edecls:prototypes
 
 $edecls:builtin
+
+$edecls:multicore_decls
 
 $edecls:(map funcToDef definitions)
 
@@ -1538,6 +1539,7 @@ $edecls:(arrayDefinitions endstate)
 $edecls:(opaqueDefinitions endstate)
 
 $edecls:entry_point_decls
+
   |]
 
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
