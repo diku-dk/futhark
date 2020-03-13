@@ -20,6 +20,7 @@ import Futhark.Transform.Rename
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Optimise.BlkRegTiling
+import Debug.Trace
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
@@ -38,26 +39,17 @@ optimiseBody :: Body Kernels -> TileM (Body Kernels)
 optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
   Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
 
--- optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
--- optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
---   mmm_tiling <- mmmTiling2D lvl space ts kbody
---   (host_stms, (lvl', space', kbody')) <-
---     case mmm_tiling of
---       Just (host_stms, (lvl', space', kbody')) -> return (host_stms, (lvl', space', kbody'))
---       Nothing -> -- do
---         tileInKernelBody mempty initial_variance lvl space ts kbody
---   return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
---   where initial_variance = M.map mempty $ scopeOfSegSpace space
-
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
   mmm_tiling <- mmmTiling2D stm
+  -- let mmm_tiling = Nothing -- use this instead of the above to disable mmm_tiling.
   case mmm_tiling of
     Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
     Nothing -> do
       (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
       return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
   where initial_variance = M.map mempty $ scopeOfSegSpace space
+
 
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
@@ -125,6 +117,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
       -- 2D tiling of redomap.
       | (gtids, kdims) <- unzip $ unSegSpace initial_space,
         Just (w, arrs, form) <- tileable stm_to_tile,
+
         Just inner_perm <- mapM (invariantToOneOfTwoInnerDims branch_variant variance gtids) arrs,
         gtid_y : gtid_x : top_gtids_rev <- reverse gtids,
         kdim_y : kdim_x : top_kdims_rev <- reverse kdims,
@@ -808,7 +801,8 @@ readTile2D :: (SubExp, SubExp) -> (VName, VName) -> (VName, VName) -> SubExp
            -> TileKind -> PrivStms -> SubExp
            -> [(VName, [Int])]
            -> Binder Kernels [VName]
-readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups group_size kind privstms tile_id arrs_and_perms =
+readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size
+  num_groups group_size kind privstms tile_id arrs_and_perms =
   segMap2D "readTile2D.full_tile" (SegThread num_groups group_size SegNoVirt)
   ResultNoSimplify (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
 

@@ -50,7 +50,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
     -- build the variance table, that records, for
     -- each variable name, the variables it depends on
-    initial_variance <-  M.map mempty $ scopeOfSegSpace space,
+    initial_variance <- M.map mempty $ scopeOfSegSpace space,
     variance <- varianceInStms initial_variance kstms,
 
     -- check that the code fits the pattern having:
@@ -84,13 +84,13 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
     -- sanity check that the reduce part is not missing
     not (null red_nes) = do
       let inp_A : inp_B : _ = arrs
-      let elem_type = patElemAttr fst_res
       let red_ne : _ = red_nes
 
       -----------------------------------------------------------------------
       -- in this binder: host code and outer seggroup (ie. the new kernel) --
       -----------------------------------------------------------------------
       (new_kernel, host_stms) <- runBinder $ do -- host code
+        subexp_inp_A <- letSubExp "inp_A" $ BasicOp $ SubExp $ Var inp_A
 
         ty_name  <- nameFromString . pretty <$> newVName "Ty"
         tx_name  <- nameFromString . pretty <$> newVName "Tx"
@@ -134,33 +134,36 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
           acc_t <- lookupType acc_
           acc <- letSubExp "acc" $ BasicOp $ SubExp $ Var acc_
-          let acc_attr = toDecl acc_t Unique -- needed for constructing FParams later
+          let acc_attr = toDecl acc_t Unique -- needed for FParams later.
 
           kk       <- newVName "kk"
           kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
           let loop_kk_form = ForLoop kk Int32 kk_bound []
+
           -------------------------------------------
           -- in this binder: body of outer kk loop --
           -------------------------------------------
           loop_kk_body <- runBodyBinder $ inScopeOf loop_kk_form $ do
 
-            -----------------------------------------------------------
-            -- segmap which copies A and B from global to shared mem --
-            -----------------------------------------------------------
-            -- A_shr :: [ty_ry][tk]t
             a_shr : _ <- segMap2D "A_shr" (segThread grid_size group_size)
                                   ResultNoSimplify (ty_ry, tk) $ \(x, y) -> do
               reconstructGtids2D ty_ry (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
 
-              a_shr <- letSubExp "a_shr" $ BasicOp $ Index inp_A (SubExp)
+              slice_a <- letSubExp "slice_a" $ BasicOp $ SubExp $ intConst Int32 0
+
+              -- this line produces a run-time failure in BinderT.lookupType.
+              a_shr <- letSubExp "a_shr" $ BasicOp $ Index inp_A [DimFix slice_a]
               return [a_shr]
 
-            -- B_shr :: [tk][tx_rx]t
+            {--
             b_shr : _ <- segMap2D "B_shr" (segThread grid_size group_size)
                                    ResultNoSimplify (tk, tx_rx) $ \(x, y) -> do
               reconstructGtids2D tx_rx (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
-              b_shr <- letSubExp "b_shr" $ BasicOp $ SubExp red_ne
+
+              slice_b <- letSubExp "slice_a" $ BasicOp $ SubExp $ intConst Int32 0
+              b_shr <- letSubExp "b_shr" $ BasicOp $ Index inp_B [DimFix slice_b]
               return [b_shr]
+            --}
             ------------------------------------------------------------------------
 
             k <- newVName "k"
@@ -197,8 +200,10 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
       ------------------------------------------------------------------------
 
       trace (
-             -- ">> inp_A:\n" ++ _pretty inp_A ++
-             -- ">> inp_B:\n" ++ _pretty inp_B ++
+             ">> pat:\n" ++ _pretty pat ++
+             -- ">> tp_arrs:\n" ++ _pretty tp_arrs ++
+             -- ">> inp_A:\n"   ++ _pretty inp_A ++
+             -- ">> inp_B:\n"   ++ _pretty inp_B ++
              ">> host_stms:\n"  ++ _pretty host_stms ++
              ">> new_kernel:\n" ++ _pretty new_kernel)
             $ return $ Just (host_stms, new_kernel)
@@ -387,7 +392,6 @@ reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = 
 
 
 
-
 -- | Translates an LParam to an FParam
 -- translLParamToFParam :: LParam Kernels -> FParam Kernels
 -- translLParamToFParam = fmap (`toDecl` Nonunique)
@@ -407,9 +411,4 @@ reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = 
 --
 --   num_threads <- letSubExp "num_threads" (BasicOp (BinOp (Mul Int32) num_groups group_size))
 --
---   traceM ("num_threads:\n" ++ _pretty num_threads ++
---           "num_groups:\n"  ++ _pretty num_groups)
---
 --   return (num_threads, num_groups)
-
-
