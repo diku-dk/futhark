@@ -137,7 +137,7 @@ copyMulticoreMemory _ _ destspace _ _ srcspace _ =
 
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop names decls i e body) = do
+compileOp (ParLoop fargs ftypes i e body) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
@@ -147,7 +147,7 @@ compileOp (ParLoop names decls i e body) = do
              $sdecls:fields
            };|])
 
-  f <- GC.publicMulticoreDef ("parloop") GC.MiscDecl $ \s ->
+  f <- GC.publicMulticoreDef "parloop" GC.MiscDecl $ \s ->
    ([C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i);|],
     [C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i) {
             $decls:(decl_and_get_vals)
@@ -165,19 +165,18 @@ compileOp (ParLoop names decls i e body) = do
                    $id:f(&$id:ctx, $id:i);
                  }|]]
 
-
   where fields = [ [C.csdecl|$ty:ty *$id:name;|]
-                 | (name, ty) <- zip names decls ]
+                 | (name, ty) <- zip fargs fctypes]
 
-        set_vals ct =
-                 [ [C.cstm|$id:(ct).$id:name=&$id:name;|]
-                 | name <- names ]
+        set_vals ct = [ [C.cstm|$id:(ct).$id:name=&$id:name;|]
+                      | name <- fargs]
 
-        decl_and_get_vals =
-                 [ [C.cdecl|$ty:ty $id:name = *ctx->$id:name;|]
-                 | (name, ty) <- (zip names decls) ]
-
-
+        decl_and_get_vals = [ [C.cdecl|$ty:ty $id:name = *ctx->$id:name;|]
+                            | (name, ty) <- (zip fargs fctypes) ]
+        getCType t = case t of
+                      Scalar pt  -> GC.primTypeToCType pt
+                      Mem space' -> GC.fatMemType space'
+        fctypes = map getCType ftypes
 
 
 compileOp (ParRed i e body) = do

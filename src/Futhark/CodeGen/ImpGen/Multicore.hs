@@ -7,11 +7,6 @@ module Futhark.CodeGen.ImpGen.Multicore
   where
 
 import Control.Monad
-import Control.Monad.Reader
-import Prelude hiding (quot, rem)
-import Data.List
-import Data.Maybe
-import qualified Data.Map.Strict as M
 
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
@@ -23,10 +18,6 @@ import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
-
-import Futhark.CodeGen.Backends.GenericC (memToCType, fatMemType)
-
-import Futhark.CodeGen.Backends.SimpleRepresentation (primTypeToCType)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError Imp.Program)
@@ -232,14 +223,13 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
 
   let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn kstms)
   ts <- mapM lookupType $ namesToList $ freeIn body'
-  let cdecls = map getCType ts
 
-  emit $ Imp.Op $ Imp.ParLoop (tail paramsNames) (tail cdecls) (segFlat space) (product ns') body'
-
-  where getCType t = case t of
-                  Prim pt      -> primTypeToCType pt
-                  Mem space'   -> fatMemType space'
-                  Array pt _ _ -> primTypeToCType pt -- TODO: Fix this!
+  -- First param is loop variable which is first declared in ParLoop
+  emit $ Imp.Op $ Imp.ParLoop (tail paramsNames) (tail $ map getType ts) (segFlat space) (product ns') body'
+  where getType t = case t of
+                      Prim pt      -> Imp.Scalar pt
+                      Mem space'   -> Imp.Mem space'
+                      Array pt _ _ -> Imp.Scalar pt -- TODO: Fix this!
 
 compileSegOp _ op =
   error $ "compileSegOp: unhandled: " ++ pretty op
