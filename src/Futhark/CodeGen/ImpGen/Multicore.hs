@@ -221,11 +221,10 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
            error $ "writeResult: cannot handle " ++ pretty res
      zipWithM_ writeResult (patternElements pat) kres
 
-  let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn kstms)
-  ts <- mapM lookupType $ namesToList $ freeIn body'
+  let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
+  ts <- mapM lookupType paramsNames
 
-  -- First param is loop variable which is first declared in ParLoop
-  emit $ Imp.Op $ Imp.ParLoop (tail paramsNames) (tail $ map getType ts) (segFlat space) (product ns') body'
+  emit $ Imp.Op $ Imp.ParLoop (paramsNames) (map getType ts) (segFlat space) (product ns') body'
   where getType t = case t of
                       Prim pt      -> Imp.Scalar pt
                       Mem space'   -> Imp.Mem space'
