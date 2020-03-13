@@ -9,6 +9,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        )
        where
 
+import qualified Language.C.Syntax as C
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.AST.Attributes.Names
@@ -25,18 +26,19 @@ type Function = Imp.Function Multicore
 type Code = Imp.Code Multicore
 
 -- | A parallel operation.
-data Multicore = ParLoop VName Imp.Exp Code
+data Multicore = ParLoop [VName] [C.Type] VName Imp.Exp Code
                | ParRed VName Imp.Exp Code
 
+
+
 instance Pretty Multicore where
-  ppr (ParLoop i e body) =
+  ppr (ParLoop _ _ i e body) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr body)
   ppr (ParRed i e body) =
     text "parred" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr body)
 
-
 instance FreeIn Multicore where
-  freeIn' (ParLoop _ e body) = freeIn' e <> freeIn' body
+  freeIn' (ParLoop _ _ _ e body) = freeIn' e <> freeIn' body
   freeIn' (ParRed _ e body) = freeIn' e <> freeIn' body

@@ -51,6 +51,7 @@ module Futhark.CodeGen.Backends.GenericC
   , headerDecl
   , publicDef
   , publicDef_
+  , publicMulticoreDef
   , profileReport
   , HeaderSection(..)
   , libDecl
@@ -58,7 +59,11 @@ module Futhark.CodeGen.Backends.GenericC
   , publicName
   , contextType
   , contextField
-
+  -- My stuff
+  , decls
+  , memToCType
+  , fatMemType
+  , rawMemCType
   -- * Building Blocks
   , primTypeToCType
   , copyMemoryDefaultSpace
@@ -100,6 +105,7 @@ data CompilerState s = CompilerState {
   , compUserState :: s
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
   , compLibDecls :: DL.DList C.Definition
+  , compMulticoreDecls :: DL.DList C.Definition
   , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
   , compProfileItems :: DL.DList C.BlockItem
   , compDeclaredMem :: [(VName,Space)]
@@ -115,6 +121,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compUserState = s
                                        , compHeaderDecls = mempty
                                        , compLibDecls = mempty
+                                       , compMulticoreDecls = mempty
                                        , compCtxFields = mempty
                                        , compProfileItems = mempty
                                        , compDeclaredMem = mempty
@@ -412,6 +419,16 @@ publicDef_ :: String -> HeaderSection -> (String -> (C.Definition, C.Definition)
            -> CompilerM op s ()
 publicDef_ s h f = void $ publicDef s h f
 
+publicMulticoreDef :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
+                   -> CompilerM op s String
+publicMulticoreDef s h f = do
+  s' <- publicMulticoreName s
+  let (pub, priv) = f s'
+  headerDecl h pub
+  multicoreDecl priv
+  return s'
+
+
 headerDecl :: HeaderSection -> C.Definition -> CompilerM op s ()
 headerDecl sec def = modify $ \s ->
   s { compHeaderDecls = M.unionWith (<>) (compHeaderDecls s)
@@ -420,6 +437,10 @@ headerDecl sec def = modify $ \s ->
 libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s { compLibDecls = compLibDecls s <> DL.singleton def }
+
+multicoreDecl :: C.Definition -> CompilerM op s ()
+multicoreDecl def = modify $ \s ->
+  s { compMulticoreDecls = compMulticoreDecls s <> DL.singleton def }
 
 earlyDecls :: [C.Definition] -> CompilerM op s ()
 earlyDecls def = modify $ \s ->
@@ -442,7 +463,11 @@ stms :: [C.Stm] -> CompilerM op s ()
 stms = mapM_ stm
 
 decl :: C.InitGroup -> CompilerM op s ()
-decl x = item [C.citem|$decl:x;|]
+decl x =
+  item [C.citem|$decl:x;|]
+
+decls :: [C.InitGroup] -> CompilerM op s ()
+decls = mapM_ decl
 
 addrOf :: C.Exp -> C.Exp
 addrOf e = [C.cexp|&$exp:e|]
@@ -450,6 +475,10 @@ addrOf e = [C.cexp|&$exp:e|]
 -- | Public names must have a consitent prefix.
 publicName :: String -> CompilerM op s String
 publicName s = return $ "futhark_" ++ s
+
+-- | Public names must have a consitent prefix.
+publicMulticoreName :: String -> CompilerM op s String
+publicMulticoreName s = return $ "futhark_multicore_" ++ s
 
 -- | The generated code must define a struct with this name.
 contextType :: CompilerM op s C.Type
@@ -644,10 +673,11 @@ allocMem name size space on_failure = do
   refcount <- asks envFatMemory
   let name_s = pretty $ C.toExp name noLoc
   if refcount
-    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
-                                                 $string:name_s)) {
-                       $stm:on_failure
-                     }|]
+    then stms [[C.cstm|printf("Allocmem1\n");|],
+               [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
+                                                        $string:name_s)) {
+                                                        $stm:on_failure
+                     }|]]
     else alloc name
   where alloc dest = case space of
           Space sid ->
@@ -1477,6 +1507,7 @@ int main(int argc, char** argv) {
 
   let early_decls = DL.toList $ compEarlyDecls endstate
   let lib_decls = DL.toList $ compLibDecls endstate
+  let multicore_decls = DL.toList $ compMulticoreDecls endstate
   let libdefs = [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
@@ -1490,6 +1521,8 @@ $esc:lock_h
 $edecls:early_decls
 
 $edecls:lib_decls
+
+$edecls:multicore_decls
 
 $edecls:(tupleDefinitions endstate)
 
@@ -1799,6 +1832,7 @@ compileCode (For i it bound body) = do
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+            printf("For\n");
             $items:body'
           }|]
 
@@ -1806,6 +1840,7 @@ compileCode (While cond body) = do
   cond' <- compileExp cond
   body' <- blockScope $ compileCode body
   stm [C.cstm|while ($exp:cond') {
+            printf("While\n");
             $items:body'
           }|]
 
@@ -1827,9 +1862,10 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
   size' <- compileExp size
   dest' <- rawMem dest
   src' <- rawMem src
-  stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
+  stms [[C.cstm|printf("Copy1\n");|],
+       [C.cstm|memmove($exp:dest' + $exp:destoffset',
                       $exp:src' + $exp:srcoffset',
-                      $exp:size');|]
+                      $exp:size');|]]
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
@@ -1844,13 +1880,15 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
            <$> compileExp idx
            <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
-  stm [C.cstm|$exp:deref = $exp:elemexp';|]
+  stms [[C.cstm|printf("Write2\n");|],
+        [C.cstm|$exp:deref = $exp:elemexp';|]]
 
 compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
   dest' <- rawMem dest
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  stm [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]
+  stms [[C.cstm|printf("Write1\n");|],
+        [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]]
 
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
@@ -1896,11 +1934,13 @@ compileCode (DeclareArray name (Space space) t vs) =
 compileCode (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
   | dest == x, Just f <- assignmentOperator op = do
       y' <- compileExp y
-      stm [C.cstm|$exp:(f dest y');|]
+      stms [[C.cstm|printf("SetScalar1\n");|],
+            [C.cstm|$exp:(f dest y');|]]
 
 compileCode (SetScalar dest src) = do
   src' <- compileExp src
-  stm [C.cstm|$id:dest = $exp:src';|]
+  stms [[C.cstm|printf("SetScalar2\n");|],
+        [C.cstm|$id:dest = $exp:src';|]]
 
 compileCode (SetMem dest src space) =
   setMem dest src space

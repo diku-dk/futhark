@@ -19,6 +19,8 @@ import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
+import Futhark.CodeGen.Backends.SimpleRepresentation (funName')
+
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError GC.CParts)
 compileProg =
@@ -126,20 +128,57 @@ compileProg =
                          (void)ctx;
                        }|])
 
+          GC.earlyDecls [[C.cedecl|typedef int (*task_fn)(void*, int start, int end);|]]
+
+
 copyMulticoreMemory :: GC.Copy Multicore ()
 copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
   GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyMulticoreMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
+
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop i e body) = do
+compileOp (ParLoop names decls i e body) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
+
+  ctx <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
+    ([C.cedecl|struct $id:s;|],
+     [C.cedecl|struct $id:s {
+             $sdecls:fields
+           };|])
+
+  f <- GC.publicMulticoreDef (funName' "parloop") GC.MiscDecl $ \s ->
+   ([C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i);|],
+    [C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i) {
+            $decls:(decl_and_get_vals)
+            $items:body'
+            return 0;
+   }|])
+
+
   GC.stms [[C.cstm|$pragma:("omp parallel for")|],
            [C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
-                   $items:body'
+                   struct $id:ctx $id:ctx;
+                   $stms:(set_vals ctx)
+                   $id:f(&$id:ctx, $id:i);
                  }|]]
+
+
+  where fields = [ [C.csdecl|$ty:ty *$id:name;|]
+                 | (name, ty) <- zip names decls ]
+
+        set_vals ct =
+                 [ [C.cstm|$id:(ct).$id:name=&$id:name;|]
+                 | name <- names ]
+
+        decl_and_get_vals =
+                 [ [C.cdecl|$ty:ty $id:name = *ctx->$id:name;|]
+                 | (name, ty) <- (zip names decls) ]
+
+
+
 
 compileOp (ParRed i e body) = do
   e' <- GC.compileExp e

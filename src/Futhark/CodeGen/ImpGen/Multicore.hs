@@ -1,21 +1,32 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE LambdaCase #-}
+
 module Futhark.CodeGen.ImpGen.Multicore
   ( Futhark.CodeGen.ImpGen.Multicore.compileProg
   )
   where
 
 import Control.Monad
-
+import Control.Monad.Reader
 import Prelude hiding (quot, rem)
+import Data.List
+import Data.Maybe
+import qualified Data.Map.Strict as M
+
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
+
+
+import Futhark.CodeGen.ImpGen.Kernels.Base
 
 import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
 
+import Futhark.CodeGen.Backends.GenericC (memToCType, fatMemType)
 
+import Futhark.CodeGen.Backends.SimpleRepresentation (primTypeToCType)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError Imp.Program)
@@ -52,6 +63,16 @@ myGroupResultArrays space (Count size) reds =
     sAllocArrayPerm "group_res_arr" pt full_shape space perm
 
 
+data SubhistosInfo = SubhistosInfo { subhistosArray :: VName
+                                   , subhistosAlloc :: CallKernelGen ()
+                                   }
+
+data SegHistSlug = SegHistSlug
+                   { mySlugOp :: HistOp ExplicitMemory
+                   , mySlugNumSubhistos :: VName
+                   , mySlugSubhistos :: [SubhistosInfo]
+                   , mySlugAtomicUpdate :: AtomicUpdate ExplicitMemory
+                   }
 
 -- | A SegRedOp with auxiliary information.
 data MySegRedOpSlug =
@@ -64,24 +85,24 @@ data MySegRedOpSlug =
     -- ^ Places to store accumulator in stage 1 reduction.
   }
 
-my_slugBody :: MySegRedOpSlug -> Body ExplicitMemory
-my_slugBody = lambdaBody . segRedLambda . slugOp
+mySlugBody :: MySegRedOpSlug -> Body ExplicitMemory
+mySlugBody = lambdaBody . segRedLambda . slugOp
 
-my_slugParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
-my_slugParams = lambdaParams . segRedLambda . slugOp
+mySlugParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
+mySlugParams = lambdaParams . segRedLambda . slugOp
 
-my_slugNeutral :: MySegRedOpSlug -> [SubExp]
-my_slugNeutral = segRedNeutral . slugOp
+mySlugNeutral :: MySegRedOpSlug -> [SubExp]
+mySlugNeutral = segRedNeutral . slugOp
 
-my_slugShape :: MySegRedOpSlug -> Shape
-my_slugShape = segRedShape . slugOp
+mySlugShape :: MySegRedOpSlug -> Shape
+mySlugShape = segRedShape . slugOp
 
-my_slugsComm :: [MySegRedOpSlug] -> Commutativity
-my_slugsComm = mconcat . map (segRedComm . slugOp)
+mySlugsComm :: [MySegRedOpSlug] -> Commutativity
+mySlugsComm = mconcat . map (segRedComm . slugOp)
 
-my_accParams, nextParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
-my_accParams slug = take (length (my_slugNeutral slug)) $ my_slugParams slug
-nextParams slug = drop (length (my_slugNeutral slug)) $ my_slugParams slug
+myAccParams, nextParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
+myAccParams slug = take (length (mySlugNeutral slug)) $ mySlugParams slug
+nextParams slug = drop (length (mySlugNeutral slug)) $ mySlugParams slug
 
 mySegRedOpSlug :: (SegRedOp ExplicitMemory, [VName])
                         -> ImpM lore op MySegRedOpSlug
@@ -97,22 +118,62 @@ mySegRedOpSlug (op, group_res_arrs) =
               error "couldn't determine type"
 
 
+
+
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
-compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
+compileSegOp pat (SegRed lvl space reds _ body) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
+
+  reds_group_res_arrs <- myGroupResultArrays DefaultSpace num_groups reds
+
+  let body'' red_cont = compileStms (freeIn $ kernelBodyLore body)(kernelBodyStms body) $ do
+        let (red_res, _) = splitAt (segRedResults reds) $ kernelBodyResult body
+        red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+
+  -- Creates accumulator variables
+  slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
+
+  emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
+
+  dScope Nothing $ scopeOfLParams $ concatMap mySlugParams slugs
+
+  -- Initialize  neutral element accumualtor
+  sComment "neutral-initialise the accumulators" $
+    forM_ slugs $ \slug ->
+    forM_ (zip (slugAccs slug) (mySlugNeutral slug)) $ \((acc, acc_is), ne) ->
+    sLoopNest (mySlugShape slug) $ \vec_is ->
+    copyDWIMFix acc (acc_is++vec_is) ne []
+
   body' <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
+    sComment "apply map function" $
+      body'' $ \all_red_res -> do
+      let slugs_res = chunks (map (length . mySlugNeutral) slugs) all_red_res
+      emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
+      forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
+        sLoopNest (mySlugShape slug) $ \vec_is -> do
+        sComment "load accumulator" $
+          forM_ (zip (myAccParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+          copyDWIMFix (paramName p) [] (Var acc) acc_is
+        sComment "load new values" $
+          forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+          copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+        sComment "apply reduction operator" $
+          compileStms mempty (bodyStms $ mySlugBody slug) $
+          sComment "store in accumulator" $
+          forM_ (zip
+                  (slugAccs slug)
+                  (bodyResult $ mySlugBody slug)) $ \((acc, acc_is), se) -> do
+          copyDWIMFix acc (acc_is ++ vec_is) se []
+          forM_ (zip (patternElements pat) (bodyResult $ mySlugBody slug)) $ \(pe, se') ->
+            copyDWIMFix (patElemName pe) [] se' []
 
-    compileStms (freeIn kres) kstms $ do
-      let writeResult pe (Returns _ se) =
-            copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
-          writeResult _ res =
-            error $ "writeResult: cannot handle " ++ pretty res
-      zipWithM_ writeResult (patternElements pat) kres
-
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') body'
+  emit $ Imp.Op $ Imp.ParRed (segFlat space) (product ns') body'
+  where
+    num_groups = segNumGroups lvl
+    _group_size = segGroupSize lvl
 
 
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
@@ -154,68 +215,43 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   emit $ Imp.DebugPrint "\n# SegScan -- end"  Nothing
 
 
-compileSegOp pat (SegRed lvl space reds _ body) = do
+
+compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  reds_group_res_arrs <- myGroupResultArrays DefaultSpace num_groups reds
-
-  let body'' red_cont = compileStms (freeIn $ kernelBodyLore body)(kernelBodyStms body) $ do
-        let (red_res, _) = splitAt (segRedResults reds) $ kernelBodyResult body
-        red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
-
-  num_groups' <- traverse toExp num_groups
-  group_size' <- traverse toExp group_size
-
-  emit $ Imp.DebugPrint "num_groups" $ Just $ Imp.unCount num_groups'
-  emit $ Imp.DebugPrint "group_size" $ Just $ Imp.unCount group_size'
-
-  -- Creates accumulator variables
-  slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
-
-  emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
-
-  dScope Nothing $ scopeOfLParams $ concatMap my_slugParams slugs
-
-  -- Initialize  neutral element accumualtor
-  sComment "neutral-initialise the accumulators" $
-    forM_ slugs $ \slug ->
-    forM_ (zip (slugAccs slug) (my_slugNeutral slug)) $ \((acc, acc_is), ne) ->
-    sLoopNest (my_slugShape slug) $ \vec_is ->
-    copyDWIMFix acc (acc_is++vec_is) ne []
-
   body' <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
-    sComment "apply map function" $
-      body'' $ \all_red_res -> do
-      let slugs_res = chunks (map (length . my_slugNeutral) slugs) all_red_res
-      emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
-      forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
-        sLoopNest (my_slugShape slug) $ \vec_is -> do
-        sComment "load accumulator" $
-          forM_ (zip (my_accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-          copyDWIMFix (paramName p) [] (Var acc) acc_is
-        sComment "load new values" $
-          forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
-          copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-        sComment "apply reduction operator" $
-          compileStms mempty (bodyStms $ my_slugBody slug) $
-          sComment "store in accumulator" $
-          forM_ (zip
-                  (slugAccs slug)
-                  (bodyResult $ my_slugBody slug)) $ \((acc, acc_is), se) -> do
-          copyDWIMFix acc (acc_is ++ vec_is) se []
-          forM_ (zip (patternElements pat) (bodyResult $ my_slugBody slug)) $ \(pe, se') ->
-            copyDWIMFix (patElemName pe) [] se' []
+   zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+   compileStms (freeIn kres) kstms $ do
+     let writeResult pe (Returns _ se) =
+           copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+         writeResult _ res =
+           error $ "writeResult: cannot handle " ++ pretty res
+     zipWithM_ writeResult (patternElements pat) kres
 
-  emit $ Imp.Op $ Imp.ParRed (segFlat space) (product ns') body'
+  let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn kstms)
+  ts <- mapM lookupType $ namesToList $ freeIn body'
+  let cdecls = map getCType ts
 
-  where
-    -- num_groups = segNumGroups $ SegThread {segNumGroups = Count $ Constant $ IntValue $ Int32Value 0,
-    --                                        segGroupSize = Count $ Constant $ IntValue $ Int32Value 0,
-    --                                        segVirt = SegVirt}
-    num_groups = segNumGroups lvl
-    group_size = segGroupSize lvl
+  emit $ Imp.Op $ Imp.ParLoop (tail paramsNames) (tail cdecls) (segFlat space) (product ns') body'
+
+  emit $ Imp.DebugPrint "\n# SegScan -- tmp"  Nothing
+  where getType t = case t of
+                  Prim pt -> Imp.Scalar pt
+                  Mem space' -> Imp.Mem space'
+                  Array pt _ _ -> Imp.Scalar pt -- TODO: Fix this!
+        getCType t = case t of
+                  Prim pt      -> primTypeToCType pt
+                  Mem space'   -> fatMemType space'
+                  Array pt _ _ -> primTypeToCType pt -- TODO: Fix this!
+        genParam (v, t) = case t of
+                  Prim pt      -> Imp.ScalarParam v pt
+                  Mem space'   -> Imp.MemParam v space'
+                  Array pt _ _ -> Imp.ScalarParam v pt
+        getVName v = case v of
+                  Imp.ScalarUse v _ -> v
+                  Imp.MemoryUse v   -> v
+                  Imp.ConstUse v _ -> v
 
 
 compileSegOp _ op =
