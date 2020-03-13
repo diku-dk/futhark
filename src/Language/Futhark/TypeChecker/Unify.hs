@@ -433,6 +433,11 @@ unifyWith onDims usage = subunify False mempty
          Scalar (Sum arg_cs))
           | M.keys cs == M.keys arg_cs ->
               unifySharedConstructors onDims usage bcs cs arg_cs
+          | otherwise -> do
+              let missing = filter (`notElem` M.keys arg_cs) (M.keys cs) ++
+                            filter (`notElem` M.keys cs) (M.keys arg_cs)
+              unifyError usage mempty bcs $
+                "Unshared constructors:" <+> commasep (map (("#"<>) . ppr) missing) <> "."
 
         _ | t1' == t2' -> return ()
           | otherwise -> failure
