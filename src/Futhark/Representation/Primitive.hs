@@ -974,24 +974,15 @@ primFuns = M.fromList
           Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
         _ -> Nothing))
 
-  , ("lerp32",
-     ([FloatType Float32, FloatType Float32, FloatType Float32], FloatType Float32,
-      \case
-        [FloatValue (Float32Value v0),
-         FloatValue (Float32Value v1),
-         FloatValue (Float32Value t)] ->
-          Just $ FloatValue $ Float32Value $
-          v0 + (v1-v0)*max 0 (min 1 t)
-        _ -> Nothing))
-  , ("lerp64",
-     ([FloatType Float64, FloatType Float64, FloatType Float64], FloatType Float64,
-      \case
-        [FloatValue (Float64Value v0),
-         FloatValue (Float64Value v1),
-         FloatValue (Float64Value t)] ->
-          Just $ FloatValue $ Float64Value $
-          v0 + (v1-v0)*max 0 (min 1 t)
-        _ -> Nothing))
+  , f32_3 "lerp32" (\v0 v1 t -> v0 + (v1-v0)*max 0 (min 1 t))
+  , f64_3 "lerp64" (\v0 v1 t -> v0 + (v1-v0)*max 0 (min 1 t))
+
+  , f32_3 "mad32" (\a b c -> a*b+c)
+  , f64_3 "mad64" (\a b c -> a*b+c)
+
+  , f32_3 "fma32" (\a b c -> a*b+c)
+  , f64_3 "fma64" (\a b c -> a*b+c)
+
   ]
   where i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
         i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))
@@ -999,6 +990,10 @@ primFuns = M.fromList
         i64 s f = (s, ([IntType Int64], IntType Int32, i64PrimFun f))
         f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
         f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
+        f32_3 s f = (s, ([FloatType Float32,FloatType Float32,FloatType Float32],
+                         FloatType Float32, f32PrimFun3 f))
+        f64_3 s f = (s, ([FloatType Float64,FloatType Float64,FloatType Float64],
+                         FloatType Float64, f64PrimFun3 f))
 
         i8PrimFun f [IntValue (Int8Value x)] =
           Just $ f x
@@ -1023,6 +1018,18 @@ primFuns = M.fromList
         f64PrimFun f [FloatValue (Float64Value x)] =
           Just $ FloatValue $ Float64Value $ f x
         f64PrimFun _ _ = Nothing
+
+        f32PrimFun3 f [FloatValue (Float32Value a),
+                       FloatValue (Float32Value b),
+                       FloatValue (Float32Value c)] =
+          Just $ FloatValue $ Float32Value $ f a b c
+        f32PrimFun3 _ _ = Nothing
+
+        f64PrimFun3 f [FloatValue (Float64Value a),
+                       FloatValue (Float64Value b),
+                       FloatValue (Float64Value c)] =
+          Just $ FloatValue $ Float64Value $ f a b c
+        f64PrimFun3 _ _ = Nothing
 
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool

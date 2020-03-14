@@ -330,6 +330,13 @@ private static double futhark_floor64(double x){return Math.Floor(x);}
 private static float futhark_lerp32(float v0, float v1, float t){return v0 + (v1-v0)*t;}
 private static double futhark_lerp64(double v0, double v1, double t){return v0 + (v1-v0)*t;}
 
+private static float futhark_fma32(float a, float b, float c){return a*b+c;}
+private static double futhark_fma64(double a, double b, double c){return a*b+c;}
+
+private static float futhark_mad32(float a, float b, float c){return a*b+c;}
+private static double futhark_mad64(double a, double b, double c){return a*b+c;}
+
+
 int futhark_popc8 (sbyte x) {
   int c = 0;
   for (; x != 0; ++c) {

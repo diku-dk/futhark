@@ -588,6 +588,12 @@ $esc:("#ifdef __OPENCL_VERSION__")
     static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
       return mix(v0, v1, t);
     }
+    static inline float $id:(funName' "mad32")(float a, float b, float c) {
+      return mad(a,b,c);
+    }
+    static inline float $id:(funName' "fma32")(float a, float b, float c) {
+      return fma(a,b,c);
+    }
 $esc:("#else")
     static inline float fmod32(float x, float y) {
       return fmodf(x, y);
@@ -603,6 +609,12 @@ $esc:("#else")
     }
     static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
       return v0 + (v1-v0)*t;
+    }
+    static inline float $id:(funName' "mad32")(float a, float b, float c) {
+      return a*b+c;
+    }
+    static inline float $id:(funName' "fma32")(float a, float b, float c) {
+      return fmaf(a,b,c);
     }
 $esc:("#endif")
 |]
@@ -689,6 +701,10 @@ cFloat64Funs = [C.cunit|
       return lgamma(x);
     }
 
+    static inline double $id:(funName' "fma64")(double a, double b, double c) {
+      return fma(a,b,c);
+    }
+
     static inline double $id:(funName' "round64")(double x) {
       return rint(x);
     }
@@ -727,7 +743,7 @@ cFloat64Funs = [C.cunit|
       return p.t;
     }
 
-    static inline float fmod64(float x, float y) {
+    static inline double fmod64(double x, double y) {
       return fmod(x, y);
     }
 
@@ -735,9 +751,15 @@ $esc:("#ifdef __OPENCL_VERSION__")
     static inline double $id:(funName' "lerp64")(double v0, double v1, double t) {
       return mix(v0, v1, t);
     }
+    static inline double $id:(funName' "mad64")(double a, double b, double c) {
+      return mad(a,b,c);
+    }
 $esc:("#else")
     static inline double $id:(funName' "lerp64")(double v0, double v1, double t) {
       return v0 + (v1-v0)*t;
+    }
+    static inline double $id:(funName' "mad64")(double a, double b, double c) {
+      return a*b+c;
     }
 $esc:("#endif")
 |]
