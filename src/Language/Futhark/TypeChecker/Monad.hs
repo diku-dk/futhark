@@ -89,8 +89,7 @@ instance Pretty Note where
   ppr (Note msg) = "Note:" <+> align msg
 
 instance Pretty Notes where
-  ppr (Notes notes) = folddoc twolines $ map ppr notes
-    where twolines x y = x <> line <> line <> y
+  ppr (Notes notes) = foldMap (((line<>line)<>) . ppr) notes
 
 aNote :: Pretty a => a -> Notes
 aNote = Notes . pure . Note . ppr
