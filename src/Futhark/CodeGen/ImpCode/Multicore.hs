@@ -5,6 +5,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , FunctionT (Function)
        , Code
        , Multicore(..)
+       , MulticoreFunc(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -24,19 +25,32 @@ type Function = Imp.Function Multicore
 -- | A piece of imperative code, with multicore operations inside.
 type Code = Imp.Code Multicore
 
+
+-- | A function
+data MulticoreFunc = MulticoreFunc [VName] [Type] Code
+
 -- | A parallel operation.
-data Multicore = ParLoop [VName] [Type] VName Imp.Exp Code
+data Multicore = ParLoop VName Imp.Exp MulticoreFunc
                | ParRed VName Imp.Exp Code
 
 
+instance Pretty MulticoreFunc where
+  ppr (MulticoreFunc fargs _ func) =
+    text "parfor" <+> ppr fargs <+> langle <+>
+    nestedBlock "{" "}" (ppr func)
+
 instance Pretty Multicore where
-  ppr (ParLoop fargs _ i e body) =
-    text "parfor" <+> ppr fargs <+> ppr i <+> langle <+> ppr e <+>
-    nestedBlock "{" "}" (ppr body)
+  ppr (ParLoop i e func) =
+    text "parfor" <+> ppr i <+> langle <+> ppr e <+>
+    nestedBlock "{" "}" (ppr func)
   ppr (ParRed i e body) =
     text "parred" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr body)
 
+
+instance FreeIn MulticoreFunc where
+  freeIn' (MulticoreFunc _ _ func) = freeIn' func
+
 instance FreeIn Multicore where
-  freeIn' (ParLoop _ _ _ e body) = freeIn' e <> freeIn' body
+  freeIn' (ParLoop _ e func) = freeIn' e <> freeIn' func
   freeIn' (ParRed _ e body) = freeIn' e <> freeIn' body

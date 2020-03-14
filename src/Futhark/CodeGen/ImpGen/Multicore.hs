@@ -223,7 +223,7 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
   ts <- mapM lookupType paramsNames
 
-  emit $ Imp.Op $ Imp.ParLoop (paramsNames) (map getType ts) (segFlat space) (product ns') body'
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
   where getType t = case t of
                       Prim pt      -> Imp.Scalar pt
                       Mem space'   -> Imp.Mem space'

@@ -137,7 +137,7 @@ copyMulticoreMemory _ _ destspace _ _ srcspace _ =
 
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop fargs ftypes i e body) = do
+compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
