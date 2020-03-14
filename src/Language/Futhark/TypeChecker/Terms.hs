@@ -310,7 +310,7 @@ data SizeSource = SourceArg FName (ExpBase NoInfo VName)
 -- generating unique names, as these will be user-visible.
 data TermTypeState = TermTypeState
                      { stateConstraints :: Constraints
-                     , stateCounter :: Int
+                     , stateCounter :: !Int
                      , stateDimTable :: M.Map SizeSource VName
                        -- ^ Mapping function arguments encountered to
                        -- the sizes they ended up generating (when
@@ -804,8 +804,8 @@ checkPattern' (PatternConstr n NoInfo ps loc) NoneInferred = do
   where usage = mkUsage loc "matching against constructor"
 
 patternNameMap :: Pattern -> NameMap
-patternNameMap = M.fromList . map asTerm . S.toList . patternIdents
-  where asTerm v = ((Term, baseName $ identName v), qualName $ identName v)
+patternNameMap = M.fromList . map asTerm . S.toList . patternNames
+  where asTerm v = ((Term, baseName v), qualName v)
 
 checkPattern :: UncheckedPattern -> InferredType -> (Pattern -> TermTypeM a)
              -> TermTypeM a
@@ -1029,8 +1029,7 @@ lexicalClosure params closure = do
                     Just (BoundV Local _ _) -> True
                     _ -> False
   return $ S.map AliasBound $ S.filter isLocal $
-    allOccuring closure S.\\
-    S.map identName (mconcat (map patternIdents params))
+    allOccuring closure S.\\ mconcat (map patternNames params)
 
 -- Check the common parts of ascription and coercion.
 checkAscript :: SrcLoc
@@ -1735,12 +1734,11 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
   -- and matches what happens for function calls.  Those arrays that
   -- really *cannot* be consumed will alias something unconsumable,
   -- and will be caught that way.
-  let bound_here = S.map identName (patternIdents mergepat'') <>
-                   S.fromList sparams <> form_bound
+  let bound_here = patternNames mergepat'' <> S.fromList sparams <> form_bound
       form_bound =
         case form' of
           For v _ -> S.singleton $ identName v
-          ForIn forpat _ -> S.map identName (patternIdents forpat)
+          ForIn forpat _ -> patternNames forpat
           While{} -> mempty
       loopt' = second (`S.difference` S.map AliasBound bound_here) $
                loopt `setUniqueness` Unique
@@ -1754,8 +1752,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
 
   where
     convergePattern pat body_cons body_t body_loc = do
-      let consumed_merge = S.map identName (patternIdents pat) `S.intersection`
-                           body_cons
+      let consumed_merge = patternNames pat `S.intersection` body_cons
 
           uniquePat (Wildcard (Info t) wloc) =
             Wildcard (Info $ t `setUniqueness` Nonunique) wloc
@@ -1858,7 +1855,7 @@ checkExp (Constr name es NoInfo loc) = do
   ets <- mapM expTypeFully es'
   mustHaveConstr (mkUsage loc "use of constructor") name t (toStruct <$> ets)
   -- A sum value aliases *anything* that went into its construction.
-  let als = mconcat (map aliases ets)
+  let als = foldMap aliases ets
   return $ Constr name es' (Info $ fromStruct t `addAliases` (<>als)) loc
 
 checkExp (Match e cs _ loc) =
@@ -2490,7 +2487,7 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList . M.map s
 
 hiddenParamNames :: [Pattern] -> Names
 hiddenParamNames params = hidden
-  where param_all_names = S.map identName $ mconcat $ map patternIdents params
+  where param_all_names = mconcat $ map patternNames params
         named (Named x, _) = Just x
         named (Unnamed, _) = Nothing
         param_names =
@@ -2613,7 +2610,7 @@ checkGlobalAliases params body_t loc = do
                     _ -> False
   let als = filter (not . isLocal) $ S.toList $
             boundArrayAliases body_t `S.difference`
-            S.map identName (mconcat (map patternIdents params))
+            foldMap patternNames params
   case als of
     v:_ | not $ null params ->
       typeError loc mempty $
@@ -2647,9 +2644,9 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((>1) . snd) . M.toList . d
 
 uniqueParamNames :: [Pattern] -> Names
 uniqueParamNames =
-  S.fromList . map identName
-  . filter (unique . unInfo . identType)
-  . S.toList . mconcat . map patternIdents
+  S.map identName
+  . S.filter (unique . unInfo . identType)
+  . foldMap patternIdents
 
 boundArrayAliases :: PatternType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als
@@ -2683,7 +2680,7 @@ nothingMustBeUnique loc = check
 verifyFunctionParams :: Maybe Name -> [Pattern] -> TermTypeM ()
 verifyFunctionParams fname params =
   onFailure (CheckingParams fname) $
-  verifyParams (mconcat (map patternNames params)) =<< mapM updateTypes params
+  verifyParams (foldMap patternNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p:ps)
       | d:_ <- S.toList $ patternDimNames p `S.intersection` forbidden =
@@ -2932,9 +2929,6 @@ arrayOfM :: (Pretty (ShapeDecl dim), Monoid as) =>
 arrayOfM loc t shape u = do
   zeroOrderType (mkUsage loc "use as array element") "type used in array" t
   return $ arrayOf t shape u
-
-patternNames :: Pattern -> S.Set VName
-patternNames = S.map identName . patternIdents
 
 updateTypes :: ASTMappable e => e -> TermTypeM e
 updateTypes = astMap tv
