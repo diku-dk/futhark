@@ -31,26 +31,25 @@ data MulticoreFunc = MulticoreFunc [VName] [Type] Code
 
 -- | A parallel operation.
 data Multicore = ParLoop VName Imp.Exp MulticoreFunc
-               | ParRed VName Imp.Exp Code
+               | ParLoopAcc VName Imp.Exp MulticoreFunc -- A loop with an accumulator
 
 
 instance Pretty MulticoreFunc where
-  ppr (MulticoreFunc fargs _ func) =
+  ppr (MulticoreFunc fargs _ body) =
     text "parfor" <+> ppr fargs <+> langle <+>
-    nestedBlock "{" "}" (ppr func)
+    nestedBlock "{" "}" (ppr body)
 
 instance Pretty Multicore where
   ppr (ParLoop i e func) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr func)
-  ppr (ParRed i e body) =
-    text "parred" <+> ppr i <+> langle <+> ppr e <+>
-    nestedBlock "{" "}" (ppr body)
-
+  ppr (ParLoopAcc i e func) =
+    text "parfor" <+> ppr i <+> langle <+> ppr e <+>
+    nestedBlock "{" "}" (ppr func)
 
 instance FreeIn MulticoreFunc where
-  freeIn' (MulticoreFunc _ _ func) = freeIn' func
+  freeIn' (MulticoreFunc _ _ body) = freeIn' body
 
 instance FreeIn Multicore where
   freeIn' (ParLoop _ e func) = freeIn' e <> freeIn' func
-  freeIn' (ParRed _ e body) = freeIn' e <> freeIn' body
+  freeIn' (ParLoopAcc _ e func) = freeIn' e <> freeIn' func

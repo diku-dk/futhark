@@ -115,8 +115,9 @@ mySegRedOpSlug (op, group_res_arrs) =
               error "couldn't determine type"
 
 
-
-
+-- TODOs
+-- 0. Clean-up (write wrapper and remove code duplications)
+-- 1. Makes segRed and segScan parallel
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
 
@@ -126,57 +127,34 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  -- Desclare neutral element
-  dScope Nothing $ scopeOfLParams $ lambdaParams lore
-
   let (scan_x_params, scan_y_params) =
         splitAt (length subexps) $ lambdaParams lore
+  dScope Nothing $ scopeOfLParams $ lambdaParams lore
 
   -- Set neutral element value
   forM_ (zip scan_x_params subexps) $ \(p, ne) ->
-      copyDWIMFix (paramName p) [] ne []
+       copyDWIMFix (paramName p) [] ne []
 
   body' <- collect $ do
-    emit $ Imp.DebugPrint "\n# body -- start"  Nothing
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
-
+    -- Desclare neutral element
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     sComment "Read value" $ compileStms mempty (kernelBodyStms kbody) $ do
-          let (scan_res, _map_res) = splitAt (length subexps) $ kernelBodyResult kbody
-          sComment "write to-scan values to parameters" $
-            forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-            copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
+      let (scan_res, _map_res) = splitAt (length subexps) $ kernelBodyResult kbody
+      forM_ (zip scan_y_params scan_res) $ \(p, se) ->
+        copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
 
-    sComment "combine with carry and write to local memory" $
+    sComment "combine with carry and write back to res and accum" $
       compileStms mempty (bodyStms $ lambdaBody lore) $
-      forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lore) $ \(pe, se) -> do
-      copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
-      forM_ (zip scan_x_params $ bodyResult $ lambdaBody lore) $ \(p, ne) ->
-        copyDWIMFix (paramName p) [] ne []
-
-    emit $ Imp.DebugPrint "\n# body -- end"  Nothing
-
-  emit $ Imp.Op $ Imp.ParRed (segFlat space) (product ns') body'
-  emit $ Imp.DebugPrint "\n# SegScan -- end"  Nothing
-
-
-
-compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
-  let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  body' <- collect $ do
-   zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-   compileStms (freeIn kres) kstms $ do
-     let writeResult pe (Returns _ se) =
-           copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
-         writeResult _ res =
-           error $ "writeResult: cannot handle " ++ pretty res
-     zipWithM_ writeResult (patternElements pat) kres
+      forM_ (zip3  scan_x_params (patternElements pat) $ bodyResult $ lambdaBody lore) $ \(p, pe, se) -> do
+        copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+        copyDWIMFix (paramName p) [] se []
 
   let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
   ts <- mapM lookupType paramsNames
 
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
+  emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
+
+
 
 -- TODO
 -- 1. This can't handle multidimensional reductions (e.g. tests/soacs/reduce4.fut)
@@ -198,8 +176,10 @@ compileSegOp pat (SegRed lvl space reds _ body) = do
   -- Initialize  neutral element accumualtor
   sComment "neutral-initialise the accumulators" $
     forM_ slugs $ \slug ->
-      forM_ (zip (patternElements pat) (mySlugNeutral slug)) $ \(pe, ne) ->
-        copyDWIMFix (patElemName pe) [] ne []
+    forM_ (zip (slugAccs slug) (mySlugNeutral slug)) $ \((acc, acc_is), ne) ->
+    sLoopNest (mySlugShape slug) $ \vec_is ->
+    copyDWIMFix acc (acc_is++vec_is) ne []
+
 
   body' <- collect $ do
     -- Intialize function params
@@ -218,17 +198,37 @@ compileSegOp pat (SegRed lvl space reds _ body) = do
           copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
         sComment "apply reduction operator" $
           compileStms mempty (bodyStms $ mySlugBody slug) $
-            forM_ (zip (patternElements pat) (bodyResult $ mySlugBody slug)) $ \(pe, se') ->
+            forM_ (zip3 (patternElements pat) (slugAccs slug) (bodyResult $ mySlugBody slug)) $
+            \(pe, (acc, acc_is), se') -> do
+              copyDWIMFix acc (acc_is ++ vec_is) se' []
               copyDWIMFix (patElemName pe) [] se' []
 
 
   let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
   ts <- mapM lookupType paramsNames
 
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
+  emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
   where
     -- This should be the appropiate thread numbers
     num_threads = segNumGroups lvl
+
+compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  body' <- collect $ do
+   zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+   compileStms (freeIn kres) kstms $ do
+     let writeResult pe (Returns _ se) =
+           copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+         writeResult _ res =
+           error $ "writeResult: cannot handle " ++ pretty res
+     zipWithM_ writeResult (patternElements pat) kres
+
+  let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
+  ts <- mapM lookupType paramsNames
+
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
 
 
 compileSegOp _ op =
