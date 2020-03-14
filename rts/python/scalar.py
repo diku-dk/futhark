@@ -485,4 +485,16 @@ def futhark_lerp32(v0, v1, t):
 def futhark_lerp64(v0, v1, t):
   return v0 + (v1-v0)*t
 
+def futhark_mad32(a, b, c):
+  return a * b + c
+
+def futhark_mad64(a, b, c):
+  return a * b + c
+
+def futhark_fma32(a, b, c):
+  return a * b + c
+
+def futhark_fma64(a, b, c):
+  return a * b + c
+
 # End of scalar.py.

@@ -170,6 +170,16 @@ module type real = {
   val floor : t -> t
   val trunc : t -> t
 
+  -- | Computes `a*b+c`.  Depending on the compiler backend, this may
+  -- be fused into a single operation that is faster but less
+  -- accurate.  Do not confuse it with `fma@term`.
+  val mad : (a: t) -> (b: t) -> (c: t) -> t
+
+  -- | Computes `a*b+c`, with `a*b` being rounded with infinite
+  -- precision.  Rounding of intermediate products shall not
+  -- occur. Edge case behavior is per the IEEE 754-2008 standard.
+  val fma : (a: t) -> (b: t) -> (c: t) -> t
+
   -- | Round to the nearest integer, with alfway cases rounded to the
   -- nearest even integer.  Note that this differs from `round()` in
   -- C, but matches more modern languages.
@@ -905,7 +915,10 @@ module f64: (float with t = f64 with int_t = u64) = {
   let atan2 (x: f64) (y: f64) = intrinsics.atan2_64 (x, y)
   let gamma = intrinsics.gamma64
   let lgamma = intrinsics.lgamma64
-  let lerp v0 v1 t = intrinsics.lerp64 (v0, v1, t)
+
+  let lerp v0 v1 t = intrinsics.lerp64 (v0,v1,t)
+  let fma a b c = intrinsics.fma64 (a,b,c)
+  let mad a b c = intrinsics.mad64 (a,b,c)
 
   let ceil = intrinsics.ceil64
   let floor = intrinsics.floor64
@@ -1010,7 +1023,10 @@ module f32: (float with t = f32 with int_t = u32) = {
   let atan2 (x: f32) (y: f32) = intrinsics.atan2_32 (x, y)
   let gamma = intrinsics.gamma32
   let lgamma = intrinsics.lgamma32
-  let lerp v0 v1 t = intrinsics.lerp32 (v0, v1, t)
+
+  let lerp v0 v1 t = intrinsics.lerp32 (v0,v1,t)
+  let fma a b c = intrinsics.fma32 (a,b,c)
+  let mad a b c = intrinsics.mad32 (a,b,c)
 
   let ceil = intrinsics.ceil32
   let floor = intrinsics.floor32
