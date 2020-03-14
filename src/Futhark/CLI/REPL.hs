@@ -147,7 +147,7 @@ newFutharkiState count maybe_file = runExceptT $ do
 
       -- Then make the prelude available in the type checker.
       (tenv, d, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv
-                         (T.mkInitialImport ".") $ mkOpen "/futlib/prelude"
+                         (T.mkInitialImport ".") $ mkOpen "/prelude/prelude"
       -- Then in the interpreter.
       ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
@@ -164,7 +164,7 @@ newFutharkiState count maybe_file = runExceptT $ do
       ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
                map (fmap fileProg) imports
       (tenv1, d1, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv imp $
-                           mkOpen "/futlib/prelude"
+                           mkOpen "/prelude/prelude"
       (tenv2, d2, src'') <- badOnLeft T.prettyTypeError $ T.checkDec imports src' tenv1 imp $
                             mkOpen $ toPOSIX $ dropExtension file
       ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
@@ -247,7 +247,7 @@ onDec d = do
   -- that 'import "foo"' is a declaration.  We have to involve a lot
   -- of machinery to load this external code before executing the
   -- declaration itself.
-  let basis = Basis imports src ["/futlib/prelude"]
+  let basis = Basis imports src ["/prelude/prelude"]
       mkImport = uncurry $ T.mkImportFrom cur_import
   imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
 
