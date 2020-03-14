@@ -118,9 +118,9 @@ mySegRedOpSlug (op, group_res_arrs) =
 -- TODOs
 -- 0. Clean-up (write wrapper and remove code duplications)
 -- 1. Makes segRed and segScan parallel
+-- 2. What does 2nd arg to compileStms do?
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
-
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
 
   emit $ Imp.DebugPrint "\n# SegScan -- start"  Nothing
@@ -129,14 +129,16 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
 
   let (scan_x_params, scan_y_params) =
         splitAt (length subexps) $ lambdaParams lore
-  dScope Nothing $ scopeOfLParams $ lambdaParams lore
 
   -- Set neutral element value
+  dScope Nothing $ scopeOfLParams scan_x_params
   forM_ (zip scan_x_params subexps) $ \(p, ne) ->
        copyDWIMFix (paramName p) [] ne []
 
   body' <- collect $ do
-    -- Desclare neutral element
+    -- Declare y param
+    dScope Nothing $ scopeOfLParams scan_y_params
+
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     sComment "Read value" $ compileStms mempty (kernelBodyStms kbody) $ do
       let (scan_res, _map_res) = splitAt (length subexps) $ kernelBodyResult kbody
