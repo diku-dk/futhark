@@ -1031,15 +1031,6 @@ lexicalClosure params closure = do
   return $ S.map AliasBound $ S.filter isLocal $
     allOccuring closure S.\\ mconcat (map patternNames params)
 
-noAliasesIfOverloaded :: PatternType -> TermTypeM PatternType
-noAliasesIfOverloaded t@(Scalar (TypeVar _ u tn [])) = do
-  subst <- fmap snd . M.lookup (typeLeaf tn) <$> getConstraints
-  case subst of
-    Just Overloaded{} -> return $ Scalar $ TypeVar mempty u tn []
-    _ -> return t
-noAliasesIfOverloaded t =
-  return t
-
 -- Check the common parts of ascription and coercion.
 checkAscript :: SrcLoc
              -> UncheckedTypeDecl
