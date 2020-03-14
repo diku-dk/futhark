@@ -34,6 +34,12 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
         opCompiler _ (Inner (OtherOp ())) =
           return ()
 
+getType :: TypeBase shape u -> Imp.Type
+getType t = case t of
+             Prim pt      -> Imp.Scalar pt
+             Mem space'   -> Imp.Mem space'
+             Array pt _ _ -> Imp.Scalar pt -- TODO: Fix this!
+
 
 -- |
 -- These are copied from SegRed.hs but the module doesn't export them
@@ -113,59 +119,6 @@ mySegRedOpSlug (op, group_res_arrs) =
 
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
-compileSegOp pat (SegRed lvl space reds _ body) = do
-  let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  reds_group_res_arrs <- myGroupResultArrays DefaultSpace num_groups reds
-
-  let body'' red_cont = compileStms (freeIn $ kernelBodyLore body)(kernelBodyStms body) $ do
-        let (red_res, _) = splitAt (segRedResults reds) $ kernelBodyResult body
-        red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
-
-  -- Creates accumulator variables
-  slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
-
-  emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
-
-  dScope Nothing $ scopeOfLParams $ concatMap mySlugParams slugs
-
-  -- Initialize  neutral element accumualtor
-  sComment "neutral-initialise the accumulators" $
-    forM_ slugs $ \slug ->
-    forM_ (zip (slugAccs slug) (mySlugNeutral slug)) $ \((acc, acc_is), ne) ->
-    sLoopNest (mySlugShape slug) $ \vec_is ->
-    copyDWIMFix acc (acc_is++vec_is) ne []
-
-  body' <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
-    sComment "apply map function" $
-      body'' $ \all_red_res -> do
-      let slugs_res = chunks (map (length . mySlugNeutral) slugs) all_red_res
-      emit $ Imp.DebugPrint "\n# SegRed -- test"  Nothing
-      forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
-        sLoopNest (mySlugShape slug) $ \vec_is -> do
-        sComment "load accumulator" $
-          forM_ (zip (myAccParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-          copyDWIMFix (paramName p) [] (Var acc) acc_is
-        sComment "load new values" $
-          forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
-          copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-        sComment "apply reduction operator" $
-          compileStms mempty (bodyStms $ mySlugBody slug) $
-          sComment "store in accumulator" $
-          forM_ (zip
-                  (slugAccs slug)
-                  (bodyResult $ mySlugBody slug)) $ \((acc, acc_is), se) -> do
-          copyDWIMFix acc (acc_is ++ vec_is) se []
-          forM_ (zip (patternElements pat) (bodyResult $ mySlugBody slug)) $ \(pe, se') ->
-            copyDWIMFix (patElemName pe) [] se' []
-
-  emit $ Imp.Op $ Imp.ParRed (segFlat space) (product ns') body'
-  where
-    num_groups = segNumGroups lvl
-    _group_size = segGroupSize lvl
-
 
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
 
@@ -224,10 +177,58 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   ts <- mapM lookupType paramsNames
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
-  where getType t = case t of
-                      Prim pt      -> Imp.Scalar pt
-                      Mem space'   -> Imp.Mem space'
-                      Array pt _ _ -> Imp.Scalar pt -- TODO: Fix this!
+
+
+compileSegOp pat (SegRed lvl space reds _ body) = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  reds_group_res_arrs <- myGroupResultArrays DefaultSpace num_groups reds
+
+  let body'' red_cont = compileStms mempty (kernelBodyStms body) $ do
+        let (red_res, _) = splitAt (segRedResults reds) $ kernelBodyResult body
+        red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+
+  -- Creates accumulator variables
+  slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
+
+
+  -- Initialize  neutral element accumualtor
+  sComment "neutral-initialise the accumulators" $
+    forM_ slugs $ \slug ->
+      forM_ (zip (patternElements pat) (mySlugNeutral slug)) $ \(pe, ne) ->
+          copyDWIMFix (patElemName pe) [] ne []
+
+  body' <- collect $ do
+    -- Intialize function params
+    dScope Nothing $ scopeOfLParams $ concatMap mySlugParams slugs
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space -- This setups index variables
+    sComment "apply map function" $
+      body'' $ \all_red_res -> do
+      let slugs_res = chunks (map (length . mySlugNeutral) slugs) all_red_res
+      forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
+        sLoopNest (mySlugShape slug) $ \vec_is -> do
+        sComment "load accumulator" $
+          forM_ (zip (myAccParams slug) (patternElements pat)) $ \(p, pe) ->
+          copyDWIMFix (paramName p) [] (Var $ patElemName pe) []
+        sComment "load new values" $
+          forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+          copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+        sComment "apply reduction operator" $
+          compileStms mempty (bodyStms $ mySlugBody slug) $
+          sComment "store in accumulator" $
+            forM_ (zip (patternElements pat) (bodyResult $ mySlugBody slug)) $ \(pe, se') ->
+              copyDWIMFix (patElemName pe) [] se' []
+
+
+  let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
+  ts <- mapM lookupType paramsNames
+
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
+  where
+    num_groups = segNumGroups lvl
+    _group_size = segGroupSize lvl
+
 
 compileSegOp _ op =
   error $ "compileSegOp: unhandled: " ++ pretty op
