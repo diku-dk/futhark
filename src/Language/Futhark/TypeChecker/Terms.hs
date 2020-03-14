@@ -1088,20 +1088,22 @@ unscopeType tloc unscoped t = do
 
 -- 'checkApplyExp' is like 'checkExp', but tries to find the "root
 -- function", for better error messages.
-checkApplyExp :: UncheckedExp -> TermTypeM (Exp, Maybe (QualName VName))
+checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
 
 checkApplyExp (Apply e1 e2 _ _ loc) = do
-  (e1', fname) <- checkApplyExp e1
+  (e1', (fname, i)) <- checkApplyExp e1
   arg <- checkArg e2
   t <- expType e1'
-  (t1, rt, argext, exts) <- checkApply loc fname t arg
+  (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
   return (Apply e1' (argExp arg) (Info (diet t1, argext)) (Info rt, Info exts) loc,
-          fname)
+          (fname, i+1))
 
 checkApplyExp e = do
   e' <- checkExp e
-  return (e', case e' of Var qn _ _ -> Just qn
-                         _ -> Nothing)
+  return (e',
+          (case e' of Var qn _ _ -> Just qn
+                      _ -> Nothing,
+           0))
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 
@@ -1235,8 +1237,8 @@ checkExp (BinOp (op, oploc) NoInfo (e1,_) (e2,_) NoInfo NoInfo loc) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op') ftype e1_arg
-  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op') rt e2_arg
+  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
+  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
 
   return $ BinOp (op', oploc) (Info ftype)
     (argExp e1_arg, Info (toStruct p1_t, p1_ext))
@@ -1524,7 +1526,7 @@ checkExp (OpSection op _ loc) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
-  (t1, rt, argext, retext) <- checkApply loc (Just op') ftype e_arg
+  (t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
   case rt of
     Scalar (Arrow _ _ t2 rettype) ->
       return $ OpSectionLeft op' (Info ftype) (argExp e_arg)
@@ -1538,7 +1540,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   case ftype of
     Scalar (Arrow as1 m1 t1 (Scalar (Arrow as2 m2 t2 ret))) -> do
       (t2', _, argext, _) <-
-        checkApply loc (Just op')
+        checkApply loc (Just op', 1)
         (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
       return $ OpSectionRight op' (Info ftype) (argExp e_arg)
         (Info $ toStruct t1, Info (toStruct t2', argext)) (Info ret) loc
@@ -2134,9 +2136,16 @@ instantiateDimsInReturnType :: SrcLoc -> Maybe (QualName VName)
 instantiateDimsInReturnType tloc fname =
   instantiateEmptyArrayDims tloc "ret" $ Rigid $ RigidRet fname
 
-checkApply :: SrcLoc -> Maybe (QualName VName) -> PatternType -> Arg
+-- Some information about the function/operator we are trying to
+-- apply, and how many arguments it has previously accepted.  Used for
+-- generating nicer type errors.
+type ApplyOp = (Maybe (QualName VName), Int)
+
+checkApply :: SrcLoc -> ApplyOp -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
-checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) =
+checkApply loc (fname, _)
+           (Scalar (Arrow as pname tp1 tp2))
+           (argexp, argtype, dflow, argloc) =
   onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
@@ -2190,10 +2199,17 @@ checkApply loc fname tfun@(Scalar TypeVar{}) arg = do
   tfun' <- normPatternType tfun
   checkApply loc fname tfun' arg
 
-checkApply loc _ ftype arg =
+checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
+  let fname' = maybe "expression" (pquote . ppr) fname
+
   typeError loc mempty $
-  "Attempt to apply an expression of type" <+> ppr ftype <+>
-  "to an argument of type" <+> ppr (argType arg) <> "."
+    if prev_applied == 0
+    then "Cannot apply" <+> fname' <+> "as function, as it has type:" </>
+         indent 2 (ppr ftype)
+    else "Cannot apply" <+> fname' <+> "to argument #" <> ppr (prev_applied+1) <+>
+         pquote (shorten $ pretty $ flatten $ ppr argexp) <> "," <+/>
+         "as" <+> fname' <+> "only takes" <+> ppr prev_applied <+>
+         "arguments."
 
 isInt32 :: Exp -> Maybe Int32
 isInt32 (Literal (SignedValue (Int32Value k')) _) = Just $ fromIntegral k'
