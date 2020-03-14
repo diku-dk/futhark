@@ -37,7 +37,7 @@ compileProg prog = do
                 include_opengl_h [Space "device", DefaultSpace]
                 cliOptions prog'
   where operations :: GC.Operations OpenGL ()
-        operations = GC.Operations
+        operations = GC.defaultOperations
                      { GC.opsCompiler    = callShader
                      , GC.opsWriteScalar = writeOpenGLScalar
                      , GC.opsReadScalar  = readOpenGLScalar
@@ -144,14 +144,14 @@ copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nby
       OPENGL_SUCCEED(glGetError());
     }|]
 copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
-  GC.stm [C.cstm|{
+  GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
       glCopyNamedBufferSubData($exp:srcmem, $exp:destmem,
                                $exp:srcidx, $exp:destidx,
                                $exp:nbytes);
       OPENGL_SUCCEED(glGetError());
     }
-  }|]
+  |]
 copyOpenGLMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
   GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyOpenGLMemory _ _ destspace _ _ srcspace _ =
