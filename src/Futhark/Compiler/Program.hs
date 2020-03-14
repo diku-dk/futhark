@@ -35,7 +35,7 @@ import Language.Futhark.Parser
 import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.Semantic
-import Language.Futhark.Futlib
+import Language.Futhark.Prelude
 
 -- | A little monad for reading and type-checking a Futhark program.
 type CompilerM m = ReaderT [FilePath] (StateT ReaderState m)
@@ -121,12 +121,12 @@ readImportFile include = do
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
   r <- liftIO $ readFileSafely $ includeToFilePath include
-  case (r, lookup futlib_str futlib) of
+  case (r, lookup prelude_str prelude) of
     (Just (Right (filepath,s)), _) -> return (s, filepath)
     (Just (Left e), _)  -> externalErrorS e
-    (Nothing, Just t)   -> return (t, futlib_str)
+    (Nothing, Just t)   -> return (t, prelude_str)
     (Nothing, Nothing)  -> externalErrorS not_found
-   where futlib_str = "/" Posix.</> includeToString include Posix.<.> "fut"
+   where prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
          not_found =
            "Error at " ++ E.locStr (srclocOf include) ++
@@ -141,8 +141,8 @@ readLibraryWithBasis :: (MonadError CompilerError m, MonadIO m) =>
                            VNameSource)
 readLibraryWithBasis builtin fps = do
   (_, imps, src) <- runCompilerM builtin $
-    mapM (readImport [] . mkInitialImport) prelude
-  let basis = Basis imps src prelude
+    readImport [] $ mkInitialImport "/prelude/prelude"
+  let basis = Basis imps src ["/prelude/prelude"]
   readLibrary' basis fps
 
 -- | Read and type-check a Futhark library (multiple files, relative
@@ -163,7 +163,7 @@ readLibrary' basis fps = runCompilerM basis $ mapM onFile fps
             where (fp_name, _) = Posix.splitExtension fp
 
 -- | Read and type-check Futhark imports (no @.fut@ extension; may
--- refer to baked-in futlib).  This is an exotic operation that
+-- refer to baked-in prelude).  This is an exotic operation that
 -- probably only makes sense in an interactive environment.
 readImports :: (MonadError CompilerError m, MonadIO m) =>
                Basis -> [ImportName]

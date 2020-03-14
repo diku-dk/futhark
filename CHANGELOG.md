@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * `"futlib"` is now called `"prelude"`, and it is now an error to
+    import it explicitly.
+
 ### Fixed
 
   * Corrected address calculations in `csharp` backend.

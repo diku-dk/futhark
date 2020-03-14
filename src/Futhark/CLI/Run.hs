@@ -116,7 +116,7 @@ newFutharkiState cfg file = runExceptT $ do
   ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
            map (fmap fileProg) imports
   (tenv1, d1, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv imp $
-                       mkOpen "/futlib/prelude"
+                       mkOpen "/prelude/prelude"
   (tenv2, d2, _) <- badOnLeft T.prettyTypeError $ T.checkDec imports src' tenv1 imp $
                     mkOpen $ toPOSIX $ dropExtension file
   ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)

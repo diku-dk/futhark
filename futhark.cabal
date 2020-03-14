@@ -23,7 +23,7 @@ extra-source-files:
     rts/csharp/*.cs
     rts/futhark-doc/*.css
     rts/python/*.py
-    futlib/*.fut
+    prelude/*.fut
 -- Just enough of the docs to build the manpages.
     docs/**/*.rst
     docs/Makefile
@@ -222,7 +222,7 @@ library
       Language.Futhark
       Language.Futhark.Attributes
       Language.Futhark.Core
-      Language.Futhark.Futlib
+      Language.Futhark.Prelude
       Language.Futhark.Interpreter
       Language.Futhark.Parser
       Language.Futhark.Pretty
