@@ -172,7 +172,7 @@ module type real = {
 
   -- | Computes `a*b+c`.  Depending on the compiler backend, this may
   -- be fused into a single operation that is faster but less
-  -- accurate.  Do not confuse it with `fma@term`.
+  -- accurate.  Do not confuse it with `fma`@term.
   val mad : (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Computes `a*b+c`, with `a*b` being rounded with infinite
