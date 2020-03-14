@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `f32` and `f64` modules now also define `sinh`, `cosh`,
     `tanh`, `asinh`, `acosh`, and `atanh` functions.
 
+  * The `f32` and `f64` modules now also define `fma` and `mad`
+    functions.
+
 ### Removed
 
   * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,
