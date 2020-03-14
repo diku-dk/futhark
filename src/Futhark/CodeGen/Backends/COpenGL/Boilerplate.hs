@@ -250,6 +250,7 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                      ctx->profiling_paused = 0;
                      ctx->logging          = cfg->opengl.logging;
                      ctx->error            = NULL;
+                     create_lock(&ctx->lock);
 
                      $stms:init_fields
                      //$stms:ctx_opengl_inits
