@@ -178,12 +178,15 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
 
-
+-- TODO
+-- 1. This can't handle multidimensional reductions (e.g. tests/soacs/reduce4.fut)
+-- 2. Need to partition reduction into @num_threads smaller Reductions
+-- 2.a and add a accumulator loop
 compileSegOp pat (SegRed lvl space reds _ body) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  reds_group_res_arrs <- myGroupResultArrays DefaultSpace num_groups reds
+  reds_group_res_arrs <- myGroupResultArrays DefaultSpace num_threads reds
 
   let body'' red_cont = compileStms mempty (kernelBodyStms body) $ do
         let (red_res, _) = splitAt (segRedResults reds) $ kernelBodyResult body
@@ -192,12 +195,11 @@ compileSegOp pat (SegRed lvl space reds _ body) = do
   -- Creates accumulator variables
   slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
 
-
   -- Initialize  neutral element accumualtor
   sComment "neutral-initialise the accumulators" $
     forM_ slugs $ \slug ->
       forM_ (zip (patternElements pat) (mySlugNeutral slug)) $ \(pe, ne) ->
-          copyDWIMFix (patElemName pe) [] ne []
+        copyDWIMFix (patElemName pe) [] ne []
 
   body' <- collect $ do
     -- Intialize function params
@@ -211,12 +213,11 @@ compileSegOp pat (SegRed lvl space reds _ body) = do
         sComment "load accumulator" $
           forM_ (zip (myAccParams slug) (patternElements pat)) $ \(p, pe) ->
           copyDWIMFix (paramName p) [] (Var $ patElemName pe) []
-        sComment "load new values" $
+        sComment "set new values to func_param" $
           forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
           copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
         sComment "apply reduction operator" $
           compileStms mempty (bodyStms $ mySlugBody slug) $
-          sComment "store in accumulator" $
             forM_ (zip (patternElements pat) (bodyResult $ mySlugBody slug)) $ \(pe, se') ->
               copyDWIMFix (patElemName pe) [] se' []
 
@@ -226,8 +227,8 @@ compileSegOp pat (SegRed lvl space reds _ body) = do
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc paramsNames (map getType ts) body')
   where
-    num_groups = segNumGroups lvl
-    _group_size = segGroupSize lvl
+    -- This should be the appropiate thread numbers
+    num_threads = segNumGroups lvl
 
 
 compileSegOp _ op =
