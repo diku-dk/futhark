@@ -118,29 +118,23 @@ copyOpenGLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nby
   GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
       $id:mapped_mem =
-        ($ty:mem_t*)glMapNamedBuffer($exp:srcmem, GL_READ_ONLY);
+        ($ty:mem_t*)glMapNamedBufferRange($exp:srcmem,
+                                          $exp:srcidx,
+                                          $exp:nbytes,
+                                          GL_MAP_READ_BIT);
+        OPENGL_SUCCEED(glGetError());
+        glUnmapNamedBuffer($exp:srcmem);
         OPENGL_SUCCEED(glGetError());
    }|]
   GC.copyMemoryDefaultSpace destmem destidx [C.cexp|$id:mapped_mem|] srcidx nbytes
-  GC.stm [C.cstm|
-  if ($exp:nbytes > 0) {
-    glUnmapNamedBuffer($exp:srcmem);
-    OPENGL_SUCCEED(glGetError());
-  }|]
-copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes = do
-  mapped_mem <- newVName "mapped_dest_memory"
-  mem_t      <- openglMemoryType "device"
-  GC.decl [C.cdecl|$ty:mem_t *$id:mapped_mem;|]
+copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
   GC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      $id:mapped_mem =
-        ($ty:mem_t*)glMapNamedBuffer($exp:destmem, GL_WRITE_ONLY);
-        OPENGL_SUCCEED(glGetError());
-    }|]
-  GC.copyMemoryDefaultSpace [C.cexp|$id:mapped_mem|] destidx srcmem srcidx nbytes
-  GC.stm [C.cstm|
-    if ($exp:nbytes > 0) {
-      glUnmapNamedBuffer($exp:destmem);
+      glNamedBufferSubData($exp:destmem,
+                           $exp:destidx,
+                           $exp:nbytes,
+                           ($exp:srcmem + $exp:srcidx)
+                          );
       OPENGL_SUCCEED(glGetError());
     }|]
 copyOpenGLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
