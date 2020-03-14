@@ -141,38 +141,38 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
-  ctx <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
+  bodyvals <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s {
              $sdecls:fields
            };|])
 
   f <- GC.publicMulticoreDef "parloop" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i);|],
-    [C.cedecl|int $id:s(struct $id:ctx *ctx, int $id:i) {
-            $decls:(decl_and_get_vals)
+   ([C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i);|],
+    [C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i) {
+            $decls:(decl_and_get_vals bodyvals)
             $items:body'
             return 0;
    }|])
 
 
   -- Declare and set values
-  GC.decl [C.cdecl|struct $id:ctx $id:ctx;|]
-  GC.stms [C.cstms|$stms:(set_vals ctx)|]
+  GC.decl [C.cdecl|struct $id:bodyvals $id:bodyvals;|]
+  GC.stms [C.cstms|$stms:(set_vals bodyvals)|]
 
-  GC.stms [[C.cstm|$pragma:("omp parallel for")|],
-           [C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
-                   $id:f(&$id:ctx, $id:i);
+  -- GC.stm  [C.cstm|$pragma:("omp parallel for")|]
+  GC.stms [[C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
+                   $id:f(&$id:bodyvals, $id:i);
                  }|]]
 
   where fields = [ [C.csdecl|$ty:ty *$id:name;|]
                  | (name, ty) <- zip fargs fctypes]
 
-        set_vals ct = [ [C.cstm|$id:(ct).$id:name=&$id:name;|]
-                      | name <- fargs]
+        set_vals bodyvals = [ [C.cstm|$id:bodyvals.$id:name=&$id:name;|]
+                              | name <- fargs ]
 
-        decl_and_get_vals = [ [C.cdecl|$ty:ty $id:name = *ctx->$id:name;|]
-                            | (name, ty) <- (zip fargs fctypes) ]
+        decl_and_get_vals bodyvals = [ [C.cdecl|$ty:ty $id:name = *$id:bodyvals->$id:name;|]
+                                       | (name, ty) <- zip fargs fctypes ]
         getCType t = case t of
                       Scalar pt  -> GC.primTypeToCType pt
                       Mem space' -> GC.fatMemType space'
