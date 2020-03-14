@@ -2154,7 +2154,9 @@ type ApplyOp = (Maybe (QualName VName), Int)
 
 checkApply :: SrcLoc -> ApplyOp -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
-checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) =
+checkApply loc (fname, _)
+           (Scalar (Arrow as pname tp1 tp2))
+           (argexp, argtype, dflow, argloc) =
   onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
@@ -2218,9 +2220,7 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
     else "Cannot apply" <+> fname' <+> "to argument #" <> ppr (prev_applied+1) <+>
          pquote (shorten $ pretty $ flatten $ ppr argexp) <> "," <+/>
          "as" <+> fname' <+> "only takes" <+> ppr prev_applied <+>
-         arguments <> "."
-  where arguments | prev_applied == 1 = "argument"
-                  | otherwise = "arguments"
+         "arguments."
 
 isInt32 :: Exp -> Maybe Int32
 isInt32 (Literal (SignedValue (Int32Value k')) _) = Just $ fromIntegral k'
