@@ -17,7 +17,6 @@ module Language.Futhark.TypeChecker.Monad
   , localEnv
 
   , TypeError(..)
-  , prettyTypeError, prettyTypeErrorNoLoc
   , unexpectedType
   , undefinedType
   , unappliedFunctor
@@ -97,13 +96,10 @@ aNote = Notes . pure . Note . ppr
 -- | Information about an error during type checking.
 data TypeError = TypeError SrcLoc Notes Doc
 
-prettyTypeErrorNoLoc :: TypeError -> String
-prettyTypeErrorNoLoc (TypeError _ notes msg) =
-  pretty $ msg <> ppr notes
-
-prettyTypeError :: TypeError -> String
-prettyTypeError e@(TypeError loc _ _) =
-  "Error at " ++ locStr loc ++ ":\n" ++ prettyTypeErrorNoLoc e
+instance Pretty TypeError where
+  ppr (TypeError loc notes msg) =
+    "Error at" <+> text (locStr loc) <+> ":" </>
+    msg <> ppr notes
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
