@@ -470,12 +470,13 @@ matchMTys orig_mty orig_mty_sig =
           indent 2 (ppValBind spec_name spec_v) </>
           "but module provides" </>
           indent 2 (ppValBind spec_name v) </>
-          maybe mempty text problem
+          fromMaybe mempty problem
 
-    matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe String)
+    matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe Doc)
     matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
       case doUnification loc tps (toStruct orig_spec_t) (toStruct orig_t) of
-        Left err -> Just $ Just $ prettyTypeErrorNoLoc err
+        Left (TypeError _ notes msg) ->
+          Just $ Just $ msg <> ppr notes
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t | noSizes t `subtypeOf`

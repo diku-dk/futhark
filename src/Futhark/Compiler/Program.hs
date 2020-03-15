@@ -36,6 +36,7 @@ import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.Semantic
 import Language.Futhark.Prelude
+import Futhark.Util.Pretty (ppr)
 
 -- | A little monad for reading and type-checking a Futhark program.
 type CompilerM m = ReaderT [FilePath] (StateT ReaderState m)
@@ -65,7 +66,7 @@ readImport :: (MonadError CompilerError m, MonadIO m) =>
               [ImportName] -> ImportName -> CompilerM m ()
 readImport steps include
   | include `elem` steps =
-      throwError $ ExternalError $ T.pack $
+      externalErrorS $
       "Import cycle: " ++ intercalate " -> "
       (map includeToString $ reverse $ include:steps)
   | otherwise = do
@@ -96,7 +97,7 @@ handleFile steps include file_contents file_name = do
 
   case E.checkProg imports src include $ prependRoots roots prog of
     Left err ->
-      externalError $ T.pack $ E.prettyTypeError err
+      externalError $ ppr err
     Right (m, ws, src') ->
       modify $ \s ->
         s { alreadyImported = (includeToString include,m) : imports
@@ -158,7 +159,7 @@ readLibrary' basis fps = runCompilerM basis $ mapM onFile fps
           case r of
             Just (Right (_, fs)) ->
               handleFile [] (mkInitialImport fp_name) fs fp
-            Just (Left e) -> externalError $ T.pack e
+            Just (Left e) -> externalErrorS e
             Nothing -> externalErrorS $ fp ++ ": file not found."
             where (fp_name, _) = Posix.splitExtension fp
 
