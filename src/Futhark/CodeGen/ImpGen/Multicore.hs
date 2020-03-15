@@ -117,7 +117,7 @@ mySegRedOpSlug (op, group_res_arrs) =
 
 -- TODOs
 -- 0. Clean-up (write wrapper and remove code duplications)
--- 1. Makes segRed and segScan parallel
+-- 1. Make segMap, segRed and segScan parallel
 -- 2. What does 2nd arg to compileStms do?
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
@@ -175,12 +175,12 @@ compileSegOp pat (SegRed lvl space reds _ body) = do
   -- Creates accumulator variables
   slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
 
-  -- Initialize  neutral element accumualtor
+  -- Initialize neutral element accumualtor
   sComment "neutral-initialise the accumulators" $
     forM_ slugs $ \slug ->
-    forM_ (zip (slugAccs slug) (mySlugNeutral slug)) $ \((acc, acc_is), ne) ->
-    sLoopNest (mySlugShape slug) $ \vec_is ->
-    copyDWIMFix acc (acc_is++vec_is) ne []
+      forM_ (zip (slugAccs slug) (mySlugNeutral slug)) $ \((acc, acc_is), ne) ->
+        sLoopNest (mySlugShape slug) $ \vec_is ->
+          copyDWIMFix acc (acc_is++vec_is) ne []
 
 
   body' <- collect $ do

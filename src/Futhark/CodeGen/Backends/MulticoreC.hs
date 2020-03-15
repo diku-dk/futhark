@@ -142,10 +142,14 @@ compileStructFields :: C.ToIdent a =>
 compileStructFields  fargs fctypes =
   [ [C.csdecl|$ty:ty *$id:name;|]| (name, ty) <- zip fargs fctypes]
 
+
+-- | Sets the field values of the struct
+--   Assummes that vnames are fields of the struct
 compileSetStructValues :: (C.ToIdent a1, C.ToIdent a2) =>
                            a1 -> [a2] -> [C.Stm]
 compileSetStructValues struct vnames =
   [ [C.cstm|$id:struct.$id:name=&$id:name;|] | name <- vnames]
+
 
 compileGetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
                          a2 -> [a1] -> [C.Type] -> [C.InitGroup]
@@ -171,29 +175,62 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
-  bodyvals <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
+  struct <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s {
              $sdecls:(compileStructFields fargs fctypes)
            };|])
 
-  f <- GC.publicMulticoreDef "parloop" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i);|],
-    [C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i) {
-            $decls:(compileGetStructVals  bodyvals fargs fctypes)
+  -- Maybe I should drop this and just use the thread function
+  fbody <- GC.publicMulticoreDef "parloop_body" GC.MiscDecl $ \s ->
+   ([C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i);|],
+    [C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i) {
+            $decls:(compileGetStructVals struct fargs fctypes)
             $items:body'
             return 0;
    }|])
 
 
-  -- Declare and set values
-  GC.decl [C.cdecl|struct $id:bodyvals $id:bodyvals;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues bodyvals fargs)|]
+  task_struct <- GC.publicMulticoreDef "parloop_task_struct" GC.MiscDecl $ \s ->
+    ([C.cedecl|struct $id:s;|],
+     [C.cedecl|struct $id:s {
+               struct $id:struct *$id:struct;
+               int start;
+               int end;
+           };|])
 
-  GC.stm  [C.cstm|$pragma:("omp parallel for")|]
-  GC.stms [[C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
-                   $id:f(&$id:bodyvals, $id:i);
-                 }|]]
+
+  -- A task function that a thread should execute
+  -- Not intended to be a worker thread
+  ftask <- GC.publicMulticoreDef "parloop_task" GC.MiscDecl $ \s ->
+   ([C.cedecl|void* $id:s(void *input);|],
+    [C.cedecl|void* $id:s(void *input) {
+              struct $id:task_struct *$id:task_struct = (struct $id:task_struct*) input;
+              struct $id:struct *$id:struct = $id:task_struct->$id:struct;
+              for (int i = $id:task_struct->start; i < $id:task_struct->end; i++) {
+                   $id:fbody($id:struct, i);
+              }
+   }|])
+
+  -- Declare and set values needed by function body
+  GC.decl [C.cdecl|struct $id:struct $id:struct;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues struct fargs)|]
+
+
+  -- GC.decl [C.cdecl|int num_threads = 4;|]
+  -- GC.stms [C.cstms|for (int i = 0; i < num_threads; i++) {
+  --             struct $id:task_struct $
+  --          }|]
+
+  -- Setup arg for thread function
+  GC.decl [C.cdecl|struct $id:task_struct $id:task_struct;|]
+  GC.stms [C.cstms|$id:task_struct.$id:struct = &$id:struct;|]
+  GC.stms [C.cstms|$id:task_struct.end = $exp:e';|]
+  GC.stms [C.cstms|$id:task_struct.start = 0;|]
+
+  GC.stm [C.cstm|$id:ftask((void*)&$id:task_struct);|];
+
+
 
 
 
@@ -202,27 +239,26 @@ compileOp (ParLoopAcc i e (MulticoreFunc fargs ftypes body)) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
-  bodyvals <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
+  struct <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s {
                  $sdecls:(compileStructFields fargs fctypes)
                };|])
 
   f <- GC.publicMulticoreDef "parloop" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i);|],
-    [C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i) {
-            $decls:(compileGetStructVals  bodyvals fargs fctypes)
+   ([C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i);|],
+    [C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i) {
+            $decls:(compileGetStructVals  struct fargs fctypes)
             $items:body'
-            $stms:(compileSetStructVals bodyvals fargs)
+            $stms:(compileSetStructVals struct fargs)
             return 0;
   }|])
 
   -- Declare and set values
-  GC.decl [C.cdecl|struct $id:bodyvals $id:bodyvals;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues bodyvals fargs)|]
+  GC.decl [C.cdecl|struct $id:struct $id:struct;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues struct fargs)|]
 
 
-  -- GC.stm  [C.cstm|$pragma:("omp parallel for")|]
   GC.stms [[C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
-                   int retval = $id:f(&$id:bodyvals, $id:i);
+                   int retval = $id:f(&$id:struct, $id:i);
                  }|]]
