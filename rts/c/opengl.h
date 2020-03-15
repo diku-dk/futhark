@@ -1,6 +1,7 @@
 // Start of opengl.h.
 
 #define OPENGL_SUCCEED(e) opengl_succeed(e, #e, __FILE__, __LINE__)
+#define SHADER_SUCCEED(e) shader_succeed(e, #e, __FILE__, __LINE__)
 
 typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*,
                                                     GLXFBConfig,
@@ -71,9 +72,6 @@ static void opengl_config_init(struct opengl_config *cfg,
 }
 
 struct opengl_context {
-
-  GLuint SSBOs;
-
   struct opengl_config cfg;
 
   struct free_list free_list;
@@ -85,7 +83,6 @@ struct opengl_context {
   size_t max_shared_memory;
 
   size_t lockstep_width;
-
 };
 
 static char *strclone(const char *str) {
@@ -144,6 +141,40 @@ static void opengl_succeed(GLenum ret,
     panic(-1, "%s:%d: OpenGL call\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, opengl_error_string(ret));
   }
+}
+
+static void shader_succeed(int ret,
+                           const char *call,
+                           const char *file,
+                           int line) {
+  if (ret) {
+    panic(-1, "%s:%d: OpenGL call\n  %s\nfailed with error code %d\n",
+          file, line, call, ret);
+  }
+}
+
+static int opengl_shader_succeed(GLuint shader, const char* type)
+{
+  GLint success;
+  GLchar infoLog[2048];
+
+  if (type == "PROGRAM") {
+    glGetProgramiv(shader, GL_LINK_STATUS, &success);
+    if (!success) {
+      glGetProgramInfoLog(shader, 2048, NULL, infoLog);
+      printf("PROGRAM_LINKING_ERROR: %s\n%s\n", type, infoLog);
+      return 1;
+    }
+  }
+  else {
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+      glGetShaderInfoLog(shader, 2048, NULL, infoLog);
+      printf("SHADER_COMPILATION_ERROR: %s\n%s\n", type, infoLog);
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static void setup_size_opengl(struct opengl_context *ctx) {
