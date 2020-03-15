@@ -1440,6 +1440,8 @@ static const char *entry_point = "main";
 
 $esc:tuning_h
 
+$esc:jobqueue_h
+
 $func:option_parser
 
 $edecls:cli_entry_point_decls
@@ -1472,6 +1474,16 @@ int main(int argc, char** argv) {
   struct futhark_context *ctx = futhark_context_new(cfg);
   assert (ctx != NULL);
 
+  int num_threads = 4;
+  typename pthread_t *threads = calloc(num_threads, sizeof(pthread_t));
+
+  for (int i = 0; i < num_threads; i++) {
+    if (pthread_create(&threads[i], NULL, &futhark_worker, ctx) != 0) {
+      fprintf(stderr, "Failed to create thread (%d)\n", i);
+      return 1;
+    }
+  }
+
   if (entry_point != NULL) {
     int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
     entry_point_fun *entry_point_fun = NULL;
@@ -1500,6 +1512,14 @@ int main(int argc, char** argv) {
     futhark_debugging_report(ctx);
   }
 
+  futhark_context_kill_jobqueue(ctx);
+  for (int i = 0; i < num_threads; i++) {
+    if (pthread_join(threads[i], NULL) != 0) {
+      fprintf(stderr, "pthread_join failed on thread %d", i);
+      return 1;
+    }
+  }
+
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
   return 0;
@@ -1522,7 +1542,6 @@ $esc:lock_h
 $edecls:early_decls
 
 $edecls:lib_decls
-
 
 $edecls:(tupleDefinitions endstate)
 
@@ -1576,11 +1595,13 @@ $edecls:entry_point_decls
       builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
                 cFloat32Funs ++ cFloat64Funs
 
-      panic_h  = $(embedStringFile "rts/c/panic.h")
-      values_h = $(embedStringFile "rts/c/values.h")
-      timing_h = $(embedStringFile "rts/c/timing.h")
-      lock_h   = $(embedStringFile "rts/c/lock.h")
-      tuning_h = $(embedStringFile "rts/c/tuning.h")
+      panic_h    = $(embedStringFile "rts/c/panic.h")
+      values_h   = $(embedStringFile "rts/c/values.h")
+      timing_h   = $(embedStringFile "rts/c/timing.h")
+      lock_h     = $(embedStringFile "rts/c/lock.h")
+      tuning_h   = $(embedStringFile "rts/c/tuning.h")
+      jobqueue_h = $(embedStringFile "rts/c/jobqueue.h")
+
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do

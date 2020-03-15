@@ -71,6 +71,7 @@ compileProg =
           ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:s;|],
              [C.cedecl|struct $id:s {
+                          struct job_queue q;
                           int detail_memory;
                           int debugging;
                           int profiling;
@@ -86,6 +87,7 @@ compileProg =
                                   if (ctx == NULL) {
                                     return NULL;
                                   }
+                                  if (job_queue_init(&ctx->q, 64)) return NULL;
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
                                   ctx->error = NULL;
@@ -127,7 +129,55 @@ compileProg =
                          (void)ctx;
                        }|])
 
-          GC.earlyDecls [[C.cedecl|typedef int (*task_fn)(void*, int start, int end);|]]
+          GC.publicDef_ "context_init_jobqueue" GC.InitDecl $ \s ->
+            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         return job_queue_init(&ctx->q, 64);
+                       }|])
+
+          GC.publicDef_ "context_kill_jobqueue" GC.InitDecl $ \s ->
+            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         return job_queue_destroy(&ctx->q);
+                       }|])
+
+
+         -- TODO figure out the naming scheme here
+         -- And if this should even be declared here
+          GC.earlyDecls [[C.cedecl|typedef int (*task_fn)(void*);|]]
+          GC.earlyDecls [[C.cedecl|struct task {
+                       typename task_fn fn;
+                       void* args;
+                       typename pthread_mutex_t *mutex;
+                       typename pthread_cond_t *cond;
+                       int *counter;
+          };|]]
+
+          -- GC.earlyDecls [[C.cedecl|struct job_queue q;|]]
+
+          GC.publicDef_ "worker" GC.InitDecl $ \s ->
+            ([C.cedecl|void *$id:s(void*);|],
+             [C.cedecl|void *$id:s(void* arg) {
+                         struct $id:ctx *ctx = (struct $id:ctx*) arg;
+                         while(1) {
+                           struct task *task;
+                           if (job_queue_pop(&ctx->q, (void**)&task) == 0) {
+                              task->fn(task->args);
+                              pthread_mutex_lock(task->mutex);
+                              (*task->counter)--;
+                              pthread_cond_signal(task->cond);
+                              pthread_mutex_unlock(task->mutex);
+                              free(task);
+                           } else {
+                              break;
+                           }
+                         }
+                         return NULL;
+                       }|])
+
+
+
+
 
 
 copyMulticoreMemory :: GC.Copy Multicore ()
@@ -203,13 +253,14 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
   -- A task function that a thread should execute
   -- Not intended to be a worker thread
   ftask <- GC.publicMulticoreDef "parloop_task" GC.MiscDecl $ \s ->
-   ([C.cedecl|void* $id:s(void *input);|],
-    [C.cedecl|void* $id:s(void *input) {
+   ([C.cedecl|int $id:s(void *input);|],
+    [C.cedecl|int $id:s(void *input) {
               struct $id:task_struct *$id:task_struct = (struct $id:task_struct*) input;
               struct $id:struct *$id:struct = $id:task_struct->$id:struct;
               for (int i = $id:task_struct->start; i < $id:task_struct->end; i++) {
                    $id:fbody($id:struct, i);
               }
+              return 0;
    }|])
 
   -- Declare and set values needed by function body
@@ -217,21 +268,56 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues struct fargs)|]
 
 
-  -- GC.decl [C.cdecl|int num_threads = 4;|]
-  -- GC.stms [C.cstms|for (int i = 0; i < num_threads; i++) {
-  --             struct $id:task_struct $
-  --          }|]
-
   -- Setup arg for thread function
   GC.decl [C.cdecl|struct $id:task_struct $id:task_struct;|]
   GC.stms [C.cstms|$id:task_struct.$id:struct = &$id:struct;|]
   GC.stms [C.cstms|$id:task_struct.end = $exp:e';|]
   GC.stms [C.cstms|$id:task_struct.start = 0;|]
 
-  GC.stm [C.cstm|$id:ftask((void*)&$id:task_struct);|];
+
+  -- Set up join condition for this task
+  GC.decl [C.cdecl|int retval;|]
+  GC.decl [C.cdecl|typename pthread_mutex_t mutex;|]
+  GC.stms [C.cstms|retval = pthread_mutex_init(&mutex, NULL);|]
+  GC.stms [C.cstms|if (retval != 0) {
+                     fprintf(stderr, "got error from pthread_mutex_init: %s\n", strerror(errno));
+                     return 1;
+                   }|]
+
+  GC.decl [C.cdecl|typename pthread_cond_t cond;|]
+  GC.stms [C.cstms|retval = pthread_cond_init(&cond, NULL);|]
+  GC.stms [C.cstms|if (retval != 0) {
+                     fprintf(stderr, "got error from pthread_cond_init: %s\n", strerror(errno));
+                     return 1;
+                   }|]
 
 
+  -- TODO
+  -- actually partition operation into subtasks
+  -- e.g. based on num_threads or ??
 
+  -- Set up task struct for queue
+  GC.decl [C.cdecl|int counter;|]
+  GC.stms [C.cstms|counter = 1;|]
+  GC.decl [C.cdecl|struct task* task = malloc(sizeof(struct task));|]
+  GC.stms [C.cstms|task->fn = $id:ftask;|]
+  GC.stms [C.cstms|task->args = &$id:task_struct;|]
+  GC.stms [C.cstms|task->mutex   = &mutex;|]
+  GC.stms [C.cstms|task->cond    = &cond;|]
+  GC.stms [C.cstms|task->counter = &counter;|]
+
+  GC.stm [C.cstm|job_queue_push(&ctx->q, task);|]
+
+  -- GC.decl [C.cdecl|int num_threads = 4;|]
+  -- GC.stms [C.cstms|for (int i = 0; i < num_threads; i++) {
+  --             struct $id:task_struct $
+  --          }|]
+
+
+  GC.stm [C.cstm|pthread_mutex_lock(&mutex);|]
+  GC.stm [C.cstm|while (counter != 0) {
+                    pthread_cond_wait(task->cond, task->mutex);
+                 }|]
 
 
 compileOp (ParLoopAcc i e (MulticoreFunc fargs ftypes body)) = do
