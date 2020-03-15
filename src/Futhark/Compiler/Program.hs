@@ -36,6 +36,7 @@ import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
 import Language.Futhark.Semantic
 import Language.Futhark.Prelude
+import Futhark.Util.Pretty (ppr)
 
 -- | A little monad for reading and type-checking a Futhark program.
 type CompilerM m = ReaderT [FilePath] (StateT ReaderState m)
