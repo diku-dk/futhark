@@ -244,9 +244,9 @@ library
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists
-  build-tools:
-      alex
-    , happy
+  build-tool-depends:
+      alex:alex
+    , happy:happy
   build-depends:
       aeson >=1.0.0.0
     , ansi-terminal >=0.6.3.1
