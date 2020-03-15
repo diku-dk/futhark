@@ -1071,7 +1071,7 @@ unknown size.
 Complex slicing
 ...............
 
-Most complex array slicing, such as ``a[a:b]``, will have an unknown
+Most complex array slicing, such as ``xs[a:b]``, will have an unknown
 size.  Exceptions are listed in the :ref:`reference for slice
 expressions <slices>`.
 
