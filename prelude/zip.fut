@@ -3,7 +3,7 @@
 -- compiler representation is always tuples of arrays.
 
 -- The main reason this module exists is that we need it to define
--- SOACs like `map2`@term@"/futlib/soacs".
+-- SOACs like `map2`.
 
 -- We need a map to define some of the zip variants, but this file is
 -- depended upon by soacs.fut.  So we just define a quick-and-dirty
