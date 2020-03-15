@@ -265,7 +265,7 @@ definition::
 
 The application ``pair [1] [2,3]`` will fail at run-time.
 
-To simplify the handling of in-inplace updates (see
+To simplify the handling of in-place updates (see
 :ref:`in-place-updates`), the value returned by a function may not
 alias any global variables.
 
@@ -298,7 +298,7 @@ It is not permitted to define operators with the names ``&&`` or
 ``||`` (although these as prefixes are accepted).  This is because a
 user-defined version of these operators would not be short-circuiting.
 User-defined operators behave exactly like ordinary functions, except
-for bbeing infix.
+for being infix.
 
 A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
 This will result in the built-in polymorphic operator becoming
@@ -357,7 +357,7 @@ abbreviations do not create distinct types: the types ``t1`` and
 
 If the right-hand side of a type contains anonymous sizes, it must be
 declared "size-lifted" with ``type~``.  If it (potentially) contains a
-function, it must de declared "fully lifted" with ``type^``.  A lifted
+function, it must be declared "fully lifted" with ``type^``.  A lifted
 type can also contain anonymous sizes.  Lifted types cannot be put in
 arrays.  Fully lifted types cannot be returned from conditional or
 loop expressions.
@@ -594,8 +594,8 @@ be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
 array is returned.
 
-The array ``a`` must be a variable name or a parenthesized expression.
-Futhermore, there *may not* be a space between ``a`` and the opening
+The array ``a`` must be a variable name or a parenthesised expression.
+Furthermore, there *may not* be a space between ``a`` and the opening
 bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 [i]``, which is a function call with a literal array.
 
@@ -1025,7 +1025,7 @@ operation.  For example, the type of ``concat`` should conceptually be::
 
   val concat [n] [m] 't : [n]t -> [m]t -> [n+m]t
 
-But this is not precently allowed.  Instead, the return type contains
+But this is not presently allowed.  Instead, the return type contains
 an anonymous size::
 
   val concat [n] [m] 't : [n]t -> [m]t -> []t
@@ -1180,7 +1180,7 @@ Empty array literals
 
 Just as with size-polymorphic functions, when constructing an empty
 array, we must know the exact size of the (missing) elements.  For
-example, in the following proram we are forcing the elements of ``a``
+example, in the following program we are forcing the elements of ``a``
 to be the same as the elements of ``b``, but the size of the elements
 of ``b`` are not known at the time ``a`` is constructed::
 
@@ -1224,13 +1224,13 @@ Higher-order functions
 When a higher-order function takes a functional argument whose return
 type is a non-lifted type parameter, any instantiation of that type
 parameter must have a non-anonymous size.  If the return type is a
-lifted type parameter, then the instiation may contain anonymous
+lifted type parameter, then the instantiation may contain anonymous
 sizes.  This is why the type of ``map`` guarantees regular arrays::
 
   val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
 
 The type parameter ``b`` can only be replaced with a type that has
-non-anomymous sizes, which means they must be the same for every
+non-anonymous sizes, which means they must be the same for every
 application of the function.  In contrast, this is the type of the
 pipeline operator::
 
@@ -1439,7 +1439,7 @@ modules.  For example::
         T.add x' x
   }
 
-We can instantiate ``Times`` with any module that fulfills the module
+We can instantiate ``Times`` with any module that fulfils the module
 type ``Addable`` and get back a module that defines a function
 ``times``::
 
@@ -1534,7 +1534,7 @@ Module Type Expressions
 Module types classify modules, with the only (unimportant) difference
 in expressivity being that modules can contain module types, but
 module types cannot specify that a module must contain a specific
-module types. They can specify of course that a module contains a
+module type. They can specify of course that a module contains a
 *submodule* of a specific module type.
 
 .. _other-files:
