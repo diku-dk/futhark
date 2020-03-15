@@ -275,7 +275,7 @@ resolveMTyNames = resolveMTyNames'
                   Just (QualName _ modname')
                     | Just sig_env_mod <-
                         M.lookup modname' $ envModTable mod_env ->
-                      resolveModNames mod_env_mod sig_env_mod
+                      resolveModNames sig_env_mod mod_env_mod
                   _ -> mempty
           in mconcat [ resolve Term mod_env $ envVtable sig_env
                      , resolve Type mod_env $ envVtable sig_env
