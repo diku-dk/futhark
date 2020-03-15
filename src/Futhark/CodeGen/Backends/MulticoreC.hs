@@ -10,6 +10,7 @@ module Futhark.CodeGen.Backends.MulticoreC
 
 import Control.Monad
 
+import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.Error
@@ -136,21 +137,50 @@ copyMulticoreMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 
+compileStructFields :: C.ToIdent a =>
+                       [a] -> [C.Type] -> [C.FieldGroup]
+compileStructFields  fargs fctypes =
+  [ [C.csdecl|$ty:ty *$id:name;|]| (name, ty) <- zip fargs fctypes]
+
+compileSetStructValues :: (C.ToIdent a1, C.ToIdent a2) =>
+                           a1 -> [a2] -> [C.Stm]
+compileSetStructValues struct vnames =
+  [ [C.cstm|$id:struct.$id:name=&$id:name;|] | name <- vnames]
+
+compileGetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
+                         a2 -> [a1] -> [C.Type] -> [C.InitGroup]
+compileGetStructVals struct fargs fctypes =
+  [ [C.cdecl|$ty:ty $id:name = *$id:struct->$id:name;|]
+            | (name, ty) <- zip fargs fctypes ]
+
+
+compileSetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
+                         a1 -> [a2] -> [C.Stm]
+compileSetStructVals struct vals =
+  [ [C.cstm|*$id:struct->$id:name=$id:name;|]
+           | name <- vals ]
+
+getCType :: Type -> C.Type
+getCType t = case t of
+               Scalar pt  -> GC.primTypeToCType pt
+               Mem space' -> GC.fatMemType space'
+
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
+  let fctypes = map getCType ftypes
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
   bodyvals <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s {
-             $sdecls:fields
+             $sdecls:(compileStructFields fargs fctypes)
            };|])
 
   f <- GC.publicMulticoreDef "parloop" GC.MiscDecl $ \s ->
    ([C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i);|],
     [C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i) {
-            $decls:(decl_and_get_vals bodyvals)
+            $decls:(compileGetStructVals  bodyvals fargs fctypes)
             $items:body'
             return 0;
    }|])
@@ -158,66 +188,41 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
 
   -- Declare and set values
   GC.decl [C.cdecl|struct $id:bodyvals $id:bodyvals;|]
-  GC.stms [C.cstms|$stms:(set_vals bodyvals)|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues bodyvals fargs)|]
 
   GC.stm  [C.cstm|$pragma:("omp parallel for")|]
   GC.stms [[C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
                    $id:f(&$id:bodyvals, $id:i);
                  }|]]
 
-  where fields = [ [C.csdecl|$ty:ty *$id:name;|]
-                 | (name, ty) <- zip fargs fctypes]
-
-        set_vals bodyvals = [ [C.cstm|$id:bodyvals.$id:name=&$id:name;|]
-                              | name <- fargs ]
-
-        decl_and_get_vals bodyvals = [ [C.cdecl|$ty:ty $id:name = *$id:bodyvals->$id:name;|]
-                                       | (name, ty) <- zip fargs fctypes ]
-        getCType t = case t of
-                      Scalar pt  -> GC.primTypeToCType pt
-                      Mem space' -> GC.fatMemType space'
-        fctypes = map getCType ftypes
-
 
 
 compileOp (ParLoopAcc i e (MulticoreFunc fargs ftypes body)) = do
+  let fctypes = map getCType ftypes
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
   bodyvals <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
-     [C.cedecl|struct $id:s { $sdecls:fields };|])
+     [C.cedecl|struct $id:s {
+                 $sdecls:(compileStructFields fargs fctypes)
+               };|])
 
   f <- GC.publicMulticoreDef "parloop" GC.MiscDecl $ \s ->
    ([C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i);|],
     [C.cedecl|int $id:s(struct $id:bodyvals *$id:bodyvals, int $id:i) {
-            $decls:(decl_and_get_vals bodyvals)
+            $decls:(compileGetStructVals  bodyvals fargs fctypes)
             $items:body'
-            $stms:(set_vals_ptr bodyvals)
+            $stms:(compileSetStructVals bodyvals fargs)
             return 0;
   }|])
 
-
   -- Declare and set values
   GC.decl [C.cdecl|struct $id:bodyvals $id:bodyvals;|]
-  GC.stms [C.cstms|$stms:(set_vals bodyvals)|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues bodyvals fargs)|]
+
 
   -- GC.stm  [C.cstm|$pragma:("omp parallel for")|]
   GC.stms [[C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
                    int retval = $id:f(&$id:bodyvals, $id:i);
                  }|]]
-
-  where fields = [ [C.csdecl|$ty:ty *$id:name;|]
-                 | (name, ty) <- zip fargs fctypes]
-
-        set_vals bodyvals = [ [C.cstm|$id:bodyvals.$id:name=&$id:name;|]
-                              | name <- fargs ]
-        set_vals_ptr bodyvals = [ [C.cstm|*$id:bodyvals->$id:name=$id:name;|]
-                                | name <- fargs ]
-
-        decl_and_get_vals bodyvals = [ [C.cdecl|$ty:ty $id:name = *$id:bodyvals->$id:name;|]
-                                       | (name, ty) <- zip fargs fctypes ]
-        getCType t = case t of
-                      Scalar pt  -> GC.primTypeToCType pt
-                      Mem space' -> GC.fatMemType space'
-        fctypes = map getCType ftypes
