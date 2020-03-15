@@ -372,7 +372,7 @@ unifyWith onDims usage = subunify False mempty
         (Scalar (TypeVar _ _ (TypeName _ tn) targs),
          Scalar (TypeVar _ _ (TypeName _ arg_tn) arg_targs))
           | tn == arg_tn, length targs == length arg_targs -> do
-            let bcs' = breadCrumb (Matching "When matching type arguments") bcs
+            let bcs' = breadCrumb (Matching "When matching type arguments.") bcs
             zipWithM_ (unifyTypeArg bcs') targs arg_targs
 
         (Scalar (TypeVar _ _ (TypeName [] v1) []),
@@ -399,10 +399,10 @@ unifyWith onDims usage = subunify False mempty
           (a2', a2_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r2 a2
           let bound' = bound <> mapMaybe pname [p1, p2] <> a1_dims <> a2_dims
           subunify (not ord) bound
-            (breadCrumb (Matching "When matching parameter types") bcs)
+            (breadCrumb (Matching "When matching parameter types.") bcs)
             a1' a2'
           subunify ord bound'
-            (breadCrumb (Matching "When matching return types") bcs)
+            (breadCrumb (Matching "When matching return types.") bcs)
             b1' b2'
           where (b1', b2') =
                   -- Replace one parameter name with the other in the
