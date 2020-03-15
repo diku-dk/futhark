@@ -193,8 +193,8 @@ compileSegOp pat (SegRed lvl space reds _ body) = do
       forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
         sLoopNest (mySlugShape slug) $ \vec_is -> do
         sComment "load accumulator" $
-          forM_ (zip (myAccParams slug) (patternElements pat)) $ \(p, pe) ->
-          copyDWIMFix (paramName p) [] (Var $ patElemName pe) []
+          forM_ (zip (myAccParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+          copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
         sComment "set new values to func_param" $
           forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
           copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
