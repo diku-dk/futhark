@@ -85,12 +85,12 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
     not (null red_nes) = do
       let inp_A : inp_B : _ = arrs
       let red_ne : _ = red_nes
+      -- addStms code2'
 
       -----------------------------------------------------------------------
       -- in this binder: host code and outer seggroup (ie. the new kernel) --
       -----------------------------------------------------------------------
       (new_kernel, host_stms) <- runBinder $ do -- host code
-        subexp_inp_A <- letSubExp "inp_A" $ BasicOp $ SubExp $ Var inp_A
 
         ty_name  <- nameFromString . pretty <$> newVName "Ty"
         tx_name  <- nameFromString . pretty <$> newVName "Tx"
@@ -140,6 +140,8 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
           kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
           let loop_kk_form = ForLoop kk Int32 kk_bound []
 
+          addStms code1 -- TODO: temporary hack to bring A and B
+                        -- TODO: into scope before the kk loop.
           -------------------------------------------
           -- in this binder: body of outer kk loop --
           -------------------------------------------
@@ -149,21 +151,17 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
                                   ResultNoSimplify (ty_ry, tk) $ \(x, y) -> do
               reconstructGtids2D ty_ry (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
 
-              slice_a <- letSubExp "slice_a" $ BasicOp $ SubExp $ intConst Int32 0
-
-              -- this line produces a run-time failure in BinderT.lookupType.
+              slice_a <- letSubExp "foo" $ BasicOp $ SubExp $ intConst Int32 0 -- dummy
               a_shr <- letSubExp "a_shr" $ BasicOp $ Index inp_A [DimFix slice_a]
               return [a_shr]
 
-            {--
             b_shr : _ <- segMap2D "B_shr" (segThread grid_size group_size)
                                    ResultNoSimplify (tk, tx_rx) $ \(x, y) -> do
               reconstructGtids2D tx_rx (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
 
-              slice_b <- letSubExp "slice_a" $ BasicOp $ SubExp $ intConst Int32 0
+              slice_b <- letSubExp "slice_a" $ BasicOp $ SubExp $ intConst Int32 0 -- dummy
               b_shr <- letSubExp "b_shr" $ BasicOp $ Index inp_B [DimFix slice_b]
               return [b_shr]
-            --}
             ------------------------------------------------------------------------
 
             k <- newVName "k"
@@ -200,12 +198,12 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
       ------------------------------------------------------------------------
 
       trace (
-             ">> pat:\n" ++ _pretty pat ++
-             -- ">> tp_arrs:\n" ++ _pretty tp_arrs ++
              -- ">> inp_A:\n"   ++ _pretty inp_A ++
              -- ">> inp_B:\n"   ++ _pretty inp_B ++
+             ">> pat:\n"        ++ _pretty pat ++
              ">> host_stms:\n"  ++ _pretty host_stms ++
-             ">> new_kernel:\n" ++ _pretty new_kernel)
+             ">> new_kernel:\n" ++ _pretty new_kernel ++
+             ">> old_kbody:\n"  ++ _pretty old_kbody)
             $ return $ Just (host_stms, new_kernel)
 
 
@@ -259,20 +257,34 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 -- | Tries to identify the following pattern:
 --   code followed by some Screma followed by more code.
 matchCodeStreamCode :: Stms Kernels ->
-                       ([Stm Kernels], Maybe (Stm Kernels), [Stm Kernels])
+                       -- ([Stm Kernels], Maybe (Stm Kernels), [Stm Kernels])
+                       (Stms Kernels, Maybe (Stm Kernels), Stms Kernels)
 matchCodeStreamCode kstms =
-  foldl (\acc stmt ->
-            case (acc, stmt) of
-              ((cd1, Nothing, cd2), Let _ _ (Op (OtherOp (Screma _ _ _)))) ->
-               (cd1, Just stmt, cd2)
+  let (code1, screma, code2) = foldl (\acc stmt ->
+                case (acc, stmt) of
+                  ((cd1, Nothing, cd2), Let _ _ (Op (OtherOp (Screma _ _ _)))) ->
+                   (cd1, Just stmt, cd2)
+    
+                  ((cd1, Nothing, cd2), _) ->
+                   (cd1 ++ [stmt], Nothing, cd2)
+    
+                  ((cd1, Just strm, cd2), _) ->
+                   (cd1, Just strm, cd2++[stmt])
+            ) ([], Nothing, []) (stmsToList kstms)
+  in (stmsFromList code1, screma, stmsFromList code2)
 
-              ((cd1, Nothing, cd2), _) ->
-               (cd1 ++ [stmt], Nothing, cd2)
-
-              ((cd1, Just strm, cd2), _) ->
-               (cd1, Just strm, cd2++[stmt])
-        ) ([], Nothing, []) (stmsToList kstms)
-
+-- matchCodeStreamCode kstms =
+--   foldl (\acc stmt ->
+--             case (acc, stmt) of
+--               ((cd1, Nothing, cd2), Let _ _ (Op (OtherOp (Screma _ _ _)))) ->
+--                (cd1, Just stmt, cd2)
+--
+--               ((cd1, Nothing, cd2), _) ->
+--                (cd1 ++ [stmt], Nothing, cd2)
+--
+--               ((cd1, Just strm, cd2), _) ->
+--                (cd1, Just strm, cd2++[stmt])
+--         ) ([], Nothing, []) (stmsToList kstms)
 isTileableRedomap :: Stm Kernels
          -> Maybe (SubExp, [VName],
                    (Commutativity, Lambda Kernels, [SubExp], Lambda Kernels))
