@@ -2220,7 +2220,9 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
     else "Cannot apply" <+> fname' <+> "to argument #" <> ppr (prev_applied+1) <+>
          pquote (shorten $ pretty $ flatten $ ppr argexp) <> "," <+/>
          "as" <+> fname' <+> "only takes" <+> ppr prev_applied <+>
-         "arguments."
+         arguments <> "."
+  where arguments | prev_applied == 1 = "argument"
+                  | otherwise = "arguments"
 
 isInt32 :: Exp -> Maybe Int32
 isInt32 (Literal (SignedValue (Int32Value k')) _) = Just $ fromIntegral k'
