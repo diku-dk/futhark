@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.
 module Futhark.CodeGen.Backends.MulticoreC
@@ -19,6 +20,7 @@ import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
+import Data.FileEmbed (embedStringFile)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError GC.CParts)
@@ -32,6 +34,7 @@ compileProg =
                      }
 
         generateContext = do
+
           cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:s;|],
              [C.cedecl|struct $id:s { int debugging; };|])
@@ -142,6 +145,10 @@ compileProg =
                        }|])
 
 
+
+          GC.headerDecl GC.MiscDecl [C.cedecl|$esc:("#define MULTICORE")|]
+          GC.headerDecl GC.EntryDecl [C.cedecl|$esc:jobqueue_h|]
+
          -- TODO figure out the naming scheme here
          -- And if this should even be declared here
           GC.earlyDecls [[C.cedecl|typedef int (*task_fn)(void*);|]]
@@ -153,7 +160,6 @@ compileProg =
                        int *counter;
           };|]]
 
-          -- GC.earlyDecls [[C.cedecl|struct job_queue q;|]]
 
           GC.publicDef_ "worker" GC.InitDecl $ \s ->
             ([C.cedecl|void *$id:s(void*);|],
@@ -174,6 +180,7 @@ compileProg =
                          }
                          return NULL;
                        }|])
+           where  jobqueue_h = $(embedStringFile "rts/c/jobqueue.h")
 
 
 
