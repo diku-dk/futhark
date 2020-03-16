@@ -4,6 +4,7 @@ module Futhark.CLI.Autotune (main) where
 
 import Control.Monad
 import qualified Data.ByteString.Char8 as SBS
+import Data.Function (on)
 import Data.Tree
 import Data.List
 import qualified Data.Set as S
@@ -195,8 +196,14 @@ thresholdForest prog = do
 
           in ((parent, parent_cmp), mapMaybe isChild thresholds)
 
---- Doing the atual tuning
-
+-- | Do the actual tuning The purpose of this function is to find the optimal
+-- parameter for the threshold `v`. Assuming that the runtime as a function of
+-- the threshold parameter forms a linear, convex or concave function, we aim to
+-- find the parameter that minimizes that function.
+--
+-- If the function is linear or concave, we test the highest or lowest candidate
+-- and pick the best one. If the function is convex, we perform a binary search
+-- to find the optimal parameter.
 tuneThreshold :: AutotuneOptions
               -> [(DatasetName, RunDataset, T.Text)]
               -> Path -> (String, Path)
@@ -205,47 +212,67 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
   putStrLn $ unwords ["Tuning threshold", v]
 
   (e_pars', _) <- getAllEPars already_tuned v
-  let e_pars = S.toList $ S.insert thresholdMax $ S.insert thresholdMin e_pars'
+  let e_pars = S.toAscList e_pars'
 
   when (optVerbose opts > 0) $
     putStrLn $ unwords ["Got e_pars:", show e_pars]
 
-  when (optVerbose opts > 0) $
-    putStrLn $ unwords ["Computing baseline with e_par", show $ head e_pars]
+  -- Or simplify: Always compute min and max, then compute mid and mid+1: If
+  -- mid+1 is lower than mid, recurse in to upper half, else recurse into
+  -- lower half. Remember to carry the best so far (min, max, mid, mid+1).
+  result_min  <- benchmarkThresholdChoice 6000 thresholdMin
+  result_max <- benchmarkThresholdChoice 6000 thresholdMax
 
-  baseline <- benchmarkThresholdChoice 60000 (head e_pars)
+  best_e_par <- binarySearch
+                (bestPair $ catMaybes $  [(,) <$> result_min <*> pure thresholdMin,
+                                          (,) <$> result_max <*> pure thresholdMax])
+                e_pars
 
-  case baseline of
-    Just baseline' -> do
-      best_e_par <- binarySearch baseline' $ tail e_pars
-
-      return $ (v, best_e_par) : already_tuned
-
-    Nothing ->
-      error $ unwords ["Couldn't get baseline for", v]
+  return $ (v, best_e_par) : already_tuned
 
   where
-    binarySearch :: (Int, Int) -> [Int] -> IO Int
-    binarySearch (best_t, best) xs =
-      case splitAt (length xs `div` 2) xs of
-        (_, []) -> return best
-        (lower, middle : upper) -> do
-          when (optVerbose opts > 0) $
-            putStrLn $ unwords ["Trying e_par", show middle]
-          candidate <- benchmarkThresholdChoice (timeout best_t) middle
-          case candidate of
-            -- We search from the bottom, so if the new number is better than
-            -- the previous, we recurse into the upper half
-            Just (new_t, _)
-              | new_t < best_t ->
-                  binarySearch (new_t, middle) upper
-              | otherwise ->
-                  binarySearch (best_t, best) lower
-            Nothing -> do
-              when (optVerbose opts > 2) $
-                putStrLn $ unwords ["Timing failed for candidate", show middle]
+    bestPair :: [(Int, Int)] -> (Int, Int)
+    bestPair = minimumBy (compare `on` fst)
 
-              binarySearch (best_t, best) lower
+    binarySearch :: (Int, Int) -> [Int] -> IO Int
+    binarySearch best@(best_t, best_e_par) xs =
+      case splitAt (length xs `div` 2) xs of
+        (lower, middle : middle' : upper) -> do
+          when (optVerbose opts > 0) $
+            putStrLn $ unwords ["Trying e_par", show middle,
+                                "and", show middle']
+          candidate <- benchmarkThresholdChoice (timeout best_t) middle
+          candidate' <- benchmarkThresholdChoice (timeout best_t) middle'
+          case (candidate, candidate') of
+            (Just new_t, Just new_t') ->
+              if new_t < new_t' then
+                -- recurse into lower half
+                binarySearch (bestPair [(new_t, middle), best]) lower
+              else
+                -- recurse into upper half
+                binarySearch (bestPair [(new_t', middle'), best]) upper
+            (Just new_t, Nothing) ->
+              -- recurse into lower half
+              binarySearch (bestPair [(new_t, middle), best]) lower
+            (Nothing, Just new_t') ->
+                -- recurse into upper half
+                binarySearch (bestPair [(new_t', middle'), best]) upper
+            (Nothing, Nothing) -> do
+              when (optVerbose opts > 2) $
+                putStrLn $ unwords ["Timing failed for candidates",
+                                    show middle, "and", show middle']
+              return best_e_par
+        (_, []) -> return best_e_par
+        (_, [x]) -> do
+          when (optVerbose opts > 0) $
+            putStrLn $ unwords ["Trying e_par", show x]
+          candidate <- benchmarkThresholdChoice (timeout best_t) x
+          case candidate of
+            Just new_t ->
+              return $ snd $ bestPair [(new_t, x), best]
+            Nothing ->
+              return best_e_par
+
 
     timeout :: Int -> Int
     timeout elapsed = ceiling (fromIntegral elapsed * 1.2 :: Double) + 1
@@ -253,7 +280,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
     aggregateResults :: [Maybe Int] -> Maybe Int
     aggregateResults xs = sum <$> sequence xs
 
-    benchmarkThresholdChoice :: Int -> Int -> IO (Maybe (Int, Int))
+    benchmarkThresholdChoice :: Int -> Int -> IO (Maybe Int)
     benchmarkThresholdChoice best_t e_par = do
       benchmarks <- forM datasets $ \(dataset_name, run, entry_point) ->
         if not $ isPrefixOf (T.unpack entry_point ++ ".") v then do
@@ -274,7 +301,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
               return $ Just $ ceiling runtime_t
 
       let total_runtime = aggregateResults benchmarks
-      return $ (,) <$> total_runtime <*> pure e_par
+      return total_runtime
 
     getAllEPars :: Path -> String -> IO (S.Set Int, Int)
     getAllEPars path threshold = do
