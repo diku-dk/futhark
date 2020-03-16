@@ -651,7 +651,7 @@ returnAliased :: Name -> Name -> SrcLoc -> TermTypeM ()
 returnAliased fname name loc =
   typeError loc mempty $
   "Unique return value of" <+> pquote (pprName fname) <+>
-  "is aliased to" <+> pquote (pprName name) <+> ", which is not consumed."
+  "is aliased to" <+> pquote (pprName name) <> ", which is not consumed."
 
 uniqueReturnAliased :: Name -> SrcLoc -> TermTypeM a
 uniqueReturnAliased fname loc =
@@ -1390,14 +1390,14 @@ checkExp (LetWith dest src idxes ve body NoInfo loc) =
 
   unless (unique src_t) $
     typeError loc mempty $ "Source" <+> pquote (pprName (identName src)) <+>
-    "has type" <+> ppr src_t <+> ", which is not unique."
+    "has type" <+> ppr src_t <> ", which is not unique."
   vtable <- asks $ scopeVtable . termScope
   forM_ (aliases src_t) $ \v ->
     case aliasVar v `M.lookup` vtable of
       Just (BoundV Local _ v_t)
         | not $ unique v_t ->
             typeError loc mempty $ "Source" <+> pquote (pprName (identName src)) <+>
-            "aliases" <+> pquote (pprName (aliasVar v)) <+> ", which is not consumable."
+            "aliases" <+> pquote (pprName (aliasVar v)) <> ", which is not consumable."
       _ -> return ()
 
   sequentially (unifies "type of target array" (toStruct elemt) =<< checkExp ve) $ \ve' _ -> do
@@ -1423,7 +1423,7 @@ checkExp (Update src idxes ve loc) = do
     src_t <- expTypeFully src'
     unless (unique src_t) $
       typeError loc mempty $ "Source" <+> pquote (ppr src) <+>
-      "has type" <+> ppr src_t <+> ", which is not unique."
+      "has type" <+> ppr src_t <> ", which is not unique."
 
     let src_als = aliases src_t
     ve_t <- expTypeFully ve'
