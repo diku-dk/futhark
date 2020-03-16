@@ -992,7 +992,7 @@ used to express invariants about the shapes of arrays that are
 accepted or produced by the function.  For example::
 
   let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
-    map (+) a b
+    map2 (+) a b
 
 We use a *size parameter*, ``[n]``, to explicitly quantify the names
 of shapes.  The ``[n]`` parameter is not explicitly passed when
