@@ -36,6 +36,7 @@ jobs:
   - script: |
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
+      cabal check
       cabal update
       cabal install --only-dependencies
     displayName: Build Haskell dependencies
