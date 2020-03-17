@@ -1435,8 +1435,8 @@ modules.  For example::
 
   module Times = \(M: Addable) -> {
     let times (x: M.t) (k: i32): M.t =
-      loop (x' = x) for i < k do
-        T.add x' x
+      loop x' = x for i < k do
+        M.add x' x
   }
 
 We can instantiate ``Times`` with any module that fulfils the module
