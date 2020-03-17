@@ -1434,7 +1434,7 @@ Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
   module Times = \(M: Addable) -> {
-    let times (x: M.t) (k: int): M.t =
+    let times (x: M.t) (k: i32): M.t =
       loop (x' = x) for i < k do
         T.add x' x
   }
