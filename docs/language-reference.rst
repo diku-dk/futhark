@@ -994,13 +994,12 @@ accepted or produced by the function.  For example::
   let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
     map (+) a b
 
-We use a *size parameter*, ``[n]``, to explicitly quantify the names
-of shapes.  The ``[n]`` parameter is not explicitly passed when
-calling ``f``.  Rather, its value is implicitly deduced from the
-arguments passed for the value parameters.  An array can contain
-*anonymous dimensions*, e.g. ``[]i32``, for which the type checker
-will invent fresh size parameters, which ensures that all sizes have a
-(symbolic) size.
+We use a *size parameter*, ``[n]``, to explicitly quantify sizes.  The
+``[n]`` parameter is not explicitly passed when calling ``f``.
+Rather, its value is implicitly deduced from the arguments passed for
+the value parameters.  An array can contain *anonymous dimensions*,
+e.g. ``[]i32``, for which the type checker will invent fresh size
+parameters, which ensures that all arrays have a (symbolic) size.
 
 A size annotation can also be an integer constant (with no suffix).
 Size parameters can be used as ordinary variables within the scope of
