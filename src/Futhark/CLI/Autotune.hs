@@ -72,7 +72,7 @@ comparisons = mapMaybe isComparison . lines
 data RunPurpose = RunSample -- ^ Only a single run.
                 | RunBenchmark -- ^ As many runs as needed.
 
-type RunDataset = Int -> Path -> RunPurpose -> IO (Either String ([(String, Int)], Double))
+type RunDataset = Int -> Path -> RunPurpose -> IO (Either String ([(String, Int)], Int))
 
 type DatasetName = String
 
@@ -130,12 +130,17 @@ prepare opts prog = do
                  fromIntegral (sum (map runMicroseconds runres)) /
                  fromIntegral (optRuns opts))
 
+              bestRuntime :: ([RunResult], T.Text) -> ([(String, Int)], Int)
+              bestRuntime (runres, errout) =
+                (comparisons (T.unpack errout),
+                 maximum $ map runMicroseconds runres)
+
               ropts = runOptions path timeout opts'
 
           when (optVerbose opts > 1) $
             putStrLn $ "Running with options: " ++ unwords (runExtraOptions ropts)
 
-          either (Left . T.unpack) (Right . averageRuntime) <$>
+          either (Left . T.unpack) (Right . bestRuntime) <$>
             benchmarkDataset ropts prog entry_point
             (runInput trun) expected
             (testRunReferenceOutput prog entry_point trun)
@@ -298,7 +303,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
               return Nothing
 
             Right (_, runtime_t) ->
-              return $ Just $ ceiling runtime_t
+              return $ Just runtime_t
 
       let total_runtime = aggregateResults benchmarks
       return total_runtime
@@ -323,7 +328,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
               return (S.empty, 0)
             Right (cmps, run_t) ->
               return (S.map snd $ S.filter ((==) threshold . fst) $ S.fromList cmps,
-                      ceiling run_t)
+                      run_t)
 
       let (cmps, run_ts) = unzip result
 
