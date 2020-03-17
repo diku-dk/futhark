@@ -2319,8 +2319,8 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   let t = toStruct $ typeOf e'
   (tparams, _, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
-  e'' <- updateTypes e'
   fixOverloadedTypes
+  e'' <- updateTypes e'
   checkUnmatched e''
   causalityCheck e''
   return (tparams, e'')
