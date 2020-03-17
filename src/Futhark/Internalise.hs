@@ -583,14 +583,14 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
   -- information.  For a type-correct source program, these reshapes
   -- should simplify away.
   let merge = ctxmerge ++ valmerge
-      merge_names = map (I.paramName . fst) merge
-      merge_ts = existentialiseExtTypes merge_names $
-                 staticShapes $ map (I.paramType . fst) merge
+      merge_ts = map (I.paramType . fst) merge
   loopbody'' <- localScope (scopeOfFParams $ map fst merge) $
-                inScopeOf form' $
-                ensureResultExtShapeNoCtx asserting
-                "shape of loop result does not match shapes in loop parameter"
-                loc merge_ts loopbody'
+                inScopeOf form' $ insertStmsM $
+    resultBodyM
+    =<< ensureArgShapes asserting
+        "shape of loop result does not match shapes in loop parameter"
+        loc (map (I.paramName . fst) ctxmerge) merge_ts
+    =<< bodyBind loopbody'
 
   loop_res <- map I.Var . dropCond <$>
               letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody'')
