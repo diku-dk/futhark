@@ -205,33 +205,24 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
              $sdecls:(compileStructFields fargs fctypes)
            };|]
 
-  -- Maybe I should drop this and just use the task function
-  fbody <- GC.multicoreDef "parloop_body" $ \s ->
-    [C.cedecl|int $id:s(struct $id:fstruct *$id:fstruct, int $id:i) {
-            $decls:(compileGetStructVals fstruct fargs fctypes)
-            $items:body'
-            return 0;
-   }|]
-
-
-
   -- A task function that a thread should execute
   ftask <- GC.multicoreDef "parloop_task" $ \s ->
     [C.cedecl|int $id:s(void *args, int start, int end) {
-              for (int i = start; i < end; i++) {
-                   $id:fbody((struct $id:fstruct*) args, i);
+              struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+              $decls:(compileGetStructVals fstruct fargs fctypes)
+              for (int $id:i = start; $id:i < end; $id:i++) {
+                   $items:body'
               }
               return 0;
    }|]
 
-  -- Declare and set values needed by function body
   GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-
-  GC.stm [C.cstm|scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e');|]
-
-  GC.stm [C.cstm|free($id:fstruct);|]
-
+  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e') =! 0) {
+                     fprintf(stderr, "scheduler failed to do task\n");
+                     return 1;
+           };|]
+  GC.stm  [C.cstm|free($id:fstruct);|]
 
 compileOp (ParLoopAcc i e (MulticoreFunc fargs ftypes body)) = do
   let fctypes = map getCType ftypes

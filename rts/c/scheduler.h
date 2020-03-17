@@ -7,6 +7,7 @@
 #define MULTICORE
 
 
+const int num_threads = 4;
 
 typedef int (*task_fn)(void*, int, int);
 
@@ -19,6 +20,10 @@ struct task {
   int *counter;
 };
 
+
+enum OP {
+  SegMap
+};
 
 static inline void *futhark_worker(void* arg) {
   struct futhark_context *ctx = (struct futhark_context*) arg;
@@ -38,11 +43,26 @@ static inline void *futhark_worker(void* arg) {
   return NULL;
 }
 
-/* TODO */
-/* actually partition operation into subtasks */
-/* e.g. based on num_threads or ?? */
+
+
+static inline struct task* setup_task(task_fn fn, void* task_args,
+                                      pthread_mutex_t *mutex, pthread_cond_t *cond,
+                                      int* counter, int start, int end) {
+
+    struct task* task = malloc(sizeof(struct task));
+    task->fn      = fn;
+    task->args    = task_args;
+    task->mutex   = mutex;
+    task->cond    = cond;
+    task->counter = counter;
+    task->start   = start;
+    task->end     = end;
+    return task;
+}
+
+
 static inline int scheduler_do_task(struct futhark_context *ctx, task_fn fn,
-                          void* task_args, int iterations)
+                                    void* task_args, int iterations)
 {
   pthread_mutex_t mutex;
   if (pthread_mutex_init(&mutex, NULL) != 0) {
@@ -55,27 +75,25 @@ static inline int scheduler_do_task(struct futhark_context *ctx, task_fn fn,
      return 1;
   }
 
-  int counter = 1;
+  int num_tasks = num_threads;
+  int iter_pr_task = iterations / num_threads;
 
-  struct task* task = malloc(sizeof(struct task));
-  task->fn      = fn;
-  task->args    = task_args;
-  task->mutex   = &mutex;
-  task->cond    = &cond;
-  task->counter = &counter;
-  task->start   = 0;
-  task->end     = iterations;
+  printf("%d\n", iter_pr_task);
 
-  job_queue_push(futhark_context_get_jobqueue(ctx), (void*)task);
+  for (int i = 0; i < num_threads; i++) {
+    struct task *task = setup_task(fn, task_args, &mutex, &cond, &num_tasks,
+                                   i * iter_pr_task, (i+1) * iter_pr_task);
+    job_queue_push(futhark_context_get_jobqueue(ctx), (void*)task);
+  }
 
   // Join (wait for tasks to finish)
   pthread_mutex_lock(&mutex);
-  while (counter != 0) {
-    pthread_cond_wait(task->cond, task->mutex);
+  while (num_tasks != 0) {
+    pthread_cond_wait(&cond, &mutex);
   }
 
   // destroy mutex/cond here
-
+  return 0;
 
 }
 
