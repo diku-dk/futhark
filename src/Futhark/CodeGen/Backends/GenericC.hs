@@ -51,7 +51,7 @@ module Futhark.CodeGen.Backends.GenericC
   , headerDecl
   , publicDef
   , publicDef_
-  , publicMulticoreDef
+  , multicoreDef
   , profileReport
   , HeaderSection(..)
   , libDecl
@@ -419,15 +419,13 @@ publicDef_ :: String -> HeaderSection -> (String -> (C.Definition, C.Definition)
            -> CompilerM op s ()
 publicDef_ s h f = void $ publicDef s h f
 
-publicMulticoreDef :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
+multicoreDef :: String -> (String -> C.Definition)
                    -> CompilerM op s String
-publicMulticoreDef s h f = do
+multicoreDef s f = do
   s' <- newVName s
   -- TODO: Surely must a better way to obtain a tag name string
   s'' <- publicMulticoreName $ (baseString s') ++ "_" ++ (show $ baseTag s')
-  let (pub, priv) = f s''
-  -- headerDecl h pub
-  multicoreDecl priv
+  multicoreDecl $ f s''
   return s''
 
 

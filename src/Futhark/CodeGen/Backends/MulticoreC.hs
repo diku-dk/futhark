@@ -200,32 +200,29 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
-  fstruct <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
-    ([C.cedecl|struct $id:s;|],
+  fstruct <- GC.multicoreDef "parloop_struct" $ \s ->
      [C.cedecl|struct $id:s {
              $sdecls:(compileStructFields fargs fctypes)
-           };|])
+           };|]
 
   -- Maybe I should drop this and just use the task function
-  fbody <- GC.publicMulticoreDef "parloop_body" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(struct $id:fstruct *$id:fstruct, int $id:i);|],
+  fbody <- GC.multicoreDef "parloop_body" $ \s ->
     [C.cedecl|int $id:s(struct $id:fstruct *$id:fstruct, int $id:i) {
             $decls:(compileGetStructVals fstruct fargs fctypes)
             $items:body'
             return 0;
-   }|])
+   }|]
 
 
 
   -- A task function that a thread should execute
-  ftask <- GC.publicMulticoreDef "parloop_task" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(void *args, int start, int end);|],
+  ftask <- GC.multicoreDef "parloop_task" $ \s ->
     [C.cedecl|int $id:s(void *args, int start, int end) {
               for (int i = start; i < end; i++) {
                    $id:fbody((struct $id:fstruct*) args, i);
               }
               return 0;
-   }|])
+   }|]
 
   -- Declare and set values needed by function body
   GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
@@ -241,25 +238,22 @@ compileOp (ParLoopAcc i e (MulticoreFunc fargs ftypes body)) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
-  struct <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
-    ([C.cedecl|struct $id:s;|],
+  struct <- GC.multicoreDef "parloop_struct" $ \s ->
      [C.cedecl|struct $id:s {
                  $sdecls:(compileStructFields fargs fctypes)
-               };|])
+               };|]
 
-  f <- GC.publicMulticoreDef "parloop" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i);|],
+  f <- GC.multicoreDef "parloop" $ \s ->
     [C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i) {
-            $decls:(compileGetStructVals  struct fargs fctypes)
-            $items:body'
-            $stms:(compileSetStructVals struct fargs)
-            return 0;
-  }|])
+                $decls:(compileGetStructVals  struct fargs fctypes)
+                $items:body'
+                $stms:(compileSetStructVals struct fargs)
+                return 0;
+              }|]
 
   -- Declare and set values
   GC.decl [C.cdecl|struct $id:struct $id:struct;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues struct fargs)|]
-
 
   GC.stms [[C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
                    int retval = $id:f(&$id:struct, $id:i);
