@@ -243,10 +243,11 @@ compileSegScan :: Pattern ExplicitMemory
                -> KernelBody ExplicitMemory
                -> CallKernelGen ()
 compileSegScan pat lvl space scan_op nes kbody = do
+  emit $ Imp.DebugPrint "\n# SegScan" Nothing
+
   (elems_per_group, crossesSegment) <-
     scanStage1 pat (segNumGroups lvl) (segGroupSize lvl) space scan_op nes kbody
 
-  emit $ Imp.DebugPrint "\n# SegScan" Nothing
   emit $ Imp.DebugPrint "elems_per_group" $ Just elems_per_group
 
   scan_op' <- renameLambda scan_op
