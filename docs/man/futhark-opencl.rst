@@ -19,7 +19,7 @@ DESCRIPTION
 OpenCL kernels, and either compiles that C code with gcc(1) to an
 executable binary program, or produces a ``.h`` and ``.c`` file that
 can be linked with other code. The standard Futhark optimisation
-pipeline is used, and GCC is invoked with ``-O3``, ``-lm``, and
+pipeline is used, and GCC is invoked with ``-O``, ``-lm``, and
 ``-std=c99``. The resulting program will otherwise behave exactly as
 one compiled with ``futhark c``.
 
