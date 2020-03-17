@@ -156,6 +156,7 @@ data RunOptions =
   , runRuns :: Int
   , runExtraOptions :: [String]
   , runTimeout :: Int
+  , runVerbose :: Int
   }
 
 -- | Run the benchmark program on the indicated dataset.
@@ -185,6 +186,10 @@ benchmarkDataset opts program entry input_spec expected_spec ref_out =
   let (to_run, to_run_args)
         | null $ runRunner opts = ("." </> binaryName program, options)
         | otherwise = (runRunner opts, binaryName program : options)
+
+  when (runVerbose opts > 0) $
+    putStrLn $ unwords ["Running executable", show to_run,
+                        "with arguments", show to_run_args]
 
   run_res <-
     timeout (runTimeout opts * 1000000) $
