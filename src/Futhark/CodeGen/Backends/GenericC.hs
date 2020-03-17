@@ -426,7 +426,7 @@ publicMulticoreDef s h f = do
   -- TODO: Surely must a better way to obtain a tag name string
   s'' <- publicMulticoreName $ (baseString s') ++ "_" ++ (show $ baseTag s')
   let (pub, priv) = f s''
-  headerDecl h pub
+  -- headerDecl h pub
   multicoreDecl priv
   return s''
 
@@ -1440,6 +1440,10 @@ static const char *entry_point = "main";
 
 $esc:tuning_h
 
+$esc:jobqueue_h
+
+$esc:scheduler_h
+
 $func:option_parser
 
 $edecls:cli_entry_point_decls
@@ -1597,11 +1601,14 @@ $edecls:entry_point_decls
       builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
                 cFloat32Funs ++ cFloat64Funs
 
-      panic_h    = $(embedStringFile "rts/c/panic.h")
-      values_h   = $(embedStringFile "rts/c/values.h")
-      timing_h   = $(embedStringFile "rts/c/timing.h")
-      lock_h     = $(embedStringFile "rts/c/lock.h")
-      tuning_h   = $(embedStringFile "rts/c/tuning.h")
+      panic_h     = $(embedStringFile "rts/c/panic.h")
+      values_h    = $(embedStringFile "rts/c/values.h")
+      timing_h    = $(embedStringFile "rts/c/timing.h")
+      lock_h      = $(embedStringFile "rts/c/lock.h")
+      tuning_h    = $(embedStringFile "rts/c/tuning.h")
+      jobqueue_h  = $(embedStringFile "rts/c/jobqueue.h")
+      scheduler_h = $(embedStringFile "rts/c/scheduler.h")
+
 
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)

@@ -20,7 +20,7 @@ import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
-import Data.FileEmbed (embedStringFile)
+-- import Data.FileEmbed (embedStringFile)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError GC.CParts)
@@ -132,6 +132,12 @@ compileProg =
                          (void)ctx;
                        }|])
 
+          GC.publicDef_ "context_get_jobqueue" GC.InitDecl $ \s ->
+            ([C.cedecl|struct job_queue *$id:s(struct $id:ctx* ctx);|],
+             [C.cedecl|struct job_queue *$id:s(struct $id:ctx* ctx) {
+                         return &ctx->q;
+                       }|])
+
           GC.publicDef_ "context_init_jobqueue" GC.InitDecl $ \s ->
             ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|int $id:s(struct $id:ctx* ctx) {
@@ -143,44 +149,6 @@ compileProg =
              [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                          return job_queue_destroy(&ctx->q);
                        }|])
-
-
-
-          GC.headerDecl GC.MiscDecl [C.cedecl|$esc:("#define MULTICORE")|]
-          GC.headerDecl GC.EntryDecl [C.cedecl|$esc:jobqueue_h|]
-
-         -- TODO figure out the naming scheme here
-         -- And if this should even be declared here
-          GC.earlyDecls [[C.cedecl|typedef int (*task_fn)(void*);|]]
-          GC.earlyDecls [[C.cedecl|struct task {
-                       typename task_fn fn;
-                       void* args;
-                       typename pthread_mutex_t *mutex;
-                       typename pthread_cond_t *cond;
-                       int *counter;
-          };|]]
-
-
-          GC.publicDef_ "worker" GC.InitDecl $ \s ->
-            ([C.cedecl|void *$id:s(void*);|],
-             [C.cedecl|void *$id:s(void* arg) {
-                         struct $id:ctx *ctx = (struct $id:ctx*) arg;
-                         while(1) {
-                           struct task *task;
-                           if (job_queue_pop(&ctx->q, (void**)&task) == 0) {
-                              task->fn(task->args);
-                              pthread_mutex_lock(task->mutex);
-                              (*task->counter)--;
-                              pthread_cond_signal(task->cond);
-                              pthread_mutex_unlock(task->mutex);
-                              free(task);
-                           } else {
-                              break;
-                           }
-                         }
-                         return NULL;
-                       }|])
-           where  jobqueue_h = $(embedStringFile "rts/c/jobqueue.h")
 
 
 
@@ -205,7 +173,7 @@ compileStructFields  fargs fctypes =
 compileSetStructValues :: (C.ToIdent a1, C.ToIdent a2) =>
                            a1 -> [a2] -> [C.Stm]
 compileSetStructValues struct vnames =
-  [ [C.cstm|$id:struct.$id:name=&$id:name;|] | name <- vnames]
+  [ [C.cstm|$id:struct->$id:name=&$id:name;|] | name <- vnames]
 
 
 compileGetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
@@ -232,96 +200,40 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
-  struct <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
+  fstruct <- GC.publicMulticoreDef "parloop_struct" GC.MiscDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s {
              $sdecls:(compileStructFields fargs fctypes)
            };|])
 
-  -- Maybe I should drop this and just use the thread function
+  -- Maybe I should drop this and just use the task function
   fbody <- GC.publicMulticoreDef "parloop_body" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i);|],
-    [C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i) {
-            $decls:(compileGetStructVals struct fargs fctypes)
+   ([C.cedecl|int $id:s(struct $id:fstruct *$id:fstruct, int $id:i);|],
+    [C.cedecl|int $id:s(struct $id:fstruct *$id:fstruct, int $id:i) {
+            $decls:(compileGetStructVals fstruct fargs fctypes)
             $items:body'
             return 0;
    }|])
 
 
-  task_struct <- GC.publicMulticoreDef "parloop_task_struct" GC.MiscDecl $ \s ->
-    ([C.cedecl|struct $id:s;|],
-     [C.cedecl|struct $id:s {
-               struct $id:struct *$id:struct;
-               int start;
-               int end;
-           };|])
-
 
   -- A task function that a thread should execute
-  -- Not intended to be a worker thread
   ftask <- GC.publicMulticoreDef "parloop_task" GC.MiscDecl $ \s ->
-   ([C.cedecl|int $id:s(void *input);|],
-    [C.cedecl|int $id:s(void *input) {
-              struct $id:task_struct *$id:task_struct = (struct $id:task_struct*) input;
-              struct $id:struct *$id:struct = $id:task_struct->$id:struct;
-              for (int i = $id:task_struct->start; i < $id:task_struct->end; i++) {
-                   $id:fbody($id:struct, i);
+   ([C.cedecl|int $id:s(void *args, int start, int end);|],
+    [C.cedecl|int $id:s(void *args, int start, int end) {
+              for (int i = start; i < end; i++) {
+                   $id:fbody((struct $id:fstruct*) args, i);
               }
               return 0;
    }|])
 
   -- Declare and set values needed by function body
-  GC.decl [C.cdecl|struct $id:struct $id:struct;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues struct fargs)|]
+  GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
 
+  GC.stm [C.cstm|scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e');|]
 
-  -- Setup arg for thread function
-  GC.decl [C.cdecl|struct $id:task_struct $id:task_struct;|]
-  GC.stms [C.cstms|$id:task_struct.$id:struct = &$id:struct;|]
-  GC.stms [C.cstms|$id:task_struct.end = $exp:e';|]
-  GC.stms [C.cstms|$id:task_struct.start = 0;|]
-
-
-  -- Set up join condition for this task
-  GC.decl [C.cdecl|typename pthread_mutex_t mutex;|]
-  GC.stms [C.cstms|if (pthread_mutex_init(&mutex, NULL) != 0) {
-                     fprintf(stderr, "got error from pthread_mutex_init: %s\n", strerror(errno));
-                     return 1;
-                   }|]
-
-  GC.decl [C.cdecl|typename pthread_cond_t cond;|]
-  GC.stms [C.cstms|if (pthread_cond_init(&cond, NULL)!= 0) {
-                     fprintf(stderr, "got error from pthread_cond_init: %s\n", strerror(errno));
-                     return 1;
-                   }|]
-
-
-  -- TODO
-  -- actually partition operation into subtasks
-  -- e.g. based on num_threads or ??
-
-  -- Set up task struct for queue
-  GC.decl [C.cdecl|int counter;|]
-  GC.stms [C.cstms|counter = 1;|]
-  GC.decl [C.cdecl|struct task* task = malloc(sizeof(struct task));|]
-  GC.stms [C.cstms|task->fn = $id:ftask;|]
-  GC.stms [C.cstms|task->args = &$id:task_struct;|]
-  GC.stms [C.cstms|task->mutex   = &mutex;|]
-  GC.stms [C.cstms|task->cond    = &cond;|]
-  GC.stms [C.cstms|task->counter = &counter;|]
-
-  GC.stm [C.cstm|job_queue_push(&ctx->q, task);|]
-
-  -- GC.decl [C.cdecl|int num_threads = 4;|]
-  -- GC.stms [C.cstms|for (int i = 0; i < num_threads; i++) {
-  --             struct $id:task_struct $
-  --          }|]
-
-
-  GC.stm [C.cstm|pthread_mutex_lock(&mutex);|]
-  GC.stm [C.cstm|while (counter != 0) {
-                    pthread_cond_wait(task->cond, task->mutex);
-                 }|]
+  GC.stm [C.cstm|free($id:fstruct);|]
 
 
 compileOp (ParLoopAcc i e (MulticoreFunc fargs ftypes body)) = do
