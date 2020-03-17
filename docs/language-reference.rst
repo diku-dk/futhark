@@ -992,7 +992,7 @@ used to express invariants about the shapes of arrays that are
 accepted or produced by the function.  For example::
 
   let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
-    map (+) a b
+    map2 (+) a b
 
 We use a *size parameter*, ``[n]``, to explicitly quantify sizes.  The
 ``[n]`` parameter is not explicitly passed when calling ``f``.
@@ -1433,9 +1433,9 @@ Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
   module Times = \(M: Addable) -> {
-    let times (x: M.t) (k: int): M.t =
-      loop (x' = x) for i < k do
-        T.add x' x
+    let times (x: M.t) (k: i32): M.t =
+      loop x' = x for i < k do
+        M.add x' x
   }
 
 We can instantiate ``Times`` with any module that fulfils the module
