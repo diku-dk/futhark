@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fix a REPL regression that made it unable to handle overloaded
+    types (such as numeric literals, oops).
+
 ## [0.15.1]
 
 ### Added
