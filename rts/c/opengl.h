@@ -130,6 +130,7 @@ static const char* opengl_error_string(GLenum err) {
     case GL_OUT_OF_MEMORY:                 return "OUT_OF_MEMORY";
     case GL_STACK_UNDERFLOW:               return "GL_STACK_UNDERFLOW";
     case GL_STACK_OVERFLOW:                return "GL_STACK_OVERFLOW";
+    default:                               return "UNSPECIFIED_ERROR";
   }
 }
 
@@ -153,26 +154,30 @@ static void shader_succeed(int ret,
   }
 }
 
-static int opengl_shader_succeed(GLuint shader, const char* type)
-{
+static int shader_link_succeed(GLuint shader) {
   GLint success;
   GLchar infoLog[2048];
 
-  if (type == "PROGRAM") {
-    glGetProgramiv(shader, GL_LINK_STATUS, &success);
-    if (!success) {
-      glGetProgramInfoLog(shader, 2048, NULL, infoLog);
-      printf("PROGRAM_LINKING_ERROR: %s\n%s\n", type, infoLog);
-      return 1;
-    }
+  glGetProgramiv(shader, GL_LINK_STATUS, &success);
+
+  if (!success) {
+    glGetProgramInfoLog(shader, 2048, NULL, infoLog);
+    printf("PROGRAM_LINKING_ERROR: \n%s\n", infoLog);
+    return success;
   }
-  else {
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-      glGetShaderInfoLog(shader, 2048, NULL, infoLog);
-      printf("SHADER_COMPILATION_ERROR: %s\n%s\n", type, infoLog);
-      return 1;
-    }
+  return 0;
+}
+
+static int shader_compile_succeed(GLuint shader) {
+  GLint success;
+  GLchar infoLog[2048];
+
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+
+  if (!success) {
+    glGetShaderInfoLog(shader, 2048, NULL, infoLog);
+    printf("SHADER_COMPILATION_ERROR: \n%s\n", infoLog);
+    return success;
   }
   return 0;
 }
