@@ -283,17 +283,14 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
 
 
   -- Set up join condition for this task
-  GC.decl [C.cdecl|int retval;|]
   GC.decl [C.cdecl|typename pthread_mutex_t mutex;|]
-  GC.stms [C.cstms|retval = pthread_mutex_init(&mutex, NULL);|]
-  GC.stms [C.cstms|if (retval != 0) {
+  GC.stms [C.cstms|if (pthread_mutex_init(&mutex, NULL) != 0) {
                      fprintf(stderr, "got error from pthread_mutex_init: %s\n", strerror(errno));
                      return 1;
                    }|]
 
   GC.decl [C.cdecl|typename pthread_cond_t cond;|]
-  GC.stms [C.cstms|retval = pthread_cond_init(&cond, NULL);|]
-  GC.stms [C.cstms|if (retval != 0) {
+  GC.stms [C.cstms|if (pthread_cond_init(&cond, NULL)!= 0) {
                      fprintf(stderr, "got error from pthread_cond_init: %s\n", strerror(errno));
                      return 1;
                    }|]
