@@ -50,6 +50,7 @@ runOptions path timeout_s opts =
              , runRuns = optRuns opts
              , runExtraOptions = "-L" : map opt path ++ optExtraOptions opts
              , runTimeout = timeout_s
+             , runVerbose = optVerbose opts
              }
   where opt (name, val) = "--size=" ++ name ++ "=" ++ show val
 
