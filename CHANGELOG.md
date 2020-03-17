@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fix a REPL regression that made it unable to handle overloaded
     types (such as numeric literals, oops).
 
+  * The uniqueness of a record is now the minimum of the uniqueness of
+    any of its elements (#870).
+
 ## [0.15.1]
 
 ### Added

@@ -240,7 +240,8 @@ mustBeExplicit bind_t =
 uniqueness :: TypeBase shape as -> Uniqueness
 uniqueness (Array _ u _ _) = u
 uniqueness (Scalar (TypeVar _ u _ _)) = u
-uniqueness (Scalar (Sum ts)) = mconcat $ map (mconcat . map uniqueness) $ M.elems ts
+uniqueness (Scalar (Sum ts)) = foldMap (foldMap uniqueness) $ M.elems ts
+uniqueness (Scalar (Record fs)) = foldMap uniqueness $ M.elems fs
 uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
