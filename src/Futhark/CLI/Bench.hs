@@ -42,11 +42,12 @@ data BenchOptions = BenchOptions
                    , optEntryPoint :: Maybe String
                    , optTuning :: Maybe String
                    , optConcurrency :: Maybe Int
+                   , optVerbose :: Int
                    }
 
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "c" Nothing "" 10 [] [] Nothing (-1) False
-                      ["nobench", "disable"] [] Nothing (Just "tuning") Nothing
+                      ["nobench", "disable"] [] Nothing (Just "tuning") Nothing 0
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -162,6 +163,7 @@ runOptions opts = RunOptions { runRunner = optRunner opts
                              , runRuns = optRuns opts
                              , runExtraOptions = optExtraOptions opts
                              , runTimeout = optTimeout opts
+                             , runVerbose = optVerbose opts
                              }
 
 runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
@@ -275,6 +277,9 @@ commandLineOptions = [
                    Left $ error $ "'" ++ n ++ "' is not a positive integer.")
     "NUM")
     "Number of benchmarks to prepare (not run) concurrently."
+  , Option "v" ["verbose"]
+    (NoArg $ Right $ \config -> config { optVerbose = optVerbose config + 1 })
+    "Enable logging.  Pass multiple times for more."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
