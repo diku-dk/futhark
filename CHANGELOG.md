@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The uniqueness of a record is now the minimum of the uniqueness of
     any of its elements (#870).
 
+  * Bug in causality checking has been fixed (#872).
+
 ## [0.15.1]
 
 ### Added
