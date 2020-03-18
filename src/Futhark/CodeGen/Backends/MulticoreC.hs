@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.MulticoreC
 
 import Control.Monad
 
+
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
@@ -20,7 +21,6 @@ import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
--- import Data.FileEmbed (embedStringFile)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError GC.CParts)
@@ -189,14 +189,15 @@ compileSetStructVals struct vals =
   [ [C.cstm|*$id:struct->$id:name=$id:name;|]
            | name <- vals ]
 
-getCType :: Type -> C.Type
+getCType :: Param -> C.Type
 getCType t = case t of
-               Scalar pt  -> GC.primTypeToCType pt
-               Mem space' -> GC.fatMemType space'
+               ScalarParam _ pt  -> GC.primTypeToCType pt
+               MemParam _ space' -> GC.fatMemType space'
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
-  let fctypes = map getCType ftypes
+compileOp (ParLoop i e (MulticoreFunc params _ body _)) = do
+  let fctypes = map getCType params
+  let fargs   = map paramName params
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
@@ -207,7 +208,7 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
 
   -- A task function that a thread should execute
   ftask <- GC.multicoreDef "parloop_task" $ \s ->
-    [C.cedecl|int $id:s(void *args, int start, int end) {
+    [C.cedecl|int $id:s(void *args, int start, int end, int thread_id) {
               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
               $decls:(compileGetStructVals fstruct fargs fctypes)
               for (int $id:i = start; $id:i < end; $id:i++) {
@@ -216,36 +217,46 @@ compileOp (ParLoop i e (MulticoreFunc fargs ftypes body)) = do
               return 0;
    }|]
 
+
   GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e') =! 0) {
+  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', NULL) != 0) {
                      fprintf(stderr, "scheduler failed to do task\n");
                      return 1;
            };|]
   GC.stm  [C.cstm|free($id:fstruct);|]
 
-compileOp (ParLoopAcc i e (MulticoreFunc fargs ftypes body)) = do
-  let fctypes = map getCType ftypes
+
+compileOp (ParLoopAcc i e (MulticoreFunc params prebody body tid)) = do
+  let fctypes = map getCType params
+  let fargs   = map paramName params
   e' <- GC.compileExp e
   body' <- GC.blockScope $ GC.compileCode body
 
-  struct <- GC.multicoreDef "parloop_struct" $ \s ->
+  prebody' <- GC.blockScope $ GC.compileCode prebody
+
+  fstruct <- GC.multicoreDef "parloop_struct" $ \s ->
      [C.cedecl|struct $id:s {
                  $sdecls:(compileStructFields fargs fctypes)
                };|]
 
-  f <- GC.multicoreDef "parloop" $ \s ->
-    [C.cedecl|int $id:s(struct $id:struct *$id:struct, int $id:i) {
-                $decls:(compileGetStructVals  struct fargs fctypes)
-                $items:body'
-                $stms:(compileSetStructVals struct fargs)
-                return 0;
-              }|]
+  ftask <- GC.multicoreDef "parloop" $ \s ->
+    [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
+              struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+              $decls:(compileGetStructVals fstruct fargs fctypes)
+              int $id:i = start;
+              $items:prebody'
+              for (++$id:i; $id:i < end; $id:i++) {
+                  $items:body'
+              }
+              return 0;
+           }|]
 
-  -- Declare and set values
-  GC.decl [C.cdecl|struct $id:struct $id:struct;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues struct fargs)|]
+  GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
+  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', &$id:tid) != 0) {
+                     fprintf(stderr, "scheduler failed to do task\n");
+                     return 1;
+           };|]
 
-  GC.stms [[C.cstm|for (int $id:i = 0; $id:i < $exp:e'; $id:i++) {
-                   int retval = $id:f(&$id:struct, $id:i);
-                 }|]]
+  GC.stm  [C.cstm|free($id:fstruct);|]

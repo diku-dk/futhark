@@ -47,6 +47,7 @@ module Futhark.CodeGen.Backends.GenericC
   , stm
   , stms
   , decl
+  , decls
   , atInit
   , headerDecl
   , publicDef
@@ -60,7 +61,6 @@ module Futhark.CodeGen.Backends.GenericC
   , contextType
   , contextField
   -- My stuff
-  , decls
   , memToCType
   , fatMemType
   , rawMemCType
