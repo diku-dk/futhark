@@ -112,14 +112,8 @@ prepare opts prog = do
   fmap concat $ forM truns $ \ios ->
     forM (mapMaybe (runnableDataset $ iosEntryPoint ios)
                    (iosTestRuns ios)) $
-      \(dataset, do_run) -> do
-      res <- do_run (optTimeout opts) [] RunBenchmark
-      case res of Left err -> do
-                    putStrLn $ "Error when running " ++ prog ++ ":"
-                    putStrLn err
-                    exitFailure
-                  Right _ ->
-                    return (dataset, do_run, iosEntryPoint ios)
+      \(dataset, do_run) ->
+        return (dataset, do_run, iosEntryPoint ios)
 
   where run entry_point trun expected timeout path purpose = do
           let opts' = case purpose of RunSample -> opts { optRuns = 1 }
