@@ -296,7 +296,7 @@ instance ASTMappable (FieldBase Info VName) where
 
 instance ASTMappable (CaseBase Info VName) where
   astMap tv (CasePat pat e loc) =
-    CasePat <$> astMap tv pat <*> astMap tv e <*> pure loc
+    CasePat <$> astMap tv pat <*> mapOnExp tv e <*> pure loc
 
 instance ASTMappable a => ASTMappable (Info a) where
   astMap tv = traverse $ astMap tv
