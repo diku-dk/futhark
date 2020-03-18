@@ -19,6 +19,13 @@ run-simple:
 dump-simple:
 	./tests/scan/simple --dump-opencl tests/scan/simple-kernel.c
 
+gpu-simple:
+	$(FUTHARK) dev --gpu tests/scan/simple.fut > tests/scan/simple.gpu
+
+dump-fused:
+	$(FUTHARK) dev --gpu tests/intragroup/scan0.fut > tests/intragroup/scan0.gpu
+	# ./tests/intragroup/scan0 --dump-opencl tests/intragroup/scan0-kernel.c
+
 dump-cuda:
 	./tests/scan/simple --dump-cuda tests/scan/simple-cuda-kernel.c
 
@@ -30,3 +37,6 @@ test-cuda: $(SIZES:%=kA-%.data)
 
 kA-%.data:
 	futhark dataset --i32-bounds=-10000:10000 -g [$*]i32 > tests/scan/$@
+
+ntest:
+	$(FUTHARK) test --backend=opencl tests/scan/n-tests.fut
