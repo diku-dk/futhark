@@ -30,11 +30,12 @@ data AutotuneOptions = AutotuneOptions
                     , optTuning :: Maybe String
                     , optExtraOptions :: [String]
                     , optVerbose :: Int
+                    , optTimeout :: Int
                     }
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -112,7 +113,7 @@ prepare opts prog = do
     forM (mapMaybe (runnableDataset $ iosEntryPoint ios)
                    (iosTestRuns ios)) $
       \(dataset, do_run) -> do
-      res <- do_run 60000 [] RunBenchmark
+      res <- do_run (optTimeout opts) [] RunBenchmark
       case res of Left err -> do
                     putStrLn $ "Error when running " ++ prog ++ ":"
                     putStrLn err
@@ -226,8 +227,8 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
   -- Or simplify: Always compute min and max, then compute mid and mid+1: If
   -- mid+1 is lower than mid, recurse in to upper half, else recurse into
   -- lower half. Remember to carry the best so far (min, max, mid, mid+1).
-  result_min  <- benchmarkThresholdChoice 6000 thresholdMin
-  result_max <- benchmarkThresholdChoice 6000 thresholdMax
+  result_min  <- benchmarkThresholdChoice (optTimeout opts) thresholdMin
+  result_max <- benchmarkThresholdChoice (optTimeout opts) thresholdMax
 
   best_e_par <- binarySearch
                 (bestPair $ catMaybes $  [(,) <$> result_min <*> pure thresholdMin,
@@ -281,7 +282,8 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
 
 
     timeout :: Int -> Int
-    timeout elapsed = ceiling (fromIntegral elapsed * 1.2 :: Double) + 1
+    timeout elapsed = min (optTimeout opts) $
+                      ceiling (fromIntegral elapsed * 1.2 / 1000000 :: Double) + 1
 
     aggregateResults :: [Maybe Int] -> Maybe Int
     aggregateResults xs = sum <$> sequence xs
@@ -318,7 +320,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
           return (S.empty, 0)
 
         else do
-          sample_run <- run 60000 path RunSample
+          sample_run <- run (optTimeout opts) path RunSample
           case sample_run of
             Left err -> do
               -- If the sampling run fails, we treat it as zero information.
@@ -391,6 +393,15 @@ commandLineOptions = [
   , Option "v" ["verbose"]
     (NoArg $ Right $ \config -> config { optVerbose = optVerbose config + 1 })
     "Enable logging.  Pass multiple times for more."
+  , Option [] ["timeout"]
+    (ReqArg (\n ->
+               case reads n of
+                 [(n', "")] ->
+                   Right $ \config -> config { optTimeout = n' }
+                 _ ->
+                   Left $ error $ "'" ++ n ++ "' is not a non-negative integer.")
+    "SECONDS")
+    "Number of seconds before each tuning run is aborted."
    ]
 
 main :: String -> [String] -> IO ()
