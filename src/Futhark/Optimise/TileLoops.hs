@@ -41,8 +41,8 @@ optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
-  mmm_tiling <- mmmTiling2D stm
-  -- let mmm_tiling = Nothing -- use this instead of the above to disable mmm_tiling.
+  -- mmm_tiling <- mmmTiling2D stm
+  let mmm_tiling = Nothing -- use this instead of the above to disable mmm_tiling.
   case mmm_tiling of
     Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
     Nothing -> do
