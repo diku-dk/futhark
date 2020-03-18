@@ -276,8 +276,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
 
 
     timeout :: Int -> Int
-    timeout elapsed = min (optTimeout opts) $
-                      ceiling (fromIntegral elapsed * 1.2 / 1000000 :: Double) + 1
+    timeout elapsed = optTimeout opts
 
     aggregateResults :: [Maybe Int] -> Maybe Int
     aggregateResults xs = sum <$> sequence xs
