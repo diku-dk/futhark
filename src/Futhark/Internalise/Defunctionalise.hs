@@ -758,6 +758,8 @@ buildRetType env pats = comb
         problematic v = (v `member` bound) && not (boundAsUnique v)
         comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
           Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
+        comb (Scalar (Sum cs_annot)) (Scalar (Sum cs_got)) =
+          Scalar $ Sum $ M.intersectionWith (zipWith comb) cs_annot cs_got
         comb (Scalar Arrow{}) t =
           descend t
         comb got et =
