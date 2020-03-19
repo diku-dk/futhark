@@ -30,7 +30,6 @@ module Futhark.CodeGen.Backends.GenericC
   , CompilerM
   , CompilerState (compUserState)
   , getUserState
-  , putUserState
   , modifyUserState
   , contextContents
   , contextFinalInits
@@ -340,9 +339,6 @@ runCompilerM prog ops src userstate (CompilerM m) =
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
-
-putUserState :: s -> CompilerM op s ()
-putUserState s = modify $ \compstate -> compstate { compUserState = s }
 
 modifyUserState :: (s -> s) -> CompilerM op s ()
 modifyUserState f = modify $ \compstate ->

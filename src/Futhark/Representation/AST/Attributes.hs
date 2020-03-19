@@ -30,7 +30,6 @@ module Futhark.Representation.AST.Attributes
   , stmCerts
   , certify
   , expExtTypesFromPattern
-  , patternFromParams
 
   , IsOp (..)
   , Attributes (..)
@@ -218,8 +217,3 @@ expExtTypesFromPattern :: Typed attr => PatternT attr -> [ExtType]
 expExtTypesFromPattern pat =
   existentialiseExtTypes (patternContextNames pat) $
   staticShapes $ map patElemType $ patternValueElements pat
-
--- | Create a pattern corresponding to some parameters.
-patternFromParams :: [Param attr] -> PatternT attr
-patternFromParams = Pattern [] . map toPatElem
-  where toPatElem p = PatElem (paramName p) $ paramAttr p

@@ -27,7 +27,6 @@ module Futhark.Transform.Rename
   -- * Renaming annotations
   , RenameM
   , substituteRename
-  , bindingForRename
   , renamingStms
   , Rename (..)
   , Renameable
@@ -163,10 +162,6 @@ instance Rename Ident where
     name' <- rename name
     tp' <- rename tp
     return $ Ident name' tp'
-
--- | Create a bunch of new names and bind them for substitution.
-bindingForRename :: [VName] -> RenameM a -> RenameM a
-bindingForRename = bind
 
 bind :: [VName] -> RenameM a -> RenameM a
 bind vars body = do

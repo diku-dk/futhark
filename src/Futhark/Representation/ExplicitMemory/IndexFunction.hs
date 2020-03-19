@@ -6,14 +6,12 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , index
        , iota
        , offsetIndex
-       , strideIndex
        , permute
        , rotate
        , reshape
        , slice
        , rebase
        , repeat
-       , isContiguous
        , shape
        , rank
        , linearWithOffset
@@ -224,10 +222,6 @@ isDirect ixfun@(IxFun (LMAD offset dims :| []) oshp True) =
             s == se && r == 0 && n == d && p == m)
      (zip4 dims [0..length dims - 1] oshp strides_expected)
 isDirect _ = False
-
--- | Does the index function have contiguous memory support?
-isContiguous :: (Eq num, IntegralExp num) => IxFun num -> Bool
-isContiguous ixfun = ixfunContig ixfun && hasContiguousPerm ixfun
 
 -- | Does the index function have an ascending permutation?
 hasContiguousPerm :: IxFun num -> Bool
@@ -701,15 +695,6 @@ offsetIndex ixfun i | i == 0 = ixfun
 offsetIndex ixfun i =
   case shape ixfun of
     d : ds -> slice ixfun (DimSlice i (d - i) 1 : map (unitSlice 0) ds)
-    [] -> error "offsetIndex: underlying index function has rank zero"
-
--- | Stride index.  Results in the index function corresponding to making the
--- outermost dimension strided by @s@.
-strideIndex :: (Eq num, IntegralExp num) =>
-               IxFun num -> num -> IxFun num
-strideIndex ixfun s =
-  case shape ixfun of
-    d : ds -> slice ixfun (DimSlice 0 d s : map (unitSlice 0) ds)
     [] -> error "offsetIndex: underlying index function has rank zero"
 
 -- | If the memory support of the index function is contiguous and row-major

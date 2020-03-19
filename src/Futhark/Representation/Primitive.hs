@@ -696,7 +696,7 @@ doSIToFP :: IntValue -> FloatType -> FloatValue
 doSIToFP v t = floatValue t $ intToInt64 v
 
 doCmpOp :: CmpOp -> PrimValue -> PrimValue -> Maybe Bool
-doCmpOp CmpEq{} v1 v2                            = Just $ v1 == v2
+doCmpOp CmpEq{} v1 v2                            = Just $ doCmpEq v1 v2
 doCmpOp CmpUlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpUlt v1 v2
 doCmpOp CmpUle{} (IntValue v1) (IntValue v2)     = Just $ doCmpUle v1 v2
 doCmpOp CmpSlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpSlt v1 v2

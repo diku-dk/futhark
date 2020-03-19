@@ -11,12 +11,9 @@ module Futhark.MonadFreshNames
   , newName
   , newNameFromString
   , newVName
-  , newVName'
   , newIdent
   , newIdent'
-  , newIdents
   , newParam
-  , newParam'
   , module Futhark.FreshNames
   ) where
 
@@ -32,7 +29,7 @@ import Control.Monad.Reader
 
 import Futhark.Representation.AST.Syntax
 import qualified Futhark.FreshNames as FreshNames
-import Futhark.FreshNames hiding (newName, newVName)
+import Futhark.FreshNames hiding (newName)
 
 -- | A monad that stores a name source.  The following is a good
 -- instance for a monad in which the only state is a @NameSource vn@:
@@ -89,11 +86,6 @@ newID s = newName $ VName s 0
 newVName :: MonadFreshNames m => String -> m VName
 newVName = newID . nameFromString
 
--- | Produce a fresh 'VName', using the given name as a template, but
--- possibly appending something more..
-newVName' :: MonadFreshNames m => (String -> String) -> String -> m VName
-newVName' f = newID . nameFromString . f
-
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
             String -> Type -> m Ident
@@ -110,27 +102,12 @@ newIdent' f ident =
   newIdent (f $ nameToString $ baseName $ identName ident)
            (identType ident)
 
--- | Produce several 'Ident's, using the given name as a template,
--- based on a list of types.
-newIdents :: MonadFreshNames m =>
-             String -> [Type] -> m [Ident]
-newIdents = mapM . newIdent
-
 -- | Produce a fresh 'Param', using the given name as a template.
 newParam :: MonadFreshNames m =>
             String -> attr -> m (Param attr)
 newParam s t = do
   s' <- newID $ nameFromString s
   return $ Param s' t
-
--- | Produce a fresh 'Param', using the given 'Param' as a template,
--- but possibly modifying the name.
-newParam' :: MonadFreshNames m =>
-             (String -> String)
-          -> Param attr -> m (Param attr)
-newParam' f param =
-  newParam (f $ nameToString $ baseName $ paramName param)
-           (paramAttr param)
 
 -- Utility instance defintions for MTL classes.  This requires
 -- UndecidableInstances, but saves on typing elsewhere.

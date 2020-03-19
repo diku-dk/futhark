@@ -36,7 +36,6 @@ module Futhark.CodeGen.Backends.GenericPython
   , CompilerEnv(..)
   , CompilerState(..)
   , stm
-  , stms
   , atInit
   , collect'
   , collect
@@ -220,9 +219,6 @@ atInit x = modify $ \s ->
 
 stm :: PyStmt -> CompilerM op s ()
 stm x = tell [x]
-
-stms :: [PyStmt] -> CompilerM op s ()
-stms = mapM_ stm
 
 futharkFun :: String -> String
 futharkFun s = "futhark_" ++ zEncodeString s
