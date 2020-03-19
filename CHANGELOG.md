@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Invariant memory allocations in scan/reduce operators are now supported.
 
+  * `futhark run` now performs more type checking on entry point input (#876).
+
+  * Compiled Futhark programs now check for EOF after the last input
+    argument has been read (#877).
+
 ## [0.15.1]
 
 ### Added

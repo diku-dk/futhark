@@ -950,8 +950,9 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args) =
   if any isOpaque decl_args then
     return (Def fname' VoidT [] [exitException], nameToString fname, Var fname')
   else do
-    (_, _, _, prepareIn, _, body_bin, prepare_out, res, prepare_run) <- prepareEntry entry
+    (_, _, _, prepare_in, _, body_bin, prepare_out, res, prepare_run) <- prepareEntry entry
     let str_input = map readInput decl_args
+        end_of_input = [Exp $ simpleCall "EndOfInput" [String $ pretty fname]]
 
     let outputDecls = map getDefaultDecl outputs
         exitcall = [
@@ -978,7 +979,7 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args) =
     str_output <- printValue res
 
     return (Def fname' VoidT [] $
-             str_input ++ prepareIn ++ outputDecls ++
+             str_input ++ end_of_input ++ prepare_in ++ outputDecls ++
              [Try [do_warmup_run, do_num_runs] [except']] ++
              [close_runtime_file] ++
              str_output,
