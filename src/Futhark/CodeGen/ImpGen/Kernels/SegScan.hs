@@ -349,7 +349,7 @@ compileSegScan  (Pattern _ pes)
               flag <-- Imp.var usedflg_val int8 .&. 3 -- get status
               sIf (flagExp .==. 2)
                 (read_offset <-- Imp.var loop_stop int32) $ do-- EXIT
-                used <-- Imp.BinOpExp (LShr Int32) (Imp.var usedflg_val int8) 2 -- get used: usd_flg >> 2
+                used <-- Imp.BinOpExp (LShr Int8) (Imp.var usedflg_val int8) 2 -- get used: usd_flg >> 2
                 read_offset <-- Imp.var read_offset int32 - Imp.var used int32
               copyDWIMFix block_id [0] (Var read_offset) []
               -- update prefix
