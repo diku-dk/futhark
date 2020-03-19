@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Bug in causality checking has been fixed (#872).
 
+  * Invariant memory allocations in scan/reduce operators are now supported.
+
 ## [0.15.1]
 
 ### Added
