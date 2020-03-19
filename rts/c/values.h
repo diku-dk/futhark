@@ -653,7 +653,9 @@ static int read_array(const struct primtype_info_t *expected_type, void **data, 
 
 static int end_of_input() {
   skipspaces();
-  if (feof(stdin)) {
+  char token[2];
+  next_token(token, sizeof(token));
+  if (strcmp(token, "") == 0) {
     return 0;
   } else {
     return 1;
