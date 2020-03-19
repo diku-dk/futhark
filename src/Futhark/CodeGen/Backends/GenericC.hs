@@ -1227,6 +1227,11 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     /* Declare and read input. */
     set_binary_mode(stdin);
     $items:input_items
+
+    if (end_of_input() != 0) {
+      panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
+    }
+
     $items:output_decls
 
     /* Warmup run */

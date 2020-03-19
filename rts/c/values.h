@@ -651,6 +651,15 @@ static int read_array(const struct primtype_info_t *expected_type, void **data, 
   }
 }
 
+static int end_of_input() {
+  skipspaces();
+  if (feof(stdin)) {
+    return 0;
+  } else {
+    return 1;
+  }
+}
+
 static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, unsigned char *data, int64_t *shape, int8_t rank) {
   if (rank==0) {
     elem_type->write_str(out, (void*)data);

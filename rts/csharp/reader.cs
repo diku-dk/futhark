@@ -852,6 +852,18 @@ private double ReadF64()
     return ReadStrF64();
 }
 
+private void EndOfInput(string entry)
+{
+    try {
+        SkipSpaces();
+        var c = GetChar();
+        if (c.HasValue) {
+            throw new Exception(String.Format("Expected EOF on stdin after reading input for \"{0}\".", entry));
+        }
+    } catch (System.IO.EndOfStreamException e) {
+    }
+}
+
 private void WriteValue(bool x){Console.Write(x ? "true" : "false", x);}
 private void WriteValue(sbyte x){Console.Write("{0}i8", x);}
 private void WriteValue(short x){Console.Write("{0}i16", x);}
