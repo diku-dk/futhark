@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Compiled Futhark programs now check for EOF after the last input
     argument has been read (#877).
 
+  * Fixed a bug in `loop` type checking that prevented the result from
+    ever aliasing the initial parameter values (#879).
+
 ## [0.15.1]
 
 ### Added

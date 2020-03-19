@@ -1601,8 +1601,8 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
 
   (merge_t, new_dims) <-
     instantiateEmptyArrayDims loc "loop" Nonrigid . -- dim handling (1)
-    anySizes .
-    (`setAliases` mempty) =<< expTypeFully mergeexp'
+    anySizes
+    =<< expTypeFully mergeexp'
 
   -- dim handling (2)
   let checkLoopReturnSize mergepat' loopbody' = do
