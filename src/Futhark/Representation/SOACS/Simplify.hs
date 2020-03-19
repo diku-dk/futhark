@@ -8,7 +8,6 @@ module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
        , simplifyLambda
        , simplifyFun
-       , simplifyFun'
        , simplifyStms
 
        , simpleSOACS
@@ -66,10 +65,6 @@ getShapeNames bnd =
 simplifyFun :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
 simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
-
-simplifyFun' :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
-simplifyFun' =
-  Simplify.simplifyFun simpleSOACS mempty Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> [Maybe VName] -> m Lambda

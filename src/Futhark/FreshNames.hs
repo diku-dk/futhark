@@ -5,8 +5,6 @@ module Futhark.FreshNames
   , blankNameSource
   , newNameSource
   , newName
-  , newVName
-  , newVNameFromName
   ) where
 
 import Language.Haskell.TH.Syntax (Lift)
@@ -41,11 +39,3 @@ blankNameSource = newNameSource 0
 -- | A new name source that starts counting from the given number.
 newNameSource :: Int -> VNameSource
 newNameSource = VNameSource
-
--- | Produce a fresh 'VName', using the given base name as a template.
-newVName :: VNameSource -> String -> (VName, VNameSource)
-newVName src = newVNameFromName src . nameFromString
-
--- | Produce a fresh 'VName', using the given base name as a template.
-newVNameFromName :: VNameSource -> Name -> (VName, VNameSource)
-newVNameFromName src s = newName src $ VName s 0

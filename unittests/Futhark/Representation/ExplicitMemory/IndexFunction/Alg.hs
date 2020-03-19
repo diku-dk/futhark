@@ -4,7 +4,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Alg
   ( IxFun(..)
   , iota
   , offsetIndex
-  , strideIndex
   , permute
   , rotate
   , reshape
@@ -12,7 +11,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Alg
   , rebase
   , repeat
   , shape
-  , rank
   , index
   )
 where
@@ -39,7 +37,6 @@ data IxFun num = Direct (Shape num)
                | Reshape (IxFun num) (ShapeChange num)
                | Repeat (IxFun num) [Shape num] (Shape num)
                | OffsetIndex (IxFun num) num
-               | StrideIndex (IxFun num) num
                | Rebase (IxFun num) (IxFun num)
                deriving (Eq, Show)
 
@@ -56,8 +53,6 @@ instance Pretty num => Pretty (IxFun num) where
     ppr fun <> text "->repeat" <> parens (commasep (map ppr $ outer_shapes++ [inner_shape]))
   ppr (OffsetIndex fun i) =
     ppr fun <> text "->offset_index" <> parens (ppr i)
-  ppr (StrideIndex fun s) =
-    ppr fun <> text "->stride_index" <> parens (ppr s)
   ppr (Rebase new_base fun) =
     text "rebase(" <> ppr new_base <> text ", " <> ppr fun <> text ")"
 
@@ -67,9 +62,6 @@ iota = Direct
 
 offsetIndex :: IxFun num -> num -> IxFun num
 offsetIndex = OffsetIndex
-
-strideIndex :: IxFun num -> num -> IxFun num
-strideIndex = StrideIndex
 
 permute :: IxFun num -> Permutation -> IxFun num
 permute = Permute
@@ -106,15 +98,8 @@ shape (Repeat ixfun outer_shapes inner_shape) =
   where repeated outer_ds d = outer_ds ++ [d]
 shape (OffsetIndex ixfun _) =
   shape ixfun
-shape (StrideIndex ixfun _) =
-  shape ixfun
 shape (Rebase _ ixfun) =
   shape ixfun
-
-rank :: IntegralExp num =>
-        IxFun num -> Int
-rank = length . shape
-
 
 index :: (IntegralExp num, Eq num) =>
          IxFun num -> Indices num -> num
@@ -147,11 +132,6 @@ index (OffsetIndex fun i) is =
     d : ds ->
       index (Index fun (DimSlice i (d-i) 1 : map (unitSlice 0) ds)) is
     [] -> error "index: OffsetIndex: underlying index function has rank zero"
-index (StrideIndex fun s) is =
-  case shape fun of
-    d : ds ->
-      index (Index fun (DimSlice 0 d s : map (unitSlice 0) ds)) is
-    [] -> error "index: StrideIndex: underlying index function has rank zero"
 index (Rebase new_base fun) is =
   let fun' = case fun of
                Direct old_shape ->
@@ -168,8 +148,6 @@ index (Rebase new_base fun) is =
                  reshape (rebase new_base ixfun) new_shape
                Repeat ixfun outer_shapes inner_shape ->
                  repeat (rebase new_base ixfun) outer_shapes inner_shape
-               StrideIndex ixfun i ->
-                 strideIndex (rebase new_base ixfun) i
                OffsetIndex ixfun s ->
                  offsetIndex (rebase new_base ixfun) s
                r@Rebase{} ->

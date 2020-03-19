@@ -22,7 +22,6 @@ module Language.Futhark.Attributes
   , decImports
   , progModuleTypes
   , identifierReference
-  , identifierReferences
   , prettyStacktrace
 
   -- * Queries on expressions
@@ -995,15 +994,6 @@ identifierReference ('`' : s)
         _ -> Just ((identifier, namespace, Nothing), s'')
 
 identifierReference _ = Nothing
-
--- | Find all the identifier references in a string.
-identifierReferences :: String -> [(String, String, Maybe FilePath)]
-identifierReferences [] = []
-identifierReferences s
-  | Just (ref, s') <- identifierReference s =
-      ref : identifierReferences s'
-identifierReferences (_:s') =
-  identifierReferences s'
 
 -- | Given an operator name, return the operator that determines its
 -- syntactical properties.

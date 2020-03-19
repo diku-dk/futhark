@@ -3,8 +3,6 @@
 module Futhark.Representation.ExplicitMemory.IndexFunctionWrapper
   ( IxFun
   , iota
-  , offsetIndex
-  , strideIndex
   , permute
   , rotate
   , reshape
@@ -31,14 +29,6 @@ type IxFun num = (I.IxFun num, IA.IxFun num)
 iota :: IntegralExp num =>
         Shape num -> IxFun num
 iota x = (I.iota x, IA.iota x)
-
-offsetIndex :: (Eq num, IntegralExp num) =>
-               IxFun num -> num -> IxFun num
-offsetIndex (l, a) x = (I.offsetIndex l x, IA.offsetIndex a x)
-
-strideIndex :: (Eq num, IntegralExp num) =>
-               IxFun num -> num -> IxFun num
-strideIndex (l, a) x = (I.strideIndex l x, IA.strideIndex a x)
 
 permute :: IntegralExp num =>
            IxFun num -> Permutation -> IxFun num

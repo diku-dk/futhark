@@ -24,7 +24,6 @@ module Futhark.Representation.SOACS.SOAC
 
        , mkIdentityLambda
        , isIdentityLambda
-       , composeLambda
        , nilFn
        , scanomapSOAC
        , redomapSOAC
@@ -71,7 +70,7 @@ import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.Range as Range
 import Futhark.Construct
-import Futhark.Util (maybeNth, chunks, splitAt3)
+import Futhark.Util (maybeNth, chunks)
 
 data SOAC lore =
     Stream SubExp (StreamForm lore) (Lambda lore) [VName]
@@ -175,37 +174,6 @@ mkIdentityLambda ts = do
 isIdentityLambda :: Lambda lore -> Bool
 isIdentityLambda lam = bodyResult (lambdaBody lam) ==
                        map (Var . paramName) (lambdaParams lam)
-
-composeLambda :: (Bindable lore, BinderOps lore, MonadFreshNames m,
-                  HasScope somelore m, SameScope somelore lore) =>
-                 Lambda lore
-              -> Lambda lore
-              -> Lambda lore
-              -> m (Lambda lore)
-composeLambda scan_fun red_fun map_fun = do
-  body <- runBodyBinder $ inScopeOf scan_fun $ inScopeOf red_fun $ inScopeOf map_fun $ do
-    mapM_ addStm $ bodyStms $ lambdaBody map_fun
-    let (scan_res, red_res, map_res) = splitAt3 n m $ bodyResult $ lambdaBody map_fun
-
-    forM_ (zip scan_y_params scan_res) $ \(p,se) ->
-      letBindNames_ [paramName p] $ BasicOp $ SubExp se
-    forM_ (zip red_y_params red_res) $ \(p,se) ->
-      letBindNames_ [paramName p] $ BasicOp $ SubExp se
-    mapM_ addStm $ bodyStms $ lambdaBody scan_fun
-    mapM_ addStm $ bodyStms $ lambdaBody red_fun
-
-    resultBodyM $
-      bodyResult (lambdaBody scan_fun) ++
-      bodyResult (lambdaBody red_fun) ++
-      map_res
-
-  return Lambda { lambdaParams = scan_x_params ++ red_x_params ++ lambdaParams map_fun
-                , lambdaBody = body
-                , lambdaReturnType = lambdaReturnType map_fun }
-  where n = length $ lambdaReturnType scan_fun
-        m = length $ lambdaReturnType red_fun
-        (scan_x_params, scan_y_params) = splitAt n $ lambdaParams scan_fun
-        (red_x_params, red_y_params) = splitAt m $ lambdaParams red_fun
 
 -- | A lambda with no parameters that returns no values.
 nilFn :: Bindable lore => Lambda lore

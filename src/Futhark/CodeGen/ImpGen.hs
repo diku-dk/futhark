@@ -62,7 +62,6 @@ module Futhark.CodeGen.ImpGen
   , dLParams
   , dFParams
   , dScope
-  , dScopes
   , dArray
   , dPrim, dPrimVol_, dPrim_, dPrimV_, dPrimV, dPrimVE
 
@@ -813,9 +812,6 @@ dInfo e name info = do
 
 dScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
-
-dScopes :: [(Maybe (Exp lore), Scope ExplicitMemory)] -> ImpM lore op ()
-dScopes = mapM_ $ uncurry dScope
 
 dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op ()
 dArray name bt shape membind = do

@@ -31,7 +31,6 @@ module Futhark.Pass.ExtractKernels.Distribution
        , newKernel
        , pushKernelNesting
        , pushInnerKernelNesting
-       , removeArraysFromNest
        , kernelNestLoops
        , kernelNestWidths
        , boundInKernelNest
@@ -208,18 +207,6 @@ fixNestingPatternOrder nest (_,res) inner_pat =
         fixed_target = sortOn posInInnerPat $ zip (patternValueIdents pat) res
         posInInnerPat (_, Var v) = fromMaybe 0 $ elemIndex v $ patternNames inner_pat
         posInInnerPat _          = 0
-
--- | Remove these arrays from the outermost nesting, and all
--- uses of corresponding parameters from innermost nesting.
-removeArraysFromNest :: [VName] -> KernelNest -> KernelNest
-removeArraysFromNest orig_arrs (outer, inners) =
-  let (arrs, outer') = remove (namesFromList orig_arrs) outer
-      (_, inners') = mapAccumL remove arrs inners
-  in (outer', inners')
-  where remove arrs nest =
-          let (discard, keep) = partition ((`nameIn` arrs) . snd) $ loopNestingParamsAndArrs nest
-          in (namesFromList (map (paramName . fst) discard) <> arrs,
-              nest { loopNestingParamsAndArrs = keep })
 
 newKernel :: LoopNesting -> KernelNest
 newKernel nest = (nest, [])

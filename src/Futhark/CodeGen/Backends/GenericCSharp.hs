@@ -52,18 +52,14 @@ module Futhark.CodeGen.Backends.GenericCSharp
   , simpleCall
   , callMethod
   , simpleInitClass
-  , parametrizedCall
 
   , copyMemoryDefaultSpace
   , consoleErrorWrite
   , consoleErrorWriteLine
-  , consoleWrite
-  , consoleWriteLine
 
   , publicName
   , sizeOf
   , privateFunDef
-  , publicFunDef
   , getDefaultDecl
   ) where
 
@@ -561,12 +557,6 @@ assignScalarPointer e ptr =
 simpleCall :: String -> [CSExp] -> CSExp
 simpleCall fname = Call (Var fname) . map simpleArg
 
--- | A 'Call' where the function is a variable and every argument is a
--- simple 'Arg'.
-parametrizedCall :: String -> String -> [CSExp] -> CSExp
-parametrizedCall fname primtype = Call (Var fname') . map simpleArg
-  where fname' = concat [fname, "<", primtype, ">"]
-
 simpleArg :: CSExp -> CSArg
 simpleArg = Arg Nothing
 
@@ -683,9 +673,6 @@ extName = (++"_ext")
 sizeOf :: CSType -> CSExp
 sizeOf t = simpleCall "sizeof" [(Var . pretty) t]
 
-publicFunDef :: String -> CSType -> [(CSType, String)] -> [CSStmt] -> CSStmt
-publicFunDef s t args stmts = PublicFunDef $ Def s t args stmts
-
 privateFunDef :: String -> CSType -> [(CSType, String)] -> [CSStmt] -> CSStmt
 privateFunDef s t args stmts = PrivateFunDef $ Def s t args stmts
 
@@ -695,12 +682,6 @@ valueDescName = compileName . valueDescVName
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _) = vname
-
-consoleWrite :: String -> [CSExp] -> CSExp
-consoleWrite str exps = simpleCall "Console.Write" $ String str:exps
-
-consoleWriteLine :: String -> [CSExp] -> CSExp
-consoleWriteLine str exps = simpleCall "Console.WriteLine" $ String str:exps
 
 consoleErrorWrite :: String -> [CSExp] -> CSExp
 consoleErrorWrite str exps = simpleCall "Console.Error.Write" $ String str:exps

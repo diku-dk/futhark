@@ -9,7 +9,6 @@ module Futhark.Representation.AST.Attributes.Types
        , setArrayShape
        , existential
        , uniqueness
-       , setUniqueness
        , unique
        , staticShapes
        , staticShapes1
@@ -23,7 +22,6 @@ module Futhark.Representation.AST.Attributes.Types
        , setOuterDim
        , setDim
        , setArrayDims
-       , setArrayExtDims
        , peelArray
        , stripArray
        , arrayDims
@@ -130,13 +128,6 @@ uniqueness _ = Nonunique
 unique :: TypeBase shape Uniqueness -> Bool
 unique = (==Unique) . uniqueness
 
--- | Set the uniqueness attribute of a type.
-setUniqueness :: TypeBase shape Uniqueness
-              -> Uniqueness
-              -> TypeBase shape Uniqueness
-setUniqueness (Array et dims _) u = Array et dims u
-setUniqueness t _ = t
-
 -- | Convert types with non-existential shapes to types with
 -- non-existential shapes.  Only the representation is changed, so all
 -- the shapes will be 'Free'.
@@ -190,11 +181,6 @@ arrayOfShape t shape = arrayOf t shape NoUniqueness
 -- array, return the type unchanged.
 setArrayDims :: TypeBase oldshape u -> [SubExp] -> TypeBase Shape u
 setArrayDims t dims = t `setArrayShape` Shape dims
-
--- | Set the existential dimensions of an array.  If the given type is
--- not an array, return the type unchanged.
-setArrayExtDims :: TypeBase oldshape u -> [ExtSize] -> TypeBase ExtShape u
-setArrayExtDims t dims = t `setArrayShape` Shape dims
 
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.

@@ -7,16 +7,13 @@ module Futhark.Analysis.SymbolTable
   , empty
   , fromScope
   , toScope
-  , castSymbolTable
     -- * Entries
   , Entry
   , deepen
   , bindingDepth
   , valueRange
-  , loopVariable
   , entryStm
   , entryLetBoundAttr
-  , entryFParamLore
   , entryType
   , asScalExp
     -- * Lookup
@@ -28,8 +25,6 @@ module Futhark.Analysis.SymbolTable
   , lookupType
   , lookupSubExp
   , lookupScalExp
-  , lookupValue
-  , lookupVar
   , lookupAliases
   , available
   , consume
@@ -43,7 +38,6 @@ module Futhark.Analysis.SymbolTable
   , insertFParams
   , insertLParam
   , insertArrayLParam
-  , insertChunkLParam
   , insertLoopVar
     -- * Bounds
   , updateBounds
@@ -51,7 +45,6 @@ module Futhark.Analysis.SymbolTable
   , setLowerBound
   , isAtLeast
     -- * Misc
-  , enclosingLoopVars
   , rangesRep
   , hideIf
   , hideCertified
@@ -75,7 +68,6 @@ import Futhark.Representation.AST hiding (FParam, lookupType)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Analysis.ScalExp
 
-import Futhark.Analysis.Rephrase
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Representation.AST.Attributes.Ranges
   (Range, ScalExpRange, Ranged)
@@ -115,51 +107,6 @@ fromScope = M.foldlWithKey' insertFreeVar' empty
 
 toScope :: SymbolTable lore -> Scope lore
 toScope = M.map entryInfo . bindings
-
--- | Try to convert a symbol table for one representation into a
--- symbol table for another.  The two symbol tables will have the same
--- keys, but some entries may be diferent (i.e. some expression
--- entries will have been turned into free variable entries).
-castSymbolTable :: (SameScope from to,
-                    ExpAttr from ~ ExpAttr to,
-                    BodyAttr from ~ BodyAttr to,
-                    RetType from ~ RetType to,
-                    BranchType from ~ BranchType to) =>
-                   SymbolTable from -> SymbolTable to
-castSymbolTable table = genCastSymbolTable loopVar letBound fParam lParam freeVar table
-  where loopVar (LoopVarEntry r d it) = LoopVar $ LoopVarEntry r d it
-        letBound e
-          | Just e' <- castStm $ letBoundStm e =
-              LetBound e { letBoundStm = e'
-                         , letBoundAttr = letBoundAttr e
-                         }
-          | otherwise =
-              FreeVar FreeVarEntry
-              { freeVarAttr = LetInfo $ letBoundAttr e
-              , freeVarStmDepth = letBoundStmDepth e
-              , freeVarRange = letBoundRange e
-              , freeVarIndex = \name is -> index' name is table
-              , freeVarConsumed = letBoundConsumed e
-              }
-
-        fParam e = FParam e { fparamAttr = fparamAttr e }
-        lParam e = LParam e { lparamAttr = lparamAttr e }
-        freeVar e = FreeVar e { freeVarAttr = castNameInfo $ freeVarAttr e }
-
-genCastSymbolTable :: (LoopVarEntry fromlore -> Entry tolore)
-                   -> (LetBoundEntry fromlore -> Entry tolore)
-                   -> (FParamEntry fromlore -> Entry tolore)
-                   -> (LParamEntry fromlore -> Entry tolore)
-                   -> (FreeVarEntry fromlore -> Entry tolore)
-                   -> SymbolTable fromlore
-                   -> SymbolTable tolore
-genCastSymbolTable loopVar letBound fParam lParam freeVar vtable =
-  vtable { bindings = M.map onEntry $ bindings vtable }
-  where onEntry (LoopVar entry) = loopVar entry
-        onEntry (LetBound entry) = letBound entry
-        onEntry (FParam entry) = fParam entry
-        onEntry (LParam entry) = lParam entry
-        onEntry (FreeVar entry) = freeVar entry
 
 deepen :: SymbolTable lore -> SymbolTable lore
 deepen vtable = vtable { loopDepth = loopDepth vtable + 1,
@@ -306,14 +253,6 @@ entryLetBoundAttr :: Entry lore -> Maybe (LetAttr lore)
 entryLetBoundAttr (LetBound entry) = Just $ letBoundAttr entry
 entryLetBoundAttr _                = Nothing
 
-entryFParamLore :: Entry lore -> Maybe (FParamAttr lore)
-entryFParamLore (FParam entry) = Just $ fparamAttr entry
-entryFParamLore _              = Nothing
-
-loopVariable :: Entry lore -> Bool
-loopVariable (LoopVar _) = True
-loopVariable _           = False
-
 asStm :: Entry lore -> Maybe (Stm lore)
 asStm = fmap letBoundStm . isVarBound
 
@@ -361,16 +300,6 @@ lookupScalExp name vtable =
     (Just entry, _) -> asScalExp entry
     _ -> Nothing
 
-lookupValue :: VName -> SymbolTable lore -> Maybe (PrimValue, Certificates)
-lookupValue name vtable = case lookupSubExp name vtable of
-                            Just (Constant val, cs) -> Just (val, cs)
-                            _                       -> Nothing
-
-lookupVar :: VName -> SymbolTable lore -> Maybe (VName, Certificates)
-lookupVar name vtable = case lookupSubExp name vtable of
-                          Just (Var v, cs) -> Just (v, cs)
-                          _                -> Nothing
-
 lookupAliases :: VName -> SymbolTable lore -> Names
 lookupAliases name vtable = case M.lookup name $ bindings vtable of
                               Just (LetBound e) -> letBoundAliases e
@@ -407,14 +336,6 @@ index' name is vtable = do
 lookupRange :: VName -> SymbolTable lore -> ScalExpRange
 lookupRange name vtable =
   maybe (Nothing, Nothing) valueRange $ lookup name vtable
-
-enclosingLoopVars :: [VName] -> SymbolTable lore -> [VName]
-enclosingLoopVars free vtable =
-  map fst $
-  sortOn (Down . bindingDepth . snd) $
-  filter (loopVariable . snd) $ mapMaybe fetch free
-  where fetch name = do e <- lookup name vtable
-                        return (name, e)
 
 rangesRep :: SymbolTable lore -> AS.RangesRep
 rangesRep = M.filter knownRange . M.map toRep . bindings
@@ -472,12 +393,6 @@ indexExp table (BasicOp (Index v slice)) _ is =
         pe = primExpFromSubExp (IntType Int32)
 
 indexExp _ _ _ _ = Nothing
-
-indexChunk :: SymbolTable lore -> VName -> VName -> IndexArray
-indexChunk table offset array (i:is) =
-  index' array (offset'+i:is) table
-  where offset' = primExpFromSubExp (IntType Int32) (Var offset)
-indexChunk _ _ _ _ = Nothing
 
 defBndEntry :: (Attributes lore, IndexOp (Op lore)) =>
                SymbolTable lore
@@ -643,19 +558,6 @@ insertArrayLParam param (Just array) vtable =
 insertArrayLParam param Nothing vtable =
   -- Well, we still know that it's a param...
   insertLParam param vtable
-
-insertChunkLParam :: Attributes lore =>
-                     VName -> LParam lore -> VName -> SymbolTable lore
-                  -> SymbolTable lore
-insertChunkLParam offset param array vtable =
-  -- We now know that the outer size of 'array' is at least one, and
-  -- that the inner sizes are at least zero, since they are array
-  -- sizes.
-  let vtable' = insertLParamWithRange param
-                (lookupRange array vtable) (indexChunk vtable offset array) vtable
-  in case arrayDims <$> lookupType array vtable of
-    Just (Var v:_) -> (v `isAtLeast` 1) vtable'
-    _              -> vtable'
 
 insertLoopVar :: Attributes lore => VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name it bound = insertEntry name bind

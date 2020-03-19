@@ -22,7 +22,6 @@ module Futhark.Optimise.Simplify.Engine
        ( -- * Monadic interface
          SimpleM
        , runSimpleM
-       , subSimpleM
        , SimpleOps (..)
        , SimplifyOp
        , bindableSimpleOps
@@ -49,7 +48,6 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyStms
        , simplifyFun
        , simplifyLambda
-       , simplifyLambdaSeq
        , simplifyLambdaNoHoisting
        , simplifyParam
        , bindLParams
@@ -166,16 +164,6 @@ runSimpleM :: SimpleM lore a
 runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b, _)) = runState (runReaderT m (simpl, env)) (src, False, mempty)
   in ((x, b), src')
-
-subSimpleM :: RuleBook (Wise lore)
-           -> HoistBlockers lore
-           -> SimpleM lore a
-           -> SimpleM lore a
-subSimpleM rules blockers =
-  local $ \(ops, env) -> (ops,
-                          env { envRules = rules
-                              , envHoistBlockers = blockers
-                              })
 
 askEngineEnv :: SimpleM lore (Env lore)
 askEngineEnv = asks snd
@@ -829,12 +817,6 @@ simplifyLambda :: SimplifiableLore lore =>
 simplifyLambda lam arrs = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   simplifyLambdaMaybeHoist par_blocker lam arrs
-
-simplifyLambdaSeq :: SimplifiableLore lore =>
-                     Lambda lore
-                  -> [Maybe VName]
-                  -> SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
-simplifyLambdaSeq = simplifyLambdaMaybeHoist neverBlocks
 
 simplifyLambdaNoHoisting :: SimplifiableLore lore =>
                             Lambda lore

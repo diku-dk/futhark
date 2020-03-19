@@ -17,13 +17,10 @@ module Futhark.Representation.Ranges
        , module Futhark.Representation.AST.Syntax
          -- * Adding ranges
        , addRangesToPattern
-       , mkRangedLetStm
        , mkRangedBody
        , mkPatternRanges
        , mkBodyRanges
          -- * Removing ranges
-       , removeProgRanges
-       , removeFunDefRanges
        , removeExpRanges
        , removeBodyRanges
        , removeStmRanges
@@ -110,14 +107,6 @@ removeRanges = Rephraser { rephraseExpLore = return
                          , rephraseOp = return . removeOpRanges
                          }
 
-removeProgRanges :: CanBeRanged (Op lore) =>
-                    Prog (Ranges lore) -> Prog lore
-removeProgRanges = runIdentity . rephraseProg removeRanges
-
-removeFunDefRanges :: CanBeRanged (Op lore) =>
-                      FunDef (Ranges lore) -> FunDef lore
-removeFunDefRanges = runIdentity . rephraseFunDef removeRanges
-
 removeExpRanges :: CanBeRanged (Op lore) =>
                    Exp (Ranges lore) -> Exp lore
 removeExpRanges = runIdentity . rephraseExp removeRanges
@@ -174,14 +163,6 @@ mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
           | otherwise                                 = Just bound
         removeUnknownBound Nothing =
           Nothing
-
-mkRangedLetStm :: (Attributes lore, CanBeRanged (Op lore)) =>
-                  Pattern lore
-               -> ExpAttr lore
-               -> Exp (Ranges lore)
-               -> Stm (Ranges lore)
-mkRangedLetStm pat explore e =
-  Let (addRangesToPattern pat e) (StmAux mempty explore) e
 
 -- It is convenient for a wrapped aliased lore to also be aliased.
 

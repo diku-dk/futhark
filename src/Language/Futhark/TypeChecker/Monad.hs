@@ -22,7 +22,6 @@ module Language.Futhark.TypeChecker.Monad
   , unappliedFunctor
   , unknownVariableError
   , underscoreUse
-  , functionIsNotValue
   , Notes
   , aNote
 
@@ -115,12 +114,6 @@ unexpectedType loc t ts =
 undefinedType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
 undefinedType loc name =
   typeError loc mempty $ "Unknown type" <+> ppr name <> "."
-
-functionIsNotValue :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
-functionIsNotValue loc name =
-  typeError loc mempty $
-  "Attempt to use function" <+> ppr name <+> "as value at" <+>
-  text (locStr loc) <> "."
 
 unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
 unappliedFunctor loc =
