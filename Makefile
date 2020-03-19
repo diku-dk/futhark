@@ -39,4 +39,4 @@ kA-%.data:
 	futhark dataset --i32-bounds=-10000:10000 -g [$*]i32 > tests/scan/$@
 
 ntest:
-	$(FUTHARK) test --backend=opencl tests/scan/n-tests.fut
+	$(FUTHARK) test --backend=cuda tests/scan/n-tests.fut
