@@ -403,7 +403,7 @@ offsetMemoryInPattern (Pattern ctx vals) = do
           return patElem { patElemAttr = new_attr }
         inspectCtx patElem
           | Mem space <- patElemType patElem,
-            space /= Space "local" =
+            space `notElem` [Space "local", Space "private"] =
               throwError $ unwords ["Cannot deal with existential memory block",
                                     pretty (patElemName patElem),
                                     "when expanding inside kernels."]
