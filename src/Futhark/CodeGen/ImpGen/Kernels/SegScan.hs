@@ -215,9 +215,9 @@ compileSegScan  (Pattern _ pes)
 
         sOp Imp.MemFenceGlobal
         -- if (warpscan[0] == STATUS_P && tid == 0) prefix = incprefix[WG_ID-1];
-        status1 <- dPrim "status1" int32
+        status1 <- dPrim "status1" int8
         copyDWIMFix status1 [] (Var warpscan) [0]
-        sIf (Imp.var status1 int32 .==. 2)
+        sIf (Imp.var status1 int8 .==. 2)
           -- if
           (sWhen (ltid .==. 0) (forM_ (zip prefix incprefix) $ \(pre,inc) ->
             copyDWIMFix pre [] (Var inc) [Imp.var wG_ID int32 - 1])) $ do
