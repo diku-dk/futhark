@@ -52,6 +52,7 @@ static inline struct task* setup_task(task_fn fn, void* task_args, int task_id,
                                       pthread_mutex_t *mutex, pthread_cond_t *cond,
                                       int* counter, int start, int end) {
 
+  // Don't allocate this on heap, use stack!
     struct task* task = malloc(sizeof(struct task));
     task->fn      = fn;
     task->args    = task_args;
