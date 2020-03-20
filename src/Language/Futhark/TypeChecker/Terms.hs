@@ -2876,6 +2876,7 @@ consume loc als = do
   let consumable v = case M.lookup v vtable of
                        Just (BoundV Local _ t)
                          | arrayRank t > 0 -> unique t
+                         | Scalar TypeVar{} <- t -> unique t
                          | otherwise -> True
                        _ -> False
   case filter (not . consumable) $ map aliasVar $ S.toList als of
