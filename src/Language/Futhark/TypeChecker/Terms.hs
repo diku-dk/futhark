@@ -1716,8 +1716,8 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
                   loopbody')
 
   mergepat'' <- do
-    loop_t <- expTypeFully loopbody'
-    convergePattern mergepat' (allConsumed bodyflow) loop_t $
+    loopbody_t <- expTypeFully loopbody'
+    convergePattern mergepat' (allConsumed bodyflow) loopbody_t $
       mkUsage (srclocOf loopbody') "being (part of) the result of the loop body"
 
   let consumeMerge (Id _ (Info pt) ploc) mt
@@ -1777,8 +1777,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
                 let t' = t `setUniqueness` Unique `setAliases` mempty
                 in Id name (Info t') iloc
             | otherwise =
-                let t' = case t of Scalar Record{} -> t
-                                   _               -> t `setUniqueness` Nonunique
+                let t' = t `setUniqueness` Nonunique
                 in Id name (Info t') iloc
           uniquePat (TuplePattern pats ploc) =
             TuplePattern (map uniquePat pats) ploc
