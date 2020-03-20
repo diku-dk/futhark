@@ -1,6 +1,8 @@
 FUTHARK = ~/.local/bin/futhark
-SIZES = 8704
+SIZES = 8704 16384 32768
+# 65536 131072 262144 524288
 # 33 1024 1025 2048 8704
+
 all: compile compile-simple-opencl dump-simple test
 allcuda: compile compile-simple-cuda dump-cuda test-cuda
 
@@ -38,5 +40,5 @@ test-cuda: $(SIZES:%=kA-%.data)
 kA-%.data:
 	futhark dataset --i32-bounds=-10000:10000 -g [$*]i32 > tests/scan/$@
 
-ntest:
+ntest: $(SIZES:%=kA-%.data)
 	$(FUTHARK) test --backend=cuda tests/scan/n-tests.fut
