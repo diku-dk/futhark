@@ -47,7 +47,6 @@ import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
-import Futhark.CodeGen.ImpCode.Kernels (elements)
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 import Futhark.Util (chunks, maybeNth, mapAccumLM, takeLast, dropLast)
@@ -713,27 +712,15 @@ makeAllMemoryGlobal =
         globalMemory entry =
           entry
 
-writeParamToLocalMemory :: Typed (MemBound u) =>
-                           Imp.Exp -> (VName, t) -> Param (MemBound u)
+writeParamToLocalMemory :: Imp.Exp -> VName -> LParam ExplicitMemory
                         -> ImpM lore op ()
-writeParamToLocalMemory i (mem, _) param
-  | Prim t <- paramType param =
-      emit $
-      Imp.Write mem (elements i) bt (Space "local") Imp.Volatile $
-      Imp.var (paramName param) t
-  | otherwise =
-      return ()
-  where bt = elemType $ paramType param
+writeParamToLocalMemory i arr param =
+  everythingVolatile $ copyDWIM arr [DimFix i] (Var $ paramName param) []
 
-readParamFromLocalMemory :: Typed (MemBound u) =>
-                            Imp.Exp -> Param (MemBound u) -> (VName, t)
+readParamFromLocalMemory :: Imp.Exp -> LParam ExplicitMemory -> VName
                          -> ImpM lore op ()
-readParamFromLocalMemory i param (l_mem, _)
-  | Prim _ <- paramType param =
-      paramName param <--
-      Imp.index l_mem (elements i) bt (Space "local") Imp.Volatile
-  | otherwise = return ()
-  where bt = elemType $ paramType param
+readParamFromLocalMemory i param arr =
+  everythingVolatile $ copyDWIM (paramName param) [] (Var arr) [DimFix i]
 
 groupReduce :: ExplicitMemorish lore =>
                KernelConstants
@@ -842,10 +829,6 @@ groupScan constants seg_flag w lam arrs = do
 
   renamed_lam <- renameLambda lam
 
-  acc_local_mem <- flip zip (repeat ()) <$>
-                   mapM (fmap (memLocationName . entryArrayLocation) .
-                         lookupArray) arrs
-
   let ltid = kernelLocalThreadId constants
       (x_params, y_params) = splitAt (length arrs) $ lambdaParams lam
 
@@ -865,7 +848,7 @@ groupScan constants seg_flag w lam arrs = do
       simd_width = kernelWaveSize constants
       block_id = ltid `quot` block_size
       in_block_id = ltid - block_id * block_size
-      doInBlockScan seg_flag' active = inBlockScan seg_flag' simd_width block_size active ltid acc_local_mem
+      doInBlockScan seg_flag' active = inBlockScan seg_flag' simd_width block_size active ltid arrs
       ltid_in_bounds = ltid .<. w
 
   doInBlockScan seg_flag ltid_in_bounds lam
@@ -874,7 +857,7 @@ groupScan constants seg_flag w lam arrs = do
   let last_in_block = in_block_id .==. block_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
     sWhen (last_in_block .&&. ltid_in_bounds) $
-    zipWithM_ (writeParamToLocalMemory block_id) acc_local_mem y_params
+    zipWithM_ (writeParamToLocalMemory block_id) arrs y_params
 
   sOp Imp.LocalBarrier
 
@@ -891,7 +874,7 @@ groupScan constants seg_flag w lam arrs = do
 
   let read_carry_in =
         zipWithM_ (readParamFromLocalMemory (block_id - 1))
-        x_params acc_local_mem
+        x_params arrs
 
   let op_to_y
         | Nothing <- seg_flag =
@@ -900,7 +883,7 @@ groupScan constants seg_flag w lam arrs = do
             sUnless (flag_true (block_id*block_size-1) ltid) $
               compileBody' y_params $ lambdaBody lam
       write_final_result =
-        zipWithM_ (writeParamToLocalMemory ltid) acc_local_mem y_params
+        zipWithM_ (writeParamToLocalMemory ltid) arrs y_params
 
   sComment "carry-in for every block except the first" $
     sUnless (is_first_block .||. Imp.UnOpExp Not ltid_in_bounds) $ do
@@ -920,10 +903,10 @@ inBlockScan :: Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
             -> Imp.Exp
             -> Imp.Exp
             -> Imp.Exp
-            -> [(VName, t)]
+            -> [VName]
             -> Lambda ExplicitMemory
             -> InKernelGen ()
-inBlockScan seg_flag lockstep_width block_size active ltid acc_local_mem scan_lam = everythingVolatile $ do
+inBlockScan seg_flag lockstep_width block_size active ltid arrs scan_lam = everythingVolatile $ do
   skip_threads <- dPrim "skip_threads" int32
   let in_block_thread_active =
         Imp.var skip_threads int32 .<=. in_block_id
@@ -932,11 +915,11 @@ inBlockScan seg_flag lockstep_width block_size active ltid acc_local_mem scan_la
         splitAt (length actual_params `div` 2) actual_params
       read_operands =
         zipWithM_ (readParamFromLocalMemory $ ltid - Imp.var skip_threads int32)
-        x_params acc_local_mem
+        x_params arrs
 
   -- Set initial y values
   sWhen active $
-    zipWithM_ (readParamFromLocalMemory ltid) y_params acc_local_mem
+    zipWithM_ (readParamFromLocalMemory ltid) y_params arrs
 
   let op_to_y
         | Nothing <- seg_flag =
@@ -945,7 +928,7 @@ inBlockScan seg_flag lockstep_width block_size active ltid acc_local_mem scan_la
             sUnless (flag_true (ltid-Imp.var skip_threads int32) ltid) $
               compileBody' y_params $ lambdaBody scan_lam
       write_operation_result =
-        zipWithM_ (writeParamToLocalMemory ltid) acc_local_mem y_params
+        zipWithM_ (writeParamToLocalMemory ltid) arrs y_params
       maybeLocalBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32) $
                           sOp Imp.LocalBarrier
 
