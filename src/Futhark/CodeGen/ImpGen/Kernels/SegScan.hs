@@ -133,6 +133,7 @@ compileSegScan  (Pattern _ pes)
       p1 <- dPrim "p1" int32
       p1 <-- 1
       let p1Var = Imp.var p1 int32
+      sOp Imp.LocalBarrier
 
       -- while p < array.size
       sWhile (p1Var .<. arraysize) $ do
