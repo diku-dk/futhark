@@ -261,9 +261,12 @@ callKernel (CmpSizeLe v key x) = do
   GC.stm [C.cstm|if (ctx->logging) {
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
     }|]
-callKernel (GetSizeMax v size_class) =
+callKernel (GetSizeMax v size_class) = do
   let field = "max_" ++ pretty size_class
-  in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
+  GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
+  GC.stm [C.cstm|if (ctx->logging) {
+    fprintf(stderr, "Found max_%s: %d.\n", $string:(pretty size_class), $id:v);
+    }|]
 
 callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
 
