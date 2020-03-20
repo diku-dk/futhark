@@ -3,6 +3,7 @@
 --
 -- ==
 -- tags { no_opencl }
+-- compiled random input { [2000]bool [2000][10]i32 } auto output
 
 let segmented_scan [n] 't (op: t -> t -> t) (ne: t)
                           (flags: [n]bool) (as: [n]t): [n]t =
