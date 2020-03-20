@@ -136,11 +136,10 @@ mySegRedOpSlug (op, group_res_arrs) =
 -- 0. Clean-up (write wrapper and remove code duplications)
 -- 1. Make segMap, segRed and segScan parallel
 -- 2. What does 2nd arg to compileStms do?
+-- 3. tests/soacs/scan2.fut fail (doesn't compile)
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
-
-  emit $ Imp.DebugPrint "\n# SegScan -- start"  Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -194,22 +193,30 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns')
                                  (Imp.MulticoreFunc params prebody reduce_body thread_id)
 
-  stage_two_red_res <- myGroupResultArraysScan DefaultSpace (Count $ Constant $ IntValue $ Int32Value 10) lore
+
+  -- Begin stage two of scan
+  stage_two_red_res <- myGroupResultArraysScan DefaultSpace (Count $ Var thread_id) lore
+
   -- Set neutral element value
   dScope Nothing $ scopeOfLParams $ lambdaParams lore
-  forM_ (zip3 stage_two_red_res scan_x_params subexps) $ \(two_res, p, ne) -> do
-       copyDWIMFix  (paramName p) [] ne []
+  forM_ (zip stage_two_red_res subexps) $ \(two_res, ne) ->
        copyDWIMFix  two_res [] ne []
 
-  sFor "i" tid_exp $ \i -> do
+  -- Let master thread accumulate "neutral elements" for each segment
+  sFor "i" (tid_exp-1) $ \i -> do
     forM_ (zip scan_y_params stage_one_red_res) $ \(p, se) ->
       copyDWIMFix (paramName p) [] (Var se) [i]
 
+    forM_ (zip scan_x_params stage_two_red_res) $ \(p, se) ->
+      copyDWIMFix (paramName p) [] (Var se) [i]
+
     compileStms mempty (bodyStms $ lambdaBody lore) $
-      forM_ (zip3  scan_x_params stage_two_red_res $ bodyResult $ lambdaBody lore) $ \(p, scan_arr, se) -> do
-        copyDWIMFix (paramName p) [] se []
+      forM_ (zip stage_two_red_res $ bodyResult $ lambdaBody lore) $ \(scan_arr, se) ->
         copyDWIMFix scan_arr [i+1] se [] -- TODO fix this offset
 
+
+
+  -- Prepare function body for second scan iteration
   prebody' <- collect $ do
     dScope Nothing $ scopeOfLParams $ lambdaParams lore
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
@@ -247,7 +254,6 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
                                  (namesFromList $ thread_id : segFlat space : (map paramName $ lambdaParams lore)))
   ts' <- mapM lookupType paramsNames'
   let params' = zipWith getParam paramsNames' ts'
-
 
   emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns')
                                  (Imp.MulticoreFunc params' prebody' scan_body thread_id)
@@ -309,10 +315,9 @@ compileSegOp pat (SegRed _ space reds _ body) = do
   emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns') (Imp.MulticoreFunc params prebody body' thread_id)
 
 
-  sComment "neutral-initialise the accumulators" $
-    forM_ slugs $ \slug ->
-      forM_ (zip (patternElements pat) (mySlugNeutral slug)) $ \(pe, ne) ->
-        copyDWIMFix (patElemName pe) [] ne []
+  forM_ slugs $ \slug ->
+    forM_ (zip (patternElements pat) (mySlugNeutral slug)) $ \(pe, ne) ->
+      copyDWIMFix (patElemName pe) [] ne []
 
   dScope Nothing $ scopeOfLParams $ concatMap mySlugParams slugs
   sFor "i" tid_exp $ \i ->

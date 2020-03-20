@@ -223,7 +223,7 @@ compileOp (ParLoop i e (MulticoreFunc params _ body _)) = do
   GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', NULL) != 0) {
                      fprintf(stderr, "scheduler failed to do task\n");
                      return 1;
-           };|]
+           }|]
   GC.stm  [C.cstm|free($id:fstruct);|]
 
 
@@ -257,6 +257,6 @@ compileOp (ParLoopAcc i e (MulticoreFunc params prebody body tid)) = do
   GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', &$id:tid) != 0) {
                      fprintf(stderr, "scheduler failed to do task\n");
                      return 1;
-           };|]
+           }|]
 
   GC.stm  [C.cstm|free($id:fstruct);|]
