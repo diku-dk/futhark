@@ -1,23 +1,16 @@
--- Fails if the scan is rewritten to be in-place (consume md_st)
--- during first-order transform.
---
--- This compiles to a scan of a two-dimensional array, which is
--- presently not supported in the OpenCL code generator.
+-- A scan of a two-dimensional array, which is presently not supported
+-- in the OpenCL code generator.
 --
 -- ==
 -- tags { no_opencl }
--- input {
---   [[[1.0]]]
---   [[1.0],[2.0]]
--- }
--- output {
---   2.000000
--- }
 
-let main (bb_mat: [][][]f64) (e_rows: [][]f64): f64 =
-  let md_st = [42.0]
-  let a = map (\(bb_arr_431: [][]f64) ->
-                 scan (\(x_657: []f64) (y_658: []f64) -> [2.0])
-                      md_st e_rows)
-              bb_mat in
-  a[0,0,0]
+let segmented_scan [n] 't (op: t -> t -> t) (ne: t)
+                          (flags: [n]bool) (as: [n]t): [n]t =
+  (unzip (scan (\(x_flag,x) (y_flag,y) ->
+                (x_flag || y_flag,
+                 if y_flag then y else x `op` y))
+          (false, ne)
+          (zip flags as))).1
+
+let main [n][m] (flags: [n]bool) (xss: [n][m]i32): [n][m]i32 =
+  segmented_scan (map2 (+)) (replicate m 0) flags xss
