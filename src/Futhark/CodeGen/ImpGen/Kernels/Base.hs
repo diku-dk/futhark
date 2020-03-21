@@ -161,15 +161,15 @@ compileGroupExp _ (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Copy arr)) = do
   groupCopy constants (patElemName dest) [] (Var arr) []
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Manifest _ arr)) = do
   groupCopy constants (patElemName dest) [] (Var arr) []
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
   ds' <- mapM toExp $ shapeDims ds
   groupCoverSpace constants ds' $ \is ->
     copyDWIMFix (patElemName dest) is se (drop (shapeRank ds) is)
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   n' <- toExp n
   e' <- toExp e
@@ -177,7 +177,7 @@ compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   groupLoop constants n' $ \i' -> do
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIMFix (patElemName dest) [i'] (Var x) []
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
 compileGroupExp _ dest e =
   defCompileExp dest e
@@ -250,7 +250,7 @@ compileGroupOp constants pat (Inner (SegOp (SegMap lvl space _ body))) = do
     zipWithM_ (compileThreadResult space constants) (patternElements pat) $
     kernelBodyResult body
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
 compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
   compileGroupSpace constants lvl space
@@ -264,7 +264,7 @@ compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))
     (map (`Imp.var` int32) ltids)
     (kernelResultSubExp res) []
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
@@ -293,7 +293,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       copyDWIMFix dest (map (`Imp.var` int32) ltids) (kernelResultSubExp res) []
     zipWithM_ (compileThreadResult space constants) map_pes map_res
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
   case dims' of
     -- Nonsegmented case (or rather, a single segment) - this we can
@@ -302,7 +302,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupReduce constants dim' (segRedLambda op) tmps
 
-      sOp Imp.ErrorSync
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIMFix (patElemName pe) [] (Var arr) [0]
@@ -317,13 +317,13 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupScan constants (Just crossesSegment) (product dims') (segRedLambda op) tmps
 
-      sOp Imp.ErrorSync
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       let segment_is = map Imp.vi32 $ init ltids
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIMFix (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
 compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   compileGroupSpace constants lvl space
@@ -339,7 +339,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
   ops' <- prepareIntraGroupSegHist constants (segGroupSize lvl) ops
 
   -- Ensure that all locks have been initialised.
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
   sWhen (isActive $ unSegSpace space) $
     compileStms mempty (kernelBodyStms kbody) $ do
@@ -365,7 +365,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
               copyDWIMFix (paramName p) [] v is
             do_op (bin_is ++ is)
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
 compileGroupOp _ pat _ =
   compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
@@ -506,8 +506,8 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
         sComment "update global result" $
         zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
-      fence = case space of Space "local" -> sOp Imp.MemFenceLocal
-                            _             -> sOp Imp.MemFenceGlobal
+      fence = case space of Space "local" -> sOp $ Imp.MemFence Imp.FenceLocal
+                            _             -> sOp $ Imp.MemFence Imp.FenceGlobal
 
 
   -- While-loop: Try to insert your value
@@ -800,8 +800,8 @@ groupReduceWithOffset constants offset w lam arrs = do
         global_tid = kernelGlobalThreadId constants
 
         barrier
-          | all primType $ lambdaReturnType lam = sOp Imp.LocalBarrier
-          | otherwise                           = sOp Imp.GlobalBarrier
+          | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
+          | otherwise                           = sOp $ Imp.Barrier Imp.FenceGlobal
 
         readReduceArgument param arr
           | Prim _ <- paramType param = do
@@ -852,14 +852,14 @@ groupScan constants seg_flag w lam arrs = do
       ltid_in_bounds = ltid .<. w
 
   doInBlockScan seg_flag ltid_in_bounds lam
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
   let last_in_block = in_block_id .==. block_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
     sWhen (last_in_block .&&. ltid_in_bounds) $
     zipWithM_ (writeParamToLocalMemory block_id) arrs y_params
 
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
   let is_first_block = block_id .==. 0
       first_block_seg_flag = do
@@ -870,7 +870,7 @@ groupScan constants seg_flag w lam arrs = do
     "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
     doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
   let read_carry_in =
         zipWithM_ (readParamFromLocalMemory (block_id - 1))
@@ -891,12 +891,12 @@ groupScan constants seg_flag w lam arrs = do
     sComment "perform operation" op_to_y
     sComment "write final result" write_final_result
 
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
   sComment "restore correct values for first block" $
     sWhen is_first_block write_final_result
 
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
 inBlockScan :: Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
             -> Imp.Exp
@@ -930,7 +930,7 @@ inBlockScan seg_flag lockstep_width block_size active ltid arrs scan_lam = every
       write_operation_result =
         zipWithM_ (writeParamToLocalMemory ltid) arrs y_params
       maybeLocalBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32) $
-                          sOp Imp.LocalBarrier
+                          sOp $ Imp.Barrier Imp.FenceLocal
 
   sComment "in-block scan (hopefully no barriers needed)" $ do
     skip_threads <-- 1
@@ -1017,8 +1017,7 @@ virtualiseGroups constants SegVirt required_groups m = do
     m =<< dPrimV "virt_group_id" (Imp.vi32 phys_group_id + i * kernelNumGroups constants)
     -- Make sure the virtual group is actually done before we let
     -- another virtual group have its way with it.
-    sOp Imp.GlobalBarrier
-    sOp Imp.LocalBarrier
+    sOp $ Imp.Barrier Imp.FenceGlobal
 
 sKernelThread, sKernelGroup :: String
                             -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp

@@ -602,7 +602,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
         (sLoopNest (histShape op) $ \is ->
             copyDWIMFix dest_local (local_is++is) ne [])
 
-    sOp Imp.LocalBarrier
+    sOp $ Imp.Barrier Imp.FenceLocal
 
     kernelLoop pgtid_in_segment threads_per_segment segment_size' $ \ie -> do
       dPrimV_ i_in_segment ie
@@ -645,8 +645,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
                   copyDWIMFix (paramName p) [] v is
                 do_op (bucket_is ++ is)
 
-    sOp Imp.ErrorSync
-    sOp Imp.GlobalBarrier
+    sOp $ Imp.ErrorSync Imp.FenceGlobal
 
     sComment "Compact the multiple local memory subhistograms to result in global memory" $
       onSlugs $ \slug dests hist_H_chk histo_dims histo_size -> do

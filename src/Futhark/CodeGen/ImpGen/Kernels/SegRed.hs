@@ -273,7 +273,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
              isActive (init $ zip gtids dims) .&&.
              ltid .<. segment_size * segments_per_group) in_bounds out_of_bounds
 
-      sOp Imp.ErrorSync -- Also implicitly barrier.
+      sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
 
       let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
       sWhen (segment_size .>. 0) $
@@ -281,7 +281,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
         forM_ (zip reds reds_arrs) $ \(SegRedOp _ red_op _ _, red_arrs) ->
         groupScan constants (Just crossesSegment) (segment_size*segments_per_group) red_op red_arrs
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
       sComment "save final values of segments" $
         sWhen (group_id' * segments_per_group + ltid .<. num_segments .&&.
@@ -295,7 +295,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
 
       -- Finally another barrier, because we will be writing to the
       -- local memory array first thing in the next iteration.
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
 largeSegmentsReduction :: Pattern ExplicitMemory
                        -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -500,11 +500,11 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
               when (primType $ paramType p) $
               copyDWIMFix arr [local_tid] (Var $ paramName p) []
 
-          sOp Imp.ErrorSync -- Also implicitly barrier.
+          sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
 
           groupReduce constants (kernelGroupSize constants) slug_op_renamed (slugArrs slug)
 
-          sOp Imp.LocalBarrier
+          sOp $ Imp.Barrier Imp.FenceLocal
 
           sComment "first thread saves the result in accumulator" $
             sWhen (local_tid .==. 0) $
@@ -616,7 +616,7 @@ reductionStageTwo constants segred_pes
     sWhen (local_tid .==. 0) $ do
     forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
       copyDWIMFix v [0, group_id] (Var acc) acc_is
-    sOp Imp.MemFenceGlobal
+    sOp $ Imp.MemFence Imp.FenceGlobal
     -- Increment the counter, thus stating that our result is
     -- available.
     sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd old_counter counter_mem counter_offset 1
@@ -624,8 +624,7 @@ reductionStageTwo constants segred_pes
     -- so, it is our responsibility to produce the final result.
     sWrite sync_arr [0] $ Imp.var old_counter int32 .==. groups_per_segment - 1
 
-  sOp Imp.LocalBarrier
-  sOp Imp.GlobalBarrier
+  sOp $ Imp.Barrier Imp.FenceGlobal
 
   is_last_group <- dPrim "is_last_group" Bool
   copyDWIMFix is_last_group [] (Var sync_arr) [0]
@@ -653,7 +652,7 @@ reductionStageTwo constants segred_pes
           when (primType $ paramType p) $
             copyDWIMFix arr [local_tid] (Var $ paramName p) []
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
       sComment "reduce the per-group results" $ do
         groupReduce constants group_size red_op_renamed red_arrs
