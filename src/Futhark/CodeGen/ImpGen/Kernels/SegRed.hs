@@ -279,7 +279,8 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       sWhen (segment_size .>. 0) $
         sComment "perform segmented scan to imitate reduction" $
         forM_ (zip reds reds_arrs) $ \(SegRedOp _ red_op _ _, red_arrs) ->
-        groupScan constants (Just crossesSegment) (segment_size*segments_per_group) red_op red_arrs
+        groupScan constants (Just crossesSegment) (Imp.vi32 num_threads)
+        (segment_size*segments_per_group) red_op red_arrs
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
