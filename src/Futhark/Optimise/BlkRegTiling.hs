@@ -66,7 +66,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
     Just arr_var_dims <- isInvarTo1of2InnerDims mempty space variance arrs,
 
     -- get the variables on which the first result of redomap depends on
-    fst_res : _      <-  patternValueElements pat_redomap,
+    fst_res : _      <- patternValueElements pat_redomap,
     Just res_red_var <- M.lookup (patElemName fst_res) variance, -- variance of the reduce result
 
     -- we furthermore check that code1 is only formed by
@@ -91,30 +91,28 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
       -----------------------------------------------------------------------
       (new_kernel, host_stms) <- runBinder $ do -- host code
 
-        ty_name  <- nameFromString . pretty <$> newVName "Ty"
-        tx_name  <- nameFromString . pretty <$> newVName "Tx"
-        tk_name  <- nameFromString . pretty <$> newVName "Tk"
-        ry_name  <- nameFromString . pretty <$> newVName "Ry"
-        rx_name  <- nameFromString . pretty <$> newVName "Rx"
-
-        gtid_y   <- newVName "gtid_y"
-        gtid_x   <- newVName "gtid_x"
-        gid_flat <- newVName "gid_flat"
-
-        ty <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
-        tx <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
-        tk <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
+        ty_name <- nameFromString . pretty <$> newVName "Ty"
+        tx_name <- nameFromString . pretty <$> newVName "Tx"
+        tk_name <- nameFromString . pretty <$> newVName "Tk"
+        ry_name <- nameFromString . pretty <$> newVName "Ry"
+        rx_name <- nameFromString . pretty <$> newVName "Rx"
+        tk <- letSubExp "Tk" $ Op $ SizeOp $ GetSize ty_name SizeTile
+        ty <- letSubExp "Ty" $ Op $ SizeOp $ GetSize tx_name SizeTile
+        tx <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tk_name SizeTile
         ry <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeTile
         rx <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeTile
 
         tx_rx <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx
         ty_ry <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32) ty ry
-
         group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
 
         grid_dimy <- letSubExp "grid_dimy" =<< ceilDiv height_A ty_ry
         grid_dimx <- letSubExp "grid_dimx" =<< ceilDiv width_B tx_rx
         grid_size <- letSubExp "grid_size" $ BasicOp $ BinOp (Mul Int32) grid_dimx grid_dimy
+
+        gtid_y   <- newVName "gtid_y"
+        gtid_x   <- newVName "gtid_x"
+        gid_flat <- newVName "gid_flat"
 
         -----------------------------------------------
         -- in this binder: the entire outer seggroup --
@@ -132,22 +130,33 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
           addStms code1 -- FIXME: temp hack to bring arrays into scope before kk loop.
           kk       <- newVName "kk"
           kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
-          loop_kk  <- buildForLoop acc kk kk_bound $ \_ -> inScopeOf code1 $ do -- TODO: inScopeOf here..?
+          loop_kk  <- buildForLoop acc kk kk_bound $ inScopeOf code1 $ do   -- TODO: inScopeOf here..?
 
             a_shr : _ <- segMap2D "A_shr" (segThread grid_size group_size)
-                           ResultNoSimplify (ty_ry, tk) $ \(x, y) -> do
-              -- reconstructGtids2D ty_ry (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
+                           ResultNoSimplify (ty, tk) $ \(x, y) -> do
 
-              slice_a <- letSubExp "slice_a" $ BasicOp $ SubExp $ Var gtid_y      -- dummy
-              a_shr <- letSubExp "a_shr" $ BasicOp $ Index inp_A [DimFix slice_a]
-              return [a_shr]
+              -- TODO: scratch a 1D array of size Ry. risky, in that compiler
+              -- might put innermost array in stupid place such as global mem
+              garbage <- letExp "garbage" $ BasicOp $ Scratch float64 [ry]  -- TODO: make generic
+
+              reconstructGtids2D ty_ry (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
+
+              i <- newVName "i"
+              loop_a_shr <- buildForLoop garbage i ry $ do
+                var_y <- varFromVName y
+                foo <- letSubExp "foo" $ BasicOp $ SubExp $ intConst Int32 22
+                a_shr <- letSubExp "a_shr" $ BasicOp $ Update garbage [DimFix var_y] foo
+                return $ resultBody [a_shr]
+
+              return [loop_a_shr]
+
 
             b_shr : _ <- segMap2D "B_shr" (segThread grid_size group_size)
                            ResultNoSimplify (tk, tx_rx) $ \(x, y) -> do
-              -- reconstructGtids2D tx_rx (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
+              reconstructGtids2D tx_rx (gtid_x, gtid_y) (gid_x, gid_y) (x, y)
 
-              slice_b <- letSubExp "slice_a" $ BasicOp $ SubExp $ Var gtid_x      -- dummy
-              b_shr <- letSubExp "b_shr" $ BasicOp $ Index inp_B [DimFix slice_b]
+              slice_b <- letSubExp "slice_b" $ BasicOp $ SubExp $ Var gtid_x      -- dummy
+              b_shr   <- letSubExp "b_shr" $ BasicOp $ Index inp_B [DimFix slice_b]
               return [b_shr]
 
             ------------------------
@@ -155,7 +164,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
             ------------------------
             k <- newVName "k"
             let k_bound = tk
-            loop_k <- buildForLoop acc k k_bound $ \init -> do
+            loop_k <- buildForLoop acc k k_bound $ do
               asss : bsss : _ <- segMap2D "asss_bsss" (segThread grid_size group_size)
                                    ResultPrivate (ty, tx) $ \(thd_x, thd_y) -> do
 
@@ -178,13 +187,14 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
                 foo <- letSubExp "foo" $ BasicOp $ SubExp $ intConst Int32 42
                 -- TODO: two nested for loops here ...
-               
+
                 return [foo]
 
-              return $ resultBody [init]
+              acc <- varFromVName acc   -- dummy
+              return $ resultBody [acc] -- dummy
 
             return $ resultBody [loop_k]
-          --------------- END inner k loop ---------------
+          --------------- END inner k loop ----------------
 
           return [Returns ResultNoSimplify loop_kk]
         --------------- END outer kk loop ---------------
@@ -246,18 +256,22 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
           foo <- letSubExp "foo" $ BasicOp $ SubExp $ Var name
           return foo
 
-        slice2D :: VName -> SubExp -> (VName, VName) -> Binder Kernels (Slice SubExp)
+        slice2D :: VName           -- array to slice
+                -> SubExp          -- tile size
+                -> (VName, VName)  -- ltid_x, ltid_y
+                -> Binder Kernels (Slice SubExp)
         slice2D arr tile_size (x, y) = do
           var_x <- varFromVName x
           var_y <- varFromVName y
           i <- letSubExp "i" $ BasicOp $ BinOp (Mul Int32) var_x tile_size
           return [DimFix i, DimFix var_y]
 
-        buildForLoop :: VName                         -- loop merge name
+        buildForLoop :: VName                         -- loop merge vname
                      -> VName                         -- loop variable
                      -> SubExp                        -- loop variable bound
-                     -> (SubExp ->                    -- loop merge init
-                           Binder Kernels (Body Kernels)) -- loop body
+                     -> Binder Kernels (Body Kernels) -- loop body
+                     -- -> (SubExp ->                    -- loop merge init
+                     --      Binder Kernels (Body Kernels)) -- loop body
                      -> Binder Kernels SubExp
         buildForLoop merge i i_bound body = do
           let name = "loop_" ++ baseString i
@@ -268,7 +282,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
           loop_init <- newParam (name ++ "_init") $ toDecl merge_t Unique
 
-          loop_body <- runBodyBinder $ inScopeOf loop_form $ body merge_se -- loop_init
+          loop_body <- runBodyBinder $ inScopeOf loop_form body -- $ body merge_se
 
           loop <- letSubExp name $ DoLoop [] [(loop_init, merge_se)]
                                           loop_form loop_body
