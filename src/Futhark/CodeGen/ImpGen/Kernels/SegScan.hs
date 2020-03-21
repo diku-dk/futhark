@@ -115,7 +115,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
                   to' = to + Imp.var chunk_offset int32
               in f from' to'
 
-      sOp Imp.ErrorSync -- Also implicitly barrier.
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       groupScan constants crossesSegment'
         (kernelGroupSize constants) scan_op_renamed local_arrs
@@ -125,7 +125,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
         copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
         (Var arr) [kernelLocalThreadId constants]
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
       let load_carry =
             forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
@@ -143,7 +143,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
                                                  kernelGroupSize constants))
                                          load_neutral load_carry
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
   return (elems_per_group, crossesSegment)
 

@@ -466,9 +466,8 @@ pendingError b =
 
 hasCommunication :: ImpKernels.KernelCode -> Bool
 hasCommunication = any communicates
-  where communicates ErrorSync = True
-        communicates LocalBarrier = True
-        communicates GlobalBarrier = True
+  where communicates ErrorSync{} = True
+        communicates Barrier{} = True
         communicates _ = False
 
 inKernelOperations :: ImpKernels.KernelCode -> GenericC.Operations KernelOp KernelState
@@ -487,6 +486,9 @@ inKernelOperations body =
   }
   where has_communication = hasCommunication body
 
+        fence FenceLocal = [C.cexp|CLK_LOCAL_MEM_FENCE|]
+        fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE|]
+
         kernelOps :: GenericC.OpCompiler KernelOp KernelState
         kernelOps (GetGroupId v i) =
           GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
@@ -500,15 +502,12 @@ inKernelOperations body =
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
         kernelOps (GetLockstepWidth v) =
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-        kernelOps LocalBarrier = do
-          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+        kernelOps (Barrier f) = do
+          GenericC.stm [C.cstm|barrier($exp:(fence f));|]
           GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
-        kernelOps GlobalBarrier = do
-          GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
-          GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
-        kernelOps MemFenceLocal =
+        kernelOps (MemFence FenceLocal) =
           GenericC.stm [C.cstm|mem_fence_local();|]
-        kernelOps MemFenceGlobal =
+        kernelOps (MemFence FenceGlobal) =
           GenericC.stm [C.cstm|mem_fence_global();|]
         kernelOps (PrivateAlloc name size) = do
           size' <- GenericC.compileExp $ unCount size
@@ -520,14 +519,14 @@ inKernelOperations body =
           GenericC.modifyUserState $ \s ->
             s { kernelLocalMemory = (name', size) : kernelLocalMemory s }
           GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
-        kernelOps ErrorSync = do
+        kernelOps (ErrorSync f) = do
           label <- nextErrorLabel
           pending <- kernelSyncPending <$> GenericC.getUserState
           when pending $ do
             pendingError False
-            GenericC.stm [C.cstm|$id:label: barrier(CLK_LOCAL_MEM_FENCE);|]
+            GenericC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
             GenericC.stm [C.cstm|if (local_failure) { return; }|]
-          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
           GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
           incErrorLabel
         kernelOps (Atomic space aop) = atomicOps space aop

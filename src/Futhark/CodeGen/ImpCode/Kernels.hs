@@ -11,6 +11,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelConstExp
   , HostOp (..)
   , KernelOp (..)
+  , Fence (..)
   , AtomicOp (..)
   , Kernel (..)
   , KernelUse (..)
@@ -147,6 +148,11 @@ instance Pretty Kernel where
      text "failure_tolerant" <+> ppr (kernelFailureTolerant kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
 
+-- | When we do a barrier or fence, is it at the local or global
+-- level?
+data Fence = FenceLocal | FenceGlobal
+           deriving (Show)
+
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int
               | GetLocalSize VName Int
@@ -154,19 +160,17 @@ data KernelOp = GetGroupId VName Int
               | GetGlobalId VName Int
               | GetLockstepWidth VName
               | Atomic Space AtomicOp
-              | LocalBarrier
-              | GlobalBarrier
-              | MemFenceLocal
-              | MemFenceGlobal
+              | Barrier Fence
+              | MemFence Fence
               | PrivateAlloc VName (Count Bytes Imp.Exp)
               | LocalAlloc VName (Count Bytes Imp.Exp)
-              | ErrorSync
-                -- ^ Perform a local memory barrier and also check
-                -- whether any threads have failed an assertion.  Make
-                -- sure all threads would reach all 'ErrorSync's if
-                -- any of them do.  A failing assertion will jump to
-                -- the next following 'ErrorSync', so make sure it's
-                -- not inside control flow or similar.
+              | ErrorSync Fence
+                -- ^ Perform a barrier and also check whether any
+                -- threads have failed an assertion.  Make sure all
+                -- threads would reach all 'ErrorSync's if any of them
+                -- do.  A failing assertion will jump to the next
+                -- following 'ErrorSync', so make sure it's not inside
+                -- control flow or similar.
               deriving (Show)
 
 -- Atomic operations return the value stored before the update.
@@ -214,20 +218,22 @@ instance Pretty KernelOp where
   ppr (GetLockstepWidth dest) =
     ppr dest <+> text "<-" <+>
     text "get_lockstep_width()"
-  ppr LocalBarrier =
+  ppr (Barrier FenceLocal) =
     text "local_barrier()"
-  ppr GlobalBarrier =
+  ppr (Barrier FenceGlobal) =
     text "global_barrier()"
-  ppr MemFenceLocal =
+  ppr (MemFence FenceLocal) =
     text "mem_fence_local()"
-  ppr MemFenceGlobal =
+  ppr (MemFence FenceGlobal) =
     text "mem_fence_global()"
   ppr (PrivateAlloc name size) =
     ppr name <+> equals <+> text "private_alloc" <> parens (ppr size)
   ppr (LocalAlloc name size) =
     ppr name <+> equals <+> text "local_alloc" <> parens (ppr size)
-  ppr ErrorSync =
-    text "error_sync()"
+  ppr (ErrorSync FenceLocal) =
+    text "error_sync_local()"
+  ppr (ErrorSync FenceGlobal) =
+    text "error_sync_global()"
   ppr (Atomic _ (AtomicAdd old arr ind x)) =
     ppr old <+> text "<-" <+> text "atomic_add" <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
