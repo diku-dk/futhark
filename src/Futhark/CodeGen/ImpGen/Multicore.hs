@@ -159,14 +159,14 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
              sLoopNest shape $ \_is' -> do
                -- Index
                buck <- toExp bucket
-               forM_ (zip (patternElements pat) is_params) $ \(pe, p) -> do
+               forM_ (zip (patternElements pat) is_params) $ \(pe, p) ->
                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) [buck]
                -- Value at index
                forM_ (zip vs_params vs') $ \(p, v) ->
                  copyDWIMFix (paramName p) [] v []
                compileStms mempty (bodyStms $ lambdaBody lam) $
                  forM_ (zip (patternElements pat)  $ bodyResult $ lambdaBody lam) $
-                 \(pe, se) -> do
+                 \(pe, se) ->
                    copyDWIMFix (patElemName pe) [buck] se [] -- TODO fix this offset
 
 
