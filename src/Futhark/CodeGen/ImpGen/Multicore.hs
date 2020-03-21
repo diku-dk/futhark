@@ -132,11 +132,9 @@ compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
 compileSegOp pat  (SegHist _ space histops _ kbody) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
-  -- let lparams = lambdaParams $ mapM histOp histop
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
-
 
   body' <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
@@ -146,7 +144,7 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
           (buckets, vs) = splitAt (length histops) red_res
           perOp = chunks $ map (length . histDest) histops
 
-      forM_ (zip3 histops (perOp vs) buckets) $ do
+      forM_ (zip3 histops (perOp vs) buckets) $
          \(HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
 
            let vs_params = takeLast (length vs') $ lambdaParams lam
@@ -172,9 +170,7 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
                    copyDWIMFix (patElemName pe) [buck] se [] -- TODO fix this offset
 
 
-
   thread_id <- dPrim "thread_id" $ IntType Int32
-  tid_exp <- toExp $ Var thread_id
 
   let paramsNames = namesToList (freeIn body' `namesSubtract`
                                 (namesFromList $ thread_id : [segFlat space]))
@@ -183,7 +179,6 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
                               (Imp.MulticoreFunc params mempty body' thread_id)
-
 
 
 
