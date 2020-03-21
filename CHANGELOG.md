@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `scan` now supports operators whose operands are arrays.  They are
+    significantly slower than primitive-typed scans, so avoid them if
+    at all possible.
+
 ### Removed
 
 ### Changed
