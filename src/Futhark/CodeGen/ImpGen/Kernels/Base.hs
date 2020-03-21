@@ -268,7 +268,7 @@ compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))
 
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
-  groupScan constants (Just crossesSegment) (product dims') scan_op $
+  groupScan constants (Just crossesSegment) (product dims') (product dims') scan_op $
     patternNames pat
 
 compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
@@ -315,7 +315,8 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
           crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
-        groupScan constants (Just crossesSegment) (product dims') (segRedLambda op) tmps
+        groupScan constants (Just crossesSegment) (product dims') (product dims')
+        (segRedLambda op) tmps
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -712,16 +713,6 @@ makeAllMemoryGlobal =
         globalMemory entry =
           entry
 
-writeParamToLocalMemory :: Imp.Exp -> VName -> LParam ExplicitMemory
-                        -> ImpM lore op ()
-writeParamToLocalMemory i arr param =
-  everythingVolatile $ copyDWIM arr [DimFix i] (Var $ paramName param) []
-
-readParamFromLocalMemory :: Imp.Exp -> LParam ExplicitMemory -> VName
-                         -> ImpM lore op ()
-readParamFromLocalMemory i param arr =
-  everythingVolatile $ copyDWIM (paramName param) [] (Var arr) [DimFix i]
-
 groupReduce :: ExplicitMemorish lore =>
                KernelConstants
             -> Imp.Exp
@@ -820,13 +811,11 @@ groupReduceWithOffset constants offset w lam arrs = do
 groupScan :: KernelConstants
           -> Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
           -> Imp.Exp
+          -> Imp.Exp
           -> Lambda ExplicitMemory
           -> [VName]
           -> ImpM ExplicitMemory Imp.KernelOp ()
-groupScan constants seg_flag w lam arrs = do
-  unless (all (primType . paramType) $ lambdaParams lam) $
-    compilerLimitationS "Cannot compile parallel scans with array element type."
-
+groupScan constants seg_flag arrs_full_size w lam arrs = do
   renamed_lam <- renameLambda lam
 
   let ltid = kernelLocalThreadId constants
@@ -848,108 +837,183 @@ groupScan constants seg_flag w lam arrs = do
       simd_width = kernelWaveSize constants
       block_id = ltid `quot` block_size
       in_block_id = ltid - block_id * block_size
-      doInBlockScan seg_flag' active = inBlockScan seg_flag' simd_width block_size active ltid arrs
+      doInBlockScan seg_flag' active =
+        inBlockScan constants seg_flag' arrs_full_size
+        simd_width block_size active arrs barrier
       ltid_in_bounds = ltid .<. w
+      array_scan = not $ all primType $ lambdaReturnType lam
+      barrier | array_scan =
+                  sOp $ Imp.Barrier Imp.FenceGlobal
+              | otherwise =
+                  sOp $ Imp.Barrier Imp.FenceLocal
+
+      group_offset = kernelGroupId constants * kernelGroupSize constants
+
+      writeBlockResult p arr
+        | primType $ paramType p =
+            copyDWIM arr [DimFix block_id] (Var $ paramName p) []
+        | otherwise =
+            copyDWIM arr [DimFix $ group_offset + block_id] (Var $ paramName p) []
+
+      readPrevBlockResult p arr
+        | primType $ paramType p =
+            copyDWIM (paramName p) [] (Var arr) [DimFix $ block_id - 1]
+        | otherwise =
+            copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + block_id - 1]
 
   doInBlockScan seg_flag ltid_in_bounds lam
-  sOp $ Imp.Barrier Imp.FenceLocal
+  barrier
+
+  let is_first_block = block_id .==. 0
+  when array_scan $ do
+    sComment "save correct values for first block" $
+      sWhen is_first_block $ forM_ (zip x_params arrs) $ \(x, arr) ->
+      unless (primType $ paramType x) $
+      copyDWIM arr [DimFix $ arrs_full_size + group_offset + block_size + ltid] (Var $ paramName x) []
+
+    barrier
 
   let last_in_block = in_block_id .==. block_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
     sWhen (last_in_block .&&. ltid_in_bounds) $
-    zipWithM_ (writeParamToLocalMemory block_id) arrs y_params
+    zipWithM_ writeBlockResult x_params arrs
 
-  sOp $ Imp.Barrier Imp.FenceLocal
+  barrier
 
-  let is_first_block = block_id .==. 0
-      first_block_seg_flag = do
+  let first_block_seg_flag = do
         flag_true <- seg_flag
         Just $ \from to ->
           flag_true (from*block_size+block_size-1) (to*block_size+block_size-1)
   comment
-    "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
+    "scan the first block, after which offset 'i' contains carry-in for block 'i+1'" $
     doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
-  sOp $ Imp.Barrier Imp.FenceLocal
+  barrier
 
-  let read_carry_in =
-        zipWithM_ (readParamFromLocalMemory (block_id - 1))
-        x_params arrs
+  when array_scan $ do
+    sComment "move correct values for first block back a block" $
+      sWhen is_first_block $ forM_ (zip x_params arrs) $ \(x, arr) ->
+      unless (primType $ paramType x) $
+      copyDWIM
+      arr [DimFix $ arrs_full_size + group_offset + ltid]
+      (Var arr) [DimFix $ arrs_full_size + group_offset + block_size + ltid]
 
-  let op_to_y
+    barrier
+
+  let read_carry_in = do
+        forM_ (zip x_params y_params) $ \(x,y) ->
+          copyDWIM (paramName y) [] (Var (paramName x)) []
+        zipWithM_ readPrevBlockResult x_params arrs
+
+      op_to_x
         | Nothing <- seg_flag =
-            compileBody' y_params $ lambdaBody lam
+            compileBody' x_params $ lambdaBody lam
         | Just flag_true <- seg_flag =
             sUnless (flag_true (block_id*block_size-1) ltid) $
-              compileBody' y_params $ lambdaBody lam
+              compileBody' x_params $ lambdaBody lam
+
       write_final_result =
-        zipWithM_ (writeParamToLocalMemory ltid) arrs y_params
+        forM_ (zip x_params arrs) $ \(p, arr) ->
+        when (primType $ paramType p) $
+        copyDWIM arr [DimFix ltid] (Var $ paramName p) []
 
   sComment "carry-in for every block except the first" $
     sUnless (is_first_block .||. Imp.UnOpExp Not ltid_in_bounds) $ do
     sComment "read operands" read_carry_in
-    sComment "perform operation" op_to_y
+    sComment "perform operation" op_to_x
     sComment "write final result" write_final_result
 
-  sOp $ Imp.Barrier Imp.FenceLocal
+  barrier
 
   sComment "restore correct values for first block" $
-    sWhen is_first_block write_final_result
+    sWhen is_first_block $forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
+      if primType (paramType y)
+      then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
+      else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
 
-  sOp $ Imp.Barrier Imp.FenceLocal
-
-inBlockScan :: Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
+inBlockScan :: KernelConstants
+            -> Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
             -> Imp.Exp
             -> Imp.Exp
             -> Imp.Exp
             -> Imp.Exp
             -> [VName]
+            -> InKernelGen ()
             -> Lambda ExplicitMemory
             -> InKernelGen ()
-inBlockScan seg_flag lockstep_width block_size active ltid arrs scan_lam = everythingVolatile $ do
+inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
   skip_threads <- dPrim "skip_threads" int32
   let in_block_thread_active =
         Imp.var skip_threads int32 .<=. in_block_id
       actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
-      read_operands =
-        zipWithM_ (readParamFromLocalMemory $ ltid - Imp.var skip_threads int32)
-        x_params arrs
 
   -- Set initial y values
-  sWhen active $
-    zipWithM_ (readParamFromLocalMemory ltid) y_params arrs
+  sWhen active $ do
+    zipWithM_ readInitial y_params arrs
+    -- Since the final result is expected to be in x_params, we may
+    -- need to copy it there for the first thread in the block.
+    sWhen (in_block_id .==. 0) $
+      forM_ (zip x_params y_params) $ \(x,y) ->
+      when (primType (paramType x)) $
+      copyDWIM (paramName x) [] (Var (paramName y)) []
 
-  let op_to_y
+  unless (all primType $ lambdaReturnType scan_lam)
+    barrier
+
+  let op_to_x
         | Nothing <- seg_flag =
-            compileBody' y_params $ lambdaBody scan_lam
+            compileBody' x_params $ lambdaBody scan_lam
         | Just flag_true <- seg_flag =
             sUnless (flag_true (ltid-Imp.var skip_threads int32) ltid) $
-              compileBody' y_params $ lambdaBody scan_lam
-      write_operation_result =
-        zipWithM_ (writeParamToLocalMemory ltid) arrs y_params
-      maybeLocalBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32) $
-                          sOp $ Imp.Barrier Imp.FenceLocal
+              compileBody' x_params $ lambdaBody scan_lam
+
+      maybeBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32)
+                     barrier
 
   sComment "in-block scan (hopefully no barriers needed)" $ do
     skip_threads <-- 1
     sWhile (Imp.var skip_threads int32 .<. block_size) $ do
       sWhen (in_block_thread_active .&&. active) $ do
-        sComment "read operands" read_operands
-        sComment "perform operation" op_to_y
+        sComment "read operands" $
+          zipWithM_ (readParam (Imp.vi32 skip_threads)) x_params arrs
+        sComment "perform operation" op_to_x
 
-      maybeLocalBarrier
+      maybeBarrier
 
       sWhen (in_block_thread_active .&&. active) $
-        sComment "write result" write_operation_result
+        sComment "write result" $
+        sequence_ $ zipWith3 writeResult x_params y_params arrs
 
-      maybeLocalBarrier
+      maybeBarrier
 
       skip_threads <-- Imp.var skip_threads int32 * 2
 
   where block_id = ltid `quot` block_size
         in_block_id = ltid - block_id * block_size
+        ltid = kernelLocalThreadId constants
+        gtid = kernelGlobalThreadId constants
+
+        readInitial p arr
+          | primType $ paramType p =
+              copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+          | otherwise =
+              copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+
+        readParam behind p arr
+          | primType $ paramType p =
+              copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+          | otherwise =
+              copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+
+        writeResult x y arr
+          | primType $ paramType x = do
+              copyDWIM arr [DimFix ltid] (Var $ paramName x) []
+              copyDWIM (paramName y) [] (Var $ paramName x) []
+          | otherwise =
+              copyDWIM (paramName y) [] (Var $ paramName x) []
+
 
 getSize :: String -> Imp.SizeClass -> CallKernelGen VName
 getSize desc sclass = do
