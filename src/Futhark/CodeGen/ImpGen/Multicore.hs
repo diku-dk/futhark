@@ -14,10 +14,12 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 
 import Futhark.CodeGen.ImpGen.Kernels.Base
 
-import Futhark.Util (chunks)
+import Futhark.Util.IntegralExp (quotRoundingUp)
+import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
+
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Either InternalError Imp.Program)
@@ -61,7 +63,7 @@ myGroupResultArrays space (Count size) reds =
 myGroupResultArraysScan :: Space
                      -> Count u SubExp
                      -> LambdaT lore1
-                     -> ImpM lore2 op ([VName])
+                     -> ImpM lore2 op [VName]
 myGroupResultArraysScan space (Count size) (Lambda _ _ retype)  =
   forM retype $ \t -> do
     let pt = elemType t
@@ -72,17 +74,6 @@ myGroupResultArraysScan space (Count size) (Lambda _ _ retype)  =
     sAllocArrayPerm "group_res_arr" pt full_shape space perm
 
 
-
-data SubhistosInfo = SubhistosInfo { subhistosArray :: VName
-                                   , subhistosAlloc :: CallKernelGen ()
-                                   }
-
-data SegHistSlug = SegHistSlug
-                   { mySlugOp :: HistOp ExplicitMemory
-                   , mySlugNumSubhistos :: VName
-                   , mySlugSubhistos :: [SubhistosInfo]
-                   , mySlugAtomicUpdate :: AtomicUpdate ExplicitMemory
-                   }
 
 -- | A SegRedOp with auxiliary information.
 data MySegRedOpSlug =
@@ -115,7 +106,6 @@ mySlugsComm = mconcat . map (segRedComm . slugOp)
 
 myAccParams, myNextParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
 myAccParams slug = take (length (mySlugNeutral slug)) $ mySlugParams slug
-
 myNextParams slug = drop (length (mySlugNeutral slug)) $ mySlugParams slug
 
 mySegRedOpSlug :: (SegRedOp ExplicitMemory, [VName])
@@ -139,6 +129,64 @@ mySegRedOpSlug (op, group_res_arrs) =
 -- 3. tests/soacs/scan2.fut fail (doesn't compile)
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
+compileSegOp pat  (SegHist _ space histops _ kbody) = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+  -- let lparams = lambdaParams $ mapM histOp histop
+
+  let num_red_res = length histops + sum (map (length . histNeutral) histops)
+      (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+
+
+  body' <- collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+    compileStms mempty (kernelBodyStms kbody) $ do
+      let (red_res, _map_res) = splitFromEnd (length map_pes) $
+                               map kernelResultSubExp $ kernelBodyResult kbody
+          (buckets, vs) = splitAt (length histops) red_res
+          perOp = chunks $ map (length . histDest) histops
+
+      forM_ (zip3 histops (perOp vs) buckets) $ do
+         \(HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
+
+           let vs_params = takeLast (length vs') $ lambdaParams lam
+               is_params = take (length vs') $ lambdaParams lam
+               bucket'   = toExp' int32 bucket
+               dest_w'   = toExp' int32 dest_w
+               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+
+           sComment "perform non-atomic updates" $
+             sWhen bucket_in_bounds $ do
+             dLParams $ lambdaParams lam
+             sLoopNest shape $ \_is' -> do
+               -- Index
+               buck <- toExp bucket
+               forM_ (zip (patternElements pat) is_params) $ \(pe, p) -> do
+                 copyDWIMFix (paramName p) [] (Var $ patElemName pe) [buck]
+               -- Value at index
+               forM_ (zip vs_params vs') $ \(p, v) ->
+                 copyDWIMFix (paramName p) [] v []
+               compileStms mempty (bodyStms $ lambdaBody lam) $
+                 forM_ (zip (patternElements pat)  $ bodyResult $ lambdaBody lam) $
+                 \(pe, se) -> do
+                   copyDWIMFix (patElemName pe) [buck] se [] -- TODO fix this offset
+
+
+
+  thread_id <- dPrim "thread_id" $ IntType Int32
+  tid_exp <- toExp $ Var thread_id
+
+  let paramsNames = namesToList (freeIn body' `namesSubtract`
+                                (namesFromList $ thread_id : [segFlat space]))
+  ts <- mapM lookupType paramsNames
+  let params = zipWith getParam paramsNames ts
+
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
+                              (Imp.MulticoreFunc params mempty body' thread_id)
+
+
+
+
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -355,7 +403,3 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let params = zipWith getParam paramsNames ts
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc params mempty body' thread_id)
-
-
-compileSegOp _ op =
-  error $ "compileSegOp: unhandled: " ++ pretty op
