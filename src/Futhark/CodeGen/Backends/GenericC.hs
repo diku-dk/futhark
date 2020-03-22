@@ -707,6 +707,7 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
                       $exp:srcmem + $exp:srcidx,
                       $exp:nbytes);|]
 
+
 paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
   -- Let's hope we don't need the size for anything, because we are
@@ -1900,6 +1901,17 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <$> rawMem dest <*> compileExp destoffset <*> pure destspace
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
+
+
+-- A very slow memset
+compileCode (MemSet dest pt (Count size) c) = do
+  let ct = primTypeToCType pt
+  c' <- compileExp c
+  size' <- compileExp size
+  -- stm [C.cstm|memset($id:dest.mem, $exp:c', $id:dest.size);|]
+  stm [C.cstm|for(int i = 0; i < $exp:size'; i++) {
+                (($ty:ct*)$id:dest.mem)[i] = $exp:c';
+              }|]
 
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest

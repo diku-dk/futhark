@@ -128,104 +128,29 @@ mySegRedOpSlug (op, group_res_arrs) =
           | otherwise =
               error "couldn't determine type"
 
-type CallKernelGen2 = ImpM ExplicitMemory Imp.Multicore
--- type InKernelGen = ImpM ExplicitMemory Imp.KernelOp
 
-
-data MySubhistosInfo = SubhistosInfo { subhistosArray :: VName
-                                     , subhistosAlloc :: CallKernelGen2 ()
-                                     }
 
 data MySegHistSlug = MySegHistSlug
                    { mySlugOp :: HistOp ExplicitMemory
-                   , mySlugNumSubhistos :: VName
-                   , mySlugSubhistos :: [MySubhistosInfo]
                    }
 
-
-histoSpaceUsage :: HistOp ExplicitMemory
-                -> Imp.Count Imp.Bytes Imp.Exp
-histoSpaceUsage op =
-  sum $
-  map (typeSize .
-       (`arrayOfRow` histWidth op) .
-       (`arrayOfShape` histShape op)) $
-  lambdaReturnType $ histOp op
-
-computeHistoUsage :: SegSpace
-                  -> HistOp ExplicitMemory
-                  -> ImpM ExplicitMemory Imp.Multicore (Imp.Count Imp.Bytes Imp.Exp,
-                                                        Imp.Count Imp.Bytes Imp.Exp,
-                                                        MySegHistSlug)
-computeHistoUsage space op = do
-  let segment_dims = init $ unSegSpace space
-      num_segments = length segment_dims
-
-  -- Create names for the intermediate array memory blocks,
-  -- memory block sizes, arrays, and number of subhistograms.
-  num_subhistos <- dPrim "num_subhistos" int32
-  subhisto_infos <- forM (zip (histDest op) (histNeutral op)) $ \(dest, ne) -> do
-    dest_t <- lookupType dest
-    dest_mem <- entryArrayLocation <$> lookupArray dest
-
-    subhistos_mem <-
-      sDeclareMem (baseString dest ++ "_subhistos_mem") (DefaultSpace)
-
-    let subhistos_shape = Shape (map snd segment_dims++[Var num_subhistos]) <>
-                          stripDims num_segments (arrayShape dest_t)
-        subhistos_membind = ArrayIn subhistos_mem $ IxFun.iota $
-                            map (primExpFromSubExp int32) $ shapeDims subhistos_shape
-    subhistos <- sArray (baseString dest ++ "_subhistos")
-                 (elemType dest_t) subhistos_shape subhistos_membind
-
-    return $ SubhistosInfo subhistos $ do
-      let unitHistoCase =
-            emit $
-            Imp.SetMem subhistos_mem (memLocationName dest_mem) DefaultSpace
-
-          multiHistoCase = do
-            let num_elems = foldl' (*) (Imp.var num_subhistos int32) $
-                            map (toExp' int32) $ arrayDims dest_t
-
-            let subhistos_mem_size =
-                  Imp.bytes $
-                  Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
-
-            sAlloc_ subhistos_mem subhistos_mem_size DefaultSpace
-
-            -- sReplicate subhistos ne
-            subhistos_t <- lookupType subhistos
-            let slice = fullSliceNum (map (toExp' int32) $ arrayDims subhistos_t) $
-                        map (unitSlice 0 . toExp' int32 . snd) segment_dims ++
-                        [DimFix 0]
-            sUpdate subhistos slice $ Var dest
-
-      sIf (Imp.var num_subhistos int32 .==. 1) unitHistoCase multiHistoCase
-
-  let h = histoSpaceUsage op
-      segmented_h = h * product (map (Imp.bytes . toExp' int32) $ init $ segSpaceDims space)
-
-  return (h,
-          segmented_h,
-          MySegHistSlug op num_subhistos subhisto_infos)
+computeHistoUsage :: HistOp ExplicitMemory
+                  -> ImpM ExplicitMemory Imp.Multicore (MySegHistSlug)
+computeHistoUsage op =
+  return $ MySegHistSlug op
 
 
-
-
-type InitLocalHistograms = [([VName],
-                              SubExp ->
+type InitLocalHistograms = [( SubExp ->
                               ImpM ExplicitMemory Imp.Multicore ([VName],
                                                                  [Imp.Exp] -> ImpM ExplicitMemory Imp.Multicore ()))]
 
 prepareIntermediateArraysLocal :: VName
                                -> SegSpace -> [MySegHistSlug]
                                -> ImpM ExplicitMemory Imp.Multicore InitLocalHistograms
-
 prepareIntermediateArraysLocal num_subhistos_per_group _space =
   mapM onOp
   where
-    onOp (MySegHistSlug op _num_subhistos subhisto_info) = do
-
+    onOp (MySegHistSlug op) = do
       mk_op <- return $ \arrs bucket -> do
         let op' =  histOp op
         let (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op'
@@ -236,7 +161,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group _space =
         let op_body = sComment "execute operation" $
                       compileBody' acc_params $ lambdaBody op'
             do_hist =
-              sComment "update global result" $
+              sComment "update sub hist result" $
               zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
         sComment "Start of body" $ do
@@ -245,27 +170,24 @@ prepareIntermediateArraysLocal num_subhistos_per_group _space =
           op_body
           do_hist
 
-
-
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
-      let init_local_subhistos (hist_H_chk) = do
+      let init_local_subhistos hist_H_chk = do
             local_subhistos <-
-              forM (histType op) $ \t -> do
+              forM (zip (histType op) (histNeutral op)) $ \(t, ne) -> do
                 let sub_local_shape =
                       Shape [Var num_subhistos_per_group] <>
                       (arrayShape t `setOuterDim` hist_H_chk)
-                sAllocArray "subhistogram_local"
-                  (elemType t) sub_local_shape DefaultSpace
+                name <- (sAllocArray "subhistogram_local"
+                        (elemType t) sub_local_shape DefaultSpace)
+                ne' <- toExp ne
+                size <- mapM toExp $ shapeDims sub_local_shape
+                memSet name (elemType t) (product size) ne'
+                return name
 
             return (local_subhistos, mk_op local_subhistos)
 
-      -- Initialise global-memory sub-histograms.
-      glob_subhistos <- forM subhisto_info $ \info -> do
-        subhistosAlloc info
-        return $ subhistosArray info
-
-      return (glob_subhistos, init_local_subhistos)
+      return init_local_subhistos
 
     writeArray bucket arr val = copyDWIMFix arr bucket val []
 
@@ -285,65 +207,64 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
-  (op_hs, op_seg_hs, slugs) <- unzip3 <$> mapM (computeHistoUsage space) histops
-  h <- dPrimVE "h" $ Imp.unCount $ sum op_hs
-  seg_h <- dPrimVE "seg_h" $ Imp.unCount $ sum op_seg_hs
-  -- Maximum group size (or actual, in this case).
-  let hist_B =  Constant $ IntValue $ Int32Value 4
-  hist_B' <- toExp hist_B
-  -- Number of subhistograms per result histogram.
-  hist_M <- dPrimV "hist_M" $ hist_B'
+  slugs <- mapM computeHistoUsage histops
 
-  flat_segment_id <- dPrimVE "flat_segment_id" $  hist_B'
-  -- Size of a histogram.
-  hist_H <- dPrimVE "hist_H" $ sum $ map (toExp' int32 . histWidth) histops
+  -- Maximum group size (or actual, in this case).
+  hist_B' <- toExp $ Constant $ IntValue $ Int32Value 6 -- just to be sure
+  -- variable for how many subhistograms to allocate
+  hist_M <- dPrimV "hist_M" hist_B'
 
   init_histograms <-
     prepareIntermediateArraysLocal hist_M space slugs
-  -- Set segment indices.
-  zipWithM_ dPrimV_ is $
-    unflattenIndex (map (toExp' int32) ns) flat_segment_id
-
-  hist_L <- dPrim "hist_L" int32
-  hist_S <- dPrimVE "hist_S" $ (hist_H) `quotRoundingUp` Imp.vi32 hist_L
 
   hist_H_chks <- forM (map (histWidth . mySlugOp) slugs) $ \w -> do
     w' <- toExp w
-    dPrimV "hist_H_chk" $ w' `quotRoundingUp` hist_S
-
+    dPrimV "hist_H_chk" $ w'
 
   thread_id <- dPrim "thread_id" $ IntType Int32
   tid_exp <- toExp $ Var thread_id
 
+  -- Actually allocate subhistograms
   histograms <- forM (zip init_histograms hist_H_chks) $
-                \((glob_subhistos, init_local_subhistos), hist_H_chk) -> do
+                \(init_local_subhistos, hist_H_chk) -> do
     (local_subhistos, do_op) <- init_local_subhistos (Var hist_H_chk)
-    return (zip glob_subhistos local_subhistos, hist_H_chk, do_op)
+    return (local_subhistos, hist_H_chk, do_op)
 
-  body' <- collect $ compileStms mempty (kernelBodyStms kbody) $ do
-     let (red_res, map_res) = splitFromEnd (length map_pes) $
-                          map kernelResultSubExp $ kernelBodyResult kbody
-         (buckets, vs) = splitAt (length slugs) red_res
-         perOp = chunks $ map (length . histDest . mySlugOp) slugs
+  -- prebody' <- do
+  --   forM_ (zip histograms slugs) $ \(hists, slug) -> do
+  --     let (hists', _ , _) = hists
+  --     forM (zip hists' $ histNeutral $ mySlugOp slug) $ \(hist, ne) -> do
+  --       ne' <- toExp ne
+  --       memSet hist ne'
 
 
-     forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
-       \(HistOp dest_w _ _ _ shape lam,
-         (_, _hist_H_chk, do_op), bucket, vs') -> do
+  -- Generate body of parallel function
+  body' <- collect $ do
+     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+     compileStms mempty (kernelBodyStms kbody) $ do
+       let (red_res, _map_res) = splitFromEnd (length map_pes) $
+                            map kernelResultSubExp $ kernelBodyResult kbody
+           (buckets, vs) = splitAt (length slugs) red_res
+           perOp = chunks $ map (length . histDest . mySlugOp) slugs
 
-         let bucket' = toExp' int32 bucket
-             dest_w' = toExp' int32 dest_w
-             bucket_in_bounds = bucket' .<. dest_w'
-             vs_params = takeLast (length vs') $ lambdaParams lam
-             bucket_is = [tid_exp, bucket']
 
-         sComment "perform updates" $
-           sWhen bucket_in_bounds $ do
-           dLParams $ lambdaParams lam
-           sLoopNest shape $ \is' -> do
-             forM_ (zip vs_params vs') $ \(p, v) ->
-               copyDWIMFix (paramName p) [] v is'
-             do_op (bucket_is ++ is')
+       forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
+         \(HistOp dest_w _ _ _ shape lam,
+           (_, _hist_H_chk, do_op), bucket, vs') -> do
+
+           let bucket' = toExp' int32 bucket
+               dest_w' = toExp' int32 dest_w
+               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+               vs_params = takeLast (length vs') $ lambdaParams lam
+               bucket_is = [tid_exp, bucket']
+
+           sComment "perform updates" $
+             sWhen bucket_in_bounds $ do
+             dLParams $ lambdaParams lam
+             sLoopNest shape $ \is' -> do
+               forM_ (zip vs_params vs') $ \(p, v) ->
+                 copyDWIMFix (paramName p) [] v is'
+               do_op (bucket_is ++ is')
 
 
   let paramsNames = namesToList (freeIn body' `namesSubtract`

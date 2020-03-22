@@ -182,7 +182,6 @@ compileGetStructVals struct fargs fctypes =
   [ [C.cdecl|$ty:ty $id:name = *$id:struct->$id:name;|]
             | (name, ty) <- zip fargs fctypes ]
 
-
 compileSetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
                          a1 -> [a2] -> [C.Stm]
 compileSetStructVals struct vals =
@@ -195,7 +194,7 @@ getCType t = case t of
                MemParam _ space' -> GC.fatMemType space'
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop i e (MulticoreFunc params _ body _)) = do
+compileOp (ParLoop i e (MulticoreFunc params _ body tid)) = do
   let fctypes = map getCType params
   let fargs   = map paramName params
   e' <- GC.compileExp e
@@ -208,7 +207,7 @@ compileOp (ParLoop i e (MulticoreFunc params _ body _)) = do
 
   -- A task function that a thread should execute
   ftask <- GC.multicoreDef "parloop_task" $ \s ->
-    [C.cedecl|int $id:s(void *args, int start, int end, int thread_id) {
+    [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
               $decls:(compileGetStructVals fstruct fargs fctypes)
               for (int $id:i = start; $id:i < end; $id:i++) {
@@ -217,9 +216,18 @@ compileOp (ParLoop i e (MulticoreFunc params _ body _)) = do
               return 0;
    }|]
 
+
   GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stm [C.cstm|$id:ftask($id:fstruct, 0, $exp:e', 0);|]
+  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', &$id:tid) != 0) {
+                     fprintf(stderr, "scheduler failed to do task\n");
+                     return 1;
+           }|]
+
+
+  -- GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
+  -- GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
+  -- GC.stm [C.cstm|$id:ftask($id:fstruct, 0, $exp:e', &$id:tid);|]
 
 
   -- GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', NULL) != 0) {
@@ -229,7 +237,7 @@ compileOp (ParLoop i e (MulticoreFunc params _ body _)) = do
   -- GC.stm  [C.cstm|free($id:fstruct);|]
 
 
-compileop (ParLoopAcc i e (MulticoreFunc params prebody body tid)) = do
+compileOp (ParLoopAcc i e (MulticoreFunc params prebody body tid)) = do
   let fctypes = map getCType params
   let fargs   = map paramName params
   e' <- GC.compileExp e

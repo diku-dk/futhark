@@ -166,6 +166,7 @@ data Code a = Skip
             | SetScalar VName Exp
             | SetMem VName VName Space
               -- ^ Must be in same space.
+            | MemSet VName PrimType (Count Bytes Exp) Exp
             | Call [VName] Name [Arg]
             | If Exp (Code a) (Code a)
             | Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
