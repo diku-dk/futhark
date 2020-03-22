@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Futhark.CodeGen.ImpGen.Multicore
   ( Futhark.CodeGen.ImpGen.Multicore.compileProg
@@ -7,18 +8,24 @@ module Futhark.CodeGen.ImpGen.Multicore
   where
 
 import Control.Monad
+import Data.Maybe
+import Data.Foldable (foldl')
+import Data.List
+
 
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 
-
 import Futhark.CodeGen.ImpGen.Kernels.Base
 
 import Futhark.Util.IntegralExp (quotRoundingUp)
-import Futhark.Util (chunks, splitFromEnd, takeLast)
+import Futhark.Util (chunks, splitFromEnd, takeLast, maybeNth)
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Construct (fullSliceNum)
+
 
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
@@ -121,6 +128,147 @@ mySegRedOpSlug (op, group_res_arrs) =
           | otherwise =
               error "couldn't determine type"
 
+type CallKernelGen2 = ImpM ExplicitMemory Imp.Multicore
+-- type InKernelGen = ImpM ExplicitMemory Imp.KernelOp
+
+
+data MySubhistosInfo = SubhistosInfo { subhistosArray :: VName
+                                     , subhistosAlloc :: CallKernelGen2 ()
+                                     }
+
+data MySegHistSlug = MySegHistSlug
+                   { mySlugOp :: HistOp ExplicitMemory
+                   , mySlugNumSubhistos :: VName
+                   , mySlugSubhistos :: [MySubhistosInfo]
+                   }
+
+
+histoSpaceUsage :: HistOp ExplicitMemory
+                -> Imp.Count Imp.Bytes Imp.Exp
+histoSpaceUsage op =
+  sum $
+  map (typeSize .
+       (`arrayOfRow` histWidth op) .
+       (`arrayOfShape` histShape op)) $
+  lambdaReturnType $ histOp op
+
+computeHistoUsage :: SegSpace
+                  -> HistOp ExplicitMemory
+                  -> ImpM ExplicitMemory Imp.Multicore (Imp.Count Imp.Bytes Imp.Exp,
+                                                        Imp.Count Imp.Bytes Imp.Exp,
+                                                        MySegHistSlug)
+computeHistoUsage space op = do
+  let segment_dims = init $ unSegSpace space
+      num_segments = length segment_dims
+
+  -- Create names for the intermediate array memory blocks,
+  -- memory block sizes, arrays, and number of subhistograms.
+  num_subhistos <- dPrim "num_subhistos" int32
+  subhisto_infos <- forM (zip (histDest op) (histNeutral op)) $ \(dest, ne) -> do
+    dest_t <- lookupType dest
+    dest_mem <- entryArrayLocation <$> lookupArray dest
+
+    subhistos_mem <-
+      sDeclareMem (baseString dest ++ "_subhistos_mem") (DefaultSpace)
+
+    let subhistos_shape = Shape (map snd segment_dims++[Var num_subhistos]) <>
+                          stripDims num_segments (arrayShape dest_t)
+        subhistos_membind = ArrayIn subhistos_mem $ IxFun.iota $
+                            map (primExpFromSubExp int32) $ shapeDims subhistos_shape
+    subhistos <- sArray (baseString dest ++ "_subhistos")
+                 (elemType dest_t) subhistos_shape subhistos_membind
+
+    return $ SubhistosInfo subhistos $ do
+      let unitHistoCase =
+            emit $
+            Imp.SetMem subhistos_mem (memLocationName dest_mem) DefaultSpace
+
+          multiHistoCase = do
+            let num_elems = foldl' (*) (Imp.var num_subhistos int32) $
+                            map (toExp' int32) $ arrayDims dest_t
+
+            let subhistos_mem_size =
+                  Imp.bytes $
+                  Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
+
+            sAlloc_ subhistos_mem subhistos_mem_size DefaultSpace
+
+            -- sReplicate subhistos ne
+            subhistos_t <- lookupType subhistos
+            let slice = fullSliceNum (map (toExp' int32) $ arrayDims subhistos_t) $
+                        map (unitSlice 0 . toExp' int32 . snd) segment_dims ++
+                        [DimFix 0]
+            sUpdate subhistos slice $ Var dest
+
+      sIf (Imp.var num_subhistos int32 .==. 1) unitHistoCase multiHistoCase
+
+  let h = histoSpaceUsage op
+      segmented_h = h * product (map (Imp.bytes . toExp' int32) $ init $ segSpaceDims space)
+
+  return (h,
+          segmented_h,
+          MySegHistSlug op num_subhistos subhisto_infos)
+
+
+
+
+type InitLocalHistograms = [([VName],
+                              SubExp ->
+                              ImpM ExplicitMemory Imp.Multicore ([VName],
+                                                                 [Imp.Exp] -> ImpM ExplicitMemory Imp.Multicore ()))]
+
+prepareIntermediateArraysLocal :: VName
+                               -> SegSpace -> [MySegHistSlug]
+                               -> ImpM ExplicitMemory Imp.Multicore InitLocalHistograms
+
+prepareIntermediateArraysLocal num_subhistos_per_group _space =
+  mapM onOp
+  where
+    onOp (MySegHistSlug op _num_subhistos subhisto_info) = do
+
+      mk_op <- return $ \arrs bucket -> do
+        let op' =  histOp op
+        let (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op'
+            bind_acc_params =
+              sComment "bind lhs" $
+                forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
+                  copyDWIMFix (paramName acc_p) [] (Var arr) bucket
+        let op_body = sComment "execute operation" $
+                      compileBody' acc_params $ lambdaBody op'
+            do_hist =
+              sComment "update global result" $
+              zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
+
+        sComment "Start of body" $ do
+          dLParams acc_params
+          bind_acc_params
+          op_body
+          do_hist
+
+
+
+      -- Initialise local-memory sub-histograms.  These are
+      -- represented as two-dimensional arrays.
+      let init_local_subhistos (hist_H_chk) = do
+            local_subhistos <-
+              forM (histType op) $ \t -> do
+                let sub_local_shape =
+                      Shape [Var num_subhistos_per_group] <>
+                      (arrayShape t `setOuterDim` hist_H_chk)
+                sAllocArray "subhistogram_local"
+                  (elemType t) sub_local_shape DefaultSpace
+
+            return (local_subhistos, mk_op local_subhistos)
+
+      -- Initialise global-memory sub-histograms.
+      glob_subhistos <- forM subhisto_info $ \info -> do
+        subhistosAlloc info
+        return $ subhistosArray info
+
+      return (glob_subhistos, init_local_subhistos)
+
+    writeArray bucket arr val = copyDWIMFix arr bucket val []
+
 
 -- TODOs
 -- 0. Clean-up (write wrapper and remove code duplications)
@@ -129,6 +277,7 @@ mySegRedOpSlug (op, group_res_arrs) =
 -- 3. tests/soacs/scan2.fut fail (doesn't compile)
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
+
 compileSegOp pat  (SegHist _ space histops _ kbody) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -136,41 +285,66 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
-  body' <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, _map_res) = splitFromEnd (length map_pes) $
-                               map kernelResultSubExp $ kernelBodyResult kbody
-          (buckets, vs) = splitAt (length histops) red_res
-          perOp = chunks $ map (length . histDest) histops
+  (op_hs, op_seg_hs, slugs) <- unzip3 <$> mapM (computeHistoUsage space) histops
+  h <- dPrimVE "h" $ Imp.unCount $ sum op_hs
+  seg_h <- dPrimVE "seg_h" $ Imp.unCount $ sum op_seg_hs
+  -- Maximum group size (or actual, in this case).
+  let hist_B =  Constant $ IntValue $ Int32Value 4
+  hist_B' <- toExp hist_B
+  -- Number of subhistograms per result histogram.
+  hist_M <- dPrimV "hist_M" $ hist_B'
 
-      forM_ (zip3 histops (perOp vs) buckets) $
-         \(HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
+  flat_segment_id <- dPrimVE "flat_segment_id" $  hist_B'
+  -- Size of a histogram.
+  hist_H <- dPrimVE "hist_H" $ sum $ map (toExp' int32 . histWidth) histops
 
-           let vs_params = takeLast (length vs') $ lambdaParams lam
-               is_params = take (length vs') $ lambdaParams lam
-               bucket'   = toExp' int32 bucket
-               dest_w'   = toExp' int32 dest_w
-               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+  init_histograms <-
+    prepareIntermediateArraysLocal hist_M space slugs
+  -- Set segment indices.
+  zipWithM_ dPrimV_ is $
+    unflattenIndex (map (toExp' int32) ns) flat_segment_id
 
-           sComment "perform non-atomic updates" $
-             sWhen bucket_in_bounds $ do
-             dLParams $ lambdaParams lam
-             sLoopNest shape $ \_is' -> do
-               -- Index
-               buck <- toExp bucket
-               forM_ (zip (patternElements pat) is_params) $ \(pe, p) ->
-                 copyDWIMFix (paramName p) [] (Var $ patElemName pe) [buck]
-               -- Value at index
-               forM_ (zip vs_params vs') $ \(p, v) ->
-                 copyDWIMFix (paramName p) [] v []
-               compileStms mempty (bodyStms $ lambdaBody lam) $
-                 forM_ (zip (patternElements pat)  $ bodyResult $ lambdaBody lam) $
-                 \(pe, se) ->
-                   copyDWIMFix (patElemName pe) [buck] se [] -- TODO fix this offset
+  hist_L <- dPrim "hist_L" int32
+  hist_S <- dPrimVE "hist_S" $ (hist_H) `quotRoundingUp` Imp.vi32 hist_L
+
+  hist_H_chks <- forM (map (histWidth . mySlugOp) slugs) $ \w -> do
+    w' <- toExp w
+    dPrimV "hist_H_chk" $ w' `quotRoundingUp` hist_S
 
 
   thread_id <- dPrim "thread_id" $ IntType Int32
+  tid_exp <- toExp $ Var thread_id
+
+  histograms <- forM (zip init_histograms hist_H_chks) $
+                \((glob_subhistos, init_local_subhistos), hist_H_chk) -> do
+    (local_subhistos, do_op) <- init_local_subhistos (Var hist_H_chk)
+    return (zip glob_subhistos local_subhistos, hist_H_chk, do_op)
+
+  body' <- collect $ compileStms mempty (kernelBodyStms kbody) $ do
+     let (red_res, map_res) = splitFromEnd (length map_pes) $
+                          map kernelResultSubExp $ kernelBodyResult kbody
+         (buckets, vs) = splitAt (length slugs) red_res
+         perOp = chunks $ map (length . histDest . mySlugOp) slugs
+
+
+     forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
+       \(HistOp dest_w _ _ _ shape lam,
+         (_, _hist_H_chk, do_op), bucket, vs') -> do
+
+         let bucket' = toExp' int32 bucket
+             dest_w' = toExp' int32 dest_w
+             bucket_in_bounds = bucket' .<. dest_w'
+             vs_params = takeLast (length vs') $ lambdaParams lam
+             bucket_is = [tid_exp, bucket']
+
+         sComment "perform updates" $
+           sWhen bucket_in_bounds $ do
+           dLParams $ lambdaParams lam
+           sLoopNest shape $ \is' -> do
+             forM_ (zip vs_params vs') $ \(p, v) ->
+               copyDWIMFix (paramName p) [] v is'
+             do_op (bucket_is ++ is')
+
 
   let paramsNames = namesToList (freeIn body' `namesSubtract`
                                 (namesFromList $ thread_id : [segFlat space]))
@@ -180,7 +354,7 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
                               (Imp.MulticoreFunc params mempty body' thread_id)
 
-
+  emit $ Imp.DebugPrint "end of histograms" $ Nothing
 
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   let (is, ns) = unzip $ unSegSpace space
@@ -398,3 +572,59 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let params = zipWith getParam paramsNames ts
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc params mempty body' thread_id)
+
+
+
+-- A different version of segHist
+-- Takes sequential version and simpley chunks is
+-- Implementation does currently not ensure amotic updates
+
+-- compileSegOp pat  (SegHist _ space histops _ kbody) = do
+--   let (is, ns) = unzip $ unSegSpace space
+--   ns' <- mapM toExp ns
+--   let num_red_res = length histops + sum (map (length . histNeutral) histops)
+--       (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+
+--   body' <- collect $ do
+--     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+--     compileStms mempty (kernelBodyStms kbody) $ do
+--       let (red_res, _map_res) = splitFromEnd (length map_pes) $
+--                                map kernelResultSubExp $ kernelBodyResult kbody
+--           (buckets, vs) = splitAt (length histops) red_res
+--           perOp = chunks $ map (length . histDest) histops
+
+--       forM_ (zip3 histops (perOp vs) buckets) $
+--          \(HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
+
+--            let vs_params = takeLast (length vs') $ lambdaParams lam
+--                is_params = take (length vs') $ lambdaParams lam
+--                bucket'   = toExp' int32 bucket
+--                dest_w'   = toExp' int32 dest_w
+--                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+
+--            sComment "perform non-atomic updates" $
+--              sWhen bucket_in_bounds $ do
+--              dLParams $ lambdaParams lam
+--              sLoopNest shape $ \_is' -> do
+--                -- Index
+--                buck <- toExp bucket
+--                forM_ (zip (patternElements pat) is_params) $ \(pe, p) ->
+--                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) [buck]
+--                -- Value at index
+--                forM_ (zip vs_params vs') $ \(p, v) ->
+--                  copyDWIMFix (paramName p) [] v []
+--                compileStms mempty (bodyStms $ lambdaBody lam) $
+--                  forM_ (zip (patternElements pat)  $ bodyResult $ lambdaBody lam) $
+--                  \(pe, se) ->
+--                    copyDWIMFix (patElemName pe) [buck] se [] -- TODO fix this offset
+
+
+--   thread_id <- dPrim "thread_id" $ IntType Int32
+
+--   let paramsNames = namesToList (freeIn body' `namesSubtract`
+--                                 (namesFromList $ thread_id : [segFlat space]))
+--   ts <- mapM lookupType paramsNames
+--   let params = zipWith getParam paramsNames ts
+
+--   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
+--                               (Imp.MulticoreFunc params mempty body' thread_id)
