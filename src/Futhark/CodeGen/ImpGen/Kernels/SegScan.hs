@@ -245,7 +245,9 @@ scanStage3 (Pattern _ pes) num_groups group_size elems_per_group crossesSegment 
     -- group, and are not the last element in such a group (because
     -- then the carry was updated in stage 2), and we are not crossing
     -- a segment boundary.
-    let crosses_segment = fromMaybe false $
+    let in_bounds =
+          foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
+        crosses_segment = fromMaybe false $
           crossesSegment <*>
             pure (Imp.var carry_in_flat_idx int32) <*>
             pure flat_idx
@@ -253,7 +255,7 @@ scanStage3 (Pattern _ pes) num_groups group_size elems_per_group crossesSegment 
                      (Imp.var orig_group int32 + 1) * elems_per_group - 1
         no_carry_in = Imp.var orig_group int32 .==. 0 .||. is_a_carry .||. crosses_segment
 
-    sWhen (kernelThreadActive constants) $ sUnless no_carry_in $ do
+    sWhen in_bounds $ sUnless no_carry_in $ do
       dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
       let (scan_x_params, scan_y_params) =
             splitAt (length nes) $ lambdaParams scan_op
