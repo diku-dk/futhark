@@ -875,7 +875,7 @@ groupScan constants seg_flag arrs_full_size w lam arrs = do
 
   let last_in_block = in_block_id .==. block_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
-    sWhen (last_in_block .&&. ltid_in_bounds) $
+    sWhen (last_in_block .&&. ltid_in_bounds) $ everythingVolatile $
     zipWithM_ writeBlockResult x_params arrs
 
   barrier
@@ -905,12 +905,19 @@ groupScan constants seg_flag arrs_full_size w lam arrs = do
           copyDWIM (paramName y) [] (Var (paramName x)) []
         zipWithM_ readPrevBlockResult x_params arrs
 
+      y_to_x = forM_ (zip x_params y_params) $ \(x,y) ->
+        when (primType (paramType x)) $
+        copyDWIM (paramName x) [] (Var (paramName y)) []
+
       op_to_x
         | Nothing <- seg_flag =
             compileBody' x_params $ lambdaBody lam
-        | Just flag_true <- seg_flag =
-            sUnless (flag_true (block_id*block_size-1) ltid) $
-              compileBody' x_params $ lambdaBody lam
+        | Just flag_true <- seg_flag = do
+            inactive <-
+              dPrimVE "inactive" $ flag_true (block_id*block_size-1) ltid
+            sWhen inactive y_to_x
+            when array_scan barrier
+            sUnless inactive $ compileBody' x_params $ lambdaBody lam
 
       write_final_result =
         forM_ (zip x_params arrs) $ \(p, arr) ->
@@ -931,6 +938,8 @@ groupScan constants seg_flag arrs_full_size w lam arrs = do
       then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
       else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
 
+  barrier
+
 inBlockScan :: KernelConstants
             -> Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
             -> Imp.Exp
@@ -948,26 +957,29 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
       actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
+      y_to_x =
+        forM_ (zip x_params y_params) $ \(x,y) ->
+        when (primType (paramType x)) $
+        copyDWIM (paramName x) [] (Var (paramName y)) []
 
   -- Set initial y values
   sWhen active $ do
     zipWithM_ readInitial y_params arrs
     -- Since the final result is expected to be in x_params, we may
     -- need to copy it there for the first thread in the block.
-    sWhen (in_block_id .==. 0) $
-      forM_ (zip x_params y_params) $ \(x,y) ->
-      when (primType (paramType x)) $
-      copyDWIM (paramName x) [] (Var (paramName y)) []
+    sWhen (in_block_id .==. 0) y_to_x
 
-  unless (all primType $ lambdaReturnType scan_lam)
-    barrier
+  when array_scan barrier
 
   let op_to_x
         | Nothing <- seg_flag =
             compileBody' x_params $ lambdaBody scan_lam
-        | Just flag_true <- seg_flag =
-            sUnless (flag_true (ltid-Imp.var skip_threads int32) ltid) $
-              compileBody' x_params $ lambdaBody scan_lam
+        | Just flag_true <- seg_flag = do
+            inactive <- dPrimVE "inactive" $
+                        flag_true (ltid-Imp.var skip_threads int32) ltid
+            sWhen inactive y_to_x
+            when array_scan barrier
+            sUnless inactive $ compileBody' x_params $ lambdaBody scan_lam
 
       maybeBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32)
                      barrier
@@ -994,6 +1006,7 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
         in_block_id = ltid - block_id * block_size
         ltid = kernelLocalThreadId constants
         gtid = kernelGlobalThreadId constants
+        array_scan = not $ all primType $ lambdaReturnType scan_lam
 
         readInitial p arr
           | primType $ paramType p =
@@ -1013,7 +1026,6 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
               copyDWIM (paramName y) [] (Var $ paramName x) []
           | otherwise =
               copyDWIM (paramName y) [] (Var $ paramName x) []
-
 
 getSize :: String -> Imp.SizeClass -> CallKernelGen VName
 getSize desc sclass = do
