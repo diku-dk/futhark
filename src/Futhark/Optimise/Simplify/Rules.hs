@@ -343,7 +343,7 @@ removeUnnecessaryCopy :: BinderOps lore => BottomUpRuleBasicOp lore
 removeUnnecessaryCopy (vtable,used) (Pattern [] [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
-      Simplify $ letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
+      Simplify $ letBindNames_ [patElemName d] $ BasicOp $ SubExp $ Var v
   where -- We need to make sure we can even consume the original.
         -- This is currently a hacky check, much too conservative,
         -- because we don't have the information conveniently
@@ -579,8 +579,8 @@ simplifyIndex (vtable, used) pat@(Pattern [] [pe]) (StmAux cs _) (Index idd inds
       res <- m
       case res of
         SubExpResult cs' se ->
-          certifying (cs<>cs') $ letBindNames_ (patternNames pat) $
-          BasicOp $ SubExp se
+          certifying (cs<>cs') $
+          letBindNames_ (patternNames pat) $ BasicOp $ SubExp se
         IndexResult extra_cs idd' inds' ->
           certifying (cs<>extra_cs) $
           letBindNames_ (patternNames pat) $ BasicOp $ Index idd' inds'
@@ -832,7 +832,7 @@ ruleIf _ pat _ (e1, tb, fb, IfAttr _ ifsort)
     ifsort /= IfFallback || isCt1 e1 = Simplify $ do
   let ses = bodyResult branch
   addStms $ bodyStms branch
-  sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
+  sequence_ [ letBindNames_ [patElemName p] $ BasicOp $ SubExp se
             | (p,se) <- zip (patternElements pat) ses]
 
   where checkBranch
@@ -869,7 +869,7 @@ ruleIf _ pat _ (_, tbranch, _, IfAttr _ IfFallback)
     all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
       let ses = bodyResult tbranch
       addStms $ bodyStms tbranch
-      sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
+      sequence_ [ letBindNames_ [patElemName p] $ BasicOp $ SubExp se
                 | (p,se) <- zip (patternElements pat) ses]
 
 ruleIf _ _ _ _ = Skip
@@ -914,7 +914,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = Simplify $ do
         branchInvariant (pe, t, (tse, fse))
           -- Do both branches return the same value?
           | tse == fse = do
-              letBind_ (Pattern [] [pe]) $ BasicOp $ SubExp tse
+              letBindNames_ [patElemName pe] $ BasicOp $ SubExp tse
               hoisted pe t
 
           -- Do both branches return values that are free in the
@@ -923,7 +923,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = Simplify $ do
           | invariant tse, invariant fse, patternSize pat > 1,
             Prim _ <- patElemType pe, not $ sizeOfMem $ patElemName pe = do
               bt <- expTypesFromPattern $ Pattern [] [pe]
-              letBind_ (Pattern [] [pe]) =<<
+              letBindNames_ [patElemName pe] =<<
                 (If cond <$> resultBodyM [tse]
                          <*> resultBodyM [fse]
                          <*> pure (IfAttr bt ifsort))
