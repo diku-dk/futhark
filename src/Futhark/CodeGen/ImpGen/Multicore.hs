@@ -8,23 +8,17 @@ module Futhark.CodeGen.ImpGen.Multicore
   where
 
 import Control.Monad
-import Data.Maybe
-import Data.Foldable (foldl')
 import Data.List
 
 
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 
-import Futhark.CodeGen.ImpGen.Kernels.Base
 
-import Futhark.Util.IntegralExp (quotRoundingUp)
-import Futhark.Util (chunks, splitFromEnd, takeLast, maybeNth)
+import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import Futhark.Construct (fullSliceNum)
 
 
 
@@ -89,12 +83,7 @@ data MySegRedOpSlug =
   , slugArrs :: [VName]
     -- ^ The arrays used for computing the intra-group reduction
     -- (either local or global memory).
-  , slugAccs :: [(VName, [Imp.Exp])]
-    -- ^ Places to store accumulator in stage 1 reduction.
   }
-
-mySlugAccums :: MySegRedOpSlug -> [VName]
-mySlugAccums = map paramName . myAccParams
 
 mySlugBody :: MySegRedOpSlug -> Body ExplicitMemory
 mySlugBody = lambdaBody . segRedLambda . slugOp
@@ -108,9 +97,6 @@ mySlugNeutral = segRedNeutral . slugOp
 mySlugShape :: MySegRedOpSlug -> Shape
 mySlugShape = segRedShape . slugOp
 
-mySlugsComm :: [MySegRedOpSlug] -> Commutativity
-mySlugsComm = mconcat . map (segRedComm . slugOp)
-
 myAccParams, myNextParams :: MySegRedOpSlug -> [LParam ExplicitMemory]
 myAccParams slug = take (length (mySlugNeutral slug)) $ mySlugParams slug
 myNextParams slug = drop (length (mySlugNeutral slug)) $ mySlugParams slug
@@ -118,31 +104,21 @@ myNextParams slug = drop (length (mySlugNeutral slug)) $ mySlugParams slug
 mySegRedOpSlug :: (SegRedOp ExplicitMemory, [VName])
                         -> ImpM lore op MySegRedOpSlug
 mySegRedOpSlug (op, group_res_arrs) =
-  MySegRedOpSlug op group_res_arrs <$>
-  mapM mkAcc (lambdaParams (segRedLambda op))
-  where mkAcc p
-          | Prim t <- paramType p,
-            shapeRank (segRedShape op) == 0 = do
-              acc <- dPrim (baseString (paramName p) <> "_acc") t
-              return (acc, [])
-          | otherwise =
-              error "couldn't determine type"
+  return $ MySegRedOpSlug op group_res_arrs
 
 
-
-data MySegHistSlug = MySegHistSlug
-                   { mySlugOp :: HistOp ExplicitMemory
-                   }
+newtype MySegHistSlug = MySegHistSlug
+                       { mySlugOp :: HistOp ExplicitMemory }
 
 computeHistoUsage :: HistOp ExplicitMemory
-                  -> ImpM ExplicitMemory Imp.Multicore (MySegHistSlug)
+                  -> ImpM ExplicitMemory Imp.Multicore MySegHistSlug
 computeHistoUsage op =
   return $ MySegHistSlug op
 
 
-type InitLocalHistograms = [(SubExp ->
+type InitLocalHistograms = [SubExp ->
                              ImpM ExplicitMemory Imp.Multicore ([VName],
-                                                 [Imp.Exp] -> ImpM ExplicitMemory Imp.Multicore ()))]
+                                                                [Imp.Exp] -> ImpM ExplicitMemory Imp.Multicore ())]
 
 prepareIntermediateArraysLocal :: VName
                                -> SegSpace -> [MySegHistSlug]
@@ -178,8 +154,8 @@ prepareIntermediateArraysLocal num_subhistos_per_group _space =
                 let sub_local_shape =
                       Shape [Var num_subhistos_per_group] <>
                       (arrayShape t `setOuterDim` hist_H_chk)
-                name <- (sAllocArray "subhistogram_local"
-                        (elemType t) sub_local_shape DefaultSpace)
+                name <- sAllocArray "subhistogram_local"
+                        (elemType t) sub_local_shape DefaultSpace
                 ne' <- toExp ne
                 size <- mapM toExp $ shapeDims sub_local_shape
                 memSet name (elemType t) (product size) ne'
@@ -219,7 +195,7 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
 
   hist_H_chks <- forM (map (histWidth . mySlugOp) slugs) $ \w -> do
     w' <- toExp w
-    dPrimV "hist_H_chk" $ w'
+    dPrimV "hist_H_chk" w'
 
   thread_id <- dPrim "thread_id" $ IntType Int32
   tid_exp <- toExp $ Var thread_id
@@ -259,8 +235,8 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
                do_op (bucket_is ++ is')
 
 
-  let paramsNames = namesToList (freeIn body' `namesSubtract`
-                                (namesFromList $ thread_id : [segFlat space]))
+  let paramsNames = namesToList $ freeIn body' `namesSubtract`
+                                  namesFromList (thread_id : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith getParam paramsNames ts
 
@@ -275,7 +251,7 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
         (buckets, vs) = splitAt (length slugs) red_res
         perOp = chunks $ map (length . histDest . mySlugOp) slugs
 
-    sFor "i" tid_exp $ \i -> do
+    sFor "i" tid_exp $ \i ->
       forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
           \(HistOp dest_w _ _ _ shape lam,
            (hist, _hist_H_chk, _do_op), bucket, vs') -> do
@@ -286,7 +262,7 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
                -- Use splitAt
                vs_params = takeLast (length vs') $ lambdaParams lam
                is_params = take (length vs') $ lambdaParams lam
-               bucket_is = i : (map Imp.vi32 is)
+               bucket_is = i : map Imp.vi32 is
 
            sComment "perform updates" $ do
              dLParams $ lambdaParams lam
@@ -297,19 +273,18 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 is)
                compileStms mempty (bodyStms $ lambdaBody lam) $
                  forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $
-                 \(pe, se) -> do
+                 \(pe, se) ->
                    copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
 
-  let paramsNames = namesToList (freeIn reduce_body `namesSubtract`
-                                (namesFromList $ [segFlat space]))
-  ts <- mapM lookupType paramsNames
-  let params = zipWith getParam paramsNames ts
+  let paramsNames' = namesToList $ freeIn reduce_body `namesSubtract` namesFromList [segFlat space]
+  ts' <- mapM lookupType paramsNames'
+  let params' = zipWith getParam paramsNames' ts'
 
   thread_id2 <- dPrim "thread_id" $ IntType Int32
-  num_elem <- mapM toExp $ map Var hist_H_chks
+  num_elem <- mapM (toExp . Var) hist_H_chks
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product num_elem)
-                              (Imp.MulticoreFunc params mempty reduce_body thread_id2)
+                              (Imp.MulticoreFunc params' mempty reduce_body thread_id2)
 
 
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
@@ -334,8 +309,8 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     sComment "prebody" $
       body'' $ \all_red_res ->
-        forM_ (zip (stage_one_red_res) all_red_res) $ \(slug_arr, (res, res_is)) ->
-          copyDWIMFix slug_arr [tid_exp] res (res_is)
+        forM_ (zip stage_one_red_res all_red_res) $ \(slug_arr, (res, res_is)) ->
+          copyDWIMFix slug_arr [tid_exp] res res_is
 
     emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
 
@@ -353,15 +328,15 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
           copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
       -- Load reduce accumulator
       sComment "load accumulator " $
-        forM_ (zip (scan_x_params) (stage_one_red_res)) $ \(p, slug_arr) ->
+        forM_ (zip scan_x_params stage_one_red_res) $ \(p, slug_arr) ->
           copyDWIMFix (paramName p) [] (Var slug_arr) [tid_exp]
       sComment "combine with carry and write back to res and accum" $
         compileStms mempty (bodyStms $ lambdaBody lore) $
           forM_ (zip stage_one_red_res $ bodyResult $ lambdaBody lore) $ \(res_arr, se) ->
-          copyDWIMFix (res_arr) [tid_exp] se []
+          copyDWIMFix res_arr [tid_exp] se []
 
-  let paramsNames = namesToList (freeIn reduce_body `namesIntersection` freeIn prebody `namesSubtract`
-                                 (namesFromList $ thread_id : [segFlat space]))
+  let paramsNames = namesToList $ freeIn reduce_body `namesIntersection` freeIn prebody `namesSubtract`
+                                  namesFromList (thread_id : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith getParam paramsNames ts
 
@@ -402,7 +377,7 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
 
     sComment "Read value" $ compileStms mempty (kernelBodyStms kbody) $ do
        let (scan_res, _map_res) = splitAt (length subexps) $ kernelBodyResult kbody
-       forM_ (zip scan_y_params scan_res) $ \(p, se) -> do
+       forM_ (zip scan_y_params scan_res) $ \(p, se) ->
          copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
     sComment "combine with carry and write back to res and accum" $
        compileStms mempty (bodyStms $ lambdaBody lore) $
@@ -426,8 +401,8 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
          copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
          copyDWIMFix (paramName p) [] se []
 
-  let paramsNames' = namesToList ((freeIn scan_body <> freeIn prebody') `namesSubtract`
-                                 (namesFromList $ thread_id : segFlat space : (map paramName $ lambdaParams lore)))
+  let paramsNames' = namesToList $ (freeIn scan_body <> freeIn prebody') `namesSubtract`
+                                   namesFromList (thread_id : segFlat space : map paramName (lambdaParams lore))
   ts' <- mapM lookupType paramsNames'
   let params' = zipWith getParam paramsNames' ts'
 
@@ -465,7 +440,7 @@ compileSegOp pat (SegRed _ space reds _ body) = do
       let slugs_res = chunks (map (length . mySlugNeutral) slugs) all_red_res
       forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
         forM_ (zip (slugArrs slug) red_res) $ \(slug_arr, (res, res_is)) ->
-          copyDWIMFix slug_arr [tid_exp] res (res_is)
+          copyDWIMFix slug_arr [tid_exp] res res_is
       emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
 
 
@@ -485,8 +460,8 @@ compileSegOp pat (SegRed _ space reds _ body) = do
             \(slug_arr, se') -> copyDWIMFix slug_arr [tid_exp] se' []
 
 
-  let paramsNames = namesToList ((freeIn body' `namesIntersection` freeIn prebody) `namesSubtract`
-                                 (namesFromList $ thread_id : [segFlat space] ))
+  let paramsNames = namesToList $ (freeIn body' `namesIntersection` freeIn prebody) `namesSubtract`
+                                  namesFromList (thread_id : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith getParam paramsNames ts
 
