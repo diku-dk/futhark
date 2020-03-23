@@ -541,7 +541,8 @@ internaliseExp desc e@E.Apply{} = do
              let tag ses = [ (se, I.Observe) | se <- ses ]
              args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
              let args'' = concatMap tag args'
-             letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+             letTupExp' desc $ I.Apply fname args'' [I.Prim rettype]
+               (I.NotConstFun, Safe, loc, [])
 
          | otherwise -> do
              args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
@@ -1412,7 +1413,7 @@ internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
   letBind_ (basicPattern [] [I.Ident name $ I.Prim I.int32]) $
-  I.Apply fname [] [I.Prim I.int32] (Safe, loc, mempty)
+  I.Apply fname [] [I.Prim I.int32] (I.ConstFun, Safe, loc, mempty)
 
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
@@ -1759,7 +1760,8 @@ internaliseIfConst loc name = do
                    " failed"
         Just rettype -> do
           ses <- fmap (map I.Var) $ letTupExp (baseString name) $
-                 I.Apply fname (zip constargs const_ds) rettype (safety, loc, mempty)
+                 I.Apply fname (zip constargs const_ds) rettype
+                 (I.ConstFun, safety, loc, mempty)
           bind_ext ses
           return $ Just ses
     _ -> return Nothing
@@ -1769,7 +1771,7 @@ constFunctionArgs loc = mapM arg
   where arg (fname, name) = do
           safety <- askSafety
           se <- letSubExp (baseString name ++ "_arg") $
-                I.Apply fname [] [I.Prim I.int32] (safety, loc, [])
+                I.Apply fname [] [I.Prim I.int32] (I.ConstFun, safety, loc, [])
           return (se, I.ObservePrim, I.Prim I.int32)
 
 funcall :: String -> QualName VName -> [SubExp] -> SrcLoc
@@ -1797,7 +1799,7 @@ funcall desc (QualName _ fname) args loc = do
                "\nFunction has parameters\n " ++ pretty fun_params
     Just ts -> do
       safety <- askSafety
-      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
+      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) ts (I.NotConstFun, safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
 -- Bind existential names defined by an expression, based on the

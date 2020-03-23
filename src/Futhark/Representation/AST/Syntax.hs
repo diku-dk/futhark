@@ -43,6 +43,7 @@ module Futhark.Representation.AST.Syntax
   , LoopForm (..)
   , IfAttr (..)
   , IfSort (..)
+  , ConstFun (..)
   , Safety (..)
   , LambdaT(..)
   , Lambda
@@ -274,7 +275,7 @@ data ExpT lore
   = BasicOp (BasicOp lore)
     -- ^ A simple (non-recursive) operation.
 
-  | Apply  Name [(SubExp, Diet)] [RetType lore] (Safety, SrcLoc, [SrcLoc])
+  | Apply  Name [(SubExp, Diet)] [RetType lore] (ConstFun, Safety, SrcLoc, [SrcLoc])
 
   | If     SubExp (BodyT lore) (BodyT lore) (IfAttr (BranchType lore))
 
@@ -287,6 +288,10 @@ data ExpT lore
 deriving instance Annotations lore => Eq (ExpT lore)
 deriving instance Annotations lore => Show (ExpT lore)
 deriving instance Annotations lore => Ord (ExpT lore)
+
+-- | Does this function call actually represent a reference to a
+-- run-time constant?  This has implications for inlining.
+data ConstFun = ConstFun | NotConstFun deriving (Eq, Ord, Show)
 
 -- | Whether something is safe or unsafe (mostly function calls, and
 -- in the context of whether operations are dynamically checked).

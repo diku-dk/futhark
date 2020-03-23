@@ -8,7 +8,6 @@ module Futhark.Analysis.CallGraph
 
 import Control.Monad.Writer.Strict
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Maybe (isJust)
 import Data.List
 
@@ -23,7 +22,7 @@ buildFunctionTable = foldl expand M.empty . progFuns
 -- | The call graph is just a mapping from a function name, i.e., the
 -- caller, to a set of the names of functions called *directly* (not
 -- transitively!) by the function.
-type CallGraph = M.Map Name (S.Set Name)
+type CallGraph = M.Map Name (M.Map Name ConstFun)
 
 -- | @buildCallGraph prog@ build the program's call graph.
 buildCallGraph :: Prog SOACS -> CallGraph
@@ -43,14 +42,14 @@ buildCGfun ftable cg fname  =
                let callees = buildCGbody $ funDefBody f
                    cg' = M.insert fname callees cg
                -- recursively build the callees
-               foldl' (buildCGfun ftable) cg' callees
+               foldl' (buildCGfun ftable) cg' $ M.keys callees
     _ -> cg
 
-buildCGbody :: Body -> S.Set Name
+buildCGbody :: Body -> M.Map Name ConstFun
 buildCGbody = mconcat . map (buildCGexp . stmExp) . stmsToList . bodyStms
 
-buildCGexp :: Exp -> S.Set Name
-buildCGexp (Apply fname _ _ _) = S.singleton fname
+buildCGexp :: Exp -> M.Map Name ConstFun
+buildCGexp (Apply fname _ _ (constf, _, _, _)) = M.singleton fname constf
 buildCGexp (Op op) = execWriter $ mapSOACM folder op
   where folder = identitySOACMapper {
           mapOnSOACLambda = \lam -> do tell $ buildCGbody $ lambdaBody lam
