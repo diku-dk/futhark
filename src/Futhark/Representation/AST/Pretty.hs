@@ -220,10 +220,12 @@ instance PrettyLore lore => Pretty (Exp lore) where
           maybeNest b | null $ bodyStms b = ppr b
                       | otherwise         = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
-  ppr (Apply fname args _ (safety, _, _)) =
-    text (nameToString fname) <> safety' <> apply (map (align . pprArg) args)
+  ppr (Apply fname args _ (constf, safety, _, _)) =
+    text (nameToString fname) <> constf' <> safety' <> apply (map (align . pprArg) args)
     where pprArg (arg, Consume) = text "*" <> ppr arg
           pprArg (arg, _)       = ppr arg
+          constf' = case constf of ConstFun -> text "<constant>"
+                                   NotConstFun -> mempty
           safety' = case safety of Unsafe -> text "<unsafe>"
                                    Safe   -> mempty
   ppr (Op op) = ppr op
