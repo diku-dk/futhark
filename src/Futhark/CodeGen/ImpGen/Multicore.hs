@@ -140,9 +140,9 @@ computeHistoUsage op =
   return $ MySegHistSlug op
 
 
-type InitLocalHistograms = [( SubExp ->
-                              ImpM ExplicitMemory Imp.Multicore ([VName],
-                                                                 [Imp.Exp] -> ImpM ExplicitMemory Imp.Multicore ()))]
+type InitLocalHistograms = [(SubExp ->
+                             ImpM ExplicitMemory Imp.Multicore ([VName],
+                                                 [Imp.Exp] -> ImpM ExplicitMemory Imp.Multicore ()))]
 
 prepareIntermediateArraysLocal :: VName
                                -> SegSpace -> [MySegHistSlug]
@@ -230,14 +230,6 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
     (local_subhistos, do_op) <- init_local_subhistos (Var hist_H_chk)
     return (local_subhistos, hist_H_chk, do_op)
 
-  -- prebody' <- do
-  --   forM_ (zip histograms slugs) $ \(hists, slug) -> do
-  --     let (hists', _ , _) = hists
-  --     forM (zip hists' $ histNeutral $ mySlugOp slug) $ \(hist, ne) -> do
-  --       ne' <- toExp ne
-  --       memSet hist ne'
-
-
   -- Generate body of parallel function
   body' <- collect $ do
      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
@@ -274,6 +266,50 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
 
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
                               (Imp.MulticoreFunc params mempty body' thread_id)
+
+  -- second stage
+  reduce_body <- collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+    let (red_res, _map_res) = splitFromEnd (length map_pes) $
+                          map kernelResultSubExp $ kernelBodyResult kbody
+        (buckets, vs) = splitAt (length slugs) red_res
+        perOp = chunks $ map (length . histDest . mySlugOp) slugs
+
+    sFor "i" tid_exp $ \i -> do
+      forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
+          \(HistOp dest_w _ _ _ shape lam,
+           (hist, _hist_H_chk, _do_op), bucket, vs') -> do
+
+           let bucket' = toExp' int32 bucket
+               dest_w' = toExp' int32 dest_w
+               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+               -- Use splitAt
+               vs_params = takeLast (length vs') $ lambdaParams lam
+               is_params = take (length vs') $ lambdaParams lam
+               bucket_is = i : (map Imp.vi32 is)
+
+           sComment "perform updates" $ do
+             dLParams $ lambdaParams lam
+             sLoopNest shape $ \is' -> do
+               forM_ (zip vs_params hist) $ \(p, v) ->
+                 copyDWIMFix (paramName p) [] (Var v) (bucket_is ++ is')
+               forM_ (zip (patternElements pat) is_params) $ \(pe, p) ->
+                 copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 is)
+               compileStms mempty (bodyStms $ lambdaBody lam) $
+                 forM_ (zip (patternElements pat) $ bodyResult $ lambdaBody lam) $
+                 \(pe, se) -> do
+                   copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+
+  let paramsNames = namesToList (freeIn reduce_body `namesSubtract`
+                                (namesFromList $ [segFlat space]))
+  ts <- mapM lookupType paramsNames
+  let params = zipWith getParam paramsNames ts
+
+  thread_id2 <- dPrim "thread_id" $ IntType Int32
+  num_elem <- mapM toExp $ map Var hist_H_chks
+
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product num_elem)
+                              (Imp.MulticoreFunc params mempty reduce_body thread_id2)
 
 
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do

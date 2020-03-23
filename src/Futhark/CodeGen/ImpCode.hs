@@ -456,6 +456,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y
+  freeIn' (MemSet x _ _ _) =
+    freeIn' x
   freeIn' (Write v i _ _ _ e) =
     freeIn' v <> freeIn' i <> freeIn' e
   freeIn' (SetScalar x y) =
