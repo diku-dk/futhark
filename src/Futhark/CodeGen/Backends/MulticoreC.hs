@@ -194,50 +194,7 @@ getCType t = case t of
                MemParam _ space' -> GC.fatMemType space'
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop i e (MulticoreFunc params _ body tid)) = do
-  let fctypes = map getCType params
-  let fargs   = map paramName params
-  e' <- GC.compileExp e
-  body' <- GC.blockScope $ GC.compileCode body
-
-  fstruct <- GC.multicoreDef "parloop_struct" $ \s ->
-     [C.cedecl|struct $id:s {
-             $sdecls:(compileStructFields fargs fctypes)
-           };|]
-
-  -- A task function that a thread should execute
-  ftask <- GC.multicoreDef "parloop_task" $ \s ->
-    [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
-              struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
-              $decls:(compileGetStructVals fstruct fargs fctypes)
-              for (int $id:i = start; $id:i < end; $id:i++) {
-                   $items:body'
-              }
-              return 0;
-   }|]
-
-
-  GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', &$id:tid) != 0) {
-                     fprintf(stderr, "scheduler failed to do task\n");
-                     return 1;
-           }|]
-
-
-  -- GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
-  -- GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  -- GC.stm [C.cstm|$id:ftask($id:fstruct, 0, $exp:e', &$id:tid);|]
-
-
-  -- GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', NULL) != 0) {
-  --                    fprintf(stderr, "scheduler failed to do task\n");
-  --                    return 1;
-  --          }|]
-  -- GC.stm  [C.cstm|free($id:fstruct);|]
-
-
-compileOp (ParLoopAcc i e (MulticoreFunc params prebody body tid)) = do
+compileOp (ParLoop i e (MulticoreFunc params prebody body tid)) = do
   let fctypes = map getCType params
   let fargs   = map paramName params
   e' <- GC.compileExp e
@@ -256,7 +213,7 @@ compileOp (ParLoopAcc i e (MulticoreFunc params prebody body tid)) = do
               $decls:(compileGetStructVals fstruct fargs fctypes)
               int $id:i = start;
               $items:prebody'
-              for (++$id:i; $id:i < end; $id:i++) {
+              for (; $id:i < end; $id:i++) {
                   $items:body'
               }
               return 0;

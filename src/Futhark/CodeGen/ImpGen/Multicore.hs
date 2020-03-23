@@ -275,7 +275,6 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
                               (Imp.MulticoreFunc params mempty body' thread_id)
 
-  emit $ Imp.DebugPrint "end of histograms" $ Nothing
 
 compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   let (is, ns) = unzip $ unSegSpace space
@@ -301,6 +300,8 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
       body'' $ \all_red_res ->
         forM_ (zip (stage_one_red_res) all_red_res) $ \(slug_arr, (res, res_is)) ->
           copyDWIMFix slug_arr [tid_exp] res (res_is)
+
+    emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
 
 
   reduce_body <- collect $ do
@@ -328,7 +329,7 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   ts <- mapM lookupType paramsNames
   let params = zipWith getParam paramsNames ts
 
-  emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
                                  (Imp.MulticoreFunc params prebody reduce_body thread_id)
 
 
@@ -373,6 +374,7 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
          copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
          copyDWIMFix (paramName p) [] se []
 
+    emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
 
   scan_body <- collect $ do
      dScope Nothing $ scopeOfLParams scan_y_params
@@ -393,7 +395,7 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   ts' <- mapM lookupType paramsNames'
   let params' = zipWith getParam paramsNames' ts'
 
-  emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
                                  (Imp.MulticoreFunc params' prebody' scan_body thread_id)
 
 
@@ -405,8 +407,8 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
 -- 2.a and add a accumulator loop
 compileSegOp pat (SegRed _ space reds _ body) = do
   let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
 
+  ns' <- mapM toExp ns
   reds_group_res_arrs <- myGroupResultArrays DefaultSpace (Count $ Constant $ IntValue $ Int32Value 10) reds
 
   thread_id <- dPrim "thread_id" $ IntType Int32
@@ -418,18 +420,20 @@ compileSegOp pat (SegRed _ space reds _ body) = do
 
   slugs <- mapM mySegRedOpSlug $ zip reds reds_group_res_arrs
 
+
   prebody <- collect $ do
-    dScope Nothing $ scopeOfLParams $ concatMap mySlugParams slugs
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+    dScope Nothing $ scopeOfLParams $ concatMap mySlugParams slugs
     sComment "prebody" $
       body'' $ \all_red_res -> do
       let slugs_res = chunks (map (length . mySlugNeutral) slugs) all_red_res
       forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
         forM_ (zip (slugArrs slug) red_res) $ \(slug_arr, (res, res_is)) ->
           copyDWIMFix slug_arr [tid_exp] res (res_is)
+      emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
+
 
   body' <- collect $ do
-    -- Intialize function params
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     sComment "apply map function" $
       body'' $ \all_red_res -> do
@@ -445,12 +449,12 @@ compileSegOp pat (SegRed _ space reds _ body) = do
             \(slug_arr, se') -> copyDWIMFix slug_arr [tid_exp] se' []
 
 
-  let paramsNames = namesToList (freeIn body' `namesIntersection` freeIn prebody `namesSubtract`
-                                 (namesFromList $ thread_id : [segFlat space]))
+  let paramsNames = namesToList ((freeIn body' `namesIntersection` freeIn prebody) `namesSubtract`
+                                 (namesFromList $ thread_id : [segFlat space] ))
   ts <- mapM lookupType paramsNames
   let params = zipWith getParam paramsNames ts
 
-  emit $ Imp.Op $ Imp.ParLoopAcc (segFlat space) (product ns') (Imp.MulticoreFunc params prebody body' thread_id)
+  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc params prebody body' thread_id)
 
 
   forM_ slugs $ \slug ->
@@ -458,7 +462,7 @@ compileSegOp pat (SegRed _ space reds _ body) = do
       copyDWIMFix (patElemName pe) [] ne []
 
   dScope Nothing $ scopeOfLParams $ concatMap mySlugParams slugs
-  sFor "i" tid_exp $ \i ->
+  sFor "i" tid_exp $ \i' ->
     sComment "apply map function" $
       forM_ slugs $ \slug ->
         sLoopNest (mySlugShape slug) $ \_vec_is -> do
@@ -467,7 +471,7 @@ compileSegOp pat (SegRed _ space reds _ body) = do
           copyDWIMFix (paramName p) [] (Var $ patElemName pe) []
         -- sComment "set new values to func_param" $
         forM_ (zip (myNextParams slug) (slugArrs slug)) $ \(p, acc) ->
-          copyDWIMFix (paramName p) [] (Var acc) [i]
+          copyDWIMFix (paramName p) [] (Var acc) [i']
         -- sComment "apply reduction operator" $
         compileStms mempty (bodyStms $ mySlugBody slug) $
             forM_ (zip (patternElements pat) (bodyResult $ mySlugBody slug)) $

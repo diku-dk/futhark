@@ -13,7 +13,6 @@ module Futhark.CodeGen.ImpCode.Multicore
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.AST.Attributes.Names
-
 import Futhark.Util.Pretty
 
 -- | An imperative program.
@@ -30,7 +29,6 @@ data MulticoreFunc = MulticoreFunc [Param] Code Code VName
 
 -- | A parallel operation.
 data Multicore = ParLoop VName Imp.Exp MulticoreFunc
-               | ParLoopAcc VName Imp.Exp MulticoreFunc -- A loop with an accumulator
 
 
 instance Pretty MulticoreFunc where
@@ -44,14 +42,9 @@ instance Pretty Multicore where
   ppr (ParLoop i e func) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr func)
-  ppr (ParLoopAcc i e func) =
-    text "parfor" <+> ppr i <+> langle <+> ppr e <+>
-    nestedBlock "{" "}" (ppr func)
 
 instance FreeIn MulticoreFunc where
   freeIn' (MulticoreFunc _ prebody body _) = freeIn' prebody <> freeIn' body
 
 instance FreeIn Multicore where
   freeIn' (ParLoop _ e func) = freeIn' e <> freeIn' func
-  freeIn' (ParLoopAcc _ e func) =
-    freeIn' e <> freeIn' func
