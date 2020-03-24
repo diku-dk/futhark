@@ -199,6 +199,11 @@ extractGenericBodyAllocations bound_outside get_stms set_stms body =
                        stmsToList $ get_stms body
   in (set_stms (stmsFromList stms) body, allocs)
 
+expandable :: Space -> Bool
+expandable (Space "local") = False
+expandable ScalarSpace{} = False
+expandable _ = True
+
 extractStmAllocations :: Names -> Stm ExplicitMemory
                       -> Writer Extraction (Maybe (Stm ExplicitMemory))
 extractStmAllocations bound_outside (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
@@ -209,11 +214,6 @@ extractStmAllocations bound_outside (Let (Pattern [] [patElem]) _ (Op (Alloc siz
 
         where visibleOutside (Var v) = v `nameIn` bound_outside
               visibleOutside Constant{} = True
-
-              expandable (Space "private") = False
-              expandable (Space "local") = False
-              expandable ScalarSpace{} = False
-              expandable _ = True
 
 extractStmAllocations bound_outside stm = do
   e <- mapExpM expMapper $ stmExp stm
@@ -403,7 +403,7 @@ offsetMemoryInPattern (Pattern ctx vals) = do
           return patElem { patElemAttr = new_attr }
         inspectCtx patElem
           | Mem space <- patElemType patElem,
-            space `notElem` [Space "local", Space "private"] =
+            expandable space =
               throwError $ unwords ["Cannot deal with existential memory block",
                                     pretty (patElemName patElem),
                                     "when expanding inside kernels."]

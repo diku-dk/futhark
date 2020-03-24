@@ -930,8 +930,7 @@ compileCode (Imp.SetMem dest src _) = do
   let dest' = Var (compileName dest)
   stm $ Assign dest' src'
 
-compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space))
-  | space /= "private" =
+compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
   join $ asks envAllocate
     <*> pure name
     <*> compileExp e

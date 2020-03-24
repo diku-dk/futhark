@@ -72,11 +72,9 @@ keyWithEntryPoint :: Name -> Name -> Name
 keyWithEntryPoint fname key =
   nameFromString $ nameToString fname ++ "." ++ nameToString key
 
-allocLocal, allocPrivate :: AllocCompiler ExplicitMemory Imp.KernelOp
+allocLocal :: AllocCompiler ExplicitMemory Imp.KernelOp
 allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
-allocPrivate mem size =
-  emit $ Imp.Allocate mem size $ Space "private"
 
 kernelAlloc :: KernelConstants
             -> Pattern ExplicitMemory
@@ -86,9 +84,6 @@ kernelAlloc _ (Pattern _ [_]) _ ScalarSpace{} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
   return ()
-kernelAlloc _ (Pattern _ [mem]) size (Space "private") = do
-  size' <- toExp size
-  allocPrivate (patElemName mem) $ Imp.bytes size'
 kernelAlloc _ (Pattern _ [mem]) size (Space "local") = do
   size' <- toExp size
   allocLocal (patElemName mem) $ Imp.bytes size'
@@ -1164,8 +1159,7 @@ threadOperations constants =
   , opsExpCompiler = compileThreadExp
   , opsStmsCompiler = \_ -> defCompileStms mempty
   , opsAllocCompilers =
-      M.fromList [ (Space "local", allocLocal)
-                 , (Space "private", allocPrivate) ]
+      M.fromList [ (Space "local", allocLocal) ]
   }
 groupOperations constants =
   (defaultOperations $ compileGroupOp constants)
@@ -1173,8 +1167,7 @@ groupOperations constants =
   , opsExpCompiler = compileGroupExp constants
   , opsStmsCompiler = \_ -> defCompileStms mempty
   , opsAllocCompilers =
-      M.fromList [ (Space "local", allocLocal)
-                 , (Space "private", allocPrivate) ]
+      M.fromList [ (Space "local", allocLocal) ]
   }
 
 -- | Perform a Replicate with a kernel.
