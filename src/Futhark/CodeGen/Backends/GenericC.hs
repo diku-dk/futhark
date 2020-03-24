@@ -360,6 +360,10 @@ collect' m = pass $ do
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
+fatMemory :: Space -> CompilerM op s Bool
+fatMemory ScalarSpace{} = return False
+fatMemory _ = asks envFatMemory
+
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeString . nameToString
 
@@ -455,7 +459,7 @@ contextType = do
 
 memToCType :: Space -> CompilerM op s C.Type
 memToCType space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   if refcount
      then return $ fatMemType space
      else rawMemCType space
@@ -605,18 +609,18 @@ declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
   ty <- memToCType space
   decl [C.cdecl|$ty:ty $id:name;|]
-  resetMem name
+  resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
-resetMem :: C.ToExp a => a -> CompilerM op s ()
-resetMem mem = do
-  refcount <- asks envFatMemory
+resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
+resetMem mem space = do
+  refcount <- fatMemory space
   when refcount $
     stm [C.cstm|$exp:mem.references = NULL;|]
 
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let src_s = pretty $ C.toExp src noLoc
   if refcount
     then stm [C.cstm|if ($id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
@@ -627,7 +631,7 @@ setMem dest src space = do
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let mem_s = pretty $ C.toExp mem noLoc
   when refcount $
     stm [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
@@ -637,7 +641,7 @@ unRefMem mem space = do
 allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> C.Stm -> CompilerM op s ()
 allocMem name size space on_failure = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let name_s = pretty $ C.toExp name noLoc
   if refcount
     then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
@@ -737,7 +741,7 @@ arrayLibraryFunctions space pt signed shape = do
   memty <- rawMemCType space
 
   let prepare_new = do
-        resetMem [C.cexp|arr->mem|]
+        resetMem [C.cexp|arr->mem|] space
         allocMem [C.cexp|arr->mem|] [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|] space
                  [C.cstm|return NULL;|]
         forM_ [0..rank-1] $ \i ->
@@ -1657,9 +1661,8 @@ compileExp = compilePrimExp compileLeaf
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (Index src (Count iexp) _ ScalarSpace{} _) = do
-          src' <- rawMem src
           iexp' <- compileExp iexp
-          return [C.cexp|$exp:src'[$exp:iexp']|]
+          return [C.cexp|$id:src[$exp:iexp']|]
 
         compileLeaf (SizeOf t) =
           return [C.cexp|(typename int32_t)sizeof($ty:t')|]
@@ -1791,6 +1794,11 @@ compileCode (Assert e msg (loc, locs)) = do
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
+compileCode (Allocate _ _ ScalarSpace{}) =
+  -- Handled by the declaration of the memory block, which is
+  -- translated to an actual array.
+  return ()
+
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space [C.cstm|return 1;|]
@@ -1852,10 +1860,9 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
-  dest' <- rawMem dest
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  stm [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]
+  stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
@@ -1952,7 +1959,7 @@ compileFunBody output_ptrs outputs code = do
           decl [C.cdecl|$ty:ctp $id:name;|]
 
         setRetVal' p (MemParam name space) = do
-          resetMem [C.cexp|*$exp:p|]
+          resetMem [C.cexp|*$exp:p|] space
           setMem [C.cexp|*$exp:p|] name space
         setRetVal' p (ScalarParam name _) =
           stm [C.cstm|*$exp:p = $id:name;|]
