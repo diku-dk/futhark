@@ -116,7 +116,7 @@ mapTranspose block_dim args t kind =
                      t (Space "local") Nonvolatile $
                      index idata (elements $ v32 idata_offset + v32 index_in)
                      t (Space "global") Nonvolatile]
-      , Op LocalBarrier
+      , Op $ Barrier FenceLocal
       , SetScalar x_index $ v32 get_group_id_1 * tile_dim + v32 get_local_id_0
       , SetScalar y_index $ v32 get_group_id_0 * tile_dim + v32 get_local_id_1
       , when (v32 x_index .<. height) $
@@ -199,7 +199,7 @@ mapTranspose block_dim args t kind =
             t (Space "local") Nonvolatile $
             index idata (elements $ v32 idata_offset + v32 index_in)
             t (Space "global") Nonvolatile
-          , Op LocalBarrier
+          , Op $ Barrier FenceLocal
           , SetScalar x_index x_out_index
           , SetScalar y_index y_out_index
           , dec index_out $ v32 y_index * height + v32 x_index

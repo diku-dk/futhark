@@ -19,7 +19,6 @@ module Futhark.Representation.AST.Attributes
   , builtInFunctions
 
   -- * Extra tools
-  , funDefByName
   , asBasicOp
   , safeExp
   , subExpVars
@@ -31,7 +30,6 @@ module Futhark.Representation.AST.Attributes
   , stmCerts
   , certify
   , expExtTypesFromPattern
-  , patternFromParams
 
   , IsOp (..)
   , Attributes (..)
@@ -64,10 +62,6 @@ isBuiltInFunction fnm = fnm `M.member` builtInFunctions
 builtInFunctions :: M.Map Name (PrimType,[PrimType])
 builtInFunctions = M.fromList $ map namify $ M.toList primFuns
   where namify (k,(paramts,ret,_)) = (nameFromString k, (ret, paramts))
-
--- | Find the function of the given name in the Futhark program.
-funDefByName :: Name -> Prog lore -> Maybe (FunDef lore)
-funDefByName fname = find ((fname ==) . funDefName) . progFunctions
 
 -- | If the expression is a 'BasicOp', return that 'BasicOp', otherwise 'Nothing'.
 asBasicOp :: Exp lore -> Maybe (BasicOp lore)
@@ -113,7 +107,8 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp _ = False
 
 safeExp (DoLoop _ _ _ body) = safeBody body
-safeExp (Apply fname _ _ _) = isBuiltInFunction fname
+safeExp (Apply fname _ _ (constf, _, _, _)) =
+  isBuiltInFunction fname || constf == ConstFun
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . stmExp) (bodyStms tbranch) &&
   all (safeExp . stmExp) (bodyStms fbranch)
@@ -223,8 +218,3 @@ expExtTypesFromPattern :: Typed attr => PatternT attr -> [ExtType]
 expExtTypesFromPattern pat =
   existentialiseExtTypes (patternContextNames pat) $
   staticShapes $ map patElemType $ patternValueElements pat
-
--- | Create a pattern corresponding to some parameters.
-patternFromParams :: [Param attr] -> PatternT attr
-patternFromParams = Pattern [] . map toPatElem
-  where toPatElem p = PatElem (paramName p) $ paramAttr p

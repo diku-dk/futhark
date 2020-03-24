@@ -36,7 +36,7 @@ import Futhark.Util (mapAccumLM)
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $
-  fmap Prog . mapM transformFunDef . progFunctions
+  fmap Prog . mapM transformFunDef . progFuns
   -- Cannot use intraproceduralTransformation because it might create
   -- duplicate size keys (which are not fixed by renamer, and size
   -- keys must currently be globally unique).
@@ -403,7 +403,7 @@ offsetMemoryInPattern (Pattern ctx vals) = do
           return patElem { patElemAttr = new_attr }
         inspectCtx patElem
           | Mem space <- patElemType patElem,
-            space /= Space "local" =
+            space `notElem` [Space "local", Space "private"] =
               throwError $ unwords ["Cannot deal with existential memory block",
                                     pretty (patElemName patElem),
                                     "when expanding inside kernels."]

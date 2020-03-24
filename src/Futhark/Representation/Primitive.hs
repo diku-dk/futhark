@@ -696,7 +696,7 @@ doSIToFP :: IntValue -> FloatType -> FloatValue
 doSIToFP v t = floatValue t $ intToInt64 v
 
 doCmpOp :: CmpOp -> PrimValue -> PrimValue -> Maybe Bool
-doCmpOp CmpEq{} v1 v2                            = Just $ v1 == v2
+doCmpOp CmpEq{} v1 v2                            = Just $ doCmpEq v1 v2
 doCmpOp CmpUlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpUlt v1 v2
 doCmpOp CmpUle{} (IntValue v1) (IntValue v2)     = Just $ doCmpUle v1 v2
 doCmpOp CmpSlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpSlt v1 v2
@@ -833,12 +833,20 @@ primFuns = M.fromList
   , f32 "log10_32" (logBase 10), f64 "log10_64" (logBase 10)
   , f32 "log2_32" (logBase 2), f64 "log2_64" (logBase 2)
   , f32 "exp32" exp, f64 "exp64" exp
+
   , f32 "sin32" sin, f64 "sin64" sin
+  , f32 "sinh32" sinh, f64 "sinh64" sinh
   , f32 "cos32" cos, f64 "cos64" cos
+  , f32 "cosh32" cosh, f64 "cosh64" cosh
   , f32 "tan32" tan, f64 "tan64" tan
+  , f32 "tanh32" tanh, f64 "tanh64" tanh
   , f32 "asin32" asin, f64 "asin64" asin
+  , f32 "asinh32" asinh, f64 "asinh64" asinh
   , f32 "acos32" acos, f64 "acos64" acos
+  , f32 "acosh32" acosh, f64 "acosh64" acosh
   , f32 "atan32" atan, f64 "atan64" atan
+  , f32 "atanh32" atanh, f64 "atanh64" atanh
+
   , f32 "round32" roundFloat, f64 "round64" roundDouble
   , f32 "ceil32" ceilFloat, f64 "ceil64" ceilDouble
   , f32 "floor32" floorFloat, f64 "floor64" floorDouble
@@ -854,6 +862,56 @@ primFuns = M.fromList
   , i16 "popc16" $ IntValue . Int32Value . fromIntegral . popCount
   , i32 "popc32" $ IntValue . Int32Value . fromIntegral . popCount
   , i64 "popc64" $ IntValue . Int32Value . fromIntegral . popCount
+
+  , ("mad_hi8", ([IntType Int8, IntType Int8, IntType Int8], IntType Int8,
+                 \case
+                   [IntValue (Int8Value a), IntValue (Int8Value b), IntValue (Int8Value c)] ->
+                     Just $ IntValue . Int8Value $ mad_hi8 (Int8Value a) (Int8Value b) c
+                   _ -> Nothing
+                ))
+  , ("mad_hi16", ([IntType Int16, IntType Int16, IntType Int16], IntType Int16,
+                 \case
+                   [IntValue (Int16Value a), IntValue (Int16Value b), IntValue (Int16Value c)] ->
+                     Just $ IntValue . Int16Value  $ mad_hi16 (Int16Value a) (Int16Value b) c
+                   _ -> Nothing
+                ))
+  , ("mad_hi32", ([IntType Int32, IntType Int32, IntType Int32], IntType Int32,
+                  \case
+                   [IntValue (Int32Value a), IntValue (Int32Value b), IntValue (Int32Value c)] ->
+                     Just $ IntValue . Int32Value  $ mad_hi32 (Int32Value a) (Int32Value b) c
+                   _ -> Nothing
+                ))
+  , ("mad_hi64", ([IntType Int64, IntType Int64, IntType Int64], IntType Int64,
+                  \case
+                    [IntValue (Int64Value a), IntValue (Int64Value b), IntValue (Int64Value c)] ->
+                      Just $ IntValue . Int64Value $ mad_hi64 (Int64Value a) (Int64Value b) c
+                    _ -> Nothing
+                ))
+
+  , ("mul_hi8", ([IntType Int8, IntType Int8], IntType Int8,
+                 \case
+                   [IntValue (Int8Value a), IntValue (Int8Value b)] ->
+                     Just $ IntValue . Int8Value $ mul_hi8 (Int8Value a) (Int8Value b)
+                   _ -> Nothing
+                ))
+  , ("mul_hi16", ([IntType Int16, IntType Int16], IntType Int16,
+                 \case
+                   [IntValue (Int16Value a), IntValue (Int16Value b)] ->
+                     Just $ IntValue . Int16Value  $ mul_hi16 (Int16Value a) (Int16Value b)
+                   _ -> Nothing
+                ))
+  , ("mul_hi32", ([IntType Int32, IntType Int32], IntType Int32,
+                  \case
+                   [IntValue (Int32Value a), IntValue (Int32Value b)] ->
+                     Just $ IntValue . Int32Value  $ mul_hi32 (Int32Value a) (Int32Value b)
+                   _ -> Nothing
+                ))
+  , ("mul_hi64", ([IntType Int64, IntType Int64], IntType Int64,
+                  \case
+                    [IntValue (Int64Value a), IntValue (Int64Value b)] ->
+                      Just $ IntValue . Int64Value $ mul_hi64 (Int64Value a) (Int64Value b)
+                    _ -> Nothing
+                ))
 
   , ("atan2_32",
      ([FloatType Float32, FloatType Float32], FloatType Float32,
@@ -916,24 +974,15 @@ primFuns = M.fromList
           Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
         _ -> Nothing))
 
-  , ("lerp32",
-     ([FloatType Float32, FloatType Float32, FloatType Float32], FloatType Float32,
-      \case
-        [FloatValue (Float32Value v0),
-         FloatValue (Float32Value v1),
-         FloatValue (Float32Value t)] ->
-          Just $ FloatValue $ Float32Value $
-          v0 + (v1-v0)*max 0 (min 1 t)
-        _ -> Nothing))
-  , ("lerp64",
-     ([FloatType Float64, FloatType Float64, FloatType Float64], FloatType Float64,
-      \case
-        [FloatValue (Float64Value v0),
-         FloatValue (Float64Value v1),
-         FloatValue (Float64Value t)] ->
-          Just $ FloatValue $ Float64Value $
-          v0 + (v1-v0)*max 0 (min 1 t)
-        _ -> Nothing))
+  , f32_3 "lerp32" (\v0 v1 t -> v0 + (v1-v0)*max 0 (min 1 t))
+  , f64_3 "lerp64" (\v0 v1 t -> v0 + (v1-v0)*max 0 (min 1 t))
+
+  , f32_3 "mad32" (\a b c -> a*b+c)
+  , f64_3 "mad64" (\a b c -> a*b+c)
+
+  , f32_3 "fma32" (\a b c -> a*b+c)
+  , f64_3 "fma64" (\a b c -> a*b+c)
+
   ]
   where i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
         i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))
@@ -941,6 +990,10 @@ primFuns = M.fromList
         i64 s f = (s, ([IntType Int64], IntType Int32, i64PrimFun f))
         f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
         f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
+        f32_3 s f = (s, ([FloatType Float32,FloatType Float32,FloatType Float32],
+                         FloatType Float32, f32PrimFun3 f))
+        f64_3 s f = (s, ([FloatType Float64,FloatType Float64,FloatType Float64],
+                         FloatType Float64, f64PrimFun3 f))
 
         i8PrimFun f [IntValue (Int8Value x)] =
           Just $ f x
@@ -965,6 +1018,18 @@ primFuns = M.fromList
         f64PrimFun f [FloatValue (Float64Value x)] =
           Just $ FloatValue $ Float64Value $ f x
         f64PrimFun _ _ = Nothing
+
+        f32PrimFun3 f [FloatValue (Float32Value a),
+                       FloatValue (Float32Value b),
+                       FloatValue (Float32Value c)] =
+          Just $ FloatValue $ Float32Value $ f a b c
+        f32PrimFun3 _ _ = Nothing
+
+        f64PrimFun3 f [FloatValue (Float64Value a),
+                       FloatValue (Float64Value b),
+                       FloatValue (Float64Value c)] =
+          Just $ FloatValue $ Float64Value $ f a b c
+        f64PrimFun3 _ _ = Nothing
 
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool
@@ -1134,3 +1199,39 @@ convOp s from to = text s <> text "_" <> ppr from <> text "_" <> ppr to
 prettySigned :: Bool -> PrimType -> String
 prettySigned True (IntType it) = 'u' : drop 1 (pretty it)
 prettySigned _ t = pretty t
+
+mul_hi8 :: IntValue -> IntValue -> Int8
+mul_hi8 a b =
+  let a' = intToWord64 a
+      b' = intToWord64 b
+  in fromIntegral (shiftR (a' * b') 8)
+
+mul_hi16 :: IntValue -> IntValue -> Int16
+mul_hi16 a b =
+  let a' = intToWord64 a
+      b' = intToWord64 b
+  in fromIntegral (shiftR (a' * b') 16)
+
+mul_hi32 :: IntValue -> IntValue -> Int32
+mul_hi32 a b =
+  let a' = intToWord64 a
+      b' = intToWord64 b
+  in fromIntegral (shiftR (a' * b') 32)
+
+mul_hi64 :: IntValue -> IntValue -> Int64
+mul_hi64 a b =
+  let a' = (toInteger . intToWord64) a
+      b' = (toInteger . intToWord64) b
+  in fromIntegral (shiftR (a' * b') 64)
+
+mad_hi8 :: IntValue -> IntValue -> Int8 -> Int8
+mad_hi8 a b c = mul_hi8 a b + c
+
+mad_hi16 :: IntValue -> IntValue -> Int16 -> Int16
+mad_hi16 a b c = mul_hi16 a b + c
+
+mad_hi32 :: IntValue -> IntValue -> Int32 -> Int32
+mad_hi32 a b c = mul_hi32 a b + c
+
+mad_hi64 :: IntValue -> IntValue -> Int64 -> Int64
+mad_hi64 a b c = mul_hi64 a b + c

@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Language.Futhark.Interpreter
   ( Ctx(..)
   , Env
@@ -24,7 +25,6 @@ import Control.Monad.Free.Church
 import Control.Monad.Except
 import Control.Monad.State
 import Control.Monad.Reader
-import qualified Control.Monad.Fail as Fail
 import Data.Array
 import Data.Bifunctor (first)
 import Data.List hiding (break)
@@ -40,7 +40,7 @@ import Futhark.Representation.Primitive (intValue, floatValue)
 import qualified Futhark.Representation.Primitive as P
 import qualified Language.Futhark.Semantic as T
 
-import Futhark.Util.Pretty hiding (apply, bool, stack)
+import Futhark.Util.Pretty hiding (apply, bool)
 import Futhark.Util (chunk, splitFromEnd, maybeHead)
 
 import Prelude hiding (mod, break)
@@ -58,7 +58,7 @@ data ExtOp a = ExtOpTrace Loc String a
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
-  fmap f (ExtOpBreak stack x) = ExtOpBreak stack $ f x
+  fmap f (ExtOpBreak backtrace x) = ExtOpBreak backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
 
 type Stack = [StackFrame]
@@ -72,9 +72,6 @@ newtype EvalM a = EvalM (ReaderT (Stack, M.Map FilePath Env)
             MonadFree ExtOp,
             MonadReader (Stack, M.Map FilePath Env),
             MonadState Sizes)
-
-instance Fail.MonadFail EvalM where
-  fail = error
 
 runEvalM :: M.Map FilePath Env -> EvalM a -> F ExtOp a
 runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) mempty
@@ -407,10 +404,10 @@ break = do
   -- intrinsics.break, since that is just going to be the boring
   -- wrapper function (intrinsics are never called directly).
   -- This is why we go a step up the stack.
-  stack <- asks $ drop 1 . fst
-  case NE.nonEmpty stack of
+  backtrace <- asks $ drop 1 . fst
+  case NE.nonEmpty backtrace of
     Nothing -> return ()
-    Just stack' -> liftF $ ExtOpBreak stack' ()
+    Just backtrace' -> liftF $ ExtOpBreak backtrace' ()
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
@@ -856,7 +853,7 @@ eval env (Negate e _) = do
     ValuePrim (UnsignedValue (Int64Value v)) -> return $ UnsignedValue $ Int64Value (-v)
     ValuePrim (FloatValue (Float32Value v)) -> return $ FloatValue $ Float32Value (-v)
     ValuePrim (FloatValue (Float64Value v)) -> return $ FloatValue $ Float64Value (-v)
-    _ -> fail $ "Cannot negate " ++ pretty ev
+    _ -> error $ "Cannot negate " ++ pretty ev
 
 eval env (Index e is (Info t, Info retext) loc) = do
   is' <- mapM (evalDimIndex env) is
@@ -914,7 +911,7 @@ eval _ (ProjectSection ks _ _) =
   return $ ValueFun $ flip (foldM walk) ks
   where walk (ValueRecord fs) f
           | Just v' <- M.lookup f fs = return v'
-        walk _ _ = fail "Value does not have expected field."
+        walk _ _ = error "Value does not have expected field."
 
 eval env (DoLoop sparams pat init_e form body (Info (ret, retext)) _) = do
   init_v <- eval env init_e
@@ -960,7 +957,7 @@ eval env (Project f e _ _) = do
   v <- eval env e
   case v of
     ValueRecord fs | Just v' <- M.lookup f fs -> return v'
-    _ -> fail "Value does not have expected field."
+    _ -> error "Value does not have expected field."
 
 eval env (Unsafe e _) = eval env e
 
@@ -978,7 +975,7 @@ eval env (Match e cs (Info ret, Info retext) _) = do
   v <- eval env e
   returned env ret retext =<< match v (NE.toList cs)
   where match _ [] =
-          fail "Pattern match failure."
+          error "Pattern match failure."
         match v (c:cs') = do
           c' <- evalCase v env c
           case c' of
@@ -1051,9 +1048,12 @@ evalModExp env (ModLambda p ret e loc) =
     Just (se, rsubsts) -> ModAscript e se rsubsts loc
 
 evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
-  ModuleFun f' <- evalModExp env f
-  e' <- evalModExp env e
-  substituteInModule rsubst <$> f' (substituteInModule psubst e')
+  f' <- evalModExp env f
+  case f' of
+    ModuleFun f'' -> do
+      e' <- evalModExp env e
+      substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+    _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
 
@@ -1062,8 +1062,10 @@ evalDec env (ValDec (ValBind _ v _ (Info (ret, retext)) tparams ps fbody _ _)) =
   return $ env { envTerm = M.insert v binding $ envTerm env }
 
 evalDec env (OpenDec me _) = do
-  Module me' <- evalModExp env me
-  return $ me' <> env
+  me' <- evalModExp env me
+  case me' of
+    Module me'' -> return $ me'' <> env
+    _ -> error "Expected Module"
 
 evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
@@ -1443,7 +1445,24 @@ interpretImport ctx (fp, prog) = do
   env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
   return ctx { ctxImports = M.insert fp env $ ctxImports ctx }
 
--- | Execute the named function on the given arguments; will fail
+checkEntryArgs :: VName -> [F.Value] -> StructType -> Either String ()
+checkEntryArgs entry args entry_t
+  | args_ts == param_ts =
+      return ()
+  | otherwise =
+      Left $ pretty $ expected </>
+      "Got input of types" </>
+      indent 2 (stack (map ppr args_ts))
+  where (param_ts, _) = unfoldFunType entry_t
+        args_ts = map (valueStructType . valueType) args
+        expected
+          | null param_ts =
+              "Entry point " <> pquote (pprName entry) <> " is not a function."
+          | otherwise =
+              "Entry point " <> pquote (pprName entry) <> " expects input of type(s)" </>
+              indent 2 (stack (map ppr param_ts))
+
+-- | Execute the named function on the given arguments; may fail
 -- horribly if these are ill-typed.
 interpretFunction :: Ctx -> VName -> [F.Value] -> Either String (F ExtOp Value)
 interpretFunction ctx fname vs = do
@@ -1458,6 +1477,8 @@ interpretFunction ctx fname vs = do
   vs' <- case mapM convertValue vs of
            Just vs' -> Right vs'
            Nothing -> Left "Invalid input: irregular array."
+
+  checkEntryArgs fname vs ft
 
   Right $ runEvalM (ctxImports ctx) $ do
     f <- evalTermVar (ctxEnv ctx) (qualName fname) ft

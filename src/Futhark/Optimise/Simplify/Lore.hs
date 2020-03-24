@@ -10,11 +10,9 @@ module Futhark.Optimise.Simplify.Lore
        , ExpWisdom
        , removeStmWisdom
        , removeLambdaWisdom
-       , removeProgWisdom
        , removeFunDefWisdom
        , removeExpWisdom
        , removePatternWisdom
-       , removePatElemWisdom
        , removeBodyWisdom
        , removeScopeWisdom
        , addScopeWisdom
@@ -175,9 +173,6 @@ addScopeWisdom = M.map alias
         alias (LParamInfo attr) = LParamInfo attr
         alias (IndexInfo it) = IndexInfo it
 
-removeProgWisdom :: CanBeWise (Op lore) => Prog (Wise lore) -> Prog lore
-removeProgWisdom = runIdentity . rephraseProg removeWisdom
-
 removeFunDefWisdom :: CanBeWise (Op lore) => FunDef (Wise lore) -> FunDef lore
 removeFunDefWisdom = runIdentity . rephraseFunDef removeWisdom
 
@@ -195,9 +190,6 @@ removeExpWisdom = runIdentity . rephraseExp removeWisdom
 
 removePatternWisdom :: PatternT (VarWisdom, a) -> PatternT a
 removePatternWisdom = runIdentity . rephrasePattern (return . snd)
-
-removePatElemWisdom :: PatElemT (VarWisdom, a) -> PatElemT a
-removePatElemWisdom = runIdentity . rephrasePatElem (return . snd)
 
 addWisdomToPattern :: (Attributes lore, CanBeWise (Op lore)) =>
                       Pattern lore

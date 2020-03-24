@@ -35,9 +35,6 @@ module Futhark.Representation.Kernels.Kernel
        , SegOpMapper(..)
        , identitySegOpMapper
        , mapSegOpM
-       , SegOpWalker(..)
-       , identitySegOpWalker
-       , walkSegOpM
 
        -- * Size operations
        , SizeOp(..)
@@ -651,39 +648,6 @@ mapOnSegOpType _tv (Prim pt) = pure $ Prim pt
 mapOnSegOpType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnSegOpSubExp tv) dims
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
-
--- | Like 'Walker', but just for 'SegOp's.
-data SegOpWalker lore m = SegOpWalker {
-    walkOnSegOpSubExp :: SubExp -> m ()
-  , walkOnSegOpLambda :: Lambda lore -> m ()
-  , walkOnSegOpBody :: KernelBody lore -> m ()
-  , walkOnSegOpVName :: VName -> m ()
-  }
-
--- | A no-op traversal.
-identitySegOpWalker :: Monad m => SegOpWalker lore m
-identitySegOpWalker = SegOpWalker {
-    walkOnSegOpSubExp = const $ return ()
-  , walkOnSegOpLambda = const $ return ()
-  , walkOnSegOpBody = const $ return ()
-  , walkOnSegOpVName = const $ return ()
-  }
-
-walkSegOpMapper :: forall lore m. Monad m =>
-                   SegOpWalker lore m -> SegOpMapper lore lore m
-walkSegOpMapper f = SegOpMapper {
-    mapOnSegOpSubExp = wrap walkOnSegOpSubExp
-  , mapOnSegOpLambda = wrap walkOnSegOpLambda
-  , mapOnSegOpBody = wrap walkOnSegOpBody
-  , mapOnSegOpVName = wrap walkOnSegOpVName
-  }
-  where wrap :: (SegOpWalker lore m -> a -> m ()) -> a -> m a
-        wrap op k = op f k >> return k
-
--- | As 'mapSegOpM', but ignoring the results.
-walkSegOpM :: Monad m => SegOpWalker lore m -> SegOp lore -> m ()
-walkSegOpM f = void . mapSegOpM m
-  where m = walkSegOpMapper f
 
 instance Attributes lore => Substitute (SegOp lore) where
   substituteNames subst = runIdentity . mapSegOpM substitute

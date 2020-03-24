@@ -6,12 +6,10 @@ module Futhark.Tools
 
   , nonuniqueParams
   , redomapToMapAndReduce
-  , scanomapToMapAndScan
   , dissectScrema
   , sequentialStreamWholeArray
 
   , partitionChunkedFoldParameters
-  , partitionChunkedKernelLambdaParameters
   , partitionChunkedKernelFoldParameters
 
   -- * Primitive expressions
@@ -66,25 +64,6 @@ redomapToMapAndReduce (Pattern [] patelems)
   return (map_bnd, red_bnd)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
-
--- | Like 'redomapToMapAndReduce', but for 'Scanomap'.
-scanomapToMapAndScan :: (MonadFreshNames m, Bindable lore,
-                          ExpAttr lore ~ (), Op lore ~ SOAC lore) =>
-                        Pattern lore
-                     -> ( SubExp
-                        , LambdaT lore, LambdaT lore, [SubExp]
-                        , [VName])
-                     -> m (Stm lore, Stm lore)
-scanomapToMapAndScan (Pattern [] patelems) (w, scanlam, map_lam, accs, arrs) = do
-  (map_pat, scan_pat, scan_args) <-
-    splitScanOrRedomap patelems w map_lam accs
-  let map_bnd = mkLet [] map_pat $ Op $ Screma w (mapSOAC map_lam) arrs
-      (nes, scan_arrs) = unzip scan_args
-  scan_bnd <- Let scan_pat (defAux ()) . Op <$>
-              (Screma w <$> scanSOAC scanlam nes <*> pure scan_arrs)
-  return (map_bnd, scan_bnd)
-scanomapToMapAndScan _ _ =
-  error "scanomapToMapAndScan does not handle a non-empty 'patternContextElements'"
 
 splitScanOrRedomap :: (Typed attr, MonadFreshNames m) =>
                       [PatElemT attr]
@@ -180,10 +159,3 @@ partitionChunkedKernelFoldParameters num_accs (i_param : chunk_param : params) =
   in (paramName i_param, chunk_param, acc_params, arr_params)
 partitionChunkedKernelFoldParameters _ _ =
   error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"
-
-partitionChunkedKernelLambdaParameters :: [Param attr]
-                                       -> (VName, Param attr, [Param attr])
-partitionChunkedKernelLambdaParameters (i_param : chunk_param : params) =
-  (paramName i_param, chunk_param, params)
-partitionChunkedKernelLambdaParameters _ =
-  error "partitionChunkedKernelLambdaParameters: lambda takes too few parameters"

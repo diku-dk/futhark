@@ -5,7 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.15.0]
+## [0.16.0]
+
+### Added
+
+  * `scan` now supports operators whose operands are arrays.  They are
+    significantly slower than primitive-typed scans, so avoid them if
+    at all possible.
+
+  * Precomputed constants are now handled much more efficiently.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.15.2]
+
+### Fixed
+
+  * Fix a REPL regression that made it unable to handle overloaded
+    types (such as numeric literals, oops).
+
+  * The uniqueness of a record is now the minimum of the uniqueness of
+    any of its elements (#870).
+
+  * Bug in causality checking has been fixed (#872).
+
+  * Invariant memory allocations in scan/reduce operators are now supported.
+
+  * `futhark run` now performs more type checking on entry point input (#876).
+
+  * Compiled Futhark programs now check for EOF after the last input
+    argument has been read (#877).
+
+  * Fixed a bug in `loop` type checking that prevented the result from
+    ever aliasing the initial parameter values (#879).
+
+## [0.15.1]
 
 ### Added
 
@@ -20,6 +58,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Integer exponentiation with negative exponent is now properly
     safety-checked and produces an error message.
+
+  * Serious effort has been put into improving type errors.
 
   * `reduce_by_index` may be somewhat faster for complex operators on
     histograms that barely fit in local memory.
@@ -36,14 +76,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark bench` now accepts `--pass-compiler-option`.
 
-### Removed
+  * The integer modules now have `mad_hi` and `mul_hi` functions for
+    getting the upper part of multiplications.  Thanks to @porcuquine
+    for the contribution!
 
-### Changed
+  * The `f32` and `f64` modules now also define `sinh`, `cosh`,
+    `tanh`, `asinh`, `acosh`, and `atanh` functions.
+
+  * The `f32` and `f64` modules now also define `fma` and `mad`
+    functions.
+
+### Removed
 
   * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,
     `steps`, and `range` from the prelude.
 
+### Changed
+
+  * `"futlib"` is now called `"prelude"`, and it is now an error to
+    import it explicitly.
+
 ### Fixed
+
+  * Corrected address calculations in `csharp` backend.
+
+  * The C backends are now more careful about generating overflowing
+    integer operations (since this is undefined behaviour in C, but
+    defined in Futhark).
+
+  * `futhark dataset` no longer crashes uncontrollably when used
+    incorrectly (#849).
 
 ## [0.14.1]
 

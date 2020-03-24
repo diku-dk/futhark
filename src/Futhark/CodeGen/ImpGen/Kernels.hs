@@ -133,7 +133,7 @@ expCompiler dest e =
 
 callKernelCopy :: CopyCompiler ExplicitMemory Imp.HostOp
 callKernelCopy bt
-  destloc@(MemLocation destmem destshape destIxFun)
+  destloc@(MemLocation destmem _ destIxFun)
   srcloc@(MemLocation srcmem srcshape srcIxFun)
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
@@ -147,10 +147,6 @@ callKernelCopy bt
          Imp.ExpArg src_elems, Imp.ExpArg dest_elems]
 
   | bt_size <- primByteSize bt,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) destshape) destIxFun,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) srcshape) srcIxFun,
     Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
@@ -293,26 +289,24 @@ isMapTransposeKernel bt
   (MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
-    srcshape' <- IxFun.shape srcIxFun,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk (product srcshape') (product destshape) destshape swap r1 r2 dest_offset src_offset
+      isOk (product destshape) destshape swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
-    destshape' <- IxFun.shape destIxFun,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk (product srcshape) (product destshape') srcshape id r1 r2 dest_offset src_offset
+      isOk (product srcshape) srcshape id r1 r2 dest_offset src_offset
   | otherwise =
-    Nothing
+      Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
 
-        isOk src_elems dest_elems shape f r1 r2 dest_offset src_offset = do
+        isOk elems shape f r1 r2 dest_offset src_offset = do
           let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
           return (dest_offset, src_offset,
                   num_arrays, size_x, size_y,
-                  src_elems, dest_elems)
+                  elems, elems)
 
         getSizes shape f r1 r2 =
           let (mapped, notmapped) = splitAt r1 shape

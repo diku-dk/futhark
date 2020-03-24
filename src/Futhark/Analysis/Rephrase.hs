@@ -11,8 +11,6 @@ module Futhark.Analysis.Rephrase
        , rephrasePattern
        , rephrasePatElem
        , Rephraser (..)
-
-       , castStm
        )
 where
 
@@ -30,7 +28,7 @@ data Rephraser m from to
               }
 
 rephraseProg :: Monad m => Rephraser m from to -> Prog from -> m (Prog to)
-rephraseProg rephraser = fmap Prog . mapM (rephraseFunDef rephraser) . progFunctions
+rephraseProg rephraser = fmap Prog . mapM (rephraseFunDef rephraser) . progFuns
 
 rephraseFunDef :: Monad m => Rephraser m from to -> FunDef from -> m (FunDef to)
 rephraseFunDef rephraser fundec = do
@@ -87,21 +85,3 @@ mapper rephraser = identityMapper {
   , mapOnLParam = rephraseParam (rephraseLParamLore rephraser)
   , mapOnOp = rephraseOp rephraser
   }
-
--- | Convert a binding from one lore to another, if possible.
-castStm :: (SameScope from to,
-            ExpAttr from ~ ExpAttr to,
-            BodyAttr from ~ BodyAttr to,
-            RetType from ~ RetType to,
-            BranchType from ~ BranchType to) =>
-           Stm from -> Maybe (Stm to)
-castStm = rephraseStm caster
-  where caster = Rephraser { rephraseExpLore = Just
-                           , rephraseBodyLore = Just
-                           , rephraseLetBoundLore = Just
-                           , rephraseFParamLore = Just
-                           , rephraseLParamLore = Just
-                           , rephraseOp = const Nothing
-                           , rephraseRetType = Just
-                           , rephraseBranchType = Just
-                           }

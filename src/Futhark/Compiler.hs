@@ -32,6 +32,7 @@ import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Compiler.Program
 import Futhark.Util.Log
+import Futhark.Util.Pretty (prettyText)
 
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: (Verbosity, Maybe FilePath)
@@ -51,7 +52,7 @@ dumpError :: FutharkConfig -> CompilerError -> IO ()
 dumpError config err =
   case err of
     ExternalError s -> do
-      T.hPutStrLn stderr s
+      T.hPutStrLn stderr $ prettyText s
       T.hPutStrLn stderr ""
       T.hPutStrLn stderr "If you find this error message confusing, uninformative, or wrong, please open an issue at\nhttps://github.com/diku-dk/futhark/issues."
     InternalError s info CompilerBug -> do

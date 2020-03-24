@@ -146,8 +146,8 @@ newFutharkiState count maybe_file = runExceptT $ do
               I.initialCtx $ map (fmap fileProg) imports
 
       -- Then make the prelude available in the type checker.
-      (tenv, d, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv
-                         (T.mkInitialImport ".") $ mkOpen "/futlib/prelude"
+      (tenv, d, src') <- badOnLeft pretty $ T.checkDec imports src T.initialEnv
+                         (T.mkInitialImport ".") $ mkOpen "/prelude/prelude"
       -- Then in the interpreter.
       ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
@@ -157,15 +157,15 @@ newFutharkiState count maybe_file = runExceptT $ do
         badOnLeft show =<<
         liftIO (runExceptT (readProgram file)
                  `Haskeline.catch` \(err::IOException) ->
-                   return (Left (ExternalError (T.pack $ show err))))
+                   return (externalErrorS (show err)))
       liftIO $ hPrint stderr ws
 
       let imp = T.mkInitialImport "."
       ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
                map (fmap fileProg) imports
-      (tenv1, d1, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv imp $
-                           mkOpen "/futlib/prelude"
-      (tenv2, d2, src'') <- badOnLeft T.prettyTypeError $ T.checkDec imports src' tenv1 imp $
+      (tenv1, d1, src') <- badOnLeft pretty $ T.checkDec imports src T.initialEnv imp $
+                           mkOpen "/prelude/prelude"
+      (tenv2, d2, src'') <- badOnLeft pretty $ T.checkDec imports src' tenv1 imp $
                             mkOpen $ toPOSIX $ dropExtension file
       ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
       ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
@@ -247,7 +247,7 @@ onDec d = do
   -- that 'import "foo"' is a declaration.  We have to involve a lot
   -- of machinery to load this external code before executing the
   -- declaration itself.
-  let basis = Basis imports src ["/futlib/prelude"]
+  let basis = Basis imports src ["/prelude/prelude"]
       mkImport = uncurry $ T.mkImportFrom cur_import
   imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
 
@@ -255,7 +255,7 @@ onDec d = do
     Left e -> liftIO $ print e
     Right (_, imports',  src') ->
       case T.checkDec imports' src' tenv cur_import d of
-        Left e -> liftIO $ putStrLn $ T.prettyTypeError e
+        Left e -> liftIO $ putStrLn $ pretty e
         Right (tenv', d', src'') -> do
           let new_imports = filter ((`notElem` map fst imports) . fst) imports'
           int_r <- runInterpreter $ do
@@ -273,14 +273,20 @@ onDec d = do
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
-  case either (Left . T.prettyTypeError) Right $
+  case either (Left . pretty) Right $
        T.checkExp imports src tenv e of
     Left err -> liftIO $ putStrLn err
-    Right (_, e') -> do
-      r <- runInterpreter $ I.interpretExp ienv e'
-      case r of
-        Left err -> liftIO $ print err
-        Right v -> liftIO $ putStrLn $ pretty v
+    Right (tparams, e')
+      | null tparams -> do
+          r <- runInterpreter $ I.interpretExp ienv e'
+          case r of
+            Left err -> liftIO $ print err
+            Right v -> liftIO $ putStrLn $ pretty v
+
+      | otherwise -> liftIO $ do
+          putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
+          putStrLn $ "The following types are ambiguous: " ++
+            intercalate ", " (map (prettyName . typeParamName) tparams)
 
 prettyBreaking :: Breaking -> String
 prettyBreaking b =
@@ -360,7 +366,7 @@ genTypeCommand f g h e = do
       src <- gets futharkiNameSource
       (tenv, _) <- gets futharkiEnv
       case g imports src tenv e' of
-        Left err -> liftIO $ putStrLn $ T.prettyTypeError err
+        Left err -> liftIO $ putStrLn $ pretty err
         Right x -> liftIO $ putStrLn $ h x
 
 typeCommand :: Command

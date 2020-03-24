@@ -52,18 +52,14 @@ module Futhark.CodeGen.Backends.GenericCSharp
   , simpleCall
   , callMethod
   , simpleInitClass
-  , parametrizedCall
 
   , copyMemoryDefaultSpace
   , consoleErrorWrite
   , consoleErrorWriteLine
-  , consoleWrite
-  , consoleWriteLine
 
   , publicName
   , sizeOf
   , privateFunDef
-  , publicFunDef
   , getDefaultDecl
   ) where
 
@@ -561,12 +557,6 @@ assignScalarPointer e ptr =
 simpleCall :: String -> [CSExp] -> CSExp
 simpleCall fname = Call (Var fname) . map simpleArg
 
--- | A 'Call' where the function is a variable and every argument is a
--- simple 'Arg'.
-parametrizedCall :: String -> String -> [CSExp] -> CSExp
-parametrizedCall fname primtype = Call (Var fname') . map simpleArg
-  where fname' = concat [fname, "<", primtype, ">"]
-
 simpleArg :: CSExp -> CSArg
 simpleArg = Arg Nothing
 
@@ -683,9 +673,6 @@ extName = (++"_ext")
 sizeOf :: CSType -> CSExp
 sizeOf t = simpleCall "sizeof" [(Var . pretty) t]
 
-publicFunDef :: String -> CSType -> [(CSType, String)] -> [CSStmt] -> CSStmt
-publicFunDef s t args stmts = PublicFunDef $ Def s t args stmts
-
 privateFunDef :: String -> CSType -> [(CSType, String)] -> [CSStmt] -> CSStmt
 privateFunDef s t args stmts = PrivateFunDef $ Def s t args stmts
 
@@ -695,12 +682,6 @@ valueDescName = compileName . valueDescVName
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _) = vname
-
-consoleWrite :: String -> [CSExp] -> CSExp
-consoleWrite str exps = simpleCall "Console.Write" $ String str:exps
-
-consoleWriteLine :: String -> [CSExp] -> CSExp
-consoleWriteLine str exps = simpleCall "Console.WriteLine" $ String str:exps
 
 consoleErrorWrite :: String -> [CSExp] -> CSExp
 consoleErrorWrite str exps = simpleCall "Console.Error.Write" $ String str:exps
@@ -969,8 +950,9 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args) =
   if any isOpaque decl_args then
     return (Def fname' VoidT [] [exitException], nameToString fname, Var fname')
   else do
-    (_, _, _, prepareIn, _, body_bin, prepare_out, res, prepare_run) <- prepareEntry entry
+    (_, _, _, prepare_in, _, body_bin, prepare_out, res, prepare_run) <- prepareEntry entry
     let str_input = map readInput decl_args
+        end_of_input = [Exp $ simpleCall "EndOfInput" [String $ pretty fname]]
 
     let outputDecls = map getDefaultDecl outputs
         exitcall = [
@@ -997,7 +979,7 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args) =
     str_output <- printValue res
 
     return (Def fname' VoidT [] $
-             str_input ++ prepareIn ++ outputDecls ++
+             str_input ++ end_of_input ++ prepare_in ++ outputDecls ++
              [Try [do_warmup_run, do_num_runs] [except']] ++
              [close_runtime_file] ++
              str_output,
@@ -1167,7 +1149,8 @@ compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) (IntType Int8) _ _) _) =
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt _ _) _) = do
   iexp' <- compileExp iexp
   let bt' = compilePrimType bt
-  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp']
+      iexp'' = BinOp "*" iexp' (sizeOf (compilePrimTypeToAST bt))
+  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp'']
 
 compileExp (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike x y
@@ -1347,9 +1330,11 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
   let dest' = Var $ compileName dest
-  let elemtype' = compileTypecast elemtype
-  let ctype = elemtype' elemexp'
-  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
+      elemtype' = compileTypecast elemtype
+      ctype = elemtype' elemexp'
+      idx'' = BinOp "*" idx' (sizeOf (compilePrimTypeToAST elemtype))
+
+  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx'', ctype]
 
 compileCode Imp.Skip = return ()
 

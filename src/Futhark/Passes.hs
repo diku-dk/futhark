@@ -35,7 +35,10 @@ import Futhark.Representation.SOACS (SOACS)
 standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
   passes [ simplifySOACS
-         , inlineAndRemoveDeadFunctions
+         , inlineFunctions
+         , simplifySOACS
+         , performCSE True
+         , inlineConstants
          , simplifySOACS
          , performCSE True
          , simplifySOACS

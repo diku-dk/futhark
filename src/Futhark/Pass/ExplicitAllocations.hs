@@ -18,7 +18,6 @@ import Control.Monad.Reader
 import Control.Monad.RWS.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import qualified Control.Monad.Fail as Fail
 import Data.Maybe
 import Data.List (zip4, partition, sort)
 
@@ -142,9 +141,6 @@ newtype AllocM fromlore tolore a =
              LocalScope tolore,
              MonadReader (AllocEnv fromlore tolore))
 
-instance Fail.MonadFail (AllocM fromlore tolore) where
-  fail = error . ("AllocM.fail: "++)
-
 instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
          MonadBinder (AllocM fromlore tolore) where
   type Lore (AllocM fromlore tolore) = tolore
@@ -254,7 +250,7 @@ allocsForPattern :: Allocator lore m =>
                        [AllocStm])
 allocsForPattern sizeidents validents rts hints = do
   let sizes' = [ PatElem size $ MemPrim int32 | size <- map identName sizeidents ]
-  (vals, (mems, postbnds)) <-
+  (vals, (exts, mems, postbnds)) <-
     runWriterT $ forM (zip3 validents rts hints) $ \(ident, rt, hint) -> do
       let shape = arrayShape $ identType ident
       case rt of
@@ -268,7 +264,7 @@ allocsForPattern sizeidents validents rts hints = do
 
         MemArray bt _ u (Just (ReturnsInBlock mem extixfun)) -> do
           (patels, ixfn) <- instantiateExtIxFun ident extixfun
-          tell (patels, [])
+          tell (patels, [], [])
 
           return $ PatElem (identName ident) $
             MemArray bt shape u $
@@ -279,20 +275,19 @@ allocsForPattern sizeidents validents rts hints = do
             summary <- lift $ summaryForBindage (identType ident) hint
             return $ PatElem (identName ident) summary
 
-
         MemArray bt _ u (Just (ReturnsNewBlock space _ extixfn)) -> do
           -- treat existential index function first
           (patels, ixfn) <- instantiateExtIxFun ident extixfn
-          tell (patels, [])
+          tell (patels, [], [])
 
           memid <- lift $ mkMemIdent ident space
-          tell ([PatElem (identName memid) $ MemMem space], [])
+          tell ([], [PatElem (identName memid) $ MemMem space], [])
           return $ PatElem (identName ident) $ MemArray bt shape u $
             ArrayIn (identName memid) ixfn
 
         _ -> error "Impossible case reached in allocsForPattern!"
 
-  return (sizes' <> mems,
+  return (sizes' <> exts <> mems,
           vals,
           postbnds)
   where knownShape = mapM known . shapeDims
@@ -304,36 +299,35 @@ allocsForPattern sizeidents validents rts hints = do
           let memname = baseString (identName ident) <> "_mem"
           newIdent memname $ Mem space
 
-        instantiateExtIxFun :: (MonadFreshNames m) =>
-                              Ident -> ExtIxFun ->
-                              m ([PatElemT (MemInfo d u ret)], IxFun)
+        instantiateExtIxFun :: MonadFreshNames m =>
+                               Ident -> ExtIxFun ->
+                               m ([PatElemT (MemInfo d u ret)], IxFun)
         instantiateExtIxFun idd ext_ixfn = do
-          let idnm = baseString (identName idd) <> "_ixfn"
-              (is, ptps) = unzip $ sort $ S.toList $
-                           foldMap onlyExts $
-                           foldMap leafExpTypes ext_ixfn
-              is' = drop (length sizeidents) is
-              ptps' = drop (length sizeidents) ptps
-          if length is /= length ptps
-            then error "In allocsForPattern: broken invariant 1!"
-            else do nms <- mapM (\_ -> newVName idnm) is'
-                    -- We need to instantiate with size parameters, but we
-                    -- shouldn't return them at the end
-                    let nms' = map identName sizeidents ++ nms
-                    let tab = M.fromList $
-                          map (\(i, nm, ptp) ->
-                                 (Ext i, LeafExp (Free nm) ptp)) $
-                          zip3 is nms' ptps
-                    ixfn <- instantiateIxFun $
-                            IxFun.substituteInIxFun tab ext_ixfn
-                    let patels = zipWith (\nm ptp -> PatElem nm $ MemPrim ptp)
-                                 nms ptps'
+          let isAndPtps = S.toList $
+                          foldMap onlyExts $
+                          foldMap leafExpTypes ext_ixfn
 
-                    return (patels, ixfn)
+          -- Find the existentials that reuse the sizeidents, and
+          -- those that need new pattern elements.  Assumes that the
+          -- Exts form a contiguous interval of integers.
+          let (size_exts, new_exts) =
+                span ((<length sizeidents) . fst) $ sort isAndPtps
+          (new_substs, patels) <-
+            fmap unzip $ forM new_exts $ \(i, t) -> do
+            v <- newVName $ baseString (identName idd) <> "_ixfn"
+            return ((Ext i, LeafExp (Free v) t),
+                    PatElem v $ MemPrim t)
+          let size_substs = zipWith (\(i, t) ident ->
+                                    (Ext i, LeafExp (Free (identName ident)) t))
+                            size_exts sizeidents
+              substs = M.fromList $ new_substs <> size_substs
+          ixfn <- instantiateIxFun $ IxFun.substituteInIxFun substs ext_ixfn
 
-        onlyExts :: (Ext a, PrimType) -> S.Set (Int, PrimType)
-        onlyExts (Free _, _) = S.empty
-        onlyExts (Ext i, t) = S.singleton (i, t)
+          return (patels, ixfn)
+
+onlyExts :: (Ext a, PrimType) -> S.Set (Int, PrimType)
+onlyExts (Free _, _) = S.empty
+onlyExts (Ext i, t) = S.singleton (i, t)
 
 
 instantiateIxFun :: Monad m => ExtIxFun -> m IxFun
@@ -358,6 +352,13 @@ summaryForBindage t (Hint ixfun space) = do
                     fromIntegral (primByteSize (elemType t)::Int64)]
   m <- allocateMemory "mem" bytes space
   return $ MemArray bt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
+
+lookupMemSpace :: (HasScope lore m, Monad m) => VName -> m Space
+lookupMemSpace v = do
+  t <- lookupType v
+  case t of
+    Mem space -> return space
+    _ -> error $ "lookupMemSpace: " ++ pretty v ++ " is not a memory block."
 
 directIndexFunction :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIndexFunction bt shape u mem t =
@@ -417,7 +418,7 @@ allocInMergeParams variant merge m = do
   where allocInMergeParam (mergeparam, Var v)
           | Array bt shape u <- paramDeclType mergeparam = do
               (mem, ixfun) <- lift $ lookupArraySummary v
-              Mem space <- lift $ lookupType mem
+              space <- lift $ lookupMemSpace mem
               reuse <- asks aggressiveReuse
               if space /= Space "local" &&
                  reuse &&
@@ -443,7 +444,7 @@ ensureArrayIn :: (Allocable fromlore tolore,
                  Type -> VName -> IxFun -> SubExp
               -> AllocM fromlore tolore SubExp
 ensureArrayIn _ _ _ (Constant v) =
-  fail $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
+  error $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
 ensureArrayIn t mem ixfun (Var v) = do
   (src_mem, src_ixfun) <- lookupArraySummary v
   if src_mem == mem && src_ixfun == ixfun
@@ -460,7 +461,7 @@ ensureDirectArray :: (Allocable fromlore tolore,
                      Maybe Space -> VName -> AllocM fromlore tolore (VName, SubExp)
 ensureDirectArray space_ok v = do
   (mem, ixfun) <- lookupArraySummary v
-  Mem mem_space <- lookupType mem
+  mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   if IxFun.isDirect ixfun && maybe True (==mem_space) space_ok
     then return (mem, Var v)
@@ -544,7 +545,7 @@ handleHostOp :: HostOp Kernels (SOAC Kernels)
 handleHostOp (SizeOp op) =
   return $ Inner $ SizeOp op
 handleHostOp (OtherOp op) =
-  fail $ "Cannot allocate memory in SOAC: " ++ pretty op
+  error $ "Cannot allocate memory in SOAC: " ++ pretty op
 handleHostOp (SegOp op) =
   Inner . SegOp <$> handleSegOp op
 
@@ -597,7 +598,6 @@ ensureDirect space_ok (Var v) = do
     then return $ Var v
     else do (_, v') <- ensureDirectArray space_ok v
             return v'
-
 
 allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                Stms fromlore -> (Stms tolore -> AllocM fromlore tolore a)
@@ -679,17 +679,17 @@ allocInExp (If cond tbranch0 fbranch0 (IfAttr rets ifsort)) = do
         res_if_expr = If cond tbranch'' fbranch'' $ IfAttr rets'' ifsort
     return res_if_expr
       where generalize :: (Maybe Space, Maybe MemBind) -> (Maybe Space, Maybe MemBind)
-                       -> (Maybe Space, Maybe (Int, ExtIxFun, M.Map Int (PrimExp VName, PrimExp VName)))
+                       -> (Maybe Space, Maybe (ExtIxFun, [(PrimExp VName, PrimExp VName)]))
             generalize (Just sp1, Just (ArrayIn _ ixf1)) (Just sp2, Just (ArrayIn _ ixf2)) =
               if sp1 /= sp2 then (Just sp1, Nothing)
-              else case IxFun.leastGeneralGeneralization 0 ixf1 ixf2 of
-                Just (k, ixf, tab) -> (Just sp1, Just (k, ixf, tab))
+              else case IxFun.leastGeneralGeneralization ixf1 ixf2 of
+                Just (ixf, m) -> (Just sp1, Just (ixf, m))
                 Nothing -> (Just sp1, Nothing)
             generalize (mbsp1, _) _ = (mbsp1, Nothing)
 
-            selectSub :: ((a, a) -> a) -> Maybe (Int, ExtIxFun, M.Map Int (a, a)) ->
-                         Maybe (Int, ExtIxFun, M.Map Int a)
-            selectSub f (Just (k, ixfn, tab)) = Just (k, ixfn, M.map f tab)
+            selectSub :: ((a, a) -> a) -> Maybe (ExtIxFun, [(a, a)]) ->
+                         Maybe (ExtIxFun, [a])
+            selectSub f (Just (ixfn, m)) = Just (ixfn, map f m)
             selectSub _ Nothing = Nothing
 
             -- | Just introduces the new representation (index functions); but
@@ -722,55 +722,66 @@ allocInExp e = mapExpM alloc e
 
 addResCtxInIfBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                      [ExtType] -> Body tolore -> [Maybe Space] ->
-                     [Maybe (Int, ExtIxFun, M.Map Int (PrimExp VName))] ->
+                     [Maybe (ExtIxFun, [PrimExp VName])] ->
                      AllocM fromlore tolore (Body tolore, [BodyReturns])
 addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
   let num_vals = length ifrets
       (ctx_res, val_res) = splitFromEnd num_vals res
-      ext_ini = S.size $ shapeContext ifrets
   ((res', bodyrets'), all_body_stms) <- collectStms $ do
     mapM_ addStm bnds
-    (val_res', mem_ctx_res, bodyrets, _) <-
-      foldM helper ([], [], [], ext_ini) (zip4 ifrets val_res substs spaces)
-    return (ctx_res <> mem_ctx_res <> val_res', bodyrets)
+    (val_res', ext_ses_res, mem_ctx_res, bodyrets, total_existentials) <-
+      foldM helper ([], [], [], [], length ctx_res) (zip4 ifrets val_res substs spaces)
+    return (ctx_res <> ext_ses_res <> mem_ctx_res <> val_res',
+             -- We need to adjust the ReturnsNewBlock existentials, because they
+             -- should always be numbered _after_ all other existentials in the
+             -- return values.
+            reverse $ fst $ foldl adjustNewBlockExistential ([], total_existentials) bodyrets)
   body' <- mkBodyM all_body_stms res'
   return (body', bodyrets')
     where
-      helper (res_acc, ctx_acc, br_acc, k) (ifr, r, mbixfsub, sp) =
+      helper (res_acc, ext_acc, ctx_acc, br_acc, k) (ifr, r, mbixfsub, sp) =
         case mbixfsub of
           Nothing -> do
             -- does NOT generalize/antiunify; ensure direct
             r' <- ensureDirect sp r
             mem_ctx_r <- bodyReturnMemCtx r'
-            let (body_ret, i) = inspect k ifr sp
+            let body_ret = inspect ifr sp
             return (res_acc ++ [r'],
+                    ext_acc,
                     ctx_acc ++ mem_ctx_r,
                     br_acc ++ [body_ret],
-                    k + i)
-          Just (i, ixfn, tab) -> do -- generalizes
+                    k)
+          Just (ixfn, m) -> do -- generalizes
+            let i = length m
             ext_ses <- mapM (primExpToSubExp "ixfn_exist"
-                             (return . BasicOp . SubExp . Var)) $
-                       M.elems tab
+                             (return . BasicOp . SubExp . Var))
+                       m
             mem_ctx_r <- bodyReturnMemCtx r
             let sp' = fromMaybe DefaultSpace sp
                 ixfn' = fmap (adjustExtPE k) ixfn
                 exttp = case ifr of
-                          Array pt shp u ->
-                            MemArray pt shp u $
-                            ReturnsNewBlock sp' (k + i) ixfn'
+                          Array pt shp' u ->
+                            MemArray pt shp' u $
+                            ReturnsNewBlock sp' 0 ixfn'
                           _ -> error "Impossible case reached in addResCtxInIfBody"
             return (res_acc ++ [r],
-                    ctx_acc ++ ext_ses ++ mem_ctx_r,
+                    ext_acc ++ ext_ses,
+                    ctx_acc ++ mem_ctx_r,
                     br_acc ++ [exttp],
-                    k + i + 1)
+                    k + i)
 
-      inspect i (Array pt shape u) space =
+      adjustNewBlockExistential :: ([BodyReturns], Int) -> BodyReturns -> ([BodyReturns], Int)
+      adjustNewBlockExistential (acc, k) (MemArray pt shp u (ReturnsNewBlock space _ ixfun)) =
+        (MemArray pt shp u (ReturnsNewBlock space k ixfun) : acc, k + 1)
+      adjustNewBlockExistential (acc, k) x = (x : acc, k)
+
+      inspect (Array pt shape u) space =
         let space' = fromMaybe DefaultSpace space
-            bodyret = MemArray pt shape u $ ReturnsNewBlock space' i $
+            bodyret = MemArray pt shape u $ ReturnsNewBlock space' 0 $
               IxFun.iota $ map convert $ shapeDims shape
-        in (bodyret, 1)
-      inspect _ (Prim pt) _ = (MemPrim pt, 0)
-      inspect _ (Mem space) _ = (MemMem space, 0)
+        in bodyret
+      inspect (Prim pt) _ = MemPrim pt
+      inspect (Mem space) _ = MemMem space
 
       convert (Ext i) = LeafExp (Ext i) int32
       convert (Free v) = Free <$> primExpFromSubExp int32 v
@@ -805,10 +816,11 @@ allocInLoopForm (ForLoop i it n loopvars) =
   where allocInLoopVar (p,a) = do
           (mem, ixfun) <- lookupArraySummary a
           case paramType p of
-            Array bt shape u ->
+            Array bt shape u -> do
+              dims <- map (primExpFromSubExp int32) . arrayDims <$> lookupType a
               let ixfun' = IxFun.slice ixfun $
-                           fullSliceNum (IxFun.shape ixfun) [DimFix $ LeafExp i int32]
-              in return (p { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun' }, a)
+                           fullSliceNum dims [DimFix $ LeafExp i int32]
+              return (p { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun' }, a)
             Prim bt ->
               return (p { paramAttr = MemPrim bt }, a)
             Mem space ->
@@ -845,12 +857,12 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
               let t = paramType x `arrayOfRow` twice_num_threads
               mem <- allocForArray t DefaultSpace
               -- XXX: this iota ixfun is a bit inefficient; leading to uncoalesced access.
-              let ixfun_base = IxFun.iota $
-                               map (primExpFromSubExp int32) (arrayDims t)
+              let base_dims = map (primExpFromSubExp int32) (arrayDims t)
+                  ixfun_base = IxFun.iota base_dims
                   ixfun_x = IxFun.slice ixfun_base $
-                            fullSliceNum (IxFun.shape ixfun_base) [DimFix my_id]
+                            fullSliceNum base_dims [DimFix my_id]
                   ixfun_y = IxFun.slice ixfun_base $
-                            fullSliceNum (IxFun.shape ixfun_base) [DimFix other_id]
+                            fullSliceNum base_dims [DimFix other_id]
               return (x { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_x },
                       y { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_y })
             Prim bt ->

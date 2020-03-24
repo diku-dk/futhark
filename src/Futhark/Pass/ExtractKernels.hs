@@ -189,7 +189,7 @@ extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
-       , passFunction = fmap Prog . mapM transformFunDef . progFunctions
+       , passFunction = fmap Prog . mapM transformFunDef . progFuns
        }
 
 -- In order to generate more stable threshold names, we keep track of
@@ -351,10 +351,11 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   -- map function.  Such cases will fall through to the
   -- screma-splitting case, and produce an ordinary map and scan.
   -- Hopefully, the scan then triggers the ISWIM case above (otherwise
-  -- we will still crash in code generation).
+  -- we will still crash in code generation).  However, if the map
+  -- lambda is already identity, let's just go ahead here.
   | Just (scan_lam, nes, map_lam) <- isScanomapSOAC form,
-    all primType $ lambdaReturnType scan_lam,
-    not $ lambdaContainsParallelism map_lam = runBinder_ $ do
+    (all primType (lambdaReturnType scan_lam) &&
+     not (lambdaContainsParallelism map_lam)) || isIdentityLambda map_lam = runBinder_ $ do
       let scan_lam' = soacsLambdaToKernels scan_lam
           map_lam' = soacsLambdaToKernels map_lam
       lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt

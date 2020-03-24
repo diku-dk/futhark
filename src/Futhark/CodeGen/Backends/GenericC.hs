@@ -30,7 +30,6 @@ module Futhark.CodeGen.Backends.GenericC
   , CompilerM
   , CompilerState (compUserState)
   , getUserState
-  , putUserState
   , modifyUserState
   , contextContents
   , contextFinalInits
@@ -347,9 +346,6 @@ runCompilerM prog ops src userstate (CompilerM m) =
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
-
-putUserState :: s -> CompilerM op s ()
-putUserState s = modify $ \compstate -> compstate { compUserState = s }
 
 modifyUserState :: (s -> s) -> CompilerM op s ()
 modifyUserState f = modify $ \compstate ->
@@ -1261,6 +1257,11 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     /* Declare and read input. */
     set_binary_mode(stdin);
     $items:input_items
+
+    if (end_of_input() != 0) {
+      panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
+    }
+
     $items:output_decls
 
     /* Warmup run */
@@ -1784,12 +1785,14 @@ compilePrimExp f (ConvOpExp conv x) = do
 compilePrimExp f (BinOpExp bop x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
+  -- Note that integer addition, subtraction, and multiplication are
+  -- not handled by explicit operators, but rather by functions.  This
+  -- is because we want to implicitly convert them to unsigned
+  -- numbers, so we can do overflow without invoking undefined
+  -- behaviour.
   return $ case bop of
-             Add{} -> [C.cexp|$exp:x' + $exp:y'|]
              FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]
-             Sub{} -> [C.cexp|$exp:x' - $exp:y'|]
              FSub{} -> [C.cexp|$exp:x' - $exp:y'|]
-             Mul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FMul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FDiv{} -> [C.cexp|$exp:x' / $exp:y'|]
              Xor{} -> [C.cexp|$exp:x' ^ $exp:y'|]
@@ -1859,7 +1862,7 @@ compileCode (Free name space) =
 
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
-      it' = intTypeToCType it
+      it' = primTypeToCType $ IntType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
