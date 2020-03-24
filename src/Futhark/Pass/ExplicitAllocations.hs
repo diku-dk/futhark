@@ -1064,12 +1064,11 @@ inThreadExpHints :: Allocator ExplicitMemory m => Exp ExplicitMemory -> m [ExpHi
 inThreadExpHints e =
   mapM maybePrivate =<< expExtType e
   where maybePrivate t
-          | arrayRank t > 0,
-            Just t' <- hasStaticShape t,
-            all semiStatic $ arrayDims t' = do
-              alloc_dims <- mapM dimAllocationSize $ arrayDims t'
-              let ixfun = IxFun.iota $ map (primExpFromSubExp int32) alloc_dims
-              return $ Hint ixfun $ Space "private"
+          | Just (Array pt shape _) <- hasStaticShape t,
+            all semiStatic $ shapeDims shape = do
+              let ixfun = IxFun.iota $ map (primExpFromSubExp int32) $
+                          shapeDims shape
+              return $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
           | otherwise =
               return NoHint
 

@@ -466,8 +466,8 @@ rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)[1]|]
 rawMemCType (ScalarSpace ds t) =
-  return $ foldl' addDim [C.cty|$ty:(primTypeToCType t)|] ds
-  where addDim t' d = [C.cty|$ty:t'[$exp:d]|]
+  return [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
+  where ds' = map (`C.toExp` noLoc) ds
 
 fatMemType :: Space -> C.Type
 fatMemType space =
@@ -1790,12 +1790,6 @@ compileCode (Assert e msg (loc, locs)) = do
          asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
-
-compileCode (Allocate name (Count e) (Space "private")) = do
-  size' <- compileExp e
-  name' <- newVName $ pretty name ++ "_backing"
-  item [C.citem|__private char $id:name'[$exp:size'];|]
-  stm [C.cstm|$id:name = $id:name';|]
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
