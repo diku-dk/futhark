@@ -1401,6 +1401,8 @@ $esc:("#include <getopt.h>")
 
 $esc:values_h
 
+$esc:("#define __private")
+
 static int binary_output = 0;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
@@ -1788,6 +1790,12 @@ compileCode (Assert e msg (loc, locs)) = do
          asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
+
+compileCode (Allocate name (Count e) (Space "private")) = do
+  size' <- compileExp e
+  name' <- newVName $ pretty name ++ "_backing"
+  item [C.citem|__private char $id:name'[$exp:size'];|]
+  stm [C.cstm|$id:name = $id:name';|]
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
