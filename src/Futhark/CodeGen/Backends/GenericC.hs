@@ -495,8 +495,8 @@ rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)[1]|]
 rawMemCType (ScalarSpace ds t) =
-  return $ foldl' addDim [C.cty|$ty:(primTypeToCType t)|] ds
-  where addDim t' d = [C.cty|$ty:t'[$exp:d]|]
+  return [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
+  where ds' = map (`C.toExp` noLoc) ds
 
 fatMemType :: Space -> C.Type
 fatMemType space =
@@ -1430,6 +1430,8 @@ $esc:("#include <errno.h>")
 $esc:("#include <getopt.h>")
 
 $esc:values_h
+
+$esc:("#define __private")
 
 static int binary_output = 0;
 static typename FILE *runtime_file;

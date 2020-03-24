@@ -509,11 +509,6 @@ inKernelOperations body =
           GenericC.stm [C.cstm|mem_fence_local();|]
         kernelOps (MemFence FenceGlobal) =
           GenericC.stm [C.cstm|mem_fence_global();|]
-        kernelOps (PrivateAlloc name size) = do
-          size' <- GenericC.compileExp $ unCount size
-          name' <- newVName $ pretty name ++ "_backing"
-          GenericC.item [C.citem|__private char $id:name'[$exp:size'];|]
-          GenericC.stm [C.cstm|$id:name = $id:name';|]
         kernelOps (LocalAlloc name size) = do
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.modifyUserState $ \s ->
