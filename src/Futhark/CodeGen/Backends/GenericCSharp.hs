@@ -1286,7 +1286,8 @@ compileCode (Imp.SetMem dest src _) = do
   let dest' = Var (compileName dest)
   stm $ Exp $ simpleCall "MemblockSetDevice" [Ref $ Var "Ctx", Ref dest', Ref src', String (compileName src)]
 
-compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
+compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space))
+  | space /= "private" =
   join $ asks envAllocate
     <*> pure name
     <*> compileExp e
@@ -1295,7 +1296,7 @@ compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
 compileCode (Imp.Allocate name (Imp.Count e) _) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
-  let name' = Var (compileName name)
+      name' = Var (compileName name)
   stm $ Reassign name' allocate'
 
 compileCode (Imp.Free name space) = do

@@ -162,7 +162,6 @@ data KernelOp = GetGroupId VName Int
               | Atomic Space AtomicOp
               | Barrier Fence
               | MemFence Fence
-              | PrivateAlloc VName (Count Bytes Imp.Exp)
               | LocalAlloc VName (Count Bytes Imp.Exp)
               | ErrorSync Fence
                 -- ^ Perform a barrier and also check whether any
@@ -226,8 +225,6 @@ instance Pretty KernelOp where
     text "mem_fence_local()"
   ppr (MemFence FenceGlobal) =
     text "mem_fence_global()"
-  ppr (PrivateAlloc name size) =
-    ppr name <+> equals <+> text "private_alloc" <> parens (ppr size)
   ppr (LocalAlloc name size) =
     ppr name <+> equals <+> text "local_alloc" <> parens (ppr size)
   ppr (ErrorSync FenceLocal) =

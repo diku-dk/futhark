@@ -76,7 +76,7 @@ allocLocal, allocPrivate :: AllocCompiler ExplicitMemory Imp.KernelOp
 allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
 allocPrivate mem size =
-  sOp $ Imp.PrivateAlloc mem size
+  emit $ Imp.Allocate mem size $ Space "private"
 
 kernelAlloc :: KernelConstants
             -> Pattern ExplicitMemory
