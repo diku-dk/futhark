@@ -799,19 +799,12 @@ memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
                                  , entryArrayElemType = bt
                                  }
 
--- Hacky maybe?
 -- TODO fix this
 memSet :: VName -> PrimType -> Imp.Exp -> Imp.Exp -> ImpM lore op ()
 memSet dest pt size c = do
-  dest_entry <- lookupVar dest
-  case dest_entry of
-    ScalarVar _ _ ->
-      compilerBugS $ unwords ["cannot memset a scalar" , pretty dest]
-    ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) -> do
-      emit $ Imp.MemSet mem pt (bytes size) c
-    MemVar _ _ ->
-      compilerBugS $ unwords ["cannot memset a MemVar", pretty dest]
-
+  dest_entry <- lookupArray dest
+  let (ArrayEntry (MemLocation mem _ _) _) = dest_entry
+  emit $ Imp.MemSet mem pt (bytes size) c
 
 dInfo :: Maybe (Exp lore) -> VName -> NameInfo ExplicitMemory
          -> ImpM lore op ()
@@ -1261,12 +1254,6 @@ sAllocArrayPerm name pt shape space perm = do
 sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
 sAllocArray name pt shape space =
   sAllocArrayPerm name pt shape space [0..shapeRank shape-1]
-
-
--- | Uses linear/iota index function.
--- sMemset :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
--- sMemset mem c size =
-  -- sAllocArrayPerm name pt shape space [0..shapeRank shape-1]
 
 
 -- | Uses linear/iota index function.

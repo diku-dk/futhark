@@ -182,25 +182,20 @@ compileGetStructVals struct fargs fctypes =
   [ [C.cdecl|$ty:ty $id:name = *$id:struct->$id:name;|]
             | (name, ty) <- zip fargs fctypes ]
 
-compileSetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
-                         a1 -> [a2] -> [C.Stm]
-compileSetStructVals struct vals =
-  [ [C.cstm|*$id:struct->$id:name=$id:name;|]
-           | name <- vals ]
-
-getCType :: Param -> C.Type
-getCType t = case t of
+paramToCType :: Param -> C.Type
+paramToCType t = case t of
                ScalarParam _ pt  -> GC.primTypeToCType pt
                MemParam _ space' -> GC.fatMemType space'
 
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (ParLoop i e (MulticoreFunc params prebody body tid)) = do
-  let fctypes = map getCType params
+  let fctypes = map paramToCType params
   let fargs   = map paramName params
   e' <- GC.compileExp e
-  body' <- GC.blockScope $ GC.compileCode body
 
   prebody' <- GC.blockScope $ GC.compileCode prebody
+  body' <- GC.blockScope $ GC.compileCode body
+
 
   fstruct <- GC.multicoreDef "parloop_struct" $ \s ->
      [C.cedecl|struct $id:s {
