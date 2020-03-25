@@ -491,12 +491,12 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
    compileStms (freeIn kres) kstms $ do
      let writeResult pe (Returns _ se) =
            copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
-         writeResult pe (WriteReturns size _ idx_vals) = do
+         writeResult pe (WriteReturns dims _ idx_vals) = do
            let (iss, vs) = unzip idx_vals
-           size' <- mapM toExp size
+           dims' <- mapM toExp dims
            forM_ (zip iss vs) $ \(idx, v) -> do
              is' <- mapM toExp idx
-             let in_bounds = foldl1 (.&&.) ( zipWith (.<.) is' size') .&&.
+             let in_bounds = foldl1 (.&&.) ( zipWith (.<.) is' dims') .&&.
                              foldl1 (.&&.) ( map (0.<=.) is')
                  when_in_bounds = copyDWIMFix (patElemName pe) is' v []
                  when_oob = return ()
