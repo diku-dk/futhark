@@ -17,7 +17,7 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util (zEncodeString)
-import Futhark.MonadFreshNames hiding (newVName')
+import Futhark.MonadFreshNames
 
 
 compileProg :: MonadFreshNames m => Maybe String

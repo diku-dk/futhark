@@ -447,18 +447,17 @@ type InitLocalHistograms = [([VName],
                                             [Imp.Exp] -> InKernelGen ()))]
 
 prepareIntermediateArraysLocal :: VName
-                               -> Count NumGroups SubExp
+                               -> Count NumGroups Imp.Exp
                                -> SegSpace -> [SegHistSlug]
                                -> CallKernelGen InitLocalHistograms
-prepareIntermediateArraysLocal num_subhistos_per_group num_groups space =
-  mapM onOp
+prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space slugs = do
+  num_segments <- dPrimVE "num_segments" $
+                  product $ map (toExp' int32 . snd) $ init $ unSegSpace space
+  mapM (onOp num_segments) slugs
   where
-    onOp (SegHistSlug op num_subhistos subhisto_info do_op) = do
+    onOp num_segments (SegHistSlug op num_subhistos subhisto_info do_op) = do
 
-      -- For the segmented case we produce a single histogram per group.
-      if length (unSegSpace space) > 1
-        then num_subhistos <-- 1
-        else num_subhistos <-- toExp' int32 (unCount num_groups)
+      num_subhistos <-- unCount groups_per_segment * num_segments
 
       emit $ Imp.DebugPrint "Number of subhistograms in global memory" $
         Just $ Imp.vi32 num_subhistos
@@ -603,7 +602,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
         (sLoopNest (histShape op) $ \is ->
             copyDWIMFix dest_local (local_is++is) ne [])
 
-    sOp Imp.LocalBarrier
+    sOp $ Imp.Barrier Imp.FenceLocal
 
     kernelLoop pgtid_in_segment threads_per_segment segment_size' $ \ie -> do
       dPrimV_ i_in_segment ie
@@ -646,8 +645,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
                   copyDWIMFix (paramName p) [] v is
                 do_op (bucket_is ++ is)
 
-    sOp Imp.ErrorSync
-    sOp Imp.GlobalBarrier
+    sOp $ Imp.ErrorSync Imp.FenceGlobal
 
     sComment "Compact the multiple local memory subhistograms to result in global memory" $
       onSlugs $ \slug dests hist_H_chk histo_dims histo_size -> do
@@ -714,9 +712,7 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
   emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just num_subhistos_per_group
 
   init_histograms <-
-    prepareIntermediateArraysLocal num_subhistos_per_group_var num_groups space slugs
-
-  emit $ Imp.DebugPrint "Number of local subhistograms per group" $ Just num_subhistos_per_group
+    prepareIntermediateArraysLocal num_subhistos_per_group_var groups_per_segment space slugs
 
   sFor "chk_i" hist_S $ \chk_i ->
     histKernelLocalPass
@@ -816,8 +812,8 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
   -- Minimal sequential chunking factor.
   let q_small = 2
 
-  hist_Nout <- dPrimVE "hist_Nout" $
-               product $ map (toExp' int32) segment_dims
+  -- The number of segments/histograms produced..
+  hist_Nout <- dPrimVE "hist_Nout" $ product $ map (toExp' int32) segment_dims
 
   hist_Nin <- dPrimVE "hist_Nin" $ toExp' int32 $ last space_sizes
 
@@ -885,7 +881,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
         .&&. Imp.vi32 hist_M .>. 0
 
       groups_per_segment
-        | segmented = 1
+        | segmented = num_groups' `quotRoundingUp` Imp.Count hist_Nout
         | otherwise = num_groups'
 
       run = do
@@ -894,6 +890,8 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
         emit $ Imp.DebugPrint "Multiplication degree (M)" $ Just $ Imp.vi32 hist_M
         emit $ Imp.DebugPrint "Cooperation level (C)" $ Just hist_C
         emit $ Imp.DebugPrint "Number of chunks (S)" $ Just hist_S
+        when segmented $
+          emit $ Imp.DebugPrint "Groups per segment" $ Just $ unCount groups_per_segment
         histKernelLocal hist_M groups_per_segment map_pes
           num_groups group_size space hist_S slugs kbody
 
@@ -953,13 +951,15 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
     let hist_T = unCount num_groups' * unCount group_size'
     emit $ Imp.DebugPrint "\n# SegHist" Nothing
     emit $ Imp.DebugPrint "Number of threads (T)" $ Just hist_T
-    emit $ Imp.DebugPrint "Memory per set of subhistograms per segment" $ Just h
-    emit $ Imp.DebugPrint "Memory per set of subhistograms times segments" $ Just seg_h
-    emit $ Imp.DebugPrint "Input elements per histogram (N)" $ Just hist_N
     emit $ Imp.DebugPrint "Desired group size (B)" $ Just hist_B
     emit $ Imp.DebugPrint "Histogram size (H)" $ Just hist_H
+    emit $ Imp.DebugPrint "Input elements per histogram (N)" $ Just hist_N
+    emit $ Imp.DebugPrint "Number of segments" $
+      Just $ product $ map (toExp' int32 . snd) segment_dims
     emit $ Imp.DebugPrint "Histogram element size (el_size)" $ Just hist_el_size
     emit $ Imp.DebugPrint "Race factor (RF)" $ Just hist_RF
+    emit $ Imp.DebugPrint "Memory per set of subhistograms per segment" $ Just h
+    emit $ Imp.DebugPrint "Memory per set of subhistograms times segments" $ Just seg_h
 
     (use_local_memory, run_in_local_memory) <-
       localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kbody

@@ -24,7 +24,7 @@ corresponds exactly to the state of the Git repository at some point.
  * Verify that `CHANGELOG.md` is updated, and that the most recent
    entries refer to the correct version number.
 
- * Verify the version number in `package.yaml`.
+ * Verify the version number in `futhark.cabal`.
 
  * Make sure you've committed any changes you may have made due to the
    previous two steps.

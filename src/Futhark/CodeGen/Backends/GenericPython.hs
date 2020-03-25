@@ -36,7 +36,6 @@ module Futhark.CodeGen.Backends.GenericPython
   , CompilerEnv(..)
   , CompilerState(..)
   , stm
-  , stms
   , atInit
   , collect'
   , collect
@@ -220,9 +219,6 @@ atInit x = modify $ \s ->
 
 stm :: PyStmt -> CompilerM op s ()
 stm x = tell [x]
-
-stms :: [PyStmt] -> CompilerM op s ()
-stms = mapM_ stm
 
 futharkFun :: String -> String
 futharkFun s = "futhark_" ++ zEncodeString s
@@ -614,9 +610,10 @@ entryTypes func = (map desc $ Imp.functionArgs func,
 callEntryFun :: [PyStmt] -> (Name, Imp.Function op)
              -> CompilerM op s (PyFunDef, String, PyExp)
 callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
-  (_, _, prepareIn, _, body_bin, _, res, prepare_run) <- prepareEntry entry
+  (_, _, prepare_in, _, body_bin, _, res, prepare_run) <- prepareEntry entry
 
   let str_input = map readInput decl_args
+      end_of_input = [Exp $ simpleCall "end_of_input" [String $ pretty fname]]
 
       exitcall = [Exp $ simpleCall "sys.exit" [Field (String "Assertion.{} failed") "format(e)"]]
       except' = Catch (Var "AssertionError") exitcall
@@ -640,7 +637,7 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
   let fname' = "entry_" ++ nameToString fname
 
   return (Def fname' [] $
-           str_input ++ prepareIn ++
+           str_input ++ end_of_input ++ prepare_in ++
            [Try [With errstate [do_warmup_run, do_num_runs]] [except']] ++
            [close_runtime_file] ++
            str_output,
@@ -942,7 +939,7 @@ compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
 compileCode (Imp.Allocate name (Imp.Count e) _) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
-  let name' = Var (compileName name)
+      name' = Var (compileName name)
   stm $ Assign name' allocate'
 
 compileCode (Imp.Free name _) =

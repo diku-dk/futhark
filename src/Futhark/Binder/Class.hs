@@ -21,7 +21,6 @@ module Futhark.Binder.Class
 where
 
 import Control.Monad.Writer
-import qualified Control.Monad.Fail as Fail
 import qualified Data.Kind
 
 import Futhark.Representation.AST
@@ -57,8 +56,7 @@ class (Attributes lore,
 -- bindings, however.
 class (Attributes (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
-       LocalScope (Lore m) m,
-       Fail.MonadFail m) =>
+       LocalScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: Data.Kind.Type
   mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))

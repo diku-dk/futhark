@@ -129,10 +129,11 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
     ppr u <> ppr (qualNameFromTypeName et) <+> spread (map (pprPrec 3) targs)
   pprPrec _ (Record fs)
     | Just ts <- areTupleFields fs =
-        parens $ commasep $ map ppr ts
+        oneLine (parens $ commasep $ map ppr ts)
+        <|> parens (align $ mconcat $ punctuate (text "," <> line) $ map ppr ts)
     | otherwise =
         oneLine (braces $ commasep fs')
-        <|> braces (mconcat $ punctuate (text "," <> line) fs')
+        <|> braces (align $ mconcat $ punctuate (text "," <> line) fs')
     where ppField (name, t) = text (nameToString name) <> colon <+> align (ppr t)
           fs' = map ppField $ M.toList fs
   pprPrec p (Arrow _ (Named v) t1 t2) =
@@ -149,7 +150,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr = pprPrec 0
-  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> pprPrec 1 at
+  pprPrec _ (Array _ u at shape) = ppr u <> ppr shape <> align (pprPrec 1 at)
   pprPrec p (Scalar t) = pprPrec p t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim) where
@@ -234,8 +235,13 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     | otherwise                     = braces $ commasep $ map ppr fs
     where fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
           fieldArray RecordFieldImplicit{} = False
-  pprPrec _ (ArrayLit es _ _) =
-    brackets $ commasep $ map ppr es
+  pprPrec _ (ArrayLit es info _) =
+    brackets (commasep $ map ppr es) <> info'
+    where info' = case unAnnot info of
+                    Just t
+                      | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False ->
+                          text "@" <> parens (align $ ppr t)
+                    _ -> mempty
   pprPrec _ (StringLit s _) =
     text $ show $ decode s
   pprPrec p (Range start maybe_step end _ _) =
@@ -251,7 +257,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
   pprPrec p (Apply f arg _ _ _) =
-    parensIf (p >= 10) $ ppr f <+/> pprPrec 10 arg
+    parensIf (p >= 10) $ pprPrec 0 f <+/> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat pat e body _ _) =
     parensIf (p /= -1) $ align $
