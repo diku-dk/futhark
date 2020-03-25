@@ -51,37 +51,6 @@ toParam name t = case t of
                     Mem space'   -> Imp.MemParam name space'
                     Array pt _ _ -> Imp.ScalarParam name pt -- TODO: Fix this!
 
--- |
--- These are copied from SegRed.hs but the module doesn't export them
--- so I copied them for now, Should fix this
-myGroupResultArrays :: Traversable t =>
-                        Space
-                     -> Count u SubExp
-                     -> t (SegRedOp lore1)
-                     -> ImpM lore2 op (t [VName])
-myGroupResultArrays space (Count size) reds =
-  forM reds $ \(SegRedOp _ lam _ shape) ->
-    forM (lambdaReturnType lam) $ \t -> do
-    let pt = elemType t
-        full_shape = Shape [size] <> shape <> arrayShape t
-        -- Move the groupsize dimension last to ensure coalesced
-        -- memory access.
-        perm = [1..shapeRank full_shape-1] ++ [0]
-    sAllocArrayPerm "group_res_arr" pt full_shape space perm
-
-myGroupResultArraysScan :: Space
-                     -> Count u SubExp
-                     -> LambdaT lore1
-                     -> ImpM lore2 op [VName]
-myGroupResultArraysScan space (Count size) (Lambda _ _ retype)  =
-  forM retype $ \t -> do
-    let pt = elemType t
-        full_shape = Shape [size] <> arrayShape t
-        -- Move the groupsize dimension last to ensure coalesced
-        -- memory access.
-        perm = [1..shapeRank full_shape-1] ++ [0]
-    sAllocArrayPerm "group_res_arr" pt full_shape space perm
-
 
 allocIntermediateArrays :: Space
                      -> Count u SubExp
@@ -149,13 +118,13 @@ prepareIntermediateArraysLocal num_subhistos_per_group _space =
   where
     onOp (MySegHistSlug op) = do
       mk_op <- return $ \arrs bucket -> do
-        let op' =  histOp op
-        let (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op'
+        let op' = histOp op
+            (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op'
             bind_acc_params =
               sComment "bind lhs" $
                 forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
                   copyDWIMFix (paramName acc_p) [] (Var arr) bucket
-        let op_body = sComment "execute operation" $
+            op_body = sComment "execute operation" $
                       compileBody' acc_params $ lambdaBody op'
             do_hist =
               sComment "update sub hist result" $
@@ -191,9 +160,8 @@ prepareIntermediateArraysLocal num_subhistos_per_group _space =
 
 -- TODOs
 -- 0. Clean-up (write wrapper and remove code duplications)
--- 1. Make segMap, segRed and segScan parallel
--- 2. What does 2nd arg to compileStms do?
--- 3. tests/soacs/scan2.fut fail (doesn't compile)
+-- 1. What does 2nd arg to compileStms do?
+-- 2. tests/soacs/scan2.fut fail (doesn't compile)
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
              -> ImpM ExplicitMemory Imp.Multicore ()
 
@@ -202,7 +170,7 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
   ns' <- mapM toExp ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+      map_pes = drop num_red_res $ patternValueElements pat
 
   slugs <- mapM computeHistoUsage histops
 

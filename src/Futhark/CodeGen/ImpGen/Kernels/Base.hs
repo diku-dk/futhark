@@ -400,6 +400,7 @@ data Locking =
 type DoAtomicUpdate lore =
   Space -> [VName] -> [Imp.Exp] -> ImpM lore Imp.KernelOp ()
 
+
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
 -- efficient.
