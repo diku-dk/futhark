@@ -298,10 +298,9 @@ compileSegOp pat (SegScan _ space lore subexps _ kbody) = do
   prebody <- collect $ do
     dScope Nothing $ scopeOfLParams $ lambdaParams lore
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-    sComment "prebody" $
-      compileKBody kbody $ \all_red_res ->
-        forM_ (zip stage_one_red_res all_red_res) $ \(slug_arr, (res, res_is)) ->
-          copyDWIMFix slug_arr [num_tasks'] res res_is
+    compileKBody kbody $ \all_red_res ->
+      forM_ (zip stage_one_red_res all_red_res) $ \(slug_arr, (res, res_is)) ->
+        copyDWIMFix slug_arr [num_tasks'] res res_is
 
     emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
 
@@ -421,16 +420,15 @@ compileSegOp pat (SegRed _ space reds _ kbody) = do
 
   slugs <- mapM segRedOpSlug $ zip reds stage_one_red_arrs
 
-  prebody <- collect $
-    sComment "prebody" $ do
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-      dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-      compileKBody kbody $ \all_red_res -> do
-        let slugs_res = chunks (map (length . slugNeutral) slugs) all_red_res
-        forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
-          forM_ (zip (slugArrs slug) red_res) $ \(slug_arr, (res, res_is)) ->
-            copyDWIMFix slug_arr [num_tasks'] res res_is
-        emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
+  prebody <- collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+    compileKBody kbody $ \all_red_res -> do
+      let slugs_res = chunks (map (length . slugNeutral) slugs) all_red_res
+      forM_ (zip slugs slugs_res) $ \(slug, red_res) ->
+        forM_ (zip (slugArrs slug) red_res) $ \(slug_arr, (res, res_is)) ->
+          copyDWIMFix slug_arr [num_tasks'] res res_is
+      emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
 
   fbody <- collect $
     sComment "function main body" $ do
@@ -485,6 +483,7 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
+
   num_tasks <- dPrim "ntask" $ IntType Int32
 
   body' <- collect $ do
@@ -492,6 +491,17 @@ compileSegOp pat (SegMap _ space _ (KernelBody _ kstms kres)) = do
    compileStms (freeIn kres) kstms $ do
      let writeResult pe (Returns _ se) =
            copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+         writeResult pe (WriteReturns size _ idx_vals) = do
+           let (iss, vs) = unzip idx_vals
+           size' <- mapM toExp size
+           forM_ (zip iss vs) $ \(idx, v) -> do
+             is' <- mapM toExp idx
+             let in_bounds = foldl1 (.&&.) ( zipWith (.<.) is' size') .&&.
+                             foldl1 (.&&.) ( map (0.<=.) is')
+                 when_in_bounds = copyDWIMFix (patElemName pe) is' v []
+                 when_oob = return ()
+             sIf in_bounds when_in_bounds when_oob
+
          writeResult _ res =
            error $ "writeResult: cannot handle " ++ pretty res
      zipWithM_ writeResult (patternElements pat) kres
