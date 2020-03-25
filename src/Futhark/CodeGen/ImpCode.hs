@@ -166,7 +166,6 @@ data Code a = Skip
             | SetScalar VName Exp
             | SetMem VName VName Space
               -- ^ Must be in same space.
-            | MemSet VName PrimType (Count Bytes Exp) Exp
             | Call [VName] Name [Arg]
             | If Exp (Code a) (Code a)
             | Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
@@ -456,8 +455,6 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y
-  freeIn' (MemSet x _ _ _) =
-    freeIn' x
   freeIn' (Write v i _ _ _ e) =
     freeIn' v <> freeIn' i <> freeIn' e
   freeIn' (SetScalar x y) =

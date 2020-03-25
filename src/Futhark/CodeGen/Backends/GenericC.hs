@@ -1916,16 +1916,6 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <*> compileExp size
 
 
--- A very slow memset
-compileCode (MemSet dest pt (Count size) c) = do
-  let ct = primTypeToCType pt
-  c' <- compileExp c
-  size' <- compileExp size
-  -- stm [C.cstm|memset($id:dest.mem, $exp:c', $id:dest.size);|]
-  stm [C.cstm|for(int i = 0; i < $exp:size'; i++) {
-                (($ty:ct*)$id:dest.mem)[i] = $exp:c';
-              }|]
-
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'

@@ -146,9 +146,12 @@ prepareIntermediateArraysLocal num_subhistos_per_group _space =
                       (arrayShape t `setOuterDim` hist_H_chk)
                 name <- sAllocArray "subhistogram_local"
                         (elemType t) sub_local_shape DefaultSpace
-                ne' <- toExp ne
+
                 size <- mapM toExp $ shapeDims sub_local_shape
-                memSet name (elemType t) (product size) ne'
+
+                -- Maybe postpone this work for the thread?
+                sFor "i" (product size) $ \i ->
+                  copyDWIMFix name [i] ne []
                 return name
 
             return (local_subhistos, mk_op local_subhistos)
@@ -174,9 +177,8 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
 
   slugs <- mapM computeHistoUsage histops
 
-  -- Maximum group size (or actual, in this case).
-  hist_B' <- toExp $ Constant $ IntValue $ Int32Value 6 -- just to be sure
   -- variable for how many subhistograms to allocate
+  hist_B' <- toExp $ Constant $ IntValue $ Int32Value 6 -- just to be sure
   hist_M <- dPrimV "hist_M" hist_B'
 
   init_histograms <-
@@ -242,14 +244,14 @@ compileSegOp pat  (SegHist _ space histops _ kbody) = do
 
     sFor "i" tid_exp $ \i ->
       forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
-          \(HistOp dest_w _ _ _ shape lam,
-           (hist, _hist_H_chk, _do_op), bucket, vs') -> do
+          \(HistOp _dest_w _ _ _ shape lam,
+           (hist, _hist_H_chk, _do_op), _bucket, vs') -> do
 
-           let bucket' = toExp' int32 bucket
-               dest_w' = toExp' int32 dest_w
-               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+           -- let bucket' = toExp' int32 bucket
+               -- dest_w' = toExp' int32 dest_w
+               -- bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
                -- Use splitAt
-               vs_params = takeLast (length vs') $ lambdaParams lam
+           let vs_params = takeLast (length vs') $ lambdaParams lam
                is_params = take (length vs') $ lambdaParams lam
                bucket_is = i : map Imp.vi32 is
 

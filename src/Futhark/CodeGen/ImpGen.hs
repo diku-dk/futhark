@@ -76,7 +76,6 @@ module Futhark.CodeGen.ImpGen
   , (<--)
 
   , function
-  , memSet
   )
   where
 
@@ -793,13 +792,6 @@ memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
   return $ ArrayVar e ArrayEntry { entryArrayLocation = location
                                  , entryArrayElemType = bt
                                  }
-
--- TODO fix this
-memSet :: VName -> PrimType -> Imp.Exp -> Imp.Exp -> ImpM lore op ()
-memSet dest pt size c = do
-  dest_entry <- lookupArray dest
-  let (ArrayEntry (MemLocation mem _ _) _) = dest_entry
-  emit $ Imp.MemSet mem pt (bytes size) c
 
 dInfo :: Maybe (Exp lore) -> VName -> NameInfo ExplicitMemory
          -> ImpM lore op ()
