@@ -545,7 +545,7 @@ linkVarToType onDims usage bcs vn lvl tp = do
         unifyError usage mempty bcs $ "Type variable" <+> pprName vn <+>
         "cannot be instantiated with type containing anonymous sizes:" </>
         indent 2 (ppr tp) </>
-        textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size beind a value parameter.  Add type annotation to clarify."
+        textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
 
     Just (Equality _) ->
       equalityType usage tp'
