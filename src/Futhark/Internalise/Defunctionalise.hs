@@ -113,7 +113,10 @@ lookupVar loc x = do
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
             -- module, which we will have to treat specially.
       | baseTag x <= maxIntrinsicTag -> return IntrinsicSV
-      | otherwise -> error $ "Variable " ++ pretty x ++ " at "
+      | otherwise -> -- Anything not in scope is going to be an
+                     -- existential size.
+          return $ Dynamic $ Scalar $ Prim $ Signed Int32
+      | otherwise ->  error $ "Variable " ++ pretty x ++ " at "
                           ++ locStr loc ++ " is out of scope."
 
 -- Like patternDimNames, but ignores sizes that are only found in
@@ -133,7 +136,10 @@ arraySizes (Array _ _ t shape) =
 patternArraySizes :: Pattern -> S.Set VName
 patternArraySizes = arraySizes . patternStructType
 
-dimMapping :: PatternType -> PatternType -> M.Map VName VName
+dimMapping :: Monoid a =>
+              TypeBase (DimDecl VName) a
+           -> TypeBase (DimDecl VName) a
+           -> M.Map VName VName
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where f (NamedDim d1) (NamedDim d2) = do
           modify $ M.insert (qualLeaf d1) (qualLeaf d2)
@@ -260,7 +266,7 @@ defuncExp e@(Var qn _ loc) = do
     -- Intrinsic functions used as variables are eta-expanded, so we
     -- can get rid of them.
     IntrinsicSV -> do
-      (pats, body, tp) <- etaExpand e
+      (pats, body, tp) <- etaExpand (typeOf e) e
       defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) noLoc
     _ -> let tp = typeFromSV sv
          in return (Var qn (Info tp) loc, sv)
@@ -470,27 +476,28 @@ defuncSoacExp (Lambda params e0 decl tp loc) = do
 
 defuncSoacExp e
   | Scalar Arrow{} <- typeOf e = do
-      (pats, body, tp) <- etaExpand e
+      (pats, body, tp) <- etaExpand (typeOf e) e
       let env = foldMap envFromPattern pats
       body' <- localEnv env $ defuncExp' body
       return $ Lambda pats body' Nothing (Info (mempty, tp)) noLoc
   | otherwise = defuncExp' e
 
-etaExpand :: Exp -> DefM ([Pattern], Exp, StructType)
-etaExpand e = do
-  let (ps, ret) = getType $ typeOf e
-  (pats, vars) <- fmap unzip . forM ps $ \t -> do
-    x <- newNameFromString "x"
+etaExpand :: PatternType -> Exp -> DefM ([Pattern], Exp, StructType)
+etaExpand e_t e = do
+  let (ps, ret) = getType e_t
+  (pats, vars) <- fmap unzip . forM ps $ \(p, t) -> do
+    x <- case p of Named x -> pure x
+                   Unnamed -> newNameFromString "x"
     return (Id x (Info t) noLoc,
             Var (qualName x) (Info t) noLoc)
   let e' = foldl' (\e1 (e2, t2, argtypes) ->
                      Apply e1 e2 (Info (diet t2, Nothing))
                      (Info (foldFunType argtypes ret), Info []) noLoc)
-           e $ zip3 vars ps (drop 1 $ tails ps)
+           e $ zip3 vars (map snd ps) (drop 1 $ tails $ map snd ps)
   return (pats, e', toStruct ret)
 
-  where getType (Scalar (Arrow _ _ t1 t2)) =
-          let (ps, r) = getType t2 in (t1 : ps, r)
+  where getType (Scalar (Arrow _ p t1 t2)) =
+          let (ps, r) = getType t2 in ((p,t1) : ps, r)
         getType t = ([], t)
 
 -- | Defunctionalize an indexing of a single array dimension.
@@ -520,7 +527,7 @@ defuncLet dims ps@(pat:pats) body rettype
 
 defuncLet _ [] body rettype = do
   (body', sv) <- defuncExp body
-  return ([], [], body', imposeType sv rettype )
+  return ([], [], body', imposeType sv rettype)
   where imposeType Dynamic{} t =
           Dynamic $ fromStruct t
         imposeType (RecordSV fs1) (Scalar (Record fs2)) =
@@ -617,7 +624,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           -- non-fully-applied intrinsic?
           if null argtypes
             then return (e', Dynamic $ typeOf e)
-            else do (pats, body, tp) <- etaExpand e'
+            else do (pats, body, tp) <- etaExpand (typeOf e') e'
                     defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) noLoc
       | otherwise -> return (e', IntrinsicSV)
 
@@ -638,8 +645,11 @@ defuncApply depth e@(Var qn (Info t) loc) = do
         | otherwise -> do
             fname <- newName $ qualLeaf qn
             let (dims, pats, e0, sv') = liftDynFun sv depth
+                pats_names = S.map identName $ mconcat $ map patternIdents pats
+                notInPats = (`S.notMember` pats_names)
+                dims' = filter notInPats dims
                 (argtypes', rettype) = dynamicFunType sv' argtypes
-            liftValDec fname (fromStruct rettype) dims pats e0
+            liftValDec fname (fromStruct rettype) dims' pats e0
             return (Var (qualName fname)
                     (Info (foldFunType argtypes' $ fromStruct rettype)) loc, sv')
 
@@ -748,6 +758,8 @@ buildRetType env pats = comb
         problematic v = (v `member` bound) && not (boundAsUnique v)
         comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
           Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
+        comb (Scalar (Sum cs_annot)) (Scalar (Sum cs_got)) =
+          Scalar $ Sum $ M.intersectionWith (zipWith comb) cs_annot cs_got
         comb (Scalar Arrow{}) t =
           descend t
         comb got et =
@@ -760,14 +772,17 @@ buildRetType env pats = comb
 
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> PatternType
-typeFromSV (Dynamic tp)           = tp
-typeFromSV (LambdaSV _ _ _ _ env) = typeFromEnv env
-typeFromSV (RecordSV ls)          = Scalar $ Record $ M.fromList $ map (fmap typeFromSV) ls
-typeFromSV (DynamicFun (_, sv) _) = typeFromSV sv
+typeFromSV (Dynamic tp) = tp
+typeFromSV (LambdaSV sizes _ _ _ env) =
+  unscopeType (S.fromList sizes) $ typeFromEnv env
+typeFromSV (RecordSV ls) =
+  Scalar $ Record $ M.fromList $ map (fmap typeFromSV) ls
+typeFromSV (DynamicFun (_, sv) _) =
+  typeFromSV sv
 typeFromSV (SumSV name svs fields) =
   Scalar $ Sum $ M.insert name (map typeFromSV svs) $ M.fromList fields
-typeFromSV IntrinsicSV            = error $ "Tried to get the type from the "
-                                         ++ "static value of an intrinsic."
+typeFromSV IntrinsicSV =
+  error "Tried to get the type from the static value of an intrinsic."
 
 typeFromEnv :: Env -> PatternType
 typeFromEnv = Scalar . Record . M.fromList .
@@ -901,7 +916,8 @@ freeVars expr = case expr of
     where freeVarsField (RecordFieldExplicit _ e _)  = freeVars e
           freeVarsField (RecordFieldImplicit vn t _) = ident $ Ident vn t noLoc
 
-  ArrayLit es _ _      -> foldMap freeVars es
+  ArrayLit es t _      -> foldMap freeVars es <>
+                          names (typeDimNames $ unInfo t)
   Range e me incl _ _  -> freeVars e <> foldMap freeVars me <>
                           foldMap freeVars incl
   Var qn (Info t) _    -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
@@ -970,18 +986,14 @@ patternVars = mconcat . map ident . S.toList . patternIdents
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind entry@Just{} name _ (Info (rettype, retext)) tparams params body _ loc)
-  | (rettype_ps, rettype') <- unfoldFunType rettype,
-    not $ null rettype_ps = do
-      (body_pats, body', _) <- etaExpand body
+defuncValBind (ValBind entry name _ (Info (rettype, retext)) tparams params body _ loc)
+  | Scalar Arrow{} <- rettype = do
+      (body_pats, body', rettype') <- etaExpand (fromStruct rettype) body
       -- FIXME: we should also handle non-constant size annotations
       -- here.
       defuncValBind $ ValBind entry name Nothing
-        (Info (onlyConstantDims rettype', retext))
+        (Info (rettype', retext))
         tparams (params <> body_pats) body' Nothing loc
-  where onlyConstantDims = first onDim
-        onDim (ConstDim x) = ConstDim x
-        onDim _            = AnyDim
 
 defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ _) = do
   (tparams', params', body', sv) <- defuncLet tparams params body rettype

@@ -190,7 +190,7 @@ presently not allowed.  See `Type Abbreviations`_ for further details.
    param_type: `type` | "(" `id` ":" `type` ")"
 
 Functions are classified via function types, but they are not fully
-first class.  See `Higher-order functions`_ for the details.
+first class.  See :ref:`hofs` for the details.
 
 .. productionlist::
    stringlit: '"' `stringchar` '"'
@@ -265,7 +265,7 @@ definition::
 
 The application ``pair [1] [2,3]`` will fail at run-time.
 
-To simplify the handling of in-inplace updates (see
+To simplify the handling of in-place updates (see
 :ref:`in-place-updates`), the value returned by a function may not
 alias any global variables.
 
@@ -298,7 +298,7 @@ It is not permitted to define operators with the names ``&&`` or
 ``||`` (although these as prefixes are accepted).  This is because a
 user-defined version of these operators would not be short-circuiting.
 User-defined operators behave exactly like ordinary functions, except
-for bbeing infix.
+for being infix.
 
 A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
 This will result in the built-in polymorphic operator becoming
@@ -357,7 +357,7 @@ abbreviations do not create distinct types: the types ``t1`` and
 
 If the right-hand side of a type contains anonymous sizes, it must be
 declared "size-lifted" with ``type~``.  If it (potentially) contains a
-function, it must de declared "fully lifted" with ``type^``.  A lifted
+function, it must be declared "fully lifted" with ``type^``.  A lifted
 type can also contain anonymous sizes.  Lifted types cannot be put in
 arrays.  Fully lifted types cannot be returned from conditional or
 loop expressions.
@@ -594,8 +594,8 @@ be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
 array is returned.
 
-The array ``a`` must be a variable name or a parenthesized expression.
-Futhermore, there *may not* be a space between ``a`` and the opening
+The array ``a`` must be a variable name or a parenthesised expression.
+Furthermore, there *may not* be a space between ``a`` and the opening
 bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 [i]``, which is a function call with a literal array.
 
@@ -939,6 +939,8 @@ An *operator section* that is equivalent to ``\x -> x.a.b.c``.
 
 An *operator section* that is equivalent to ``\x -> x[i,j]``.
 
+.. _hofs:
+
 Higher-order functions
 ----------------------
 
@@ -990,15 +992,14 @@ used to express invariants about the shapes of arrays that are
 accepted or produced by the function.  For example::
 
   let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
-    map (+) a b
+    map2 (+) a b
 
-We use a *size parameter*, ``[n]``, to explicitly quantify the names
-of shapes.  The ``[n]`` parameter is not explicitly passed when
-calling ``f``.  Rather, its value is implicitly deduced from the
-arguments passed for the value parameters.  An array can contain
-*anonymous dimensions*, e.g. ``[]i32``, for which the type checker
-will invent fresh size parameters, which ensures that all sizes have a
-(symbolic) size.
+We use a *size parameter*, ``[n]``, to explicitly quantify sizes.  The
+``[n]`` parameter is not explicitly passed when calling ``f``.
+Rather, its value is implicitly deduced from the arguments passed for
+the value parameters.  An array can contain *anonymous dimensions*,
+e.g. ``[]i32``, for which the type checker will invent fresh size
+parameters, which ensures that all arrays have a (symbolic) size.
 
 A size annotation can also be an integer constant (with no suffix).
 Size parameters can be used as ordinary variables within the scope of
@@ -1023,7 +1024,7 @@ operation.  For example, the type of ``concat`` should conceptually be::
 
   val concat [n] [m] 't : [n]t -> [m]t -> [n+m]t
 
-But this is not precently allowed.  Instead, the return type contains
+But this is not presently allowed.  Instead, the return type contains
 an anonymous size::
 
   val concat [n] [m] 't : [n]t -> [m]t -> []t
@@ -1069,7 +1070,7 @@ unknown size.
 Complex slicing
 ...............
 
-Most complex array slicing, such as ``a[a:b]``, will have an unknown
+Most complex array slicing, such as ``xs[a:b]``, will have an unknown
 size.  Exceptions are listed in the :ref:`reference for slice
 expressions <slices>`.
 
@@ -1141,42 +1142,56 @@ Only expression-level type annotations give rise to run-time checks.
 Despite their similar syntax, parameter and return type annotations
 must be valid at compile-time, or type checking will fail.
 
-Constructivity restriction
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Causality restriction
+~~~~~~~~~~~~~~~~~~~~~
 
 Conceptually, size parameters are assigned their value by reading the
 sizes of concrete values passed along as parameters.  This means that
-any size parameter must be used as the size of some non-functional
-parameter, as functions do not on their own have sizes.  This is an
-error::
+any size parameter must be used as the size of some parameter.  This
+is an error::
 
   let f [n] (x: i32) = n
 
-Similarly, this is also an error, because ``n`` is not used as the
-size of an array value::
+The following is not an error::
 
   let f [n] (g: [n]i32 -> [n]i32) = ...
 
-However, the following is permitted::
+However, using this function comes with a constraint: whenever an
+application ``f x`` occurs, the value of the size parameter must be
+inferable.  Specifically, this value must have been used as the size
+of an array *before* the ``f x`` application is encountered.  The
+notion of "before" is subtle, as there is no evaluation ordering of a
+Futhark expression, *except* that a ``let``-binding is always
+evaluated before its body, and the argument to a function is always
+evaluated before the function.
 
-  let f [n] (g: [n]i32 -> [n]i32) (arr: [n]i32) = ...
+The causality restriction only occurs when a function has size
+parameters whose first use is *not* as a concrete array size.  For
+example, it does not apply to uses of the following function::
 
-Array literals
-..............
+  let f [n] (arr: [n]i32) (g: [n]i32 -> [n]i32) = ...
 
-When constructing an *empty* array, the compiler must still be able to
-determine the element size of the array at run-time.  Concretely, if
-the element type is polymorphic, a function parameter of that
-polymorphic type (or an array, record, or sum containing it) must
-exist.  This is illegal::
+This is because the proper value of ``n`` can be read directly from
+the actual size of the array.
 
-  let empty 'a (x: i32) = (x, [] : [0]a)
+Empty array literals
+~~~~~~~~~~~~~~~~~~~~
 
-This restriction does not exist for *non-empty* array literals,
-because in those cases the actual provided elements have a size.
+Just as with size-polymorphic functions, when constructing an empty
+array, we must know the exact size of the (missing) elements.  For
+example, in the following program we are forcing the elements of ``a``
+to be the same as the elements of ``b``, but the size of the elements
+of ``b`` are not known at the time ``a`` is constructed::
+
+  let main (b: bool) (xs: []i32) =
+    let a = [] : [][]i32
+    let b = [filter (>0) xs]
+    in a[0] == b[0]
+
+The result is a type error.
 
 Sum types
-.........
+~~~~~~~~~
 
 When constructing a value of a sum type, the compiler must still be
 able to determine the size of the constructors that are *not* used.
@@ -1188,8 +1203,8 @@ This is illegal::
     let v : sum = #foo xs
     in xs
 
-Abstract types
-..............
+Modules
+~~~~~~~
 
 When matching a module with a module type (see :ref:`module-system`),
 a non-lifted abstract type (i.e. one that is declared with ``type``
@@ -1202,26 +1217,44 @@ the following::
 Then we can construct an array of values of type ``m.t`` without
 worrying about constructing an irregular array.
 
-Interactions with higher-order functions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Higher-order functions
+~~~~~~~~~~~~~~~~~~~~~~
 
 When a higher-order function takes a functional argument whose return
 type is a non-lifted type parameter, any instantiation of that type
 parameter must have a non-anonymous size.  If the return type is a
-lifted type parameter, then the instiation may contain anonymous
+lifted type parameter, then the instantiation may contain anonymous
 sizes.  This is why the type of ``map`` guarantees regular arrays::
 
   val map [n] 'a 'b : (a -> b) -> [n]a -> [n]b
 
 The type parameter ``b`` can only be replaced with a type that has
-known sizes, which means they must be the same for every application
-of the function.  In contrast, this is the type of the pipeline
-operator::
+non-anonymous sizes, which means they must be the same for every
+application of the function.  In contrast, this is the type of the
+pipeline operator::
 
   val (|>) '^a -> '^b : a -> (a -> b) -> b
 
 The provided function can return something with an anonymous size
 (such as ``filter``).
+
+A function whose return type has an unknown size
+................................................
+
+If a function (named or anonymous) is inferred to have a return type
+that contains an unknown size variable created *within* the function
+body, that size variable will be replaced with an anonymous size.  In
+most cases this is not important, but it means that an expression like
+the following is ill-typed::
+
+  map (\xs -> iota (length xs)) (xss : [n][m]i32)
+
+This is because the ``(length xs)`` expression gives rise to some
+fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
+[k]i32``, which is immediately turned into ``[n]t -> []i32`` because
+``k`` was generated inside its body.  A function of this type cannot
+be passed to ``map``, as explained before.  The solution is to bind
+``length`` to a name *before* the lambda.
 
 .. _in-place-updates:
 
@@ -1400,12 +1433,12 @@ Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
   module Times = \(M: Addable) -> {
-    let times (x: M.t) (k: int): M.t =
-      loop (x' = x) for i < k do
-        T.add x' x
+    let times (x: M.t) (k: i32): M.t =
+      loop x' = x for i < k do
+        M.add x' x
   }
 
-We can instantiate ``Times`` with any module that fulfills the module
+We can instantiate ``Times`` with any module that fulfils the module
 type ``Addable`` and get back a module that defines a function
 ``times``::
 
@@ -1500,7 +1533,7 @@ Module Type Expressions
 Module types classify modules, with the only (unimportant) difference
 in expressivity being that modules can contain module types, but
 module types cannot specify that a module must contain a specific
-module types. They can specify of course that a module contains a
+module type. They can specify of course that a module contains a
 *submodule* of a specific module type.
 
 .. _other-files:

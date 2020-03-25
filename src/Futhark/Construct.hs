@@ -5,7 +5,6 @@ module Futhark.Construct
   ( letSubExp
   , letSubExps
   , letExp
-  , letExps
   , letTupExp
   , letTupExp'
   , letInPlace
@@ -16,9 +15,7 @@ module Futhark.Construct
   , eBinOp
   , eCmpOp
   , eConvOp
-  , eNegate
   , eNot
-  , eAbs
   , eSignum
   , eCopy
   , eAssert
@@ -89,7 +86,7 @@ letExp desc e = do
   idents <- letBindNames vs e
   case idents of
     [ident] -> return $ identName ident
-    _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
+    _       -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
               String -> VName -> Slice SubExp -> Exp (Lore m)
@@ -101,10 +98,6 @@ letInPlace desc src slice e = do
 letSubExps :: MonadBinder m =>
               String -> [Exp (Lore m)] -> m [SubExp]
 letSubExps desc = mapM $ letSubExp desc
-
-letExps :: MonadBinder m =>
-           String -> [Exp (Lore m)] -> m [VName]
-letExps desc = mapM $ letExp desc
 
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
@@ -175,39 +168,9 @@ eConvOp op x = do
   x' <- letSubExp "x" =<< x
   return $ BasicOp $ ConvOp op x'
 
-eNegate :: MonadBinder m =>
-           m (Exp (Lore m)) -> m (Exp (Lore m))
-eNegate em = do
-  e <- em
-  e' <- letSubExp "negate_arg" e
-  t <- subExpType e'
-  case t of
-    Prim (IntType int_t) ->
-      return $ BasicOp $
-      BinOp (Sub int_t) (intConst int_t 0) e'
-    Prim (FloatType float_t) ->
-      return $ BasicOp $
-      BinOp (FSub float_t) (floatConst float_t 0) e'
-    _ ->
-      fail $ "eNegate: operand " ++ pretty e ++ " has invalid type."
-
 eNot :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
 eNot e = BasicOp . UnOp Not <$> (letSubExp "not_arg" =<< e)
-
-eAbs :: MonadBinder m =>
-        m (Exp (Lore m)) -> m (Exp (Lore m))
-eAbs em = do
-  e <- em
-  e' <- letSubExp "abs_arg" e
-  t <- subExpType e'
-  case t of
-    Prim (IntType int_t) ->
-      return $ BasicOp $ UnOp (Abs int_t) e'
-    Prim (FloatType float_t) ->
-      return $ BasicOp $ UnOp (FAbs float_t) e'
-    _ ->
-      fail $ "eAbs: operand " ++ pretty e ++ " has invalid type."
 
 eSignum :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -219,7 +182,7 @@ eSignum em = do
     Prim (IntType int_t) ->
       return $ BasicOp $ UnOp (SSignum int_t) e'
     _ ->
-      fail $ "eSignum: operand " ++ pretty e ++ " has invalid type."
+      error $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -314,7 +277,7 @@ eWriteArray arr is v = do
 eBlank :: MonadBinder m => Type -> m (Exp (Lore m))
 eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
 eBlank (Array pt shape _) = return $ BasicOp $ Scratch pt $ shapeDims shape
-eBlank Mem{} = fail "eBlank: cannot create blank memory"
+eBlank Mem{} = error "eBlank: cannot create blank memory"
 
 -- | Sign-extend to the given integer type.
 asIntS :: MonadBinder m => IntType -> SubExp -> m SubExp
@@ -332,7 +295,7 @@ asInt ext to_it e = do
     Prim (IntType from_it)
       | to_it == from_it -> return e
       | otherwise -> letSubExp s $ BasicOp $ ConvOp (ext from_it to_it) e
-    _ -> fail "asInt: wrong type"
+    _ -> error "asInt: wrong type"
   where s = case e of Var v -> baseString v
                       _     -> "to_" ++ pretty to_it
 

@@ -62,7 +62,6 @@ module Futhark.CodeGen.ImpGen
   , dLParams
   , dFParams
   , dScope
-  , dScopes
   , dArray
   , dPrim, dPrimVol_, dPrim_, dPrimV_, dPrimV, dPrimVE
 
@@ -85,7 +84,6 @@ import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM, State)
 import Control.Monad.Writer hiding (mapM, forM)
 import Control.Monad.Except hiding (mapM, forM)
-import qualified Control.Monad.Fail as Fail
 import Data.Either
 import Data.Traversable
 import qualified Data.Map.Strict as M
@@ -230,9 +228,6 @@ newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) (State lore op) 
             MonadWriter (Imp.Code op),
             MonadError InternalError)
 
-instance Fail.MonadFail (ImpM lore op) where
-  fail = error . ("ImpM.fail: "++)
-
 instance MonadFreshNames (ImpM lore op) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
@@ -316,7 +311,7 @@ compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
 compileProg ops space prog =
   modifyNameSource $ \src ->
-  case foldM compileFunDef' (newState src) (progFunctions prog) of
+  case foldM compileFunDef' (newState src) (progFuns prog) of
     Left err -> (Left err, src)
     Right s -> (Right $ stateFunctions s, stateNameSource s)
   where compileFunDef' s fdef = do
@@ -826,9 +821,6 @@ dInfo e name info = do
 dScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
-dScopes :: [(Maybe (Exp lore), Scope ExplicitMemory)] -> ImpM lore op ()
-dScopes = mapM_ $ uncurry dScope
-
 dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op ()
 dArray name bt shape membind = do
   entry <- memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
@@ -967,11 +959,7 @@ copy bt pat src = do
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler lore op
 defaultCopy bt dest src
-  | ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) destshape) destIxFun,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) srcshape) srcIxFun,
-    Just destoffset <-
+  | Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
@@ -985,7 +973,7 @@ defaultCopy bt dest src
       copyElementWise bt dest src
   where bt_size = primByteSize bt
         num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
-        MemLocation destmem destshape destIxFun = dest
+        MemLocation destmem _ destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
 copyElementWise :: CopyCompiler lore op
@@ -1007,8 +995,8 @@ copyArrayDWIM :: PrimType
               -> MemLocation -> [DimIndex Imp.Exp]
               -> ImpM lore op (Imp.Code op)
 copyArrayDWIM bt
-  destlocation@(MemLocation _ destshape dest_ixfun) destslice
-  srclocation@(MemLocation _ srcshape src_ixfun) srcslice
+  destlocation@(MemLocation _ destshape _) destslice
+  srclocation@(MemLocation _ srcshape _) srcslice
 
   | Just destis <- mapM dimFix destslice,
     Just srcis <- mapM dimFix srcslice,
@@ -1025,14 +1013,14 @@ copyArrayDWIM bt
   | otherwise = do
       let destlocation' =
             sliceArray destlocation $
-            fullSliceNum (IxFun.shape dest_ixfun) destslice
+            fullSliceNum (map (toExp' int32) destshape) destslice
           srclocation'  =
             sliceArray srclocation $
-            fullSliceNum (IxFun.shape src_ixfun) srcslice
+            fullSliceNum (map (toExp' int32) srcshape) srcslice
           destrank = length (memLocationShape destlocation')
           srcrank = length (memLocationShape srclocation')
       if destrank /= srcrank
-        then fail $ "copyArrayDWIM: cannot copy to " ++
+        then error $ "copyArrayDWIM: cannot copy to " ++
              pretty (memLocationName destlocation') ++
              " from " ++ pretty (memLocationName srclocation') ++
              " because ranks do not match (" ++ pretty destrank ++

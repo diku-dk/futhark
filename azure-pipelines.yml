@@ -14,10 +14,13 @@ jobs:
 
   steps:
 
+  - checkout: self
+    submodules: true
+
   - script: |
       set -e
       sudo apt update
-      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy hpack
+      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy
     displayName: Install OS-level dependencies
 
   - script: |
@@ -33,7 +36,7 @@ jobs:
   - script: |
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
-      hpack
+      cabal check
       cabal update
       cabal install --only-dependencies
     displayName: Build Haskell dependencies
@@ -44,7 +47,6 @@ jobs:
       mkdir -p $HOME/.local/bin
       cabal install --installdir=$HOME/.local/bin --install-method=copy
     displayName: Build and install Futhark compiler
-
 
   - script: |
       set -e
@@ -67,17 +69,24 @@ jobs:
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
-      futhark test -C --no-terminal --backend=opencl tests examples --exclude=no_opencl
-    displayName: Compile with backend=opencl
+      futhark test -C --no-terminal --backend=opencl --exclude=no_opencl tests examples
+    displayName: Compile tests with backend=opencl
 
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
-      futhark test -C --no-terminal --backend=cuda tests examples --exclude=no_opencl
-    displayName: Compile with backend=cuda
+      futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
+    displayName: Compile tests with backend=cuda
 
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
-      futhark test -c --no-terminal --no-tuning --backend=python tests examples --exclude=no_python
-    displayName: Compile and run with backend=python
+      futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
+    displayName: Compile tests and run with backend=python
+
+
+  - script: |
+      set -e
+      export PATH=$HOME/.local/bin:$PATH
+      futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
+    displayName: Compile benchmarks with backend=opencl

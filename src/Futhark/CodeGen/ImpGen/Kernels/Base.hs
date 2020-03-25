@@ -47,7 +47,6 @@ import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
-import Futhark.CodeGen.ImpCode.Kernels (elements)
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 import Futhark.Util (chunks, maybeNth, mapAccumLM, takeLast, dropLast)
@@ -73,11 +72,9 @@ keyWithEntryPoint :: Name -> Name -> Name
 keyWithEntryPoint fname key =
   nameFromString $ nameToString fname ++ "." ++ nameToString key
 
-allocLocal, allocPrivate :: AllocCompiler ExplicitMemory Imp.KernelOp
+allocLocal :: AllocCompiler ExplicitMemory Imp.KernelOp
 allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
-allocPrivate mem size =
-  sOp $ Imp.PrivateAlloc mem size
 
 kernelAlloc :: KernelConstants
             -> Pattern ExplicitMemory
@@ -87,9 +84,6 @@ kernelAlloc _ (Pattern _ [_]) _ ScalarSpace{} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
   return ()
-kernelAlloc _ (Pattern _ [mem]) size (Space "private") = do
-  size' <- toExp size
-  allocPrivate (patElemName mem) $ Imp.bytes size'
 kernelAlloc _ (Pattern _ [mem]) size (Space "local") = do
   size' <- toExp size
   allocLocal (patElemName mem) $ Imp.bytes size'
@@ -162,15 +156,15 @@ compileGroupExp _ (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Copy arr)) = do
   groupCopy constants (patElemName dest) [] (Var arr) []
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Manifest _ arr)) = do
   groupCopy constants (patElemName dest) [] (Var arr) []
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
   ds' <- mapM toExp $ shapeDims ds
   groupCoverSpace constants ds' $ \is ->
     copyDWIMFix (patElemName dest) is se (drop (shapeRank ds) is)
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   n' <- toExp n
   e' <- toExp e
@@ -178,7 +172,7 @@ compileGroupExp constants (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
   groupLoop constants n' $ \i' -> do
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIMFix (patElemName dest) [i'] (Var x) []
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
 compileGroupExp _ dest e =
   defCompileExp dest e
@@ -186,7 +180,7 @@ compileGroupExp _ dest e =
 sanityCheckLevel :: SegLevel -> InKernelGen ()
 sanityCheckLevel SegThread{} = return ()
 sanityCheckLevel SegGroup{} =
-  fail "compileGroupOp: unexpected group-level SegOp."
+  error "compileGroupOp: unexpected group-level SegOp."
 
 compileGroupSpace :: KernelConstants -> SegLevel -> SegSpace -> InKernelGen ()
 compileGroupSpace constants lvl space = do
@@ -251,7 +245,7 @@ compileGroupOp constants pat (Inner (SegOp (SegMap lvl space _ body))) = do
     zipWithM_ (compileThreadResult space constants) (patternElements pat) $
     kernelBodyResult body
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
 compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
   compileGroupSpace constants lvl space
@@ -265,11 +259,11 @@ compileGroupOp constants pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))
     (map (`Imp.var` int32) ltids)
     (kernelResultSubExp res) []
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
-  groupScan constants (Just crossesSegment) (product dims') scan_op $
+  groupScan constants (Just crossesSegment) (product dims') (product dims') scan_op $
     patternNames pat
 
 compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
@@ -294,7 +288,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       copyDWIMFix dest (map (`Imp.var` int32) ltids) (kernelResultSubExp res) []
     zipWithM_ (compileThreadResult space constants) map_pes map_res
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
   case dims' of
     -- Nonsegmented case (or rather, a single segment) - this we can
@@ -303,7 +297,7 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupReduce constants dim' (segRedLambda op) tmps
 
-      sOp Imp.ErrorSync
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIMFix (patElemName pe) [] (Var arr) [0]
@@ -316,15 +310,16 @@ compileGroupOp constants pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
           crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
-        groupScan constants (Just crossesSegment) (product dims') (segRedLambda op) tmps
+        groupScan constants (Just crossesSegment) (product dims') (product dims')
+        (segRedLambda op) tmps
 
-      sOp Imp.ErrorSync
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       let segment_is = map Imp.vi32 $ init ltids
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
         copyDWIMFix (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
 compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   compileGroupSpace constants lvl space
@@ -340,7 +335,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
   ops' <- prepareIntraGroupSegHist constants (segGroupSize lvl) ops
 
   -- Ensure that all locks have been initialised.
-  sOp Imp.LocalBarrier
+  sOp $ Imp.Barrier Imp.FenceLocal
 
   sWhen (isActive $ unSegSpace space) $
     compileStms mempty (kernelBodyStms kbody) $ do
@@ -366,7 +361,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
               copyDWIMFix (paramName p) [] v is
             do_op (bin_is ++ is)
 
-  sOp Imp.ErrorSync
+  sOp $ Imp.ErrorSync Imp.FenceLocal
 
 compileGroupOp _ pat _ =
   compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
@@ -508,8 +503,8 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
         sComment "update global result" $
         zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
-      fence = case space of Space "local" -> sOp Imp.MemFenceLocal
-                            _             -> sOp Imp.MemFenceGlobal
+      fence = case space of Space "local" -> sOp $ Imp.MemFence Imp.FenceLocal
+                            _             -> sOp $ Imp.MemFence Imp.FenceGlobal
 
 
   -- While-loop: Try to insert your value
@@ -714,28 +709,6 @@ makeAllMemoryGlobal =
         globalMemory entry =
           entry
 
-writeParamToLocalMemory :: Typed (MemBound u) =>
-                           Imp.Exp -> (VName, t) -> Param (MemBound u)
-                        -> ImpM lore op ()
-writeParamToLocalMemory i (mem, _) param
-  | Prim t <- paramType param =
-      emit $
-      Imp.Write mem (elements i) bt (Space "local") Imp.Volatile $
-      Imp.var (paramName param) t
-  | otherwise =
-      return ()
-  where bt = elemType $ paramType param
-
-readParamFromLocalMemory :: Typed (MemBound u) =>
-                            Imp.Exp -> Param (MemBound u) -> (VName, t)
-                         -> ImpM lore op ()
-readParamFromLocalMemory i param (l_mem, _)
-  | Prim _ <- paramType param =
-      paramName param <--
-      Imp.index l_mem (elements i) bt (Space "local") Imp.Volatile
-  | otherwise = return ()
-  where bt = elemType $ paramType param
-
 groupReduce :: ExplicitMemorish lore =>
                KernelConstants
             -> Imp.Exp
@@ -814,8 +787,8 @@ groupReduceWithOffset constants offset w lam arrs = do
         global_tid = kernelGlobalThreadId constants
 
         barrier
-          | all primType $ lambdaReturnType lam = sOp Imp.LocalBarrier
-          | otherwise                           = sOp Imp.GlobalBarrier
+          | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
+          | otherwise                           = sOp $ Imp.Barrier Imp.FenceGlobal
 
         readReduceArgument param arr
           | Prim _ <- paramType param = do
@@ -834,18 +807,12 @@ groupReduceWithOffset constants offset w lam arrs = do
 groupScan :: KernelConstants
           -> Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
           -> Imp.Exp
+          -> Imp.Exp
           -> Lambda ExplicitMemory
           -> [VName]
           -> ImpM ExplicitMemory Imp.KernelOp ()
-groupScan constants seg_flag w lam arrs = do
-  unless (all (primType . paramType) $ lambdaParams lam) $
-    compilerLimitationS "Cannot compile parallel scans with array element type."
-
+groupScan constants seg_flag arrs_full_size w lam arrs = do
   renamed_lam <- renameLambda lam
-
-  acc_local_mem <- flip zip (repeat ()) <$>
-                   mapM (fmap (memLocationName . entryArrayLocation) .
-                         lookupArray) arrs
 
   let ltid = kernelLocalThreadId constants
       (x_params, y_params) = splitAt (length arrs) $ lambdaParams lam
@@ -866,108 +833,195 @@ groupScan constants seg_flag w lam arrs = do
       simd_width = kernelWaveSize constants
       block_id = ltid `quot` block_size
       in_block_id = ltid - block_id * block_size
-      doInBlockScan seg_flag' active = inBlockScan seg_flag' simd_width block_size active ltid acc_local_mem
+      doInBlockScan seg_flag' active =
+        inBlockScan constants seg_flag' arrs_full_size
+        simd_width block_size active arrs barrier
       ltid_in_bounds = ltid .<. w
+      array_scan = not $ all primType $ lambdaReturnType lam
+      barrier | array_scan =
+                  sOp $ Imp.Barrier Imp.FenceGlobal
+              | otherwise =
+                  sOp $ Imp.Barrier Imp.FenceLocal
+
+      group_offset = kernelGroupId constants * kernelGroupSize constants
+
+      writeBlockResult p arr
+        | primType $ paramType p =
+            copyDWIM arr [DimFix block_id] (Var $ paramName p) []
+        | otherwise =
+            copyDWIM arr [DimFix $ group_offset + block_id] (Var $ paramName p) []
+
+      readPrevBlockResult p arr
+        | primType $ paramType p =
+            copyDWIM (paramName p) [] (Var arr) [DimFix $ block_id - 1]
+        | otherwise =
+            copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + block_id - 1]
 
   doInBlockScan seg_flag ltid_in_bounds lam
-  sOp Imp.LocalBarrier
+  barrier
+
+  let is_first_block = block_id .==. 0
+  when array_scan $ do
+    sComment "save correct values for first block" $
+      sWhen is_first_block $ forM_ (zip x_params arrs) $ \(x, arr) ->
+      unless (primType $ paramType x) $
+      copyDWIM arr [DimFix $ arrs_full_size + group_offset + block_size + ltid] (Var $ paramName x) []
+
+    barrier
 
   let last_in_block = in_block_id .==. block_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
-    sWhen (last_in_block .&&. ltid_in_bounds) $
-    zipWithM_ (writeParamToLocalMemory block_id) acc_local_mem y_params
+    sWhen (last_in_block .&&. ltid_in_bounds) $ everythingVolatile $
+    zipWithM_ writeBlockResult x_params arrs
 
-  sOp Imp.LocalBarrier
+  barrier
 
-  let is_first_block = block_id .==. 0
-      first_block_seg_flag = do
+  let first_block_seg_flag = do
         flag_true <- seg_flag
         Just $ \from to ->
           flag_true (from*block_size+block_size-1) (to*block_size+block_size-1)
   comment
-    "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
+    "scan the first block, after which offset 'i' contains carry-in for block 'i+1'" $
     doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
-  sOp Imp.LocalBarrier
+  barrier
 
-  let read_carry_in =
-        zipWithM_ (readParamFromLocalMemory (block_id - 1))
-        x_params acc_local_mem
+  when array_scan $ do
+    sComment "move correct values for first block back a block" $
+      sWhen is_first_block $ forM_ (zip x_params arrs) $ \(x, arr) ->
+      unless (primType $ paramType x) $
+      copyDWIM
+      arr [DimFix $ arrs_full_size + group_offset + ltid]
+      (Var arr) [DimFix $ arrs_full_size + group_offset + block_size + ltid]
 
-  let op_to_y
+    barrier
+
+  let read_carry_in = do
+        forM_ (zip x_params y_params) $ \(x,y) ->
+          copyDWIM (paramName y) [] (Var (paramName x)) []
+        zipWithM_ readPrevBlockResult x_params arrs
+
+      y_to_x = forM_ (zip x_params y_params) $ \(x,y) ->
+        when (primType (paramType x)) $
+        copyDWIM (paramName x) [] (Var (paramName y)) []
+
+      op_to_x
         | Nothing <- seg_flag =
-            compileBody' y_params $ lambdaBody lam
-        | Just flag_true <- seg_flag =
-            sUnless (flag_true (block_id*block_size-1) ltid) $
-              compileBody' y_params $ lambdaBody lam
+            compileBody' x_params $ lambdaBody lam
+        | Just flag_true <- seg_flag = do
+            inactive <-
+              dPrimVE "inactive" $ flag_true (block_id*block_size-1) ltid
+            sWhen inactive y_to_x
+            when array_scan barrier
+            sUnless inactive $ compileBody' x_params $ lambdaBody lam
+
       write_final_result =
-        zipWithM_ (writeParamToLocalMemory ltid) acc_local_mem y_params
+        forM_ (zip x_params arrs) $ \(p, arr) ->
+        when (primType $ paramType p) $
+        copyDWIM arr [DimFix ltid] (Var $ paramName p) []
 
   sComment "carry-in for every block except the first" $
     sUnless (is_first_block .||. Imp.UnOpExp Not ltid_in_bounds) $ do
     sComment "read operands" read_carry_in
-    sComment "perform operation" op_to_y
+    sComment "perform operation" op_to_x
     sComment "write final result" write_final_result
 
-  sOp Imp.LocalBarrier
+  barrier
 
   sComment "restore correct values for first block" $
-    sWhen is_first_block write_final_result
+    sWhen is_first_block $forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
+      if primType (paramType y)
+      then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
+      else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
 
-  sOp Imp.LocalBarrier
+  barrier
 
-inBlockScan :: Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
+inBlockScan :: KernelConstants
+            -> Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
             -> Imp.Exp
             -> Imp.Exp
             -> Imp.Exp
             -> Imp.Exp
-            -> [(VName, t)]
+            -> [VName]
+            -> InKernelGen ()
             -> Lambda ExplicitMemory
             -> InKernelGen ()
-inBlockScan seg_flag lockstep_width block_size active ltid acc_local_mem scan_lam = everythingVolatile $ do
+inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
   skip_threads <- dPrim "skip_threads" int32
   let in_block_thread_active =
         Imp.var skip_threads int32 .<=. in_block_id
       actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
-      read_operands =
-        zipWithM_ (readParamFromLocalMemory $ ltid - Imp.var skip_threads int32)
-        x_params acc_local_mem
+      y_to_x =
+        forM_ (zip x_params y_params) $ \(x,y) ->
+        when (primType (paramType x)) $
+        copyDWIM (paramName x) [] (Var (paramName y)) []
 
   -- Set initial y values
-  sWhen active $
-    zipWithM_ (readParamFromLocalMemory ltid) y_params acc_local_mem
+  sWhen active $ do
+    zipWithM_ readInitial y_params arrs
+    -- Since the final result is expected to be in x_params, we may
+    -- need to copy it there for the first thread in the block.
+    sWhen (in_block_id .==. 0) y_to_x
 
-  let op_to_y
+  when array_scan barrier
+
+  let op_to_x
         | Nothing <- seg_flag =
-            compileBody' y_params $ lambdaBody scan_lam
-        | Just flag_true <- seg_flag =
-            sUnless (flag_true (ltid-Imp.var skip_threads int32) ltid) $
-              compileBody' y_params $ lambdaBody scan_lam
-      write_operation_result =
-        zipWithM_ (writeParamToLocalMemory ltid) acc_local_mem y_params
-      maybeLocalBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32) $
-                          sOp Imp.LocalBarrier
+            compileBody' x_params $ lambdaBody scan_lam
+        | Just flag_true <- seg_flag = do
+            inactive <- dPrimVE "inactive" $
+                        flag_true (ltid-Imp.var skip_threads int32) ltid
+            sWhen inactive y_to_x
+            when array_scan barrier
+            sUnless inactive $ compileBody' x_params $ lambdaBody scan_lam
+
+      maybeBarrier = sWhen (lockstep_width .<=. Imp.var skip_threads int32)
+                     barrier
 
   sComment "in-block scan (hopefully no barriers needed)" $ do
     skip_threads <-- 1
     sWhile (Imp.var skip_threads int32 .<. block_size) $ do
       sWhen (in_block_thread_active .&&. active) $ do
-        sComment "read operands" read_operands
-        sComment "perform operation" op_to_y
+        sComment "read operands" $
+          zipWithM_ (readParam (Imp.vi32 skip_threads)) x_params arrs
+        sComment "perform operation" op_to_x
 
-      maybeLocalBarrier
+      maybeBarrier
 
       sWhen (in_block_thread_active .&&. active) $
-        sComment "write result" write_operation_result
+        sComment "write result" $
+        sequence_ $ zipWith3 writeResult x_params y_params arrs
 
-      maybeLocalBarrier
+      maybeBarrier
 
       skip_threads <-- Imp.var skip_threads int32 * 2
 
   where block_id = ltid `quot` block_size
         in_block_id = ltid - block_id * block_size
+        ltid = kernelLocalThreadId constants
+        gtid = kernelGlobalThreadId constants
+        array_scan = not $ all primType $ lambdaReturnType scan_lam
+
+        readInitial p arr
+          | primType $ paramType p =
+              copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+          | otherwise =
+              copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+
+        readParam behind p arr
+          | primType $ paramType p =
+              copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+          | otherwise =
+              copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+
+        writeResult x y arr
+          | primType $ paramType x = do
+              copyDWIM arr [DimFix ltid] (Var $ paramName x) []
+              copyDWIM (paramName y) [] (Var $ paramName x) []
+          | otherwise =
+              copyDWIM (paramName y) [] (Var $ paramName x) []
 
 getSize :: String -> Imp.SizeClass -> CallKernelGen VName
 getSize desc sclass = do
@@ -1035,8 +1089,7 @@ virtualiseGroups constants SegVirt required_groups m = do
     m =<< dPrimV "virt_group_id" (Imp.vi32 phys_group_id + i * kernelNumGroups constants)
     -- Make sure the virtual group is actually done before we let
     -- another virtual group have its way with it.
-    sOp Imp.GlobalBarrier
-    sOp Imp.LocalBarrier
+    sOp $ Imp.Barrier Imp.FenceGlobal
 
 sKernelThread, sKernelGroup :: String
                             -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
@@ -1107,8 +1160,7 @@ threadOperations constants =
   , opsExpCompiler = compileThreadExp
   , opsStmsCompiler = \_ -> defCompileStms mempty
   , opsAllocCompilers =
-      M.fromList [ (Space "local", allocLocal)
-                 , (Space "private", allocPrivate) ]
+      M.fromList [ (Space "local", allocLocal) ]
   }
 groupOperations constants =
   (defaultOperations $ compileGroupOp constants)
@@ -1116,8 +1168,7 @@ groupOperations constants =
   , opsExpCompiler = compileGroupExp constants
   , opsStmsCompiler = \_ -> defCompileStms mempty
   , opsAllocCompilers =
-      M.fromList [ (Space "local", allocLocal)
-                 , (Space "private", allocPrivate) ]
+      M.fromList [ (Space "local", allocLocal) ]
   }
 
 -- | Perform a Replicate with a kernel.

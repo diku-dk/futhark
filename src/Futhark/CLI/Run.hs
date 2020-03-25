@@ -12,7 +12,6 @@ import qualified Data.Map as M
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Except
-import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.FilePath
 import System.Exit
@@ -108,16 +107,16 @@ newFutharkiState cfg file = runExceptT $ do
     badOnLeft show =<<
     liftIO (runExceptT (readProgram file)
             `Haskeline.catch` \(err::IOException) ->
-               return (Left (ExternalError (T.pack $ show err))))
+               return (externalErrorS (show err)))
   when (interpreterPrintWarnings cfg) $
     liftIO $ hPrint stderr ws
 
   let imp = T.mkInitialImport "."
   ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
            map (fmap fileProg) imports
-  (tenv1, d1, src') <- badOnLeft T.prettyTypeError $ T.checkDec imports src T.initialEnv imp $
-                       mkOpen "/futlib/prelude"
-  (tenv2, d2, _) <- badOnLeft T.prettyTypeError $ T.checkDec imports src' tenv1 imp $
+  (tenv1, d1, src') <- badOnLeft pretty $ T.checkDec imports src T.initialEnv imp $
+                       mkOpen "/prelude/prelude"
+  (tenv2, d2, _) <- badOnLeft pretty $ T.checkDec imports src' tenv1 imp $
                     mkOpen $ toPOSIX $ dropExtension file
   ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
   ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)

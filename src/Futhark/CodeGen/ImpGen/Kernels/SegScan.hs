@@ -36,12 +36,18 @@ makeLocalArrays (Count group_size) num_threads nes scan_op = do
 
 type CrossesSegment = Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
 
+localArrayIndex :: KernelConstants -> Type -> Imp.Exp
+localArrayIndex constants t =
+  if primType t
+  then kernelLocalThreadId constants
+  else kernelGlobalThreadId constants
+
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 :: Pattern ExplicitMemory
            -> Count NumGroups SubExp -> Count GroupSize SubExp -> SegSpace
            -> Lambda ExplicitMemory -> [SubExp]
            -> KernelBody ExplicitMemory
-           -> CallKernelGen (Imp.Exp, CrossesSegment)
+           -> CallKernelGen (VName, Imp.Exp, CrossesSegment)
 scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
   num_groups' <- traverse toExp num_groups
   group_size' <- traverse toExp group_size
@@ -49,6 +55,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
                  unCount num_groups' * unCount group_size'
 
   let (gtids, dims) = unzip $ unSegSpace space
+      rets = lambdaReturnType scan_op
   dims' <- mapM toExp dims
   let num_elements = product dims'
       elems_per_thread = num_elements `quotRoundingUp` Imp.vi32 num_threads
@@ -65,8 +72,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
           _ -> Nothing
 
   sKernelThread "scan_stage1" num_groups' group_size' (segFlat space) $ \constants -> do
-    local_arrs <-
-      makeLocalArrays group_size (Var num_threads) nes scan_op
+    local_arrs <- makeLocalArrays group_size (Var num_threads) nes scan_op
 
     -- The variables from scan_op will be used for the carry and such
     -- in the big chunking loop.
@@ -105,8 +111,8 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
 
       sComment "combine with carry and write to local memory" $
         compileStms mempty (bodyStms $ lambdaBody scan_op) $
-        forM_ (zip local_arrs $ bodyResult $ lambdaBody scan_op) $ \(arr, se) ->
-          copyDWIMFix arr [kernelLocalThreadId constants] se []
+        forM_ (zip3 rets local_arrs (bodyResult $ lambdaBody scan_op)) $ \(t, arr, se) ->
+        copyDWIMFix arr [localArrayIndex constants t] se []
 
       let crossesSegment' = do
             f <- crossesSegment
@@ -115,48 +121,64 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
                   to' = to + Imp.var chunk_offset int32
               in f from' to'
 
-      sOp Imp.ErrorSync -- Also implicitly barrier.
+      sOp $ Imp.ErrorSync fence
 
       groupScan constants crossesSegment'
+        (Imp.vi32 num_threads)
         (kernelGroupSize constants) scan_op_renamed local_arrs
 
       sComment "threads in bounds write partial scan result" $
-        sWhen in_bounds $ forM_ (zip pes local_arrs) $ \(pe, arr) ->
+        sWhen in_bounds $ forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
         copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
-        (Var arr) [kernelLocalThreadId constants]
+        (Var arr) [localArrayIndex constants t]
 
-      sOp Imp.LocalBarrier
+      barrier
 
       let load_carry =
             forM_ (zip local_arrs scan_x_params) $ \(arr, p) ->
-            copyDWIMFix (paramName p) [] (Var arr) [kernelGroupSize constants - 1]
+            copyDWIMFix (paramName p) [] (Var arr)
+            [if primType $ paramType p
+             then kernelGroupSize constants - 1
+             else (kernelGroupId constants+1) * kernelGroupSize constants - 1]
           load_neutral =
             forM_ (zip nes scan_x_params) $ \(ne, p) ->
             copyDWIMFix (paramName p) [] ne []
 
-      sComment "first thread reads last element as carry-in for next iteration" $
-        sWhen (kernelLocalThreadId constants .==. 0) $
-        case crossesSegment of Nothing -> load_carry
-                               Just f -> sIf (f (Imp.var chunk_offset int32 +
-                                                 kernelGroupSize constants-1)
-                                                (Imp.var chunk_offset int32 +
-                                                 kernelGroupSize constants))
-                                         load_neutral load_carry
+      sComment "first thread reads last element as carry-in for next iteration" $ do
+        crosses_segment <- dPrimVE "crosses_segment" $
+          case crossesSegment of
+            Nothing -> false
+            Just f -> f (Imp.var chunk_offset int32 +
+                         kernelGroupSize constants-1)
+                        (Imp.var chunk_offset int32 +
+                         kernelGroupSize constants)
+        should_load_carry <- dPrimVE "should_load_carry" $
+          kernelLocalThreadId constants .==. 0 .&&. UnOpExp Not crosses_segment
+        sWhen should_load_carry load_carry
+        when array_scan barrier
+        sUnless should_load_carry load_neutral
 
-      sOp Imp.LocalBarrier
+      barrier
 
-  return (elems_per_group, crossesSegment)
+  return (num_threads, elems_per_group, crossesSegment)
+
+  where array_scan = not $ all primType $ lambdaReturnType scan_op
+        fence | array_scan = Imp.FenceGlobal
+              | otherwise = Imp.FenceLocal
+        barrier = sOp $ Imp.Barrier fence
+
 
 scanStage2 :: Pattern ExplicitMemory
-           -> Imp.Exp -> Count NumGroups SubExp -> CrossesSegment -> SegSpace
+           -> VName -> Imp.Exp -> Count NumGroups SubExp -> CrossesSegment -> SegSpace
            -> Lambda ExplicitMemory -> [SubExp]
            -> CallKernelGen ()
-scanStage2 (Pattern _ pes) elems_per_group num_groups crossesSegment space scan_op nes = do
+scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crossesSegment space scan_op nes = do
   -- Our group size is the number of groups for the stage 1 kernel.
   let group_size = Count $ unCount num_groups
   group_size' <- traverse toExp group_size
 
   let (gtids, dims) = unzip $ unSegSpace space
+      rets = lambdaReturnType scan_op
   dims' <- mapM toExp dims
   let crossesSegment' = do
         f <- crossesSegment
@@ -164,8 +186,7 @@ scanStage2 (Pattern _ pes) elems_per_group num_groups crossesSegment space scan_
           f ((from + 1) * elems_per_group - 1) ((to + 1) * elems_per_group - 1)
 
   sKernelThread  "scan_stage2" 1 group_size' (segFlat space) $ \constants -> do
-    local_arrs <- makeLocalArrays group_size (unCount group_size)
-                  nes scan_op
+    local_arrs <- makeLocalArrays group_size (Var stage1_num_threads) nes scan_op
 
     flat_idx <- dPrimV "flat_idx" $
       (kernelLocalThreadId constants + 1) * elems_per_group - 1
@@ -174,37 +195,46 @@ scanStage2 (Pattern _ pes) elems_per_group num_groups crossesSegment space scan_
 
     let in_bounds =
           foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
-        when_in_bounds = forM_ (zip local_arrs pes) $ \(arr, pe) ->
-          copyDWIMFix arr [kernelLocalThreadId constants]
+        when_in_bounds = forM_ (zip3 rets local_arrs pes) $ \(t, arr, pe) ->
+          copyDWIMFix arr [localArrayIndex constants t]
           (Var $ patElemName pe) $ map (`Imp.var` int32) gtids
-        when_out_of_bounds = forM_ (zip local_arrs nes) $ \(arr, ne) ->
-          copyDWIMFix arr [kernelLocalThreadId constants] ne []
+        when_out_of_bounds = forM_ (zip3 rets local_arrs nes) $ \(t, arr, ne) ->
+          copyDWIMFix arr [localArrayIndex constants t] ne []
 
     sComment "threads in bound read carries; others get neutral element" $
       sIf in_bounds when_in_bounds when_out_of_bounds
 
     groupScan constants crossesSegment'
-      (kernelGroupSize constants) scan_op local_arrs
+      (Imp.vi32 stage1_num_threads) (kernelGroupSize constants) scan_op local_arrs
 
     sComment "threads in bounds write scanned carries" $
-      sWhen in_bounds $ forM_ (zip pes local_arrs) $ \(pe, arr) ->
+      sWhen in_bounds $ forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
       copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
-      (Var arr) [kernelLocalThreadId constants]
+      (Var arr) [localArrayIndex constants t]
 
 scanStage3 :: Pattern ExplicitMemory
+           -> Count NumGroups SubExp -> Count GroupSize SubExp
            -> Imp.Exp -> CrossesSegment -> SegSpace
            -> Lambda ExplicitMemory -> [SubExp]
            -> CallKernelGen ()
-scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
+scanStage3 (Pattern _ pes) num_groups group_size elems_per_group crossesSegment space scan_op nes = do
+  num_groups' <- traverse toExp num_groups
+  group_size' <- traverse toExp group_size
   let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
-  sKernelSimple "scan_stage3" (product dims') $ \constants -> do
-    dPrimV_ (segFlat space) $ kernelGlobalThreadId constants
+  required_groups <- dPrimVE "required_groups" $
+                     product dims' `quotRoundingUp` unCount group_size'
+
+  sKernelThread "scan_stage3" num_groups' group_size' (segFlat space) $ \constants ->
+    virtualiseGroups constants SegVirt required_groups $ \virt_group_id -> do
     -- Compute our logical index.
-    zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ kernelGlobalThreadId constants
+    flat_idx <- dPrimVE "flat_idx" $
+                Imp.vi32 virt_group_id * unCount group_size' +
+                kernelLocalThreadId constants
+    zipWithM_ dPrimV_ gtids $ unflattenIndex dims' flat_idx
+
     -- Figure out which group this element was originally in.
-    orig_group <- dPrimV "orig_group" $
-                  kernelGlobalThreadId constants `quot` elems_per_group
+    orig_group <- dPrimV "orig_group" $ flat_idx `quot` elems_per_group
     -- Then the index of the carry-in of the preceding group.
     carry_in_flat_idx <- dPrimV "carry_in_flat_idx" $
                          Imp.var orig_group int32 * elems_per_group - 1
@@ -215,15 +245,17 @@ scanStage3 (Pattern _ pes) elems_per_group crossesSegment space scan_op nes = do
     -- group, and are not the last element in such a group (because
     -- then the carry was updated in stage 2), and we are not crossing
     -- a segment boundary.
-    let crosses_segment = fromMaybe false $
+    let in_bounds =
+          foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
+        crosses_segment = fromMaybe false $
           crossesSegment <*>
             pure (Imp.var carry_in_flat_idx int32) <*>
-            pure (kernelGlobalThreadId constants)
-        is_a_carry = kernelGlobalThreadId constants .==.
+            pure flat_idx
+        is_a_carry = flat_idx .==.
                      (Imp.var orig_group int32 + 1) * elems_per_group - 1
         no_carry_in = Imp.var orig_group int32 .==. 0 .||. is_a_carry .||. crosses_segment
 
-    sWhen (kernelThreadActive constants) $ sUnless no_carry_in $ do
+    sWhen in_bounds $ sUnless no_carry_in $ do
       dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
       let (scan_x_params, scan_y_params) =
             splitAt (length nes) $ lambdaParams scan_op
@@ -243,13 +275,14 @@ compileSegScan :: Pattern ExplicitMemory
                -> KernelBody ExplicitMemory
                -> CallKernelGen ()
 compileSegScan pat lvl space scan_op nes kbody = do
-  (elems_per_group, crossesSegment) <-
+  emit $ Imp.DebugPrint "\n# SegScan" Nothing
+
+  (stage1_num_threads, elems_per_group, crossesSegment) <-
     scanStage1 pat (segNumGroups lvl) (segGroupSize lvl) space scan_op nes kbody
 
-  emit $ Imp.DebugPrint "\n# SegScan" Nothing
   emit $ Imp.DebugPrint "elems_per_group" $ Just elems_per_group
 
   scan_op' <- renameLambda scan_op
   scan_op'' <- renameLambda scan_op
-  scanStage2 pat elems_per_group (segNumGroups lvl) crossesSegment space scan_op' nes
-  scanStage3 pat elems_per_group crossesSegment space scan_op'' nes
+  scanStage2 pat stage1_num_threads elems_per_group (segNumGroups lvl) crossesSegment space scan_op' nes
+  scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scan_op'' nes

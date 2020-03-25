@@ -22,7 +22,6 @@ module Futhark.Optimise.Simplify.Engine
        ( -- * Monadic interface
          SimpleM
        , runSimpleM
-       , subSimpleM
        , SimpleOps (..)
        , SimplifyOp
        , bindableSimpleOps
@@ -49,7 +48,6 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyStms
        , simplifyFun
        , simplifyLambda
-       , simplifyLambdaSeq
        , simplifyLambdaNoHoisting
        , simplifyParam
        , bindLParams
@@ -166,16 +164,6 @@ runSimpleM :: SimpleM lore a
 runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b, _)) = runState (runReaderT m (simpl, env)) (src, False, mempty)
   in ((x, b), src')
-
-subSimpleM :: RuleBook (Wise lore)
-           -> HoistBlockers lore
-           -> SimpleM lore a
-           -> SimpleM lore a
-subSimpleM rules blockers =
-  local $ \(ops, env) -> (ops,
-                          env { envRules = rules
-                              , envHoistBlockers = blockers
-                              })
 
 askEngineEnv :: SimpleM lore (Env lore)
 askEngineEnv = asks snd
@@ -315,7 +303,7 @@ protectIf _ _ _ stm =
 
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem{} =
-  fail "emptyOfType: Cannot hoist non-existential memory."
+  error "emptyOfType: Cannot hoist non-existential memory."
 emptyOfType _ (Prim pt) =
   return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
 emptyOfType ctx_names (Array pt shape _) = do
@@ -471,6 +459,8 @@ cheapExp DoLoop{}                 = False
 cheapExp (If _ tbranch fbranch _) = all cheapStm (bodyStms tbranch) &&
                                     all cheapStm (bodyStms fbranch)
 cheapExp (Op op)                  = cheapOp op
+cheapExp (Apply _ _ _ (constf, _, _, _)) =
+  constf == ConstFun
 cheapExp _                        = True -- Used to be False, but
                                          -- let's try it out.
 
@@ -513,8 +503,11 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       hoistbl_nms = filterBnds desirableToHoist getArrSz_fun $
                     stmsToList $ stms1<>stms2
 
+      -- No matter what, we always want to hoist constants as much as
+      -- possible.
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp ArrayLit{})) = False
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp SubExp{})) = False
+      isNotHoistableBnd _ _ _ (Let _ _ (Apply _ _ _ (ConstFun, _, _, _))) = False
       isNotHoistableBnd nms _ _ stm = not (hasPatName nms stm)
 
       block = branch_blocker `orIf`
@@ -829,12 +822,6 @@ simplifyLambda :: SimplifiableLore lore =>
 simplifyLambda lam arrs = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   simplifyLambdaMaybeHoist par_blocker lam arrs
-
-simplifyLambdaSeq :: SimplifiableLore lore =>
-                     Lambda lore
-                  -> [Maybe VName]
-                  -> SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
-simplifyLambdaSeq = simplifyLambdaMaybeHoist neverBlocks
 
 simplifyLambdaNoHoisting :: SimplifiableLore lore =>
                             Lambda lore

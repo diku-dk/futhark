@@ -30,7 +30,6 @@ module Futhark.CodeGen.Backends.GenericC
   , CompilerM
   , CompilerState (compUserState)
   , getUserState
-  , putUserState
   , modifyUserState
   , contextContents
   , contextFinalInits
@@ -348,9 +347,6 @@ runCompilerM prog ops src userstate (CompilerM m) =
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
 
-putUserState :: s -> CompilerM op s ()
-putUserState s = modify $ \compstate -> compstate { compUserState = s }
-
 modifyUserState :: (s -> s) -> CompilerM op s ()
 modifyUserState f = modify $ \compstate ->
   compstate { compUserState = f $ compUserState compstate }
@@ -370,6 +366,10 @@ collect' m = pass $ do
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
+
+fatMemory :: Space -> CompilerM op s Bool
+fatMemory ScalarSpace{} = return False
+fatMemory _ = asks envFatMemory
 
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeString . nameToString
@@ -488,7 +488,7 @@ contextType = do
 
 memToCType :: Space -> CompilerM op s C.Type
 memToCType space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   if refcount
      then return $ fatMemType space
      else rawMemCType space
@@ -499,8 +499,8 @@ rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)[1]|]
 rawMemCType (ScalarSpace ds t) =
-  return $ foldl' addDim [C.cty|$ty:(primTypeToCType t)|] ds
-  where addDim t' d = [C.cty|$ty:t'[$exp:d]|]
+  return [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
+  where ds' = map (`C.toExp` noLoc) ds
 
 fatMemType :: Space -> C.Type
 fatMemType space =
@@ -638,18 +638,18 @@ declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
   ty <- memToCType space
   decl [C.cdecl|$ty:ty $id:name;|]
-  resetMem name
+  resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
-resetMem :: C.ToExp a => a -> CompilerM op s ()
-resetMem mem = do
-  refcount <- asks envFatMemory
+resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
+resetMem mem space = do
+  refcount <- fatMemory space
   when refcount $
     stm [C.cstm|$exp:mem.references = NULL;|]
 
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let src_s = pretty $ C.toExp src noLoc
   if refcount
     then stm [C.cstm|if ($id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
@@ -660,7 +660,7 @@ setMem dest src space = do
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let mem_s = pretty $ C.toExp mem noLoc
   when refcount $
     stm [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
@@ -670,7 +670,7 @@ unRefMem mem space = do
 allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> C.Stm -> CompilerM op s ()
 allocMem name size space on_failure = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let name_s = pretty $ C.toExp name noLoc
   if refcount
     then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
@@ -771,7 +771,7 @@ arrayLibraryFunctions space pt signed shape = do
   memty <- rawMemCType space
 
   let prepare_new = do
-        resetMem [C.cexp|arr->mem|]
+        resetMem [C.cexp|arr->mem|] space
         allocMem [C.cexp|arr->mem|] [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|] space
                  [C.cstm|return NULL;|]
         forM_ [0..rank-1] $ \i ->
@@ -1261,6 +1261,11 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     /* Declare and read input. */
     set_binary_mode(stdin);
     $items:input_items
+
+    if (end_of_input() != 0) {
+      panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
+    }
+
     $items:output_decls
 
     /* Warmup run */
@@ -1429,6 +1434,8 @@ $esc:("#include <errno.h>")
 $esc:("#include <getopt.h>")
 
 $esc:values_h
+
+$esc:("#define __private")
 
 static int binary_output = 0;
 static typename FILE *runtime_file;
@@ -1718,9 +1725,8 @@ compileExp = compilePrimExp compileLeaf
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (Index src (Count iexp) _ ScalarSpace{} _) = do
-          src' <- rawMem src
           iexp' <- compileExp iexp
-          return [C.cexp|$exp:src'[$exp:iexp']|]
+          return [C.cexp|$id:src[$exp:iexp']|]
 
         compileLeaf (SizeOf t) =
           return [C.cexp|(typename int32_t)sizeof($ty:t')|]
@@ -1784,12 +1790,14 @@ compilePrimExp f (ConvOpExp conv x) = do
 compilePrimExp f (BinOpExp bop x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
+  -- Note that integer addition, subtraction, and multiplication are
+  -- not handled by explicit operators, but rather by functions.  This
+  -- is because we want to implicitly convert them to unsigned
+  -- numbers, so we can do overflow without invoking undefined
+  -- behaviour.
   return $ case bop of
-             Add{} -> [C.cexp|$exp:x' + $exp:y'|]
              FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]
-             Sub{} -> [C.cexp|$exp:x' - $exp:y'|]
              FSub{} -> [C.cexp|$exp:x' - $exp:y'|]
-             Mul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FMul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FDiv{} -> [C.cexp|$exp:x' / $exp:y'|]
              Xor{} -> [C.cexp|$exp:x' ^ $exp:y'|]
@@ -1850,6 +1858,11 @@ compileCode (Assert e msg (loc, locs)) = do
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
+compileCode (Allocate _ _ ScalarSpace{}) =
+  -- Handled by the declaration of the memory block, which is
+  -- translated to an actual array.
+  return ()
+
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space [C.cstm|return 1;|]
@@ -1859,7 +1872,7 @@ compileCode (Free name space) =
 
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
-      it' = intTypeToCType it
+      it' = primTypeToCType $ IntType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
@@ -1922,10 +1935,9 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
-  dest' <- rawMem dest
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  stm [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]
+  stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
@@ -2022,7 +2034,7 @@ compileFunBody output_ptrs outputs code = do
           decl [C.cdecl|$ty:ctp $id:name;|]
 
         setRetVal' p (MemParam name space) = do
-          resetMem [C.cexp|*$exp:p|]
+          resetMem [C.cexp|*$exp:p|] space
           setMem [C.cexp|*$exp:p|] name space
         setRetVal' p (ScalarParam name _) =
           stm [C.cstm|*$exp:p = $id:name;|]
