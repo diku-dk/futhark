@@ -14,7 +14,6 @@ import Control.Monad
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
-
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
 import Futhark.CodeGen.ImpCode.Multicore
@@ -203,7 +202,7 @@ compileOp (ParLoop i e (MulticoreFunc params prebody body tid)) = do
                };|]
 
   ftask <- GC.multicoreDef "parloop" $ \s ->
-    [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
+    [C.cedecl|int $id:s(struct futhark_context * ctx, void *args, int start, int end, int $id:tid) {
               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
               $decls:(compileGetStructVals fstruct fargs fctypes)
               int $id:i = start;
