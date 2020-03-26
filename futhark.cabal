@@ -117,6 +117,11 @@ library
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
       Futhark.CodeGen.ImpGen.Multicore
+      Futhark.CodeGen.ImpGen.Multicore.Base
+      Futhark.CodeGen.ImpGen.Multicore.SegHist
+      Futhark.CodeGen.ImpGen.Multicore.SegMap
+      Futhark.CodeGen.ImpGen.Multicore.SegRed
+      Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
       Futhark.CodeGen.OpenCL.Heuristics
