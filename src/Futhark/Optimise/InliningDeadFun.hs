@@ -17,6 +17,7 @@ import qualified Data.Set as S
 
 import Futhark.Representation.SOACS
 import Futhark.Representation.SOACS.Simplify (simpleSOACS, simplifyFun)
+import Futhark.Optimise.CSE
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)
 import Futhark.Transform.Rename
 import Futhark.Analysis.CallGraph
@@ -24,13 +25,17 @@ import Futhark.Binder
 import Futhark.Pass
 
 aggInlineFunctions :: MonadFreshNames m =>
-                      ConstFun -> CallGraph -> [FunDef SOACS] -> m [FunDef SOACS]
-aggInlineFunctions constf cg =
-  fmap (filter keep) . recurse 0 . filter isFunInCallGraph
+                      CallGraph -> [FunDef SOACS] -> m [FunDef SOACS]
+aggInlineFunctions cg =
+  fmap (filter (keep mempty)) . recurse 0 . filter isFunInCallGraph
   where isFunInCallGraph fundec =
           isJust $ M.lookup (funDefName fundec) cg
 
-        fdmap fds = M.fromList $ zip (map funDefName fds) fds
+        constfuns =
+          S.fromList $ M.keys $ M.filter (==ConstFun) $ mconcat $ M.elems cg
+
+        fdmap fds =
+          M.fromList $ zip (map funDefName fds) fds
 
         noCallsTo :: (Name -> Bool) -> FunDef SOACS -> Bool
         noCallsTo interesting fundec =
@@ -58,28 +63,34 @@ aggInlineFunctions constf cg =
                 partition (noCallsTo
                            (`elem` map funDefName to_be_inlined))
                 maybe_inline_in
+              keep_around =
+                S.fromList $ map funDefName $
+                filter expensiveConstant to_be_inlined
               not_actually_inlined =
-                filter keep to_be_inlined
+                filter (keep keep_around) to_be_inlined
           if null to_be_inlined
             then return funs
             else do let simplify
-                          | i `rem` simplifyRate == 0 = simplifyFun
+                          | i `rem` simplifyRate == 0 =
+                              copyPropagateInFun simpleSOACS <=<
+                              pure . performCSEOnFunDef True <=<
+                              simplifyFun
                           | otherwise = copyPropagateInFun simpleSOACS
 
                     let onFun = simplify <=< renameFun .
-                                doInlineInCaller constf (fdmap to_be_inlined) False
-                    to_inline_in' <- recurse (i+1) . (not_to_inline_in++) =<<
-                                     mapM onFun to_inline_in
-                    return $ not_actually_inlined ++ to_inline_in'
+                                doInlineInCaller (fdmap to_be_inlined) False
+                    to_inline_in' <- mapM onFun to_inline_in
+                    (not_actually_inlined<>) <$>
+                      recurse (i+1) (not_to_inline_in <> to_inline_in')
 
-        keep fd = isJust (funDefEntryPoint fd)
-                  || callsRecursive fd
-                  || funDefName fd `S.member` keep_around
+        keep keep_around fd =
+          isJust (funDefEntryPoint fd)
+          || callsRecursive fd
+          || funDefName fd `S.member` keep_around
 
-        keep_around =
-          S.fromList $ map fst $
-          filter ((/=constf) . snd) $
-          M.toList $ mconcat $ M.elems cg
+        expensiveConstant fd =
+          funDefName fd `S.member` constfuns &&
+          not (null (bodyStms (funDefBody fd)))
 
         callsRecursive fd = maybe False (any recursive . M.keys) $
                             M.lookup (funDefName fd) cg
@@ -95,10 +106,10 @@ aggInlineFunctions constf cg =
 -- other functions. Further extensions that transform a tail-recursive
 -- function to a do or while loop, should do the transformation first
 -- and then do the inlining.
-doInlineInCaller :: ConstFun -> M.Map Name (FunDef SOACS) -> Bool -> FunDef SOACS
+doInlineInCaller :: M.Map Name (FunDef SOACS) -> Bool -> FunDef SOACS
                  -> FunDef SOACS
-doInlineInCaller constf fdmap always_reshape (FunDef entry name rtp args body) =
-  let body' = inlineInBody constf fdmap always_reshape body
+doInlineInCaller fdmap always_reshape (FunDef entry name rtp args body) =
+  let body' = inlineInBody fdmap always_reshape body
   in FunDef entry name rtp args body'
 
 inlineFunction :: Bool
@@ -137,12 +148,11 @@ inlineFunction always_reshape pat aux args (_,safety,loc,locs) fun =
 
         notNoLoc = (/=NoLoc) . locOf
 
-inlineInBody :: ConstFun -> M.Map Name (FunDef SOACS) -> Bool -> Body -> Body
-inlineInBody constf fdmap always_reshape = onBody
-  where inline (Let pat aux (Apply fname args _ (fname_constf,safety,loc,locs)) : rest)
-          | fname_constf == constf,
-            Just fd <- M.lookup fname fdmap =
-              inlineFunction always_reshape pat aux args (fname_constf,safety,loc,locs) fd
+inlineInBody :: M.Map Name (FunDef SOACS) -> Bool -> Body -> Body
+inlineInBody fdmap always_reshape = onBody
+  where inline (Let pat aux (Apply fname args _ what) : rest)
+          | Just fd <- M.lookup fname fdmap =
+              inlineFunction always_reshape pat aux args what fd
               <> inline rest
         inline (stm : rest) =
           onStm stm : inline rest
@@ -194,7 +204,7 @@ inlineFunctions =
        }
   where pass prog = do
           let cg = buildCallGraph prog
-          Prog <$> aggInlineFunctions NotConstFun cg (progFuns prog)
+          Prog <$> aggInlineFunctions cg (progFuns prog)
 
 aggInlineConstants :: [FunDef SOACS] -> [FunDef SOACS]
 aggInlineConstants orig_fds =
