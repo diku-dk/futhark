@@ -872,6 +872,18 @@ ruleIf _ pat _ (_, tbranch, _, IfAttr _ IfFallback)
       sequence_ [ letBindNames_ [patElemName p] $ BasicOp $ SubExp se
                 | (p,se) <- zip (patternElements pat) ses]
 
+ruleIf _ pat _ (cond, tb, fb, _)
+  | Body _ _ [Constant (IntValue t)] <- tb,
+    Body _ _ [Constant (IntValue f)] <- fb =
+      if oneIshInt t && zeroIshInt f
+      then Simplify $
+           letBind_ pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond
+      else if zeroIshInt t && oneIshInt f
+      then Simplify $ do
+        cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
+        letBind_ pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
+      else Skip
+
 ruleIf _ _ _ _ = Skip
 
 -- | Move out results of a conditional expression whose computation is
