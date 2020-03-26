@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Futhark.CodeGen.ImpGen.Multicore.SegMap
   (compileSegMap
   )
@@ -8,17 +6,15 @@ module Futhark.CodeGen.ImpGen.Multicore.SegMap
 import Control.Monad
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
-
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
-
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 
 compileSegMap :: Pattern ExplicitMemory
               -> SegSpace
               -> KernelBody ExplicitMemory
-              -> ImpM ExplicitMemory Imp.Multicore ()
+              -> MulticoreGen ()
 compileSegMap pat space (KernelBody _ kstms kres) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -49,5 +45,5 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
 
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop num_tasks (segFlat space) (product ns')
                               (Imp.MulticoreFunc params mempty body' num_tasks)

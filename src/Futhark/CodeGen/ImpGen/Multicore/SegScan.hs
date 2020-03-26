@@ -6,11 +6,10 @@ module Futhark.CodeGen.ImpGen.Multicore.SegScan
 import Control.Monad
 import Data.List
 import Prelude hiding (quot, rem)
-import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 
+import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
-
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 
@@ -28,18 +27,41 @@ allocIntermediateArrays space (Count size) types =
     sAllocArrayPerm "group_res_arr" pt full_shape space perm
 
 
+-- | A SegScanOp with auxiliary information.
+data SegScanOpSlug =
+  SegScanOpSlug
+  { slugOp :: Lambda ExplicitMemory
+  , slugAccs :: [(VName, [Imp.Exp])]
+    -- ^ Places to store accumulator in stage 1 reduction.
+  }
+
+slugParams :: SegScanOpSlug -> [LParam ExplicitMemory]
+slugParams = lambdaParams . slugOp
+
+segScanOpSlug :: Imp.Exp
+             -> Lambda ExplicitMemory
+             -> [VName]
+             -> MulticoreGen SegScanOpSlug
+segScanOpSlug local_tid op param_arrs =
+  SegScanOpSlug op <$>
+  mapM mkAcc param_arrs
+  where mkAcc param_arr = return (param_arr, [local_tid])
+
+
+
+
 compileSegScan :: Pattern ExplicitMemory
                 -> SegSpace
                 -> Lambda ExplicitMemory
                 -> [SubExp]
                 -> KernelBody ExplicitMemory
-                -> ImpM ExplicitMemory Imp.Multicore ()
-compileSegScan pat space lore subexps kbody = do
+                -> MulticoreGen ()
+compileSegScan pat space lore nes kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  num_tasks <- dPrim "num_tasks" $ IntType Int32
-  num_tasks' <- toExp $ Var num_tasks
+  tid <- dPrim "tid" $ IntType Int32
+  tid' <- toExp $ Var tid
 
   -- Dummy value for now
   -- Need to postpone allocation of intermediate res for scheduler
@@ -47,16 +69,18 @@ compileSegScan pat space lore subexps kbody = do
   stage_one_red_res <- allocIntermediateArrays DefaultSpace num_threads $ lambdaReturnType lore
 
   let (scan_x_params, scan_y_params) =
-        splitAt (length subexps) $ lambdaParams lore
+        splitAt (length nes) $ lambdaParams lore
 
   dPrim_ (segFlat space) (IntType Int32)
 
+  slug <- segScanOpSlug tid' lore stage_one_red_res
+
   prebody <- collect $ do
-    dScope Nothing $ scopeOfLParams $ lambdaParams lore
+    dScope Nothing $ scopeOfLParams $ slugParams slug
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-    compileKBody kbody $ \all_red_res ->
-      forM_ (zip stage_one_red_res all_red_res) $ \(slug_arr, (res, res_is)) ->
-        copyDWIMFix slug_arr [num_tasks'] res res_is
+    compileKBody kbody $ \kbody_res ->
+      forM_ (zip  (slugAccs slug) kbody_res) $ \((acc, acc_is), (res, res_is)) ->
+        copyDWIMFix acc acc_is res res_is
 
     emit $ Imp.SetScalar (segFlat space) (Imp.vi32 (segFlat space) + 1)
 
@@ -66,45 +90,49 @@ compileSegScan pat space lore subexps kbody = do
       copyDWIMFix is' [] (Var $ segFlat space) []
 
     compileStms mempty (kernelBodyStms kbody) $ do
-      let scan_res = take (length subexps) $ kernelBodyResult kbody
+      let scan_res = take (length nes) $ kernelBodyResult kbody
       -- Load new value
       forM_ (zip scan_y_params scan_res) $ \(p, se) ->
         copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
       -- Load reduce accumulator
-      forM_ (zip scan_x_params stage_one_red_res) $ \(p, slug_arr) ->
-        copyDWIMFix (paramName p) [] (Var slug_arr) [num_tasks']
+      forM_ (zip scan_x_params $ slugAccs slug) $ \(p, (acc, acc_is)) ->
+        copyDWIMFix (paramName p) [] (Var acc) acc_is
       compileStms mempty (bodyStms $ lambdaBody lore) $
-        forM_ (zip stage_one_red_res $ bodyResult $ lambdaBody lore) $ \(res_arr, se) ->
-          copyDWIMFix res_arr [num_tasks'] se []
+        forM_ (zip (slugAccs slug) $ bodyResult $ lambdaBody lore) $ \((acc, acc_is), se) ->
+          copyDWIMFix acc acc_is se []
 
   let paramsNames = namesToList $ (freeIn reduce_body `namesIntersection` freeIn prebody) `namesSubtract`
-                                  namesFromList (num_tasks : [segFlat space])
+                                  namesFromList (tid : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
 
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
-                              (Imp.MulticoreFunc params prebody reduce_body num_tasks)
+
+  ntasks <- dPrim "ntasks" $ IntType Int32
+  ntasks' <- toExp $ Var ntasks
+
+  emit $ Imp.Op $ Imp.ParLoop ntasks (segFlat space) (product ns')
+                              (Imp.MulticoreFunc params prebody reduce_body tid)
 
 
   -- |
   -- Begin stage two of scan
-  stage_two_red_res <- allocIntermediateArrays DefaultSpace (Count $ Var num_tasks) $ lambdaReturnType lore
+  stage_two_red_res <- allocIntermediateArrays DefaultSpace (Count $ Var tid) $ lambdaReturnType lore
 
   -- Set neutral element value
   dScope Nothing $ scopeOfLParams $ lambdaParams lore
-  forM_ (zip stage_two_red_res subexps) $ \(two_res, ne) ->
-       copyDWIMFix  two_res [] ne []
+  forM_ (zip stage_two_red_res nes) $ \(stage_two_res, ne) ->
+       copyDWIMFix  stage_two_res [] ne []
 
   -- Let master thread accumulate "neutral elements" for each segment
   -- This is essentially a exclusive scan
-  sFor "i" (num_tasks'-1) $ \i -> do
+  sFor "i" (ntasks'-1) $ \i -> do
     forM_ (zip scan_y_params stage_one_red_res) $ \(p, se) ->
       copyDWIMFix (paramName p) [] (Var se) [i]
     forM_ (zip scan_x_params stage_two_red_res) $ \(p, se) ->
       copyDWIMFix (paramName p) [] (Var se) [i]
     compileStms mempty (bodyStms $ lambdaBody lore) $
-      forM_ (zip stage_two_red_res $ bodyResult $ lambdaBody lore) $ \(scan_arr, se) ->
-        copyDWIMFix scan_arr [i+1] se []
+      forM_ (zip stage_two_red_res $ bodyResult $ lambdaBody lore) $ \(arr, se) ->
+        copyDWIMFix arr [i+1] se []
 
 
   -- Prepare function body for second scan iteration
@@ -113,12 +141,12 @@ compileSegScan pat space lore subexps kbody = do
     dScope Nothing $ scopeOfLParams $ lambdaParams lore
     -- Set neutral element
     forM_ (zip3  (patternElements pat) scan_x_params stage_two_red_res) $ \(pe, p, ne) -> do
-       copyDWIMFix  (paramName p) [] (Var ne) [num_tasks']
+       copyDWIMFix  (paramName p) [] (Var ne) [tid']
        copyDWIMFix (patElemName pe) (map Imp.vi32 is) (Var $ paramName p) []
 
     -- Read initial value
     compileStms mempty (kernelBodyStms kbody) $ do
-      let scan_res = take (length subexps) $ kernelBodyResult kbody
+      let scan_res = take (length nes) $ kernelBodyResult kbody
       forM_ (zip scan_y_params scan_res) $ \(p, se) ->
         copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
     -- sComment "combine with carry and write back to res and accum" $
@@ -134,7 +162,7 @@ compileSegScan pat space lore subexps kbody = do
        copyDWIMFix is' [] (Var $ segFlat space) []
 
      compileStms mempty (kernelBodyStms kbody) $ do
-       let (scan_res, _map_res) = splitAt (length subexps) $ kernelBodyResult kbody
+       let (scan_res, _map_res) = splitAt (length nes) $ kernelBodyResult kbody
        forM_ (zip scan_y_params scan_res) $ \(p, se) ->
          copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
 
@@ -148,10 +176,10 @@ compileSegScan pat space lore subexps kbody = do
 
   let paramsNames' = stage_two_red_arr_names ++
                      namesToList ((freeIn scan_body `namesIntersection` freeIn prebody') `namesSubtract`
-                     namesFromList (num_tasks: segFlat space : map paramName (lambdaParams lore) ++ is))
+                     namesFromList (tid: segFlat space : map paramName (lambdaParams lore) ++ is))
 
   ts' <- mapM lookupType paramsNames'
   let params' = zipWith toParam paramsNames' ts'
 
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns')
-                              (Imp.MulticoreFunc params' prebody' scan_body num_tasks)
+  emit $ Imp.Op $ Imp.ParLoop ntasks (segFlat space) (product ns')
+                             (Imp.MulticoreFunc params' prebody' scan_body tid)

@@ -28,7 +28,7 @@ type Code = Imp.Code Multicore
 data MulticoreFunc = MulticoreFunc [Param] Code Code VName
 
 -- | A parallel operation.
-data Multicore = ParLoop VName Imp.Exp MulticoreFunc
+data Multicore = ParLoop VName VName Imp.Exp MulticoreFunc
 
 
 instance Pretty MulticoreFunc where
@@ -39,7 +39,7 @@ instance Pretty MulticoreFunc where
     nestedBlock "{" "}" (ppr body)
 
 instance Pretty Multicore where
-  ppr (ParLoop i e func) =
+  ppr (ParLoop _ntask i e func) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr func)
 
@@ -47,4 +47,4 @@ instance FreeIn MulticoreFunc where
   freeIn' (MulticoreFunc _ prebody body _) = freeIn' prebody <> freeIn' body
 
 instance FreeIn Multicore where
-  freeIn' (ParLoop _ e func) = freeIn' e <> freeIn' func
+  freeIn' (ParLoop ntask _ e func) = freeIn' ntask <> freeIn' e <> freeIn' func

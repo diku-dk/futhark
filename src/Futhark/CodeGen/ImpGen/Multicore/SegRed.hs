@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Futhark.CodeGen.ImpGen.Multicore.SegRed
   (compileSegRed
   )
@@ -10,15 +8,10 @@ import Data.List
 import Prelude hiding (quot, rem)
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
-
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
-
 import Futhark.Util (chunks)
-
 import Futhark.CodeGen.ImpGen.Multicore.Base
-
-
 
 -- Compile SegReduce
 -- 1. This can't handle multidimensional reductions (e.g. tests/soacs/reduce4.fut)
@@ -26,14 +19,13 @@ compileSegRed :: Pattern ExplicitMemory
                  -> SegLevel -> SegSpace
                  -> [SegRedOp ExplicitMemory]
                  -> KernelBody ExplicitMemory
-                 -> ImpM ExplicitMemory Imp.Multicore ()
+                 -> MulticoreGen ()
 compileSegRed pat _lvl space reds kbody
   | [(_, Constant (IntValue (Int32Value 1))), _] <- unSegSpace space =
       nonsegmentedReduction pat space reds kbody
   | otherwise =
     error "segmented reduction not supported currently"
       -- segmentedReduction pat space reds kbody
-
 
 
 -- | Arrays for storing group results.
@@ -45,9 +37,9 @@ compileSegRed pat _lvl space reds kbody
 groupResultArrays :: Count NumGroups SubExp
                   -> [SubExp]
                   -> [SegRedOp ExplicitMemory]
-                  -> ImpM ExplicitMemory Imp.Multicore [[VName]]
+                  -> MulticoreGen [[VName]]
 groupResultArrays (Count num_threads) dims reds =
-  forM (zip reds dims) $ \((SegRedOp _ lam _ shape), dim) ->
+  forM (zip reds dims) $ \(SegRedOp _ lam _ shape, dim) ->
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
         full_shape = Shape [dim, num_threads] <> shape <> arrayShape t
@@ -55,10 +47,8 @@ groupResultArrays (Count num_threads) dims reds =
     sAllocArrayPerm "group_res_arr" pt full_shape DefaultSpace perm
 
 
-
-
 -- | A SegRedOp with auxiliary information.
-data RedOpSlug =
+data SegRedOpSlug =
   SegRedOpSlug
   { slugOp :: SegRedOp ExplicitMemory
   , slugAccs :: [(VName, [Imp.Exp])]
@@ -66,27 +56,27 @@ data RedOpSlug =
   }
 
 
-
-slugBody :: RedOpSlug -> Body ExplicitMemory
+slugBody :: SegRedOpSlug -> Body ExplicitMemory
 slugBody = lambdaBody . segRedLambda . slugOp
 
-slugParams :: RedOpSlug -> [LParam ExplicitMemory]
+slugParams :: SegRedOpSlug -> [LParam ExplicitMemory]
 slugParams = lambdaParams . segRedLambda . slugOp
 
-slugNeutral :: RedOpSlug -> [SubExp]
+slugNeutral :: SegRedOpSlug -> [SubExp]
 slugNeutral = segRedNeutral . slugOp
 
-slugShape :: RedOpSlug -> Shape
+slugShape :: SegRedOpSlug -> Shape
 slugShape = segRedShape . slugOp
 
-accParams, nextParams :: RedOpSlug -> [LParam ExplicitMemory]
+accParams, nextParams :: SegRedOpSlug -> [LParam ExplicitMemory]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
+
 
 segRedOpSlug :: Imp.Exp
              -> Imp.Exp
              -> (SegRedOp ExplicitMemory, [VName])
-             -> ImpM ExplicitMemory Imp.Multicore RedOpSlug
+             -> MulticoreGen SegRedOpSlug
 segRedOpSlug local_tid dims (op, param_arrs) =
   SegRedOpSlug op <$>
   mapM mkAcc param_arrs
@@ -97,13 +87,11 @@ segRedOpSlug local_tid dims (op, param_arrs) =
               return (param_arr, [local_tid, dims])
 
 
-
-
 nonsegmentedReduction :: Pattern ExplicitMemory
                       -> SegSpace
                       -> [SegRedOp ExplicitMemory]
                       -> KernelBody ExplicitMemory
-                      -> ImpM ExplicitMemory Imp.Multicore ()
+                      -> MulticoreGen ()
 nonsegmentedReduction pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
 
@@ -113,13 +101,12 @@ nonsegmentedReduction pat space reds kbody = do
   num_threads' <- toExp $ unCount num_threads
 
   ns' <- mapM toExp ns
-  emit $ Imp.DebugPrint "K" Nothing
   stage_one_red_arrs <- groupResultArrays num_threads ns reds
 
-  num_tasks <- dPrim "num_tasks" $ IntType Int32
-  num_tasks' <- toExp $ Var num_tasks
+  tid <- dPrim "tid" $ IntType Int32
+  tid' <- toExp $ Var tid
 
-  slugs <- mapM (segRedOpSlug num_tasks' num_threads') $ zip reds stage_one_red_arrs
+  slugs <- mapM (segRedOpSlug tid' num_threads') $ zip reds stage_one_red_arrs
 
   prebody <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
@@ -148,11 +135,15 @@ nonsegmentedReduction pat space reds kbody = do
 
 
   let paramsNames = namesToList $ (freeIn fbody `namesIntersection` freeIn prebody) `namesSubtract`
-                                  namesFromList (num_tasks : [segFlat space])
+                                  namesFromList (tid : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
 
-  emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc params prebody fbody num_tasks)
+  ntasks <- dPrim "num_tasks" $ IntType Int32
+  ntasks' <- toExp $ Var ntasks
+
+  emit $ Imp.Op $ Imp.ParLoop ntasks (segFlat space) (product ns')
+                              (Imp.MulticoreFunc params prebody fbody tid)
 
   forM_ slugs $ \slug ->
     forM_ (zip (patternElements pat) (slugNeutral slug)) $ \(pe, ne) ->
@@ -160,7 +151,7 @@ nonsegmentedReduction pat space reds kbody = do
 
   -- Reduce over intermediate results
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-  sFor "i" num_tasks' $ \i' ->
+  sFor "i" ntasks' $ \i' ->
     sComment "apply map function" $
       forM_ slugs $ \slug ->
         sLoopNest (slugShape slug) $ \_vec_is -> do
@@ -178,11 +169,12 @@ nonsegmentedReduction pat space reds kbody = do
 
 
 
+
 -- segmentedReduction :: Pattern ExplicitMemory
 --                       -> SegSpace
 --                       -> [SegRedOp ExplicitMemory]
 --                       -> KernelBody ExplicitMemory
---                       -> ImpM ExplicitMemory Imp.Multicore ()
+--                       -> MulticoreGen ()
 -- segmentedReduction pat space reds kbody = do
 --   let (is, ns) = unzip $ unSegSpace space
 --       -- Dummy value for now
@@ -193,10 +185,10 @@ nonsegmentedReduction pat space reds kbody = do
 --   num_threads' <- toExp $ unCount num_threads
 --   stage_one_red_arrs <- groupResultArrays num_threads ns reds
 
---   num_tasks <- dPrim "num_tasks" $ IntType Int32
---   num_tasks' <- toExp $ Var num_tasks
+--   tid <- dPrim "num_tasks" $ IntType Int32
+--   tid' <- toExp $ Var num_tasks
 
---   slugs <- mapM (segRedOpSlug num_tasks' num_threads') $ zip reds stage_one_red_arrs
+--   slugs <- mapM (segRedOpSlug tid' num_threads') $ zip reds stage_one_red_arrs
 
 --   emit $ Imp.DebugPrint "\n# SegRed" Nothing
 
@@ -235,12 +227,12 @@ nonsegmentedReduction pat space reds kbody = do
 
 
 --   let paramsNames = namesToList $ (freeIn fbody `namesIntersection` freeIn prebody) `namesSubtract`
---                                   namesFromList (num_tasks : [segFlat space])
+--                                   namesFromList (tid : [segFlat space])
 
 --   ts <- mapM lookupType paramsNames
 --   let params = zipWith toParam paramsNames ts
 
---   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc params prebody fbody num_tasks)
+--   emit $ Imp.Op $ Imp.ParLoop (segFlat space) (product ns') (Imp.MulticoreFunc params prebody fbody tid)
 
 --   -- | BROKEN!
 --   -- Stage two of SegReduce
@@ -255,7 +247,7 @@ nonsegmentedReduction pat space reds kbody = do
 --   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 --   forM_  (init ns') $ \n -> do
 --     sFor "n" n $ \n' ->
---       sFor "i" num_tasks' $ \i' ->
+--       sFor "i" tid' $ \i' ->
 --         sComment "apply map function" $
 --           forM_ slugs $ \slug ->
 --             sLoopNest (slugShape slug) $ \_vec_is -> do

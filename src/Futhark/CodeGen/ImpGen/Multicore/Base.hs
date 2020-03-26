@@ -1,6 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
- (toParam
- ,compileKBody
+ ( toParam
+ , compileKBody
+ , MulticoreGen
  )
  where
 
@@ -11,6 +12,7 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 
+type MulticoreGen = ImpM ExplicitMemory Imp.Multicore
 
 
 toParam :: VName -> TypeBase shape u -> Imp.Param

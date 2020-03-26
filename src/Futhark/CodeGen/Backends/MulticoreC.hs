@@ -187,7 +187,7 @@ paramToCType t = case t of
                MemParam _ space' -> GC.fatMemType space'
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop i e (MulticoreFunc params prebody body tid)) = do
+compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   let fctypes = map paramToCType params
   let fargs   = map paramName params
   e' <- GC.compileExp e
@@ -215,7 +215,7 @@ compileOp (ParLoop i e (MulticoreFunc params prebody body tid)) = do
 
   GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', &$id:tid) != 0) {
+  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', &$id:ntasks) != 0) {
                      fprintf(stderr, "scheduler failed to do task\n");
                      return 1;
            }|]
