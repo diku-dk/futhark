@@ -183,7 +183,13 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
                                        substituteInMod p_substs' arg_mod)) $ do
           substs <- scopeSubsts <$> askScope
           x <- evalModExp f_body
-          return $ addSubsts abs abs_substs $ substituteInMod (b_substs <> substs) x
+          return $
+            addSubsts abs abs_substs $
+            -- The next one is dubious, but is necessary to
+            -- propagate substitutions from the argument (see
+            -- modules/functor24.fut).
+            addSubsts abs (scopeSubsts $ modScope arg_mod) $
+            substituteInMod (b_substs <> substs) x
   where addSubsts abs substs (ModFun mabs (Scope msubsts mods) mp me) =
           ModFun (abs<>mabs) (Scope (substs<>msubsts) mods) mp me
         addSubsts _ substs (ModMod (Scope msubsts mods)) =
