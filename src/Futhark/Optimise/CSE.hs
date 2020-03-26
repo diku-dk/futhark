@@ -28,6 +28,7 @@
 -- This affects SOACs in particular.
 module Futhark.Optimise.CSE
        ( performCSE
+       , performCSEOnFunDef
        , CSEInOp
        )
        where
@@ -55,6 +56,13 @@ performCSE cse_arrays =
   Pass "CSE" "Combine common subexpressions." $
   intraproceduralTransformation $
   return . removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
+
+-- | Perform CSE on a single function.
+performCSEOnFunDef :: (Attributes lore, CanBeAliased (Op lore),
+                       CSEInOp (OpWithAliases (Op lore))) =>
+                      Bool -> FunDef lore -> FunDef lore
+performCSEOnFunDef cse_arrays =
+  removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 cseInFunDef :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                Bool -> FunDef lore -> FunDef lore
