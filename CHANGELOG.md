@@ -15,11 +15,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Precomputed constants are now handled much more efficiently.
 
+  * Certain large programs that rely heavily on inlining now compile
+    orders of magnitude faster.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+  * Some fixes to complicated module expressions.
 
 ## [0.15.2]
 
