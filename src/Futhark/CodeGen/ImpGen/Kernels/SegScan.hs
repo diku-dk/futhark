@@ -17,7 +17,11 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 -- import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 -- import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
+-- import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
+-- import Futhark.Tools hiding (toExp)--(letSubExp)
+
+-- import Futhark.Construct  hiding (toExp)
 -- one pass scan will be implemented here
 compileSegScan :: Pattern ExplicitMemory
                -> SegLevel      --At which level the *body* of a SegOp executes.
@@ -33,28 +37,41 @@ compileSegScan  (Pattern _ pes)
                 nes
                 kbody = do
     let (gtids, dims) = unzip $ unSegSpace space
-    arraysize <- toExp $ head dims
+    let arrsize = head dims
+    arraysize <- toExp $ arrsize
     let gtid = head gtids
 
-    let num_groups = segNumGroups lvl
-    num_groups' <- traverse toExp $ segNumGroups lvl
-    let group_size = segGroupSize lvl
-    group_size' <- traverse toExp $ segGroupSize lvl
+    -- let num_groups = segNumGroups lvl
+    -- num_groups' <- traverse toExp $ segNumGroups lvl
+
+    let group_size = segGroupSize lvl                                  -- Subexp
+    group_size' <- traverse toExp $ segGroupSize lvl                  -- Imp.Exp
+
+    -- Make Subexp of roundup(N/blocksize)
+    -- let num_groups_subexp = arrsize `quotRoundingUp` (unCount  group_size)
+    -- num_groups_subexp <- letSubExp "num_groups_subexp" $ BasicOp $ BinOp (Mul Int32) arrsize (unCount  group_size)
 
 
+    -- Make Imp.Exp of roundup(N/blocksize)
+    -- num_groups_impexp = arraysize + group_size - 1 / group_size
+    let apg = Imp.BinOpExp (Add Int32) arraysize (unCount group_size')
+    let apgmone = Imp.BinOpExp (Sub Int32) apg 1
+    let num_groups_impexp = Imp.BinOpExp (SDiv Int32) apgmone (unCount group_size')
+    ng <- dPrimV "num_groups" num_groups_impexp
 
     let (hxp, _hyp) = splitAt (length nes) $ lambdaParams scan_op
 
     aggregates <- forM hxp $ \p -> do
             let pt = elemType $ paramType p
-            sAllocArray "aggregates" pt (Shape $ [unCount num_groups]) $ Space "device"
+            sAllocArray "aggregates" pt (Shape $ [Var ng]) $ Space "device"
 
     incprefix <- forM hxp $ \p -> do
             let pt = elemType $ paramType p
-            sAllocArray "incprefix" pt (Shape $ [unCount num_groups]) $ Space "device"
+            sAllocArray "incprefix" pt (Shape $ [Var ng]) $ Space "device"
 
 
-    statusflgs <- sAllocArray "statusflgs" int8 (Shape [unCount num_groups]) (Space "device")
+    statusflgs <- sAllocArray "statusflgs" int8 (Shape $ [Var ng]) (Space "device")
+    -- statusflgs <- sAllocArray "statusflgs" int8 (Shape [num_groups_subexp]) (Space "device")
 
     g_dyn_id <- sAllocArray "dyn_id" int32 (Shape [intConst Int32 1]) (Space "device")
     copyDWIMFix g_dyn_id [0] (intConst Int32 0) []
@@ -67,7 +84,7 @@ compileSegScan  (Pattern _ pes)
                 -- -> CallKernelGen ()
       -- incprefix <- sAllocArray "incprefix" (Prim (FloatType Float32)) (Shape [num_groups]) (Space "device")
 
-    sKernelThread "my_scan" num_groups' group_size' (segFlat space) $ \constants -> do
+    sKernelThread "my_scan" (Imp.Count num_groups_impexp) group_size' (segFlat space) $ \constants -> do
 
       let ltid = kernelLocalThreadId constants
       let waveSize = kernelWaveSize constants
