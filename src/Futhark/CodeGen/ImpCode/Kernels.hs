@@ -18,13 +18,9 @@ module Futhark.CodeGen.ImpCode.Kernels
   , module Futhark.CodeGen.ImpCode
   , module Futhark.Representation.Kernels.Sizes
   -- * Utility functions
-  , getKernels
   , atomicBinOp
   )
   where
-
-import Control.Monad.Writer
-import Data.List
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
@@ -80,14 +76,6 @@ data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName
                | ConstUse VName KernelConstExp
                  deriving (Eq, Show)
-
-getKernels :: Program -> [Kernel]
-getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
-  where getFunKernels (CallKernel kernel) =
-          tell [kernel]
-        getFunKernels _ =
-          return ()
-        sameKernel _ _ = False
 
 -- | Get an atomic operator corresponding to a binary operator.
 atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Elements Imp.Exp -> Exp -> AtomicOp)
