@@ -190,7 +190,7 @@ compileStructFields  fargs fctypes =
 compileSetStructValues :: (C.ToIdent a1, C.ToIdent a2) =>
                            a1 -> [a2] -> [C.Stm]
 compileSetStructValues struct vnames =
-  [ [C.cstm|$id:struct->$id:name=&$id:name;|] | name <- vnames]
+  [ [C.cstm|$id:struct.$id:name=&$id:name;|] | name <- vnames]
 
 
 compileGetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
@@ -233,12 +233,10 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
               return 0;
            }|]
 
-  GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
-  GC.stm [C.cstm|$id:fstruct->ctx = ctx;|]
+  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
+  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stm [C.cstm|if (scheduler_do_task(&ctx->q, $id:ftask, $id:fstruct, $exp:e', &$id:ntasks) != 0) {
+  GC.stm [C.cstm|if (scheduler_do_task(&ctx->q, $id:ftask, &$id:fstruct, $exp:e', &$id:ntasks) != 0) {
                      fprintf(stderr, "scheduler failed to do task\n");
                      return 1;
            }|]
-
-  GC.stm  [C.cstm|free($id:fstruct);|]
