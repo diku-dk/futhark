@@ -101,13 +101,19 @@ gpuPipeline =
 
 multicorePipeline :: Pipeline SOACS ExplicitMemory
 multicorePipeline =
-  kernelsPipeline >>>
+  standardPipeline >>>
+  onePass extractKernels >>>
+  passes [ simplifyKernels
+         , unstream
+         , performCSE True
+         , simplifyKernels
+         , sink
+         , inPlaceLowering
+         ] >>>
   onePass explicitAllocations >>>
   passes [ simplifyExplicitMemory
          , performCSE False
          , simplifyExplicitMemory
          , doubleBuffer
-         , simplifyExplicitMemory
-         , expandAllocations
          , simplifyExplicitMemory
          ]
