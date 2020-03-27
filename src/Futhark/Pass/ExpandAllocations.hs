@@ -452,7 +452,9 @@ offsetMemoryInExp e = mapExpM recurse e
                   , mapOnBranchType = offsetMemoryInBodyReturns
                   , mapOnOp = onOp
                   }
-        onOp (Inner (SegOp op)) = Inner . SegOp <$> mapSegOpM segOpMapper op
+        onOp (Inner (SegOp op)) =
+          Inner . SegOp <$>
+          localScope (scopeOfSegSpace (segSpace op)) (mapSegOpM segOpMapper op)
           where segOpMapper =
                   identitySegOpMapper { mapOnSegOpBody = offsetMemoryInKernelBody
                                       , mapOnSegOpLambda = offsetMemoryInLambda

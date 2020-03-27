@@ -763,7 +763,7 @@ buildRetType env pats = comb
         comb (Scalar Arrow{}) t =
           descend t
         comb got et =
-          descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
+          descend $ fromStruct got `setAliases` aliases et
 
         descend t@Array{}
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
