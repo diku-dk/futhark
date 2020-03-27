@@ -44,8 +44,8 @@ compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
 compileSegOp pat  (SegHist _ space histops _ kbody) =
   compileSegHist pat space histops kbody
 
-compileSegOp pat (SegScan _ space lore subexps _ kbody) =
-  compileSegScan pat space lore subexps kbody
+compileSegOp pat (SegScan _ space op nes _ kbody) =
+  compileSegScan pat space op nes kbody
 
 compileSegOp pat (SegRed lvl space reds _ kbody) =
   compileSegRed pat lvl space reds kbody
