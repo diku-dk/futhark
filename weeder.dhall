@@ -9,6 +9,9 @@
   , "^Language.Futhark.Query"
   , "^Language.Futhark.Parser"
 
+  -- Generated code that we cannot do anything about.
+  , "^Paths_futhark"
+
   -- Code that might technically be dead right now, but is kept around
   -- for consistency of the internal API.
   , "^Futhark.Analysis.AlgSimplify.ppRangesRep"
