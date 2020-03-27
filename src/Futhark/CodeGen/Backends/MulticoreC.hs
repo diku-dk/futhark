@@ -75,6 +75,7 @@ compileProg =
              [C.cedecl|struct $id:s {
                           struct job_queue q;
                           typename pthread_t *threads;
+                          int num_threads;
                           int detail_memory;
                           int debugging;
                           int profiling;
@@ -90,20 +91,19 @@ compileProg =
                  if (ctx == NULL) {
                    return NULL;
                  }
-                 if (job_queue_init(&ctx->q, 64)) return NULL;
+                 if (job_queue_init(&ctx->q, 64, num_processors())) return NULL;
                  ctx->detail_memory = cfg->debugging;
                  ctx->debugging = cfg->debugging;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
                  $stms:init_fields
 
-                 int num_threads = 4;
-                 ctx->threads = calloc(num_threads, sizeof(pthread_t));
+                 ctx->threads = calloc(ctx->q.num_workers, sizeof(pthread_t));
 
-                 for (int i = 0; i < num_threads; i++) {
+                 for (int i = 0; i < ctx->q.num_workers; i++) {
                    if (pthread_create(&ctx->threads[i], NULL, &futhark_worker, &ctx->q) != 0) {
                      fprintf(stderr, "Failed to create thread (%d)\n", i);
-                     return 1;
+                     return NULL;
                    }
                 }
                 return ctx;
@@ -112,8 +112,8 @@ compileProg =
           GC.publicDef_ "context_free" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 futhark_context_kill_jobqueue(ctx);
-                 for (int i = 0; i < num_threads; i++) {
+                 job_queue_destroy(&ctx->q);
+                 for (int i = 0; i < ctx->q.num_workers; i++) {
                    if (pthread_join(ctx->threads[i], NULL) != 0) {
                      fprintf(stderr, "pthread_join failed on thread %d", i);
                      return 1;
@@ -148,29 +148,6 @@ compileProg =
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                          (void)ctx;
                        }|])
-
-          GC.publicDef_ "context_get_jobqueue" GC.InitDecl $ \s ->
-            ([C.cedecl|struct job_queue *$id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|struct job_queue *$id:s(struct $id:ctx* ctx) {
-                         return &ctx->q;
-                       }|])
-
-          GC.publicDef_ "context_init_jobqueue" GC.InitDecl $ \s ->
-            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         return job_queue_init(&ctx->q, 64);
-                       }|])
-
-          GC.publicDef_ "context_kill_jobqueue" GC.InitDecl $ \s ->
-            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         return job_queue_destroy(&ctx->q);
-                       }|])
-
-
-
-
-
 
 copyMulticoreMemory :: GC.Copy Multicore ()
 copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =

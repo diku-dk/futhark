@@ -3,11 +3,13 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
+#include <sys/sysinfo.h>
 
 #define MULTICORE
 
-
-const int num_threads = 4;
+static int num_processors() {
+  return get_nprocs();
+}
 
 typedef int (*task_fn)(void*, int, int, int);
 
@@ -89,8 +91,8 @@ static inline int scheduler_do_task(struct job_queue *q,
 
   int task_id = 0;
   int shared_counter = 0;
-  int iter_pr_task = iterations / num_threads;
-  int remainder = iterations % num_threads;
+  int iter_pr_task = iterations / q->num_workers;
+  int remainder = iterations % q->num_workers;
 
   struct task *task = setup_task(fn, task_args, task_id,
                                  &mutex, &cond, &shared_counter,
