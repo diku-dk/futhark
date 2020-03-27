@@ -236,7 +236,7 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.decl [C.cdecl|struct $id:fstruct *$id:fstruct = malloc(sizeof(struct $id:fstruct));|]
   GC.stm [C.cstm|$id:fstruct->ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stms [C.cstms|if (scheduler_do_task(ctx, $id:ftask, $id:fstruct, $exp:e', &$id:ntasks) != 0) {
+  GC.stm [C.cstm|if (scheduler_do_task(&ctx->q, $id:ftask, $id:fstruct, $exp:e', &$id:ntasks) != 0) {
                      fprintf(stderr, "scheduler failed to do task\n");
                      return 1;
            }|]

@@ -66,10 +66,11 @@ static inline struct task* setup_task(task_fn fn, void* task_args, int task_id,
 }
 
 
-static inline int scheduler_do_task(struct futhark_context *ctx,
+static inline int scheduler_do_task(struct job_queue *q,
                                     task_fn fn, void* task_args,
                                     int iterations, int *ntask)
 {
+  assert(q != NULL);
   if (iterations == 0) {
     if (ntask != NULL)  *ntask = 0;
     return 0;
@@ -98,7 +99,7 @@ static inline int scheduler_do_task(struct futhark_context *ctx,
   pthread_mutex_lock(&mutex);
   shared_counter++;
   pthread_mutex_unlock(&mutex);
-  job_queue_push(futhark_context_get_jobqueue(ctx), (void*)task);
+  job_queue_push(q, (void*)task);
 
 
   for (int i = remainder + iter_pr_task; i < iterations; i += iter_pr_task)
@@ -111,7 +112,7 @@ static inline int scheduler_do_task(struct futhark_context *ctx,
     pthread_mutex_lock(&mutex);
     shared_counter++;
     pthread_mutex_unlock(&mutex);
-    job_queue_push(futhark_context_get_jobqueue(ctx), (void*)task);
+    job_queue_push(q, (void*)task);
   }
 
 
