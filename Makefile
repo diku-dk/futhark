@@ -1,10 +1,10 @@
 FUTHARK = ~/.local/bin/futhark
-SIZES = 13 42 8704 32768 524288 1048576 16777216
-# 65536 131072 262144 524288
+SIZES = 13 42 8704 32768 524288 1048576
+# 65536 131072 262144 524288 1048576 16777216
 # 33 1024 1025 2048 8704
 
-all: compile compile-simple-opencl dump-simple test
 allcuda: compile compile-simple-cuda dump-cuda test-cuda
+all: compile compile-simple-opencl dump-simple test
 
 compile:
 	stack install --fast
