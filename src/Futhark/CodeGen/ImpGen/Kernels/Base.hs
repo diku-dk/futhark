@@ -12,7 +12,6 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , isActive
   , sKernelThread
   , sKernelGroup
-  , sKernelSimple
   , sReplicate
   , sIota
   , sCopy
@@ -23,9 +22,6 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , kernelLoop
   , groupCoverSpace
 
-  , getSize
-
-  , atomicUpdate
   , atomicUpdateLocking
   , Locking(..)
   , AtomicUpdate(..)
@@ -406,15 +402,6 @@ data AtomicUpdate lore
     -- ^ Can be done by efficient swaps.
   | AtomicLocking (Locking -> DoAtomicUpdate lore)
     -- ^ Requires explicit locking.
-
-atomicUpdate :: ExplicitMemorish lore =>
-                Space -> [VName] -> [Imp.Exp] -> Lambda lore -> Locking
-             -> ImpM lore Imp.KernelOp ()
-atomicUpdate space arrs bucket lam locking =
-  case atomicUpdateLocking lam of
-    AtomicPrim f -> f space arrs bucket
-    AtomicCAS f -> f space arrs bucket
-    AtomicLocking f -> f locking space arrs bucket
 
 -- | 'atomicUpdate', but where it is explicitly visible whether a
 -- locking strategy is necessary.
@@ -1023,14 +1010,6 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
           | otherwise =
               copyDWIM (paramName y) [] (Var $ paramName x) []
 
-getSize :: String -> Imp.SizeClass -> CallKernelGen VName
-getSize desc sclass = do
-  size <- dPrim desc int32
-  fname <- asks envFunction
-  let size_key = keyWithEntryPoint fname $ nameFromString $ pretty size
-  sOp $ Imp.GetSize size size_key sclass
-  return size
-
 computeMapKernelGroups :: Imp.Exp -> CallKernelGen (Imp.Exp, Imp.Exp)
 computeMapKernelGroups kernel_size = do
   group_size <- dPrim "group_size" int32
@@ -1091,20 +1070,19 @@ virtualiseGroups constants SegVirt required_groups m = do
     -- another virtual group have its way with it.
     sOp $ Imp.Barrier Imp.FenceGlobal
 
-sKernelThread, sKernelGroup :: String
-                            -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
-                            -> VName
-                            -> (KernelConstants -> InKernelGen ())
-                            -> CallKernelGen ()
-(sKernelThread, sKernelGroup) = (sKernel' threadOperations kernelGlobalThreadId,
-                                 sKernel' groupOperations kernelGroupId)
-  where sKernel' ops flatf name num_groups group_size v f = do
-          (constants, set_constants) <- kernelInitialisationSimple num_groups group_size
-          let name' = nameFromString $ name ++ "_" ++ show (baseTag v)
-          sKernel (ops constants) constants name' $ do
-            set_constants
-            dPrimV_ v $ flatf constants
-            f constants
+sKernelThread :: String
+              -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
+              -> VName
+              -> (KernelConstants -> InKernelGen ())
+              -> CallKernelGen ()
+sKernelThread = sKernel threadOperations kernelGlobalThreadId
+
+sKernelGroup :: String
+             -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
+             -> VName
+             -> (KernelConstants -> InKernelGen ())
+             -> CallKernelGen ()
+sKernelGroup = sKernel groupOperations kernelGroupId
 
 sKernelFailureTolerant :: Bool
                        -> Operations ExplicitMemory Imp.KernelOp
@@ -1124,20 +1102,20 @@ sKernelFailureTolerant tol ops constants name m = do
     , Imp.kernelFailureTolerant = tol
     }
 
-sKernel :: Operations ExplicitMemory Imp.KernelOp
-        -> KernelConstants -> Name -> ImpM ExplicitMemory Imp.KernelOp a -> CallKernelGen ()
-sKernel = sKernelFailureTolerant False
-
--- | A kernel with the given number of threads, running per-thread code.
-sKernelSimple :: String -> Imp.Exp
-              -> (KernelConstants -> InKernelGen ())
-              -> CallKernelGen ()
-sKernelSimple name kernel_size f = do
-  (constants, init_constants) <- simpleKernelConstants kernel_size name
-  let name' = nameFromString $ name ++ "_" ++
-              show (baseTag $ kernelGlobalThreadIdVar constants)
-  sKernel (threadOperations constants) constants name' $ do
-    init_constants
+sKernel :: (KernelConstants -> Operations ExplicitMemory Imp.KernelOp)
+        -> (KernelConstants -> Imp.Exp)
+        -> String
+        -> Count NumGroups Imp.Exp
+        -> Count GroupSize Imp.Exp
+        -> VName
+        -> (KernelConstants -> ImpM ExplicitMemory Imp.KernelOp a)
+        -> ImpM ExplicitMemory Imp.HostOp ()
+sKernel ops flatf name num_groups group_size v f = do
+  (constants, set_constants) <- kernelInitialisationSimple num_groups group_size
+  let name' = nameFromString $ name ++ "_" ++ show (baseTag v)
+  sKernelFailureTolerant False (ops constants) constants name' $ do
+    set_constants
+    dPrimV_ v $ flatf constants
     f constants
 
 copyInGroup :: CopyCompiler ExplicitMemory Imp.KernelOp

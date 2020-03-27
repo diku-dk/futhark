@@ -64,7 +64,9 @@ module Futhark.Representation.Primitive
 
        -- * Utility
        , zeroIsh
+       , zeroIshInt
        , oneIsh
+       , oneIshInt
        , negativeIsh
        , primBitSize
        , primByteSize
@@ -1041,10 +1043,7 @@ zeroIsh _                             = False
 
 -- | Is the given value kind of one?
 oneIsh :: PrimValue -> Bool
-oneIsh (IntValue (Int8Value k))      = k == 1
-oneIsh (IntValue (Int16Value k))     = k == 1
-oneIsh (IntValue (Int32Value k))     = k == 1
-oneIsh (IntValue (Int64Value k))     = k == 1
+oneIsh (IntValue k)                  = oneIshInt k
 oneIsh (FloatValue (Float32Value k)) = k == 1
 oneIsh (FloatValue (Float64Value k)) = k == 1
 oneIsh (BoolValue True)              = True
@@ -1064,6 +1063,13 @@ zeroIshInt (Int8Value k)  = k == 0
 zeroIshInt (Int16Value k) = k == 0
 zeroIshInt (Int32Value k) = k == 0
 zeroIshInt (Int64Value k) = k == 0
+
+-- | Is the given integer value kind of one?
+oneIshInt :: IntValue -> Bool
+oneIshInt (Int8Value k)  = k == 1
+oneIshInt (Int16Value k) = k == 1
+oneIshInt (Int32Value k) = k == 1
+oneIshInt (Int64Value k) = k == 1
 
 -- | Is the given integer value kind of negative?
 negativeIshInt :: IntValue -> Bool

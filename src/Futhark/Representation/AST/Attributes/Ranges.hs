@@ -188,6 +188,10 @@ primOpRanges (BinOp (SDiv t) x y) =
 primOpRanges (ConvOp (SExt from to) x)
   | from < to = [rangeOf x]
 
+primOpRanges (ConvOp (BToI it) _) =
+  [(Just $ ScalarBound $ SE.Val $ IntValue $ intValue it (0::Int),
+    Just $ ScalarBound $ SE.Val $ IntValue $ intValue it (1::Int))]
+
 primOpRanges (Iota n x s Int32) =
   [(Just $ ScalarBound x',
     Just $ ScalarBound $ x' + (n' - 1) * s')]
