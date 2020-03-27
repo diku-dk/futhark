@@ -17,16 +17,18 @@ struct job_queue {
   pthread_mutex_t mutex; // Mutex used for synchronisation.
   pthread_cond_t cond;   // Condition variable used for synchronisation.
 
+  int num_workers;
   int dead;
 };
 
 
 // Initialise a job queue with the given capacity.  The queue starts out
 // empty.  Returns non-zero on error.
-static inline int job_queue_init(struct job_queue *job_queue, int capacity) {
+static inline int job_queue_init(struct job_queue *job_queue, int capacity, int num_workers) {
   job_queue->capacity = capacity;
   job_queue->first = 0;
   job_queue->num_used = 0;
+  job_queue->num_workers = num_workers;
   job_queue->dead = 0;
   job_queue->buffer = calloc(capacity, sizeof(void*));
 
