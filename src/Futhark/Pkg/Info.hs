@@ -18,6 +18,7 @@ module Futhark.Pkg.Info
   )
   where
 
+import Control.Exception
 import Control.Monad.IO.Class
 import Data.Maybe
 import Data.IORef
@@ -39,6 +40,11 @@ import Network.HTTP.Simple
 import Futhark.Pkg.Types
 import Futhark.Util.Log
 import Futhark.Util (maybeHead)
+
+-- | Catch 'HttpException's and turn them into an ordinary return
+-- value.
+httpMayThrow :: IO a -> IO (Either HttpException a)
+httpMayThrow m = (Right <$> m) `catch` (pure . Left)
 
 -- | The manifest is stored as a monadic action, because we want to
 -- fetch them on-demand.  It would be a waste to fetch it information
@@ -93,14 +99,17 @@ downloadZipball url = do
   logMsg $ "Downloading " <> T.unpack url
   r <- liftIO $ parseRequest $ T.unpack url
 
-  r' <- liftIO $ httpLBS r
   let bad = fail . (("When downloading " <> T.unpack url <> ": ")<>)
-  case getResponseStatusCode r' of
-    200 ->
-      case Zip.toArchiveOrFail $ getResponseBody r' of
-        Left e -> bad $ show e
-        Right a -> return a
-    x -> bad $ "got HTTP status " ++ show x
+  http <- liftIO $ httpMayThrow $ httpLBS r
+  case http of
+    Left e -> bad $ "got network error:\n" ++ show e
+    Right r' ->
+      case getResponseStatusCode r' of
+        200 ->
+          case Zip.toArchiveOrFail $ getResponseBody r' of
+            Left e -> bad $ show e
+            Right a -> return a
+        x -> bad $ "got HTTP status " ++ show x
 
 -- | Information about a package.  The name of the package is stored
 -- separately.
@@ -170,19 +179,22 @@ ghglRevGetManifest url owner repo tag = GetManifest $ do
   logMsg $ "Downloading package manifest from " <> url
   r <- liftIO $ parseRequest $ T.unpack url
 
-  r' <- liftIO $ httpBS r
   let path = T.unpack $ owner <> "/" <> repo <> "@" <>
              tag <> "/" <> T.pack futharkPkg
       msg = (("When reading " <> path <> ": ")<>)
-  case getResponseStatusCode r' of
-    200 ->
-      case T.decodeUtf8' $ getResponseBody r' of
-        Left e -> fail $ msg $ show e
-        Right s ->
-          case parsePkgManifest path s of
-            Left e -> fail $ msg $ errorBundlePretty e
-            Right pm -> return pm
-    x -> fail $ msg $ "got HTTP status " ++ show x
+  http <- liftIO $ httpMayThrow $ httpBS r
+  case http of
+    Left e -> fail $ msg $ "got network error:\n" ++ show e
+    Right r' ->
+      case getResponseStatusCode r' of
+        200 ->
+          case T.decodeUtf8' $ getResponseBody r' of
+            Left e -> fail $ msg $ show e
+            Right s ->
+              case parsePkgManifest path s of
+                Left e -> fail $ msg $ errorBundlePretty e
+                Right pm -> return pm
+        x -> fail $ msg $ "got HTTP status " ++ show x
 
 ghglLookupCommit :: (MonadIO m, MonadLogger m, MonadFail m) =>
                     T.Text -> T.Text
