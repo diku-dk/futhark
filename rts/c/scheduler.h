@@ -9,7 +9,7 @@
 
 const int num_threads = 4;
 
-typedef int (*task_fn)(struct futhark_context*, void*, int, int, int);
+typedef int (*task_fn)(void*, int, int, int);
 
 struct task {
   task_fn fn;
@@ -29,11 +29,11 @@ enum OP {
 };
 
 static inline void *futhark_worker(void* arg) {
-  struct futhark_context *ctx = (struct futhark_context*) arg;
+  struct job_queue *q = (struct job_queue*) arg;
   while(1) {
     struct task *task;
-    if (job_queue_pop(futhark_context_get_jobqueue(ctx), (void**)&task) == 0) {
-      task->fn(ctx, task->args, task->start, task->end, task->task_id);
+    if (job_queue_pop(q, (void**)&task) == 0) {
+      task->fn(task->args, task->start, task->end, task->task_id);
        pthread_mutex_lock(task->mutex);
        (*task->counter)--;
        pthread_cond_signal(task->cond);

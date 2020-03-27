@@ -1482,18 +1482,6 @@ int main(int argc, char** argv) {
   struct futhark_context *ctx = futhark_context_new(cfg);
   assert (ctx != NULL);
 
-$esc:("#ifdef MULTICORE");
-  int num_threads = 4;
-  typename pthread_t *threads = calloc(num_threads, sizeof(pthread_t));
-
-  for (int i = 0; i < num_threads; i++) {
-    if (pthread_create(&threads[i], NULL, &futhark_worker, ctx) != 0) {
-      fprintf(stderr, "Failed to create thread (%d)\n", i);
-      return 1;
-    }
-  }
-$esc:("#endif");
-
   if (entry_point != NULL) {
     int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
     entry_point_fun *entry_point_fun = NULL;
@@ -1521,16 +1509,6 @@ $esc:("#endif");
 
     futhark_debugging_report(ctx);
   }
-
-$esc:("#ifdef MULTICORE");
-  futhark_context_kill_jobqueue(ctx);
-  for (int i = 0; i < num_threads; i++) {
-    if (pthread_join(threads[i], NULL) != 0) {
-      fprintf(stderr, "pthread_join failed on thread %d", i);
-      return 1;
-    }
-  }
-$esc:("#endif");
 
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
