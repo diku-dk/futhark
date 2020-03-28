@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Some fixes to complicated module expressions.
 
+  * `futhark pkg` should no longer crash uncontrollably on network
+    errors (#894).
+
+  * Fixed local open in interpreter (#887).
+
+  * Fix error regarding entry points that called other entry points
+    which contained local functions (#895).
+
 ## [0.15.2]
 
 ### Fixed
