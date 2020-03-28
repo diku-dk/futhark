@@ -4,9 +4,9 @@
 #define SCHEDULER_H
 
 
-// returns the number of logical cores
 #ifdef __APPLE__
 #include <sys/sysctl.h>
+// returns the number of logical cores
 static int num_processors() {
     int ncores;
     size_t ncores_size = sizeof(ncores);

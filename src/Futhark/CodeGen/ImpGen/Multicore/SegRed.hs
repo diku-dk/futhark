@@ -103,6 +103,10 @@ nonsegmentedReduction pat _ space reds kbody = do
 
   slugs <- mapM (segRedOpSlug tid') $ zip reds stage_one_red_arrs
 
+  -- TODO: Need to declare this for reduce6.fut
+  -- reduce6.fut still doesn't work though
+  dPrimV_ (segFlat space) 0
+
   prebody <- collect $
     sComment "neutral-initialise the acc used by this thread" $
       forM_ slugs $ \slug ->
@@ -144,11 +148,10 @@ nonsegmentedReduction pat _ space reds kbody = do
     forM_ slugs $ \slug ->
       forM_ (zip (patternElements pat) (slugNeutral slug)) $ \(pe, ne) ->
         sLoopNest (slugShape slug) $ \vec_is ->
-          copyDWIMFix (patElemName pe) ([0] ++ vec_is) ne []
+          copyDWIMFix (patElemName pe) (0 : vec_is) ne []
 
   -- Reduce over intermediate results
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-  dPrimV_ (segFlat space) 0
   sFor "i" ntasks' $ \i' -> do
     emit $ Imp.SetScalar tid i'
     sComment "Apply main thread reduction" $
@@ -159,11 +162,11 @@ nonsegmentedReduction pat _ space reds kbody = do
           copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
         sComment "load next params" $
           forM_ (zip (nextParams slug) $ patternElements pat) $ \(p, pe) ->
-          copyDWIMFix (paramName p) [] (Var $ patElemName pe) ([0] ++ vec_is)
+          copyDWIMFix (paramName p) [] (Var $ patElemName pe) (0 : vec_is)
         sComment "red body" $
           compileStms mempty (bodyStms $ slugBody slug) $
             forM_ (zip (patternElements pat) (bodyResult $ slugBody slug)) $
-              \(pe, se') -> copyDWIMFix (patElemName pe) ([0] ++ vec_is) se' []
+              \(pe, se') -> copyDWIMFix (patElemName pe) (0 : vec_is) se' []
 
 
 -- Each thread reduces over the number of segments
