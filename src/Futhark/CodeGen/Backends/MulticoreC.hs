@@ -115,8 +115,7 @@ compileProg =
                  job_queue_destroy(&ctx->q);
                  for (int i = 0; i < ctx->q.num_workers; i++) {
                    if (pthread_join(ctx->threads[i], NULL) != 0) {
-                     fprintf(stderr, "pthread_join failed on thread %d", i);
-                     return 1;
+                     fprintf(stderr, "pthread_join failed on thread %d\n", i);
                    }
                  }
                  free_lock(&ctx->lock);
