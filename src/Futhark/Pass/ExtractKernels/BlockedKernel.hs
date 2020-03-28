@@ -7,7 +7,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , nonSegRed
        , segScan
        , segHist
-        , segMap
+       , segMap
 
        , streamRed
        , streamMap
