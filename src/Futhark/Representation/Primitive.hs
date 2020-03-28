@@ -1170,7 +1170,7 @@ instance Pretty ConvOp where
     where (from, to) = convOpType op
 
 instance Pretty UnOp where
-  ppr Not            = text "!"
+  ppr Not            = text "not"
   ppr (Abs t)        = taggedI "abs" t
   ppr (FAbs t)       = taggedF "fabs" t
   ppr (SSignum t)    = taggedI "ssignum" t
