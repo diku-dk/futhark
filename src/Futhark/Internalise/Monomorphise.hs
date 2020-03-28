@@ -264,6 +264,9 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e e_t loc)
       let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, [], body, loc)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
+        -- Do not remember this one for next time we monomorphise this
+        -- function.
+        modifyLifts $ filter ((/=fname) . fst . fst)
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
@@ -686,11 +689,7 @@ transformValBind valbind = do
     t <- removeTypeVariablesInType $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          fst $ unInfo $ valBindRetType valbind
-    -- We are monomorphising in a special way here, so we don't want
-    -- the monomorphisations of local functions to be remembered.
-    old_lifts <- getLifts
     (name, _, valbind'') <- monomorphiseBinding True valbind' $ monoType t
-    modifyLifts $ const old_lifts
     tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = valBindEntryPoint valbind})
 
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
