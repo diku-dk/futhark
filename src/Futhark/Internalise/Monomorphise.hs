@@ -32,7 +32,7 @@ import           Control.Monad.State
 import           Control.Monad.Writer hiding (Sum)
 import           Data.Bitraversable
 import           Data.Bifunctor
-import           Data.List
+import           Data.List (partition)
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe

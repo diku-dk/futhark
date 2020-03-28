@@ -10,7 +10,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Sequence as Seq
 import qualified Data.Map.Strict as M
-import Data.List
+import Data.List (foldl')
 
 import Prelude hiding (quot)
 

@@ -23,7 +23,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Foldable
 import Data.Either
-import Data.List
+import Data.List (partition, transpose, unzip6, zip6)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S

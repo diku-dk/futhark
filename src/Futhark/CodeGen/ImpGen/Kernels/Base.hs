@@ -33,7 +33,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import Data.List
+import Data.List (elemIndex, find, nub, zip4)
 
 import Prelude hiding (quot, rem)
 

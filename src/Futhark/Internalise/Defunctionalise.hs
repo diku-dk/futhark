@@ -9,7 +9,7 @@ import           Control.Monad.State
 import           Control.Monad.RWS hiding (Sum)
 import           Data.Bifunctor
 import           Data.Foldable
-import           Data.List
+import           Data.List (sortOn, nub, partition, tails)
 import qualified Data.List.NonEmpty as NE
 import           Data.Loc
 import           Data.Maybe

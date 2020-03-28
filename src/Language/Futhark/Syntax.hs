@@ -99,7 +99,6 @@ import           Data.Ord
 import qualified Data.Set                         as S
 import           Data.Traversable
 import qualified Data.List.NonEmpty               as NE
-import           Data.List
 import           Prelude
 
 import           Futhark.Representation.Primitive (FloatType (..),

@@ -8,7 +8,7 @@ module Futhark.CLI.REPL (main) where
 import Control.Monad.Free.Church
 import Control.Exception
 import Data.Char
-import Data.List
+import Data.List (intercalate, intersperse)
 import Data.Loc
 import Data.Maybe
 import Data.Version

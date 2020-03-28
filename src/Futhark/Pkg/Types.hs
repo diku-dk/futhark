@@ -38,7 +38,7 @@ import Control.Applicative
 import Control.Monad
 import Data.Either
 import Data.Foldable
-import Data.List
+import Data.List (sortOn)
 import Data.Maybe
 import Data.Traversable
 import Data.Void

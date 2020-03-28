@@ -48,7 +48,7 @@ import Control.Monad.Trans.Maybe
 import qualified Data.Map.Strict as M
 import Data.Foldable
 import Data.Maybe
-import Data.List
+import Data.List (elemIndex, sortOn)
 
 import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames

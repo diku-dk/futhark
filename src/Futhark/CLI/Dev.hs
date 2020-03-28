@@ -3,7 +3,7 @@
 module Futhark.CLI.Dev (main) where
 
 import Data.Maybe
-import Data.List
+import Data.List (intersperse)
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State

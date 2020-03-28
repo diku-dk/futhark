@@ -5,7 +5,7 @@ module Futhark.Util.Table
      , Entry
      ) where
 
-import Data.List
+import Data.List (intercalate, transpose)
 import System.Console.ANSI
 
 data RowTemplate = RowTemplate [Int] Int deriving (Show)

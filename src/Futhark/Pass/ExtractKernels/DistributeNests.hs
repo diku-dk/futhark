@@ -44,7 +44,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer.Strict
 import Control.Monad.Trans.Maybe
 import Data.Maybe
-import Data.List
+import Data.List (find, partition, tails)
 
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.SOACS.SOAC as SOAC

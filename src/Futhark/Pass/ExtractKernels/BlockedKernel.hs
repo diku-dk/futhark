@@ -7,7 +7,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , nonSegRed
        , segScan
        , segHist
-       , segMap
+        , segMap
 
        , streamRed
        , streamMap
@@ -31,7 +31,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
 import Control.Monad
 import Control.Monad.Writer
 import Control.Monad.Identity
-import Data.List
+import Data.List ()
 
 import Prelude hiding (quot)
 

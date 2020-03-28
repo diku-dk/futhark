@@ -15,7 +15,7 @@ import Data.Bifunctor (first)
 import Data.Bitraversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List
+import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
 import Data.Loc
 import Data.Char (chr)

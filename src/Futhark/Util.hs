@@ -45,7 +45,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import Data.Char
-import Data.List
+import Data.List (genericDrop, genericSplitAt)
 import Data.Either
 import Data.Maybe
 import System.Environment

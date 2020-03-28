@@ -10,7 +10,7 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.ByteString.Lazy as LBS
-import Data.List
+import Data.List (isPrefixOf, intercalate)
 import Data.Monoid
 import System.Directory
 import System.FilePath

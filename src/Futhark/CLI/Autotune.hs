@@ -6,7 +6,7 @@ import Control.Monad
 import qualified Data.ByteString.Char8 as SBS
 import Data.Time.Clock.POSIX
 import Data.Tree
-import Data.List
+import Data.List (intersect, isPrefixOf, foldl', sort, sortOn)
 import Data.Maybe
 import Text.Read (readMaybe)
 import Text.Regex.TDFA

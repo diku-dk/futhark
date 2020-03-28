@@ -24,7 +24,7 @@ import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.Either
-import Data.List
+import Data.List (isPrefixOf, foldl', find, (\\), nub, transpose, sort, group)
 import qualified Data.List.NonEmpty as NE
 import Data.Loc
 import Data.Maybe

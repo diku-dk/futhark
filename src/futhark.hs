@@ -5,7 +5,7 @@ module Main (main) where
 import Data.Maybe
 import Control.Exception
 import Control.Monad
-import Data.List
+import Data.List (sortOn)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import GHC.IO.Encoding (setLocaleEncoding)

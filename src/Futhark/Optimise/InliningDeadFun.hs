@@ -9,7 +9,7 @@ module Futhark.Optimise.InliningDeadFun
   where
 
 import Control.Monad.Identity
-import Data.List
+import Data.List (partition)
 import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M

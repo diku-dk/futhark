@@ -9,7 +9,7 @@ module Language.Futhark.TypeChecker.Modules
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
-import Data.List
+import Data.List (intersect)
 import Data.Loc
 import Data.Maybe
 import Data.Either

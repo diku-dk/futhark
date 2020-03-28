@@ -19,7 +19,7 @@ import Control.Monad
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.List
+import Data.List (find, (\\), tails)
 
 import Futhark.Representation.SOACS hiding (SOAC(..))
 import qualified Futhark.Representation.SOACS as Futhark

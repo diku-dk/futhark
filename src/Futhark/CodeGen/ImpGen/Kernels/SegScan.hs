@@ -6,7 +6,7 @@ module Futhark.CodeGen.ImpGen.Kernels.SegScan
 
 import Control.Monad.Except
 import Data.Maybe
-import Data.List
+import Data.List ()
 
 import Prelude hiding (quot, rem)
 

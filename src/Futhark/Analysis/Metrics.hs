@@ -20,7 +20,7 @@ import Control.Monad.Writer
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.String
-import Data.List
+import Data.List (tails)
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST
