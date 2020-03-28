@@ -16,7 +16,7 @@ module Futhark.Pass.ExtractKernels.Interchange
 
 import Control.Monad.RWS.Strict
 import Data.Maybe
-import Data.List
+import Data.List (find)
 
 import Futhark.Pass.ExtractKernels.Distribution
   (LoopNesting(..), KernelNest, kernelNestLoops)

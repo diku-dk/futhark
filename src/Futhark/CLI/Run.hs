@@ -5,7 +5,6 @@ module Futhark.CLI.Run (main) where
 
 import Control.Monad.Free.Church
 import Control.Exception
-import Data.List
 import Data.Loc
 import Data.Maybe
 import qualified Data.Map as M

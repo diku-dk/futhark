@@ -21,7 +21,7 @@ where
 
 import Control.Monad
 import Data.Either
-import Data.List
+import Data.List (find, isSuffixOf, partition, sort)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 

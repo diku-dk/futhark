@@ -53,7 +53,7 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
 import qualified Data.Map.Strict as M
-import Data.List
+import Data.List (intersperse)
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias

@@ -26,7 +26,7 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
 import qualified Data.Text.Encoding as T
-import Data.List
+import Data.List (foldl', intersperse)
 import qualified System.FilePath.Posix as Posix
 import System.Exit
 import System.IO

@@ -44,7 +44,7 @@ module Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
-import Data.List
+import Data.List (foldl', genericLength, zip4, zip6)
 
 import Prelude hiding (quot, rem)
 

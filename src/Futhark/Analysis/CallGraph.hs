@@ -9,7 +9,7 @@ module Futhark.Analysis.CallGraph
 import Control.Monad.Writer.Strict
 import qualified Data.Map.Strict as M
 import Data.Maybe (isJust)
-import Data.List
+import Data.List (foldl')
 
 import Futhark.Representation.SOACS
 
