@@ -27,6 +27,22 @@ compileSegRed pat lvl space reds kbody
   | otherwise =
       segmentedReduction pat space reds kbody
 
+compileKBodyRed :: Pattern ExplicitMemory
+             -> SegSpace
+             -> (KernelBody ExplicitMemory)
+             -> [SegRedOp ExplicitMemory]
+             -> ([(SubExp, [Imp.Exp])] -> ImpM ExplicitMemory Imp.Multicore ())
+             -> ImpM ExplicitMemory Imp.Multicore ()
+compileKBodyRed pat space kbody reds red_cont =
+  compileStms mempty (kernelBodyStms kbody) $ do
+    let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult kbody
+
+    sComment "save map-out results" $ do
+      let map_arrs = drop (segRedResults reds) $ patternElements pat
+      zipWithM_ (compileThreadResult space ) map_arrs map_res
+
+    red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+
 
 -- | Arrays for storing group results.
 --
@@ -76,10 +92,7 @@ segRedOpSlug :: Imp.Exp
              -> (SegRedOp ExplicitMemory, [VName])
              -> MulticoreGen SegRedOpSlug
 segRedOpSlug local_tid (op, param_arrs) =
-  SegRedOpSlug op <$>
-  mapM mkAcc param_arrs
-  where mkAcc param_arr =
-          return (param_arr, [local_tid])
+  SegRedOpSlug op <$> mapM (\param_arr -> return (param_arr, [local_tid])) param_arrs
 
 
 nonsegmentedReduction :: Pattern ExplicitMemory
@@ -117,7 +130,7 @@ nonsegmentedReduction pat _ space reds kbody = do
   fbody <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-    compileKBody kbody $ \all_red_res -> do
+    compileKBodyRed pat space kbody reds $ \all_red_res -> do
       let all_red_res' = chunks (map (length . slugNeutral) slugs) all_red_res
       forM_ (zip all_red_res' slugs) $ \(red_res, slug) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
