@@ -3,13 +3,29 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
+
+// returns the number of logical cores
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+static int num_processors() {
+    int ncores;
+    size_t ncores_size = sizeof(ncores);
+    if (sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0)) {
+      fprintf(stderr, "[num_processors] failed to find number of cores %s", strerror(errno));
+      return -1;
+    }
+    return ncores;
+}
+#else // If Linux
 #include <sys/sysinfo.h>
-
-#define MULTICORE
-
 static int num_processors() {
   return get_nprocs();
 }
+
+#endif
+// RIP windows
+
+#define MULTICORE
 
 typedef int (*task_fn)(void*, int, int, int);
 
