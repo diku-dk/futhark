@@ -681,12 +681,18 @@ transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   valbind' <- toPolyBinding <$>
               removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
+
   when (isJust $ valBindEntryPoint valbind) $ do
     t <- removeTypeVariablesInType $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          fst $ unInfo $ valBindRetType valbind
+    -- We are monomorphising in a special way here, so we don't want
+    -- the monomorphisations of local functions to be remembered.
+    old_lifts <- getLifts
     (name, _, valbind'') <- monomorphiseBinding True valbind' $ monoType t
+    modifyLifts $ const old_lifts
     tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = valBindEntryPoint valbind})
+
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
 
 transformTypeBind :: TypeBind -> MonoM Env
