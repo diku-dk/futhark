@@ -16,7 +16,6 @@ import System.FilePath
 import System.Exit
 import System.Console.GetOpt
 import System.IO
-import qualified System.Console.Haskeline as Haskeline
 
 import Prelude
 
@@ -105,7 +104,7 @@ newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft show =<<
     liftIO (runExceptT (readProgram file)
-            `Haskeline.catch` \(err::IOException) ->
+            `catch` \(err::IOException) ->
                return (externalErrorS (show err)))
   when (interpreterPrintWarnings cfg) $
     liftIO $ hPrint stderr ws
