@@ -4,8 +4,7 @@ module Futhark.CodeGen.Backends.CSOpenCL
   ) where
 
 import Control.Monad
-import Data.List
-
+import Data.List (intersperse)
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory, int32)

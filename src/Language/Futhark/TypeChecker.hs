@@ -18,7 +18,7 @@ module Language.Futhark.TypeChecker
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
-import Data.List
+import Data.List (isPrefixOf)
 import Data.Loc
 import Data.Maybe
 import Data.Either

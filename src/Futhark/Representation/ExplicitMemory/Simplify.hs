@@ -10,7 +10,7 @@ module Futhark.Representation.ExplicitMemory.Simplify
 where
 
 import Control.Monad
-import Data.List
+import Data.List (find)
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax

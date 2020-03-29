@@ -8,7 +8,7 @@ module Futhark.Representation.AST.Attributes.Rearrange
        , isMapTranspose
        ) where
 
-import Data.List
+import Data.List (sortOn, tails)
 
 import Futhark.Util
 

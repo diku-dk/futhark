@@ -23,7 +23,7 @@ import Control.Monad.State
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.List
+import Data.List (intercalate)
 import qualified System.FilePath.Posix as Posix
 import System.IO.Error
 import qualified Data.Text as T

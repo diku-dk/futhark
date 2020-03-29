@@ -111,7 +111,7 @@ import           Data.Char
 import           Data.Foldable
 import qualified Data.Map.Strict       as M
 import qualified Data.Set              as S
-import           Data.List
+import           Data.List (sortOn, genericLength, isPrefixOf, nub)
 import           Data.Loc
 import           Data.Maybe
 import           Data.Ord

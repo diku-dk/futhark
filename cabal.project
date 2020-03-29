@@ -1,5 +1,7 @@
 packages: futhark.cabal
-index-state: 2020-02-04T23:36:26Z
+index-state: 2020-03-29T07:51:14Z
 
 package futhark
   ghc-options: -Werror -j
+
+allow-newer: th-expand-syns:template-haskell

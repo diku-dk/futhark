@@ -36,7 +36,7 @@ module Futhark.Representation.AST.Attributes
   )
   where
 
-import Data.List
+import Data.List (find)
 import Data.Maybe (mapMaybe, isJust)
 import qualified Data.Map.Strict as M
 

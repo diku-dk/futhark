@@ -63,7 +63,7 @@ import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
-import Data.List
+import Data.List (find, foldl', nub, mapAccumL)
 import Data.Maybe
 
 import Futhark.Representation.AST

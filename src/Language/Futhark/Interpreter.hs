@@ -27,7 +27,8 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Data.Array
 import Data.Bifunctor (first)
-import Data.List hiding (break)
+import Data.List
+  (transpose, genericLength, isPrefixOf, foldl', find, intercalate)
 import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.List.NonEmpty as NE

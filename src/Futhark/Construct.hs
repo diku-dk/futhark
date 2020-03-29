@@ -62,7 +62,7 @@ where
 
 import qualified Data.Map.Strict as M
 import Data.Loc (SrcLoc)
-import Data.List
+import Data.List (sortOn)
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer

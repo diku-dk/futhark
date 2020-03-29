@@ -11,7 +11,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.List
+import Data.List (foldl')
 
 import Prelude hiding (quot)
 

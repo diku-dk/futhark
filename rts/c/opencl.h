@@ -645,6 +645,9 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   const char* src_ptr[] = {fut_opencl_src};
 
   if (ctx->cfg.dump_program_to != NULL) {
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Dumping OpenCL source to %s...\n", ctx->cfg.dump_program_to);
+    }
     FILE *f = fopen(ctx->cfg.dump_program_to, "w");
     assert(f != NULL);
     fputs(fut_opencl_src, f);
@@ -652,6 +655,9 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   }
 
   if (ctx->cfg.load_binary_from == NULL) {
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Creating OpenCL program...\n");
+    }
     prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
     OPENCL_SUCCEED_FATAL(error);
 
@@ -683,10 +689,16 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
                     "%s ", extra_build_opts[i]);
     }
 
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Building OpenCL program...\n");
+    }
     OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
 
     free(compile_opts);
   } else {
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Loading OpenCL binary from %s...\n", ctx->cfg.load_binary_from);
+    }
     size_t binary_size;
     unsigned char *fut_opencl_bin =
       (unsigned char*) slurp_file(ctx->cfg.load_binary_from, &binary_size);
@@ -705,6 +717,10 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   free(fut_opencl_src);
 
   if (ctx->cfg.dump_binary_to != NULL) {
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Dumping OpenCL binary to %s...\n", ctx->cfg.dump_binary_to);
+    }
+
     size_t binary_size;
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARY_SIZES,
                                           sizeof(size_t), &binary_size, NULL));
