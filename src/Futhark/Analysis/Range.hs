@@ -13,7 +13,7 @@ module Futhark.Analysis.Range
 
 import qualified Data.Map.Strict as M
 import Control.Monad.Reader
-import Data.List
+import Data.List (nub)
 
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.Ranges

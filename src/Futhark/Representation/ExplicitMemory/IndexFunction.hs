@@ -25,7 +25,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        where
 
 import Prelude hiding (mod, repeat)
-import Data.List hiding (repeat)
+import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Function (on)

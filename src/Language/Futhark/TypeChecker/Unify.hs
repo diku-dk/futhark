@@ -41,7 +41,7 @@ import Control.Monad.Writer hiding (Sum)
 import Control.Monad.RWS.Strict hiding (Sum)
 import Control.Monad.State
 import Data.Bifoldable (biany)
-import Data.List
+import Data.List (intersect)
 import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M

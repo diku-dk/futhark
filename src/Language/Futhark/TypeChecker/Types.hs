@@ -27,7 +27,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List
+import Data.List (foldl', sort, nub)
 import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M

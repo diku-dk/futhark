@@ -60,7 +60,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS.Strict
 import Control.Monad.Identity
-import Data.List
+import Data.List (isPrefixOf, find)
 import Data.Loc
 import Data.Maybe
 import Data.Either

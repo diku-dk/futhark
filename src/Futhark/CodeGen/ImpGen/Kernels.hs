@@ -10,7 +10,7 @@ module Futhark.CodeGen.ImpGen.Kernels
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Maybe
-import Data.List
+import Data.List ()
 
 import Prelude hiding (quot)
 

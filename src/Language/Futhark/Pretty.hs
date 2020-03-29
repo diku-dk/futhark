@@ -19,7 +19,7 @@ import           Codec.Binary.UTF8.String (decode)
 import           Data.Array
 import           Data.Functor
 import qualified Data.Map.Strict       as M
-import           Data.List
+import           Data.List (intersperse)
 import qualified Data.List.NonEmpty    as NE
 import           Data.Maybe
 import           Data.Monoid           hiding (Sum)
