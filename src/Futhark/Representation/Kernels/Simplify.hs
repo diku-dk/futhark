@@ -15,7 +15,7 @@ where
 
 import Control.Monad
 import Data.Foldable
-import Data.List
+import Data.List (isPrefixOf, groupBy, partition)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 

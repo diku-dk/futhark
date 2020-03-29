@@ -77,7 +77,7 @@ import Data.Bits (xor, shiftR)
 import Data.Char (ord, isDigit, isAlphaNum)
 import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
-import Data.List
+import Data.List (unzip4)
 import Data.Loc
 import Data.Maybe
 import Data.FileEmbed

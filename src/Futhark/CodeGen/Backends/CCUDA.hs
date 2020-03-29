@@ -8,7 +8,8 @@ module Futhark.CodeGen.Backends.CCUDA
   ) where
 
 import Control.Monad
-import Data.List
+import Data.List (intercalate)
+import Data.Maybe (catMaybes)
 import qualified Language.C.Quote.OpenCL as C
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
@@ -20,8 +21,6 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
-
-import Data.Maybe (catMaybes)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg prog = do

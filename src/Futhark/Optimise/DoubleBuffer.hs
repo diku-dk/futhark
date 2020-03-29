@@ -30,7 +30,7 @@ import           Control.Monad.Writer
 import           Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import           Data.Maybe
-import           Data.List
+import           Data.List (find)
 
 import           Futhark.Construct
 import           Futhark.Representation.AST

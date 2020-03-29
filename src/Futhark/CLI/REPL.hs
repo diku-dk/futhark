@@ -8,7 +8,7 @@ module Futhark.CLI.REPL (main) where
 import Control.Monad.Free.Church
 import Control.Exception
 import Data.Char
-import Data.List
+import Data.List (intercalate, intersperse)
 import Data.Loc
 import Data.Maybe
 import Data.Version
@@ -156,7 +156,7 @@ newFutharkiState count maybe_file = runExceptT $ do
       (ws, imports, src) <-
         badOnLeft show =<<
         liftIO (runExceptT (readProgram file)
-                 `Haskeline.catch` \(err::IOException) ->
+                 `catch` \(err::IOException) ->
                    return (externalErrorS (show err)))
       liftIO $ hPrint stderr ws
 
@@ -411,7 +411,7 @@ cdCommand dir
  | T.null dir = liftIO $ putStrLn "Usage: ':cd <dir>'."
  | otherwise =
     liftIO $ setCurrentDirectory (T.unpack dir)
-    `Haskeline.catch` \(err::IOException) -> print err
+    `catch` \(err::IOException) -> print err
 
 helpCommand :: Command
 helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do
