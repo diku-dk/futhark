@@ -3,11 +3,24 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
-
-#ifdef __APPLE__
+#ifdef _WIN32
+#include <windows.h>
+#elif __APPLE__
 #include <sys/sysctl.h>
+#else
+#include <sys/sysinfo.h>
+#endif
+
 // returns the number of logical cores
 static int num_processors() {
+#ifdef _WIN32
+/* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    int ncores = sysinfo.dwNumberOfProcessors;
+    fprintf(stdout, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
+    return ncores;
+#elif __APPLE__
     int ncores;
     size_t ncores_size = sizeof(ncores);
     if (sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0)) {
@@ -15,15 +28,10 @@ static int num_processors() {
       return -1;
     }
     return ncores;
-}
 #else // If Linux
-#include <sys/sysinfo.h>
-static int num_processors() {
   return get_nprocs();
-}
-
 #endif
-// RIP windows
+}
 
 #define MULTICORE
 
