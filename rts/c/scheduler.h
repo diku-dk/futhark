@@ -41,22 +41,28 @@ struct task {
 };
 
 
-enum OP {
+struct scheduler {
+  struct job_queue q;
+  pthread_t *threads; // A list of threads
+  int num_threads;
+};
+
+enum SegOp {
   SegMap,
   SegRed,
 };
 
 static inline void *futhark_worker(void* arg) {
-  struct job_queue *q = (struct job_queue*) arg;
+  struct scheduler *scheduler = (struct scheduler*) arg;
   while(1) {
     struct task *task;
-    if (job_queue_pop(q, (void**)&task) == 0) {
+    if (job_queue_pop(&scheduler->q, (void**)&task) == 0) {
       task->fn(task->args, task->start, task->end, task->task_id);
-       pthread_mutex_lock(task->mutex);
-       (*task->counter)--;
-       pthread_cond_signal(task->cond);
-       pthread_mutex_unlock(task->mutex);
-       free(task);
+      pthread_mutex_lock(task->mutex);
+      (*task->counter)--;
+      pthread_cond_signal(task->cond);
+      pthread_mutex_unlock(task->mutex);
+      free(task);
     } else {
        break;
     }
@@ -83,11 +89,11 @@ static inline struct task* setup_task(task_fn fn, void* task_args, int task_id,
 }
 
 
-static inline int scheduler_do_task(struct job_queue *q,
+static inline int scheduler_do_task(struct scheduler *scheduler,
                                     task_fn fn, void* task_args,
                                     int iterations, int *ntask)
 {
-  assert(q != NULL);
+  assert(scheduler != NULL);
   if (iterations == 0) {
     if (ntask != NULL)  *ntask = 0;
     return 0;
@@ -106,8 +112,8 @@ static inline int scheduler_do_task(struct job_queue *q,
 
   int task_id = 0;
   int shared_counter = 0;
-  int iter_pr_task = iterations / q->num_workers;
-  int remainder = iterations % q->num_workers;
+  int iter_pr_task = iterations / scheduler->num_threads;
+  int remainder = iterations % scheduler->num_threads;
 
   struct task *task = setup_task(fn, task_args, task_id,
                                  &mutex, &cond, &shared_counter,
@@ -116,7 +122,7 @@ static inline int scheduler_do_task(struct job_queue *q,
   pthread_mutex_lock(&mutex);
   shared_counter++;
   pthread_mutex_unlock(&mutex);
-  job_queue_push(q, (void*)task);
+  job_queue_push(&scheduler->q, (void*)task);
 
 
   for (int i = remainder + iter_pr_task; i < iterations; i += iter_pr_task)
@@ -129,7 +135,7 @@ static inline int scheduler_do_task(struct job_queue *q,
     pthread_mutex_lock(&mutex);
     shared_counter++;
     pthread_mutex_unlock(&mutex);
-    job_queue_push(q, (void*)task);
+    job_queue_push(&scheduler->q, (void*)task);
   }
 
 

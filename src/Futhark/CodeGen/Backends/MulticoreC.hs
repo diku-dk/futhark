@@ -73,9 +73,7 @@ compileProg =
           ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:s;|],
              [C.cedecl|struct $id:s {
-                          struct job_queue q;
-                          typename pthread_t *threads;
-                          int num_threads;
+                          struct scheduler scheduler;
                           int detail_memory;
                           int debugging;
                           int profiling;
@@ -91,17 +89,21 @@ compileProg =
                  if (ctx == NULL) {
                    return NULL;
                  }
-                 if (job_queue_init(&ctx->q, 64, num_processors())) return NULL;
+
                  ctx->detail_memory = cfg->debugging;
                  ctx->debugging = cfg->debugging;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
                  $stms:init_fields
 
-                 ctx->threads = calloc(ctx->q.num_workers, sizeof(pthread_t));
 
-                 for (int i = 0; i < ctx->q.num_workers; i++) {
-                   if (pthread_create(&ctx->threads[i], NULL, &futhark_worker, &ctx->q) != 0) {
+                 ctx->scheduler.num_threads = num_processors();
+                 if (ctx->scheduler.num_threads < 1) return NULL;
+                 if (job_queue_init(&ctx->scheduler.q, 64)) return NULL;
+                 ctx->scheduler.threads = calloc(ctx->scheduler.num_threads, sizeof(pthread_t));
+
+                 for (int i = 0; i < ctx->scheduler.num_threads; i++) {
+                   if (pthread_create(&ctx->scheduler.threads[i], NULL, &futhark_worker, &ctx->scheduler) != 0) {
                      fprintf(stderr, "Failed to create thread (%d)\n", i);
                      return NULL;
                    }
@@ -112,9 +114,9 @@ compileProg =
           GC.publicDef_ "context_free" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 job_queue_destroy(&ctx->q);
-                 for (int i = 0; i < ctx->q.num_workers; i++) {
-                   if (pthread_join(ctx->threads[i], NULL) != 0) {
+                 job_queue_destroy(&ctx->scheduler.q);
+                 for (int i = 0; i < ctx->scheduler.num_threads; i++) {
+                   if (pthread_join(ctx->scheduler.threads[i], NULL) != 0) {
                      fprintf(stderr, "pthread_join failed on thread %d\n", i);
                    }
                  }
@@ -212,7 +214,7 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stm [C.cstm|if (scheduler_do_task(&ctx->q, $id:ftask, &$id:fstruct, $exp:e', &$id:ntasks) != 0) {
+  GC.stm [C.cstm|if (scheduler_do_task(&ctx->scheduler, $id:ftask, &$id:fstruct, $exp:e', &$id:ntasks) != 0) {
                      fprintf(stderr, "scheduler failed to do task\n");
                      return 1;
            }|]
