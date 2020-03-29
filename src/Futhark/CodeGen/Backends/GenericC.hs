@@ -60,9 +60,8 @@ module Futhark.CodeGen.Backends.GenericC
   , contextType
   , contextField
   -- My stuff
-  , memToCType
   , fatMemType
-  , rawMemCType
+  , setMem
   -- * Building Blocks
   , primTypeToCType
   , copyMemoryDefaultSpace
