@@ -660,41 +660,6 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     }
     prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
     OPENCL_SUCCEED_FATAL(error);
-
-    int compile_opts_size = 1024;
-
-    for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-      compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
-    }
-
-    for (int i = 0; extra_build_opts[i] != NULL; i++) {
-      compile_opts_size += strlen(extra_build_opts[i] + 1);
-    }
-
-    char *compile_opts = (char*) malloc(compile_opts_size);
-
-    int w = snprintf(compile_opts, compile_opts_size,
-                     "-DLOCKSTEP_WIDTH=%d ",
-                     (int)ctx->lockstep_width);
-
-    for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-      w += snprintf(compile_opts+w, compile_opts_size-w,
-                    "-D%s=%d ",
-                    ctx->cfg.size_vars[i],
-                    (int)ctx->cfg.size_values[i]);
-    }
-
-    for (int i = 0; extra_build_opts[i] != NULL; i++) {
-      w += snprintf(compile_opts+w, compile_opts_size-w,
-                    "%s ", extra_build_opts[i]);
-    }
-
-    if (ctx->cfg.debugging) {
-      fprintf(stderr, "Building OpenCL program...\n");
-    }
-    OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
-
-    free(compile_opts);
   } else {
     if (ctx->cfg.debugging) {
       fprintf(stderr, "Loading OpenCL binary from %s...\n", ctx->cfg.load_binary_from);
@@ -713,6 +678,41 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     OPENCL_SUCCEED_FATAL(status);
     OPENCL_SUCCEED_FATAL(error);
   }
+
+  int compile_opts_size = 1024;
+
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
+  }
+
+  for (int i = 0; extra_build_opts[i] != NULL; i++) {
+    compile_opts_size += strlen(extra_build_opts[i] + 1);
+  }
+
+  char *compile_opts = (char*) malloc(compile_opts_size);
+
+  int w = snprintf(compile_opts, compile_opts_size,
+                   "-DLOCKSTEP_WIDTH=%d ",
+                   (int)ctx->lockstep_width);
+
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "-D%s=%d ",
+                  ctx->cfg.size_vars[i],
+                  (int)ctx->cfg.size_values[i]);
+  }
+
+  for (int i = 0; extra_build_opts[i] != NULL; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "%s ", extra_build_opts[i]);
+  }
+
+  if (ctx->cfg.debugging) {
+    fprintf(stderr, "Building OpenCL program...\n");
+  }
+  OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
+
+  free(compile_opts);
 
   free(fut_opencl_src);
 
