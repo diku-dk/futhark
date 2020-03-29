@@ -957,16 +957,20 @@ defaultCopy bt dest src
       IxFun.linearWithOffset srcIxFun bt_size = do
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
-        emit $ Imp.Copy
-          destmem (bytes destoffset) destspace
-          srcmem (bytes srcoffset) srcspace $
-          num_elems `withElemType` bt
+        if isScalarSpace srcspace || isScalarSpace destspace
+          then copyElementWise bt dest src
+          else emit $ Imp.Copy
+               destmem (bytes destoffset) destspace
+               srcmem (bytes srcoffset) srcspace $
+               num_elems `withElemType` bt
   | otherwise =
       copyElementWise bt dest src
   where bt_size = primByteSize bt
         num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         MemLocation destmem _ destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
+        isScalarSpace ScalarSpace{} = True
+        isScalarSpace _ = False
 
 copyElementWise :: CopyCompiler lore op
 copyElementWise bt dest src = do
