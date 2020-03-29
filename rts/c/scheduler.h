@@ -11,6 +11,24 @@
 #include <sys/sysinfo.h>
 #endif
 
+static inline int check_err(int errval, int sets_errno, const char *fun, int line,
+                            const char *msg, ...)
+{
+  if (errval) {
+    char str[256];
+    char errnum[10];
+    sprintf(errnum, "%d", errval);
+    sprintf(str, "ERROR: %s in %s() at line %d with %s\n", msg, fun, line,
+            sets_errno ? strerror(errno) : errnum);
+    fprintf(stderr, "%s", str);
+  }
+
+  return errval;
+}
+
+#define CHECK_ERR(err, msg...) check_err(err, 0, __func__, __LINE__, msg)
+#define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
+
 // returns the number of logical cores
 static int num_processors() {
 #ifdef _WIN32
@@ -66,10 +84,10 @@ static inline void *futhark_worker(void* arg) {
     struct task *task;
     if (job_queue_pop(&scheduler->q, (void**)&task) == 0) {
       task->fn(task->args, task->start, task->end, task->task_id);
-      pthread_mutex_lock(task->mutex);
+      CHECK_ERR(pthread_mutex_lock(task->mutex), "pthread_mutex_lock");
       (*task->counter)--;
-      pthread_cond_signal(task->cond);
-      pthread_mutex_unlock(task->mutex);
+      CHECK_ERR(pthread_cond_signal(task->cond), "pthread_cond_signal");
+      CHECK_ERR(pthread_mutex_unlock(task->mutex), "pthread_mutex_unlock");
       free(task);
     } else {
        break;
@@ -85,6 +103,10 @@ static inline struct task* setup_task(task_fn fn, void* task_args, int task_id,
                                       int* counter, int start, int end) {
   // Don't allocate this on heap, use stack!
   struct task* task = malloc(sizeof(struct task));
+  if (task == NULL) {
+    assert(!"malloc failed in setup_task");
+    return  NULL;
+  }
   task->fn      = fn;
   task->args    = task_args;
   task->task_id = task_id;
@@ -108,15 +130,9 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   }
 
   pthread_mutex_t mutex;
-  if (pthread_mutex_init(&mutex, NULL) != 0) {
-     fprintf(stderr, "got error from pthread_mutex_init: %s\n", strerror(errno));
-     return 1;
-  }
+  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init: \n");
   pthread_cond_t cond;
-  if (pthread_cond_init(&cond, NULL) != 0) {
-     fprintf(stderr, "got error from pthread_cond_init: %s\n", strerror(errno));
-     return 1;
-  }
+  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
   int task_id = 0;
   int shared_counter = 0;
@@ -127,10 +143,11 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
                                  &mutex, &cond, &shared_counter,
                                  0, remainder + iter_pr_task);
   task_id++;
-  pthread_mutex_lock(&mutex);
+
+  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
   shared_counter++;
-  pthread_mutex_unlock(&mutex);
-  job_queue_push(&scheduler->q, (void*)task);
+  CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
+  CHECK_ERR(job_queue_push(&scheduler->q, (void*)task), "job_queue_push");
 
 
   for (int i = remainder + iter_pr_task; i < iterations; i += iter_pr_task)
@@ -140,17 +157,17 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
                                    i, i + iter_pr_task);
     task_id++;
 
-    pthread_mutex_lock(&mutex);
+    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
     shared_counter++;
-    pthread_mutex_unlock(&mutex);
-    job_queue_push(&scheduler->q, (void*)task);
+    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
+    CHECK_ERR(job_queue_push(&scheduler->q, (void*)task), "job_queue_push");
   }
 
 
   // Join (wait for tasks to finish)
-  pthread_mutex_lock(&mutex);
+  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
   while (shared_counter != 0) {
-    pthread_cond_wait(&cond, &mutex);
+    CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
   }
 
   if (ntask != NULL) {
