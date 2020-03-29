@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fix error regarding entry points that called other entry points
     which contained local functions (#895).
 
+  * Fix loading OpenCL kernels from a binary.
+
 ## [0.15.2]
 
 ### Fixed
