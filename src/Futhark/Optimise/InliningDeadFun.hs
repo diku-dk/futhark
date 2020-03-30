@@ -27,7 +27,7 @@ import Futhark.Pass
 aggInlineFunctions :: MonadFreshNames m =>
                       CallGraph -> [FunDef SOACS] -> m [FunDef SOACS]
 aggInlineFunctions cg =
-  fmap (filter (keep mempty)) . recurse 0 . filter isFunInCallGraph
+  fmap (filter keep) . recurse 0 . filter isFunInCallGraph
   where isFunInCallGraph fundec =
           isJust $ M.lookup (funDefName fundec) cg
 
@@ -63,30 +63,28 @@ aggInlineFunctions cg =
                 partition (noCallsTo
                            (`elem` map funDefName to_be_inlined))
                 maybe_inline_in
-              keep_around =
-                S.fromList $ map funDefName $
-                filter expensiveConstant to_be_inlined
-              not_actually_inlined =
-                filter (keep keep_around) to_be_inlined
+              (not_actually_inlined, to_be_inlined') =
+                partition keep to_be_inlined
           if null to_be_inlined
             then return funs
-            else do let simplify
-                          | i `rem` simplifyRate == 0 =
-                              copyPropagateInFun simpleSOACS <=<
-                              pure . performCSEOnFunDef True <=<
-                              simplifyFun
-                          | otherwise = copyPropagateInFun simpleSOACS
+            else do let simplify fd
+                          | i `rem` simplifyRate == 0 ||
+                            funDefName fd `S.member` constfuns =
+                              copyPropagateInFun simpleSOACS =<<
+                              performCSEOnFunDef True <$> simplifyFun fd
+                          | otherwise =
+                              copyPropagateInFun simpleSOACS fd
 
                     let onFun = simplify <=< renameFun .
-                                doInlineInCaller (fdmap to_be_inlined) False
+                                doInlineInCaller (fdmap to_be_inlined') False
                     to_inline_in' <- mapM onFun to_inline_in
                     (not_actually_inlined<>) <$>
                       recurse (i+1) (not_to_inline_in <> to_inline_in')
 
-        keep keep_around fd =
+        keep fd =
           isJust (funDefEntryPoint fd)
           || callsRecursive fd
-          || funDefName fd `S.member` keep_around
+          || expensiveConstant fd
 
         expensiveConstant fd =
           funDefName fd `S.member` constfuns &&
