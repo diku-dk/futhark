@@ -165,8 +165,8 @@ allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
   PatternConstr c <$> (Info <$> allDimsFreshInType t) <*>
   mapM allDimsFreshInPat pats <*> pure loc
 
-generateEntryPoint :: E.StructType -> E.ValBind -> InternaliseM ()
-generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info (rettype, _)) _ params _ _ loc) = do
+generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
+generateEntryPoint (E.EntryPoint e_paramts e_rettype) (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ loc) = do
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
   params_fresh <- mapM allDimsFreshInPat params
@@ -174,8 +174,7 @@ generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info (rettype, _)) _ param
                 mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \_ shapeparams params' -> do
     (entry_rettype, _) <- internaliseEntryReturnType $ anySizes rettype
-    let (e_paramts, e_rettype) = E.unfoldFunType ftype
-        entry' = entryPoint (zip3 params e_paramts params') (retdecl, e_rettype, entry_rettype)
+    let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $ do
@@ -196,40 +195,37 @@ generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info (rettype, _)) _ param
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
-entryPoint :: [(E.Pattern, E.StructType, [I.FParam])]
-           -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
-           -> EntryPoint
-entryPoint params (retdecl, eret, crets) =
+entryPoint :: [(E.EntryType, [I.FParam])]
+           -> (E.EntryType,
+               [[I.TypeBase ExtShape Uniqueness]])
+           -> I.EntryPoint
+entryPoint params (eret, crets) =
   (concatMap (entryPointType . preParam) params,
-   case isTupleRecord eret of
-     Just ts -> concatMap entryPointType $ zip3 retdecls ts crets
-     _       -> entryPointType (retdecl, eret, concat crets))
-  where preParam (p_pat, e_t, ps) = (paramOuterType p_pat,
-                                     e_t,
-                                     staticShapes $ map I.paramDeclType ps)
-        paramOuterType (E.PatternAscription _ tdecl _) = Just $ declaredType tdecl
-        paramOuterType (E.PatternParens p _) = paramOuterType p
-        paramOuterType _ = Nothing
+   case (isTupleRecord $ entryType eret,
+         entryAscribed eret) of
+     (Just ts, Just (E.TETuple e_ts _)) ->
+       concatMap entryPointType $
+       zip (zipWith E.EntryType ts (map Just e_ts)) crets
+     (Just ts, _) ->
+       concatMap entryPointType $
+       zip (map (`E.EntryType` Nothing) ts) crets
+     _ ->
+       entryPointType (eret, concat crets))
+  where preParam (e_t, ps) = (e_t, staticShapes $ map I.paramDeclType ps)
 
-        retdecls = case retdecl of Just (TETuple tes _) -> map Just tes
-                                   _                    -> repeat Nothing
-
-        entryPointType :: (Maybe (E.TypeExp VName),
-                           E.StructType,
-                           [I.TypeBase ExtShape Uniqueness])
-                       -> [EntryPointType]
-        entryPointType (_, E.Scalar (E.Prim E.Unsigned{}), _) =
-          [I.TypeUnsigned]
-        entryPointType (_, E.Array _ _ (E.Prim E.Unsigned{}) _, _) =
-          [I.TypeUnsigned]
-        entryPointType (_, E.Scalar E.Prim{}, _) =
-          [I.TypeDirect]
-        entryPointType (_, E.Array _ _ E.Prim{} _, _) =
-          [I.TypeDirect]
-        entryPointType (te, t, ts) =
-          [I.TypeOpaque desc $ length ts]
-          where desc = maybe (pretty t') typeExpOpaqueName te
-                t' = noSizes t `E.setUniqueness` Nonunique
+        entryPointType (t, ts)
+          | E.Scalar (E.Prim E.Unsigned{}) <- E.entryType t =
+              [I.TypeUnsigned]
+          | E.Array _ _ (E.Prim E.Unsigned{}) _ <- E.entryType t =
+              [I.TypeUnsigned]
+          | E.Scalar E.Prim{} <- E.entryType t =
+              [I.TypeDirect]
+          | E.Array _ _ E.Prim{} _ <- E.entryType t =
+              [I.TypeDirect]
+          | otherwise =
+              [I.TypeOpaque desc $ length ts]
+          where desc = maybe (pretty t') typeExpOpaqueName $ E.entryAscribed t
+                t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
 
         -- | We remove dimension arguments such that we hopefully end
         -- up with a simpler type name for the entry point.  The

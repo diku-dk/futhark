@@ -491,13 +491,24 @@ checkTypeBind (TypeBind name l tps td doc loc) =
                      },
                TypeBind name' l tps' td' doc loc)
 
+
+entryPoint :: [Pattern] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
+entryPoint params retdecl rettype =
+  EntryPoint (map patternEntry params) (EntryType rettype retdecl)
+  where patternEntry (PatternParens p _) =
+          patternEntry p
+        patternEntry (PatternAscription _ tdecl _) =
+          EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
+        patternEntry p =
+          EntryType (patternStructType p) Nothing
+
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let (rettype_params, rettype') = unfoldFunType rettype
-      entry' = Info (foldFunType (map patternStructType params') rettype) <$ entry
+      entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
 
   case entry' of
     Just _
