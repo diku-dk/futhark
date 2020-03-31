@@ -245,9 +245,13 @@ pmapIO concurrency f elems = go elems []
     go xs res = do
       numThreads <- maybe getNumCapabilities pure concurrency
       let (e,es) = splitAt numThreads xs
-      mvars  <- mapM (fork f) e
+      mvars  <- mapM (fork f') e
       result <- mapM takeMVar mvars
-      go es (result ++ res)
+      case sequence result of
+        Left err -> throw (err :: SomeException)
+        Right result' -> go es (result' ++ res)
+
+    f' x = (Right <$> f x) `catch` (pure . Left)
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --
