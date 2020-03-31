@@ -508,7 +508,7 @@ entryPoint params orig_ret_te orig_ret =
         onRetType (Just (TEArrow _ t1_te t2_te _)) (Scalar (Arrow _ _ t1 t2)) =
           let (xs, y) = onRetType (Just t2_te) t2
           in (EntryType t1 (Just t1_te) : xs, y)
-        onRetType Nothing (Scalar (Arrow _ _ t1 t2)) =
+        onRetType _ (Scalar (Arrow _ _ t1 t2)) =
           let (xs, y) = onRetType Nothing t2
           in (EntryType t1 Nothing : xs, y)
         onRetType _ t =
