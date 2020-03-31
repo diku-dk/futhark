@@ -493,14 +493,26 @@ checkTypeBind (TypeBind name l tps td doc loc) =
 
 
 entryPoint :: [Pattern] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
-entryPoint params retdecl rettype =
-  EntryPoint (map patternEntry params) (EntryType rettype retdecl)
-  where patternEntry (PatternParens p _) =
+entryPoint params orig_ret_te orig_ret =
+  EntryPoint (map patternEntry params ++ more_params) rettype'
+  where (more_params, rettype') =
+          onRetType orig_ret_te orig_ret
+
+        patternEntry (PatternParens p _) =
           patternEntry p
         patternEntry (PatternAscription _ tdecl _) =
           EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
         patternEntry p =
           EntryType (patternStructType p) Nothing
+
+        onRetType (Just (TEArrow _ t1_te t2_te _)) (Scalar (Arrow _ _ t1 t2)) =
+          let (xs, y) = onRetType (Just t2_te) t2
+          in (EntryType t1 (Just t1_te) : xs, y)
+        onRetType Nothing (Scalar (Arrow _ _ t1 t2)) =
+          let (xs, y) = onRetType Nothing t2
+          in (EntryType t1 Nothing : xs, y)
+        onRetType _ t =
+          ([], EntryType t Nothing)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
