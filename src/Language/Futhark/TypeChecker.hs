@@ -511,8 +511,8 @@ entryPoint params orig_ret_te orig_ret =
         onRetType _ (Scalar (Arrow _ _ t1 t2)) =
           let (xs, y) = onRetType Nothing t2
           in (EntryType t1 Nothing : xs, y)
-        onRetType _ t =
-          ([], EntryType t Nothing)
+        onRetType te t =
+          ([], EntryType t te)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do

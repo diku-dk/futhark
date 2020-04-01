@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixed incorrect handling of opaques in entry point return types.
+
 ## [0.15.3]
 
 ### Added
