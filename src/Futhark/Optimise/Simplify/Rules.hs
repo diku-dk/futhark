@@ -365,8 +365,17 @@ simplifyCmpOp _ _ (CmpOp cmp e1 e2)
                            FCmpLe{} -> True
                            CmpLlt -> False
                            CmpLle -> True
+
 simplifyCmpOp _ _ (CmpOp cmp (Constant v1) (Constant v2)) =
   constRes =<< BoolValue <$> doCmpOp cmp v1 v2
+
+simplifyCmpOp look _ (CmpOp CmpEq{} (Constant (IntValue x)) (Var v))
+  | Just (BasicOp (ConvOp BToI{} b), cs) <- look v =
+      case valueIntegral x :: Int of
+        1 -> Just (SubExp b, cs)
+        0 -> Just (UnOp Not b, cs)
+        _ -> Just (SubExp (Constant (BoolValue False)), cs)
+
 simplifyCmpOp _ _ _ = Nothing
 
 simplifyBinOp :: SimpleRule lore
