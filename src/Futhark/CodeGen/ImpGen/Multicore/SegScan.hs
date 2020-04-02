@@ -32,7 +32,6 @@ makeLocalArrays num_threads nes scan_op = do
             shape = Shape [num_threads]
         sAllocArray "scan_arr_p" pt shape DefaultSpace
 
--- type CrossesSegment = Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
 compileSegScan :: Pattern ExplicitMemory
                 -> SegSpace
                 -> Lambda ExplicitMemory
@@ -40,8 +39,8 @@ compileSegScan :: Pattern ExplicitMemory
                 -> KernelBody ExplicitMemory
                 -> MulticoreGen ()
 compileSegScan pat space scan_op nes kbody
-  | x <- unSegSpace space,
-    length x == 1 =
+  | segment_depth <- unSegSpace space,
+    length segment_depth == 1 =
       nonsegmentedScan pat space scan_op nes kbody
   | otherwise =
       segmentedScan pat space scan_op nes kbody
