@@ -51,24 +51,6 @@ compileSegRed' pat space reds kbody
       segmentedReduction pat space reds kbody
 
 
-
-compileKBodyRed :: Pattern ExplicitMemory
-             -> SegSpace
-             -> KernelBody ExplicitMemory
-             -> [SegRedOp ExplicitMemory]
-             -> ([(SubExp, [Imp.Exp])] -> MulticoreGen ())
-             -> ImpM ExplicitMemory Imp.Multicore ()
-compileKBodyRed pat space kbody reds red_cont =
-  compileStms mempty (kernelBodyStms kbody) $ do
-    let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult kbody
-
-    sComment "save map-out results" $ do
-      let map_arrs = drop (segRedResults reds) $ patternElements pat
-      zipWithM_ (compileThreadResult space ) map_arrs map_res
-
-    red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
-
-
 -- | Arrays for storing group results.
 --
 -- The group-result arrays have an extra dimension (of size groupsize)
