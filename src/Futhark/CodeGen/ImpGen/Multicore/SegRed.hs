@@ -1,5 +1,6 @@
 module Futhark.CodeGen.ImpGen.Multicore.SegRed
-  (compileSegRed
+  ( compileSegRed
+  , compileSegRed'
   )
   where
 
@@ -14,24 +15,48 @@ import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 
+type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
+
 -- Compile SegReduce
 -- 1. This can't handle multidimensional reductions (e.g. tests/soacs/reduce4.fut)
 compileSegRed :: Pattern ExplicitMemory
-                 -> SegLevel -> SegSpace
+                 -> SegSpace
                  -> [SegRedOp ExplicitMemory]
                  -> KernelBody ExplicitMemory
                  -> MulticoreGen ()
-compileSegRed pat lvl space reds kbody
+compileSegRed pat space reds kbody =
+  compileSegRed' pat space reds $ \red_cont ->
+    compileStms mempty (kernelBodyStms kbody) $ do
+    let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult kbody
+
+    sComment "save map-out results" $ do
+      let map_arrs = drop (segRedResults reds) $ patternElements pat
+      zipWithM_ (compileThreadResult space) map_arrs map_res
+
+    red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+
+
+
+
+-- | Like 'compileSegRed', but where the body is a monadic action.
+compileSegRed' :: Pattern ExplicitMemory
+               -> SegSpace
+               -> [SegRedOp ExplicitMemory]
+               -> DoSegBody
+               -> MulticoreGen ()
+compileSegRed' pat space reds kbody
   | [(_, Constant (IntValue (Int32Value 1))), _] <- unSegSpace space =
-      nonsegmentedReduction pat lvl space reds kbody
+      nonsegmentedReduction pat space reds kbody
   | otherwise =
       segmentedReduction pat space reds kbody
 
+
+
 compileKBodyRed :: Pattern ExplicitMemory
              -> SegSpace
-             -> (KernelBody ExplicitMemory)
+             -> KernelBody ExplicitMemory
              -> [SegRedOp ExplicitMemory]
-             -> ([(SubExp, [Imp.Exp])] -> ImpM ExplicitMemory Imp.Multicore ())
+             -> ([(SubExp, [Imp.Exp])] -> MulticoreGen ())
              -> ImpM ExplicitMemory Imp.Multicore ()
 compileKBodyRed pat space kbody reds red_cont =
   compileStms mempty (kernelBodyStms kbody) $ do
@@ -96,12 +121,11 @@ segRedOpSlug local_tid (op, param_arrs) =
 
 
 nonsegmentedReduction :: Pattern ExplicitMemory
-                      -> SegLevel
                       -> SegSpace
                       -> [SegRedOp ExplicitMemory]
-                      -> KernelBody ExplicitMemory
+                      -> DoSegBody
                       -> MulticoreGen ()
-nonsegmentedReduction pat _ space reds kbody = do
+nonsegmentedReduction pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
 
   -- Dummy value for now
@@ -109,6 +133,8 @@ nonsegmentedReduction pat _ space reds kbody = do
   let num_threads = Count $ Constant $ IntValue $ Int32Value 12
   ns' <- mapM toExp ns
   stage_one_red_arrs <- groupResultArrays num_threads reds
+  -- void  $ dPrimV "num_threads"  1
+
 
   -- Thread id for indexing into each threads accumulator element(s)
   tid <- dPrim "tid" $ IntType Int32
@@ -130,7 +156,7 @@ nonsegmentedReduction pat _ space reds kbody = do
   fbody <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-    compileKBodyRed pat space kbody reds $ \all_red_res -> do
+    kbody $ \all_red_res -> do
       let all_red_res' = chunks (map (length . slugNeutral) slugs) all_red_res
       forM_ (zip all_red_res' slugs) $ \(red_res, slug) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
@@ -189,7 +215,7 @@ nonsegmentedReduction pat _ space reds kbody = do
 segmentedReduction :: Pattern ExplicitMemory
                       -> SegSpace
                       -> [SegRedOp ExplicitMemory]
-                      -> KernelBody ExplicitMemory
+                      -> DoSegBody
                       -> MulticoreGen ()
 segmentedReduction pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
@@ -216,7 +242,7 @@ segmentedReduction pat space reds kbody = do
       sFor "i" inner_bound $ \i -> do
         dPrimV_ (segFlat space) (n_segments' * inner_bound + i)
         zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-        compileKBody kbody $ \all_red_res -> do
+        kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segRedNeutral) reds) all_red_res
           forM_ (zip reds red_res') $ \(red, res') ->
             sLoopNest (segRedShape red) $ \vec_is -> do

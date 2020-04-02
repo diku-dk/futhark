@@ -47,8 +47,8 @@ compileSegOp pat  (SegHist _ space histops _ kbody) =
 compileSegOp pat (SegScan _ space op nes _ kbody) =
   compileSegScan pat space op nes kbody
 
-compileSegOp pat (SegRed lvl space reds _ kbody) =
-  compileSegRed pat lvl space reds kbody
+compileSegOp pat (SegRed _ space reds _ kbody) =
+  compileSegRed pat space reds kbody
 
 compileSegOp pat (SegMap _ space _ kbody) =
   compileSegMap pat space kbody
