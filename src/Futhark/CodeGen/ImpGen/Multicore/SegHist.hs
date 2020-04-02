@@ -26,50 +26,44 @@ type InitLocalHistograms = [SubExp ->
                             MulticoreGen ([VName], [Imp.Exp] -> MulticoreGen ())]
 
 prepareIntermediateArraysLocal :: VName
-                               -> SegSpace -> [MySegHistSlug]
+                               -> [MySegHistSlug]
                                -> MulticoreGen InitLocalHistograms
-prepareIntermediateArraysLocal num_subhistos_per_group _space =
+prepareIntermediateArraysLocal num_subhistos_per_group =
   mapM onOp
   where
     onOp (MySegHistSlug op) = do
-      mk_op <- return $ \arrs bucket -> do
-        let op' = histOp op
-            (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op'
-            bind_acc_params =
-              sComment "bind lhs" $
-                forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
-                  copyDWIMFix (paramName acc_p) [] (Var arr) bucket
-            op_body = sComment "execute operation" $
-                      compileBody' acc_params $ lambdaBody op'
-            do_hist =
-              sComment "update sub hist result" $
-              zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
+      let mk_op arrs bucket = do
+            let op' = histOp op
+                (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op'
+                bind_acc_params =
+                  sComment "bind lhs" $
+                    forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
+                      copyDWIMFix (paramName acc_p) [] (Var arr) bucket
+                op_body = sComment "execute operation" $
+                          compileBody' acc_params $ lambdaBody op'
+                do_hist =
+                  sComment "update sub hist result" $
+                  zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
-        sComment "Start of body" $ do
-          dLParams acc_params
-          bind_acc_params
-          op_body
-          do_hist
+            sComment "Start of body" $ do
+              dLParams acc_params
+              bind_acc_params
+              op_body
+              do_hist
 
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
       let init_local_subhistos hist_H_chk = do
             local_subhistos <-
-              forM (zip (histType op) (histNeutral op)) $ \(t, ne) -> do
+              forM (histType op) $ \t -> do
                 let sub_local_shape =
                       Shape [Var num_subhistos_per_group] <>
                       (arrayShape t `setOuterDim` hist_H_chk)
-                name <- sAllocArray "subhistogram_local"
-                        (elemType t) sub_local_shape DefaultSpace
-
-                size <- mapM toExp $ shapeDims sub_local_shape
-
-                -- Maybe postpone this work for the thread?
-                sFor "i" (product size) $ \i ->
-                  copyDWIMFix name [i] ne []
-                return name
+                sAllocArray "subhistogram_local"
+                  (elemType t) sub_local_shape DefaultSpace
 
             return (local_subhistos, mk_op local_subhistos)
+
 
       return init_local_subhistos
 
@@ -91,11 +85,11 @@ compileSegHist pat space histops kbody = do
   slugs <- mapM computeHistoUsage histops
 
   -- variable for how many subhistograms to allocate
-  hist_B' <- toExp $ Constant $ IntValue $ Int32Value 6 -- just to be sure
+  hist_B' <- toExp $ Constant $ IntValue $ Int32Value 12 -- just to be sure
   hist_M <- dPrimV "hist_M" hist_B'
 
   init_histograms <-
-    prepareIntermediateArraysLocal hist_M space slugs
+    prepareIntermediateArraysLocal hist_M slugs
 
   hist_H_chks <- forM (map (histWidth . mySlugOp) slugs) $ \w -> do
     w' <- toExp w
@@ -111,15 +105,29 @@ compileSegHist pat space histops kbody = do
     (local_subhistos, do_op) <- init_local_subhistos (Var hist_H_chk)
     return (local_subhistos, hist_H_chk, do_op)
 
+  prebody <- collect $
+    forM_ (zip3 histograms hist_H_chks slugs) $ \((hists, _, _), hist_H_chk, slug) ->
+      forM_ (zip hists (histNeutral $ mySlugOp slug)) $ \(hist, ne) -> do
+        hist_H_chk' <- toExp $ Var hist_H_chk
+        sFor "i" hist_H_chk' $ \i ->
+          copyDWIMFix hist (tid_exp :[i]) ne []
+
+
   -- Generate body of parallel function
   body' <- collect $ do
      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
      compileStms mempty (kernelBodyStms kbody) $ do
-       let (red_res, _map_res) = splitFromEnd (length map_pes) $
+       let (red_res, map_res) = splitFromEnd (length map_pes) $
                             map kernelResultSubExp $ kernelBodyResult kbody
+
+
            (buckets, vs) = splitAt (length slugs) red_res
            perOp = chunks $ map (length . histDest . mySlugOp) slugs
 
+       sComment "save map-out results" $
+          forM_ (zip map_pes map_res) $ \(pe, se) ->
+          copyDWIMFix (patElemName pe)
+          (map Imp.vi32 is) se []
 
        forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
          \(HistOp dest_w _ _ _ shape lam,
@@ -140,7 +148,7 @@ compileSegHist pat space histops kbody = do
                do_op (bucket_is ++ is')
 
 
-  let paramsNames = namesToList $ freeIn body' `namesSubtract`
+  let paramsNames = namesToList $ freeIn (prebody <> body') `namesSubtract`
                                   namesFromList (thread_id : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
@@ -150,7 +158,7 @@ compileSegHist pat space histops kbody = do
 
 
   emit $ Imp.Op $ Imp.ParLoop num_tasks (segFlat space) (product ns')
-                              (Imp.MulticoreFunc params mempty body' thread_id)
+                              (Imp.MulticoreFunc params prebody body' thread_id)
 
   -- second stage
   reduce_body <- collect $ do
@@ -160,7 +168,8 @@ compileSegHist pat space histops kbody = do
         (buckets, vs) = splitAt (length slugs) red_res
         perOp = chunks $ map (length . histDest . mySlugOp) slugs
 
-    sFor "i" tid_exp $ \i ->
+    num_tasks' <- toExp $ Var num_tasks
+    sFor "i" num_tasks' $ \i ->
       forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
           \(HistOp _dest_w _ _ _ shape lam,
            (hist, _hist_H_chk, _do_op), _bucket, vs') -> do
