@@ -14,6 +14,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
+import Futhark.Transform.Rename
 
 
 makeLocalArrays :: SubExp -> [SubExp] -> Lambda ExplicitMemory
@@ -194,7 +195,11 @@ nonsegmentedScan pat space scan_op nes kbody = do
 
   -- |
   -- Begin stage two of scan
-  stage_two_red_res <- makeLocalArrays (Var tid) nes scan_op
+  scan_op' <- renameLambda scan_op
+  let (scan_x_params', scan_y_params') =
+        splitAt (length nes) $ lambdaParams scan_op'
+
+  stage_two_red_res <- makeLocalArrays (Var ntasks) nes scan_op'
 
   -- Set neutral element value
   forM_ (zip stage_two_red_res nes) $ \(stage_two_res, ne) ->
