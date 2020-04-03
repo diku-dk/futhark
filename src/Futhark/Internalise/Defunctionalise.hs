@@ -527,7 +527,7 @@ defuncLet dims ps@(pat:pats) body rettype
 
 defuncLet _ [] body rettype = do
   (body', sv) <- defuncExp body
-  return ([], [], body', imposeType sv rettype )
+  return ([], [], body', imposeType sv rettype)
   where imposeType Dynamic{} t =
           Dynamic $ fromStruct t
         imposeType (RecordSV fs1) (Scalar (Record fs2)) =
@@ -984,7 +984,7 @@ patternVars = mconcat . map ident . S.toList . patternIdents
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind entry@Just{} name _ (Info (rettype, retext)) tparams params body _ loc)
+defuncValBind (ValBind entry name _ (Info (rettype, retext)) tparams params body _ loc)
   | Scalar Arrow{} <- rettype = do
       (body_pats, body', rettype') <- etaExpand (fromStruct rettype) body
       -- FIXME: we should also handle non-constant size annotations

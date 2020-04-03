@@ -513,12 +513,14 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
           typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
 
       | p : _ <- filter nastyParameter params' ->
-          warn loc $ "Entry point parameter\n\n  " <>
-          pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+          warn loc $ pretty $ "Entry point parameter\n" </>
+          indent 2 (ppr p) </>
+          "\nwill have an opaque type, so the entry point will likely not be callable."
 
       | nastyReturnType maybe_tdecl' rettype ->
-          warn loc $ "Entry point return type\n\n  " <>
-          pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
+          warn loc $ pretty $ "Entry point return type\n" </>
+          indent 2 (ppr rettype) </>
+          "\nwill have an opaque type, so the result will likely not be usable."
 
     _ -> return ()
 
