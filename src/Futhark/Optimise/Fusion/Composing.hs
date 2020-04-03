@@ -17,7 +17,7 @@ module Futhark.Optimise.Fusion.Composing
   )
   where
 
-import Data.List
+import Data.List (mapAccumL)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 

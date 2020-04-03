@@ -1,6 +1,5 @@
 module Futhark.Doc.Html
   ( primTypeHtml
-  , prettyTypeName
   , prettyU
   , renderName
   , joinBy
@@ -23,9 +22,6 @@ docToHtml = toHtml . PP.pretty 80
 
 primTypeHtml :: PrimType -> Html
 primTypeHtml = docToHtml . ppr
-
-prettyTypeName :: TypeName -> Html
-prettyTypeName et = (docToHtml . ppr) (baseName <$> qualNameFromTypeName et)
 
 prettyU :: Uniqueness -> Html
 prettyU = docToHtml . ppr

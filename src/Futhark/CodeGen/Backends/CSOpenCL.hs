@@ -4,8 +4,7 @@ module Futhark.CodeGen.Backends.CSOpenCL
   ) where
 
 import Control.Monad
-import Data.List
-
+import Data.List (intersperse)
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory, int32)
@@ -17,7 +16,7 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util (zEncodeString)
-import Futhark.MonadFreshNames hiding (newVName')
+import Futhark.MonadFreshNames
 
 
 compileProg :: MonadFreshNames m => Maybe String

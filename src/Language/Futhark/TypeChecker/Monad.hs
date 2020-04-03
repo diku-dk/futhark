@@ -17,19 +17,13 @@ module Language.Futhark.TypeChecker.Monad
   , localEnv
 
   , TypeError(..)
-  , prettyTypeError, prettyTypeErrorNoLoc
   , unexpectedType
   , undefinedType
   , unappliedFunctor
   , unknownVariableError
   , underscoreUse
-  , functionIsNotValue
   , Notes
   , aNote
-
-  , BreadCrumb(..)
-  , MonadBreadCrumbs(..)
-  , typeError
 
   , MonadTypeChecker(..)
   , checkName
@@ -66,7 +60,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS.Strict
 import Control.Monad.Identity
-import Data.List
+import Data.List (isPrefixOf, find)
 import Data.Loc
 import Data.Maybe
 import Data.Either
@@ -93,24 +87,18 @@ instance Pretty Note where
   ppr (Note msg) = "Note:" <+> align msg
 
 instance Pretty Notes where
-  ppr (Notes notes) = folddoc twolines $ map ppr notes
-    where twolines x y = x <> line <> line <> y
+  ppr (Notes notes) = foldMap (((line<>line)<>) . ppr) notes
 
 aNote :: Pretty a => a -> Notes
 aNote = Notes . pure . Note . ppr
 
 -- | Information about an error during type checking.
-data TypeError = TypeError SrcLoc (Maybe Doc) Notes Doc
+data TypeError = TypeError SrcLoc Notes Doc
 
-prettyTypeErrorNoLoc :: TypeError -> String
-prettyTypeErrorNoLoc (TypeError _ during notes msg) =
-  pretty $
-  maybe mempty (<>(line<>line)) during <>
-  msg <> ppr notes
-
-prettyTypeError :: TypeError -> String
-prettyTypeError e@(TypeError loc _ _ _) =
-  "Error at " ++ locStr loc ++ ":\n" ++ prettyTypeErrorNoLoc e
+instance Pretty TypeError where
+  ppr (TypeError loc notes msg) =
+    "Error at" <+> text (locStr loc) <+> ":" </>
+    msg <> ppr notes
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
 unexpectedType loc _ [] =
@@ -126,12 +114,6 @@ unexpectedType loc t ts =
 undefinedType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
 undefinedType loc name =
   typeError loc mempty $ "Unknown type" <+> ppr name <> "."
-
-functionIsNotValue :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
-functionIsNotValue loc name =
-  typeError loc mempty $
-  "Attempt to use function" <+> ppr name <+> "as value at" <+>
-  text (locStr loc) <> "."
 
 unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
 unappliedFunctor loc =
@@ -205,40 +187,7 @@ localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
   in ctx { contextEnv = env' }
 
--- | A piece of information that describes what process the type
--- checker currently performing.  This is used to give better error
--- messages.
-data BreadCrumb = MatchingTypes StructType StructType
-                | MatchingFields Name
-                | Matching Doc
-
-instance Pretty BreadCrumb where
-  ppr (MatchingTypes t1 t2) =
-    "When matching type" </> indent 2 (ppr t1) </>
-    "with" </> indent 2 (ppr t2)
-  ppr (MatchingFields field) =
-    "When matching types of record field" <+> pquote (ppr field) <> dot
-  ppr (Matching s) =
-    s
-
--- | Tracking breadcrumbs to give a kind of "stack trace" in errors.
-class Monad m => MonadBreadCrumbs m where
-  breadCrumb :: BreadCrumb -> m a -> m a
-  breadCrumb _ m = m
-
-  getBreadCrumbs :: m [BreadCrumb]
-  getBreadCrumbs = return []
-
-typeError :: (Located loc, MonadError TypeError m, MonadBreadCrumbs m) =>
-             loc -> Notes -> Doc -> m a
-typeError loc notes s = do
-  bc <- getBreadCrumbs
-  let bc' | null bc = mempty
-          | otherwise = line <> stack (map ppr bc)
-  throwError $ TypeError (srclocOf loc) Nothing notes (ppr s <> bc')
-
-class (MonadError TypeError m, MonadBreadCrumbs m) =>
-      MonadTypeChecker m where
+class Monad m => MonadTypeChecker m where
   warn :: Located loc => loc -> String -> m ()
 
   newName :: VName -> m VName
@@ -261,6 +210,8 @@ class (MonadError TypeError m, MonadBreadCrumbs m) =>
       _ -> typeError loc mempty $
            "Dimension declaration" <+> ppr v <+> "should be of type i32."
 
+  typeError :: Located loc => loc -> Notes -> Doc -> m a
+
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 
@@ -269,10 +220,6 @@ bindSpaced names body = do
   names' <- mapM (newID . snd) names
   let mapping = M.fromList (zip names $ map qualName names')
   bindNameMap mapping body
-
-instance MonadBreadCrumbs TypeM where
-  breadCrumb _ m = m
-  getBreadCrumbs = pure mempty
 
 instance MonadTypeChecker TypeM where
   warn loc problem = tell $ singleWarning (srclocOf loc) problem
@@ -320,6 +267,8 @@ instance MonadTypeChecker TypeM where
                         "Attempt to use function" <+> pprName name <+> "as value."
               Right t' -> return (qn', fromStruct $
                                        qualifyTypeVars outer_env mempty qs t')
+
+  typeError loc notes s = throwError $ TypeError (srclocOf loc) notes s
 
 -- | Extract from a type either a function type comprising a list of
 -- parameter types and a return type, or a first-order type.
@@ -387,7 +336,7 @@ qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
               reachable qs' name env'
           | otherwise = False
 
-badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
+badOnLeft :: Either TypeError a -> TypeM a
 badOnLeft = either throwError return
 
 anySignedType :: [PrimType]

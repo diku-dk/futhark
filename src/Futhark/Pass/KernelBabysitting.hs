@@ -11,7 +11,7 @@ import Control.Arrow (first)
 import Control.Monad.State.Strict
 import qualified Data.Map.Strict as M
 import Data.Foldable
-import Data.List
+import Data.List (elemIndex, isPrefixOf, sort)
 import Data.Maybe
 
 import Futhark.MonadFreshNames

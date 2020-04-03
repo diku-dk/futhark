@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.GenericCSharp.Definitions
-  ( csFunctions
-  , csReader
+  ( csReader
   , csMemory
   , csMemoryOpenCL
   , csScalar
@@ -11,9 +10,6 @@ module Futhark.CodeGen.Backends.GenericCSharp.Definitions
   ) where
 
 import Data.FileEmbed
-
-csFunctions :: String
-csFunctions = $(embedStringFile "rts/csharp/functions.cs")
 
 csMemory :: String
 csMemory = $(embedStringFile "rts/csharp/memory.cs")

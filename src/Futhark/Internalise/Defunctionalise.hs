@@ -9,7 +9,7 @@ import           Control.Monad.State
 import           Control.Monad.RWS hiding (Sum)
 import           Data.Bifunctor
 import           Data.Foldable
-import           Data.List
+import           Data.List (sortOn, nub, partition, tails)
 import qualified Data.List.NonEmpty as NE
 import           Data.Loc
 import           Data.Maybe
@@ -758,10 +758,12 @@ buildRetType env pats = comb
         problematic v = (v `member` bound) && not (boundAsUnique v)
         comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
           Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
+        comb (Scalar (Sum cs_annot)) (Scalar (Sum cs_got)) =
+          Scalar $ Sum $ M.intersectionWith (zipWith comb) cs_annot cs_got
         comb (Scalar Arrow{}) t =
           descend t
         comb got et =
-          descend $ fromStruct got `setUniqueness` uniqueness et `setAliases` aliases et
+          descend $ fromStruct got `setAliases` aliases et
 
         descend t@Array{}
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique

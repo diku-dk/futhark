@@ -11,7 +11,7 @@ import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
 import Data.Maybe
-import Data.List
+import Data.List (foldl', sortBy)
 import Data.Ord
 import qualified Data.Text as T
 import System.Console.GetOpt

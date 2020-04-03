@@ -11,7 +11,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.List
+import Data.List (foldl')
 
 import Prelude hiding (quot)
 
@@ -36,7 +36,7 @@ import Futhark.Util (mapAccumLM)
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $
-  fmap Prog . mapM transformFunDef . progFunctions
+  fmap Prog . mapM transformFunDef . progFuns
   -- Cannot use intraproceduralTransformation because it might create
   -- duplicate size keys (which are not fixed by renamer, and size
   -- keys must currently be globally unique).
@@ -199,6 +199,11 @@ extractGenericBodyAllocations bound_outside get_stms set_stms body =
                        stmsToList $ get_stms body
   in (set_stms (stmsFromList stms) body, allocs)
 
+expandable :: Space -> Bool
+expandable (Space "local") = False
+expandable ScalarSpace{} = False
+expandable _ = True
+
 extractStmAllocations :: Names -> Stm ExplicitMemory
                       -> Writer Extraction (Maybe (Stm ExplicitMemory))
 extractStmAllocations bound_outside (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
@@ -209,11 +214,6 @@ extractStmAllocations bound_outside (Let (Pattern [] [patElem]) _ (Op (Alloc siz
 
         where visibleOutside (Var v) = v `nameIn` bound_outside
               visibleOutside Constant{} = True
-
-              expandable (Space "private") = False
-              expandable (Space "local") = False
-              expandable ScalarSpace{} = False
-              expandable _ = True
 
 extractStmAllocations bound_outside stm = do
   e <- mapExpM expMapper $ stmExp stm
@@ -403,7 +403,7 @@ offsetMemoryInPattern (Pattern ctx vals) = do
           return patElem { patElemAttr = new_attr }
         inspectCtx patElem
           | Mem space <- patElemType patElem,
-            space /= Space "local" =
+            expandable space =
               throwError $ unwords ["Cannot deal with existential memory block",
                                     pretty (patElemName patElem),
                                     "when expanding inside kernels."]
@@ -452,7 +452,9 @@ offsetMemoryInExp e = mapExpM recurse e
                   , mapOnBranchType = offsetMemoryInBodyReturns
                   , mapOnOp = onOp
                   }
-        onOp (Inner (SegOp op)) = Inner . SegOp <$> mapSegOpM segOpMapper op
+        onOp (Inner (SegOp op)) =
+          Inner . SegOp <$>
+          localScope (scopeOfSegSpace (segSpace op)) (mapSegOpM segOpMapper op)
           where segOpMapper =
                   identitySegOpMapper { mapOnSegOpBody = offsetMemoryInKernelBody
                                       , mapOnSegOpLambda = offsetMemoryInLambda

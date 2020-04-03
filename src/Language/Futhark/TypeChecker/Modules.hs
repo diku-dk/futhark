@@ -9,7 +9,7 @@ module Language.Futhark.TypeChecker.Modules
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
-import Data.List
+import Data.List (intersect)
 import Data.Loc
 import Data.Maybe
 import Data.Either
@@ -235,7 +235,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
       _ ->
         missingType loc $ fmap baseName name
   where mismatchedLiftedness name_l abs name mod_t =
-          Left $ TypeError loc Nothing mempty $
+          Left $ TypeError loc mempty $
           "Module defines" </>
           indent 2 (ppTypeAbbr abs name mod_t) </>
           "but module type requires" <+> text what <> "."
@@ -244,7 +244,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
                                       Lifted -> "a lifted type"
 
         anonymousSizes abs name mod_t =
-          Left $ TypeError loc Nothing mempty $
+          Left $ TypeError loc mempty $
           "Module defines" </>
           indent 2 (ppTypeAbbr abs name mod_t) </>
           "which contains anonymous sizes, but module type requires non-lifted type."
@@ -275,7 +275,7 @@ resolveMTyNames = resolveMTyNames'
                   Just (QualName _ modname')
                     | Just sig_env_mod <-
                         M.lookup modname' $ envModTable mod_env ->
-                      resolveModNames mod_env_mod sig_env_mod
+                      resolveModNames sig_env_mod mod_env_mod
                   _ -> mempty
           in mconcat [ resolve Term mod_env $ envVtable sig_env
                      , resolve Type mod_env $ envVtable sig_env
@@ -290,17 +290,17 @@ resolveMTyNames = resolveMTyNames'
 
 missingType :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingType loc name =
-  Left $ TypeError loc Nothing mempty $
+  Left $ TypeError loc mempty $
   "Module does not define a type named" <+> ppr name <> "."
 
 missingVal :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingVal loc name =
-  Left $ TypeError loc Nothing mempty $
+  Left $ TypeError loc mempty $
   "Module does not define a value named" <+> ppr name <> "."
 
 missingMod :: Pretty a => SrcLoc -> a -> Either TypeError b
 missingMod loc name =
-  Left $ TypeError loc Nothing mempty $
+  Left $ TypeError loc mempty $
   "Module does not define a module named" <+> ppr name <> "."
 
 mismatchedType :: SrcLoc
@@ -310,7 +310,7 @@ mismatchedType :: SrcLoc
                -> (Liftedness, [TypeParam], StructType)
                -> Either TypeError b
 mismatchedType loc abs name spec_t env_t =
-  Left $ TypeError loc Nothing mempty $
+  Left $ TypeError loc mempty $
   "Module defines" </>
   indent 2 (ppTypeAbbr abs name env_t) </>
   "but module type requires" </>
@@ -342,11 +342,11 @@ matchMTys orig_mty orig_mty_sig =
                -> Either TypeError (M.Map VName VName)
 
     matchMTys' _ (MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
-      Left $ TypeError loc Nothing mempty
+      Left $ TypeError loc mempty
       "Cannot match parametric module with non-parametric module type."
 
     matchMTys' _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
-      Left $ TypeError loc Nothing mempty
+      Left $ TypeError loc mempty
       "Cannot match non-parametric module with paramatric module type."
 
     matchMTys' old_abs_subst_to_type (MTy mod_abs mod) (MTy sig_abs sig) loc = do
@@ -364,10 +364,10 @@ matchMTys orig_mty orig_mty_sig =
     matchMods :: TypeSubs -> Mod -> Mod -> SrcLoc
               -> Either TypeError (M.Map VName VName)
     matchMods _ ModEnv{} ModFun{} loc =
-      Left $ TypeError loc Nothing mempty
+      Left $ TypeError loc mempty
       "Cannot match non-parametric module with parametric module type."
     matchMods _ ModFun{} ModEnv{} loc =
-      Left $ TypeError loc Nothing mempty
+      Left $ TypeError loc mempty
       "Cannot match parametric module with non-parametric module type."
 
     matchMods abs_subst_to_type (ModEnv mod) (ModEnv sig) loc =
@@ -433,7 +433,7 @@ matchMTys orig_mty orig_mty_sig =
 
       case S.toList (mustBeExplicitInType t) `intersect` map typeParamName ps of
         [] -> return ()
-        d:_ -> Left $ TypeError loc Nothing mempty $
+        d:_ -> Left $ TypeError loc mempty $
                "Type" </>
                indent 2 (ppTypeAbbr [] name (l, ps, t)) </>
                textwrap "cannot be made abstract because size parameter" <+/> pquote (pprName d) <+/>
@@ -465,17 +465,18 @@ matchMTys orig_mty orig_mty_sig =
       case matchValBinding loc spec_v v of
         Nothing -> return (spec_name, name)
         Just problem ->
-          Left $ TypeError loc Nothing mempty $
+          Left $ TypeError loc mempty $
           "Module type specifies" </>
           indent 2 (ppValBind spec_name spec_v) </>
           "but module provides" </>
           indent 2 (ppValBind spec_name v) </>
-          maybe mempty text problem
+          fromMaybe mempty problem
 
-    matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe String)
+    matchValBinding :: SrcLoc -> BoundV -> BoundV -> Maybe (Maybe Doc)
     matchValBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
       case doUnification loc tps (toStruct orig_spec_t) (toStruct orig_t) of
-        Left err -> Just $ Just $ prettyTypeErrorNoLoc err
+        Left (TypeError _ notes msg) ->
+          Just $ Just $ msg <> ppr notes
         -- Even if they unify, we still have to verify the uniqueness
         -- properties.
         Right t | noSizes t `subtypeOf`

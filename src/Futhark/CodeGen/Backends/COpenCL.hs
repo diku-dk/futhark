@@ -7,7 +7,7 @@ module Futhark.CodeGen.Backends.COpenCL
   ) where
 
 import Control.Monad hiding (mapM)
-import Data.List
+import Data.List (intercalate)
 import qualified Data.Map as M
 
 import qualified Language.C.Syntax as C

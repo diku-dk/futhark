@@ -77,7 +77,11 @@ module type numeric = {
 module type integral = {
   include numeric
 
+  -- | Like `/`@term, but rounds towards zero.  This only matters when
+  -- one of the operands is negative.  May be more efficient.
   val //: t -> t -> t
+  -- | Like `%`@term, but rounds towards zero.  This only matters when
+  -- one of the operands is negative.  May be more efficient.
   val %%: t -> t -> t
 
   val &: t -> t -> t
@@ -95,6 +99,14 @@ module type integral = {
 
   -- | Count number of one bits.
   val popc: t -> i32
+
+  -- | Computes `x * y` and returns the high half of the product of x
+  -- and y.
+  val mul_hi: (x: t) -> (y: t) -> t
+
+  -- | Computes `mul_hi a b + c`, but perhaps in a more efficient way,
+  -- depending on the target platform.
+  val mad_hi: (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Count number of zero bits preceding the most significant set
   -- bit.
@@ -122,13 +134,25 @@ module type real = {
 
   val sqrt: t -> t
   val exp: t -> t
-  val cos: t -> t
+
   val sin: t -> t
+  val cos: t -> t
   val tan: t -> t
+
   val asin: t -> t
   val acos: t -> t
   val atan: t -> t
+
+  val sinh: t -> t
+  val cosh: t -> t
+  val tanh: t -> t
+
+  val asinh: t -> t
+  val acosh: t -> t
+  val atanh: t -> t
+
   val atan2: t -> t -> t
+
   val gamma: t -> t
   val lgamma: t -> t
   -- | Linear interpolation.  The third argument must be in the range
@@ -145,6 +169,16 @@ module type real = {
   val ceil : t -> t
   val floor : t -> t
   val trunc : t -> t
+
+  -- | Computes `a*b+c`.  Depending on the compiler backend, this may
+  -- be fused into a single operation that is faster but less
+  -- accurate.  Do not confuse it with `fma`@term.
+  val mad : (a: t) -> (b: t) -> (c: t) -> t
+
+  -- | Computes `a*b+c`, with `a*b` being rounded with infinite
+  -- precision.  Rounding of intermediate products shall not
+  -- occur. Edge case behavior is per the IEEE 754-2008 standard.
+  val fma : (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Round to the nearest integer, with alfway cases rounded to the
   -- nearest even integer.  Note that this differs from `round()` in
@@ -261,6 +295,8 @@ module i8: (size with t = i8) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc8
+  let mul_hi a b = intrinsics.mul_hi8 (i8 a, i8 b)
+  let mad_hi a b c = intrinsics.mad_hi8 (i8 a, i8 b, i8 c)
   let clz = intrinsics.clz8
 
   let iota (n: i8) = 0i8..1i8..<n
@@ -333,6 +369,8 @@ module i16: (size with t = i16) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc16
+  let mul_hi a b = intrinsics.mul_hi16 (i16 a, i16 b)
+  let mad_hi a b c = intrinsics.mad_hi16 (i16 a, i16 b, i16 c)
   let clz = intrinsics.clz16
 
   let iota (n: i16) = 0i16..1i16..<n
@@ -408,6 +446,8 @@ module i32: (size with t = i32) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc = intrinsics.popc32
+  let mul_hi a b = intrinsics.mul_hi32 (i32 a, i32 b)
+  let mad_hi a b c = intrinsics.mad_hi32 (i32 a, i32 b, i32 c)
   let clz = intrinsics.clz32
 
   let iota (n: i32) = 0..1..<n
@@ -483,6 +523,8 @@ module i64: (size with t = i64) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
   let popc = intrinsics.popc64
+  let mul_hi a b = intrinsics.mul_hi64 (i64 a, i64 b)
+  let mad_hi a b c = intrinsics.mad_hi64 (i64 a, i64 b, i64 c)
   let clz = intrinsics.clz64
 
   let iota (n: i64) = 0i64..1i64..<n
@@ -558,6 +600,8 @@ module u8: (size with t = u8) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc8 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi8 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi8 (sign a, sign b, sign c))
   let clz x = intrinsics.clz8 (sign x)
 
   let iota (n: u8) = 0u8..1u8..<n
@@ -633,6 +677,8 @@ module u16: (size with t = u16) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc16 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi16 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi16 (sign a, sign b, sign c))
   let clz x = intrinsics.clz16 (sign x)
 
   let iota (n: u16) = 0u16..1u16..<n
@@ -708,6 +754,8 @@ module u32: (size with t = u32) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc32 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi32 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi32 (sign a, sign b, sign c))
   let clz x = intrinsics.clz32 (sign x)
 
   let iota (n: u32) = 0u32..1u32..<n
@@ -783,6 +831,8 @@ module u64: (size with t = u64) = {
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
   let popc x = intrinsics.popc64 (sign x)
+  let mul_hi a b = unsign (intrinsics.mul_hi64 (sign a, sign b))
+  let mad_hi a b c = unsign (intrinsics.mad_hi64 (sign a, sign b, sign c))
   let clz x = intrinsics.clz64 (sign x)
 
   let iota (n: u64) = 0u64..1u64..<n
@@ -850,16 +900,25 @@ module f64: (float with t = f64 with int_t = u64) = {
   let log2 (x: f64) = intrinsics.log2_64 x
   let log10 (x: f64) = intrinsics.log10_64 x
   let exp (x: f64) = intrinsics.exp64 x
-  let cos (x: f64) = intrinsics.cos64 x
   let sin (x: f64) = intrinsics.sin64 x
+  let cos (x: f64) = intrinsics.cos64 x
   let tan (x: f64) = intrinsics.tan64 x
   let acos (x: f64) = intrinsics.acos64 x
   let asin (x: f64) = intrinsics.asin64 x
   let atan (x: f64) = intrinsics.atan64 x
+  let sinh (x: f64) = intrinsics.sinh64 x
+  let cosh (x: f64) = intrinsics.cosh64 x
+  let tanh (x: f64) = intrinsics.tanh64 x
+  let acosh (x: f64) = intrinsics.acosh64 x
+  let asinh (x: f64) = intrinsics.asinh64 x
+  let atanh (x: f64) = intrinsics.atanh64 x
   let atan2 (x: f64) (y: f64) = intrinsics.atan2_64 (x, y)
   let gamma = intrinsics.gamma64
   let lgamma = intrinsics.lgamma64
-  let lerp v0 v1 t = intrinsics.lerp64 (v0, v1, t)
+
+  let lerp v0 v1 t = intrinsics.lerp64 (v0,v1,t)
+  let fma a b c = intrinsics.fma64 (a,b,c)
+  let mad a b c = intrinsics.mad64 (a,b,c)
 
   let ceil = intrinsics.ceil64
   let floor = intrinsics.floor64
@@ -949,16 +1008,25 @@ module f32: (float with t = f32 with int_t = u32) = {
   let log2 (x: f32) = intrinsics.log2_32 x
   let log10 (x: f32) = intrinsics.log10_32 x
   let exp (x: f32) = intrinsics.exp32 x
-  let cos (x: f32) = intrinsics.cos32 x
   let sin (x: f32) = intrinsics.sin32 x
+  let cos (x: f32) = intrinsics.cos32 x
   let tan (x: f32) = intrinsics.tan32 x
   let acos (x: f32) = intrinsics.acos32 x
   let asin (x: f32) = intrinsics.asin32 x
   let atan (x: f32) = intrinsics.atan32 x
+  let sinh (x: f32) = intrinsics.sinh32 x
+  let cosh (x: f32) = intrinsics.cosh32 x
+  let tanh (x: f32) = intrinsics.tanh32 x
+  let acosh (x: f32) = intrinsics.acosh32 x
+  let asinh (x: f32) = intrinsics.asinh32 x
+  let atanh (x: f32) = intrinsics.atanh32 x
   let atan2 (x: f32) (y: f32) = intrinsics.atan2_32 (x, y)
   let gamma = intrinsics.gamma32
   let lgamma = intrinsics.lgamma32
-  let lerp v0 v1 t = intrinsics.lerp32 (v0, v1, t)
+
+  let lerp v0 v1 t = intrinsics.lerp32 (v0,v1,t)
+  let fma a b c = intrinsics.fma32 (a,b,c)
+  let mad a b c = intrinsics.mad32 (a,b,c)
 
   let ceil = intrinsics.ceil32
   let floor = intrinsics.floor32

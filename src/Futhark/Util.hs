@@ -18,7 +18,6 @@ module Futhark.Util
         maybeHead,
         splitFromEnd,
         splitAt3,
-        splitAt4,
         focusNth,
         unixEnvironment,
         isEnvVarSet,
@@ -46,7 +45,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import Data.Char
-import Data.List
+import Data.List (genericDrop, genericSplitAt)
 import Data.Either
 import Data.Maybe
 import System.Environment
@@ -121,14 +120,6 @@ splitAt3 n m l =
   let (xs, l') = splitAt n l
       (ys, zs) = splitAt m l'
   in (xs, ys, zs)
-
--- | Like 'splitAt', but produces four lists.
-splitAt4 :: Int -> Int -> Int -> [a] -> ([a], [a], [a], [a])
-splitAt4 n m k l =
-  let (xs, l') = splitAt n l
-      (ys, l'') = splitAt m l'
-      (zs, vs) = splitAt k l''
-  in (xs, ys, zs, vs)
 
 -- | Return the list element at the given index, if the index is
 -- valid, along with the elements before and after.
@@ -254,9 +245,13 @@ pmapIO concurrency f elems = go elems []
     go xs res = do
       numThreads <- maybe getNumCapabilities pure concurrency
       let (e,es) = splitAt numThreads xs
-      mvars  <- mapM (fork f) e
+      mvars  <- mapM (fork f') e
       result <- mapM takeMVar mvars
-      go es (result ++ res)
+      case sequence result of
+        Left err -> throw (err :: SomeException)
+        Right result' -> go es (result' ++ res)
+
+    f' x = (Right <$> f x) `catch` (pure . Left)
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

@@ -5,7 +5,6 @@ module Futhark.Construct
   ( letSubExp
   , letSubExps
   , letExp
-  , letExps
   , letTupExp
   , letTupExp'
   , letInPlace
@@ -16,9 +15,7 @@ module Futhark.Construct
   , eBinOp
   , eCmpOp
   , eConvOp
-  , eNegate
   , eNot
-  , eAbs
   , eSignum
   , eCopy
   , eAssert
@@ -65,7 +62,7 @@ where
 
 import qualified Data.Map.Strict as M
 import Data.Loc (SrcLoc)
-import Data.List
+import Data.List (sortOn)
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
@@ -101,10 +98,6 @@ letInPlace desc src slice e = do
 letSubExps :: MonadBinder m =>
               String -> [Exp (Lore m)] -> m [SubExp]
 letSubExps desc = mapM $ letSubExp desc
-
-letExps :: MonadBinder m =>
-           String -> [Exp (Lore m)] -> m [VName]
-letExps desc = mapM $ letExp desc
 
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
@@ -175,39 +168,9 @@ eConvOp op x = do
   x' <- letSubExp "x" =<< x
   return $ BasicOp $ ConvOp op x'
 
-eNegate :: MonadBinder m =>
-           m (Exp (Lore m)) -> m (Exp (Lore m))
-eNegate em = do
-  e <- em
-  e' <- letSubExp "negate_arg" e
-  t <- subExpType e'
-  case t of
-    Prim (IntType int_t) ->
-      return $ BasicOp $
-      BinOp (Sub int_t) (intConst int_t 0) e'
-    Prim (FloatType float_t) ->
-      return $ BasicOp $
-      BinOp (FSub float_t) (floatConst float_t 0) e'
-    _ ->
-      error $ "eNegate: operand " ++ pretty e ++ " has invalid type."
-
 eNot :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
 eNot e = BasicOp . UnOp Not <$> (letSubExp "not_arg" =<< e)
-
-eAbs :: MonadBinder m =>
-        m (Exp (Lore m)) -> m (Exp (Lore m))
-eAbs em = do
-  e <- em
-  e' <- letSubExp "abs_arg" e
-  t <- subExpType e'
-  case t of
-    Prim (IntType int_t) ->
-      return $ BasicOp $ UnOp (Abs int_t) e'
-    Prim (FloatType float_t) ->
-      return $ BasicOp $ UnOp (FAbs float_t) e'
-    _ ->
-      error $ "eAbs: operand " ++ pretty e ++ " has invalid type."
 
 eSignum :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))

@@ -20,7 +20,7 @@ module Futhark.Internalise.TypesValues
 
 import Control.Monad.State
 import Control.Monad.Reader
-import Data.List
+import Data.List (delete, find, foldl')
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe

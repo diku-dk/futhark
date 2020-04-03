@@ -13,7 +13,7 @@ module Futhark.Analysis.AlgSimplify
 
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.List
+import Data.List (sort, sortBy, genericReplicate)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State

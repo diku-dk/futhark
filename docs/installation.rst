@@ -28,12 +28,12 @@ AUR), you shouldn't need to worry about this.
 Compiling from source
 ---------------------
 
-We use the the `Haskell Tool Stack`_ to handle dependencies and
-compilation of the Futhark compiler, so you will need to install the
-``stack`` tool.  Fortunately, the ``stack`` developers provide ample
-documentation about `installing Stack`_ on a multitude of operating
-systems.  If you're lucky, it may even be in your local package
-repository.
+The recommended way to compile Futhark is with the `Haskell Tool
+Stack`_, which handles dependencies and compilation of the Futhark
+compiler.  You will therefore need to install the ``stack`` tool.
+Fortunately, the ``stack`` developers provide ample documentation
+about `installing Stack`_ on a multitude of operating systems.  If
+you're lucky, it may even be in your local package repository.
 
 You can either retrieve a `source release tarball
 <https://github.com/diku-dk/futhark/releases>`_ or perform a checkout
@@ -69,6 +69,22 @@ directory by running::
   $ stack install
 
 Note that this does not install the Futhark manual pages.
+
+Compiling with ``cabal``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can also compile Futhark with ``cabal``.  If so, you must install
+an appropriate version of GHC and ``cabal`` yourself, for example
+through your favourite package manager.  On Linux, you can always use
+`ghcup <https://gitlab.haskell.org/haskell/ghcup>`_.  Then clone the
+repository as listed above and run::
+
+  $ cabal build
+
+To install the Futhark binaries to a specific location, for example
+``$HOME/.local/bin``, run::
+
+  $ cabal install --install-method=copy  --overwrite-policy=always --installdir=$HOME/.local/bin/
 
 Installing from a precompiled snapshot
 --------------------------------------
@@ -115,7 +131,11 @@ Installing Futhark on Linux
   be a bit behind.
 
 * Arch Linux users can use a `futhark-nightly package
-  <https://aur.archlinux.org/packages/futhark-nightly/>`_.
+  <https://aur.archlinux.org/packages/futhark-nightly/>`_ or a
+  `regular futhark package
+  <https://aur.archlinux.org/packages/futhark>`_.
+
+* NixOS users can install the ``futhark`` derivation.
 
 Otherwise (or if the version in the package system is too old), your
 best bet is to install from source or use a tarball, as described

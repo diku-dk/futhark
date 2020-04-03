@@ -15,7 +15,6 @@ module Futhark.Pipeline
        , onePass
        , passes
        , runPasses
-       , runPipeline
        )
        where
 
@@ -108,17 +107,6 @@ runPasses :: Pipeline fromlore tolore
           -> Prog fromlore
           -> FutharkM (Prog tolore)
 runPasses = unPipeline
-
-runPipeline :: Pipeline fromlore tolore
-            -> PipelineConfig
-            -> Prog fromlore
-            -> Action tolore
-            -> FutharkM ()
-runPipeline p cfg prog a = do
-  prog' <- runPasses p cfg prog
-  when (pipelineVerbose cfg) $ logMsg $
-    "Running action " <> T.pack (actionName a)
-  actionProcedure a prog'
 
 onePass :: (Checkable fromlore, Checkable tolore) =>
            Pass fromlore tolore -> Pipeline fromlore tolore

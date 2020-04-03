@@ -27,7 +27,6 @@ module Futhark.Transform.Rename
   -- * Renaming annotations
   , RenameM
   , substituteRename
-  , bindingForRename
   , renamingStms
   , Rename (..)
   , Renameable
@@ -58,7 +57,7 @@ runRenamer (RenameM m) src = runReader (runStateT m src) env
 renameProg :: (Renameable lore, MonadFreshNames m) =>
               Prog lore -> m (Prog lore)
 renameProg prog = modifyNameSource $
-                  runRenamer $ Prog <$> mapM rename (progFunctions prog)
+                  runRenamer $ Prog <$> mapM rename (progFuns prog)
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the expression is unaffected, under the assumption that the
@@ -163,10 +162,6 @@ instance Rename Ident where
     name' <- rename name
     tp' <- rename tp
     return $ Ident name' tp'
-
--- | Create a bunch of new names and bind them for substitution.
-bindingForRename :: [VName] -> RenameM a -> RenameM a
-bindingForRename = bind
 
 bind :: [VName] -> RenameM a -> RenameM a
 bind vars body = do

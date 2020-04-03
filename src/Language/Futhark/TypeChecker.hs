@@ -11,7 +11,6 @@ module Language.Futhark.TypeChecker
   , checkDec
   , checkModExp
   , TypeError
-  , prettyTypeError
   , Warnings
   , initialEnv
   )
@@ -19,7 +18,7 @@ module Language.Futhark.TypeChecker
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
-import Data.List
+import Data.List (isPrefixOf)
 import Data.Loc
 import Data.Maybe
 import Data.Either
@@ -199,6 +198,11 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
       typeError loc mempty $
       "All function parameters must have non-anonymous sizes." </>
       "Hint: add size parameters to" <+> pquote (pprName name') <> "."
+
+    let (params, _) = unfoldFunType $ unInfo $ expandedType vtype'
+    when (null params && any isSizeParam tparams) $
+      typeError loc mempty
+      "Size parameters are only allowed on bindings that also have value parameters."
 
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
@@ -487,13 +491,36 @@ checkTypeBind (TypeBind name l tps td doc loc) =
                      },
                TypeBind name' l tps' td' doc loc)
 
+
+entryPoint :: [Pattern] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
+entryPoint params orig_ret_te orig_ret =
+  EntryPoint (map patternEntry params ++ more_params) rettype'
+  where (more_params, rettype') =
+          onRetType orig_ret_te orig_ret
+
+        patternEntry (PatternParens p _) =
+          patternEntry p
+        patternEntry (PatternAscription _ tdecl _) =
+          EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
+        patternEntry p =
+          EntryType (patternStructType p) Nothing
+
+        onRetType (Just (TEArrow _ t1_te t2_te _)) (Scalar (Arrow _ _ t1 t2)) =
+          let (xs, y) = onRetType (Just t2_te) t2
+          in (EntryType t1 (Just t1_te) : xs, y)
+        onRetType _ (Scalar (Arrow _ _ t1 t2)) =
+          let (xs, y) = onRetType Nothing t2
+          in (EntryType t1 Nothing : xs, y)
+        onRetType te t =
+          ([], EntryType t te)
+
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let (rettype_params, rettype') = unfoldFunType rettype
-      entry' = Info (foldFunType (map patternStructType params') rettype) <$ entry
+      entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
 
   case entry' of
     Just _
@@ -587,8 +614,8 @@ checkOneDec (LocalDec d loc) = do
 
 checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
-  when ("/futlib" `isPrefixOf` name) $
-    warn loc $ name ++ " is already implicitly imported."
+  when ("/prelude" `isPrefixOf` name) $
+    typeError loc mempty $ ppr name <+> "may not be explicitly imported."
   return (mempty, env, ImportDec name (Info name') loc)
 
 checkOneDec (ValDec vb) = do

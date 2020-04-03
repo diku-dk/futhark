@@ -20,7 +20,7 @@ import Control.Monad.Writer
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.String
-import Data.List
+import Data.List (tails)
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST
@@ -73,7 +73,7 @@ inside what m = seen what >> censor addWhat m
         addWhat' (ctx, k) = (what : ctx, k)
 
 progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
-progMetrics = actualMetrics . execWriter . runMetricsM . mapM_ funDefMetrics . progFunctions
+progMetrics = actualMetrics . execWriter . runMetricsM . mapM_ funDefMetrics . progFuns
 
 funDefMetrics :: OpMetrics (Op lore) => FunDef lore -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody

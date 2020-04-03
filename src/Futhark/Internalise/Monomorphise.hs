@@ -32,7 +32,7 @@ import           Control.Monad.State
 import           Control.Monad.Writer hiding (Sum)
 import           Data.Bitraversable
 import           Data.Bifunctor
-import           Data.List
+import           Data.List (partition)
 import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
@@ -264,6 +264,9 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e e_t loc)
       let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, [], body, loc)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
+        -- Do not remember this one for next time we monomorphise this
+        -- function.
+        modifyLifts $ filter ((/=fname) . fst . fst)
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         return (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
 
@@ -681,12 +684,14 @@ transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   valbind' <- toPolyBinding <$>
               removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
+
   when (isJust $ valBindEntryPoint valbind) $ do
     t <- removeTypeVariablesInType $ foldFunType
          (map patternStructType (valBindParams valbind)) $
          fst $ unInfo $ valBindRetType valbind
     (name, _, valbind'') <- monomorphiseBinding True valbind' $ monoType t
     tell $ Seq.singleton (name, valbind'' { valBindEntryPoint = valBindEntryPoint valbind})
+
   return mempty { envPolyBindings = M.singleton (valBindName valbind) valbind' }
 
 transformTypeBind :: TypeBind -> MonoM Env

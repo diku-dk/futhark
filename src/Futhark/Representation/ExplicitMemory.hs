@@ -94,7 +94,7 @@ import Control.Monad.Reader
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Foldable (traverse_, toList)
-import Data.List
+import Data.List (find)
 import qualified Data.Set as S
 
 import Futhark.Analysis.Metrics

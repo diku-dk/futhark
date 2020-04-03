@@ -2,7 +2,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -fmax-pmcheck-iterations=25000000#-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -16,7 +15,7 @@ import Data.Bifunctor (first)
 import Data.Bitraversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List
+import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
 import Data.Loc
 import Data.Char (chr)
@@ -166,8 +165,8 @@ allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
   PatternConstr c <$> (Info <$> allDimsFreshInType t) <*>
   mapM allDimsFreshInPat pats <*> pure loc
 
-generateEntryPoint :: E.StructType -> E.ValBind -> InternaliseM ()
-generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info (rettype, _)) _ params _ _ loc) = do
+generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
+generateEntryPoint (E.EntryPoint e_paramts e_rettype) (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ loc) = do
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
   params_fresh <- mapM allDimsFreshInPat params
@@ -175,8 +174,7 @@ generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info (rettype, _)) _ param
                 mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \_ shapeparams params' -> do
     (entry_rettype, _) <- internaliseEntryReturnType $ anySizes rettype
-    let (e_paramts, e_rettype) = E.unfoldFunType ftype
-        entry' = entryPoint (zip3 params e_paramts params') (retdecl, e_rettype, entry_rettype)
+    let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $ do
@@ -197,40 +195,37 @@ generateEntryPoint ftype (E.ValBind _ ofname retdecl (Info (rettype, _)) _ param
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
-entryPoint :: [(E.Pattern, E.StructType, [I.FParam])]
-           -> (Maybe (E.TypeExp VName), E.StructType, [[I.TypeBase ExtShape Uniqueness]])
-           -> EntryPoint
-entryPoint params (retdecl, eret, crets) =
+entryPoint :: [(E.EntryType, [I.FParam])]
+           -> (E.EntryType,
+               [[I.TypeBase ExtShape Uniqueness]])
+           -> I.EntryPoint
+entryPoint params (eret, crets) =
   (concatMap (entryPointType . preParam) params,
-   case isTupleRecord eret of
-     Just ts -> concatMap entryPointType $ zip3 retdecls ts crets
-     _       -> entryPointType (retdecl, eret, concat crets))
-  where preParam (p_pat, e_t, ps) = (paramOuterType p_pat,
-                                     e_t,
-                                     staticShapes $ map I.paramDeclType ps)
-        paramOuterType (E.PatternAscription _ tdecl _) = Just $ declaredType tdecl
-        paramOuterType (E.PatternParens p _) = paramOuterType p
-        paramOuterType _ = Nothing
+   case (isTupleRecord $ entryType eret,
+         entryAscribed eret) of
+     (Just ts, Just (E.TETuple e_ts _)) ->
+       concatMap entryPointType $
+       zip (zipWith E.EntryType ts (map Just e_ts)) crets
+     (Just ts, _) ->
+       concatMap entryPointType $
+       zip (map (`E.EntryType` Nothing) ts) crets
+     _ ->
+       entryPointType (eret, concat crets))
+  where preParam (e_t, ps) = (e_t, staticShapes $ map I.paramDeclType ps)
 
-        retdecls = case retdecl of Just (TETuple tes _) -> map Just tes
-                                   _                    -> repeat Nothing
-
-        entryPointType :: (Maybe (E.TypeExp VName),
-                           E.StructType,
-                           [I.TypeBase ExtShape Uniqueness])
-                       -> [EntryPointType]
-        entryPointType (_, E.Scalar (E.Prim E.Unsigned{}), _) =
-          [I.TypeUnsigned]
-        entryPointType (_, E.Array _ _ (E.Prim E.Unsigned{}) _, _) =
-          [I.TypeUnsigned]
-        entryPointType (_, E.Scalar E.Prim{}, _) =
-          [I.TypeDirect]
-        entryPointType (_, E.Array _ _ E.Prim{} _, _) =
-          [I.TypeDirect]
-        entryPointType (te, t, ts) =
-          [I.TypeOpaque desc $ length ts]
-          where desc = maybe (pretty t') typeExpOpaqueName te
-                t' = noSizes t `E.setUniqueness` Nonunique
+        entryPointType (t, ts)
+          | E.Scalar (E.Prim E.Unsigned{}) <- E.entryType t =
+              [I.TypeUnsigned]
+          | E.Array _ _ (E.Prim E.Unsigned{}) _ <- E.entryType t =
+              [I.TypeUnsigned]
+          | E.Scalar E.Prim{} <- E.entryType t =
+              [I.TypeDirect]
+          | E.Array _ _ E.Prim{} _ <- E.entryType t =
+              [I.TypeDirect]
+          | otherwise =
+              [I.TypeOpaque desc $ length ts]
+          where desc = maybe (pretty t') typeExpOpaqueName $ E.entryAscribed t
+                t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
 
         -- | We remove dimension arguments such that we hopefully end
         -- up with a simpler type name for the entry point.  The
@@ -541,7 +536,8 @@ internaliseExp desc e@E.Apply{} = do
              let tag ses = [ (se, I.Observe) | se <- ses ]
              args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
              let args'' = concatMap tag args'
-             letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+             letTupExp' desc $ I.Apply fname args'' [I.Prim rettype]
+               (I.NotConstFun, Safe, loc, [])
 
          | otherwise -> do
              args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
@@ -583,14 +579,14 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
   -- information.  For a type-correct source program, these reshapes
   -- should simplify away.
   let merge = ctxmerge ++ valmerge
-      merge_names = map (I.paramName . fst) merge
-      merge_ts = existentialiseExtTypes merge_names $
-                 staticShapes $ map (I.paramType . fst) merge
+      merge_ts = map (I.paramType . fst) merge
   loopbody'' <- localScope (scopeOfFParams $ map fst merge) $
-                inScopeOf form' $
-                ensureResultExtShapeNoCtx asserting
-                "shape of loop result does not match shapes in loop parameter"
-                loc merge_ts loopbody'
+                inScopeOf form' $ insertStmsM $
+    resultBodyM
+    =<< ensureArgShapes asserting
+        "shape of loop result does not match shapes in loop parameter"
+        loc (map (I.paramName . fst) ctxmerge) merge_ts
+    =<< bodyBind loopbody'
 
   loop_res <- map I.Var . dropCond <$>
               letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody'')
@@ -1412,7 +1408,7 @@ internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
   letBind_ (basicPattern [] [I.Ident name $ I.Prim I.int32]) $
-  I.Apply fname [] [I.Prim I.int32] (Safe, loc, mempty)
+  I.Apply fname [] [I.Prim I.int32] (I.ConstFun, Safe, loc, mempty)
 
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
@@ -1420,29 +1416,30 @@ isOverloadedFunction :: E.QualName VName -> [E.Exp] -> SrcLoc
                      -> Maybe (String -> InternaliseM [SubExp])
 isOverloadedFunction qname args loc = do
   guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
-  handle args $ baseString $ qualLeaf qname
+  let handlers = [handleSign,
+                  handleIntrinsicOps,
+                  handleOps,
+                  handleSOACs,
+                  handleRest]
+  msum [h args $ baseString $ qualLeaf qname | h <- handlers]
   where
-    handle [x] "sign_i8"  = Just $ toSigned I.Int8 x
-    handle [x] "sign_i16" = Just $ toSigned I.Int16 x
-    handle [x] "sign_i32" = Just $ toSigned I.Int32 x
-    handle [x] "sign_i64" = Just $ toSigned I.Int64 x
+    handleSign [x] "sign_i8"  = Just $ toSigned I.Int8 x
+    handleSign [x] "sign_i16" = Just $ toSigned I.Int16 x
+    handleSign [x] "sign_i32" = Just $ toSigned I.Int32 x
+    handleSign [x] "sign_i64" = Just $ toSigned I.Int64 x
 
-    handle [x] "unsign_i8"  = Just $ toUnsigned I.Int8 x
-    handle [x] "unsign_i16" = Just $ toUnsigned I.Int16 x
-    handle [x] "unsign_i32" = Just $ toUnsigned I.Int32 x
-    handle [x] "unsign_i64" = Just $ toUnsigned I.Int64 x
+    handleSign [x] "unsign_i8"  = Just $ toUnsigned I.Int8 x
+    handleSign [x] "unsign_i16" = Just $ toUnsigned I.Int16 x
+    handleSign [x] "unsign_i32" = Just $ toUnsigned I.Int32 x
+    handleSign [x] "unsign_i64" = Just $ toUnsigned I.Int64 x
 
-    handle [x] "!" = Just $ complementF x
+    handleSign _ _ = Nothing
 
-    handle [x] "opaque" = Just $ \desc ->
-      mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
-
-    handle [x] s
+    handleIntrinsicOps [x] s
       | Just unop <- find ((==s) . pretty) allUnOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp unop x'
-
-    handle [TupLit [x,y] _] s
+    handleIntrinsicOps [TupLit [x,y] _] s
       | Just bop <- find ((==s) . pretty) allBinOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
@@ -1451,22 +1448,23 @@ isOverloadedFunction qname args loc = do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
           fmap pure $ letSubExp desc $ I.BasicOp $ I.CmpOp cmp x' y'
-    handle [x] s
+    handleIntrinsicOps [x] s
       | Just conv <- find ((==s) . pretty) allConvOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
+    handleIntrinsicOps _ _ = Nothing
 
     -- Short-circuiting operators are magical.
-    handle [x,y] "&&" = Just $ \desc ->
+    handleOps [x,y] "&&" = Just $ \desc ->
       internaliseExp desc $
       E.If x y (E.Literal (E.BoolValue False) noLoc) (Info $ E.Scalar $ E.Prim E.Bool, Info []) noLoc
-    handle [x,y] "||" = Just $ \desc ->
+    handleOps [x,y] "||" = Just $ \desc ->
         internaliseExp desc $
         E.If x (E.Literal (E.BoolValue True) noLoc) y (Info $ E.Scalar $ E.Prim E.Bool, Info []) noLoc
 
     -- Handle equality and inequality specially, to treat the case of
     -- arrays.
-    handle [xe,ye] op
+    handleOps [xe,ye] op
       | Just cmp_f <- isEqlOp op = Just $ \desc -> do
           xe' <- internaliseExp "x" xe
           ye' <- internaliseExp "y" ye
@@ -1514,7 +1512,7 @@ isOverloadedFunction qname args loc = do
                       I.If shapes_match compare_elems_body (resultBody [constant False]) $
                       ifCommon [I.Prim I.Bool]
 
-    handle [x,y] name
+    handleOps [x,y] name
       | Just bop <- find ((name==) . pretty) [minBound..maxBound::E.BinOp] =
       Just $ \desc -> do
         x' <- internaliseExp1 "x" x
@@ -1524,9 +1522,72 @@ isOverloadedFunction qname args loc = do
             internaliseBinOp loc desc bop x' y' t1 t2
           _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
-    handle [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
+    handleOps _ _ = Nothing
 
-    handle [E.TupLit [e, E.ArrayLit vs _ _] _] "cmp_threshold" = do
+    handleSOACs [TupLit [lam, arr] _] "map" = Just $ \desc -> do
+      arr' <- internaliseExpToVars "map_arr" arr
+      lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
+      w <- arraysSize 0 <$> mapM lookupType arr'
+      letTupExp' desc $ I.Op $
+        I.Screma w (I.mapSOAC lam') arr'
+
+    handleSOACs [TupLit [lam, arr] _] "filter" = Just $ \_desc -> do
+      arrs <- internaliseExpToVars "filter_input" arr
+      lam' <- internalisePartitionLambda internaliseLambda 1 lam $ map I.Var arrs
+      uncurry (++) <$> partitionWithSOACS 1 lam' arrs
+
+    handleSOACs [TupLit [k, lam, arr] _] "partition" = do
+      k' <- fromIntegral <$> isInt32 k
+      Just $ \_desc -> do
+        arrs <- internaliseExpToVars "partition_input" arr
+        lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
+        uncurry (++) <$> partitionWithSOACS k' lam' arrs
+        where isInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
+              isInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
+              isInt32 _ = Nothing
+
+    handleSOACs [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
+      internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
+      where reduce w red_lam nes arrs =
+              I.Screma w <$>
+              I.reduceSOAC [Reduce Noncommutative red_lam nes] <*> pure arrs
+
+    handleSOACs [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
+      internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
+      where reduce w red_lam nes arrs =
+              I.Screma w <$>
+              I.reduceSOAC [Reduce Commutative red_lam nes] <*> pure arrs
+
+    handleSOACs [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
+      internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
+      where reduce w scan_lam nes arrs =
+              I.Screma w <$> I.scanSOAC scan_lam nes <*> pure arrs
+
+    handleSOACs [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
+      internaliseStreamRed desc InOrder Noncommutative op f arr
+
+    handleSOACs [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->
+      internaliseStreamRed desc Disorder Commutative op f arr
+
+    handleSOACs [TupLit [f, arr] _] "map_stream" = Just $ \desc ->
+      internaliseStreamMap desc InOrder f arr
+
+    handleSOACs [TupLit [f, arr] _] "map_stream_per" = Just $ \desc ->
+      internaliseStreamMap desc Disorder f arr
+
+    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist" = Just $ \desc ->
+      internaliseHist desc rf dest op ne buckets img loc
+
+    handleSOACs _ _ = Nothing
+
+    handleRest [x] "!" = Just $ complementF x
+
+    handleRest [x] "opaque" = Just $ \desc ->
+      mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
+
+    handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
+
+    handleRest [E.TupLit [e, E.ArrayLit vs _ _] _] "cmp_threshold" = do
       s <- mapM isCharLit vs
       Just $ \desc -> do
         x <- internaliseExp1 "threshold_x" e
@@ -1534,7 +1595,7 @@ isOverloadedFunction qname args loc = do
       where isCharLit (Literal (SignedValue iv) _) = Just $ chr $ fromIntegral $ intToInt64 iv
             isCharLit _                            = Nothing
 
-    handle [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
+    handleRest [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "unflatten_arr" arr
       n' <- internaliseExp1 "n" n
       m' <- internaliseExp1 "m" m
@@ -1551,7 +1612,7 @@ isOverloadedFunction qname args loc = do
         letSubExp desc $ I.BasicOp $
           I.Reshape (reshapeOuter [DimNew n', DimNew m'] 1 $ I.arrayShape arr_t) arr'
 
-    handle [arr] "flatten" = Just $ \desc -> do
+    handleRest [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
         arr_t <- lookupType arr'
@@ -1561,7 +1622,7 @@ isOverloadedFunction qname args loc = do
         letSubExp desc $ I.BasicOp $
           I.Reshape (reshapeOuter [DimNew k] 2 $ I.arrayShape arr_t) arr'
 
-    handle [TupLit [x, y] _] "concat" = Just $ \desc -> do
+    handleRest [TupLit [x, y] _] "concat" = Just $ \desc -> do
       xs <- internaliseExpToVars "concat_x" x
       ys <- internaliseExpToVars "concat_y" y
       outer_size <- arraysSize 0 <$> mapM lookupType xs
@@ -1574,7 +1635,7 @@ isOverloadedFunction qname args loc = do
             I.BasicOp $ I.Concat 0 xarr [yarr] ressize
       letSubExps desc $ zipWith conc xs ys
 
-    handle [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
+    handleRest [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
       offset' <- internaliseExp1 "rotation_offset" offset
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
@@ -1582,74 +1643,20 @@ isOverloadedFunction qname args loc = do
             offsets = offset' : replicate (r-1) zero
         return $ I.Rotate offsets v
 
-    handle [e] "transpose" = Just $ \desc ->
+    handleRest [e] "transpose" = Just $ \desc ->
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
         return $ I.Rearrange ([1,0] ++ [2..r-1]) v
 
-    handle [TupLit [x, y] _] "zip" = Just $ \desc ->
+    handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
       (++) <$> internaliseExp (desc ++ "_zip_x") x
            <*> internaliseExp (desc ++ "_zip_y") y
 
-    handle [TupLit [lam, arr] _] "map" = Just $ \desc -> do
-      arr' <- internaliseExpToVars "map_arr" arr
-      lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arr'
-      w <- arraysSize 0 <$> mapM lookupType arr'
-      letTupExp' desc $ I.Op $
-        I.Screma w (I.mapSOAC lam') arr'
+    handleRest [x] "unzip" = Just $ flip internaliseExp x
+    handleRest [x] "trace" = Just $ flip internaliseExp x
+    handleRest [x] "break" = Just $ flip internaliseExp x
 
-    handle [TupLit [lam, arr] _] "filter" = Just $ \_desc -> do
-      arrs <- internaliseExpToVars "filter_input" arr
-      lam' <- internalisePartitionLambda internaliseLambda 1 lam $ map I.Var arrs
-      uncurry (++) <$> partitionWithSOACS 1 lam' arrs
-
-    handle [TupLit [k, lam, arr] _] "partition" = do
-      k' <- fromIntegral <$> isInt32 k
-      Just $ \_desc -> do
-        arrs <- internaliseExpToVars "partition_input" arr
-        lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
-        uncurry (++) <$> partitionWithSOACS k' lam' arrs
-        where isInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-              isInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
-              isInt32 _ = Nothing
-
-    handle [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
-      internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
-      where reduce w red_lam nes arrs =
-              I.Screma w <$>
-              I.reduceSOAC [Reduce Noncommutative red_lam nes] <*> pure arrs
-
-    handle [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
-      internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
-      where reduce w red_lam nes arrs =
-              I.Screma w <$>
-              I.reduceSOAC [Reduce Commutative red_lam nes] <*> pure arrs
-
-    handle [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
-      internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
-      where reduce w scan_lam nes arrs =
-              I.Screma w <$> I.scanSOAC scan_lam nes <*> pure arrs
-
-    handle [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
-      internaliseStreamRed desc InOrder Noncommutative op f arr
-
-    handle [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->
-      internaliseStreamRed desc Disorder Commutative op f arr
-
-    handle [TupLit [f, arr] _] "map_stream" = Just $ \desc ->
-      internaliseStreamMap desc InOrder f arr
-
-    handle [TupLit [f, arr] _] "map_stream_per" = Just $ \desc ->
-      internaliseStreamMap desc Disorder f arr
-
-    handle [TupLit [rf, dest, op, ne, buckets, img] _] "hist" = Just $ \desc ->
-      internaliseHist desc rf dest op ne buckets img loc
-
-    handle [x] "unzip" = Just $ flip internaliseExp x
-    handle [x] "trace" = Just $ flip internaliseExp x
-    handle [x] "break" = Just $ flip internaliseExp x
-
-    handle _ _ = Nothing
+    handleRest _ _ = Nothing
 
     toSigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e
@@ -1664,7 +1671,7 @@ isOverloadedFunction qname args loc = do
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
         E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
-        _ -> error "Futhark.Internalise.handle: non-numeric type in ToSigned"
+        _ -> error "Futhark.Internalise: non-numeric type in ToSigned"
 
     toUnsigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e
@@ -1759,7 +1766,8 @@ internaliseIfConst loc name = do
                    " failed"
         Just rettype -> do
           ses <- fmap (map I.Var) $ letTupExp (baseString name) $
-                 I.Apply fname (zip constargs const_ds) rettype (safety, loc, mempty)
+                 I.Apply fname (zip constargs const_ds) rettype
+                 (I.ConstFun, safety, loc, mempty)
           bind_ext ses
           return $ Just ses
     _ -> return Nothing
@@ -1769,7 +1777,7 @@ constFunctionArgs loc = mapM arg
   where arg (fname, name) = do
           safety <- askSafety
           se <- letSubExp (baseString name ++ "_arg") $
-                I.Apply fname [] [I.Prim I.int32] (safety, loc, [])
+                I.Apply fname [] [I.Prim I.int32] (I.ConstFun, safety, loc, [])
           return (se, I.ObservePrim, I.Prim I.int32)
 
 funcall :: String -> QualName VName -> [SubExp] -> SrcLoc
@@ -1797,7 +1805,7 @@ funcall desc (QualName _ fname) args loc = do
                "\nFunction has parameters\n " ++ pretty fun_params
     Just ts -> do
       safety <- askSafety
-      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
+      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) ts (I.NotConstFun, safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
 -- Bind existential names defined by an expression, based on the

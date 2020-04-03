@@ -29,11 +29,11 @@ compileSegMap pat lvl space kbody = do
   group_size' <- traverse toExp $ segGroupSize lvl
 
   case lvl of
-
-    SegThread{} ->
-      sKernelThread "segmap" num_groups' group_size' (segFlat space) $ \constants -> do
+    SegThread{} -> do
+      emit $ Imp.DebugPrint "\n# SegMap" Nothing
       let virt_num_groups = product dims' `quotRoundingUp` unCount group_size'
-      virtualiseGroups constants (segVirt lvl) virt_num_groups $ \group_id -> do
+      sKernelThread "segmap" num_groups' group_size' (segFlat space) $ \constants ->
+        virtualiseGroups constants (segVirt lvl) virt_num_groups $ \group_id -> do
         let global_tid = Imp.vi32 group_id * unCount group_size' +
                          kernelLocalThreadId constants
 

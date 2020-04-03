@@ -51,7 +51,7 @@ module Futhark.CodeGen.ImpCode
   )
   where
 
-import Data.List
+import Data.List (intersperse)
 import Data.Loc
 import Data.Traversable
 

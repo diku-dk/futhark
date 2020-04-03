@@ -22,7 +22,6 @@ module Language.Futhark.Attributes
   , decImports
   , progModuleTypes
   , identifierReference
-  , identifierReferences
   , prettyStacktrace
 
   -- * Queries on expressions
@@ -30,6 +29,7 @@ module Language.Futhark.Attributes
 
   -- * Queries on patterns and params
   , patternIdents
+  , patternNames
   , patternMap
   , patternType
   , patternStructType
@@ -111,7 +111,7 @@ import           Data.Char
 import           Data.Foldable
 import qualified Data.Map.Strict       as M
 import qualified Data.Set              as S
-import           Data.List
+import           Data.List (sortOn, genericLength, isPrefixOf, nub)
 import           Data.Loc
 import           Data.Maybe
 import           Data.Ord
@@ -239,7 +239,8 @@ mustBeExplicit bind_t =
 uniqueness :: TypeBase shape as -> Uniqueness
 uniqueness (Array _ u _ _) = u
 uniqueness (Scalar (TypeVar _ u _ _)) = u
-uniqueness (Scalar (Sum ts)) = mconcat $ map (mconcat . map uniqueness) $ M.elems ts
+uniqueness (Scalar (Sum ts)) = foldMap (foldMap uniqueness) $ M.elems ts
+uniqueness (Scalar (Record fs)) = foldMap uniqueness $ M.elems fs
 uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
@@ -634,6 +635,17 @@ patternIdents (PatternAscription p _ _) = patternIdents p
 patternIdents PatternLit{}              = mempty
 patternIdents (PatternConstr _ _ ps _ ) = mconcat $ map patternIdents ps
 
+-- | The set of names bound in a pattern.
+patternNames :: (Functor f, Ord vn) => PatternBase f vn -> S.Set vn
+patternNames (Id v _ _)                = S.singleton v
+patternNames (PatternParens p _)       = patternNames p
+patternNames (TuplePattern pats _)     = mconcat $ map patternNames pats
+patternNames (RecordPattern fs _)      = mconcat $ map (patternNames . snd) fs
+patternNames Wildcard{}                = mempty
+patternNames (PatternAscription p _ _) = patternNames p
+patternNames PatternLit{}              = mempty
+patternNames (PatternConstr _ _ ps _ ) = mconcat $ map patternNames ps
+
 -- | A mapping from names bound in a map to their identifier.
 patternMap :: (Functor f) => PatternBase f VName -> M.Map VName (IdentBase f VName)
 patternMap pat =
@@ -982,15 +994,6 @@ identifierReference ('`' : s)
         _ -> Just ((identifier, namespace, Nothing), s'')
 
 identifierReference _ = Nothing
-
--- | Find all the identifier references in a string.
-identifierReferences :: String -> [(String, String, Maybe FilePath)]
-identifierReferences [] = []
-identifierReferences s
-  | Just (ref, s') <- identifierReference s =
-      ref : identifierReferences s'
-identifierReferences (_:s') =
-  identifierReferences s'
 
 -- | Given an operator name, return the operator that determines its
 -- syntactical properties.

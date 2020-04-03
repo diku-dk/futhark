@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Futhark.Internalise.AccurateSizes
   ( shapeBody
-  , annotateArrayShape
   , argShapes
   , ensureResultShape
   , ensureResultExtShape
@@ -28,12 +27,6 @@ shapeBody shapenames ts body =
     ses <- bodyBind body
     sets <- mapM subExpType ses
     resultBodyM $ argShapes shapenames ts sets
-
-annotateArrayShape :: ArrayShape shape =>
-                      TypeBase shape u -> [Int] -> TypeBase Shape u
-annotateArrayShape t newshape =
-  t `setArrayShape` Shape (take (arrayRank t) $
-                           map (intConst Int32 . toInteger) $ newshape ++ repeat 0)
 
 argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
 argShapes shapes valts valargts =

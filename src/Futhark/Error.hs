@@ -18,6 +18,7 @@ where
 
 import Control.Monad.Error.Class
 import qualified Data.Text as T
+import Futhark.Util.Pretty
 
 -- | There are two classes of internal errors: actual bugs, and
 -- implementation limitations.  The latter are already known and need
@@ -27,7 +28,7 @@ data ErrorClass = CompilerBug
                 deriving (Eq, Ord, Show)
 
 data CompilerError =
-    ExternalError T.Text
+    ExternalError Doc
     -- ^ An error that happened due to something the user did, such as
     -- provide incorrect code or options.
   | InternalError T.Text T.Text ErrorClass
@@ -35,14 +36,14 @@ data CompilerError =
     -- for debugging, which can be written to a file.
 
 instance Show CompilerError where
-  show (ExternalError s) = T.unpack s
+  show (ExternalError s) = pretty s
   show (InternalError s _ _) = T.unpack s
 
-externalError :: MonadError CompilerError m => T.Text -> m a
+externalError :: MonadError CompilerError m => Doc -> m a
 externalError = throwError . ExternalError
 
 externalErrorS :: MonadError CompilerError m => String -> m a
-externalErrorS = externalError . T.pack
+externalErrorS = externalError . text
 
 -- | An error that is not the users fault, but a bug (or limitation)
 -- in the compiler.  Compiler passes should only ever report this

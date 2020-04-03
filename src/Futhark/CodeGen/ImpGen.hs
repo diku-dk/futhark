@@ -62,7 +62,6 @@ module Futhark.CodeGen.ImpGen
   , dLParams
   , dFParams
   , dScope
-  , dScopes
   , dArray
   , dPrim, dPrimVol_, dPrim_, dPrimV_, dPrimV, dPrimVE
 
@@ -89,7 +88,7 @@ import Data.Traversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.List
+import Data.List (find, sortOn)
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
@@ -311,7 +310,7 @@ compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
             -> Prog lore -> m (Either InternalError (Imp.Functions op))
 compileProg ops space prog =
   modifyNameSource $ \src ->
-  case foldM compileFunDef' (newState src) (progFunctions prog) of
+  case foldM compileFunDef' (newState src) (progFuns prog) of
     Left err -> (Left err, src)
     Right s -> (Right $ stateFunctions s, stateNameSource s)
   where compileFunDef' s fdef = do
@@ -814,9 +813,6 @@ dInfo e name info = do
 dScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
-dScopes :: [(Maybe (Exp lore), Scope ExplicitMemory)] -> ImpM lore op ()
-dScopes = mapM_ $ uncurry dScope
-
 dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op ()
 dArray name bt shape membind = do
   entry <- memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
@@ -961,16 +957,20 @@ defaultCopy bt dest src
       IxFun.linearWithOffset srcIxFun bt_size = do
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
-        emit $ Imp.Copy
-          destmem (bytes destoffset) destspace
-          srcmem (bytes srcoffset) srcspace $
-          num_elems `withElemType` bt
+        if isScalarSpace srcspace || isScalarSpace destspace
+          then copyElementWise bt dest src
+          else emit $ Imp.Copy
+               destmem (bytes destoffset) destspace
+               srcmem (bytes srcoffset) srcspace $
+               num_elems `withElemType` bt
   | otherwise =
       copyElementWise bt dest src
   where bt_size = primByteSize bt
         num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         MemLocation destmem _ destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
+        isScalarSpace ScalarSpace{} = True
+        isScalarSpace _ = False
 
 copyElementWise :: CopyCompiler lore op
 copyElementWise bt dest src = do

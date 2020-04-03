@@ -8,7 +8,6 @@ module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
        , simplifyLambda
        , simplifyFun
-       , simplifyFun'
        , simplifyStms
 
        , simpleSOACS
@@ -24,7 +23,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Foldable
 import Data.Either
-import Data.List
+import Data.List (partition, transpose, unzip6, zip6)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
@@ -66,10 +65,6 @@ getShapeNames bnd =
 simplifyFun :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
 simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
-
-simplifyFun' :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
-simplifyFun' =
-  Simplify.simplifyFun simpleSOACS mempty Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> [Maybe VName] -> m Lambda
