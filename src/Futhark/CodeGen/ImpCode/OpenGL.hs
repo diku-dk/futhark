@@ -26,6 +26,7 @@ data Program = Program { openGlProgram :: String
                        , openGlPrelude :: String
                          -- ^ Must be prepended to the program.
                        , openGlShaderNames :: M.Map ShaderName Safety
+                       , openGlUsedTypes :: [PrimType]
                        , openGlSizes :: M.Map Name SizeClass
                          -- ^ Runtime-configurable constants.
                        , hostFunctions :: Functions OpenGL

@@ -27,7 +27,7 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opengl_code opengl_prelude shaders sizes prog') -> do
+    Right (Program opengl_code opengl_prelude shaders types sizes prog') -> do
       let cost_centres =
             [copyDevToDev, copyDevToHost, copyHostToDev,
              copyScalarToDev, copyScalarFromDev]

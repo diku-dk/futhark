@@ -41,14 +41,14 @@ kernelsToOpenGL = translateKernels
 translateKernels :: ImpKernels.Program
                  -> Either InternalError ImpOpenGL.Program
 translateKernels (ImpKernels.Functions funs) = do
-  (prog', ToOpenGL shaders sizes) <-
+  (prog', ToOpenGL shaders used_types sizes) <-
     runWriterT $ fmap Functions $ forM funs $ \(fname, fun) ->
     (fname,) <$> runReaderT (traverse (onHostOp fname) fun) fname
   let shaders'       = M.map fst shaders
       opengl_code    = openGlCode $ map snd $ M.elems shaders
-      opengl_prelude = pretty $ genOpenGlPrelude
+      opengl_prelude = pretty $ genOpenGlPrelude used_types
   return $ ImpOpenGL.Program opengl_code opengl_prelude shaders'
-    sizes prog'
+    (S.toList used_types) sizes prog'
   --return $ ImpOpenGL.Program undefined undefined undefined
 
 
@@ -75,15 +75,16 @@ instance Monoid OpenGlRequirements where
   mempty = OpenGlRequirements mempty
 
 data ToOpenGL = ToOpenGL { glShaders :: M.Map ShaderName (Safety, C.Func)
+                         , glUsedTypes :: S.Set PrimType
                          , glSizes :: M.Map Name SizeClass
                          }
 
 instance Semigroup ToOpenGL where
- ToOpenGL k1 sz1 <> ToOpenGL k2 sz2 =
-   ToOpenGL (k1<>k2) (sz1<>sz2)
+ ToOpenGL k1 r1 sz1 <> ToOpenGL k2 r2 sz2 =
+   ToOpenGL (k1<>k2) (r1<>r2) (sz1<>sz2)
 
 instance Monoid ToOpenGL where
- mempty = ToOpenGL mempty mempty
+ mempty = ToOpenGL mempty mempty mempty
 
 type OnKernelM = ReaderT Name (WriterT ToOpenGL (Either InternalError))
 
@@ -106,8 +107,8 @@ openGlCode kernels =
          [[C.cedecl|$func:kernel_func|] |
           kernel_func <- kernels ]
 
-genOpenGlPrelude :: [C.Definition]
-genOpenGlPrelude =
+genOpenGlPrelude :: S.Set PrimType -> [C.Definition]
+genOpenGlPrelude ts =
    [C.cunit|
  typedef char int8_t;
  typedef short int16_t;
