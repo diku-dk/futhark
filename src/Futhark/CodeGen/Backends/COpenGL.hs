@@ -191,7 +191,6 @@ staticOpenGLArray name "device" t vs = do
 staticOpenGLArray _ space _ _ =
   error $ "OpenGL backend cannot create static array in memory space '" ++ space ++ "'"
 
--- TODO:
 callShader :: GC.OpCompiler OpenGL ()
 callShader (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
@@ -203,57 +202,64 @@ callShader (CmpSizeLe v key x) = do
     }|]
 callShader (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
-  in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
+  in GC.stm [C.cstm|$id:v = ctx->opengl.$id:field;|]
 
---TODO: Accommodate OpenGL {
 callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
-  zipWithM_ setKernelArg [(0::Int)..] args
+  when (safety == SafetyFull) $
+  --TODO: Account for full safety?
+    GC.stm [C.cstm|
+    OPENGL_SUCCEED(glGetError());
+    |]
+  zipWithM_ setShaderArg [(0::Int)..] args
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM GC.compileExp workgroup_size
   local_bytes <- foldM localBytes [C.cexp|0|] args
   launchShader name num_workgroups' workgroup_size' local_bytes
-  where setKernelArg i (ValueKArg e bt) = do
-          v <- GC.compileExpToName "kernel_arg" bt e
-          GC.stm [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($id:v), &$id:v));
-          |]
+  where setShaderArg i (ValueKArg e bt) = do
+          v <- GC.compileExpToName "shader_arg" bt e
+          GC.stm [C.cstm|glUniform1i(ctx->$id:name, &$id:v);|]
+          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
-        setKernelArg i (MemKArg v) = do
+        setShaderArg i (MemKArg v) = do
           v' <- GC.rawMem v
-          GC.stm [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
-          |]
+          GC.stm [C.cstm|glUniform1i(ctx->$id:name, &$exp:v');|]
+          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
-        setKernelArg i (SharedMemoryKArg num_bytes) = do
+        setShaderArg i (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp $ unCount num_bytes
-          GC.stm [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
-            |]
+          GC.stm [C.cstm|glUniform1i(ctx->$id:name, NULL);|]
+          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp $ unCount num_bytes
           return [C.cexp|$exp:cur + $exp:num_bytes'|]
         localBytes cur _ = return cur
 
---TODO: Accommodate OpenGL {
 launchShader :: C.ToExp a =>
                 String -> [a] -> [a] -> a -> GC.CompilerM op s ()
 launchShader shader_name num_workgroups workgroup_dims local_bytes = do
   global_work_size <- newVName "global_work_size"
-  time_start <- newVName "time_start"
-  time_end <- newVName "time_end"
-  time_diff <- newVName "time_diff"
-  local_work_size <- newVName "local_work_size"
+  time_start       <- newVName "time_start"
+  time_end         <- newVName "time_end"
+  time_diff        <- newVName "time_diff"
+  local_work_size  <- newVName "local_work_size"
 
+-- TODO: add debugging
   GC.stm [C.cstm|
     if ($exp:total_elements != 0) {
     }|]
-    where kernel_rank = length kernel_dims
-          kernel_dims = zipWith multExp num_workgroups workgroup_dims
-          kernel_dims' = map toInit kernel_dims
+    where kernel_rank     = length kernel_dims
+          kernel_dims     = zipWith multExp num_workgroups workgroup_dims
+          kernel_dims'    = map toInit kernel_dims
           workgroup_dims' = map toInit workgroup_dims
-          total_elements = foldl multExp [C.cexp|1|] kernel_dims
+          total_elements  = foldl multExp [C.cexp|1|] kernel_dims
 
-          toInit e = [C.cinit|$exp:e|]
+          toInit e    = [C.cinit|$exp:e|]
           multExp x y = [C.cexp|$exp:x * $exp:y|]
---TODO: Accommodate OpenGL}}
+
+          printKernelSize :: VName -> [C.Stm]
+          printKernelSize work_size =
+            intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
+            map (printKernelDim work_size) [0..kernel_rank-1]
+          printKernelDim global_work_size i =
+            [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]

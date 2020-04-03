@@ -34,9 +34,6 @@ kernelsToOpenGL :: ImpKernels.Program
                 -> Either InternalError ImpOpenGL.Program
 kernelsToOpenGL = translateKernels
 
--------------------------------
---TODO: Accommodate OpenGL
-
 -- | Translate a kernels-program to an OpenGL-program.
 translateKernels :: ImpKernels.Program
                  -> Either InternalError ImpOpenGL.Program
@@ -49,8 +46,6 @@ translateKernels (ImpKernels.Functions funs) = do
       opengl_prelude = pretty $ genOpenGlPrelude used_types
   return $ ImpOpenGL.Program opengl_code opengl_prelude shaders'
     (S.toList used_types) sizes prog'
-  --return $ ImpOpenGL.Program undefined undefined undefined
-
 
 type LocalMemoryUse = (VName, Count Bytes Exp)
 
@@ -86,10 +81,10 @@ instance Semigroup ToOpenGL where
 instance Monoid ToOpenGL where
  mempty = ToOpenGL mempty mempty mempty
 
-type OnKernelM = ReaderT Name (WriterT ToOpenGL (Either InternalError))
+type OnShaderM = ReaderT Name (WriterT ToOpenGL (Either InternalError))
 
-onHostOp :: kernelsToOpenGL -> HostOp -> OnKernelM OpenGL
---TODO: onHostOp target (CallKernel k) = onKernel target k
+onHostOp :: kernelsToOpenGL -> HostOp -> OnShaderM OpenGL
+--onHostOp (CallShader s) = onShader s
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
  tell mempty { glSizes = M.singleton key size_class }
  return $ ImpOpenGL.GetSize v key
@@ -99,24 +94,24 @@ onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
  return $ ImpOpenGL.GetSizeMax v size_class
 
+--onShader :: Shader -> OnShaderM OpenGL
 
 openGlCode :: [C.Func] -> String
-openGlCode kernels =
+openGlCode shaders =
  pretty [C.cunit|$edecls:funcs|]
  where funcs =
-         [[C.cedecl|$func:kernel_func|] |
-          kernel_func <- kernels ]
+         [[C.cedecl|$func:shader_func|] |
+          shader_func <- shaders ]
 
 genOpenGlPrelude :: S.Set PrimType -> [C.Definition]
 genOpenGlPrelude ts =
-   [C.cunit|
- typedef char int8_t;
- typedef short int16_t;
+  [ [C.cedecl|$esc:("#version 450")|]
+  , [C.cedecl|$esc:("#GL_ARB_compute_variable_group_size : enable")|]
+  ] ++
+  [C.cunit|
  typedef int int32_t;
  typedef long int64_t;
 
- typedef uchar uint8_t;
- typedef ushort uint16_t;
  typedef uint uint32_t;
  typedef ulong uint64_t;
  |]
