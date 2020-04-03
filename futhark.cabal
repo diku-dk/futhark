@@ -70,6 +70,7 @@ library
       Futhark.CLI.Doc
       Futhark.CLI.Misc
       Futhark.CLI.OpenCL
+      Futhark.CLI.OpenGL
       Futhark.CLI.Pkg
       Futhark.CLI.PyOpenCL
       Futhark.CLI.Python
@@ -81,6 +82,8 @@ library
       Futhark.CodeGen.Backends.CCUDA.Boilerplate
       Futhark.CodeGen.Backends.COpenCL
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
+      Futhark.CodeGen.Backends.COpenGL
+      Futhark.CodeGen.Backends.COpenGL.Boilerplate
       Futhark.CodeGen.Backends.CSOpenCL
       Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
@@ -102,6 +105,7 @@ library
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.Kernels
       Futhark.CodeGen.ImpCode.OpenCL
+      Futhark.CodeGen.ImpCode.OpenGL
       Futhark.CodeGen.ImpCode.Sequential
       Futhark.CodeGen.ImpGen
       Futhark.CodeGen.ImpGen.CUDA
@@ -112,8 +116,10 @@ library
       Futhark.CodeGen.ImpGen.Kernels.SegRed
       Futhark.CodeGen.ImpGen.Kernels.SegScan
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
+      Futhark.CodeGen.ImpGen.Kernels.ToOpenGL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
       Futhark.CodeGen.ImpGen.OpenCL
+      Futhark.CodeGen.ImpGen.OpenGL
       Futhark.CodeGen.ImpGen.Sequential
       Futhark.CodeGen.OpenCL.Heuristics
       Futhark.CodeGen.SetDefaultSpace
