@@ -67,7 +67,6 @@ prepareIntermediateArrays num_subhistos_per_group =
 
             return (local_subhistos, mk_op local_subhistos)
 
-
       return init_local_subhistos
 
     writeArray bucket arr val = copyDWIMFix arr bucket val []
@@ -129,7 +128,7 @@ segmentedHist pat space histops kbody = do
 
              sComment "save map-out results" $
                forM_ (zip map_pes map_res) $ \(pe, res) ->
-                 copyDWIMFix (patElemName pe) (map (Imp.vi32 . fst) $ unSegSpace space) res []
+                 copyDWIMFix (patElemName pe) (map Imp.vi32 is) res []
 
              sComment "perform updates" $
                sWhen bucket_in_bounds $ do
@@ -204,31 +203,31 @@ nonsegmentedHist pat space histops kbody = do
 
         -- First thread initializes histrogram wtih dest vals
         let is_first_tid = tid_exp .==. 0
-            set_dest_vals = sFor "i" hist_H_chk' $ \i ->
-                             copyDWIMFix hist (tid_exp : [i]) (Var $ patElemName pe) (map Imp.vi32 (init is) ++ [i])
-            set_neutral = sFor "i" hist_H_chk' $ \i ->
-                             copyDWIMFix hist (tid_exp : [i]) ne []
-        sIf is_first_tid set_dest_vals set_neutral
+        sFor "i" hist_H_chk' $ \i ->
+          sIf is_first_tid
+              (copyDWIMFix hist (tid_exp : [i]) (Var $ patElemName pe) (map Imp.vi32 (init is) ++ [i]))
+              (sLoopNest (histShape $ mySlugOp slug) $ \is' ->
+                 copyDWIMFix hist (tid_exp : i : is') ne [])
+
 
   -- Generate loop body of parallel function
   body' <- collect $ do
      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
      compileStms mempty (kernelBodyStms kbody) $ do
-       let (red_res, map_res) = splitFromEnd (length map_pes) $
-                            map kernelResultSubExp $ kernelBodyResult kbody
+       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
            (buckets, vs) = splitAt (length slugs) red_res
            perOp = chunks $ map (length . histDest . mySlugOp) slugs
 
        sComment "save map-out results" $
-          forM_ (zip map_pes map_res) $ \(pe, se) ->
+          forM_ (zip map_pes map_res) $ \(pe, res) ->
           copyDWIMFix (patElemName pe)
-          (map Imp.vi32 is) se []
+          (map Imp.vi32 is) (kernelResultSubExp res) []
 
        forM_ (zip4 (map mySlugOp slugs) histograms buckets (perOp vs)) $
          \(HistOp dest_w _ _ _ shape lam,
            (_, _hist_H_chk, do_op), bucket, vs') -> do
 
-           let bucket' = toExp' int32 bucket
+           let bucket' = toExp' int32 $ kernelResultSubExp bucket
                dest_w' = toExp' int32 dest_w
                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
                vs_params = takeLast (length vs') $ lambdaParams lam
@@ -238,8 +237,8 @@ nonsegmentedHist pat space histops kbody = do
              sWhen bucket_in_bounds $ do
              dLParams $ lambdaParams lam
              sLoopNest shape $ \is' -> do
-               forM_ (zip vs_params vs') $ \(p, v) ->
-                 copyDWIMFix (paramName p) [] v is'
+               forM_ (zip vs_params vs') $ \(p, res) ->
+                 copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
                do_op (bucket_is ++ is')
 
 
@@ -261,25 +260,36 @@ nonsegmentedHist pat space histops kbody = do
   forM_ (zip3 pes_per_op histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
     bucket_id <- newVName "bucket_id"
     subhistogram_id <- newVName "subhistogram_id"
-    vector_ids <- mapM (const $ newVName "vector_id") $ shapeDims $ histShape op
 
     flat_gtid <- newVName "flat_gtid"
+    let unitHistoCase =
+       -- This is OK because the memory blocks are at least as
+       -- large as the ones we are supposed to use for the result.
+         forM_ (zip red_pes hists) $ \(pe, subhisto) -> do
+           emit $ Imp.DebugPrint "unitHistoCase" Nothing
+           pe_mem <- memLocationName . entryArrayLocation <$>
+                     lookupArray (patElemName pe)
+           subhisto_mem <- memLocationName . entryArrayLocation <$>
+                           lookupArray subhisto
+           emit $ Imp.SetMem pe_mem subhisto_mem DefaultSpace
 
-    let num_buckets = histWidth op
+    sIf (Imp.var num_histos int32 .==. 1) unitHistoCase $ do
 
-    let segred_space =
-          SegSpace flat_gtid $
-          segment_dims ++
-          [(bucket_id, num_buckets)] ++
-          zip vector_ids (shapeDims $ histShape op) ++
-          [(subhistogram_id, Var num_histos)]
 
-    let segred_op = SegRedOp Commutative (histOp op) (histNeutral op) mempty
-    compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont -> do
-      let
-      red_cont $ flip map hists $ \subhisto ->
-            (Var subhisto, map Imp.vi32 $
-              map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids)
+      let num_buckets = histWidth op
+
+      let segred_space =
+            SegSpace flat_gtid $
+            segment_dims ++
+            [(bucket_id, num_buckets)] ++
+            [(subhistogram_id, Var num_histos)]
+
+      let segred_op = SegRedOp Commutative (histOp op) (histNeutral op) (histShape op)
+      compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont -> do
+        let
+        red_cont $ flip map hists $ \subhisto ->
+              (Var subhisto, map Imp.vi32 $
+                map fst segment_dims ++ [subhistogram_id, bucket_id])
    where segment_dims = init $ unSegSpace space
 
 
