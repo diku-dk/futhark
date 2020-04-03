@@ -212,8 +212,7 @@ segmentedReduction pat space reds kbody = do
   fbody <- collect $ do
     sComment "neutral-initialise the accumulators" $
       forM_ reds $ \red->
-        forM_ (zip (patternElements pat) (segRedNeutral red)) $
-        \(pe, ne) ->
+        forM_ (zip (patternElements pat) (segRedNeutral red)) $ \(pe, ne) ->
           sLoopNest (segRedShape red) $ \vec_is ->
             copyDWIMFix (patElemName pe) (n_segments' : vec_is) ne []
 
@@ -232,7 +231,7 @@ segmentedReduction pat space reds kbody = do
             sComment "load acuum " $ do
               let acc_params = take (length (segRedNeutral red)) $ (lambdaParams . segRedLambda) red
               forM_ (zip acc_params (patternElements pat)) $ \(p, pe) ->
-                copyDWIMFix (paramName p) [] (Var $ patElemName pe) [n_segments']
+                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (n_segments' : vec_is)
 
             sComment "load new val" $ do
               let next_params = drop (length (segRedNeutral red)) $ (lambdaParams . segRedLambda) red
@@ -244,7 +243,7 @@ segmentedReduction pat space reds kbody = do
               compileStms mempty (bodyStms lbody) $
                 sComment "write back to res" $
                 forM_ (zip (patternElements pat) (bodyResult lbody)) $
-                  \(pe, se') -> copyDWIMFix (patElemName pe) [n_segments'] se' []
+                  \(pe, se') -> copyDWIMFix (patElemName pe) (n_segments' : vec_is) se' []
 
 
   let paramsNames = namesToList $ freeIn fbody `namesSubtract`
