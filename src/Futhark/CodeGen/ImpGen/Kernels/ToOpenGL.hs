@@ -18,7 +18,6 @@ import qualified Data.Map.Strict as M
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote as C
 
---TODO:
 import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.Error
@@ -42,14 +41,14 @@ kernelsToOpenGL = translateKernels
 translateKernels :: ImpKernels.Program
                  -> Either InternalError ImpOpenGL.Program
 translateKernels (ImpKernels.Functions funs) = do
-  (prog', ToOpenGL extra_funs kernels requirements sizes) <-
+  (prog', ToOpenGL shaders sizes) <-
     runWriterT $ fmap Functions $ forM funs $ \(fname, fun) ->
     (fname,) <$> runReaderT (traverse (onHostOp fname) fun) fname
-  let kernel_names = M.keys kernels
-      opengl_code = openGlCode $ M.elems kernels
-      opengl_prelude = pretty $ genOpenGlPrelude requirements
-  return $ ImpOpenGL.Program opengl_code opengl_prelude kernel_names
-    sizes $ ImpOpenGL.Functions (M.toList extra_funs) <> prog'
+  let shaders'       = M.map fst shaders
+      opengl_code    = openGlCode $ map snd $ M.elems shaders
+      opengl_prelude = pretty $ genOpenGlPrelude
+  return $ ImpOpenGL.Program opengl_code opengl_prelude shaders'
+    sizes prog'
   --return $ ImpOpenGL.Program undefined undefined undefined
 
 
@@ -75,28 +74,26 @@ instance Semigroup OpenGlRequirements where
 instance Monoid OpenGlRequirements where
   mempty = OpenGlRequirements mempty
 
-data ToOpenGL = ToOpenGL { clExtraFuns :: M.Map Name ImpOpenGL.Function
-                         , clKernels :: M.Map ShaderName C.Func
-                         , clRequirements :: OpenGlRequirements
-                         , clSizes :: M.Map Name SizeClass
+data ToOpenGL = ToOpenGL { glShaders :: M.Map ShaderName (Safety, C.Func)
+                         , glSizes :: M.Map Name SizeClass
                          }
 
 instance Semigroup ToOpenGL where
- ToOpenGL f1 k1 r1 sz1 <> ToOpenGL f2 k2 r2 sz2 =
-   ToOpenGL (f1<>f2) (k1<>k2) (r1<>r2) (sz1<>sz2)
+ ToOpenGL k1 sz1 <> ToOpenGL k2 sz2 =
+   ToOpenGL (k1<>k2) (sz1<>sz2)
 
 instance Monoid ToOpenGL where
- mempty = ToOpenGL mempty mempty mempty mempty
+ mempty = ToOpenGL mempty mempty
 
 type OnKernelM = ReaderT Name (WriterT ToOpenGL (Either InternalError))
 
 onHostOp :: kernelsToOpenGL -> HostOp -> OnKernelM OpenGL
 --TODO: onHostOp target (CallKernel k) = onKernel target k
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
- tell mempty { clSizes = M.singleton key size_class }
+ tell mempty { glSizes = M.singleton key size_class }
  return $ ImpOpenGL.GetSize v key
 onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
- tell mempty { clSizes = M.singleton key size_class }
+ tell mempty { glSizes = M.singleton key size_class }
  return $ ImpOpenGL.CmpSizeLe v key x
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
  return $ ImpOpenGL.GetSizeMax v size_class
@@ -109,9 +106,8 @@ openGlCode kernels =
          [[C.cedecl|$func:kernel_func|] |
           kernel_func <- kernels ]
 
-genOpenGlPrelude :: OpenGlRequirements -> [C.Definition]
-
-genOpenGlPrelude (OpenGlRequirements ts) =
+genOpenGlPrelude :: [C.Definition]
+genOpenGlPrelude =
    [C.cunit|
  typedef char int8_t;
  typedef short int16_t;

@@ -16,10 +16,11 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util (chunk, zEncodeString)
 
-generateBoilerplate :: String -> String -> [String]
+generateBoilerplate :: String -> String
+                    -> M.Map ShaderName Safety
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenGL () ()
-generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
+generateBoilerplate opengl_code opengl_prelude shaders sizes = do
 
   let free_list_h = $(embedStringFile "rts/c/free_list.h")
       openGL_h    = $(embedStringFile "rts/c/opengl.h")
@@ -222,9 +223,9 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                        }|])
 
   (fields, init_fields) <- GC.contextContents
-  -- FIXME:
-  let ctx_opengl_fields = map (\k -> [C.csdecl| unsigned int $id:k;|])
-                              shader_names
+
+  let ctx_opengl_fields = map (\k -> [C.csdecl|unsigned int $id:k;|])
+                              $ M.keys sizes
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
@@ -250,6 +251,7 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
                      ctx->profiling_paused = 0;
                      ctx->logging          = cfg->opengl.logging;
                      ctx->error            = NULL;
+
                      create_lock(&ctx->lock);
 
                      $stms:init_fields
@@ -263,7 +265,8 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
 
   GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx) {
 
-
+                     // Load all the shaders.
+                     $stms:(map loadShader (M.toList shaders))
 
                      $stms:final_inits
                      $stms:set_sizes
@@ -279,6 +282,7 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
 
                           init_context_early(cfg, ctx);
                           setup_opengl(&ctx->opengl, opengl_program, cfg->build_opts);
+                          typename GLuint program = glCreateProgram();
                           init_context_late(cfg, ctx);
                           return ctx;
                        }|])
@@ -315,3 +319,8 @@ generateBoilerplate opengl_code opengl_prelude shader_names sizes = do
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  ctx->profiling_paused = 0;
                }|])
+
+loadShader :: (ShaderName, Safety) -> C.Stm
+loadShader (name, safety) = [C.cstm|{
+  ctx->$id:name = glCreateShader(GL_COMPUTE_SHADER);
+}|]

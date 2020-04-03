@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.COpenGL
 
 import Control.Monad hiding (mapM)
 import Data.List
+import qualified Data.Map as M
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
@@ -26,14 +27,14 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opengl_code opengl_prelude shader_names sizes prog') -> do
+    Right (Program opengl_code opengl_prelude shaders sizes prog') -> do
       let cost_centres =
             [copyDevToDev, copyDevToHost, copyHostToDev,
              copyScalarToDev, copyScalarFromDev]
-            ++ shader_names
+            ++ M.keys shaders
       Right <$> GC.compileProg operations
                 (generateBoilerplate opengl_code opengl_prelude
-                 shader_names sizes)
+                 shaders sizes)
                 include_opengl_h [Space "device", DefaultSpace]
                 cliOptions prog'
   where operations :: GC.Operations OpenGL ()
@@ -205,7 +206,7 @@ callShader (GetSizeMax v size_class) =
   in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
 
 --TODO: Accommodate OpenGL {
-callShader (LaunchShader name args num_workgroups workgroup_size) = do
+callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM GC.compileExp workgroup_size

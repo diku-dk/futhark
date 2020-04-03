@@ -7,6 +7,7 @@ module Futhark.CodeGen.ImpCode.OpenGL
        , ShaderName
        , ShaderArg (..)
        , OpenGL (..)
+       , Safety (..)
        , module Futhark.CodeGen.ImpCode
        , module Futhark.Representation.Kernels.Sizes
        )
@@ -24,7 +25,7 @@ import Futhark.Util.Pretty
 data Program = Program { openGlProgram :: String
                        , openGlPrelude :: String
                          -- ^ Must be prepended to the program.
-                       , openGlShaderNames :: [ShaderName]
+                       , openGlShaderNames :: M.Map ShaderName Safety
                        , openGlSizes :: M.Map Name SizeClass
                          -- ^ Runtime-configurable constants.
                        , hostFunctions :: Functions OpenGL
@@ -48,8 +49,21 @@ data ShaderArg = ValueKArg Exp PrimType
                  -- ^ Create this much local memory per workgroup.
                deriving (Show)
 
+-- | Information about bounds checks and how sensitive it is to
+-- errors.  Ordered by least demanding to most.
+data Safety
+  = SafetyNone
+    -- ^ Does not need to know if we are in a failing state, and also
+    -- cannot fail.
+  | SafetyCheap
+    -- ^ Needs to be told if there's a global failure, and that's it,
+    -- and cannot fail.
+  | SafetyFull
+    -- ^ Needs all parameters, may fail itself.
+    deriving (Eq, Ord, Show)
+
 -- | Host-level OpenGL operation.
-data OpenGL = LaunchShader ShaderName [ShaderArg] [Exp] [Exp]
+data OpenGL = LaunchShader Safety ShaderName [ShaderArg] [Exp] [Exp]
             | GetSize VName Name
             | CmpSizeLe VName Name Exp
             | GetSizeMax VName SizeClass
