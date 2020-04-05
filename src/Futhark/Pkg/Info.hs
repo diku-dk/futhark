@@ -197,18 +197,19 @@ ghglRevGetManifest url owner repo tag = GetManifest $ do
         x -> fail $ msg $ "got HTTP status " ++ show x
 
 ghglLookupCommit :: (MonadIO m, MonadLogger m, MonadFail m) =>
-                    T.Text -> T.Text
+                    T.Text -> T.Text -> (T.Text -> T.Text)
                  -> T.Text -> T.Text -> T.Text -> T.Text -> T.Text -> m (PkgRevInfo m)
-ghglLookupCommit archive_url manifest_url owner repo d ref hash = do
+ghglLookupCommit archive_url manifest_url mk_zip_dir owner repo d ref hash = do
   gd <- memoiseGetManifest $ ghglRevGetManifest manifest_url owner repo ref
-  let dir = Posix.addTrailingPathSeparator $ T.unpack repo <> "-" <> T.unpack d
+  let dir = Posix.addTrailingPathSeparator $ T.unpack $ mk_zip_dir d
   time <- liftIO getCurrentTime -- FIXME
   return $ PkgRevInfo archive_url dir hash gd time
 
 ghglPkgInfo :: (MonadIO m, MonadLogger m, MonadFail m) =>
-               T.Text -> (T.Text -> T.Text) -> (T.Text -> T.Text)
+               T.Text
+            -> (T.Text -> T.Text) -> (T.Text -> T.Text)  -> (T.Text -> T.Text)
             -> T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
-ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions = do
+ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir owner repo versions = do
   logMsg $ "Retrieving list of tags from " <> repo_url
   remote_lines <- T.lines . T.decodeUtf8 <$> gitCmd ["ls-remote", T.unpack repo_url]
 
@@ -219,7 +220,8 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions = do
   rev_info <- M.fromList . catMaybes <$> mapM revInfo remote_lines
 
   return $ Right $ PkgInfo rev_info $ \r ->
-    ghglLookupCommit (mk_archive_url (def r)) (mk_manifest_url (def r))
+    ghglLookupCommit
+    (mk_archive_url (def r)) (mk_manifest_url (def r)) mk_zip_dir
     owner repo (def r) (def r) (def r)
   where isHeadRef l
           | [hash, "HEAD"] <- T.words l = Just hash
@@ -231,7 +233,8 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions = do
             "v" `T.isPrefixOf` t,
             Right v <- semver $ T.drop 1 t,
             _svMajor v `elem` versions = do
-              pinfo <- ghglLookupCommit (mk_archive_url t) (mk_manifest_url t)
+              pinfo <- ghglLookupCommit
+                       (mk_archive_url t) (mk_manifest_url t) mk_zip_dir
                        owner repo (prettySemVer v) t hash
               return $ Just (v, pinfo)
           | otherwise = return Nothing
@@ -239,23 +242,29 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions = do
 ghPkgInfo :: (MonadIO m, MonadLogger m, MonadFail m) =>
              T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
 ghPkgInfo owner repo versions =
-  ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions
+  ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir
+  owner repo versions
   where repo_url = "https://github.com/" <> owner <> "/" <> repo
         mk_archive_url r = repo_url <> "/archive/" <> r <> ".zip"
         mk_manifest_url r = "https://raw.githubusercontent.com/" <>
                             owner <> "/" <> repo <> "/" <>
                             r <> "/" <> T.pack futharkPkg
+        mk_zip_dir r = repo <> "-" <> r
 
 glPkgInfo :: (MonadIO m, MonadLogger m, MonadFail m) =>
              T.Text -> T.Text -> [Word] -> m (Either T.Text (PkgInfo m))
 glPkgInfo owner repo versions =
-  ghglPkgInfo repo_url mk_archive_url mk_manifest_url owner repo versions
+  ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir
+  owner repo versions
   where base_url = "https://gitlab.com/" <> owner <> "/" <> repo
         repo_url = base_url <> ".git"
         mk_archive_url r = base_url <> "/-/archive/" <> r <>
                            "/" <> repo <> "-" <> r <> ".zip"
         mk_manifest_url r = base_url <> "/raw/" <>
                             r <> "/" <> T.pack futharkPkg
+        mk_zip_dir r
+          | Right _ <- semver r = repo <> "-v" <> r
+          | otherwise = repo <> "-" <> r
 
 -- | A package registry is a mapping from package paths to information
 -- about the package.  It is unlikely that any given registry is

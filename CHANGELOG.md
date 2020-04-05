@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed incorrect handling of opaques in entry point return types.
 
+  * `futhark pkg` now works properly with GitLab (#899).
+
 ## [0.15.3]
 
 ### Added

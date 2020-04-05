@@ -40,7 +40,7 @@ installInDir (BuildList bl) dir = do
   let putEntry from_dir pdir entry
         -- The archive may contain all kinds of other stuff that we don't want.
         | not (isInPkgDir from_dir $ Zip.eRelativePath entry)
-          || hasTrailingPathSeparator (Zip.eRelativePath entry) = return ()
+          || hasTrailingPathSeparator (Zip.eRelativePath entry) = return Nothing
         | otherwise = do
         -- Since we are writing to paths indicated in a zipfile we
         -- downloaded from the wild Internet, we are going to be a
@@ -56,6 +56,7 @@ installInDir (BuildList bl) dir = do
         let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
         createDirectoryIfMissing True $ takeDirectory f
         LBS.writeFile f $ Zip.fromEntry entry
+        return $ Just f
 
       isInPkgDir from_dir f =
         Posix.splitPath from_dir `isPrefixOf` Posix.splitPath f
@@ -82,7 +83,12 @@ installInDir (BuildList bl) dir = do
     liftIO $ removePathForcibly pdir
     liftIO $ createDirectoryIfMissing True pdir
 
-    liftIO $ mapM_ (putEntry from_dir pdir) $ Zip.zEntries a
+    written <-
+      catMaybes <$> liftIO (mapM (putEntry from_dir pdir) $ Zip.zEntries a)
+
+    when (null written) $
+      fail $ "Zip archive for package " ++ T.unpack p ++
+      " does not contain any files in " ++ from_dir
 
 libDir, libNewDir, libOldDir :: FilePath
 (libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
