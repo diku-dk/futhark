@@ -243,23 +243,45 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
   time_end         <- newVName "time_end"
   time_diff        <- newVName "time_diff"
   local_work_size  <- newVName "local_work_size"
-
--- TODO: add debugging
   GC.stm [C.cstm|
     if ($exp:total_elements != 0) {
+      typename size_t $id:global_work_size[$int:shader_rank] = {$inits:shader_dims'};
+      typename size_t $id:local_work_size[$int:shader_rank]  = {$inits:workgroup_dims'};
+      typename int64_t $id:time_start = 0, $id:time_end = 0;
+    if (ctx->debugging) {
+      fprintf(stderr, "Launching %s with global work size [", $string:shader_name);
+      $stms:(printShaderSize global_work_size)
+      fprintf(stderr, "] and local work size [");
+      $stms:(printShaderSize local_work_size)
+      fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
+      $id:time_start = get_wall_time();
+    }
+    glDispatchComputeGroupSizeARB(global_work_size[0], global_work_size[1],
+                                  global_work_size[2], local_work_size[0],
+                                  local_work_size[1],  local_work_size[2]
+                                 );
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+    if (ctx->debugging) {
+      glFinish();
+      OPENGL_SUCCEED(glGetError());
+      $id:time_end = get_wall_time();
+      long int $id:time_diff = $id:time_end - $id:time_start;
+      fprintf(stderr, "shader %s runtime: %ldus\n",
+              $string:shader_name, $id:time_diff);
+    }
     }|]
-    where kernel_rank     = length kernel_dims
-          kernel_dims     = zipWith multExp num_workgroups workgroup_dims
-          kernel_dims'    = map toInit kernel_dims
+    where shader_rank     = length shader_dims
+          shader_dims     = zipWith multExp num_workgroups workgroup_dims
+          shader_dims'    = map toInit shader_dims
           workgroup_dims' = map toInit workgroup_dims
-          total_elements  = foldl multExp [C.cexp|1|] kernel_dims
+          total_elements  = foldl multExp [C.cexp|1|] shader_dims
 
           toInit e    = [C.cinit|$exp:e|]
           multExp x y = [C.cexp|$exp:x * $exp:y|]
 
-          printKernelSize :: VName -> [C.Stm]
-          printKernelSize work_size =
+          printShaderSize :: VName -> [C.Stm]
+          printShaderSize work_size =
             intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
-            map (printKernelDim work_size) [0..kernel_rank-1]
+            map (printKernelDim work_size) [0..shader_rank-1]
           printKernelDim global_work_size i =
             [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
