@@ -111,12 +111,10 @@ nonsegmentedReduction pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
 
   -- Dummy value for now
-  -- Need to postpone allocation of intermediate res for scheduler
-  let num_threads = Count $ Constant $ IntValue $ Int32Value 12
-  ns' <- mapM toExp ns
-  stage_one_red_arrs <- groupResultArrays num_threads reds
-  -- void  $ dPrimV "num_threads"  1
+  num_threads <- getNumThreads
 
+  ns' <- mapM toExp ns
+  stage_one_red_arrs <- groupResultArrays (Count $ Var num_threads) reds
 
   -- Thread id for indexing into each threads accumulator element(s)
   tid <- dPrim "tid" $ IntType Int32

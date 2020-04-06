@@ -100,7 +100,7 @@ compileProg =
                  $stms:init_fields
 
 
-                 ctx->profiling = 1;
+                 ctx->profiling = 0;
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
                  if (job_queue_init(&ctx->scheduler.q, 64)) return NULL;
@@ -146,14 +146,21 @@ compileProg =
           GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         (void)ctx;
+                         ctx->profiling = 0;
                        }|])
 
           GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         (void)ctx;
+                         ctx->profiling = 1;
                        }|])
+
+          GC.publicDef_ "context_get_num_threads" GC.InitDecl $ \s ->
+            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                        return ctx->scheduler.num_threads;
+                       }|])
+
 
 copyMulticoreMemory :: GC.Copy Multicore ()
 copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
@@ -281,5 +288,10 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
 
+
   GC.stm [C.cstm|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks),
-                "scheduler failed to do task %s", $string:ftask);|]
+                 "scheduler failed to do task %s", $string:ftask);|]
+
+
+compileOp (MulticoreCall retval f) =
+  GC.stm [C.cstm|$id:retval = $id:f(ctx);|]

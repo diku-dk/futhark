@@ -175,8 +175,10 @@ nonsegmentedHist pat space histops kbody = do
   slugs <- mapM computeHistoUsage histops
 
   -- variable for how many subhistograms to allocate
-  hist_B' <- toExp $ Constant $ IntValue $ Int32Value 12 -- just to be sure
+  num_threads <- getNumThreads
+  hist_B' <- toExp $ Var num_threads
   hist_M <- dPrimV "hist_M" hist_B'
+
 
   init_histograms <-
     prepareIntermediateArrays hist_M slugs
@@ -187,6 +189,7 @@ nonsegmentedHist pat space histops kbody = do
 
   thread_id <- dPrim "thread_id" $ IntType Int32
   tid_exp <- toExp $ Var thread_id
+
 
 
   -- Actually allocate subhistograms

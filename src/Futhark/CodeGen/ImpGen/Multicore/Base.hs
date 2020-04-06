@@ -3,6 +3,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , compileKBody
  , compileThreadResult
  , MulticoreGen
+ , getNumThreads
  )
  where
 
@@ -12,6 +13,7 @@ import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
+
 
 type MulticoreGen = ImpM ExplicitMemory Imp.Multicore
 
@@ -23,7 +25,7 @@ toParam name t = case t of
                     Array pt _ _ -> Imp.ScalarParam name pt -- TODO: Fix this!
 
 
-compileKBody :: (KernelBody ExplicitMemory)
+compileKBody :: KernelBody ExplicitMemory
              -> ([(SubExp, [Imp.Exp])] -> ImpM ExplicitMemory Imp.Multicore ())
              -> ImpM ExplicitMemory Imp.Multicore ()
 compileKBody kbody red_cont =
@@ -47,3 +49,11 @@ compileThreadResult _ _ WriteReturns{} =
 
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
+
+
+
+getNumThreads :: MulticoreGen VName
+getNumThreads = do
+  v <- dPrim "num_threads" (IntType Int32)
+  emit $ Imp.Op $ Imp.MulticoreCall v "futhark_context_get_num_threads"
+  return v

@@ -141,11 +141,9 @@ nonsegmentedScan pat space scan_op nes kbody = do
   tid <- dPrim "tid" $ IntType Int32
   tid' <- toExp $ Var tid
 
-  -- Dummy value for now
-  -- Need to postpone allocation of intermediate res for scheduler
-  let num_threads = Constant $ IntValue $ Int32Value 12
+  num_threads <- getNumThreads
 
-  stage_one_red_res <- makeLocalArrays num_threads nes scan_op
+  stage_one_red_res <- makeLocalArrays (Var num_threads) nes scan_op
 
   let (scan_x_params, scan_y_params) =
         splitAt (length nes) $ lambdaParams scan_op

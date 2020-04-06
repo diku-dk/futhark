@@ -29,7 +29,7 @@ data MulticoreFunc = MulticoreFunc [Param] Code Code VName
 
 -- | A parallel operation.
 data Multicore = ParLoop VName VName Imp.Exp MulticoreFunc
-
+               | MulticoreCall VName String  -- This needs to be fixed
 
 instance Pretty MulticoreFunc where
   ppr (MulticoreFunc params prebody body _ ) =
@@ -42,9 +42,13 @@ instance Pretty Multicore where
   ppr (ParLoop _ntask i e func) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr func)
+  ppr (MulticoreCall dests f) =
+    ppr dests <+> ppr f
+
 
 instance FreeIn MulticoreFunc where
   freeIn' (MulticoreFunc _ prebody body _) = freeIn' prebody <> freeIn' body
 
 instance FreeIn Multicore where
   freeIn' (ParLoop ntask _ e func) = freeIn' ntask <> freeIn' e <> freeIn' func
+  freeIn' (MulticoreCall dests _ ) = freeIn' dests
