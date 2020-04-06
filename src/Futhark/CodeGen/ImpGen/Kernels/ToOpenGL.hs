@@ -108,15 +108,4 @@ genOpenGlPrelude ts =
   [ [C.cedecl|$esc:("#version 450")|]
   , [C.cedecl|$esc:("#extension GL_ARB_compute_variable_group_size : enable")|]
   , [C.cedecl|$esc:("layout (local_size_variable) in;")|]
-  ] ++
-  [C.cunit|
-typedef int int32_t;
-typedef long int64_t;
-
-typedef uint uint32_t;
-typedef ulong uint64_t;
-
-static inline void mem_fence() {
-  glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-}
-|]
+  ]
