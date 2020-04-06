@@ -259,11 +259,11 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
 
   let ftask_name = ftask ++ "_task"
-
   GC.decl [C.cdecl|struct task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
 
-  GC.stm [C.cstm|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks), "scheduler failed to do task %s", $string:ftask);|]
+  GC.stm [C.cstm|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks),
+                "scheduler failed to do task %s", $string:ftask);|]
