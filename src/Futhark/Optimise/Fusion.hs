@@ -29,12 +29,12 @@ import Futhark.Transform.Substitute
 import Futhark.Pass
 
 data VarEntry = IsArray VName (NameInfo SOACS) Names SOAC.Input
-              | IsNotArray VName (NameInfo SOACS)
+              | IsNotArray (NameInfo SOACS)
 
 varEntryType :: VarEntry -> NameInfo SOACS
 varEntryType (IsArray _ attr _ _) =
   attr
-varEntryType (IsNotArray _ attr) =
+varEntryType (IsNotArray attr) =
   attr
 
 varEntryAliases :: VarEntry -> Names
@@ -82,7 +82,7 @@ bindVar env (Ident name t, aliases) =
   env { varsInScope = M.insert name entry $ varsInScope env }
   where entry = case t of
           Array {} -> IsArray name (LetInfo t) aliases' $ SOAC.identInput $ Ident name t
-          _        -> IsNotArray name $ LetInfo t
+          _        -> IsNotArray $ LetInfo t
         expand = maybe mempty varEntryAliases . flip M.lookup (varsInScope env)
         aliases' = aliases <> mconcat (map expand $ namesToList aliases)
 
