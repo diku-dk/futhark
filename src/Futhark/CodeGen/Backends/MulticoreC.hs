@@ -81,6 +81,7 @@ compileProg =
                           char *error;
                           int total_runs;
                           long int total_runtime;
+                          typename pthread_mutex_t profile_mutex;
                           $sdecls:fields
                         };|])
 
@@ -99,6 +100,7 @@ compileProg =
                  $stms:init_fields
 
 
+                 ctx->profiling = 1;
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
                  if (job_queue_init(&ctx->scheduler.q, 64)) return NULL;
@@ -109,8 +111,9 @@ compileProg =
                      fprintf(stderr, "Failed to create thread (%d)\n", i);
                      return NULL;
                    }
-                }
-                return ctx;
+                 }
+                 CHECK_ERR(pthread_mutex_init(&ctx->profile_mutex, NULL), "pthred_mutex_init");
+                 return ctx;
               }|])
 
           GC.publicDef_ "context_free" GC.InitDecl $ \s ->
@@ -240,11 +243,24 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
     [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
               struct futhark_context *ctx = $id:fstruct->ctx;
+              struct timeval st, et;
+              if (ctx->profiling) {
+                gettimeofday(&st, NULL);
+              }
               $decls:(compileGetStructVals fstruct fargs fctypes)
               int $id:i = start;
               $items:prebody'
               for (; $id:i < end; $id:i++) {
                   $items:body'
+              };
+              if (ctx->profiling) {
+                gettimeofday(&et, NULL);
+                typename uint64_t elapsed = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
+
+                CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
+                ctx->$id:(functionRuns s)++;
+                ctx->$id:(functionRuntime s) += elapsed;
+                CHECK_ERR(pthread_mutex_unlock(&ctx->profile_mutex), "pthread_mutex_unlock");
               }
               return 0;
            }|]

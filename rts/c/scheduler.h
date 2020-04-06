@@ -41,10 +41,7 @@ static int num_processors() {
 #elif __APPLE__
     int ncores;
     size_t ncores_size = sizeof(ncores);
-    if (sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0)) {
-      fprintf(stderr, "[num_processors] failed to find number of cores %s", strerror(errno));
-      return -1;
-    }
+    CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0), "sysctlbyname (hw.logicalcpu)");
     return ncores;
 #else // If Linux
   return get_nprocs();
@@ -55,6 +52,17 @@ static int num_processors() {
 
 typedef int (*task_fn)(void*, int, int, int);
 
+
+// A task for the scheduler to execute
+struct task {
+  const char* name;
+  task_fn fn;
+  void* args;
+  long int iterations;
+};
+
+
+/* A subtask that can be executed by a thread */
 struct subtask {
   task_fn fn;
   void* args;
@@ -67,19 +75,11 @@ struct subtask {
 };
 
 
-struct task {
-  const char* name;
-  task_fn fn;
-  void* args;
-  long int iterations;
-};
-
 struct scheduler {
   struct job_queue q;
-  pthread_t *threads; // A list of threads
+  pthread_t *threads; // An array of threads
   int num_threads;
 };
-
 
 
 enum SegOp {
@@ -110,7 +110,6 @@ static inline void *futhark_worker(void* arg) {
 static inline struct subtask* setup_subtask(struct task* task, int subtask_id,
                                             pthread_mutex_t *mutex, pthread_cond_t *cond,
                                             int* counter, int start, int end) {
-  // Don't allocate this on heap, use stack!
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
     assert(!"malloc failed in setup_subtask");
