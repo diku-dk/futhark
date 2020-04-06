@@ -99,8 +99,7 @@ compileProg =
                  create_lock(&ctx->lock);
                  $stms:init_fields
 
-
-                 ctx->profiling = 0;
+                 ctx->profiling = 1;
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
                  if (job_queue_init(&ctx->scheduler.q, 64)) return NULL;
@@ -146,7 +145,8 @@ compileProg =
           GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         ctx->profiling = 0;
+                         // ctx->profiling = 0;
+                         (void)ctx;
                        }|])
 
           GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
@@ -202,7 +202,7 @@ functionRuns = (++"_runs")
 
 
 multiCoreReport :: [String] -> [C.BlockItem]
-multiCoreReport names = report_kernels ++ [report_total]
+multiCoreReport names = report_kernels
   where longest_name = foldl max 0 $ map length names
         report_kernels = concatMap reportKernel names
         format_string name =
@@ -221,13 +221,6 @@ multiCoreReport names = report_kernels ++ [report_total]
               |],
               [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
-
-        report_total = [C.citem|
-                          if (ctx->profiling) {
-                            fprintf(stderr, "%d operations with cumulative runtime: %6ldus\n",
-                                    ctx->total_runs, ctx->total_runtime);
-                          }
-                        |]
 
 
 compileOp :: GC.OpCompiler Multicore ()
@@ -250,9 +243,9 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
     [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
               struct futhark_context *ctx = $id:fstruct->ctx;
-              struct timeval st, et;
+              typename int64_t st, et;
               if (ctx->profiling) {
-                gettimeofday(&st, NULL);
+                 st = get_wall_time();
               }
               $decls:(compileGetStructVals fstruct fargs fctypes)
               int $id:i = start;
@@ -261,8 +254,8 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
                   $items:body'
               };
               if (ctx->profiling) {
-                gettimeofday(&et, NULL);
-                typename uint64_t elapsed = ((et.tv_sec - st.tv_sec) * 1000000) + (et.tv_usec - st.tv_usec);
+                et = get_wall_time();
+                typename uint64_t elapsed = et - st;
 
                 CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
                 ctx->$id:(functionRuns s)++;
@@ -280,6 +273,7 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
+
 
   let ftask_name = ftask ++ "_task"
   GC.decl [C.cdecl|struct task $id:ftask_name;|]

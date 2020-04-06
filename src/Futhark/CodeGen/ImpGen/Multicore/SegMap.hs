@@ -21,8 +21,6 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
 
   num_tasks <- dPrim "ntask" $ IntType Int32
 
-  void getNumThreads
-
   body' <- collect $ do
    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
    compileStms (freeIn kres) kstms $ do

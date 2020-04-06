@@ -131,9 +131,12 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
                                     struct task * task,
                                     int *ntask)
 {
+
   assert(scheduler != NULL);
   assert(task != NULL);
 
+  printf("starting %s\n", task->name);
+  printf("iterations %ld\n", task->iterations);
   if (task->iterations == 0) {
     if (ntask != NULL)  *ntask = 0;
     return 0;
@@ -160,7 +163,6 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   CHECK_ERR(job_queue_push(&scheduler->q, (void*)subtask), "job_queue_push");
 
 
-  printf("starting %s\n", task->name);
   for (int i = remainder + iter_pr_subtask; i < task->iterations; i += iter_pr_subtask)
   {
     struct subtask *subtask = setup_subtask(task, subtask_id,
