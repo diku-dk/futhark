@@ -365,7 +365,7 @@ tileable stm
       Nothing
 
 -- | Statements that we insert directly into every thread-private
--- SegMaps.  This is for things that cannot efficiently be computed
+-- SegMaps. This is for things that cannot efficiently be computed
 -- once in advance in the prelude SegMap, primarily (exclusively?)
 -- array slicing operations.
 data PrivStms = PrivStms (Stms Kernels) ReadPrelude
@@ -497,21 +497,21 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
 
       -- We don't use a Replicate here, because
       -- we want to enforce a scalar memory space.
-      mergeinits <- tilingSegMap tiling "tileGeneric.mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
+      mergeinits <- tilingSegMap tiling "mergeinit" (scalarLevel tiling) ResultPrivate $ \in_bounds slice ->
         -- Constant neutral elements (a common case) do not need protection from OOB.
         if freeIn red_nes == mempty
           then return red_nes
-          else fmap (map Var) $ protectOutOfBounds "tileGeneric.neutral" in_bounds (lambdaReturnType red_lam) $ do
+          else fmap (map Var) $ protectOutOfBounds "neutral" in_bounds (lambdaReturnType red_lam) $ do
           addPrivStms slice privstms
           return red_nes
 
       merge <- forM (zip (lambdaParams red_lam) mergeinits) $ \(p, mergeinit) ->
         (,) <$>
-        newParam ("tileGeneric." ++ baseString (paramName p) ++ "_merge")
+        newParam (baseString (paramName p) ++ "_merge")
         (paramType p `arrayOfShape` tile_shape `toDecl` Unique) <*>
         pure (Var mergeinit)
 
-      tile_id <- newVName "tileGeneric.tile_id"
+      tile_id <- newVName "tile_id"
       let loopform = ForLoop tile_id Int32 num_whole_tiles []
       loopbody <- renameBody <=< runBodyBinder $ inScopeOf loopform $
                   localScope (scopeOfFParams $ map fst merge) $ do
@@ -526,7 +526,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
           red_comm red_lam map_lam
           (zip tile (map snd arrs_and_perms)) (map (paramName . fst) merge)
 
-      accs <- letTupExp "tileGeneric.accs" $ DoLoop [] merge loopform loopbody
+      accs <- letTupExp "accs" $ DoLoop [] merge loopform loopbody
 
       -- We possibly have to traverse a residual tile.
       red_lam' <- renameLambda red_lam
@@ -756,9 +756,9 @@ invariantToOneOfTwoInnerDims branch_variant variance dims arr = do
   let variant_to = M.findWithDefault mempty arr variance
       branch_invariant = not $ nameIn j branch_variant || nameIn i branch_variant
   if branch_invariant && i `nameIn` variant_to && not (j `nameIn` variant_to) then
-    Just [0,1]
+    Just [0, 1]
   else if branch_invariant && j `nameIn` variant_to && not (i `nameIn` variant_to) then
-    Just [1,0]
+    Just [1, 0]
   else
     Nothing
 
@@ -770,9 +770,9 @@ segMap2D :: String           -- desc
              -> Binder Kernels [SubExp])
          -> Binder Kernels [VName]
 segMap2D desc lvl manifest (dim_x, dim_y) f = do
-  ltid_x    <- newVName "segMap2D.ltid_x"
-  ltid_y    <- newVName "segMap2D.ltid_y"
-  ltid_flat <- newVName "segMap2D.ltid_flat"
+  ltid_x    <- newVName "ltid_x"
+  ltid_y    <- newVName "ltid_y"
+  ltid_flat <- newVName "ltid_flat"
   let space = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
   ((ts, res), stms) <- runBinder $ do
@@ -825,7 +825,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size
 
     let readTileElem arr perm =
           -- No need for fullSlice because we are tiling only prims.
-          letExp "readTile2D.tile_elem" $ BasicOp $ Index arr
+          letExp "tile_elem" $ BasicOp $ Index arr
           [DimFix $ last $ rearrangeShape perm [i,j]]
         readTileElemIfInBounds (tile_t, arr, perm) = do
           let idx = last $ rearrangeShape perm [i,j]
@@ -841,7 +841,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size
     fmap (map Var) $
       case kind of
         TilePartial ->
-          mapM (letExp "readTile2D.pre" <=< readTileElemIfInBounds) (zip3 tile_ts arrs perms)
+          mapM (letExp "pre" <=< readTileElemIfInBounds) (zip3 tile_ts arrs perms)
         TileFull ->
           zipWithM readTileElem arrs perms
 
@@ -865,7 +865,7 @@ processTile2D
   -- Might be truncated in case of a partial tile.
   actual_tile_size <- arraysSize 0 <$> mapM (lookupType . fst) tiles_and_perms
 
-  segMap2D "processTile2D.acc" (SegThread num_groups group_size SegNoVirt)
+  segMap2D "acc" (SegThread num_groups group_size SegNoVirt)
     ResultPrivate (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
     reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
 
@@ -875,16 +875,16 @@ processTile2D
     -- OK because the parallel semantics are not used after this
     -- point).
     thread_accs <- forM accs $ \acc ->
-      letSubExp "processTile2D.acc" $ BasicOp $ Index acc [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
+      letSubExp "acc" $ BasicOp $ Index acc [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
     let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
     tiles' <- forM tiles_and_perms $ \(tile, perm) -> do
       tile_t <- lookupType tile
-      letExp "processTile2D.tile" $ BasicOp $ Index tile $ sliceAt tile_t (head perm)
+      letExp "tile" $ BasicOp $ Index tile $ sliceAt tile_t (head perm)
         [DimFix $ Var $ head $ rearrangeShape perm [ltid_x, ltid_y]]
 
     fmap (map Var) $
-      letTupExp "processTile2D.acc" =<< eIf (toExp $
+      letTupExp "acc" =<< eIf (toExp $
                                LeafExp gtid_x int32 .<. primExpFromSubExp int32 kdim_x .&&.
                                LeafExp gtid_y int32 .<. primExpFromSubExp int32 kdim_y)
       (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size form' tiles'])
@@ -910,23 +910,23 @@ processResidualTile2D
   num_whole_tiles accs w arrs_and_perms = do
   -- The number of residual elements that are not covered by
   -- the whole tiles.
-  residual_input <- letSubExp "procResTile2D.residual_input" $
+  residual_input <- letSubExp "residual_input" $
     BasicOp $ BinOp (SRem Int32) w tile_size
 
-  letTupExp "procResTile2D.acc_after_residual" =<<
+  letTupExp "acc_after_residual" =<<
     eIf (toExp $ primExpFromSubExp int32 residual_input .==. 0)
     (resultBodyM $ map Var accs)
     (nonemptyTile residual_input)
 
   where
     nonemptyTile residual_input = renameBody <=< runBodyBinder $ do
-      -- Collectively construct a tile.  Threads that are out-of-bounds
-      -- provide a blank dummy value.
+      -- Collectively construct a tile. Threads that
+      -- are out-of-bounds provide a blank dummy value.
       full_tile <- readTile2D kdims gtids gids tile_size num_groups group_size
                    TilePartial privstms num_whole_tiles arrs_and_perms
 
       tile <- forM full_tile $ \tile ->
-        letExp "procResTile2D.partial_tile" $ BasicOp $ Index tile
+        letExp "partial_tile" $ BasicOp $ Index tile
         [DimSlice (intConst Int32 0) residual_input (intConst Int32 1),
          DimSlice (intConst Int32 0) residual_input (intConst Int32 1)]
 
@@ -939,29 +939,29 @@ processResidualTile2D
 
 tiling2d :: [(VName, SubExp)] -> DoTiling (VName, VName) (SubExp, SubExp)
 tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
-  gid_x <- newVName "tiling2D.gid_x"
-  gid_y <- newVName "tiling2D.gid_y"
+  gid_x <- newVName "gid_x"
+  gid_y <- newVName "gid_y"
 
-  tile_size_key <- nameFromString . pretty <$> newVName "tiling2D.tile_size"
-  tile_size  <- letSubExp "tiling2D.tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
-  group_size <- letSubExp "tiling2D.group_size" $ BasicOp $ BinOp (Mul Int32) tile_size tile_size
+  tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
+  tile_size  <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
+  group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) tile_size tile_size
 
-  num_groups_x <- letSubExp "tiling2D.num_groups_x" =<<
+  num_groups_x <- letSubExp "num_groups_x" =<<
                   eDivRoundingUp Int32 (eSubExp kdim_x) (eSubExp tile_size)
-  num_groups_y <- letSubExp "tiling2D.num_groups_y" =<<
+  num_groups_y <- letSubExp "num_groups_y" =<<
                   eDivRoundingUp Int32 (eSubExp kdim_y) (eSubExp tile_size)
 
-  num_groups <- letSubExp "tiling2D.num_groups_top" =<<
+  num_groups <- letSubExp "num_groups_top" =<<
                 foldBinOp (Mul Int32) num_groups_x
                 (num_groups_y : map snd dims_on_top)
 
-  gid_flat <- newVName "tiling2D.gid_flat"
+  gid_flat <- newVName "gid_flat"
   let lvl = SegGroup (Count num_groups) (Count group_size) SegNoVirt
       space = SegSpace gid_flat $
               dims_on_top ++ [(gid_x, num_groups_x), (gid_y, num_groups_y)]
 
   -- Number of whole tiles that fit in the input.
-  num_whole_tiles <- letSubExp "tiling2D.num_whole_tiles" $
+  num_whole_tiles <- letSubExp "num_whole_tiles" $
     BasicOp $ BinOp (SQuot Int32) w tile_size
   return Tiling
     { tilingSegMap = \desc lvl' manifest f ->
@@ -985,7 +985,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
--- that name depends on.  If a variable is not present in this table,
+-- that name depends on. If a variable is not present in this table,
 -- that means it is bound outside the kernel (and so can be considered
 -- invariant to all dimensions).
 type VarianceTable = M.Map VName Names
