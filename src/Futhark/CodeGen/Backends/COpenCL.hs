@@ -289,19 +289,22 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   where setKernelArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName "kernel_arg" bt e
           GC.stm [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($id:v), &$id:v));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i,
+                                                    sizeof($id:v), &$id:v));
           |]
 
         setKernelArg i (MemKArg v) = do
           v' <- GC.rawMem v
           GC.stm [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i,
+                                                    sizeof($exp:v'), &$exp:v'));
           |]
 
         setKernelArg i (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp $ unCount num_bytes
           GC.stm [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
+            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i,
+                                                    $exp:num_bytes', NULL));
             |]
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
@@ -313,15 +316,15 @@ launchKernel :: C.ToExp a =>
                 String -> [a] -> [a] -> a -> GC.CompilerM op s ()
 launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
   global_work_size <- newVName "global_work_size"
-  time_start <- newVName "time_start"
-  time_end <- newVName "time_end"
-  time_diff <- newVName "time_diff"
-  local_work_size <- newVName "local_work_size"
+  time_start       <- newVName "time_start"
+  time_end         <- newVName "time_end"
+  time_diff        <- newVName "time_diff"
+  local_work_size  <- newVName "local_work_size"
 
   GC.stm [C.cstm|
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
-      const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
+      const size_t $id:local_work_size[$int:kernel_rank]  = {$inits:workgroup_dims'};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
         fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
@@ -332,7 +335,8 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
         $id:time_start = get_wall_time();
       }
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueNDRangeKernel(ctx->opencl.queue, ctx->$id:kernel_name, $int:kernel_rank, NULL,
+        clEnqueueNDRangeKernel(ctx->opencl.queue, ctx->$id:kernel_name,
+                               $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
                                0, NULL, $exp:(profilingEvent kernel_name)));
       if (ctx->debugging) {
@@ -343,13 +347,13 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
                 $string:kernel_name, $id:time_diff);
       }
     }|]
-  where kernel_rank = length kernel_dims
-        kernel_dims = zipWith multExp num_workgroups workgroup_dims
-        kernel_dims' = map toInit kernel_dims
+  where kernel_rank     = length kernel_dims
+        kernel_dims     = zipWith multExp num_workgroups workgroup_dims
+        kernel_dims'    = map toInit kernel_dims
         workgroup_dims' = map toInit workgroup_dims
-        total_elements = foldl multExp [C.cexp|1|] kernel_dims
+        total_elements  = foldl multExp [C.cexp|1|] kernel_dims
 
-        toInit e = [C.cinit|$exp:e|]
+        toInit e    = [C.cinit|$exp:e|]
         multExp x y = [C.cexp|$exp:x * $exp:y|]
 
         printKernelSize :: VName -> [C.Stm]

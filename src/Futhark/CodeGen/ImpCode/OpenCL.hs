@@ -36,7 +36,7 @@ data Program = Program { openClProgram :: String
                        , openClPrelude :: String
                          -- ^ Must be prepended to the program.
                        , openClKernelNames :: M.Map KernelName Safety
-                       , openClUsedTypes :: [PrimType]
+                       , openClUsedTypes   :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
                        , openClSizes :: M.Map Name SizeClass
                          -- ^ Runtime-configurable constants.
@@ -90,9 +90,9 @@ data Safety
 -- | How many leading failure arguments we must pass when launching a
 -- kernel with these safety characteristics.
 numFailureParams :: Safety -> Int
-numFailureParams SafetyNone = 0
+numFailureParams SafetyNone  = 0
 numFailureParams SafetyCheap = 1
-numFailureParams SafetyFull = 3
+numFailureParams SafetyFull  = 3
 
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel Safety KernelName [KernelArg] [Exp] [Exp]

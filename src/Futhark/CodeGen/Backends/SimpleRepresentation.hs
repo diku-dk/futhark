@@ -24,14 +24,14 @@ import Futhark.Util (zEncodeString)
 
 -- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
-intTypeToCType Int8 = [C.cty|typename int8_t|]
+intTypeToCType Int8  = [C.cty|typename int8_t|]
 intTypeToCType Int16 = [C.cty|typename int16_t|]
 intTypeToCType Int32 = [C.cty|typename int32_t|]
 intTypeToCType Int64 = [C.cty|typename int64_t|]
 
 -- | The C type corresponding to an unsigned integer type.
 uintTypeToCType :: IntType -> C.Type
-uintTypeToCType Int8 = [C.cty|typename uint8_t|]
+uintTypeToCType Int8  = [C.cty|typename uint8_t|]
 uintTypeToCType Int16 = [C.cty|typename uint16_t|]
 uintTypeToCType Int32 = [C.cty|typename uint32_t|]
 uintTypeToCType Int64 = [C.cty|typename uint64_t|]
@@ -44,7 +44,7 @@ floatTypeToCType Float64 = [C.cty|double|]
 -- | The C type corresponding to a primitive type.  Integers are
 -- assumed to be unsigned.
 primTypeToCType :: PrimType -> C.Type
-primTypeToCType (IntType t) = intTypeToCType t
+primTypeToCType (IntType t)   = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|typename bool|]
 primTypeToCType Cert = [C.cty|typename bool|]
@@ -53,7 +53,7 @@ primTypeToCType Cert = [C.cty|typename bool|]
 -- assumed to have the specified sign.
 signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
 signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
-signedPrimTypeToCType TypeDirect (IntType t) = intTypeToCType t
+signedPrimTypeToCType TypeDirect (IntType t)   = intTypeToCType t
 signedPrimTypeToCType _ t = primTypeToCType t
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
@@ -90,16 +90,16 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
               map mkSExt [minBound..maxBound] ++
               map mkZExt [minBound..maxBound]
 
-        taggedI s Int8 = s ++ "8"
+        taggedI s Int8  = s ++ "8"
         taggedI s Int16 = s ++ "16"
         taggedI s Int32 = s ++ "32"
         taggedI s Int64 = s ++ "64"
 
         -- Use unsigned types for add/sub/mul so we can do
         -- well-defined overflow.
-        mkAdd = simpleUintOp "add" [C.cexp|x + y|]
-        mkSub = simpleUintOp "sub" [C.cexp|x - y|]
-        mkMul = simpleUintOp "mul" [C.cexp|x * y|]
+        mkAdd  = simpleUintOp "add" [C.cexp|x + y|]
+        mkSub  = simpleUintOp "sub" [C.cexp|x - y|]
+        mkMul  = simpleUintOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
@@ -122,19 +122,19 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
               }|]
 
         mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
-        mkSRem = simpleIntOp "srem" [C.cexp|x % y|]
-        mkSMax = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
-        mkSMin = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
-        mkShl = simpleUintOp "shl" [C.cexp|x << y|]
-        mkLShr = simpleUintOp "lshr" [C.cexp|x >> y|]
-        mkAShr = simpleIntOp "ashr" [C.cexp|x >> y|]
-        mkAnd = simpleUintOp "and" [C.cexp|x & y|]
-        mkOr = simpleUintOp "or" [C.cexp|x | y|]
-        mkXor = simpleUintOp "xor" [C.cexp|x ^ y|]
-        mkUlt = uintCmpOp "ult" [C.cexp|x < y|]
-        mkUle = uintCmpOp "ule" [C.cexp|x <= y|]
-        mkSlt = intCmpOp "slt" [C.cexp|x < y|]
-        mkSle = intCmpOp "sle" [C.cexp|x <= y|]
+        mkSRem  = simpleIntOp "srem" [C.cexp|x % y|]
+        mkSMax  = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
+        mkSMin  = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
+        mkShl   = simpleUintOp "shl" [C.cexp|x << y|]
+        mkLShr  = simpleUintOp "lshr" [C.cexp|x >> y|]
+        mkAShr  = simpleIntOp "ashr" [C.cexp|x >> y|]
+        mkAnd   = simpleUintOp "and" [C.cexp|x & y|]
+        mkOr    = simpleUintOp "or" [C.cexp|x | y|]
+        mkXor   = simpleUintOp "xor" [C.cexp|x ^ y|]
+        mkUlt   = uintCmpOp "ult" [C.cexp|x < y|]
+        mkUle   = uintCmpOp "ule" [C.cexp|x <= y|]
+        mkSlt   = intCmpOp "slt" [C.cexp|x < y|]
+        mkSle   = intCmpOp "sle" [C.cexp|x <= y|]
 
         -- We define some operations as macros rather than functions,
         -- because this allows us to use them as constant expressions
@@ -157,27 +157,27 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
               }|]
 
         mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
-          where name = "sext_"++pretty from_t++"_"++pretty to_t
+          where name    = "sext_"++pretty from_t++"_"++pretty to_t
                 from_ct = intTypeToCType from_t
-                to_ct = intTypeToCType to_t
+                to_ct   = intTypeToCType to_t
 
         mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
-          where name = "zext_"++pretty from_t++"_"++pretty to_t
+          where name    = "zext_"++pretty from_t++"_"++pretty to_t
                 from_ct = uintTypeToCType from_t
-                to_ct = uintTypeToCType to_t
+                to_ct   = uintTypeToCType to_t
 
         mkBToI to_t =
           [C.cedecl|static inline $ty:to_ct
                     $id:name($ty:from_ct x) { return x; } |]
-          where name = "btoi_bool_"++pretty to_t
+          where name    = "btoi_bool_"++pretty to_t
                 from_ct = primTypeToCType Bool
-                to_ct = intTypeToCType to_t
+                to_ct   = intTypeToCType to_t
 
         mkIToB from_t =
           [C.cedecl|static inline $ty:to_ct
                     $id:name($ty:from_ct x) { return x; } |]
-          where name = "itob_"++pretty from_t++"_bool"
-                to_ct = primTypeToCType Bool
+          where name    = "itob_"++pretty from_t++"_bool"
+                to_ct   = primTypeToCType Bool
                 from_ct = intTypeToCType from_t
 
         simpleUintOp s e t =
@@ -405,18 +405,18 @@ $esc:("#else")
 $esc:("#endif")
                 |]
 
-cFloat32Ops :: [C.Definition]
-cFloat64Ops :: [C.Definition]
+cFloat32Ops   :: [C.Definition]
+cFloat64Ops   :: [C.Definition]
 cFloatConvOps :: [C.Definition]
 (cFloat32Ops, cFloat64Ops, cFloatConvOps) =
   ( map ($Float32) mkOps
   , map ($Float64) mkOps
   , [ mkFPConvFF "fpconv" from to |
       from <- [minBound..maxBound],
-      to <- [minBound..maxBound] ])
+      to   <- [minBound..maxBound] ])
   where taggedF s Float32 = s ++ "32"
         taggedF s Float64 = s ++ "64"
-        convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
+        convOp  s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
         mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe] ++
                 map (mkFPConvIF "sitofp") [minBound..maxBound] ++
@@ -424,12 +424,12 @@ cFloatConvOps :: [C.Definition]
                 map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
                 map (flip $ mkFPConvFU "fptoui") [minBound..maxBound]
 
-        mkFDiv = simpleFloatOp "fdiv" [C.cexp|x / y|]
-        mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
-        mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
-        mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
-        mkFMin = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
-        mkFMax = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
+        mkFDiv  = simpleFloatOp "fdiv" [C.cexp|x / y|]
+        mkFAdd  = simpleFloatOp "fadd" [C.cexp|x + y|]
+        mkFSub  = simpleFloatOp "fsub" [C.cexp|x - y|]
+        mkFMul  = simpleFloatOp "fmul" [C.cexp|x * y|]
+        mkFMin  = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
+        mkFMax  = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
         mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
         mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
 

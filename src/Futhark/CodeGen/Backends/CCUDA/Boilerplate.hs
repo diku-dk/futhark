@@ -36,17 +36,17 @@ generateBoilerplate cuda_program cuda_prelude kernels sizes failures = do
   cfg <- generateConfigFuns sizes
   generateContextFuns cfg kernels sizes failures
   where
-    cuda_h = $(embedStringFile "rts/c/cuda.h")
+    cuda_h      = $(embedStringFile "rts/c/cuda.h")
     free_list_h = $(embedStringFile "rts/c/free_list.h")
-    fragments = map (\s -> [C.cinit|$string:s|])
-                  $ chunk 2000 (cuda_prelude ++ cuda_program)
+    fragments   = map (\s -> [C.cinit|$string:s|])
+                    $ chunk 2000 (cuda_prelude ++ cuda_program)
 
 generateSizeFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () ()
 generateSizeFuns sizes = do
-  let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
+  let size_name_inits  = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
+      size_var_inits   = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
-      num_sizes = M.size sizes
+      num_sizes        = M.size sizes
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
   GC.libDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
@@ -73,7 +73,7 @@ generateSizeFuns sizes = do
 generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
 generateConfigFuns sizes = do
   let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
-      num_sizes = M.size sizes
+      num_sizes  = M.size sizes
   GC.libDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
@@ -84,7 +84,7 @@ generateConfigFuns sizes = do
                             };|])
 
   let size_value_inits = zipWith sizeInit [0..M.size sizes-1] (M.elems sizes)
-      sizeInit i size = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
+      sizeInit i size  = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
          where val = case size of SizeBespoke _ x -> x
                                   _               -> 0
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->

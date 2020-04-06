@@ -112,17 +112,17 @@ type StmsCompiler lore op = Names -> Stms lore -> ImpM lore op () -> ImpM lore o
 type ExpCompiler lore op = Pattern lore -> Exp lore -> ImpM lore op ()
 
 type CopyCompiler lore op = PrimType
-                           -> MemLocation
-                           -> MemLocation
-                           -> ImpM lore op ()
+                          -> MemLocation
+                          -> MemLocation
+                          -> ImpM lore op ()
 
 -- | An alternate way of compiling an allocation.
 type AllocCompiler lore op = VName -> Count Bytes Imp.Exp -> ImpM lore op ()
 
-data Operations lore op = Operations { opsExpCompiler :: ExpCompiler lore op
-                                     , opsOpCompiler :: OpCompiler lore op
-                                     , opsStmsCompiler :: StmsCompiler lore op
-                                     , opsCopyCompiler :: CopyCompiler lore op
+data Operations lore op = Operations { opsExpCompiler    :: ExpCompiler lore op
+                                     , opsOpCompiler     :: OpCompiler lore op
+                                     , opsStmsCompiler   :: StmsCompiler lore op
+                                     , opsCopyCompiler   :: CopyCompiler lore op
                                      , opsAllocCompilers :: M.Map Space (AllocCompiler lore op)
                                      }
 
@@ -138,7 +138,7 @@ defaultOperations opc = Operations { opsExpCompiler = defCompileExp
                                    }
 
 -- | When an array is dared, this is where it is stored.
-data MemLocation = MemLocation { memLocationName :: VName
+data MemLocation = MemLocation { memLocationName  :: VName
                                , memLocationShape :: [Imp.DimSize]
                                , memLocationIxFun :: IxFun.IxFun Imp.Exp
                                }
@@ -157,7 +157,7 @@ newtype MemEntry = MemEntry { entryMemSpace :: Imp.Space }
   deriving (Show)
 
 newtype ScalarEntry = ScalarEntry {
-    entryScalarType    :: PrimType
+    entryScalarType :: PrimType
   }
   deriving (Show)
 
@@ -186,34 +186,34 @@ data ValueDestination = ScalarDestination VName
                       deriving (Show)
 
 data Env lore op = Env {
-    envExpCompiler :: ExpCompiler lore op
-  , envStmsCompiler :: StmsCompiler lore op
-  , envOpCompiler :: OpCompiler lore op
-  , envCopyCompiler :: CopyCompiler lore op
+    envExpCompiler    :: ExpCompiler lore op
+  , envStmsCompiler   :: StmsCompiler lore op
+  , envOpCompiler     :: OpCompiler lore op
+  , envCopyCompiler   :: CopyCompiler lore op
   , envAllocCompilers :: M.Map Space (AllocCompiler lore op)
-  , envDefaultSpace :: Imp.Space
-  , envVolatility :: Imp.Volatility
-  , envFunction :: Name
+  , envDefaultSpace   :: Imp.Space
+  , envVolatility     :: Imp.Volatility
+  , envFunction       :: Name
     -- ^ Name of the function we are compiling.
   }
 
 newEnv :: Operations lore op -> Imp.Space -> Name -> Env lore op
 newEnv ops ds fname =
-  Env { envExpCompiler = opsExpCompiler ops
-      , envStmsCompiler = opsStmsCompiler ops
-      , envOpCompiler = opsOpCompiler ops
-      , envCopyCompiler = opsCopyCompiler ops
+  Env { envExpCompiler    = opsExpCompiler ops
+      , envStmsCompiler   = opsStmsCompiler ops
+      , envOpCompiler     = opsOpCompiler ops
+      , envCopyCompiler   = opsCopyCompiler ops
       , envAllocCompilers = mempty
-      , envDefaultSpace = ds
-      , envVolatility = Imp.Nonvolatile
-      , envFunction = fname
+      , envDefaultSpace   = ds
+      , envVolatility     = Imp.Nonvolatile
+      , envFunction       = fname
       }
 
 -- | The symbol table used during compilation.
 type VTable lore = M.Map VName (VarEntry lore)
 
-data State lore op = State { stateVTable :: VTable lore
-                           , stateFunctions :: Imp.Functions op
+data State lore op = State { stateVTable     :: VTable lore
+                           , stateFunctions  :: Imp.Functions op
                            , stateNameSource :: VNameSource
                            }
 
@@ -228,7 +228,7 @@ newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) (State lore op) 
             MonadError InternalError)
 
 instance MonadFreshNames (ImpM lore op) where
-  getNameSource = gets stateNameSource
+  getNameSource     = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
 -- Cannot be an ExplicitMemory scope because the index functions have
@@ -258,14 +258,14 @@ subImpM :: Operations lore op' -> ImpM lore op' a
         -> ImpM lore op (a, Imp.Code op')
 subImpM ops (ImpM m) = do
   env <- ask
-  s <- get
-  case runRWST m env { envExpCompiler = opsExpCompiler ops
-                     , envStmsCompiler = opsStmsCompiler ops
-                     , envCopyCompiler = opsCopyCompiler ops
-                     , envOpCompiler = opsOpCompiler ops
+  s   <- get
+  case runRWST m env { envExpCompiler    = opsExpCompiler ops
+                     , envStmsCompiler   = opsStmsCompiler ops
+                     , envCopyCompiler   = opsCopyCompiler ops
+                     , envOpCompiler     = opsOpCompiler ops
                      , envAllocCompilers = opsAllocCompilers ops
                      }
-                 s { stateVTable = stateVTable s
+                 s { stateVTable    = stateVTable s
                    , stateFunctions = mempty } of
     Left err -> throwError err
     Right (x, s', code) -> do
@@ -343,7 +343,7 @@ compileInParams params orig_epts = do
         splitAt (length params - sum (map entryPointSize orig_epts)) params
   (inparams, arrayds) <- partitionEithers <$> mapM compileInParam (ctx_params++val_params)
   let findArray x = find (isArrayDecl x) arrayds
-      sizes = mconcat $ map fparamSizes $ ctx_params++val_params
+      sizes       = mconcat $ map fparamSizes $ ctx_params++val_params
 
       summaries = M.fromList $ mapMaybe memSummary params
         where memSummary param
@@ -419,7 +419,7 @@ compileOutParams orig_rts orig_epts = do
           tell ([Imp.ScalarParam out t], mempty)
           return (Imp.ScalarValue t ept out, ScalarDestination out)
         mkParam (MemArray t shape _ attr) ept = do
-          space <- asks envDefaultSpace
+          space  <- asks envDefaultSpace
           memout <- case attr of
             ReturnsNewBlock _ x _ixfun -> do
               memout <- imp $ newVName "out_mem"
@@ -640,8 +640,8 @@ defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
   sUpdate (patElemName pe) (map (fmap (toExp' int32)) slice) se
 
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
-  ds' <- mapM toExp ds
-  is <- replicateM (length ds) (newVName "i")
+  ds'       <- mapM toExp ds
+  is        <- replicateM (length ds) (newVName "i")
   copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi32) is) se []
   emit $ foldl (.) id (zipWith (`Imp.For` Int32) is ds') copy_elem
 
@@ -938,7 +938,7 @@ sliceArray :: MemLocation
 sliceArray (MemLocation mem shape ixfun) slice =
   MemLocation mem (update shape slice) $ IxFun.slice ixfun slice
   where update (d:ds) (DimSlice{}:is) = d : update ds is
-        update (_:ds) (DimFix{}:is) = update ds is
+        update (_:ds) (DimFix{}:is)   = update ds is
         update _      _               = []
 
 -- More complicated read/write operations that use index functions.
@@ -955,7 +955,7 @@ defaultCopy bt dest src
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       IxFun.linearWithOffset srcIxFun bt_size = do
-        srcspace <- entryMemSpace <$> lookupMemory srcmem
+        srcspace  <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
         if isScalarSpace srcspace || isScalarSpace destspace
           then copyElementWise bt dest src

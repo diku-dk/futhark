@@ -90,18 +90,18 @@ import Futhark.Representation.AST.Attributes (isBuiltInFunction, builtInFunction
 
 
 data CompilerState s = CompilerState {
-    compTypeStructs :: [([Type], (C.Type, C.Definition))]
-  , compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))]
+    compTypeStructs   :: [([Type], (C.Type, C.Definition))]
+  , compArrayStructs  :: [((C.Type, Int), (C.Type, [C.Definition]))]
   , compOpaqueStructs :: [(String, (C.Type, [C.Definition]))]
-  , compEarlyDecls :: DL.DList C.Definition
-  , compInit :: [C.Stm]
-  , compNameSrc :: VNameSource
-  , compUserState :: s
-  , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
-  , compLibDecls :: DL.DList C.Definition
-  , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
-  , compProfileItems :: DL.DList C.BlockItem
-  , compDeclaredMem :: [(VName,Space)]
+  , compEarlyDecls    :: DL.DList C.Definition
+  , compInit          :: [C.Stm]
+  , compNameSrc       :: VNameSource
+  , compUserState     :: s
+  , compHeaderDecls   :: M.Map HeaderSection (DL.DList C.Definition)
+  , compLibDecls      :: DL.DList C.Definition
+  , compCtxFields     :: DL.DList (String, C.Type, Maybe C.Exp)
+  , compProfileItems  :: DL.DList C.BlockItem
+  , compDeclaredMem   :: [(VName,Space)]
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -191,10 +191,11 @@ defError :: ErrorCompiler op s
 defError (ErrorMsg parts) stacktrace = do
   free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
   let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
-      onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+      onPart (ErrorInt32 x)  = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
-  stm [C.cstm|{ ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
+  stm [C.cstm|{ ctx->error = msgprintf($string:formatstr, $args:formatargs,
+                                       $string:stacktrace);
                 $items:free_all_mem
                 return 1;
               }|]
@@ -281,7 +282,7 @@ newCompilerEnv :: Functions op -> Operations op s
                -> CompilerEnv op s
 newCompilerEnv (Functions funs) ops =
   CompilerEnv { envOperations = ops
-              , envFtable = ftable <> builtinFtable
+              , envFtable     = ftable <> builtinFtable
               }
   where ftable = M.fromList $ map funReturn funs
         funReturn (name, fun) =
@@ -290,8 +291,8 @@ newCompilerEnv (Functions funs) ops =
           M.map (map Scalar . snd) builtInFunctions
 
 tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
-tupleDefinitions = map (snd . snd) . compTypeStructs
-arrayDefinitions = concatMap (snd . snd) . compArrayStructs
+tupleDefinitions  = map (snd . snd) . compTypeStructs
+arrayDefinitions  = concatMap (snd . snd) . compArrayStructs
 opaqueDefinitions = concatMap (snd . snd) . compOpaqueStructs
 
 initDecls, arrayDecls, opaqueDecls, entryDecls, miscDecls :: CompilerState s -> [C.Definition]
@@ -301,7 +302,7 @@ arrayDecls = concatMap (DL.toList . snd) . filter (isArrayDecl . fst) . M.toList
         isArrayDecl _           = False
 opaqueDecls = concatMap (DL.toList . snd) . filter (isOpaqueDecl . fst) . M.toList . compHeaderDecls
   where isOpaqueDecl OpaqueDecl{} = True
-        isOpaqueDecl _           = False
+        isOpaqueDecl _            = False
 entryDecls = concatMap (DL.toList . snd) . filter ((==EntryDecl) . fst) . M.toList . compHeaderDecls
 miscDecls = concatMap (DL.toList . snd) . filter ((==MiscDecl) . fst) . M.toList . compHeaderDecls
 
@@ -374,7 +375,7 @@ instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]
 
 instance C.ToExp IntValue where
-  toExp (Int8Value v) = C.toExp v
+  toExp (Int8Value v)  = C.toExp v
   toExp (Int16Value v) = C.toExp v
   toExp (Int32Value v) = C.toExp v
   toExp (Int64Value v) = C.toExp v
@@ -384,9 +385,9 @@ instance C.ToExp FloatValue where
   toExp (Float64Value v) = C.toExp v
 
 instance C.ToExp PrimValue where
-  toExp (IntValue v) = C.toExp v
-  toExp (FloatValue v) = C.toExp v
-  toExp (BoolValue True) = C.toExp (1::Int8)
+  toExp (IntValue v)      = C.toExp v
+  toExp (FloatValue v)    = C.toExp v
+  toExp (BoolValue True)  = C.toExp (1::Int8)
   toExp (BoolValue False) = C.toExp (0::Int8)
   toExp Checked = C.toExp (1::Int8)
 
@@ -435,7 +436,7 @@ profileReport x = modify $ \s ->
 
 stm :: C.Stm -> CompilerM op s ()
 stm (C.Block items _) = mapM_ item items
-stm (C.Default s _) = stm s
+stm (C.Default s _)   = stm s
 stm s = item [C.citem|$stm:s|]
 
 stms :: [C.Stm] -> CompilerM op s ()
@@ -718,27 +719,27 @@ criticalSection items = [[C.citem|lock_lock(&ctx->lock);|]] <>
 arrayLibraryFunctions :: Space -> PrimType -> Signedness -> [DimSize]
                       -> CompilerM op s [C.Definition]
 arrayLibraryFunctions space pt signed shape = do
-  let rank = length shape
-      pt' = signedPrimTypeToCType signed pt
-      name = arrayName pt signed rank
-      arr_name = "futhark_" ++ name
+  let rank       = length shape
+      pt'        = signedPrimTypeToCType signed pt
+      name       = arrayName pt signed rank
+      arr_name   = "futhark_" ++ name
       array_type = [C.cty|struct $id:arr_name|]
 
-  new_array <- publicName $ "new_" ++ name
-  new_raw_array <- publicName $ "new_raw_" ++ name
-  free_array <- publicName $ "free_" ++ name
-  values_array <- publicName $ "values_" ++ name
+  new_array        <- publicName $ "new_"        ++ name
+  new_raw_array    <- publicName $ "new_raw_"    ++ name
+  free_array       <- publicName $ "free_"       ++ name
+  values_array     <- publicName $ "values_"     ++ name
   values_raw_array <- publicName $ "values_raw_" ++ name
-  shape_array <- publicName $ "shape_" ++ name
+  shape_array      <- publicName $ "shape_"      ++ name
 
-  let shape_names = [ "dim"++show i | i <- [0..rank-1] ]
-      shape_params = [ [C.cparam|typename int64_t $id:k|] | k <- shape_names ]
-      arr_size = cproduct [ [C.cexp|$id:k|] | k <- shape_names ]
+  let shape_names    = [ "dim"++show i | i <- [0..rank-1] ]
+      shape_params   = [ [C.cparam|typename int64_t $id:k|] | k <- shape_names ]
+      arr_size       = cproduct [ [C.cexp|$id:k|] | k <- shape_names ]
       arr_size_array = cproduct [ [C.cexp|arr->shape[$int:i]|] | i <- [0..rank-1] ]
   copy <- asks envCopy
 
   arr_raw_mem <- rawMem [C.cexp|arr->mem|]
-  memty <- rawMemCType space
+  memty       <- rawMemCType space
 
   let prepare_new = do
         resetMem [C.cexp|arr->mem|] space
@@ -831,7 +832,7 @@ arrayLibraryFunctions space pt signed shape = do
 opaqueLibraryFunctions :: String -> [ValueDesc]
                        -> CompilerM op s [C.Definition]
 opaqueLibraryFunctions desc vds = do
-  name <- publicName $ opaqueName desc vds
+  name        <- publicName $ opaqueName desc vds
   free_opaque <- publicName $ "free_" ++ opaqueName desc vds
 
   let opaque_type = [C.cty|struct $id:name|]
@@ -859,22 +860,22 @@ opaqueLibraryFunctions desc vds = do
             free(obj);
             return ret;
           }
-           |]
+         |]
 
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
 valueDescToCType (ArrayValue _ space pt signed shape) = do
-  let pt' = signedPrimTypeToCType signed pt
+  let pt'  = signedPrimTypeToCType signed pt
       rank = length shape
   exists <- gets $ lookup (pt',rank) . compArrayStructs
   case exists of
     Just (cty, _) -> return cty
     Nothing -> do
       memty <- memToCType space
-      name <- publicName $ arrayName pt signed rank
+      name  <- publicName $ arrayName pt signed rank
       let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
-          stype = [C.cty|struct $id:name|]
+          stype  = [C.cty|struct $id:name|]
       library <- arrayLibraryFunctions space pt signed shape
       modify $ \s -> s { compArrayStructs =
                            ((pt', rank), (stype, struct : library)) : compArrayStructs s
@@ -883,14 +884,14 @@ valueDescToCType (ArrayValue _ space pt signed shape) = do
 
 opaqueToCType :: String -> [ValueDesc] -> CompilerM op s C.Type
 opaqueToCType desc vds = do
-  name <- publicName $ opaqueName desc vds
+  name   <- publicName $ opaqueName desc vds
   exists <- gets $ lookup name . compOpaqueStructs
   case exists of
     Just (ty, _) -> return ty
     Nothing -> do
       members <- zipWithM field vds [(0::Int)..]
       let struct = [C.cedecl|struct $id:name { $sdecls:members };|]
-          stype = [C.cty|struct $id:name|]
+          stype  = [C.cty|struct $id:name|]
       headerDecl (OpaqueDecl desc) [C.cedecl|struct $id:name;|]
       library <- opaqueLibraryFunctions desc vds
       modify $ \s -> s { compOpaqueStructs =
@@ -905,7 +906,7 @@ opaqueToCType desc vds = do
           return [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
 externalValueToCType :: ExternalValue -> CompilerM op s C.Type
-externalValueToCType (TransparentValue vd) = valueDescToCType vd
+externalValueToCType (TransparentValue vd)  = valueDescToCType vd
 externalValueToCType (OpaqueValue desc vds) = opaqueToCType desc vds
 
 prepareEntryInputs :: [ExternalValue] -> CompilerM op s [C.Param]
@@ -919,7 +920,7 @@ prepareEntryInputs = zipWithM prepare [(0::Int)..]
           ty <- opaqueToCType desc vds
           let pname = "in" ++ show pno
               field i ScalarValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
-              field i ArrayValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
+              field i ArrayValue{}  = [C.cexp|$id:pname->$id:(tupleField i)|]
           zipWithM_ prepareValue (zipWith field [0..] vds) vds
           return [C.cparam|const $ty:ty *$id:pname|]
 
@@ -991,9 +992,9 @@ onEntryPoint :: Name -> Function op
              -> CompilerM op s (C.Definition, C.Definition, C.Initializer)
 onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
-      in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
+      in_args  = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
-  inputdecls <- collect $ mapM_ stubParam inputs
+  inputdecls  <- collect $ mapM_ stubParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
 
   let entry_point_name = nameToString fname
@@ -1067,7 +1068,7 @@ printStm (TransparentValue (ScalarValue bt ept _)) e =
   return $ printPrimStm [C.cexp|stdout|] e bt ept
 printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e = do
   values_array <- publicName $ "values_" ++ name
-  shape_array <- publicName $ "shape_" ++ name
+  shape_array  <- publicName $ "shape_"  ++ name
   let num_elems = cproduct [ [C.cexp|$id:shape_array(ctx, $exp:e)[$int:i]|] | i <- [0..rank-1] ]
   return [C.cstm|{
       $ty:bt' *arr = calloc(sizeof($ty:bt'), $exp:num_elems);
@@ -1078,7 +1079,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e = do
       free(arr);
   }|]
   where rank = length shape
-        bt' = primTypeToCType bt
+        bt'  = primTypeToCType bt
         name = arrayName bt ept rank
 
 readPrimStm :: C.ToExp a => a -> Int -> PrimType -> Signedness -> C.Stm
@@ -1103,19 +1104,19 @@ readInput i (TransparentValue (ScalarValue t ept _)) = do
   stm $ readPrimStm dest i t ept
   return ([C.cstm|;|], [C.cstm|;|], [C.cstm|;|], [C.cexp|$id:dest|])
 readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
-  dest <- newVName "read_value"
+  dest  <- newVName "read_value"
   shape <- newVName "read_shape"
-  arr <- newVName "read_arr"
-  ty <- valueDescToCType vd
+  arr   <- newVName "read_arr"
+  ty    <- valueDescToCType vd
   item [C.citem|$ty:ty *$id:dest;|]
 
-  let t' = signedPrimTypeToCType ept t
-      rank = length dims
-      name = arrayName t ept rank
+  let t'        = signedPrimTypeToCType ept t
+      rank      = length dims
+      name      = arrayName t ept rank
       dims_exps = [ [C.cexp|$id:shape[$int:j]|] | j <- [0..rank-1] ]
-      dims_s = concat $ replicate rank "[]"
+      dims_s    = concat $ replicate rank "[]"
 
-  new_array <- publicName $ "new_" ++ name
+  new_array  <- publicName $ "new_" ++ name
   free_array <- publicName $ "free_" ++ name
 
   stm [C.cstm|{
@@ -1143,7 +1144,7 @@ readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
 prepareOutputs :: [ExternalValue] -> CompilerM op s [(C.Exp, C.Stm)]
 prepareOutputs = mapM prepareResult
   where prepareResult ev = do
-          ty <- externalValueToCType ev
+          ty     <- externalValueToCType ev
           result <- newVName "result"
 
           case ev of
@@ -1178,8 +1179,8 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     collect' $ unzip <$> prepareOutputs results
   printstms <- printResult $ zip results output_vals
 
-  ctx_ty <- contextType
-  sync_ctx <- publicName "context_sync"
+  ctx_ty    <- contextType
+  sync_ctx  <- publicName "context_sync"
   error_ctx <- publicName "context_get_error"
 
   let entry_point_name = nameToString fname
@@ -1272,35 +1273,35 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
 benchmarkOptions :: [Option]
 benchmarkOptions =
-   [ Option { optionLongName = "write-runtime-to"
+   [ Option { optionLongName  = "write-runtime-to"
             , optionShortName = Just 't'
-            , optionArgument = RequiredArgument "FILE"
-            , optionAction = set_runtime_file
+            , optionArgument  = RequiredArgument "FILE"
+            , optionAction    = set_runtime_file
             }
-   , Option { optionLongName = "runs"
+   , Option { optionLongName  = "runs"
             , optionShortName = Just 'r'
-            , optionArgument = RequiredArgument "INT"
-            , optionAction = set_num_runs
+            , optionArgument  = RequiredArgument "INT"
+            , optionAction    = set_num_runs
             }
-   , Option { optionLongName = "debugging"
+   , Option { optionLongName  = "debugging"
             , optionShortName = Just 'D'
-            , optionArgument = NoArgument
-            , optionAction = [C.cstm|futhark_context_config_set_debugging(cfg, 1);|]
+            , optionArgument  = NoArgument
+            , optionAction    = [C.cstm|futhark_context_config_set_debugging(cfg, 1);|]
             }
-   , Option { optionLongName = "log"
+   , Option { optionLongName  = "log"
             , optionShortName = Just 'L'
-            , optionArgument = NoArgument
-            , optionAction = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
+            , optionArgument  = NoArgument
+            , optionAction    = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
             }
-   , Option { optionLongName = "entry-point"
+   , Option { optionLongName  = "entry-point"
             , optionShortName = Just 'e'
-            , optionArgument = RequiredArgument "NAME"
-            , optionAction = [C.cstm|if (entry_point != NULL) entry_point = optarg;|]
+            , optionArgument  = RequiredArgument "NAME"
+            , optionAction    = [C.cstm|if (entry_point != NULL) entry_point = optarg;|]
             }
-   , Option { optionLongName = "binary-output"
+   , Option { optionLongName  = "binary-output"
             , optionShortName = Just 'b'
-            , optionArgument = NoArgument
-            , optionAction = [C.cstm|binary_output = 1;|]
+            , optionArgument  = NoArgument
+            , optionAction    = [C.cstm|binary_output = 1;|]
             }
    ]
   where set_runtime_file = [C.cstm|{
@@ -1322,7 +1323,7 @@ benchmarkOptions =
 -- them, which yields a CLI program.  Another is to compile the
 -- library part by itself, and use the header file to call into it.
 data CParts = CParts { cHeader :: String
-                     , cUtils :: String
+                     , cUtils  :: String
                        -- ^ Utility definitions that must be visible
                        -- to both CLI and library parts.
                      , cCLI :: String
@@ -1557,8 +1558,8 @@ compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
-  body' <- blockScope $ compileFunBody out_ptrs outputs body
-  ctx_ty <- contextType
+  body'    <- blockScope $ compileFunBody out_ptrs outputs body
+  ctx_ty   <- contextType
   return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
                                                    $params:outparams, $params:inparams);|],
           [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
@@ -1709,7 +1710,7 @@ compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
   return $ case cmp of
-    CmpEq{} -> [C.cexp|$exp:x' == $exp:y'|]
+    CmpEq{}  -> [C.cexp|$exp:x' == $exp:y'|]
 
     FCmpLt{} -> [C.cexp|$exp:x' < $exp:y'|]
     FCmpLe{} -> [C.cexp|$exp:x' <= $exp:y'|]
@@ -1732,17 +1733,17 @@ compilePrimExp f (BinOpExp bop x y) = do
   -- numbers, so we can do overflow without invoking undefined
   -- behaviour.
   return $ case bop of
-             FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]
-             FSub{} -> [C.cexp|$exp:x' - $exp:y'|]
-             FMul{} -> [C.cexp|$exp:x' * $exp:y'|]
-             FDiv{} -> [C.cexp|$exp:x' / $exp:y'|]
-             Xor{} -> [C.cexp|$exp:x' ^ $exp:y'|]
-             And{} -> [C.cexp|$exp:x' & $exp:y'|]
-             Or{} -> [C.cexp|$exp:x' | $exp:y'|]
-             Shl{} -> [C.cexp|$exp:x' << $exp:y'|]
+             FAdd{}   -> [C.cexp|$exp:x' + $exp:y'|]
+             FSub{}   -> [C.cexp|$exp:x' - $exp:y'|]
+             FMul{}   -> [C.cexp|$exp:x' * $exp:y'|]
+             FDiv{}   -> [C.cexp|$exp:x' / $exp:y'|]
+             Xor{}    -> [C.cexp|$exp:x' ^ $exp:y'|]
+             And{}    -> [C.cexp|$exp:x' & $exp:y'|]
+             Or{}     -> [C.cexp|$exp:x' | $exp:y'|]
+             Shl{}    -> [C.cexp|$exp:x' << $exp:y'|]
              LogAnd{} -> [C.cexp|$exp:x' && $exp:y'|]
-             LogOr{} -> [C.cexp|$exp:x' || $exp:y'|]
-             _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
+             LogOr{}  -> [C.cexp|$exp:x' || $exp:y'|]
+             _        -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
 
 compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
@@ -1807,10 +1808,10 @@ compileCode (Free name space) =
   unRefMem name space
 
 compileCode (For i it bound body) = do
-  let i' = C.toIdent i
+  let i'  = C.toIdent i
       it' = primTypeToCType $ IntType it
-  bound' <- compileExp bound
-  body'  <- blockScope $ compileCode body
+  bound'  <- compileExp bound
+  body'   <- blockScope $ compileCode body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
@@ -1823,7 +1824,7 @@ compileCode (While cond body) = do
           }|]
 
 compileCode (If cond tbranch fbranch) = do
-  cond' <- compileExp cond
+  cond'    <- compileExp cond
   tbranch' <- blockScope $ compileCode tbranch
   fbranch' <- blockScope $ compileCode fbranch
   stm $ case (tbranch', fbranch') of
@@ -1973,13 +1974,13 @@ declareAndSet _ = Nothing
 
 assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)
 assignmentOperator Add{}  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
-assignmentOperator Sub{} = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
-assignmentOperator Mul{} = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
-assignmentOperator _     = Nothing
+assignmentOperator Sub{}  = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
+assignmentOperator Mul{}  = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
+assignmentOperator _      = Nothing
 
 -- | Return an expression multiplying together the given expressions.
 -- If an empty list is given, the expression @1@ is returned.
 cproduct :: [C.Exp] -> C.Exp
-cproduct []     = [C.cexp|1|]
-cproduct (e:es) = foldl mult e es
+cproduct []      = [C.cexp|1|]
+cproduct (e:es)  = foldl mult e es
   where mult x y = [C.cexp|$exp:x * $exp:y|]

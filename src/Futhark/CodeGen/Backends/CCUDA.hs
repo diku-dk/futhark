@@ -52,32 +52,32 @@ compileProg prog = do
 cliOptions :: [Option]
 cliOptions =
   commonOptions ++
-  [ Option { optionLongName = "dump-cuda"
+  [ Option { optionLongName  = "dump-cuda"
            , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
-                                     entry_point = NULL;}|]
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
+                                        entry_point = NULL;}|]
            }
-  , Option { optionLongName = "load-cuda"
+  , Option { optionLongName  = "load-cuda"
            , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
            }
-  , Option { optionLongName = "dump-ptx"
+  , Option { optionLongName  = "dump-ptx"
            , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
-                                     entry_point = NULL;}|]
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    = [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
+                                        entry_point = NULL;}|]
            }
-  , Option { optionLongName = "load-ptx"
+  , Option { optionLongName  = "load-ptx"
            , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
            }
-  , Option { optionLongName = "nvrtc-option"
+  , Option { optionLongName  = "nvrtc-option"
            , optionShortName = Nothing
-           , optionArgument = RequiredArgument "OPT"
-           , optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
+           , optionArgument  = RequiredArgument "OPT"
+           , optionAction    = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
            }
   ]
 
@@ -180,25 +180,25 @@ callKernel (GetSizeMax v size_class) =
   in GC.stm [C.cstm|$id:v = ctx->cuda.$id:field;|]
   where
     cudaSizeClass (SizeThreshold _) = "threshold"
-    cudaSizeClass SizeGroup = "block_size"
-    cudaSizeClass SizeNumGroups = "grid_size"
-    cudaSizeClass SizeTile = "tile_size"
-    cudaSizeClass SizeLocalMemory = "shared_memory"
+    cudaSizeClass SizeGroup         = "block_size"
+    cudaSizeClass SizeNumGroups     = "grid_size"
+    cudaSizeClass SizeTile          = "tile_size"
+    cudaSizeClass SizeLocalMemory   = "shared_memory"
     cudaSizeClass (SizeBespoke x _) = pretty x
 callKernel (LaunchKernel safety name args num_blocks block_size) = do
-  args_arr <- newVName "kernel_args"
+  args_arr   <- newVName "kernel_args"
   time_start <- newVName "time_start"
-  time_end <- newVName "time_end"
+  time_end   <- newVName "time_end"
   (args', shared_vars) <- unzip <$> mapM mkArgs args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
       shared_offsets_sc = mkOffsets shared_sizes
-      shared_args = zip shared_offsets shared_offsets_sc
-      shared_tot = last shared_offsets_sc
+      shared_args       = zip shared_offsets shared_offsets_sc
+      shared_tot        = last shared_offsets_sc
   mapM_ (\(arg,offset) ->
            GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
         ) shared_args
 
-  (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
+  (grid_x, grid_y, grid_z)    <- mkDims <$> mapM GC.compileExp num_blocks
   (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
   let perm_args
         | length num_blocks == 3 = [ [C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|] ]
@@ -258,27 +258,27 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
 
   where
-    mkDims [] = ([C.cexp|0|] , [C.cexp|0|], [C.cexp|0|])
-    mkDims [x] = (x, [C.cexp|1|], [C.cexp|1|])
-    mkDims [x,y] = (x, y, [C.cexp|1|])
+    mkDims []        = ([C.cexp|0|] , [C.cexp|0|], [C.cexp|0|])
+    mkDims [x]       = (x, [C.cexp|1|], [C.cexp|1|])
+    mkDims [x,y]     = (x, y, [C.cexp|1|])
     mkDims (x:y:z:_) = (x, y, z)
-    addExp x y = [C.cexp|$exp:x + $exp:y|]
-    alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
-    mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
-    expNotZero e = [C.cexp|$exp:e != 0|]
-    expAnd a b = [C.cexp|$exp:a && $exp:b|]
-    expsNotZero = foldl expAnd [C.cexp|1|] . map expNotZero
+    addExp x y       = [C.cexp|$exp:x + $exp:y|]
+    alignExp e       = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
+    mkOffsets        = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
+    expNotZero e     = [C.cexp|$exp:e != 0|]
+    expAnd a b       = [C.cexp|$exp:a && $exp:b|]
+    expsNotZero      = foldl expAnd [C.cexp|1|] . map expNotZero
     mkArgs (ValueKArg e t) =
       (,Nothing) <$> GC.compileExpToName "kernel_arg" t e
     mkArgs (MemKArg v) = do
-      v' <- GC.rawMem v
+      v'  <- GC.rawMem v
       arg <- newVName "kernel_arg"
       GC.decl [C.cdecl|typename CUdeviceptr $id:arg = $exp:v';|]
       return (arg, Nothing)
     mkArgs (SharedMemoryKArg (Count c)) = do
       num_bytes <- GC.compileExp c
-      size <- newVName "shared_size"
-      offset <- newVName "shared_offset"
+      size      <- newVName "shared_size"
+      offset    <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       return (offset, Just (size, offset))
 

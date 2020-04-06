@@ -43,10 +43,10 @@ failureSwitch failures =
 
 
 copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
-copyDevToDev = "copy_dev_to_dev"
-copyDevToHost = "copy_dev_to_host"
-copyHostToDev = "copy_host_to_dev"
-copyScalarToDev = "copy_scalar_to_dev"
+copyDevToDev      = "copy_dev_to_dev"
+copyDevToHost     = "copy_dev_to_host"
+copyHostToDev     = "copy_host_to_dev"
+copyScalarToDev   = "copy_scalar_to_dev"
 copyScalarFromDev = "copy_scalar_from_dev"
 
 profilingEvent :: String -> C.Exp
@@ -68,10 +68,10 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
 
   GC.earlyDecls top_decls
 
-  let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
-      size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
+  let size_name_inits  = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
+      size_var_inits   = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
-      num_sizes = M.size sizes
+      num_sizes        = M.size sizes
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
   GC.libDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
@@ -528,9 +528,9 @@ loadKernel (name, safety) = [C.cstm|{
                      clSetKernelArg(ctx->$id:name, 2, sizeof(typename cl_mem),
                                     &ctx->global_failure_args));|]
         set_args = case safety of
-                     SafetyNone -> []
+                     SafetyNone  -> []
                      SafetyCheap -> [set_global_failure]
-                     SafetyFull -> [set_global_failure, set_global_failure_args]
+                     SafetyFull  -> [set_global_failure, set_global_failure_args]
 
 kernelRuntime :: String -> String
 kernelRuntime = (++"_total_runtime")
@@ -579,10 +579,10 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
 
         which' = case which of
                    LockstepWidth -> [C.cexp|ctx->lockstep_width|]
-                   NumGroups -> [C.cexp|ctx->cfg.default_num_groups|]
-                   GroupSize -> [C.cexp|ctx->cfg.default_group_size|]
-                   TileSize -> [C.cexp|ctx->cfg.default_tile_size|]
-                   Threshold -> [C.cexp|ctx->cfg.default_threshold|]
+                   NumGroups     -> [C.cexp|ctx->cfg.default_num_groups|]
+                   GroupSize     -> [C.cexp|ctx->cfg.default_group_size|]
+                   TileSize      -> [C.cexp|ctx->cfg.default_tile_size|]
+                   Threshold     -> [C.cexp|ctx->cfg.default_threshold|]
 
         get_size = case what of
                      HeuristicConst x ->
@@ -599,30 +599,30 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
 -- Options that are common to multiple GPU-like backends.
 commonOptions :: [Option]
 commonOptions =
-   [ Option { optionLongName = "default-group-size"
+   [ Option { optionLongName  = "default-group-size"
             , optionShortName = Nothing
-            , optionArgument = RequiredArgument "INT"
-            , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
+            , optionArgument  = RequiredArgument "INT"
+            , optionAction    = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
             }
-   , Option { optionLongName = "default-num-groups"
+   , Option { optionLongName  = "default-num-groups"
             , optionShortName = Nothing
-            , optionArgument = RequiredArgument "INT"
-            , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
+            , optionArgument  = RequiredArgument "INT"
+            , optionAction    = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
             }
-   , Option { optionLongName = "default-tile-size"
+   , Option { optionLongName  = "default-tile-size"
             , optionShortName = Nothing
-            , optionArgument = RequiredArgument "INT"
-            , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+            , optionArgument  = RequiredArgument "INT"
+            , optionAction    = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
             }
-   , Option { optionLongName = "default-threshold"
+   , Option { optionLongName  = "default-threshold"
             , optionShortName = Nothing
-            , optionArgument = RequiredArgument "INT"
-            , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+            , optionArgument  = RequiredArgument "INT"
+            , optionAction    = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
             }
-   , Option { optionLongName = "print-sizes"
+   , Option { optionLongName  = "print-sizes"
             , optionShortName = Nothing
-            , optionArgument = NoArgument
-            , optionAction = [C.cstm|{
+            , optionArgument  = NoArgument
+            , optionAction    = [C.cstm|{
                 int n = futhark_get_num_sizes();
                 for (int i = 0; i < n; i++) {
                   printf("%s (%s)\n", futhark_get_size_name(i),
@@ -631,10 +631,10 @@ commonOptions =
                 exit(0);
               }|]
             }
-   , Option { optionLongName = "size"
+   , Option { optionLongName  = "size"
             , optionShortName = Nothing
-            , optionArgument = RequiredArgument "NAME=INT"
-            , optionAction = [C.cstm|{
+            , optionArgument  = RequiredArgument "NAME=INT"
+            , optionAction    = [C.cstm|{
                 char *name = optarg;
                 char *equals = strstr(optarg, "=");
                 char *value_str = equals != NULL ? equals+1 : optarg;
@@ -648,10 +648,10 @@ commonOptions =
                   panic(1, "Invalid argument for size option: %s\n", optarg);
                 }}|]
             }
-   , Option { optionLongName = "tuning"
+   , Option { optionLongName  = "tuning"
             , optionShortName = Nothing
-            , optionArgument = RequiredArgument "FILE"
-            , optionAction = [C.cstm|{
+            , optionArgument  = RequiredArgument "FILE"
+            , optionAction    = [C.cstm|{
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                           futhark_context_config_set_size);
                 if (ret != NULL) {
