@@ -55,11 +55,11 @@ static int num_processors() {
 
 typedef int (*task_fn)(void*, int, int, int);
 
-struct task {
+struct subtask {
   task_fn fn;
   void* args;
   int start, end;
-  int task_id; // or a subtask id
+  int subtask_id; // or a subtask id
 
   int *counter; // Counter ongoing subtasks
   pthread_mutex_t *mutex;
@@ -67,11 +67,20 @@ struct task {
 };
 
 
+struct task {
+  const char* name;
+  task_fn fn;
+  void* args;
+  long int iterations;
+};
+
 struct scheduler {
   struct job_queue q;
   pthread_t *threads; // A list of threads
   int num_threads;
 };
+
+
 
 enum SegOp {
   SegMap,
@@ -81,14 +90,14 @@ enum SegOp {
 static inline void *futhark_worker(void* arg) {
   struct scheduler *scheduler = (struct scheduler*) arg;
   while(1) {
-    struct task *task;
-    if (job_queue_pop(&scheduler->q, (void**)&task) == 0) {
-      task->fn(task->args, task->start, task->end, task->task_id);
-      CHECK_ERR(pthread_mutex_lock(task->mutex), "pthread_mutex_lock");
-      (*task->counter)--;
-      CHECK_ERR(pthread_cond_signal(task->cond), "pthread_cond_signal");
-      CHECK_ERR(pthread_mutex_unlock(task->mutex), "pthread_mutex_unlock");
-      free(task);
+    struct subtask *subtask;
+    if (job_queue_pop(&scheduler->q, (void**)&subtask) == 0) {
+      subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
+      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+      (*subtask->counter)--;
+      CHECK_ERR(pthread_cond_signal(subtask->cond), "pthread_cond_signal");
+      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+      free(subtask);
     } else {
        break;
     }
@@ -98,33 +107,35 @@ static inline void *futhark_worker(void* arg) {
 
 
 
-static inline struct task* setup_task(task_fn fn, void* task_args, int task_id,
-                                      pthread_mutex_t *mutex, pthread_cond_t *cond,
-                                      int* counter, int start, int end) {
+static inline struct subtask* setup_subtask(struct task* task, int subtask_id,
+                                            pthread_mutex_t *mutex, pthread_cond_t *cond,
+                                            int* counter, int start, int end) {
   // Don't allocate this on heap, use stack!
-  struct task* task = malloc(sizeof(struct task));
-  if (task == NULL) {
-    assert(!"malloc failed in setup_task");
+  struct subtask* subtask = malloc(sizeof(struct subtask));
+  if (subtask == NULL) {
+    assert(!"malloc failed in setup_subtask");
     return  NULL;
   }
-  task->fn      = fn;
-  task->args    = task_args;
-  task->task_id = task_id;
-  task->mutex   = mutex;
-  task->cond    = cond;
-  task->counter = counter;
-  task->start   = start;
-  task->end     = end;
-  return task;
+  subtask->fn         = task->fn;
+  subtask->args       = task->args;
+  subtask->subtask_id = subtask_id;
+  subtask->mutex      = mutex;
+  subtask->cond       = cond;
+  subtask->counter    = counter;
+  subtask->start      = start;
+  subtask->end        = end;
+  return subtask;
 }
 
 
 static inline int scheduler_do_task(struct scheduler *scheduler,
-                                    task_fn fn, void* task_args,
-                                    int iterations, int *ntask)
+                                    struct task * task,
+                                    int *ntask)
 {
   assert(scheduler != NULL);
-  if (iterations == 0) {
+  assert(task != NULL);
+
+  if (task->iterations == 0) {
     if (ntask != NULL)  *ntask = 0;
     return 0;
   }
@@ -134,33 +145,34 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   pthread_cond_t cond;
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
-  int task_id = 0;
+  int subtask_id = 0;
   int shared_counter = 0;
-  int iter_pr_task = iterations / scheduler->num_threads;
-  int remainder = iterations % scheduler->num_threads;
+  int iter_pr_subtask = task->iterations / scheduler->num_threads;
+  int remainder = task->iterations % scheduler->num_threads;
 
-  struct task *task = setup_task(fn, task_args, task_id,
-                                 &mutex, &cond, &shared_counter,
-                                 0, remainder + iter_pr_task);
-  task_id++;
+  struct subtask *subtask = setup_subtask(task, subtask_id,
+                                          &mutex, &cond, &shared_counter,
+                                          0, remainder + iter_pr_subtask);
+  subtask_id++;
 
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
   shared_counter++;
   CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-  CHECK_ERR(job_queue_push(&scheduler->q, (void*)task), "job_queue_push");
+  CHECK_ERR(job_queue_push(&scheduler->q, (void*)subtask), "job_queue_push");
 
 
-  for (int i = remainder + iter_pr_task; i < iterations; i += iter_pr_task)
+  printf("starting %s\n", task->name);
+  for (int i = remainder + iter_pr_subtask; i < task->iterations; i += iter_pr_subtask)
   {
-    struct task *task = setup_task(fn, task_args, task_id,
-                                   &mutex, &cond, &shared_counter,
-                                   i, i + iter_pr_task);
-    task_id++;
+    struct subtask *subtask = setup_subtask(task, subtask_id,
+                                            &mutex, &cond, &shared_counter,
+                                            i, i + iter_pr_subtask);
+    subtask_id++;
 
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
     shared_counter++;
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-    CHECK_ERR(job_queue_push(&scheduler->q, (void*)task), "job_queue_push");
+    CHECK_ERR(job_queue_push(&scheduler->q, (void*)subtask), "job_queue_push");
   }
 
 
@@ -171,7 +183,7 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   }
 
   if (ntask != NULL) {
-    *ntask = task_id;
+    *ntask = subtask_id;
   }
 
   return 0;

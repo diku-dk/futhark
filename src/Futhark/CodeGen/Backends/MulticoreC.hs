@@ -79,6 +79,8 @@ compileProg =
                           int profiling;
                           typename lock_t lock;
                           char *error;
+                          int total_runs;
+                          long int total_runtime;
                           $sdecls:fields
                         };|])
 
@@ -182,6 +184,42 @@ paramToCType t = case t of
                ScalarParam _ pt  -> GC.primTypeToCType pt
                MemParam _ space' -> GC.fatMemType space'
 
+functionRuntime :: String -> String
+functionRuntime = (++"_total_runtime")
+
+functionRuns :: String -> String
+functionRuns = (++"_runs")
+
+
+multiCoreReport :: [String] -> [C.BlockItem]
+multiCoreReport names = report_kernels ++ [report_total]
+  where longest_name = foldl max 0 $ map length names
+        report_kernels = concatMap reportKernel names
+        format_string name =
+          let padding = replicate (longest_name - length name) ' '
+          in unwords [name ++ padding,
+                      "ran %5d times; avg: %8ldus; total: %8ldus\n"]
+        reportKernel name =
+          let runs = functionRuns name
+              total_runtime = functionRuntime name
+          in [[C.citem|
+               fprintf(stderr,
+                       $string:(format_string name),
+                       ctx->$id:runs,
+                       (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
+                       (long int) ctx->$id:total_runtime);
+              |],
+              [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
+              [C.citem|ctx->total_runs += ctx->$id:runs;|]]
+
+        report_total = [C.citem|
+                          if (ctx->profiling) {
+                            fprintf(stderr, "%d operations with cumulative runtime: %6ldus\n",
+                                    ctx->total_runs, ctx->total_runtime);
+                          }
+                        |]
+
+
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   let fctypes = map paramToCType params
@@ -211,10 +249,21 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
               return 0;
            }|]
 
+  GC.contextField (functionRuntime ftask) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
+  GC.contextField (functionRuns ftask) [C.cty|int|] $ Just [C.cexp|0|]
+  mapM_ GC.profileReport $ multiCoreReport  [ftask]
+
+
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-  GC.stm [C.cstm|if (scheduler_do_task(&ctx->scheduler, $id:ftask, &$id:fstruct, $exp:e', &$id:ntasks) != 0) {
-                     fprintf(stderr, "scheduler failed to do task\n");
-                     return 1;
-           }|]
+
+  let ftask_name = ftask ++ "_task"
+
+  GC.decl [C.cdecl|struct task $id:ftask_name;|]
+  GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
+  GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
+  GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
+
+  GC.stm [C.cstm|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks), "scheduler failed to do task %s", $string:ftask);|]
