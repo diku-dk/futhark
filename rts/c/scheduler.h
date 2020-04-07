@@ -3,6 +3,9 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
+#define MULTICORE
+/* #define MCDEBUG */
+
 #ifdef _WIN32
 #include <windows.h>
 #elif __APPLE__
@@ -48,10 +51,8 @@ static int num_processors() {
 #endif
 }
 
-#define MULTICORE
 
 typedef int (*task_fn)(void*, int, int, int);
-
 
 // A task for the scheduler to execute
 struct task {
@@ -135,15 +136,17 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   assert(scheduler != NULL);
   assert(task != NULL);
 
-  printf("starting %s\n", task->name);
-  printf("iterations %ld\n", task->iterations);
+#ifdef MCDEBUG
+  fprintf(stderr, "starting %s\n", task->name);
+  fprintf(stderr, "iterations %ld\n", task->iterations);
+#endif
   if (task->iterations == 0) {
     if (ntask != NULL)  *ntask = 0;
     return 0;
   }
 
   pthread_mutex_t mutex;
-  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init: \n");
+  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
   pthread_cond_t cond;
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 

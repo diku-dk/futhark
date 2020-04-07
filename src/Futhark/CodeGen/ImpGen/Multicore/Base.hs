@@ -43,7 +43,7 @@ compileThreadResult space pe (Returns _ what) = do
   copyDWIMFix (patElemName pe) is what []
 
 compileThreadResult _ _ ConcatReturns{} =
-  compilerBugS "compileThreadResult: ConcatRetur nunhandled."
+  compilerBugS "compileThreadResult: ConcatReturn nunhandled."
 compileThreadResult _ _ WriteReturns{} =
   compilerBugS "compileThreadResult: WriteReturns nunhandled."
 
