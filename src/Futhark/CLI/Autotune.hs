@@ -209,25 +209,18 @@ thresholdForest prog = do
 
 --- Doing the atual tuning
 
-intersectRanges :: [(Int, Int)] -> (Int, Int)
-intersectRanges = foldl' f (thresholdMin, thresholdMax)
-  where f (xmin, xmax) (ymin, ymax) =
-          -- XXX: what happens when the intersection is empty?
-          (xmin `max` ymin,
-           xmax `min` ymax)
-
 tuneThreshold :: AutotuneOptions
               -> [(DatasetName, RunDataset, T.Text)]
               -> Path -> (String, Path)
               -> IO Path
 tuneThreshold opts datasets already_tuned (v, v_path) = do
-  ranges <-
+  thresholds <-
     forM datasets $ \(dataset_name, run, entry_point) ->
 
     if not $ isPrefixOf (T.unpack entry_point ++ ".") v then do
         when (optVerbose opts > 0) $
           putStrLn $ unwords [v, "is irrelevant for", T.unpack entry_point]
-        return (thresholdMin, thresholdMax)
+        return thresholdMax
     else do
 
       putStrLn $ unwords ["Tuning", v, "on entry point", T.unpack entry_point,
@@ -242,7 +235,7 @@ tuneThreshold opts datasets already_tuned (v, v_path) = do
           -- this path is never taken.
           when (optVerbose opts > 0) $ putStrLn $
             "Sampling run failed:\n" ++ err
-          return (thresholdMin, thresholdMax)
+          return thresholdMax
         Right (cmps, _) ->
           case lookup v cmps of
             Nothing -> do
@@ -251,13 +244,13 @@ tuneThreshold opts datasets already_tuned (v, v_path) = do
               -- branch that is never reached for this dataset.  In such
               -- cases, the optimal range is universal.
               when (optVerbose opts > 0) $ putStrLn "Irrelevant for dataset.\n"
-              return (thresholdMin, thresholdMax)
+              return thresholdMax
             Just e_par -> do
               t_run <- run path_t RunBenchmark
               f_run <- run path_f RunBenchmark
 
-              let prefer_t = (thresholdMin, e_par)
-                  prefer_f = (e_par+1, thresholdMax)
+              let prefer_t = e_par
+                  prefer_f = thresholdMax
 
               case (t_run, f_run) of
                 (Left err, _) -> do
@@ -277,8 +270,7 @@ tuneThreshold opts datasets already_tuned (v, v_path) = do
                             putStrLn "False branch is fastest."
                           return prefer_f
 
-  let (_lower, upper) = intersectRanges ranges
-  return $ (v,upper) : already_tuned
+  return $ (v,minimum thresholds) : already_tuned
 
   where path = already_tuned ++ v_path
         path_t = (v, thresholdMin) : path
