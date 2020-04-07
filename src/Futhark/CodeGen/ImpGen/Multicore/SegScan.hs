@@ -54,6 +54,7 @@ segmentedScan :: Pattern ExplicitMemory
                 -> KernelBody ExplicitMemory
                 -> MulticoreGen ()
 segmentedScan pat space scan_op nes kbody = do
+  emit $ Imp.DebugPrint "segmented segScan" Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -69,6 +70,7 @@ segmentedScan pat space scan_op nes kbody = do
 
 
   fbody <- collect $ do
+    emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
     dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
     forM_ (zip scan_x_params nes) $ \(p, ne) ->
       copyDWIMFix (paramName p) [] ne []
@@ -135,6 +137,8 @@ nonsegmentedScan :: Pattern ExplicitMemory
                  -> KernelBody ExplicitMemory
                  -> MulticoreGen ()
 nonsegmentedScan pat space scan_op nes kbody = do
+
+  emit $ Imp.DebugPrint "nonsegmented segScan " Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -152,7 +156,8 @@ nonsegmentedScan pat space scan_op nes kbody = do
 
   slug <- segScanOpSlug tid' scan_op stage_one_red_res
 
-  prebody <- collect $
+  prebody <- collect $ do
+    emit $ Imp.DebugPrint "nonsegmented segScan stage 1" Nothing
     sComment "neutral-initialise the acc used by this thread" $
       forM_ (zip (slugAccs slug) nes) $ \((acc, acc_is), ne) ->
         copyDWIMFix acc acc_is ne []
@@ -205,6 +210,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
 
   -- Let master thread accumulate "neutral elements" for each segment
   -- This is essentially a exclusive scan
+  emit $ Imp.DebugPrint "nonsegmented segScan stage 2" Nothing
   sFor "i" (ntasks'-1) $ \i -> do
     dScope Nothing $ scopeOfLParams $ lambdaParams scan_op'
     forM_ (zip scan_x_params' stage_two_red_res) $ \(p, se) ->
@@ -216,6 +222,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
         copyDWIMFix arr [i+1] se []
 
   prebody' <- collect $ do
+    emit $ Imp.DebugPrint "nonsegmented segScan stage 3" Nothing
     dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
     forM_ (zip scan_x_params stage_two_red_res) $ \(p, ne) ->
        copyDWIMFix (paramName p) [] (Var ne) [tid']

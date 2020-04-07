@@ -18,7 +18,6 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
 
 -- Compile SegReduce
--- 1. This can't handle multidimensional reductions (e.g. tests/soacs/reduce4.fut)
 compileSegRed :: Pattern ExplicitMemory
                  -> SegSpace
                  -> [SegRedOp ExplicitMemory]
@@ -108,9 +107,8 @@ nonsegmentedReduction :: Pattern ExplicitMemory
                       -> DoSegBody
                       -> MulticoreGen ()
 nonsegmentedReduction pat space reds kbody = do
+  emit $ Imp.DebugPrint "nonsegmented segRed " Nothing
   let (is, ns) = unzip $ unSegSpace space
-
-  -- Dummy value for now
   num_threads <- getNumThreads
 
   ns' <- mapM toExp ns
@@ -126,7 +124,8 @@ nonsegmentedReduction pat space reds kbody = do
   -- reduce6.fut still doesn't work though
   dPrimV_ (segFlat space) 0
 
-  prebody <- collect $
+  prebody <- collect $ do
+    emit $ Imp.DebugPrint "nonsegmented segRed stage 1" Nothing
     sComment "neutral-initialise the acc used by this thread" $
       forM_ slugs $ \slug ->
         forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
@@ -172,6 +171,7 @@ nonsegmentedReduction pat space reds kbody = do
   -- Reduce over intermediate results
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
   sFor "i" ntasks' $ \i' -> do
+    emit $ Imp.DebugPrint "nonsegmented segRed stage 2" Nothing
     emit $ Imp.SetScalar tid i'
     sComment "Apply main thread reduction" $
       forM_ slugs $ \slug ->
@@ -198,6 +198,7 @@ segmentedReduction :: Pattern ExplicitMemory
                       -> DoSegBody
                       -> MulticoreGen ()
 segmentedReduction pat space reds kbody = do
+  emit $ Imp.DebugPrint "segmented segRed " Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -208,6 +209,7 @@ segmentedReduction pat space reds kbody = do
 
   -- Perform sequential reduce on inner most dimension
   fbody <- collect $ do
+    emit $ Imp.DebugPrint "segmented segRed stage 1" Nothing
     sComment "neutral-initialise the accumulators" $
       forM_ reds $ \red->
         forM_ (zip (patternElements pat) (segRedNeutral red)) $ \(pe, ne) ->

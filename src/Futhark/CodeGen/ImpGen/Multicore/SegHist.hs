@@ -91,6 +91,7 @@ segmentedHist :: Pattern ExplicitMemory
                 -> KernelBody ExplicitMemory
                 -> MulticoreGen ()
 segmentedHist pat space histops kbody = do
+  emit $ Imp.DebugPrint "Segmented segHist" Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -105,6 +106,7 @@ segmentedHist pat space histops kbody = do
 
 
   fbody <- collect $ do
+    emit $ Imp.DebugPrint "Segmented segHist" Nothing
     let inner_bound = last ns'
 
     sFor "i" inner_bound $ \i -> do
@@ -164,6 +166,7 @@ nonsegmentedHist :: Pattern ExplicitMemory
                 -> KernelBody ExplicitMemory
                 -> MulticoreGen ()
 nonsegmentedHist pat space histops kbody = do
+  emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -199,6 +202,7 @@ nonsegmentedHist pat space histops kbody = do
     return (local_subhistos, hist_H_chk, do_op)
 
   prebody <- collect $ do
+    emit $ Imp.DebugPrint "nonsegmented segHist stage 1" Nothing
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     forM_ (zip3 histograms hist_H_chks slugs) $ \((hists, _, _), hist_H_chk, slug) ->
       forM_ (zip3 (patternElements pat) hists (histNeutral $ mySlugOp slug)) $ \(pe, hist, ne) -> do
@@ -253,11 +257,11 @@ nonsegmentedHist pat space histops kbody = do
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32
 
-  -- emit $ Imp.DebugPrint "OK" $ Nothing
   emit $ Imp.Op $ Imp.ParLoop num_histos (segFlat space) (product ns')
                               (Imp.MulticoreFunc params prebody body' thread_id)
 
 
+  emit $ Imp.DebugPrint "nonsegmented hist stage 2"  Nothing
   let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
 
   forM_ (zip3 pes_per_op histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
@@ -278,6 +282,7 @@ nonsegmentedHist pat space histops kbody = do
 
     sIf (Imp.var num_histos int32 .==. 1) unitHistoCase $ do
 
+      emit $ Imp.DebugPrint "multiHistocase" Nothing
 
       let num_buckets = histWidth op
 
