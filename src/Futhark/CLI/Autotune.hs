@@ -29,11 +29,12 @@ data AutotuneOptions = AutotuneOptions
                     , optTuning :: Maybe String
                     , optExtraOptions :: [String]
                     , optVerbose :: Int
+                    , optTimeout :: Int
                     }
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -115,7 +116,7 @@ prepare opts prog = do
                    (iosTestRuns ios)) $
       \(dataset, do_run) -> do
       bef <- toRational <$> getPOSIXTime
-      res <- do_run 60000 [] RunBenchmark
+      res <- do_run (optTimeout opts) [] RunBenchmark
       aft <- toRational <$> getPOSIXTime
       case res of Left err -> do
                     putStrLn $ "Error when running " ++ prog ++ ":"
@@ -336,6 +337,15 @@ commandLineOptions = [
     (ReqArg (\s -> Right $ \config -> config { optTuning = Just s })
     "EXTENSION")
     "Write tuning files with this extension (default: .tuning)."
+  , Option [] ["timeout"]
+    (ReqArg (\n ->
+               case reads n of
+                 [(n', "")] ->
+                   Right $ \config -> config { optTimeout = n' }
+                 _ ->
+                   Left $ error $ "'" ++ n ++ "' is not a non-negative integer.")
+    "SECONDS")
+    "Initial tuning timeout for each dataset. Later tuning runs are based off of the runtime of the first run."
   , Option "v" ["verbose"]
     (NoArg $ Right $ \config -> config { optVerbose = optVerbose config + 1 })
     "Enable logging.  Pass multiple times for more."
