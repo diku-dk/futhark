@@ -132,17 +132,17 @@ prepare opts prog = do
           let opts' = case purpose of RunSample -> opts { optRuns = 1 }
                                       RunBenchmark -> opts
 
-              averageRuntime (runres, errout) =
+              bestRuntime :: ([RunResult], T.Text) -> ([(String, Int)], Int)
+              bestRuntime (runres, errout) =
                 (comparisons (T.unpack errout),
-                 fromIntegral (sum (map runMicroseconds runres)) /
-                 fromIntegral (optRuns opts))
+                 minimum $ map runMicroseconds runres)
 
               ropts = runOptions path timeout opts'
 
           when (optVerbose opts > 1) $
             putStrLn $ "Running with options: " ++ unwords (runExtraOptions ropts)
 
-          either (Left . T.unpack) (Right . averageRuntime) <$>
+          either (Left . T.unpack) (Right . bestRuntime) <$>
             benchmarkDataset ropts prog entry_point
             (runInput trun) expected
             (testRunReferenceOutput prog entry_point trun)
