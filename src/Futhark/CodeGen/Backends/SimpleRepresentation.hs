@@ -6,12 +6,19 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , defaultMemBlockType
   , primTypeToCType
   , signedPrimTypeToCType
+  , glPrimTypeToCType
+  , glSignedPrimTypeToCType
 
     -- * Primitive value operations
   , cIntOps
   , cFloat32Ops, cFloat32Funs
   , cFloat64Ops, cFloat64Funs
   , cFloatConvOps
+  , glIntOps
+  , glFloat32Ops, glFloat32Funs
+  , glFloat64Ops, glFloat64Funs
+  , glFloatConvOps
+  , glIntOps
   )
   where
 
@@ -29,6 +36,11 @@ intTypeToCType Int16 = [C.cty|typename int16_t|]
 intTypeToCType Int32 = [C.cty|typename int32_t|]
 intTypeToCType Int64 = [C.cty|typename int64_t|]
 
+-- | The GLSL type corresponding to a signed integer type.
+glIntTypeToCType :: IntType -> C.Type
+glIntTypeToCType Int32 = [C.cty|int|]
+glIntTypeToCType Int64 = [C.cty|typename int64|]
+
 -- | The C type corresponding to an unsigned integer type.
 uintTypeToCType :: IntType -> C.Type
 uintTypeToCType Int8  = [C.cty|typename uint8_t|]
@@ -36,12 +48,17 @@ uintTypeToCType Int16 = [C.cty|typename uint16_t|]
 uintTypeToCType Int32 = [C.cty|typename uint32_t|]
 uintTypeToCType Int64 = [C.cty|typename uint64_t|]
 
+-- | The GLSL type corresponding to an unsigned integer type.
+glUintTypeToCType :: IntType -> C.Type
+glUintTypeToCType Int32 = [C.cty|typename uint|]
+glUintTypeToCType Int64 = [C.cty|typename uint64|]
+
 -- | The C type corresponding to a float type.
 floatTypeToCType :: FloatType -> C.Type
 floatTypeToCType Float32 = [C.cty|float|]
 floatTypeToCType Float64 = [C.cty|double|]
 
--- | The C type corresponding to a primitive type.  Integers are
+-- | The C type corresponding to a primitive type. Integers are
 -- assumed to be unsigned.
 primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t)   = intTypeToCType t
@@ -49,12 +66,27 @@ primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|typename bool|]
 primTypeToCType Cert = [C.cty|typename bool|]
 
--- | The C type corresponding to a primitive type.  Integers are
+-- | The GLSL type corresponding to a primitive type. Integers are
+-- assumed to be unsigned.
+glPrimTypeToCType :: PrimType -> C.Type
+glPrimTypeToCType (IntType t)   = glIntTypeToCType t
+glPrimTypeToCType (FloatType t) = floatTypeToCType t
+glPrimTypeToCType Bool = [C.cty|typename bool|]
+glPrimTypeToCType Cert = [C.cty|typename bool|]
+
+-- | The C type corresponding to a primitive type. Integers are
 -- assumed to have the specified sign.
 signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
 signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
 signedPrimTypeToCType TypeDirect (IntType t)   = intTypeToCType t
 signedPrimTypeToCType _ t = primTypeToCType t
+
+-- | The GLSL type corresponding to a primitive type. Integers are
+-- assumed to have the specified sign.
+glSignedPrimTypeToCType :: Signedness -> PrimType -> C.Type
+glSignedPrimTypeToCType TypeUnsigned (IntType t) = glUintTypeToCType t
+glSignedPrimTypeToCType TypeDirect (IntType t)   = glIntTypeToCType t
+glSignedPrimTypeToCType _ t = glPrimTypeToCType t
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
@@ -75,15 +107,15 @@ defaultMemBlockType = [C.cty|char*|]
 cIntOps :: [C.Definition]
 cIntOps = concatMap (`map` [minBound..maxBound]) ops
           ++ cIntPrimFuns
-  where ops = [mkAdd, mkSub, mkMul,
-               mkUDiv, mkUMod,
-               mkSDiv, mkSMod,
+  where ops = [mkAdd,   mkSub, mkMul,
+               mkUDiv,  mkUMod,
+               mkSDiv,  mkSMod,
                mkSQuot, mkSRem,
-               mkSMin, mkUMin,
-               mkSMax, mkUMax,
-               mkShl, mkLShr, mkAShr,
-               mkAnd, mkOr, mkXor,
-               mkUlt, mkUle,  mkSlt, mkSle,
+               mkSMin,  mkUMin,
+               mkSMax,  mkUMax,
+               mkShl,   mkLShr, mkAShr,
+               mkAnd,   mkOr,   mkXor,
+               mkUlt,   mkUle,  mkSlt, mkSle,
                mkPow,
                mkIToB, mkBToI
               ] ++
@@ -97,9 +129,9 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
 
         -- Use unsigned types for add/sub/mul so we can do
         -- well-defined overflow.
-        mkAdd  = simpleUintOp "add" [C.cexp|x + y|]
-        mkSub  = simpleUintOp "sub" [C.cexp|x - y|]
-        mkMul  = simpleUintOp "mul" [C.cexp|x * y|]
+        mkAdd  = simpleUintOp "add"  [C.cexp|x + y|]
+        mkSub  = simpleUintOp "sub"  [C.cexp|x - y|]
+        mkMul  = simpleUintOp "mul"  [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
@@ -121,20 +153,20 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                            ((r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0)) ? 0 : y);
               }|]
 
-        mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
-        mkSRem  = simpleIntOp "srem" [C.cexp|x % y|]
-        mkSMax  = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
-        mkSMin  = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
-        mkShl   = simpleUintOp "shl" [C.cexp|x << y|]
-        mkLShr  = simpleUintOp "lshr" [C.cexp|x >> y|]
-        mkAShr  = simpleIntOp "ashr" [C.cexp|x >> y|]
-        mkAnd   = simpleUintOp "and" [C.cexp|x & y|]
-        mkOr    = simpleUintOp "or" [C.cexp|x | y|]
-        mkXor   = simpleUintOp "xor" [C.cexp|x ^ y|]
-        mkUlt   = uintCmpOp "ult" [C.cexp|x < y|]
-        mkUle   = uintCmpOp "ule" [C.cexp|x <= y|]
-        mkSlt   = intCmpOp "slt" [C.cexp|x < y|]
-        mkSle   = intCmpOp "sle" [C.cexp|x <= y|]
+        mkSQuot = simpleIntOp  "squot" [C.cexp|x / y|]
+        mkSRem  = simpleIntOp  "srem"  [C.cexp|x % y|]
+        mkSMax  = simpleIntOp  "smax"  [C.cexp|x < y ? y : x|]
+        mkSMin  = simpleIntOp  "smin"  [C.cexp|x < y ? x : y|]
+        mkShl   = simpleUintOp "shl"   [C.cexp|x << y|]
+        mkLShr  = simpleUintOp "lshr"  [C.cexp|x >> y|]
+        mkAShr  = simpleIntOp  "ashr"  [C.cexp|x >> y|]
+        mkAnd   = simpleUintOp "and"   [C.cexp|x & y|]
+        mkOr    = simpleUintOp "or"    [C.cexp|x | y|]
+        mkXor   = simpleUintOp "xor"   [C.cexp|x ^ y|]
+        mkUlt   = uintCmpOp    "ult"   [C.cexp|x < y|]
+        mkUle   = uintCmpOp    "ule"   [C.cexp|x <= y|]
+        mkSlt   = intCmpOp     "slt"   [C.cexp|x < y|]
+        mkSle   = intCmpOp     "sle"   [C.cexp|x <= y|]
 
         -- We define some operations as macros rather than functions,
         -- because this allows us to use them as constant expressions
@@ -403,7 +435,179 @@ $esc:("#else")
     return n;
    }
 $esc:("#endif")
-                |]
+|]
+
+-- | Same as `cIntOps` but without static inlined functions, 8-bit ints
+-- and 16-bit ints to adapt for GLSL.
+glIntOps :: [C.Definition]
+glIntOps = concatMap (`map` [minBound..maxBound]) ops
+          ++ glIntPrimFuns
+  where ops = [mkAdd,   mkSub, mkMul,
+               mkUDiv,  mkUMod,
+               mkSDiv,  mkSMod,
+               mkSQuot, mkSRem,
+               mkSMin,  mkUMin,
+               mkSMax,  mkUMax,
+               mkShl,   mkLShr, mkAShr,
+               mkAnd,   mkOr,   mkXor,
+               mkUlt,   mkUle,  mkSlt, mkSle,
+               mkPow,
+               mkIToB, mkBToI
+              ] ++
+              map mkSExt [minBound..maxBound] ++
+              map mkZExt [minBound..maxBound]
+
+        taggedI s Int32 = s
+        taggedI s Int64 = s ++ "64"
+
+        -- Use unsigned types for add/sub/mul so we can do
+        -- well-defined overflow.
+        mkAdd  = simpleUintOp "add"  [C.cexp|x + y|]
+        mkSub  = simpleUintOp "sub"  [C.cexp|x - y|]
+        mkMul  = simpleUintOp "mul"  [C.cexp|x * y|]
+        mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
+        mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
+        mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
+        mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
+
+        mkSDiv t =
+          let ct = glIntTypeToCType t
+          in [C.cedecl|$ty:ct $id:(taggedI "sdiv" t)($ty:ct x, $ty:ct y) {
+                         $ty:ct q = x / y;
+                         $ty:ct r = x % y;
+                         return q -
+                           (((r != 0) && ((r < 0) != (y < 0))) ? 1 : 0);
+             }|]
+        mkSMod t =
+          let ct = glIntTypeToCType t
+          in [C.cedecl|$ty:ct $id:(taggedI "smod" t)($ty:ct x, $ty:ct y) {
+                         $ty:ct r = x % y;
+                         return r +
+                           ((r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0)) ? 0 : y);
+              }|]
+
+        mkSQuot = simpleIntOp  "squot" [C.cexp|x / y|]
+        mkSRem  = simpleIntOp  "srem"  [C.cexp|x % y|]
+        mkSMax  = simpleIntOp  "smax"  [C.cexp|x < y ? y : x|]
+        mkSMin  = simpleIntOp  "smin"  [C.cexp|x < y ? x : y|]
+        mkShl   = simpleUintOp "shl"   [C.cexp|x << y|]
+        mkLShr  = simpleUintOp "lshr"  [C.cexp|x >> y|]
+        mkAShr  = simpleIntOp  "ashr"  [C.cexp|x >> y|]
+        mkAnd   = simpleUintOp "and"   [C.cexp|x & y|]
+        mkOr    = simpleUintOp "or"    [C.cexp|x | y|]
+        mkXor   = simpleUintOp "xor"   [C.cexp|x ^ y|]
+        mkUlt   = uintCmpOp    "ult"   [C.cexp|x < y|]
+        mkUle   = uintCmpOp    "ule"   [C.cexp|x <= y|]
+        mkSlt   = intCmpOp     "slt"   [C.cexp|x < y|]
+        mkSle   = intCmpOp     "sle"   [C.cexp|x <= y|]
+
+        -- We define some operations as macros rather than functions,
+        -- because this allows us to use them as constant expressions
+        -- in things like array sizes and static initialisers.
+        macro name rhs =
+          [C.cedecl|$esc:("#define " ++ name ++ "(x) (" ++ prettyOneLine rhs ++ ")")|]
+
+        mkPow t =
+          let ct = glIntTypeToCType t
+          in [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
+                         $ty:ct res = 1, rem = y;
+                         while (rem != 0) {
+                           if (rem & 1) {
+                             res *= x;
+                           }
+                           rem >>= 1;
+                           x *= x;
+                         }
+                         return res;
+              }|]
+
+        mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+          where name    = "sext_"++pretty from_t++"_"++pretty to_t
+                from_ct = glIntTypeToCType from_t
+                to_ct   = glIntTypeToCType to_t
+
+        mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+          where name    = "zext_"++pretty from_t++"_"++pretty to_t
+                from_ct = glUintTypeToCType from_t
+                to_ct   = glUintTypeToCType to_t
+
+        mkBToI to_t =
+          [C.cedecl|$ty:to_ct
+                    $id:name($ty:from_ct x) { return x; } |]
+          where name    = "btoi_bool_"++pretty to_t
+                from_ct = glPrimTypeToCType Bool
+                to_ct   = glIntTypeToCType to_t
+
+        mkIToB from_t =
+          [C.cedecl|$ty:to_ct
+                    $id:name($ty:from_ct x) { return x; } |]
+          where name    = "itob_"++pretty from_t++"_bool"
+                to_ct   = glPrimTypeToCType Bool
+                from_ct = glIntTypeToCType from_t
+
+        simpleUintOp s e t =
+          [C.cedecl|$ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+            where ct = glUintTypeToCType t
+        simpleIntOp s e t =
+          [C.cedecl|$ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+            where ct = glIntTypeToCType t
+        intCmpOp s e t =
+          [C.cedecl|typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+            where ct = glIntTypeToCType t
+        uintCmpOp s e t =
+          [C.cedecl|typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+            where ct = glUintTypeToCType t
+
+-- | Same as `cIntPrimFuns` but without static inlined functions, 8-bit ints
+-- and 16-bit ints to adapt for GLSL.
+glIntPrimFuns :: [C.Definition]
+glIntPrimFuns = [C.cunit|
+   int $id:(funName' "popc32") (int x) {
+      return bitCount(x);
+   }
+   int $id:(funName' "popc64") (typename int64 x) {
+      return bitCount(x);
+   }
+
+   typename uint $id:(funName' "mul_hi32") (typename uint a, typename uint b) {
+     typename uint64 aa = a;
+     typename uint64 bb = b;
+     return (aa * bb) >> 32;
+    }
+   typename uint64 $id:(funName' "mul_hi64") (typename uint64 a, typename uint64 b) {
+     typename __uint128_t aa = a;
+     typename __uint128_t bb = b;
+     return (aa * bb) >> 64;
+    }
+
+   typename uint $id:(funName' "mad_hi32") (typename uint a, typename uint b, typename uint c) {
+     return futrts_mul_hi32(a, b) + c;
+    }
+   typename uint64 $id:(funName' "mad_hi64") (typename uint64 a, typename uint64 b, typename uint64 c) {
+     return futrts_mul_hi64(a, b) + c;
+    }
+
+   int $id:(funName' "clz32") (int x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+   int $id:(funName' "clz64") (typename int64 x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+|]
 
 cFloat32Ops   :: [C.Definition]
 cFloat64Ops   :: [C.Definition]
@@ -413,7 +617,8 @@ cFloatConvOps :: [C.Definition]
   , map ($Float64) mkOps
   , [ mkFPConvFF "fpconv" from to |
       from <- [minBound..maxBound],
-      to   <- [minBound..maxBound] ])
+      to   <- [minBound..maxBound] ]
+  )
   where taggedF s Float32 = s ++ "32"
         taggedF s Float64 = s ++ "64"
         convOp  s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
@@ -424,14 +629,14 @@ cFloatConvOps :: [C.Definition]
                 map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
                 map (flip $ mkFPConvFU "fptoui") [minBound..maxBound]
 
-        mkFDiv  = simpleFloatOp "fdiv" [C.cexp|x / y|]
-        mkFAdd  = simpleFloatOp "fadd" [C.cexp|x + y|]
-        mkFSub  = simpleFloatOp "fsub" [C.cexp|x - y|]
-        mkFMul  = simpleFloatOp "fmul" [C.cexp|x * y|]
-        mkFMin  = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
-        mkFMax  = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
-        mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
-        mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
+        mkFDiv  = simpleFloatOp "fdiv"  [C.cexp|x / y|]
+        mkFAdd  = simpleFloatOp "fadd"  [C.cexp|x + y|]
+        mkFSub  = simpleFloatOp "fsub"  [C.cexp|x - y|]
+        mkFMul  = simpleFloatOp "fmul"  [C.cexp|x * y|]
+        mkFMin  = simpleFloatOp "fmin"  [C.cexp|fmin(x, y)|]
+        mkFMax  = simpleFloatOp "fmax"  [C.cexp|fmax(x, y)|]
+        mkCmpLt = floatCmpOp    "cmplt" [C.cexp|x < y|]
+        mkCmpLe = floatCmpOp    "cmple" [C.cexp|x <= y|]
 
         mkPow Float32 =
           [C.cedecl|static inline float fpow32(float x, float y) { return pow(x, y); }|]
@@ -446,9 +651,9 @@ cFloatConvOps :: [C.Definition]
 
         mkFPConvFF = mkFPConv floatTypeToCType floatTypeToCType
         mkFPConvFI = mkFPConv floatTypeToCType intTypeToCType
-        mkFPConvIF = mkFPConv intTypeToCType floatTypeToCType
+        mkFPConvIF = mkFPConv intTypeToCType   floatTypeToCType
         mkFPConvFU = mkFPConv floatTypeToCType uintTypeToCType
-        mkFPConvUF = mkFPConv uintTypeToCType floatTypeToCType
+        mkFPConvUF = mkFPConv uintTypeToCType  floatTypeToCType
 
         simpleFloatOp s e t =
           [C.cedecl|static inline $ty:ct $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
@@ -755,4 +960,328 @@ $esc:("#else")
       return a*b+c;
     }
 $esc:("#endif")
+|]
+
+glFloat32Ops   :: [C.Definition]
+glFloat64Ops   :: [C.Definition]
+glFloatConvOps :: [C.Definition]
+(glFloat32Ops, glFloat64Ops, glFloatConvOps) =
+  ( map ($Float32) mkOps
+  , map ($Float64) mkOps
+  , [ mkFPConvFF "fpconv" from to |
+      from <- [minBound..maxBound],
+      to   <- [minBound..maxBound] ]
+  )
+  where taggedF s Float32 = s
+        taggedF s Float64 = s ++ "64"
+        convOp  s from to = s ++ pretty from ++ pretty to
+
+        mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe] ++
+                map (mkFPConvIF "sitofp") [minBound..maxBound] ++
+                map (mkFPConvUF "uitofp") [minBound..maxBound] ++
+                map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
+                map (flip $ mkFPConvFU "fptoui") [minBound..maxBound]
+
+        mkFDiv  = simpleFloatOp "fdiv"  [C.cexp|x / y|]
+        mkFAdd  = simpleFloatOp "fadd"  [C.cexp|x + y|]
+        mkFSub  = simpleFloatOp "fsub"  [C.cexp|x - y|]
+        mkFMul  = simpleFloatOp "fmul"  [C.cexp|x * y|]
+        mkFMin  = simpleFloatOp "fmin"  [C.cexp|fmin(x, y)|]
+        mkFMax  = simpleFloatOp "fmax"  [C.cexp|fmax(x, y)|]
+        mkCmpLt = floatCmpOp    "cmplt" [C.cexp|x < y|]
+        mkCmpLe = floatCmpOp    "cmple" [C.cexp|x <= y|]
+
+        mkPow Float32 =
+          [C.cedecl|float fpow32(float x, float y) { return pow(x, y); }|]
+        mkPow Float64 =
+          [C.cedecl|double fpow64(double x, double y) { return pow(x, y); }|]
+
+        mkFPConv from_f to_f s from_t to_t =
+          [C.cedecl|$ty:to_ct
+                    $id:(convOp s from_t to_t)($ty:from_ct x) { return ($ty:to_ct)x;} |]
+          where from_ct = from_f from_t
+                to_ct = to_f to_t
+
+        mkFPConvFF = mkFPConv floatTypeToCType floatTypeToCType
+        mkFPConvFI = mkFPConv floatTypeToCType intTypeToCType
+        mkFPConvIF = mkFPConv intTypeToCType   floatTypeToCType
+        mkFPConvFU = mkFPConv floatTypeToCType uintTypeToCType
+        mkFPConvUF = mkFPConv uintTypeToCType  floatTypeToCType
+
+        simpleFloatOp s e t =
+          [C.cedecl|$ty:ct $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+            where ct = floatTypeToCType t
+        floatCmpOp s e t =
+          [C.cedecl|typename bool $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+            where ct = floatTypeToCType t
+
+-- | Same as `cFloat32Funs` but without static inlined functions to
+-- adapt for GLSL.
+glFloat32Funs :: [C.Definition]
+glFloat32Funs = [C.cunit|
+    float $id:(funName' "log32")(float x) {
+      return log(x);
+    }
+
+    float $id:(funName' "log2_32")(float x) {
+      return log2(x);
+    }
+
+    float $id:(funName' "log10_32")(float x) {
+      return log10(x);
+    }
+
+    float $id:(funName' "sqrt32")(float x) {
+      return sqrt(x);
+    }
+
+    float $id:(funName' "exp32")(float x) {
+      return exp(x);
+    }
+
+    float $id:(funName' "cos32")(float x) {
+      return cos(x);
+    }
+
+    float $id:(funName' "sin32")(float x) {
+      return sin(x);
+    }
+
+    float $id:(funName' "tan32")(float x) {
+      return tan(x);
+    }
+
+    float $id:(funName' "acos32")(float x) {
+      return acos(x);
+    }
+
+    float $id:(funName' "asin32")(float x) {
+      return asin(x);
+    }
+
+    float $id:(funName' "atan32")(float x) {
+      return atan(x);
+    }
+
+    float $id:(funName' "cosh32")(float x) {
+      return cosh(x);
+    }
+
+    float $id:(funName' "sinh32")(float x) {
+      return sinh(x);
+    }
+
+    float $id:(funName' "tanh32")(float x) {
+      return tanh(x);
+    }
+
+    float $id:(funName' "acosh32")(float x) {
+      return acosh(x);
+    }
+
+    float $id:(funName' "asinh32")(float x) {
+      return asinh(x);
+    }
+
+    float $id:(funName' "atanh32")(float x) {
+      return atanh(x);
+    }
+
+    float $id:(funName' "atan2_32")(float x, float y) {
+      return atan2(x,y);
+    }
+
+    float $id:(funName' "gamma32")(float x) {
+      return tgamma(x);
+    }
+
+    float $id:(funName' "lgamma32")(float x) {
+      return lgamma(x);
+    }
+
+    typename bool $id:(funName' "isnan32")(float x) {
+      return isnan(x);
+    }
+
+    typename bool $id:(funName' "isinf32")(float x) {
+      return isinf(x);
+    }
+
+    typename int32_t $id:(funName' "to_bits32")(float x) {
+      union {
+        float f;
+        typename int32_t t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    float $id:(funName' "from_bits32")(typename int32_t x) {
+      union {
+        typename int32_t f;
+        float t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    float fmod32(float x, float y) {
+      return fmodf(x, y);
+    }
+    float $id:(funName' "round32")(float x) {
+      return rintf(x);
+    }
+    float $id:(funName' "floor32")(float x) {
+      return floorf(x);
+    }
+    float $id:(funName' "ceil32")(float x) {
+      return ceilf(x);
+    }
+    float $id:(funName' "lerp32")(float v0, float v1, float t) {
+      return v0 + (v1-v0)*t;
+    }
+    float $id:(funName' "mad32")(float a, float b, float c) {
+      return a*b+c;
+    }
+    float $id:(funName' "fma32")(float a, float b, float c) {
+      return fmaf(a,b,c);
+    }
+|]
+
+-- | Same as `cFloat64Funs` but without static inlined functions to
+-- adapt for GLSL.
+glFloat64Funs :: [C.Definition]
+glFloat64Funs = [C.cunit|
+    double $id:(funName' "log64")(double x) {
+      return log(x);
+    }
+
+    double $id:(funName' "log2_64")(double x) {
+      return log2(x);
+    }
+
+    double $id:(funName' "log10_64")(double x) {
+      return log10(x);
+    }
+
+    double $id:(funName' "sqrt64")(double x) {
+      return sqrt(x);
+    }
+
+    double $id:(funName' "exp64")(double x) {
+      return exp(x);
+    }
+
+    double $id:(funName' "cos64")(double x) {
+      return cos(x);
+    }
+
+    double $id:(funName' "sin64")(double x) {
+      return sin(x);
+    }
+
+    double $id:(funName' "tan64")(double x) {
+      return tan(x);
+    }
+
+    double $id:(funName' "acos64")(double x) {
+      return acos(x);
+    }
+
+    double $id:(funName' "asin64")(double x) {
+      return asin(x);
+    }
+
+    double $id:(funName' "atan64")(double x) {
+      return atan(x);
+    }
+
+    double $id:(funName' "cosh64")(double x) {
+      return cosh(x);
+    }
+
+    double $id:(funName' "sinh64")(double x) {
+      return sinh(x);
+    }
+
+    double $id:(funName' "tanh64")(double x) {
+      return tanh(x);
+    }
+
+    double $id:(funName' "acosh64")(double x) {
+      return acosh(x);
+    }
+
+    double $id:(funName' "asinh64")(double x) {
+      return asinh(x);
+    }
+
+    double $id:(funName' "atanh64")(double x) {
+      return atanh(x);
+    }
+
+    double $id:(funName' "atan2_64")(double x, double y) {
+      return atan2(x,y);
+    }
+
+    double $id:(funName' "gamma64")(double x) {
+      return tgamma(x);
+    }
+
+    double $id:(funName' "lgamma64")(double x) {
+      return lgamma(x);
+    }
+
+    double $id:(funName' "fma64")(double a, double b, double c) {
+      return fma(a,b,c);
+    }
+
+    double $id:(funName' "round64")(double x) {
+      return rint(x);
+    }
+
+    double $id:(funName' "ceil64")(double x) {
+      return ceil(x);
+    }
+
+    double $id:(funName' "floor64")(double x) {
+      return floor(x);
+    }
+
+    typename bool $id:(funName' "isnan64")(double x) {
+      return isnan(x);
+    }
+
+    typename bool $id:(funName' "isinf64")(double x) {
+      return isinf(x);
+    }
+
+    typename int64_t $id:(funName' "to_bits64")(double x) {
+      union {
+        double f;
+        typename int64_t t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    double $id:(funName' "from_bits64")(typename int64_t x) {
+      union {
+        typename int64_t f;
+        double t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    double fmod64(double x, double y) {
+      return fmod(x, y);
+    }
+
+    double $id:(funName' "lerp64")(double v0, double v1, double t) {
+      return v0 + (v1-v0)*t;
+    }
+    double $id:(funName' "mad64")(double a, double b, double c) {
+      return a*b+c;
+    }
 |]
