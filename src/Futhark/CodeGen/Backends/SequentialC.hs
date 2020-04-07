@@ -13,16 +13,15 @@ import Control.Monad
 
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m GC.CParts
 compileProg =
-  traverse (GC.compileProg operations generateContext "" [DefaultSpace] []) <=<
+  GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
   ImpGen.compileProg
   where operations :: GC.Operations Imp.Sequential ()
         operations = GC.defaultOperations

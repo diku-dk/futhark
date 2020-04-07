@@ -82,13 +82,12 @@ module Futhark.CodeGen.ImpGen
 import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM, State)
 import Control.Monad.Writer hiding (mapM, forM)
-import Control.Monad.Except hiding (mapM, forM)
 import Data.Either
 import Data.Traversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.List (find, sortOn)
+import Data.List (find, foldl', sortOn)
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
@@ -99,7 +98,6 @@ import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
-import Futhark.Error
 import Futhark.Util
 
 -- | How to compile an 'Op'.
@@ -220,12 +218,11 @@ data State lore op = State { stateVTable :: VTable lore
 newState :: VNameSource -> State lore op
 newState = State mempty mempty
 
-newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) (State lore op) (Either InternalError) a)
+newtype ImpM lore op a = ImpM (RWS (Env lore op) (Imp.Code op) (State lore op) a)
   deriving (Functor, Applicative, Monad,
             MonadState (State lore op),
             MonadReader (Env lore op),
-            MonadWriter (Imp.Code op),
-            MonadError InternalError)
+            MonadWriter (Imp.Code op))
 
 instance MonadFreshNames (ImpM lore op) where
   getNameSource = gets stateNameSource
@@ -247,8 +244,8 @@ instance HasScope SOACS (ImpM lore op) where
 
 runImpM :: ImpM lore op a
         -> Operations lore op -> Imp.Space -> Name -> State lore op
-        -> Either InternalError (a, State lore op, Imp.Code op)
-runImpM (ImpM m) ops space fname = runRWST m $ newEnv ops space fname
+        -> (a, State lore op, Imp.Code op)
+runImpM (ImpM m) ops space fname = runRWS m $ newEnv ops space fname
 
 subImpM_ :: Operations lore op' -> ImpM lore op' a
          -> ImpM lore op (Imp.Code op')
@@ -259,18 +256,17 @@ subImpM :: Operations lore op' -> ImpM lore op' a
 subImpM ops (ImpM m) = do
   env <- ask
   s <- get
-  case runRWST m env { envExpCompiler = opsExpCompiler ops
+  let (x, s', code) =
+        runRWS m env { envExpCompiler = opsExpCompiler ops
                      , envStmsCompiler = opsStmsCompiler ops
                      , envCopyCompiler = opsCopyCompiler ops
                      , envOpCompiler = opsOpCompiler ops
                      , envAllocCompilers = opsAllocCompilers ops
                      }
                  s { stateVTable = stateVTable s
-                   , stateFunctions = mempty } of
-    Left err -> throwError err
-    Right (x, s', code) -> do
-      putNameSource $ stateNameSource s'
-      return (x, code)
+                   , stateFunctions = mempty }
+  putNameSource $ stateNameSource s'
+  return (x, code)
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
@@ -307,16 +303,15 @@ hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
 
 compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
-            -> Prog lore -> m (Either InternalError (Imp.Functions op))
+            -> Prog lore -> m (Imp.Functions op)
 compileProg ops space prog =
   modifyNameSource $ \src ->
-  case foldM compileFunDef' (newState src) (progFuns prog) of
-    Left err -> (Left err, src)
-    Right s -> (Right $ stateFunctions s, stateNameSource s)
-  where compileFunDef' s fdef = do
-          ((), s', _) <-
-            runImpM (compileFunDef fdef) ops space (funDefName fdef) s
-          return s'
+  let s = foldl' compileFunDef' (newState src) (progFuns prog)
+  in (stateFunctions s, stateNameSource s)
+  where compileFunDef' s fdef =
+          let ((), s', _) =
+                runImpM (compileFunDef fdef) ops space (funDefName fdef) s
+          in s'
 
 compileInParam :: ExplicitMemorish lore =>
                   FParam lore -> ImpM lore op (Either Imp.Param ArrayDecl)
@@ -413,7 +408,7 @@ compileOutParams orig_rts orig_epts = do
         mkExts _ _ = return ([], [])
 
         mkParam MemMem{} _ =
-          compilerBugS "Functions may not explicitly return memory blocks."
+          error "Functions may not explicitly return memory blocks."
         mkParam (MemPrim t) ept = do
           out <- imp $ newVName "scalar_out"
           tell ([Imp.ScalarParam out t], mempty)
@@ -716,7 +711,7 @@ defCompileBasicOp _ Repeat{} =
   return ()
 
 defCompileBasicOp pat e =
-  compilerBugS $ "ImpGen.defCompileBasicOp: Invalid pattern\n  " ++
+  error $ "ImpGen.defCompileBasicOp: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 -- | Note: a hack to be used only for functions.
@@ -847,7 +842,7 @@ instance ToExp SubExp where
     lookupVar v >>= \case
     ScalarVar _ (ScalarEntry pt) ->
       return $ Imp.var v pt
-    _       -> compilerBugS $ "toExp SubExp: SubExp is not a primitive type: " ++ pretty v
+    _       -> error $ "toExp SubExp: SubExp is not a primitive type: " ++ pretty v
 
   toExp' _ (Constant v) = Imp.ValueExp v
   toExp' t (Var v) = Imp.var v t
@@ -882,21 +877,21 @@ lookupVar name = do
   res <- gets $ M.lookup name . stateVTable
   case res of
     Just entry -> return entry
-    _ -> compilerBugS $ "Unknown variable: " ++ pretty name
+    _ -> error $ "Unknown variable: " ++ pretty name
 
 lookupArray :: VName -> ImpM lore op ArrayEntry
 lookupArray name = do
   res <- lookupVar name
   case res of
     ArrayVar _ entry -> return entry
-    _                -> compilerBugS $ "ImpGen.lookupArray: not an array: " ++ pretty name
+    _                -> error $ "ImpGen.lookupArray: not an array: " ++ pretty name
 
 lookupMemory :: VName -> ImpM lore op MemEntry
 lookupMemory name = do
   res <- lookupVar name
   case res of
     MemVar _ entry -> return entry
-    _              -> compilerBugS $ "Unknown memory block: " ++ pretty name
+    _              -> error $ "Unknown memory block: " ++ pretty name
 
 destinationFromPattern :: ExplicitMemorish lore => Pattern lore -> ImpM lore op Destination
 destinationFromPattern pat =
@@ -1031,19 +1026,19 @@ copyDWIMDest :: ValueDestination -> [DimIndex Imp.Exp] -> SubExp -> [DimIndex Im
              -> ImpM lore op ()
 
 copyDWIMDest _ _ (Constant v) (_:_) =
-  compilerBugS $
+  error $
   unwords ["copyDWIMDest: constant source", pretty v, "cannot be indexed."]
 copyDWIMDest pat dest_slice (Constant v) [] =
   case mapM dimFix dest_slice of
     Nothing ->
-      compilerBugS $
+      error $
       unwords ["copyDWIMDest: constant source", pretty v, "with slice destination."]
     Just dest_is ->
       case pat of
         ScalarDestination name ->
           emit $ Imp.SetScalar name $ Imp.ValueExp v
         MemoryDestination{} ->
-          compilerBugS $
+          error $
           unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
         ArrayDestination (Just dest_loc) -> do
           (dest_mem, dest_space, dest_i) <-
@@ -1051,7 +1046,7 @@ copyDWIMDest pat dest_slice (Constant v) [] =
           vol <- asks envVolatility
           emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
         ArrayDestination Nothing ->
-          compilerBugS "copyDWIMDest: ArrayDestination Nothing"
+          error "copyDWIMDest: ArrayDestination Nothing"
   where bt = primValueType v
 
 copyDWIMDest dest dest_slice (Var src) src_slice = do
@@ -1061,19 +1056,19 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
       emit $ Imp.SetMem mem src space
 
     (MemoryDestination{}, _) ->
-      compilerBugS $
+      error $
       unwords ["copyDWIMDest: cannot write", pretty src, "to memory destination."]
 
     (_, MemVar{}) ->
-      compilerBugS $
+      error $
       unwords ["copyDWIMDest: source", pretty src, "is a memory block."]
 
     (_, ScalarVar _ (ScalarEntry _)) | not $ null src_slice ->
-      compilerBugS $
+      error $
       unwords ["copyDWIMDest: prim-typed source", pretty src, "with slice", pretty src_slice]
 
     (ScalarDestination name, _) | not $ null dest_slice ->
-      compilerBugS $
+      error $
       unwords ["copyDWIMDest: prim-typed target", pretty name, "with slice", pretty dest_slice]
 
     (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
@@ -1087,7 +1082,7 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           vol <- asks envVolatility
           emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
       | otherwise ->
-          compilerBugS $
+          error $
           unwords ["copyDWIMDest: prim-typed target and array-typed source", pretty src,
                    "with slice", pretty src_slice]
 
@@ -1102,7 +1097,7 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           vol <- asks envVolatility
           emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
       | otherwise ->
-          compilerBugS $
+          error $
           unwords ["copyDWIMDest: array-typed target and prim-typed source", pretty src,
                    "with slice", pretty dest_slice]
 
@@ -1148,7 +1143,7 @@ compileAlloc (Pattern [] [mem]) e space = do
     Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
     Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
-  compilerBugS $ "compileAlloc: Invalid pattern: " ++ pretty pat
+  error $ "compileAlloc: Invalid pattern: " ++ pretty pat
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format.
@@ -1169,7 +1164,7 @@ sFor i bound body = do
   i' <- newVName i
   it <- case primExpType bound of
           IntType it -> return it
-          t -> compilerBugS $ "sFor: bound " ++ pretty bound ++ " is of type " ++ pretty t
+          t -> error $ "sFor: bound " ++ pretty bound ++ " is of type " ++ pretty t
   addLoopVar i' it
   body' <- collect $ body $ Imp.var i' $ IntType it
   emit $ Imp.For i' it bound body'

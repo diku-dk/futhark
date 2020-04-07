@@ -86,7 +86,7 @@ kernelAlloc _ (Pattern _ [mem]) size (Space "local") = do
 kernelAlloc _ (Pattern _ [mem]) _ _ =
   compilerLimitationS $ "Cannot allocate memory block " ++ pretty mem ++ " in kernel."
 kernelAlloc _ dest _ _ =
-  compilerBugS $ "Invalid target for in-kernel allocation: " ++ show dest
+  error $ "Invalid target for in-kernel allocation: " ++ show dest
 
 splitSpace :: (ToExp w, ToExp i, ToExp elems_per_thread) =>
               Pattern ExplicitMemory -> SplitOrdering -> w -> i -> elems_per_thread
@@ -97,7 +97,7 @@ splitSpace (Pattern [] [size]) o w i elems_per_thread = do
   elems_per_thread' <- Imp.elements <$> toExp elems_per_thread
   computeThreadChunkSize o i' elems_per_thread' num_elements (patElemName size)
 splitSpace pat _ _ _ _ =
-  compilerBugS $ "Invalid target for splitSpace: " ++ pretty pat
+  error $ "Invalid target for splitSpace: " ++ pretty pat
 
 compileThreadExp :: ExpCompiler ExplicitMemory Imp.KernelOp
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =

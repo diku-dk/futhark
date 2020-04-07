@@ -13,7 +13,6 @@ import qualified Data.Map as M
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
@@ -22,22 +21,19 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m GC.CParts
 compileProg prog = do
-  res <- ImpGen.compileProg prog
-  case res of
-    Left err -> return $ Left err
-    Right (Program opencl_code opencl_prelude kernels
-           types sizes failures prog') -> do
-      let cost_centres =
-            [copyDevToDev, copyDevToHost, copyHostToDev,
-             copyScalarToDev, copyScalarFromDev]
-            ++ M.keys kernels
-      Right <$> GC.compileProg operations
-                (generateBoilerplate opencl_code opencl_prelude
-                 cost_centres kernels types sizes failures)
-                include_opencl_h [Space "device", DefaultSpace]
-                cliOptions prog'
+  (Program opencl_code opencl_prelude kernels
+    types sizes failures prog') <- ImpGen.compileProg prog
+  let cost_centres =
+        [copyDevToDev, copyDevToHost, copyHostToDev,
+         copyScalarToDev, copyScalarFromDev]
+        ++ M.keys kernels
+  GC.compileProg operations
+    (generateBoilerplate opencl_code opencl_prelude
+     cost_centres kernels types sizes failures)
+    include_opencl_h [Space "device", DefaultSpace]
+    cliOptions prog'
   where operations :: GC.Operations OpenCL ()
         operations = GC.defaultOperations
                      { GC.opsCompiler = callKernel

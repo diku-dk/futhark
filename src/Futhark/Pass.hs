@@ -13,7 +13,6 @@ module Futhark.Pass
        ) where
 
 import Control.Monad.Writer.Strict
-import Control.Monad.Except hiding (liftEither)
 import Control.Monad.State.Strict
 import Control.Parallel.Strategies
 import Data.Char
@@ -27,9 +26,8 @@ import Futhark.Util.Log
 import Futhark.MonadFreshNames
 
 -- | The monad in which passes execute.
-newtype PassM a = PassM (ExceptT InternalError (WriterT Log (State VNameSource)) a)
-              deriving (Functor, Applicative, Monad,
-                        MonadError InternalError)
+newtype PassM a = PassM (WriterT Log (State VNameSource) a)
+              deriving (Functor, Applicative, Monad)
 
 instance MonadLogger PassM where
   addLog = PassM . tell
@@ -41,9 +39,8 @@ instance MonadFreshNames PassM where
 -- | Execute a 'PassM' action, yielding logging information and either
 -- an error text or a result.
 runPassM :: MonadFreshNames m =>
-            PassM a -> m (Either InternalError a, Log)
-runPassM (PassM m) = modifyNameSource $ \src ->
-  runState (runWriterT $ runExceptT m) src
+            PassM a -> m (a, Log)
+runPassM (PassM m) = modifyNameSource $ runState (runWriterT m)
 
 -- | Turn an 'Either' computation into a 'PassM'.  If the 'Either' is
 -- 'Left', the result is a 'CompilerBug'.
@@ -78,15 +75,14 @@ passLongOption = map (spaceToDash . toLower) . passName
 
 intraproceduralTransformation :: (FunDef fromlore -> PassM (FunDef tolore))
                               -> Prog fromlore -> PassM (Prog tolore)
-intraproceduralTransformation ft prog =
-  either onError onSuccess <=< modifyNameSource $ \src ->
-  case partitionEithers $ parMap rpar (onFunction src) (progFuns prog) of
-    ([], rs) -> let (funs, logs, srcs) = unzip3 rs
-                in (Right (Prog funs, mconcat logs), mconcat srcs)
-    ((err,log,src'):_, _) -> (Left (err, log), src')
-  where onFunction src f = case runState (runPassM (ft f)) src of
-          ((Left x, log), src') -> Left (x, log, src')
-          ((Right x, log), src') -> Right (x, log, src')
+intraproceduralTransformation ft prog = do
+  (x, log) <- modifyNameSource $ \src ->
+    let (funs, logs, srcs) = unzip3 $ parMap rpar (onFunction src) (progFuns prog)
+    in ((Prog funs, mconcat logs), mconcat srcs)
 
-        onError (err, log) = addLog log >> throwError err
-        onSuccess (x, log) = addLog log >> return x
+  addLog log
+  return x
+
+  where onFunction src f =
+          let ((x, log), src') = runState (runPassM (ft f)) src
+          in (x, log, src')

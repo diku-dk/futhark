@@ -7,8 +7,7 @@ module Futhark.Error
   , externalError
   , externalErrorS
 
-  , InternalError
-  , internalError
+  , InternalError(..)
   , compilerBug
   , compilerBugS
   , compilerLimitation
@@ -16,6 +15,7 @@ module Futhark.Error
   )
 where
 
+import Control.Exception
 import Control.Monad.Error.Class
 import qualified Data.Text as T
 import Futhark.Util.Pretty
@@ -48,20 +48,21 @@ externalErrorS = externalError . text
 -- | An error that is not the users fault, but a bug (or limitation)
 -- in the compiler.  Compiler passes should only ever report this
 -- error - any problems after the type checker are *our* fault, not
--- the users.
+-- the users.  These are generally thrown as IO exceptions, and caught
+-- at the top level.
 data InternalError = Error ErrorClass T.Text
+  deriving (Show)
 
-compilerBug :: MonadError InternalError m => T.Text -> m a
-compilerBug = throwError . Error CompilerBug
+instance Exception InternalError
 
-compilerLimitation :: MonadError InternalError m => T.Text -> m a
-compilerLimitation = throwError . Error CompilerLimitation
+compilerBug :: T.Text -> a
+compilerBug = throw . Error CompilerBug
 
-internalError :: MonadError CompilerError m => InternalError -> T.Text -> m a
-internalError (Error c s) t = throwError $ InternalError s t c
+compilerLimitation :: T.Text -> a
+compilerLimitation = throw . Error CompilerLimitation
 
-compilerBugS :: MonadError InternalError m => String -> m a
+compilerBugS :: String -> a
 compilerBugS = compilerBug . T.pack
 
-compilerLimitationS :: MonadError InternalError m => String -> m a
+compilerLimitationS :: String -> a
 compilerLimitationS = compilerLimitation . T.pack
