@@ -59,6 +59,14 @@ OPTIONS
 
   Change the extension used for tuning files (``.tuning`` by default).
 
+--timeout=seconds
+
+  Initial tuning timeout for each dataset in seconds. After running the intitial
+  tuning run on each dataset, the timeout is based on the run time of that
+  initial tuning. Defaults to 60.
+
+  A negative timeout means to wait indefinitely.
+
 
 SEE ALSO
 ========
