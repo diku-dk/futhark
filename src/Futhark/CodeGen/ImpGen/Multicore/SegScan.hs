@@ -206,13 +206,13 @@ nonsegmentedScan pat space scan_op nes kbody = do
   -- Let master thread accumulate "neutral elements" for each segment
   -- This is essentially a exclusive scan
   sFor "i" (ntasks'-1) $ \i -> do
-    dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
+    dScope Nothing $ scopeOfLParams $ lambdaParams scan_op'
     forM_ (zip scan_x_params' stage_two_red_res) $ \(p, se) ->
       copyDWIMFix (paramName p) [] (Var se) [i]
     forM_ (zip scan_y_params' stage_one_red_res) $ \(p, se) ->
       copyDWIMFix (paramName p) [] (Var se) [i]
-    compileStms mempty (bodyStms $ lambdaBody scan_op) $
-      forM_ (zip stage_two_red_res $ bodyResult $ lambdaBody scan_op) $ \(arr, se) ->
+    compileStms mempty (bodyStms $ lambdaBody scan_op') $
+      forM_ (zip stage_two_red_res $ bodyResult $ lambdaBody scan_op') $ \(arr, se) ->
         copyDWIMFix arr [i+1] se []
 
   prebody' <- collect $ do
