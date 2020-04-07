@@ -163,7 +163,7 @@ kernelsProg name rep =
   externalErrorS $
   "Pass " ++ name ++" expects Kernels representation, but got " ++ representation rep
 
-typedPassOption :: (Checkable fromlore, Checkable tolore) =>
+typedPassOption :: Checkable tolore =>
                    (String -> UntypedPassState -> FutharkM (Prog fromlore))
                 -> (Prog tolore -> UntypedPassState)
                 -> Pass fromlore tolore

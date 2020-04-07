@@ -6,7 +6,6 @@ module Futhark.CodeGen.Backends.CSOpenCL
 import Control.Monad
 import Data.List (intersperse)
 
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory, int32)
 import Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericCSharp as CS
@@ -19,25 +18,23 @@ import Futhark.Util (zEncodeString)
 import Futhark.MonadFreshNames
 
 
-compileProg :: MonadFreshNames m => Maybe String
-            -> Prog ExplicitMemory -> m (Either InternalError String)
+compileProg :: MonadFreshNames m =>
+               Maybe String -> Prog ExplicitMemory -> m String
 compileProg module_name prog = do
-  res <- ImpGen.compileProg prog
-  case res of
-    Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes failures prog') ->
-      Right <$> CS.compileProg
-                  module_name
-                  CS.emptyConstructor
-                  imports
-                  defines
-                  operations
-                  ()
-                  (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes failures)
-                  []
-                  [Imp.Space "device", Imp.Space "local", Imp.DefaultSpace]
-                  cliOptions
-                  prog'
+  Imp.Program opencl_code opencl_prelude kernel_names types sizes failures prog' <-
+    ImpGen.compileProg prog
+  CS.compileProg
+    module_name
+    CS.emptyConstructor
+    imports
+    defines
+    operations
+    ()
+    (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes failures)
+    []
+    [Imp.Space "device", Imp.Space "local", Imp.DefaultSpace]
+    cliOptions
+    prog'
 
   where operations :: CS.Operations Imp.OpenCL ()
         operations = CS.defaultOperations
