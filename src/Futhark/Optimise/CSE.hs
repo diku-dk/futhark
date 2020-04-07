@@ -46,7 +46,6 @@ import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Transform.Substitute
 import Futhark.Pass
-import Futhark.Util (takeLast)
 
 -- | Perform CSE on every function in a program.
 performCSE :: (Attributes lore, CanBeAliased (Op lore),
@@ -80,8 +79,7 @@ cseInBody ds (Body bodyattr bnds res) =
   cseInStms (res_cons <> consumedInStms bnds res) (stmsToList bnds) $ do
     CSEState (_, nsubsts) _ <- ask
     return $ Body bodyattr mempty $ substituteNames nsubsts res
-  where res_cons = mconcat $ zipWith consumeResult ds $
-                   takeLast (length ds) res
+  where res_cons = mconcat $ zipWith consumeResult ds res
         consumeResult Consume se = freeIn se
         consumeResult _ _ = mempty
 
