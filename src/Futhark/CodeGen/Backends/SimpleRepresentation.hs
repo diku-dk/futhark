@@ -39,7 +39,7 @@ intTypeToCType Int64 = [C.cty|typename int64_t|]
 -- | The GLSL type corresponding to a signed integer type.
 glIntTypeToCType :: IntType -> C.Type
 glIntTypeToCType Int32 = [C.cty|int|]
-glIntTypeToCType Int64 = [C.cty|typename int64|]
+glIntTypeToCType Int64 = [C.cty|typename int64_t|]
 
 -- | The C type corresponding to an unsigned integer type.
 uintTypeToCType :: IntType -> C.Type
@@ -51,7 +51,7 @@ uintTypeToCType Int64 = [C.cty|typename uint64_t|]
 -- | The GLSL type corresponding to an unsigned integer type.
 glUintTypeToCType :: IntType -> C.Type
 glUintTypeToCType Int32 = [C.cty|typename uint|]
-glUintTypeToCType Int64 = [C.cty|typename uint64|]
+glUintTypeToCType Int64 = [C.cty|typename uint64_t|]
 
 -- | The C type corresponding to a float type.
 floatTypeToCType :: FloatType -> C.Type
@@ -565,25 +565,23 @@ glIntPrimFuns = [C.cunit|
    int $id:(funName' "popc32") (int x) {
       return bitCount(x);
    }
-   int $id:(funName' "popc64") (typename int64 x) {
+   int $id:(funName' "popc64") (typename int64_t x) {
       return bitCount(x);
    }
 
    typename uint $id:(funName' "mul_hi32") (typename uint a, typename uint b) {
-     typename uint64 aa = a;
-     typename uint64 bb = b;
+     typename uint64_t aa = a;
+     typename uint64_t bb = b;
      return (aa * bb) >> 32;
     }
-   typename uint64 $id:(funName' "mul_hi64") (typename uint64 a, typename uint64 b) {
-     typename __uint128_t aa = a;
-     typename __uint128_t bb = b;
-     return (aa * bb) >> 64;
+   typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+     return aa * bb;
     }
 
    typename uint $id:(funName' "mad_hi32") (typename uint a, typename uint b, typename uint c) {
      return futrts_mul_hi32(a, b) + c;
     }
-   typename uint64 $id:(funName' "mad_hi64") (typename uint64 a, typename uint64 b, typename uint64 c) {
+   typename uint64_t $id:(funName' "mad_hi64") (typename uint64_t a, typename uint64_t b, typename uint64_t c) {
      return futrts_mul_hi64(a, b) + c;
     }
 
