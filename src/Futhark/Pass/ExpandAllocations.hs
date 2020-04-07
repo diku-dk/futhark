@@ -41,12 +41,11 @@ expandAllocations =
   -- duplicate size keys (which are not fixed by renamer, and size
   -- keys must currently be globally unique).
 
-type ExpandM = ExceptT InternalError (ReaderT (Scope ExplicitMemory) (State VNameSource))
+type ExpandM = ReaderT (Scope ExplicitMemory) (State VNameSource)
 
 transformFunDef :: FunDef ExplicitMemory -> PassM (FunDef ExplicitMemory)
 transformFunDef fundec = do
-  body' <- either throwError return <=< modifyNameSource $
-           runState $ runReaderT (runExceptT m) mempty
+  body' <- modifyNameSource $ runState $ runReaderT m mempty
   return fundec { funDefBody = body' }
   where m = inScopeOf fundec $ transformBody $ funDefBody fundec
 

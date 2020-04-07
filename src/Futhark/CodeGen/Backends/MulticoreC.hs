@@ -11,10 +11,8 @@ module Futhark.CodeGen.Backends.MulticoreC
 
 import Control.Monad
 
-
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
@@ -22,9 +20,9 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
-            -> m (Either InternalError GC.CParts)
+            -> m GC.CParts
 compileProg =
-  traverse (GC.compileProg operations generateContext "" [DefaultSpace] []) <=<
+  GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
   ImpGen.compileProg
   where operations :: GC.Operations Multicore ()
         operations = GC.defaultOperations
