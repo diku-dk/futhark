@@ -46,22 +46,19 @@ module Futhark.CodeGen.Backends.GenericC
   , stm
   , stms
   , decl
-  , decls
   , atInit
   , headerDecl
   , publicDef
   , publicDef_
-  , multicoreDef
   , profileReport
   , HeaderSection(..)
   , libDecl
-  , earlyDecls
+  , earlyDecl
   , publicName
   , contextType
   , contextField
-  -- My stuff
-  , fatMemType
-  , setMem
+  , memToCType
+
   -- * Building Blocks
   , primTypeToCType
   , copyMemoryDefaultSpace
@@ -103,7 +100,6 @@ data CompilerState s = CompilerState {
   , compUserState :: s
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
   , compLibDecls :: DL.DList C.Definition
-  , compMulticoreDecls :: DL.DList C.Definition
   , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
   , compProfileItems :: DL.DList C.BlockItem
   , compDeclaredMem :: [(VName,Space)]
@@ -119,7 +115,6 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compUserState = s
                                        , compHeaderDecls = mempty
                                        , compLibDecls = mempty
-                                       , compMulticoreDecls = mempty
                                        , compCtxFields = mempty
                                        , compProfileItems = mempty
                                        , compDeclaredMem = mempty
@@ -410,21 +405,13 @@ publicDef s h f = do
   s' <- publicName s
   let (pub, priv) = f s'
   headerDecl h pub
-  libDecl priv
+  earlyDecl priv
   return s'
 
 -- | As 'publicDef', but ignores the public name.
 publicDef_ :: String -> HeaderSection -> (String -> (C.Definition, C.Definition))
            -> CompilerM op s ()
 publicDef_ s h f = void $ publicDef s h f
-
-multicoreDef :: String -> (String -> C.Definition)
-             -> CompilerM op s String
-multicoreDef s f = do
-  s' <- multicoreName s
-  multicoreDecl $ f s'
-  return s'
-
 
 headerDecl :: HeaderSection -> C.Definition -> CompilerM op s ()
 headerDecl sec def = modify $ \s ->
@@ -435,13 +422,9 @@ libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s { compLibDecls = compLibDecls s <> DL.singleton def }
 
-multicoreDecl :: C.Definition -> CompilerM op s ()
-multicoreDecl def = modify $ \s ->
-  s { compMulticoreDecls = compMulticoreDecls s <> DL.singleton def }
-
-earlyDecls :: [C.Definition] -> CompilerM op s ()
-earlyDecls def = modify $ \s ->
-  s { compEarlyDecls = compEarlyDecls s <> DL.fromList def }
+earlyDecl :: C.Definition -> CompilerM op s ()
+earlyDecl def = modify $ \s ->
+  s { compEarlyDecls = compEarlyDecls s <> DL.singleton def }
 
 contextField :: String -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
@@ -460,11 +443,7 @@ stms :: [C.Stm] -> CompilerM op s ()
 stms = mapM_ stm
 
 decl :: C.InitGroup -> CompilerM op s ()
-decl x =
-  item [C.citem|$decl:x;|]
-
-decls :: [C.InitGroup] -> CompilerM op s ()
-decls = mapM_ decl
+decl x = item [C.citem|$decl:x;|]
 
 addrOf :: C.Exp -> C.Exp
 addrOf e = [C.cexp|&$exp:e|]
@@ -472,11 +451,6 @@ addrOf e = [C.cexp|&$exp:e|]
 -- | Public names must have a consitent prefix.
 publicName :: String -> CompilerM op s String
 publicName s = return $ "futhark_" ++ s
-
-multicoreName :: String -> CompilerM op s String
-multicoreName s = do
-  s' <- newVName ("futhark_mc_" ++ s)
-  return $ baseString s' ++ "_" ++ (show $ baseTag s')
 
 -- | The generated code must define a struct with this name.
 contextType :: CompilerM op s C.Type
@@ -672,8 +646,8 @@ allocMem name size space on_failure = do
   let name_s = pretty $ C.toExp name noLoc
   if refcount
     then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
-                                                       $string:name_s)) {
-                                                       $stm:on_failure
+                                                 $string:name_s)) {
+                       $stm:on_failure
                      }|]
     else alloc name
   where alloc dest = case space of
@@ -704,7 +678,6 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
   stm [C.cstm|memmove($exp:destmem + $exp:destidx,
                       $exp:srcmem + $exp:srcidx,
                       $exp:nbytes);|]
-
 
 paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
@@ -1444,10 +1417,6 @@ static const char *entry_point = "main";
 
 $esc:tuning_h
 
-$esc:jobqueue_h
-
-$esc:scheduler_h
-
 $func:option_parser
 
 $edecls:cli_entry_point_decls
@@ -1516,7 +1485,6 @@ int main(int argc, char** argv) {
 
   let early_decls = DL.toList $ compEarlyDecls endstate
   let lib_decls = DL.toList $ compLibDecls endstate
-  let multicore_decls = DL.toList $ compMulticoreDecls endstate
   let libdefs = [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
@@ -1525,19 +1493,19 @@ $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
 
+$esc:(header_extra)
+
 $esc:lock_h
 
+$edecls:builtin
+
 $edecls:early_decls
+
+$edecls:prototypes
 
 $edecls:lib_decls
 
 $edecls:(tupleDefinitions endstate)
-
-$edecls:prototypes
-
-$edecls:builtin
-
-$edecls:multicore_decls
 
 $edecls:(map funcToDef definitions)
 
@@ -1546,7 +1514,6 @@ $edecls:(arrayDefinitions endstate)
 $edecls:(opaqueDefinitions endstate)
 
 $edecls:entry_point_decls
-
   |]
 
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
@@ -1556,10 +1523,10 @@ $edecls:entry_point_decls
 
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
 
-          mapM_ libDecl memstructs
+          mapM_ earlyDecl memstructs
           entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
           extra
-          mapM_ libDecl $ concat memfuns
+          mapM_ earlyDecl $ concat memfuns
           profilereport <- gets $ DL.toList . compProfileItems
 
           ctx_ty <- contextType
@@ -1583,15 +1550,11 @@ $edecls:entry_point_decls
       builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
                 cFloat32Funs ++ cFloat64Funs
 
-      panic_h     = $(embedStringFile "rts/c/panic.h")
-      values_h    = $(embedStringFile "rts/c/values.h")
-      timing_h    = $(embedStringFile "rts/c/timing.h")
-      lock_h      = $(embedStringFile "rts/c/lock.h")
-      tuning_h    = $(embedStringFile "rts/c/tuning.h")
-      jobqueue_h  = $(embedStringFile "rts/c/jobqueue.h")
-      scheduler_h = $(embedStringFile "rts/c/scheduler.h")
-
-
+      panic_h  = $(embedStringFile "rts/c/panic.h")
+      values_h = $(embedStringFile "rts/c/values.h")
+      timing_h = $(embedStringFile "rts/c/timing.h")
+      lock_h   = $(embedStringFile "rts/c/lock.h")
+      tuning_h = $(embedStringFile "rts/c/tuning.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
@@ -1890,7 +1853,6 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <$> rawMem dest <*> compileExp destoffset <*> pure destspace
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
-
 
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest

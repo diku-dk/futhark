@@ -10,6 +10,7 @@ module Futhark.CodeGen.Backends.MulticoreC
   ) where
 
 import Control.Monad
+import Data.FileEmbed
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -31,6 +32,14 @@ compileProg =
                      }
 
         generateContext = do
+
+          let jobqueue_h  = $(embedStringFile "rts/c/jobqueue.h")
+              scheduler_h = $(embedStringFile "rts/c/scheduler.h")
+
+          mapM_ GC.earlyDecl [C.cunit|
+                              $esc:jobqueue_h
+                              $esc:scheduler_h
+                             |]
 
           cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:s;|],
@@ -187,10 +196,9 @@ compileGetStructVals struct fargs fctypes =
   [ [C.cdecl|$ty:ty $id:name = *$id:struct->$id:name;|]
             | (name, ty) <- zip fargs fctypes ]
 
-paramToCType :: Param -> C.Type
-paramToCType t = case t of
-               ScalarParam _ pt  -> GC.primTypeToCType pt
-               MemParam _ space' -> GC.fatMemType space'
+paramToCType :: Param -> GC.CompilerM op s C.Type
+paramToCType (ScalarParam _ pt) = pure $ GC.primTypeToCType pt
+paramToCType (MemParam _ space') = GC.memToCType space'
 
 functionRuntime :: String -> String
 functionRuntime = (++"_total_runtime")
@@ -220,24 +228,33 @@ multiCoreReport names = report_kernels
               [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
+multicoreName :: String -> GC.CompilerM op s String
+multicoreName s = do
+  s' <- newVName ("futhark_mc_" ++ s)
+  return $ baseString s' ++ "_" ++ show (baseTag s')
+
+multicoreDef :: String -> (String -> C.Definition) -> GC.CompilerM op s String
+multicoreDef s f = do
+  s' <- multicoreName s
+  GC.libDecl $ f s'
+  return s'
 
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
-  let fctypes = map paramToCType params
-  let fargs   = map paramName params
+  fctypes <- mapM paramToCType params
+  let fargs = map paramName params
   e' <- GC.compileExp e
 
   prebody' <- GC.blockScope $ GC.compileCode prebody
   body' <- GC.blockScope $ GC.compileCode body
 
-
-  fstruct <- GC.multicoreDef "parloop_struct" $ \s ->
+  fstruct <- multicoreDef "parloop_struct" $ \s ->
      [C.cedecl|struct $id:s {
                  struct futhark_context *ctx;
                  $sdecls:(compileStructFields fargs fctypes)
                };|]
 
-  ftask <- GC.multicoreDef "parloop" $ \s ->
+  ftask <- multicoreDef "parloop" $ \s ->
     [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
               struct futhark_context *ctx = $id:fstruct->ctx;
