@@ -4,6 +4,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , compileThreadResult
  , MulticoreGen
  , getNumThreads
+ , getNumThreads'
  )
  where
 
@@ -51,9 +52,12 @@ compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
 
 
+getNumThreads' :: VName -> MulticoreGen ()
+getNumThreads' dest =
+  emit $ Imp.Op $ Imp.MulticoreCall dest "futhark_context_get_num_threads"
 
 getNumThreads :: MulticoreGen VName
 getNumThreads = do
   v <- dPrim "num_threads" (IntType Int32)
-  emit $ Imp.Op $ Imp.MulticoreCall v "futhark_context_get_num_threads"
+  getNumThreads' v
   return v
