@@ -1891,9 +1891,9 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
   case vs of
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs']
-      libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
+      earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
     ArrayZeros n ->
-      libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
+      earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
   contextField (pretty name)
     [C.cty|struct memblock|] $
