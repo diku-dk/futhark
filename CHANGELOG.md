@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Fixed incorrect handling of opaques in entry point return types.
+
+  * `futhark pkg` now works properly with GitLab (#899).
+
+## [0.15.3]
+
+### Added
+
   * `scan` now supports operators whose operands are arrays.  They are
     significantly slower than primitive-typed scans, so avoid them if
     at all possible.
@@ -17,10 +31,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Certain large programs that rely heavily on inlining now compile
     orders of magnitude faster.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -33,6 +43,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix error regarding entry points that called other entry points
     which contained local functions (#895).
+
+  * Fix loading OpenCL kernels from a binary.
 
 ## [0.15.2]
 

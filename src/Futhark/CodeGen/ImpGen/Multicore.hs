@@ -1,7 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FlexibleContexts #-}
-
 module Futhark.CodeGen.ImpGen.Multicore
   ( Futhark.CodeGen.ImpGen.Multicore.compileProg
   )
@@ -10,7 +8,6 @@ module Futhark.CodeGen.ImpGen.Multicore
 import Control.Monad
 import Prelude hiding (quot, rem)
 
-import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 
 import Futhark.CodeGen.ImpGen.Multicore.SegMap
@@ -24,7 +21,7 @@ import Futhark.MonadFreshNames
 
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
-            -> m (Either InternalError Imp.Program)
+            -> m Imp.Program
 compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
         opCompiler :: OpCompiler ExplicitMemory Imp.Multicore

@@ -9,6 +9,7 @@ module Futhark.Actions
   )
 where
 
+import Control.Monad
 import Control.Monad.IO.Class
 
 import Futhark.Pipeline
@@ -22,7 +23,6 @@ import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
 import Futhark.Analysis.Metrics
-import Futhark.Util.Pretty (prettyText)
 
 printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
@@ -49,25 +49,19 @@ impCodeGenAction :: Action ExplicitMemory
 impCodeGenAction =
   Action { actionName = "Compile imperative"
          , actionDescription = "Translate program into imperative IL and write it on standard output."
-         , actionProcedure = \prog ->
-                               either (`internalError` prettyText prog) (liftIO . putStrLn . pretty) =<<
-                               ImpGenSequential.compileProg prog
+         , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenSequential.compileProg
          }
 
 kernelImpCodeGenAction :: Action ExplicitMemory
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
-         , actionProcedure = \prog ->
-                               either (`internalError` prettyText prog) (liftIO . putStrLn . pretty) =<<
-                               ImpGenKernels.compileProg prog
+         , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenKernels.compileProg
          }
 
 multicoreImpCodeGenAction :: Action ExplicitMemory
 multicoreImpCodeGenAction =
   Action { actionName = "Compile to imperative multicore"
          , actionDescription = "Translate program into imperative multicore IL and write it on standard output."
-         , actionProcedure = \prog ->
-                               either (`internalError` prettyText prog) (liftIO . putStrLn . pretty) =<<
-                               ImpGenMulticore.compileProg prog
+         , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenMulticore.compileProg
          }

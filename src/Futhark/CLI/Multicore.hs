@@ -8,7 +8,6 @@ import System.Exit
 import Futhark.Pipeline
 import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 import Futhark.Util
 
@@ -16,8 +15,7 @@ main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile to mulcitore C" "Generate multicore C code from optimised Futhark program."
        multicorePipeline $ \() mode outpath prog -> do
-         cprog <- either (`internalError` prettyText prog) return =<<
-                  MulticoreC.compileProg prog
+         cprog <- MulticoreC.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
 

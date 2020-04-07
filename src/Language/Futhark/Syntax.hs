@@ -68,6 +68,8 @@ module Language.Futhark.Syntax
   -- * Definitions
   , DocComment(..)
   , ValBindBase(..)
+  , EntryPoint(..)
+  , EntryType(..)
   , Liftedness(..)
   , TypeBindBase(..)
   , TypeParamBase(..)
@@ -117,6 +119,7 @@ class (Show vn,
        Show (f PatternType),
        Show (f (PatternType, [VName])),
        Show (f (StructType, [VName])),
+       Show (f EntryPoint),
        Show (f Int),
        Show (f StructType),
        Show (f (StructType, Maybe VName)),
@@ -820,24 +823,41 @@ data DocComment = DocComment String SrcLoc
 instance Located DocComment where
   locOf (DocComment _ loc) = locOf loc
 
+-- | Part of the type of an entry point.  Has an actual type, and
+-- maybe also an ascribed type expression.
+data EntryType =
+  EntryType { entryType :: StructType
+            , entryAscribed :: Maybe (TypeExp VName)
+            }
+  deriving (Show)
+
+-- | Information about the external interface exposed by an entry
+-- point.  The important thing is that that we remember the original
+-- source-language types, without desugaring them at all.  The
+-- annoying thing is that we do not require type annotations on entry
+-- points, so the types can be either ascribed or inferred.
+data EntryPoint =
+  EntryPoint { entryParams :: [EntryType]
+             , entryReturn :: EntryType
+             }
+  deriving (Show)
+
 -- | Function Declarations
-data ValBindBase f vn = ValBind { valBindEntryPoint :: Maybe (f StructType)
-                                -- ^ True if this function is an entry
-                                -- point.  If so, it also contains the
-                                -- externally visible type.  Note that
-                                -- this may not strictly be well-typed
-                                -- after some desugaring operations,
-                                -- as it may refer to abstract types
-                                -- that are no longer in scope.
-                                , valBindName       :: vn
-                                , valBindRetDecl    :: Maybe (TypeExp vn)
-                                , valBindRetType    :: f (StructType, [VName])
-                                , valBindTypeParams :: [TypeParamBase vn]
-                                , valBindParams     :: [PatternBase f vn]
-                                , valBindBody       :: ExpBase f vn
-                                , valBindDoc        :: Maybe DocComment
-                                , valBindLocation   :: SrcLoc
-                                }
+data ValBindBase f vn = ValBind
+  { valBindEntryPoint :: Maybe (f EntryPoint)
+    -- ^ Just if this function is an entry point.  If so, it also
+    -- contains the externally visible interface.  Note that this may not
+    -- strictly be well-typed after some desugaring operations, as it
+    -- may refer to abstract types that are no longer in scope.
+  , valBindName       :: vn
+  , valBindRetDecl    :: Maybe (TypeExp vn)
+  , valBindRetType    :: f (StructType, [VName])
+  , valBindTypeParams :: [TypeParamBase vn]
+  , valBindParams     :: [PatternBase f vn]
+  , valBindBody       :: ExpBase f vn
+  , valBindDoc        :: Maybe DocComment
+  , valBindLocation   :: SrcLoc
+  }
 deriving instance Showable f vn => Show (ValBindBase f vn)
 
 instance Located (ValBindBase f vn) where

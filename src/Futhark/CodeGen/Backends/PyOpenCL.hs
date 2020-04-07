@@ -6,7 +6,6 @@ module Futhark.CodeGen.Backends.PyOpenCL
 import Control.Monad
 import qualified Data.Map as M
 
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
@@ -19,100 +18,98 @@ import Futhark.MonadFreshNames
 
 --maybe pass the config file rather than multiple arguments
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory ->  m (Either InternalError String)
+               Maybe String -> Prog ExplicitMemory ->  m String
 compileProg module_name prog = do
-  res <- ImpGen.compileProg prog
-  --could probably be a better why do to this..
-  case res of
-    Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernels types sizes failures prog')  -> do
-      --prepare the strings for assigning the kernels and set them as global
-      let assign = unlines $
-                   map (\x -> pretty $ Assign (Var ("self."++x++"_var"))
-                              (Var $ "program."++x)) $
-                   M.keys kernels
+  Imp.Program opencl_code opencl_prelude kernels types sizes failures prog' <-
+    ImpGen.compileProg prog
+  --prepare the strings for assigning the kernels and set them as global
+  let assign = unlines $
+               map (\x -> pretty $ Assign (Var ("self."++x++"_var"))
+                          (Var $ "program."++x)) $
+        M.keys kernels
 
-      let defines =
-            [Assign (Var "synchronous") $ Bool False,
-             Assign (Var "preferred_platform") None,
-             Assign (Var "preferred_device") None,
-             Assign (Var "default_threshold") None,
-             Assign (Var "default_group_size") None,
-             Assign (Var "default_num_groups") None,
-             Assign (Var "default_tile_size") None,
-             Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
-             Escape pyValues,
-             Escape pyFunctions,
-             Escape pyPanic,
-             Escape pyTuning]
-      let imports = [Import "sys" Nothing,
-                     Import "numpy" $ Just "np",
-                     Import "ctypes" $ Just "ct",
-                     Escape openClPrelude,
-                     Import "pyopencl.array" Nothing,
-                     Import "time" Nothing]
+  let defines =
+        [Assign (Var "synchronous") $ Bool False,
+         Assign (Var "preferred_platform") None,
+         Assign (Var "preferred_device") None,
+         Assign (Var "default_threshold") None,
+         Assign (Var "default_group_size") None,
+         Assign (Var "default_num_groups") None,
+         Assign (Var "default_tile_size") None,
+         Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
+         Escape pyValues,
+         Escape pyFunctions,
+         Escape pyPanic,
+         Escape pyTuning]
 
-      let constructor = Py.Constructor [ "self"
-                                       , "command_queue=None"
-                                       , "interactive=False"
-                                       , "platform_pref=preferred_platform"
-                                       , "device_pref=preferred_device"
-                                       , "default_group_size=default_group_size"
-                                       , "default_num_groups=default_num_groups"
-                                       , "default_tile_size=default_tile_size"
-                                       , "default_threshold=default_threshold"
-                                       , "sizes=sizes"]
-                        [Escape $ openClInit types assign sizes failures]
-          options = [ Option { optionLongName = "platform"
-                             , optionShortName = Just 'p'
-                             , optionArgument = RequiredArgument "str"
-                             , optionAction =
-                               [ Assign (Var "preferred_platform") $ Var "optarg" ]
-                             }
-                    , Option { optionLongName = "device"
-                             , optionShortName = Just 'd'
-                             , optionArgument = RequiredArgument "str"
-                             , optionAction =
-                               [ Assign (Var "preferred_device") $ Var "optarg" ]
-                             }
-                    , Option { optionLongName = "default-threshold"
-                             , optionShortName = Nothing
-                             , optionArgument = RequiredArgument "int"
-                             , optionAction =
-                               [ Assign (Var "default_threshold") $ Var "optarg" ]
-                             }
-                    , Option { optionLongName = "default-group-size"
-                             , optionShortName = Nothing
-                             , optionArgument = RequiredArgument "int"
-                             , optionAction =
-                               [ Assign (Var "default_group_size") $ Var "optarg" ]
-                             }
-                    , Option { optionLongName = "default-num-groups"
-                             , optionShortName = Nothing
-                             , optionArgument = RequiredArgument "int"
-                             , optionAction =
-                               [ Assign (Var "default_num_groups") $ Var "optarg" ]
-                             }
-                    , Option { optionLongName = "default-tile-size"
-                             , optionShortName = Nothing
-                             , optionArgument = RequiredArgument "int"
-                             , optionAction =
-                               [ Assign (Var "default_tile_size") $ Var "optarg" ]
-                             }
-                    , Option { optionLongName = "size"
-                             , optionShortName = Nothing
-                             , optionArgument = RequiredArgument "size_assignment"
-                             , optionAction =
-                                 [Assign (Index (Var "sizes")
-                                          (IdxExp (Index (Var "optarg")
-                                                   (IdxExp (Integer 0)))))
-                                   (Index (Var "optarg") (IdxExp (Integer 1)))
-                                 ]
-                             }
-                    ]
+  let imports = [Import "sys" Nothing,
+                 Import "numpy" $ Just "np",
+                 Import "ctypes" $ Just "ct",
+                 Escape openClPrelude,
+                 Import "pyopencl.array" Nothing,
+                 Import "time" Nothing]
 
-      Right <$> Py.compileProg module_name constructor imports defines operations ()
-        [Exp $ Py.simpleCall "sync" [Var "self"]] options prog'
+  let constructor = Py.Constructor [ "self"
+                                   , "command_queue=None"
+                                   , "interactive=False"
+                                   , "platform_pref=preferred_platform"
+                                   , "device_pref=preferred_device"
+                                   , "default_group_size=default_group_size"
+                                   , "default_num_groups=default_num_groups"
+                                   , "default_tile_size=default_tile_size"
+                                   , "default_threshold=default_threshold"
+                                   , "sizes=sizes"]
+                    [Escape $ openClInit types assign sizes failures]
+      options = [ Option { optionLongName = "platform"
+                         , optionShortName = Just 'p'
+                         , optionArgument = RequiredArgument "str"
+                         , optionAction =
+                           [ Assign (Var "preferred_platform") $ Var "optarg" ]
+                         }
+                , Option { optionLongName = "device"
+                         , optionShortName = Just 'd'
+                         , optionArgument = RequiredArgument "str"
+                         , optionAction =
+                           [ Assign (Var "preferred_device") $ Var "optarg" ]
+                         }
+                , Option { optionLongName = "default-threshold"
+                         , optionShortName = Nothing
+                         , optionArgument = RequiredArgument "int"
+                         , optionAction =
+                           [ Assign (Var "default_threshold") $ Var "optarg" ]
+                         }
+                , Option { optionLongName = "default-group-size"
+                         , optionShortName = Nothing
+                         , optionArgument = RequiredArgument "int"
+                         , optionAction =
+                           [ Assign (Var "default_group_size") $ Var "optarg" ]
+                         }
+                , Option { optionLongName = "default-num-groups"
+                         , optionShortName = Nothing
+                         , optionArgument = RequiredArgument "int"
+                         , optionAction =
+                           [ Assign (Var "default_num_groups") $ Var "optarg" ]
+                         }
+                , Option { optionLongName = "default-tile-size"
+                         , optionShortName = Nothing
+                         , optionArgument = RequiredArgument "int"
+                         , optionAction =
+                           [ Assign (Var "default_tile_size") $ Var "optarg" ]
+                         }
+                , Option { optionLongName = "size"
+                         , optionShortName = Nothing
+                         , optionArgument = RequiredArgument "size_assignment"
+                         , optionAction =
+                             [Assign (Index (Var "sizes")
+                                      (IdxExp (Index (Var "optarg")
+                                               (IdxExp (Integer 0)))))
+                               (Index (Var "optarg") (IdxExp (Integer 1)))
+                             ]
+                         }
+                ]
+
+  Py.compileProg module_name constructor imports defines operations ()
+    [Exp $ Py.simpleCall "sync" [Var "self"]] options prog'
   where operations :: Py.Operations Imp.OpenCL ()
         operations = Py.Operations
                      { Py.opsCompiler = callKernel

@@ -19,7 +19,6 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Quote.CUDA as CUDAC
 
-import Futhark.Error
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
@@ -29,24 +28,23 @@ import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 
-kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program
-                               -> Either InternalError ImpOpenCL.Program
+kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateKernels TargetCUDA
 kernelsToOpenCL = translateKernels TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.
 translateKernels :: KernelTarget
                  -> ImpKernels.Program
-                 -> Either InternalError ImpOpenCL.Program
-translateKernels target (ImpKernels.Functions funs) = do
-  (prog', ToOpenCL kernels used_types sizes failures) <-
-    flip runStateT initialOpenCL $ fmap Functions $ forM funs $ \(fname, fun) ->
-    (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
-  let kernels' = M.map fst kernels
+                 -> ImpOpenCL.Program
+translateKernels target (ImpKernels.Functions funs) =
+  let (prog', ToOpenCL kernels used_types sizes failures) =
+        flip runState initialOpenCL $ fmap Functions $ forM funs $ \(fname, fun) ->
+        (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
+      kernels' = M.map fst kernels
       opencl_code = openClCode $ map snd $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target used_types
-  return $ ImpOpenCL.Program opencl_code opencl_prelude kernels'
-    (S.toList used_types) (cleanSizes sizes) failures prog'
+  in ImpOpenCL.Program opencl_code opencl_prelude kernels'
+     (S.toList used_types) (cleanSizes sizes) failures prog'
   where genPrelude TargetOpenCL = genOpenClPrelude
         genPrelude TargetCUDA = const genCUDAPrelude
 
@@ -98,7 +96,7 @@ data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (Safety, C.Func)
 initialOpenCL :: ToOpenCL
 initialOpenCL = ToOpenCL mempty mempty mempty mempty
 
-type OnKernelM = ReaderT Name (StateT ToOpenCL (Either InternalError))
+type OnKernelM = ReaderT Name (State ToOpenCL)
 
 addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =

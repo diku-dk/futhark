@@ -39,9 +39,9 @@ callKernelOperations =
              , opsAllocCompilers = mempty
              }
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m Imp.Program
 compileProg prog =
-  fmap (setDefaultSpace (Imp.Space "device")) <$>
+  setDefaultSpace (Imp.Space "device") <$>
   Futhark.CodeGen.ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
 
 opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
