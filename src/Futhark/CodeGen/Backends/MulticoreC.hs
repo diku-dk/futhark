@@ -25,13 +25,7 @@ compileProg :: MonadFreshNames m => Prog ExplicitMemory
 compileProg =
   GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
   ImpGen.compileProg
-  where operations :: GC.Operations Multicore ()
-        operations = GC.defaultOperations
-                     { GC.opsCompiler = compileOp
-                     , GC.opsCopy = copyMulticoreMemory
-                     }
-
-        generateContext = do
+  where generateContext = do
 
           let jobqueue_h  = $(embedStringFile "rts/c/jobqueue.h")
               scheduler_h = $(embedStringFile "rts/c/scheduler.h")
@@ -168,6 +162,11 @@ compileProg =
                         return ctx->scheduler.num_threads;
                        }|])
 
+operations :: GC.Operations Multicore ()
+operations = GC.defaultOperations
+             { GC.opsCompiler = compileOp
+             , GC.opsCopy = copyMulticoreMemory
+             }
 
 copyMulticoreMemory :: GC.Copy Multicore ()
 copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
@@ -245,8 +244,11 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   let fargs = map paramName params
   e' <- GC.compileExp e
 
-  prebody' <- GC.blockScope $ GC.compileCode prebody
-  body' <- GC.blockScope $ GC.compileCode body
+  let ((prebody', body'), _) =
+        GC.runCompilerM mempty operations blankNameSource () $
+        (,)
+        <$> GC.blockScope (GC.compileCode prebody)
+        <*> GC.blockScope (GC.compileCode body)
 
   fstruct <- multicoreDef "parloop_struct" $ \s ->
      [C.cedecl|struct $id:s {
