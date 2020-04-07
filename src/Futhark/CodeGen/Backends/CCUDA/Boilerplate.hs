@@ -23,7 +23,7 @@ generateBoilerplate :: String -> String -> M.Map KernelName Safety
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
 generateBoilerplate cuda_program cuda_prelude kernels sizes failures = do
-  GC.earlyDecls [C.cunit|
+  mapM_ GC.earlyDecl [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
@@ -48,9 +48,9 @@ generateSizeFuns sizes = do
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
-  GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
-  GC.libDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
-  GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
 
   GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(void);|],
@@ -74,7 +74,7 @@ generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
 generateConfigFuns sizes = do
   let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
       num_sizes = M.size sizes
-  GC.libDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
+  GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s { struct cuda_config cu_cfg;

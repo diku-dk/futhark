@@ -218,10 +218,10 @@ staticOpenCLArray name "device" t vs = do
   num_elems <- case vs of
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
-      GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
+      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
       return $ length vs''
     ArrayZeros n -> do
-      GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
+      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
       return n
   -- Fake a memory block.
   GC.contextField (pretty name) [C.cty|struct memblock_device|] Nothing
