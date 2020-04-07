@@ -53,7 +53,7 @@ module Futhark.CodeGen.Backends.GenericC
   , profileReport
   , HeaderSection(..)
   , libDecl
-  , earlyDecls
+  , earlyDecl
   , publicName
   , contextType
   , contextField
@@ -404,7 +404,7 @@ publicDef s h f = do
   s' <- publicName s
   let (pub, priv) = f s'
   headerDecl h pub
-  libDecl priv
+  earlyDecl priv
   return s'
 
 -- | As 'publicDef', but ignores the public name.
@@ -421,9 +421,9 @@ libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s { compLibDecls = compLibDecls s <> DL.singleton def }
 
-earlyDecls :: [C.Definition] -> CompilerM op s ()
-earlyDecls def = modify $ \s ->
-  s { compEarlyDecls = compEarlyDecls s <> DL.fromList def }
+earlyDecl :: C.Definition -> CompilerM op s ()
+earlyDecl def = modify $ \s ->
+  s { compEarlyDecls = compEarlyDecls s <> DL.singleton def }
 
 contextField :: String -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
@@ -1492,17 +1492,19 @@ $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
 
+$esc:(header_extra)
+
 $esc:lock_h
 
+$edecls:builtin
+
 $edecls:early_decls
+
+$edecls:prototypes
 
 $edecls:lib_decls
 
 $edecls:(tupleDefinitions endstate)
-
-$edecls:prototypes
-
-$edecls:builtin
 
 $edecls:(map funcToDef definitions)
 
@@ -1520,10 +1522,10 @@ $edecls:entry_point_decls
 
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
 
-          mapM_ libDecl memstructs
+          mapM_ earlyDecl memstructs
           entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
           extra
-          mapM_ libDecl $ concat memfuns
+          mapM_ earlyDecl $ concat memfuns
           profilereport <- gets $ DL.toList . compProfileItems
 
           ctx_ty <- contextType
