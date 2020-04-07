@@ -69,9 +69,9 @@ instance Semigroup OpenGlRequirements where
 instance Monoid OpenGlRequirements where
   mempty = OpenGlRequirements mempty
 
-data ToOpenGL = ToOpenGL { glShaders :: M.Map ShaderName (Safety, C.Func)
+data ToOpenGL = ToOpenGL { glShaders   :: M.Map ShaderName (Safety, C.Func)
                          , glUsedTypes :: S.Set PrimType
-                         , glSizes :: M.Map Name SizeClass
+                         , glSizes     :: M.Map Name SizeClass
                          }
 
 instance Semigroup ToOpenGL where
@@ -107,5 +107,7 @@ genOpenGlPrelude :: S.Set PrimType -> [C.Definition]
 genOpenGlPrelude ts =
   [ [C.cedecl|$esc:("#version 450")|]
   , [C.cedecl|$esc:("#extension GL_ARB_compute_variable_group_size : enable")|]
+  , [C.cedecl|$esc:("#extension GL_ARB_gpu_shader_int64 : enable")|]
   , [C.cedecl|$esc:("layout (local_size_variable) in;")|]
-  ]
+  ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
+    glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
