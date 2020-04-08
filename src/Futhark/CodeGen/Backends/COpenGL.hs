@@ -213,7 +213,7 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
   zipWithM_ setShaderArg [(0::Int)..] args
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM GC.compileExp workgroup_size
-  local_bytes <- foldM localBytes [C.cexp|0|] args
+  local_bytes     <- foldM localBytes [C.cexp|0|] args
   launchShader name num_workgroups' workgroup_size' local_bytes
   where setShaderArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName "shader_arg" bt e

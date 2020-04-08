@@ -78,7 +78,7 @@ data KernelState =
               , kernelFailures    :: [FailureMsg]
               , kernelNextSync    :: Int
               , kernelSyncPending :: Bool
-                -- ^ Has a potential failure occurred sine the last
+                -- ^ Has a potential failure occurred since the last
                 -- ErrorSync?
               , kernelHasBarriers :: Bool
               }
@@ -472,16 +472,16 @@ hasCommunication = any communicates
 inKernelOperations :: ImpKernels.KernelCode -> GenericC.Operations KernelOp KernelState
 inKernelOperations body =
   GenericC.Operations
-  { GenericC.opsCompiler = kernelOps
-  , GenericC.opsMemoryType = kernelMemoryType
+  { GenericC.opsCompiler    = kernelOps
+  , GenericC.opsMemoryType  = kernelMemoryType
   , GenericC.opsWriteScalar = kernelWriteScalar
-  , GenericC.opsReadScalar = kernelReadScalar
-  , GenericC.opsAllocate = cannotAllocate
-  , GenericC.opsDeallocate = cannotDeallocate
-  , GenericC.opsCopy = copyInKernel
+  , GenericC.opsReadScalar  = kernelReadScalar
+  , GenericC.opsAllocate    = cannotAllocate
+  , GenericC.opsDeallocate  = cannotDeallocate
+  , GenericC.opsCopy        = copyInKernel
   , GenericC.opsStaticArray = noStaticArrays
-  , GenericC.opsFatMemory = False
-  , GenericC.opsError = errorInKernel
+  , GenericC.opsFatMemory   = False
+  , GenericC.opsError       = errorInKernel
   }
   where has_communication = hasCommunication body
 
@@ -576,11 +576,11 @@ inKernelOperations body =
 
         cannotAllocate :: GenericC.Allocate KernelOp KernelState
         cannotAllocate _ =
-          error "Cannot allocate memory in kernel"
+          error "Cannot allocate memory in kernel."
 
         cannotDeallocate :: GenericC.Deallocate KernelOp KernelState
         cannotDeallocate _ _ =
-          error "Cannot deallocate memory in kernel"
+          error "Cannot deallocate memory in kernel."
 
         copyInKernel :: GenericC.Copy KernelOp KernelState
         copyInKernel _ _ _ _ _ _ _ =

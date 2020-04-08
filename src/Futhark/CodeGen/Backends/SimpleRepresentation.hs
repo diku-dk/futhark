@@ -437,8 +437,8 @@ $esc:("#else")
 $esc:("#endif")
 |]
 
--- | Same as `cIntOps` but without static inlined functions, 8-bit ints
--- and 16-bit ints to adapt for GLSL.
+-- | Same as `cIntOps` but to adapt for GLSL and therefore without
+-- static inlined functions, 8-bit ints and 16-bit ints.
 glIntOps :: [C.Definition]
 glIntOps = concatMap (`map` [minBound..maxBound]) ops
           ++ glIntPrimFuns
