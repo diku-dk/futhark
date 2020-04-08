@@ -71,7 +71,6 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
         opCompiler (Pattern _ [pe]) (Inner (SizeOp CalcNumGroups{})) = do
           let dest = patElemName pe
           dest <-- 1
-          return ()
         opCompiler (Pattern _ [size])(Inner (SizeOp (SplitSpace o w i elems_per_thread))) = do
           num_elements <- Imp.elements <$> toExp w
           i' <- toExp i
