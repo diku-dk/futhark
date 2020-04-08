@@ -39,6 +39,9 @@ struct opengl_config {
   const char **size_vars;
   size_t      *size_values;
   const char **size_classes;
+
+  GLuint program;
+
 };
 
 static void opengl_config_init(struct opengl_config *cfg,
@@ -69,6 +72,9 @@ static void opengl_config_init(struct opengl_config *cfg,
   cfg->size_vars    = size_vars;
   cfg->size_values  = size_values;
   cfg->size_classes = size_classes;
+
+  cfg->program = glCreateProgram();
+
 }
 
 struct opengl_context {
@@ -235,7 +241,6 @@ static void setup_size_opengl(struct opengl_context *ctx) {
 }
 
 static void setup_opengl(struct opengl_context *ctx,
-                         const char *srcs[],
                          const char *extra_build_opts[]) {
 
   static int visual_attribs[] = { None };
@@ -315,6 +320,25 @@ static void setup_opengl(struct opengl_context *ctx,
   setup_size_opengl(ctx);
   OPENGL_SUCCEED(glGetError());
 
+}
+
+static void setup_shader(struct opengl_context *ctx,
+                         const char *srcs[]) {
+  // Create the compute shader object.
+  GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
+
+  // Create and compile the compute shader.
+  glShaderSource(computeShader, 1, &srcs, NULL);
+  glCompileShader(computeShader);
+  SHADER_SUCCEED(shader_compile_succeed(computeShader));
+
+  // Attach and link the shader against to the compute program.
+  glAttachShader(&ctx->program, computeShader);
+  glLinkProgram(&ctx->program);
+  SHADER_SUCCEED(shader_link_succeed(&ctx->program));
+
+  // Delete the compute shader object.
+  glDeleteShader(computeShader);
 }
 
 static GLenum opengl_alloc(struct opengl_context *ctx,
