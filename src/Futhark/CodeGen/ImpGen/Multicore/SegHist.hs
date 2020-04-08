@@ -328,6 +328,7 @@ smallDestHistogram pat space histops num_threads kbody = do
 -- A different version of segHist
 -- Takes sequential version and simpley chunks is
 -- Implementation does currently not ensure amotic updates
+-- but just doing it sequentially, single threaded seems faster
 largeDestHistogram :: Pattern ExplicitMemory
                    -> SegSpace
                    -> [HistOp ExplicitMemory]
@@ -341,7 +342,10 @@ largeDestHistogram pat space histops kbody = do
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
-  body' <- collect $ do
+  emit $ Imp.DebugPrint "largeDestHistogram segHist body" Nothing
+  -- body' <- collect $ do
+  sFor "i" (product ns') $ \i -> do
+    dPrimV_ (segFlat space) i
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     compileStms mempty (kernelBodyStms kbody) $ do
       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
@@ -372,20 +376,19 @@ largeDestHistogram pat space histops kbody = do
                    forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
                      copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
                  sComment "execute operation" $
-                   compileBody' is_params $ lambdaBody lam
-                 sComment "update hist result" $
-                   forM_ (zip dest_res is_params) $ \(pe, acc) ->
-                     copyDWIMFix (patElemName pe) (segment_dims ++ bucket' : is') (Var $ paramName acc) []
+                   compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
+                     forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
+                       \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
 
 
-  thread_id <- dPrim "thread_id" $ IntType Int32
-  let paramsNames = namesToList (freeIn body' `namesSubtract`
-                                (namesFromList $ thread_id : [segFlat space]))
-  ts <- mapM lookupType paramsNames
-  let params = zipWith toParam paramsNames ts
+  -- thread_id <- dPrim "thread_id" $ IntType Int32
+  -- let paramsNames = namesToList (freeIn body' `namesSubtract`
+  --                               (namesFromList $ thread_id : [segFlat space]))
+  -- ts <- mapM lookupType paramsNames
+  -- let params = zipWith toParam paramsNames ts
 
-  -- How many subtasks was used by scheduler
-  num_subtasks <- dPrim "num_histos" $ IntType Int32
+  -- -- How many subtasks was used by scheduler
+  -- num_subtasks <- dPrim "num_histos" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop num_subtasks (segFlat space) (product ns')
-                              (Imp.MulticoreFunc params mempty body' thread_id)
+  -- emit $ Imp.Op $ Imp.ParLoop num_subtasks (segFlat space) (product ns')
+  --                             (Imp.MulticoreFunc params mempty body' thread_id)
