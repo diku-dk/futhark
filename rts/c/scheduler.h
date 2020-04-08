@@ -21,11 +21,10 @@ static inline int check_err(int errval, int sets_errno, const char *fun, int lin
     char str[256];
     char errnum[10];
     sprintf(errnum, "%d", errval);
-    sprintf(str, "ERROR: %s in %s() at line %d with %s\n", msg, fun, line,
+    sprintf(str, "ERROR: %s in %s() at line %d with error code %s\n", msg, fun, line,
             sets_errno ? strerror(errno) : errnum);
     fprintf(stderr, "%s", str);
   }
-
   return errval;
 }
 
@@ -44,13 +43,13 @@ static int num_processors() {
 #elif __APPLE__
     int ncores;
     size_t ncores_size = sizeof(ncores);
-    CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0), "sysctlbyname (hw.logicalcpu)");
+    CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0),
+                "sysctlbyname (hw.logicalcpu)");
     return ncores;
 #else // If Linux
   return get_nprocs();
 #endif
 }
-
 
 typedef int (*task_fn)(void*, int, int, int);
 
@@ -68,8 +67,9 @@ struct subtask {
   task_fn fn;
   void* args;
   int start, end;
-  int subtask_id; // or a subtask id
+  int subtask_id;
 
+  // Shared variables across subtasks
   int *counter; // Counter ongoing subtasks
   pthread_mutex_t *mutex;
   pthread_cond_t *cond;
@@ -80,6 +80,9 @@ struct scheduler {
   struct job_queue q;
   pthread_t *threads; // An array of threads
   int num_threads;
+
+  // Temp fix for error printing
+  struct futhark_context* ctx;
 };
 
 
@@ -93,7 +96,10 @@ static inline void *futhark_worker(void* arg) {
   while(1) {
     struct subtask *subtask;
     if (job_queue_pop(&scheduler->q, (void**)&subtask) == 0) {
-      subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
+      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
+      if (err != 0) {
+        panic(err, futhark_context_get_error(scheduler->ctx));
+      }
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       (*subtask->counter)--;
       CHECK_ERR(pthread_cond_signal(subtask->cond), "pthread_cond_signal");
