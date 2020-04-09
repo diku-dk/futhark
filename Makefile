@@ -31,6 +31,9 @@ dump-fused:
 dump-cuda:
 	./tests/scan/simple --dump-cuda tests/scan/simple-cuda-kernel.c
 
+load-cuda:
+	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-131072.data
+
 test: $(SIZES:%=kA-%.data)
 	$(FUTHARK) test --backend=opencl tests/scan/simple.fut
 

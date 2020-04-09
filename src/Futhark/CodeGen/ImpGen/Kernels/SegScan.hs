@@ -92,9 +92,9 @@ compileSegScan  (Pattern _ pes)
       block_id <- sAllocArray "block_id" int32 (Shape [intConst Int32 1]) (Space "local")
 
       sWhen (ltid .==. 0) $ do
-        copyDWIMFix statusflgs [0] (intConst Int8 0) []
         reg_dyn_id <- dPrimV "reg_dyn_id" 0
         sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd reg_dyn_id global_id 0 1
+        copyDWIMFix statusflgs [Imp.var reg_dyn_id int32] (intConst Int8 0) []
         copyDWIMFix block_id [0] (Var reg_dyn_id) []
 
       sOp Imp.LocalBarrier
