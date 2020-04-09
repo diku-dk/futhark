@@ -236,6 +236,9 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
                     _ ->
                       return Nothing
 
+            when (optVerbose opts > 1) $
+              putStrLn $ unwords ("Got ePars: " : map show ePars)
+
             newMax <- binarySearch runner (t, tMax) ePars
             let newMinIdx = pred <$> elemIndex newMax ePars
             let newMin = maximum $ catMaybes [Just tMin, newMinIdx]
