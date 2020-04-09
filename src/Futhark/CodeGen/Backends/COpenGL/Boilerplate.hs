@@ -27,8 +27,9 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
       glad_h      = $(embedStringFile "rts/c/glad/include/glad/glad.h")
       glad_c      = $(embedStringFile "rts/c/glad/src/glad.c")
       -- fragments might need ctx_fields, ctx_inits and openGL_load
-      fragments   = map (\s -> [C.cinit|$string:s|])
-                        $ chunk 2000 (opengl_prelude ++ opengl_code)
+
+      fragments        = map (\s -> [C.cinit|$string:s|])
+                             $ chunk 2000 (opengl_prelude ++ opengl_code)
       size_name_inits  = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
       size_var_inits   = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|])
                                                                    $ M.keys sizes
@@ -266,7 +267,7 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
   GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx) {
 
                      // Load all the shaders.
-                     $stms:(map loadShader (M.toList shaders))
+                     $stms:(map (loadShader fragments) (M.toList shaders))
 
                      $stms:final_inits
                      $stms:set_sizes
@@ -281,8 +282,7 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
                           }
 
                           init_context_early(cfg, ctx);
-                          setup_opengl(&ctx->opengl, opengl_program, cfg->build_opts);
-                          typename GLuint program = glCreateProgram();
+                          setup_opengl(&ctx->opengl, cfg->build_opts);
                           init_context_late(cfg, ctx);
                           return ctx;
                        }|])
@@ -320,7 +320,12 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
                  ctx->profiling_paused = 0;
                }|])
 
-loadShader :: (ShaderName, Safety) -> C.Stm
-loadShader (name, safety) = [C.cstm|{
-  ctx->$id:name = glCreateShader(GL_COMPUTE_SHADER);
+loadShader :: [C.Initializer] -> (ShaderName, Safety) -> C.Stm
+loadShader srcs (name, safety) = [C.cstm|{
+  const char *opengl_program[] = {$inits:srcs, NULL};
+  setup_shader(&ctx, &opengl_program);
+  OPENGL_SUCCEED(glGetError());
+  if (ctx->debugging) {
+    fprintf(stderr, "Created shader %s.\n", $string:name);
+  }
 }|]
