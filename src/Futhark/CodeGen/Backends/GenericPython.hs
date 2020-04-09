@@ -50,7 +50,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import Data.Maybe
-import qualified Data.Map.Strict as M
 
 import Futhark.Representation.Primitive hiding (Bool)
 import Futhark.MonadFreshNames
@@ -60,7 +59,7 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (builtInFunctions, isBuiltInFunction)
+import Futhark.Representation.AST.Attributes (isBuiltInFunction)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
@@ -144,9 +143,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
         defEntryInput _ _ _ _ =
           error "Cannot accept array not in default memory space"
 
-data CompilerEnv op s = CompilerEnv {
+newtype CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
-  , envFtable     :: M.Map Name [Imp.Type]
 }
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -173,14 +171,8 @@ envEntryOutput = opsEntryOutput . envOperations
 envEntryInput :: CompilerEnv op s -> EntryInput op s
 envEntryInput = opsEntryInput . envOperations
 
-newCompilerEnv :: Imp.Functions op -> Operations op s -> CompilerEnv op s
-newCompilerEnv (Imp.Functions funs) ops =
-  CompilerEnv { envOperations = ops
-              , envFtable = ftable <> builtinFtable
-              }
-  where ftable = M.fromList $ map funReturn funs
-        funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
-        builtinFtable = M.map (map Imp.Scalar . snd) builtInFunctions
+newCompilerEnv :: Operations op s -> CompilerEnv op s
+newCompilerEnv ops = CompilerEnv { envOperations = ops }
 
 data CompilerState s = CompilerState {
     compNameSrc :: VNameSource
@@ -223,21 +215,16 @@ stm x = tell [x]
 futharkFun :: String -> String
 futharkFun s = "futhark_" ++ zEncodeString s
 
-paramsTypes :: [Imp.Param] -> [Imp.Type]
-paramsTypes = map paramType
-  where paramType (Imp.MemParam _ space) = Imp.Mem space
-        paramType (Imp.ScalarParam _ t) = Imp.Scalar t
-
 compileOutput :: [Imp.Param] -> [PyExp]
 compileOutput = map (Var . compileName . Imp.paramName)
 
-runCompilerM :: Imp.Functions op -> Operations op s
+runCompilerM :: Operations op s
              -> VNameSource
              -> s
              -> CompilerM op s a
              -> a
-runCompilerM prog ops src userstate (CompilerM m) =
-  fst $ evalRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
+runCompilerM ops src userstate (CompilerM m) =
+  fst $ evalRWS m (newCompilerEnv ops) (newCompilerState src userstate)
 
 standardOptions :: [Option]
 standardOptions = [
@@ -302,9 +289,9 @@ compileProg :: MonadFreshNames m =>
             -> [Option]
             -> Imp.Functions op
             -> m String
-compileProg module_name constructor imports defines ops userstate pre_timing options prog@(Imp.Functions funs) = do
+compileProg module_name constructor imports defines ops userstate pre_timing options (Imp.Functions funs) = do
   src <- getNameSource
-  let prog' = runCompilerM prog ops src userstate compileProg'
+  let prog' = runCompilerM ops src userstate compileProg'
       maybe_shebang =
         case module_name of Nothing -> "#!/usr/bin/env python\n"
                             Just _  -> ""

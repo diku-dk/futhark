@@ -86,7 +86,7 @@ import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (isBuiltInFunction, builtInFunctions)
+import Futhark.Representation.AST.Attributes (isBuiltInFunction)
 
 
 data CompilerState s = CompilerState {
@@ -234,9 +234,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           error "The default compiler cannot compile extended operations"
 
 
-data CompilerEnv op s = CompilerEnv {
+newtype CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
-  , envFtable     :: M.Map Name [Type]
   }
 
 newtype CompilerAcc op s = CompilerAcc {
@@ -277,17 +276,8 @@ envStaticArray = opsStaticArray . envOperations
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
 
-newCompilerEnv :: Functions op -> Operations op s
-               -> CompilerEnv op s
-newCompilerEnv (Functions funs) ops =
-  CompilerEnv { envOperations = ops
-              , envFtable = ftable <> builtinFtable
-              }
-  where ftable = M.fromList $ map funReturn funs
-        funReturn (name, fun) =
-          (name, paramsTypes $ functionOutput fun)
-        builtinFtable =
-          M.map (map Scalar . snd) builtInFunctions
+newCompilerEnv :: Operations op s -> CompilerEnv op s
+newCompilerEnv ops = CompilerEnv { envOperations = ops }
 
 tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 tupleDefinitions = map (snd . snd) . compTypeStructs
@@ -330,11 +320,11 @@ instance MonadFreshNames (CompilerM op s) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-runCompilerM :: Functions op -> Operations op s -> VNameSource -> s
+runCompilerM :: Operations op s -> VNameSource -> s
              -> CompilerM op s a
              -> (a, CompilerState s)
-runCompilerM prog ops src userstate (CompilerM m) =
-  let (x, s, _) = runRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
+runCompilerM ops src userstate (CompilerM m) =
+  let (x, s, _) = runRWS m (newCompilerEnv ops) (newCompilerState src userstate)
   in (x, s)
 
 getUserState :: CompilerM op s s
@@ -677,13 +667,6 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
   stm [C.cstm|memmove($exp:destmem + $exp:destidx,
                       $exp:srcmem + $exp:srcidx,
                       $exp:nbytes);|]
-
-paramsTypes :: [Param] -> [Type]
-paramsTypes = map paramType
-  -- Let's hope we don't need the size for anything, because we are
-  -- just making something up.
-  where paramType (MemParam _ space) = Mem space
-        paramType (ScalarParam _ t) = Scalar t
 
 --- Entry points.
 
@@ -1347,10 +1330,10 @@ compileProg :: MonadFreshNames m =>
             -> [Option]
             -> Functions op
             -> m CParts
-compileProg ops extra header_extra spaces options prog@(Functions funs) = do
+compileProg ops extra header_extra spaces options (Functions funs) = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
-        runCompilerM prog ops src () compileProg'
+        runCompilerM ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
       option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
