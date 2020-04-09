@@ -187,7 +187,7 @@ benchmarkDataset opts program entry input_spec expected_spec ref_out =
         | null $ runRunner opts = ("." </> binaryName program, options)
         | otherwise = (runRunner opts, binaryName program : options)
 
-  when (runVerbose opts > 0) $
+  when (runVerbose opts > 1) $
     putStrLn $ unwords ["Running executable", show to_run,
                         "with arguments", show to_run_args]
 
