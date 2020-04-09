@@ -118,7 +118,7 @@ onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 onKernel target kernel = do
   failures <- gets clFailures
   let (kernel_body, cstate) =
-        GenericC.runCompilerM mempty (inKernelOperations (kernelBody kernel))
+        GenericC.runCompilerM (inKernelOperations (kernelBody kernel))
         blankNameSource
         (newKernelState failures) $
         GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel

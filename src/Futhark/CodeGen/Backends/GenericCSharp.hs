@@ -70,7 +70,6 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import Control.Arrow((&&&))
 import Data.Maybe
-import qualified Data.Map.Strict as M
 
 import Futhark.Representation.Primitive hiding (Bool)
 import Futhark.MonadFreshNames
@@ -80,7 +79,6 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (builtInFunctions)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
@@ -167,9 +165,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
         defSyncRun =
           Pass
 
-data CompilerEnv op s = CompilerEnv {
+newtype CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
-  , envFtable     :: M.Map Name [Imp.Type]
 }
 
 data CompilerAcc op s = CompilerAcc {
@@ -211,14 +208,9 @@ envEntryInput = opsEntryInput . envOperations
 envSyncFun :: CompilerEnv op s -> CSStmt
 envSyncFun = opsSyncRun . envOperations
 
-newCompilerEnv :: Imp.Functions op -> Operations op s -> CompilerEnv op s
-newCompilerEnv (Imp.Functions funs) ops =
-  CompilerEnv { envOperations = ops
-              , envFtable = ftable <> builtinFtable
-              }
-  where ftable = M.fromList $ map funReturn funs
-        funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
-        builtinFtable = M.map (map Imp.Scalar . snd) builtInFunctions
+newCompilerEnv :: Operations op s -> CompilerEnv op s
+newCompilerEnv ops =
+  CompilerEnv { envOperations = ops }
 
 data CompilerState s = CompilerState {
     compNameSrc :: VNameSource
@@ -315,9 +307,6 @@ setVarAssigned vname = modify $ \s ->
 futharkFun :: String -> String
 futharkFun s = "futhark_" ++ zEncodeString s
 
-paramsTypes :: [Imp.Param] -> [Imp.Type]
-paramsTypes = map paramType
-
 paramType :: Imp.Param -> Imp.Type
 paramType (Imp.MemParam _ space) = Imp.Mem space
 paramType (Imp.ScalarParam _ t) = Imp.Scalar t
@@ -337,14 +326,13 @@ getDefaultDecl (Imp.ScalarParam v Cert) =
 getDefaultDecl (Imp.ScalarParam v t) =
   Assign (Var $ compileName v) $ simpleInitClass (compilePrimType t) []
 
-
-runCompilerM :: Imp.Functions op -> Operations op s
+runCompilerM :: Operations op s
              -> VNameSource
              -> s
              -> CompilerM op s a
              -> a
-runCompilerM prog ops src userstate (CompilerM m) =
-  fst $ evalRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
+runCompilerM ops src userstate (CompilerM m) =
+  fst $ evalRWS m (newCompilerEnv ops) (newCompilerState src userstate)
 
 standardOptions :: [Option]
 standardOptions = [
@@ -403,9 +391,9 @@ compileProg :: MonadFreshNames m =>
             -> [Option]
             -> Imp.Functions op
             -> m String
-compileProg module_name constructor imports defines ops userstate boilerplate pre_timing _ options prog@(Imp.Functions funs) = do
+compileProg module_name constructor imports defines ops userstate boilerplate pre_timing _ options (Imp.Functions funs) = do
   src <- getNameSource
-  let prog' = runCompilerM prog ops src userstate compileProg'
+  let prog' = runCompilerM ops src userstate compileProg'
   let imports' = [ Using Nothing "System"
                  , Using Nothing "System.Diagnostics"
                  , Using Nothing "System.Collections"
