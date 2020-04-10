@@ -44,8 +44,7 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
                          $esc:("#include <GL/glx.h>")
                          $esc:("typedef GLuint fl_mem_t;")
                          $esc:free_list_h
-                         $esc:openGL_h
-                         const char *opengl_program[] = {$inits:fragments, NULL};|]
+                         $esc:openGL_h|]
 
   GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
   GC.libDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
