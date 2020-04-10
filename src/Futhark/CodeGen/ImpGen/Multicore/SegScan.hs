@@ -55,6 +55,8 @@ segmentedScan :: Pattern ExplicitMemory
                 -> MulticoreGen ()
 segmentedScan pat space scan_op nes kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
+  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -137,8 +139,9 @@ nonsegmentedScan :: Pattern ExplicitMemory
                  -> KernelBody ExplicitMemory
                  -> MulticoreGen ()
 nonsegmentedScan pat space scan_op nes kbody = do
-
   emit $ Imp.DebugPrint "nonsegmented segScan " Nothing
+  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 

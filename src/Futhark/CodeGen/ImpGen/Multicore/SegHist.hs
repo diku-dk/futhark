@@ -92,6 +92,8 @@ segmentedHist :: Pattern ExplicitMemory
                 -> MulticoreGen ()
 segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
+  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -167,6 +169,7 @@ nonsegmentedHist :: Pattern ExplicitMemory
                 -> MulticoreGen ()
 nonsegmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
+  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
 
   -- variable for how many subhistograms to allocate
   num_threads <- getNumThreads
@@ -343,9 +346,9 @@ largeDestHistogram pat space histops kbody = do
       (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
   emit $ Imp.DebugPrint "largeDestHistogram segHist body" Nothing
-  -- body' <- collect $ do
-  sFor "i" (product ns') $ \i -> do
-    dPrimV_ (segFlat space) i
+  body' <- collect $ do
+  -- sFor "i" (product ns') $ \i -> do
+    -- dPrimV_ (segFlat space) i
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     compileStms mempty (kernelBodyStms kbody) $ do
       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
@@ -372,23 +375,23 @@ largeDestHistogram pat space histops kbody = do
                sLoopNest shape $ \is' -> do
                  forM_ (zip vs_params vs') $ \(p, res) ->
                    copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-                 sComment "bind lhs" $
-                   forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
-                     copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
-                 sComment "execute operation" $
-                   compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
-                     forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
-                       \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
+                 -- sComment "bind lhs" $
+                 forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
+                   copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
+                 -- sComment "execute operation" $
+                 compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
+                   forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
+                     \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
 
 
-  -- thread_id <- dPrim "thread_id" $ IntType Int32
-  -- let paramsNames = namesToList (freeIn body' `namesSubtract`
-  --                               (namesFromList $ thread_id : [segFlat space]))
-  -- ts <- mapM lookupType paramsNames
-  -- let params = zipWith toParam paramsNames ts
+  thread_id <- dPrim "thread_id" $ IntType Int32
+  let paramsNames = namesToList (freeIn body' `namesSubtract`
+                                (namesFromList $ thread_id : [segFlat space]))
+  ts <- mapM lookupType paramsNames
+  let params = zipWith toParam paramsNames ts
 
-  -- -- How many subtasks was used by scheduler
-  -- num_subtasks <- dPrim "num_histos" $ IntType Int32
+  -- How many subtasks was used by scheduler
+  num_subtasks <- dPrim "num_histos" $ IntType Int32
 
-  -- emit $ Imp.Op $ Imp.ParLoop num_subtasks (segFlat space) (product ns')
-  --                             (Imp.MulticoreFunc params mempty body' thread_id)
+  emit $ Imp.Op $ Imp.ParLoop num_subtasks (segFlat space) (product ns')
+                              (Imp.MulticoreFunc params mempty body' thread_id)

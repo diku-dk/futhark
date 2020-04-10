@@ -100,7 +100,6 @@ compileProg =
                  create_lock(&ctx->lock);
                  $stms:init_fields
 
-                 ctx->profiling = 1;
                  ctx->scheduler.ctx = ctx;
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
@@ -303,6 +302,8 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
 
   GC.stm [C.cstm|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks),
                  "scheduler failed to do task %s", $string:ftask);|]
+compileOp (MulticoreCall [] f) =
+  GC.stm [C.cstm|$id:f(ctx);|]
 
-compileOp (MulticoreCall retval f) =
-  GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
+compileOp (MulticoreCall retvals f) =
+  forM_ retvals $ \retval -> GC.stm [C.cstm|$id:retval = $id:f(ctx);|]

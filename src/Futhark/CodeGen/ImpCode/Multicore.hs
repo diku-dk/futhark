@@ -29,7 +29,7 @@ data MulticoreFunc = MulticoreFunc [Param] Code Code VName
 
 -- | A parallel operation.
 data Multicore = ParLoop VName VName Imp.Exp MulticoreFunc
-               | MulticoreCall VName String  -- This needs to be fixed
+               | MulticoreCall [VName] String  -- This needs to be fixed
 
 instance Pretty MulticoreFunc where
   ppr (MulticoreFunc params prebody body _ ) =

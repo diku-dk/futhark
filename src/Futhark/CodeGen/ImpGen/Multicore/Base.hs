@@ -54,7 +54,7 @@ compileThreadResult _ _ TileReturns{} =
 
 getNumThreads' :: VName -> MulticoreGen ()
 getNumThreads' dest =
-  emit $ Imp.Op $ Imp.MulticoreCall dest "futhark_context_get_num_threads"
+  emit $ Imp.Op $ Imp.MulticoreCall [dest] "futhark_context_get_num_threads"
 
 getNumThreads :: MulticoreGen VName
 getNumThreads = do

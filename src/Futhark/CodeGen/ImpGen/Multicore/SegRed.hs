@@ -108,6 +108,8 @@ nonsegmentedReduction :: Pattern ExplicitMemory
                       -> MulticoreGen ()
 nonsegmentedReduction pat space reds kbody = do
   emit $ Imp.DebugPrint "nonsegmented segRed " Nothing
+
+  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
   let (is, ns) = unzip $ unSegSpace space
   num_threads <- getNumThreads
 
@@ -199,6 +201,8 @@ segmentedReduction :: Pattern ExplicitMemory
                       -> MulticoreGen ()
 segmentedReduction pat space reds kbody = do
   emit $ Imp.DebugPrint "segmented segRed " Nothing
+  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
