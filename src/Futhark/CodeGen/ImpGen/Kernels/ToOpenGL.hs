@@ -58,6 +58,9 @@ data ShaderState =
               , shaderHasBarriers :: Bool
               }
 
+newShaderState :: ShaderState
+newShaderState = ShaderState mempty 0 False False
+
 errorLabel :: ShaderState -> String
 errorLabel = ("error_"++) . show . shaderNextSync
 
@@ -76,7 +79,7 @@ instance Monoid ToOpenGL where
 type OnShaderM = ReaderT Name (WriterT ToOpenGL (Either InternalError))
 
 onHostOp :: kernelsToOpenGL -> HostOp -> OnShaderM OpenGL
---onHostOp _ (CallShader s) = onShader s
+--onHostOp _ (CallKernel s) = onShader s
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
  tell mempty { glSizes = M.singleton key size_class }
  return $ ImpOpenGL.GetSize v key
@@ -85,6 +88,20 @@ onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
  return $ ImpOpenGL.CmpSizeLe v key x
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
  return $ ImpOpenGL.GetSizeMax v size_class
+
+useAsParam :: KernelUse -> Maybe C.Param
+useAsParam (ScalarUse name bt) =
+  let ctp = case bt of
+        Bool -> [C.cty|bool|]
+        _    -> GenericC.primTypeToCType bt
+  in Just [C.cparam|$ty:ctp $id:name|]
+useAsParam (MemoryUse name) =
+  Just [C.cparam|bool *$id:name|]
+useAsParam ConstUse{} =
+  Nothing
+
+constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
+constDef _ = Nothing
 
 openGlCode :: [C.Func] -> String
 openGlCode shaders =
@@ -113,6 +130,12 @@ incErrorLabel =
 pendingError :: Bool -> GenericC.CompilerM KernelOp ShaderState ()
 pendingError b =
   GenericC.modifyUserState $ \s -> s { shaderSyncPending = b }
+
+kernelArgs :: Kernel -> [ShaderArg]
+kernelArgs = mapMaybe useToArg . kernelUses
+  where useToArg (MemoryUse mem)  = Just $ MemKArg mem
+        useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+        useToArg ConstUse{}       = Nothing
 
 hasCommunication :: ImpKernels.KernelCode -> Bool
 hasCommunication = any communicates
@@ -265,6 +288,11 @@ inShaderOperations body =
 
         shaderReadScalar =
           GenericC.readScalarPointerWithQuals pointerQuals
+
+-- Checking requirements
+
+typesInShader :: Kernel -> S.Set PrimType
+typesInShader shader = typesInCode $ kernelBody shader
 
 typesInCode :: ImpKernels.KernelCode -> S.Set PrimType
 typesInCode Skip                     = mempty
