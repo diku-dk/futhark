@@ -39,7 +39,7 @@ translateKernels :: ImpKernels.Program
                  -> Either InternalError ImpOpenGL.Program
 translateKernels (ImpKernels.Functions funs) = do
   (prog', ToOpenGL shaders used_types sizes) <-
-    runWriterT $ fmap Functions $ forM funs $ \(fname, fun) ->
+    flip runStateT initialOpenGL $ fmap Functions $ forM funs $ \(fname, fun) ->
     (fname,) <$> runReaderT (traverse (onHostOp fname) fun) fname
   let shaders'       = M.map fst shaders
       opengl_code    = openGlCode $ map snd $ M.elems shaders
@@ -79,25 +79,83 @@ data ToOpenGL = ToOpenGL { glShaders   :: M.Map ShaderName (Safety, C.Func)
                          , glSizes     :: M.Map Name SizeClass
                          }
 
-instance Semigroup ToOpenGL where
- ToOpenGL k1 r1 sz1 <> ToOpenGL k2 r2 sz2 =
-   ToOpenGL (k1<>k2) (r1<>r2) (sz1<>sz2)
+initialOpenGL :: ToOpenGL
+initialOpenGL = ToOpenGL mempty mempty mempty
 
-instance Monoid ToOpenGL where
- mempty = ToOpenGL mempty mempty mempty
+type OnShaderM = ReaderT Name (StateT ToOpenGL (Either InternalError))
 
-type OnShaderM = ReaderT Name (WriterT ToOpenGL (Either InternalError))
+addSize :: Name -> SizeClass -> OnShaderM ()
+addSize key sclass =
+  modify $ \s -> s { glSizes = M.insert key sclass $ glSizes s }
 
 onHostOp :: kernelsToOpenGL -> HostOp -> OnShaderM OpenGL
 --onHostOp _ (CallKernel s) = onShader s
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
- tell mempty { glSizes = M.singleton key size_class }
+ addSize key size_class
  return $ ImpOpenGL.GetSize v key
 onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
- tell mempty { glSizes = M.singleton key size_class }
+ addSize key size_class
  return $ ImpOpenGL.CmpSizeLe v key x
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
  return $ ImpOpenGL.GetSizeMax v size_class
+
+onShader :: Kernel -> OnShaderM OpenGL
+onShader shader = do
+  let (shader_body, cstate) =
+        GenericC.runCompilerM mempty (inShaderOperations (kernelBody shader))
+        blankNameSource
+        newShaderState $
+        GenericC.blockScope $ GenericC.compileCode $ kernelBody shader
+      s_state = GenericC.compUserState cstate
+
+      use_params = mapMaybe useAsParam $ kernelUses shader
+
+      (local_memory_args, local_memory_params, local_memory_init) =
+        unzip3 $
+        flip evalState (blankNameSource :: VNameSource) $
+        mapM prepareLocalMemory $ shaderLocalMemory s_state
+
+      (perm_params, block_dim_init) =
+        (mempty,
+         [[C.citem|const int block_dim0 = 0;|],
+          [C.citem|const int block_dim1 = 1;|],
+          [C.citem|const int block_dim2 = 2;|]]
+        )
+
+      (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses shader
+
+-- We do currently not account safety within shaders.
+  let (safety, error_init) = (SafetyNone, [])
+
+      params = perm_params ++ catMaybes local_memory_params ++ use_params
+
+      shader_fun =
+        [C.cfun|void $id:name ($params:params) {
+                  $items:const_defs
+                  $items:block_dim_init
+                  $items:local_memory_init
+                  $items:shader_body
+
+                  $items:const_undefs
+                }|]
+  modify $ \s -> s
+    { glShaders   = M.insert name (safety, shader_fun) $ glShaders s
+    , glUsedTypes = typesInShader shader <> glUsedTypes s
+    }
+
+  let args = catMaybes local_memory_args ++
+             kernelArgs shader
+
+  return $ LaunchShader safety name args num_groups group_size
+  where name = nameToString $ kernelName shader
+        num_groups = kernelNumGroups shader
+        group_size = kernelGroupSize shader
+
+        prepareLocalMemory (mem, size) = do
+          param <- newVName $ baseString mem ++ "_offset"
+          return (Just $ SharedMemoryKArg size,
+                  Just [C.cparam|uint $id:param|],
+                  [C.citem|volatile int *$id:mem = &shared_mem[$id:param];|])
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
