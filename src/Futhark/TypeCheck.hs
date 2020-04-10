@@ -118,11 +118,12 @@ instance Checkable lore => Show (ErrorCase lore) where
     "Call of unknown function " ++ nameToString fname ++ "."
   show (ParameterMismatch fname expected got) =
     "In call of " ++ fname' ++ ":\n" ++
-    "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
-     expected' ++ ", but got " ++ show ngot ++
-    " arguments of types " ++ intercalate ", " (map pretty got) ++ "."
-    where (nexpected, expected') =
-            (length expected, intercalate ", " $ map pretty expected)
+    "expecting " ++ show nexpected ++ " arguments of type(s)\n" ++
+     intercalate ", " (map pretty expected) ++
+     "\nGot " ++ show ngot ++
+    " arguments of types\n" ++
+    intercalate ", " (map pretty got)
+    where nexpected = length expected
           ngot = length got
           fname' = maybe "anonymous function" (("function "++) . nameToString) fname
   show (SlicingError dims got) =
