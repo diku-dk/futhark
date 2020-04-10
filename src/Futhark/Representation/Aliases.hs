@@ -312,9 +312,10 @@ mkStmsAliases bnds res = delve mempty $ stmsToList bnds
           names <> mconcat (map look $ namesToList names)
           where look k = M.findWithDefault mempty k aliasmap
 
--- | Everything consumed in the given bindings and result (even transitively).
-consumedInStms :: Aliased lore => Stms lore -> [SubExp] -> Names
-consumedInStms bnds res = snd $ mkStmsAliases bnds res
+-- | Everything consumed in the given statements and result (even
+-- transitively).
+consumedInStms :: Aliased lore => Stms lore -> Names
+consumedInStms = snd . flip mkStmsAliases []
 
 type AliasesAndConsumed = (M.Map VName Names,
                            Names)
