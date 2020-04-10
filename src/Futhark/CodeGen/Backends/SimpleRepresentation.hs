@@ -38,6 +38,8 @@ intTypeToCType Int64 = [C.cty|typename int64_t|]
 
 -- | The GLSL type corresponding to a signed integer type.
 glIntTypeToCType :: IntType -> C.Type
+glIntTypeToCType Int8  = [C.cty|int|]
+glIntTypeToCType Int16 = [C.cty|int|]
 glIntTypeToCType Int32 = [C.cty|int|]
 glIntTypeToCType Int64 = [C.cty|typename int64_t|]
 
@@ -50,6 +52,8 @@ uintTypeToCType Int64 = [C.cty|typename uint64_t|]
 
 -- | The GLSL type corresponding to an unsigned integer type.
 glUintTypeToCType :: IntType -> C.Type
+glUintTypeToCType Int8  = [C.cty|typename uint|]
+glUintTypeToCType Int16 = [C.cty|typename uint|]
 glUintTypeToCType Int32 = [C.cty|typename uint|]
 glUintTypeToCType Int64 = [C.cty|typename uint64_t|]
 
@@ -457,6 +461,8 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
               map mkSExt [minBound..maxBound] ++
               map mkZExt [minBound..maxBound]
 
+        taggedI s Int8  = s
+        taggedI s Int16 = s
         taggedI s Int32 = s
         taggedI s Int64 = s ++ "64"
 
