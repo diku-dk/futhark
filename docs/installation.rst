@@ -74,11 +74,13 @@ Compiling with ``cabal``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can also compile Futhark with ``cabal``.  If so, you must install
-an appropriate version of GHC and ``cabal`` yourself, for example
-through your favourite package manager.  On Linux, you can always use
-`ghcup <https://gitlab.haskell.org/haskell/ghcup>`_.  Then clone the
+an appropriate version of GHC (usually the newest) and ``cabal``
+yourself, for example through your favourite package manager.  On
+Linux, you can always use `ghcup
+<https://gitlab.haskell.org/haskell/ghcup>`_.  Then clone the
 repository as listed above and run::
 
+  $ cabal update
   $ cabal build
 
 To install the Futhark binaries to a specific location, for example
