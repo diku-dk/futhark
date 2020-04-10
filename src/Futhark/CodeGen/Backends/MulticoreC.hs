@@ -213,7 +213,7 @@ multiCoreReport names = report_kernels
         format_string name =
           let padding = replicate (longest_name - length name) ' '
           in unwords [name ++ padding,
-                      "ran %5d times; avg: %8ldus; total: %8ldus\n"]
+                      "--  ran %5d times; avg: %8ldus; total: %8ldus\n"]
         reportKernel name =
           let runs = functionRuns name
               total_runtime = functionRuntime name
@@ -227,15 +227,42 @@ multiCoreReport names = report_kernels
               [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
+
+addBenchmarkFields :: String -> GC.CompilerM op s ()
+addBenchmarkFields name = do
+  GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
+  GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
+
+benchmarkCode :: String -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
+benchmarkCode name code = do
+  addBenchmarkFields name
+  return [C.citems|
+     typename int64_t $id:start, $id:end;
+     if (ctx->profiling) {
+                      $id:start = get_wall_time();
+                   }
+     $items:code
+     if (ctx->profiling) {
+                   $id:end = get_wall_time();
+                   typename uint64_t elapsed = $id:end - $id:start;
+                   CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
+                   ctx->$id:(functionRuns name)++;
+                   ctx->$id:(functionRuntime name) += elapsed;
+                   CHECK_ERR(pthread_mutex_unlock(&ctx->profile_mutex), "pthread_mutex_unlock");
+                }|]
+
+  where start = name ++ "_start"
+        end = name ++"_end"
+
 multicoreName :: String -> GC.CompilerM op s String
 multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
   return $ baseString s' ++ "_" ++ show (baseTag s')
 
-multicoreDef :: String -> (String -> C.Definition) -> GC.CompilerM op s String
+multicoreDef :: String -> (String -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s String
 multicoreDef s f = do
   s' <- multicoreName s
-  GC.libDecl $ f s'
+  GC.libDecl =<< f s'
   return s'
 
 compileOp :: GC.OpCompiler Multicore ()
@@ -251,46 +278,28 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
         <*> GC.blockScope (GC.compileCode body)
 
   fstruct <- multicoreDef "parloop_struct" $ \s ->
-     [C.cedecl|struct $id:s {
+     return [C.cedecl|struct $id:s {
                  struct futhark_context *ctx;
                  $sdecls:(compileStructFields fargs fctypes)
                };|]
 
-  ftask <- multicoreDef "parloop" $ \s ->
-    [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
-              struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
-              struct futhark_context *ctx = $id:fstruct->ctx;
-              typename int64_t st, et;
-              if (ctx->profiling) {
-                 st = get_wall_time();
-              }
-              $decls:(compileGetStructVals fstruct fargs fctypes)
-              int $id:i = start;
-              $items:prebody'
-              for (; $id:i < end; $id:i++) {
-                  $items:body'
-              };
-              if (ctx->profiling) {
-                et = get_wall_time();
-                typename uint64_t elapsed = et - st;
-
-                CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
-                ctx->$id:(functionRuns s)++;
-                ctx->$id:(functionRuntime s) += elapsed;
-                CHECK_ERR(pthread_mutex_unlock(&ctx->profile_mutex), "pthread_mutex_unlock");
-              }
-              return 0;
-           }|]
-
-  GC.contextField (functionRuntime ftask) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
-  GC.contextField (functionRuns ftask) [C.cty|int|] $ Just [C.cexp|0|]
-  mapM_ GC.profileReport $ multiCoreReport  [ftask]
-
+  ftask <- multicoreDef "parloop" $ \s -> do
+    fbody'' <- benchmarkCode s [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)
+                                         int $id:i = start;
+                                         $items:prebody'
+                                         for (; $id:i < end; $id:i++) {
+                                             $items:body'
+                                         };|]
+    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
+               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+               struct futhark_context *ctx = $id:fstruct->ctx;
+               $items:fbody''
+               return 0;
+              }|]
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
-
 
   let ftask_name = ftask ++ "_task"
   GC.decl [C.cdecl|struct task $id:ftask_name;|]
@@ -299,9 +308,13 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
 
+  code' <- benchmarkCode ftask_name [C.citems|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks),
+                                              "scheduler failed to do task %s", $string:ftask);|]
+  mapM_ GC.item code'
+  mapM_ GC.profileReport $ multiCoreReport [ftask_name, ftask]
 
-  GC.stm [C.cstm|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks),
-                 "scheduler failed to do task %s", $string:ftask);|]
+
+
 compileOp (MulticoreCall [] f) =
   GC.stm [C.cstm|$id:f(ctx);|]
 
