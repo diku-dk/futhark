@@ -328,7 +328,7 @@ static void setup_shader(struct opengl_context *ctx,
   GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
 
   // Create and compile the compute shader.
-  glShaderSource(computeShader, 1, &srcs, NULL);
+  glShaderSource(computeShader, 1, srcs, NULL);
   glCompileShader(computeShader);
   SHADER_SUCCEED(shader_compile_succeed(computeShader));
 
