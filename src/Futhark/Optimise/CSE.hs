@@ -76,7 +76,7 @@ type CSEM lore = Reader (CSEState lore)
 cseInBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              [Diet] -> Body lore -> CSEM lore (Body lore)
 cseInBody ds (Body bodyattr bnds res) =
-  cseInStms (res_cons <> consumedInStms bnds res) (stmsToList bnds) $ do
+  cseInStms (res_cons <> consumedInStms bnds) (stmsToList bnds) $ do
     CSEState (_, nsubsts) _ <- ask
     return $ Body bodyattr mempty $ substituteNames nsubsts res
   where res_cons = mconcat $ zipWith consumeResult ds res
