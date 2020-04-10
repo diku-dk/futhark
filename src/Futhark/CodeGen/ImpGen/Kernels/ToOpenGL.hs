@@ -49,25 +49,17 @@ translateKernels (ImpKernels.Functions funs) = do
 
 type LocalMemoryUse = (VName, Count Bytes Exp)
 
-newtype KernelRequirements =
-  KernelRequirements { kernelLocalMemory :: [LocalMemoryUse] }
+data ShaderState =
+  ShaderState { shaderLocalMemory :: [LocalMemoryUse]
+              , shaderNextSync    :: Int
+              , shaderSyncPending :: Bool
+                -- ^ Has a potential failure occurred since the last
+                -- ErrorSync?
+              , shaderHasBarriers :: Bool
+              }
 
-instance Semigroup KernelRequirements where
-  KernelRequirements lm1 <> KernelRequirements lm2 =
-    KernelRequirements (lm1<>lm2)
-
-instance Monoid KernelRequirements where
-  mempty = KernelRequirements mempty
-
-newtype OpenGlRequirements =
-  OpenGlRequirements { openglUsedTypes :: S.Set PrimType }
-
-instance Semigroup OpenGlRequirements where
-  OpenGlRequirements ts1 <> OpenGlRequirements ts2 =
-    OpenGlRequirements (ts1 <> ts2)
-
-instance Monoid OpenGlRequirements where
-  mempty = OpenGlRequirements mempty
+errorLabel :: ShaderState -> String
+errorLabel = ("error_"++) . show . shaderNextSync
 
 data ToOpenGL = ToOpenGL { glShaders   :: M.Map ShaderName (Safety, C.Func)
                          , glUsedTypes :: S.Set PrimType
@@ -84,7 +76,7 @@ instance Monoid ToOpenGL where
 type OnShaderM = ReaderT Name (WriterT ToOpenGL (Either InternalError))
 
 onHostOp :: kernelsToOpenGL -> HostOp -> OnShaderM OpenGL
---onHostOp (CallShader s) = onShader s
+--onHostOp _ (CallShader s) = onShader s
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
  tell mempty { glSizes = M.singleton key size_class }
  return $ ImpOpenGL.GetSize v key
@@ -93,8 +85,6 @@ onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
  return $ ImpOpenGL.CmpSizeLe v key x
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
  return $ ImpOpenGL.GetSizeMax v size_class
-
---onShader :: Shader -> OnShaderM OpenGL
 
 openGlCode :: [C.Func] -> String
 openGlCode shaders =
@@ -111,3 +101,167 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("layout (local_size_variable) in;")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
+
+nextErrorLabel :: GenericC.CompilerM KernelOp ShaderState String
+nextErrorLabel =
+  errorLabel <$> GenericC.getUserState
+
+incErrorLabel :: GenericC.CompilerM KernelOp ShaderState ()
+incErrorLabel =
+  GenericC.modifyUserState $ \s -> s { shaderNextSync = shaderNextSync s + 1 }
+
+pendingError :: Bool -> GenericC.CompilerM KernelOp ShaderState ()
+pendingError b =
+  GenericC.modifyUserState $ \s -> s { shaderSyncPending = b }
+
+hasCommunication :: ImpKernels.KernelCode -> Bool
+hasCommunication = any communicates
+  where communicates ErrorSync{} = True
+        communicates Barrier{}   = True
+        communicates _           = False
+
+pointerQuals ::  Monad m => String -> m [C.TypeQual]
+-- Layout qualifiers:
+--pointerQuals "layout"    = return [C.ctyquals|layout|]
+-- Constant qualifier
+pointerQuals "const"     = return [C.ctyquals|const|]
+-- Uniform qualifiers:
+--pointerQuals "uniform"   = return [C.ctyquals|uniform|]
+-- Shader stage input and output qualifiers:
+--pointerQuals "in"        = return [C.ctyquals|in|]
+--pointerQuals "out"       = return [C.ctyquals|out|]
+-- Shared variables:
+--pointerQuals "shared"    = return [C.ctyquals|shared|]
+-- Memory qualifiers:
+--pointerQuals "coherent"  = return [C.ctyquals|coherent|]
+pointerQuals "volatile"  = return [C.ctyquals|volatile|]
+pointerQuals "restrict"  = return [C.ctyquals|restrict|]
+--pointerQuals "readonly"  = return [C.ctyquals|readonly|]
+--pointerQuals "writeonly" = return [C.ctyquals|writeonly|]
+pointerQuals s           = error $ "'" ++ s ++ "' is not an OpenGL type qualifier."
+
+inShaderOperations :: ImpKernels.KernelCode -> GenericC.Operations KernelOp ShaderState
+inShaderOperations body =
+  GenericC.Operations
+  { GenericC.opsCompiler    = shaderOps
+  , GenericC.opsMemoryType  = shaderMemoryType
+  , GenericC.opsWriteScalar = shaderWriteScalar
+  , GenericC.opsReadScalar  = shaderReadScalar
+  , GenericC.opsAllocate    = cannotAllocate
+  , GenericC.opsDeallocate  = cannotDeallocate
+  , GenericC.opsCopy        = copyInShader
+  , GenericC.opsStaticArray = noStaticArrays
+  , GenericC.opsFatMemory   = False
+  }
+  where has_communication = hasCommunication body
+
+        shaderOps :: GenericC.OpCompiler KernelOp ShaderState
+        shaderOps (GetGroupId v i) =
+          GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
+        shaderOps (GetLocalId v i) =
+          GenericC.stm [C.cstm|$id:v = get_local_id($int:i);|]
+        shaderOps (GetLocalSize v i) =
+          GenericC.stm [C.cstm|$id:v = get_local_size($int:i);|]
+        shaderOps (GetGlobalId v i) =
+          GenericC.stm [C.cstm|$id:v = get_global_id($int:i);|]
+        shaderOps (GetGlobalSize v i) =
+          GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
+        shaderOps (GetLockstepWidth v) =
+          GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
+        shaderOps (Barrier f) = do
+          GenericC.stm [C.cstm|barrier();|]
+          GenericC.modifyUserState $ \s -> s { shaderHasBarriers = True }
+        shaderOps (MemFence FenceLocal) =
+          GenericC.stm [C.cstm|groupMemoryBarrier();|]
+        shaderOps (MemFence FenceGlobal) =
+          GenericC.stm [C.cstm|memoryBarrier();|]
+        shaderOps (LocalAlloc name size) = do
+          name' <- newVName $ pretty name ++ "_backing"
+          GenericC.modifyUserState $ \s ->
+            s { shaderLocalMemory = (name', size) : shaderLocalMemory s }
+          GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
+        shaderOps (ErrorSync f) = do
+          label   <- nextErrorLabel
+          pending <- shaderSyncPending <$> GenericC.getUserState
+          when pending $ do
+            pendingError False
+            GenericC.stm [C.cstm|$id:label: barrier();|]
+            GenericC.stm [C.cstm|if (local_failure) { return; }|]
+          GenericC.stm [C.cstm|groupMemoryBarrier();|] -- intentional
+          GenericC.modifyUserState $ \s -> s { shaderHasBarriers = True }
+          incErrorLabel
+        shaderOps (Atomic space aop) = atomicOps space aop
+
+        atomicCast s t = do
+          let volatile = [C.ctyquals|volatile|]
+          quals <- case s of Space sid    -> pointerQuals sid
+                             _            -> pointerQuals "uniform"
+          return [C.cty|$tyquals:(volatile++quals) $ty:t|]
+
+        doAtomic s old arr ind val op ty = do
+          ind' <- GenericC.compileExp $ unCount ind
+          val' <- GenericC.compileExp val
+          cast <- atomicCast s ty
+          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+
+        atomicOps s (AtomicAdd old arr ind val) =
+          doAtomic s old arr ind val "atomic_add" [C.cty|int|]
+
+        atomicOps s (AtomicSMax old arr ind val) =
+          doAtomic s old arr ind val "atomic_max" [C.cty|int|]
+
+        atomicOps s (AtomicSMin old arr ind val) =
+          doAtomic s old arr ind val "atomic_min" [C.cty|int|]
+
+        atomicOps s (AtomicUMax old arr ind val) =
+          doAtomic s old arr ind val "atomic_max" [C.cty|uint|]
+
+        atomicOps s (AtomicUMin old arr ind val) =
+          doAtomic s old arr ind val "atomic_min" [C.cty|uint|]
+
+        atomicOps s (AtomicAnd old arr ind val) =
+          doAtomic s old arr ind val "atomic_and" [C.cty|uint|]
+
+        atomicOps s (AtomicOr old arr ind val) =
+          doAtomic s old arr ind val "atomic_or" [C.cty|uint|]
+
+        atomicOps s (AtomicXor old arr ind val) =
+          doAtomic s old arr ind val "atomic_xor" [C.cty|uint|]
+
+        atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
+          ind' <- GenericC.compileExp $ unCount ind
+          cmp' <- GenericC.compileExp cmp
+          val' <- GenericC.compileExp val
+          cast <- atomicCast s [C.cty|int|]
+          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+
+        atomicOps s (AtomicXchg old arr ind val) = do
+          ind' <- GenericC.compileExp $ unCount ind
+          val' <- GenericC.compileExp val
+          cast <- atomicCast s [C.cty|int|]
+          GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+
+        cannotAllocate :: GenericC.Allocate KernelOp ShaderState
+        cannotAllocate _ =
+          error "Cannot allocate memory in shader."
+
+        cannotDeallocate :: GenericC.Deallocate KernelOp ShaderState
+        cannotDeallocate _ _ =
+          error "Cannot deallocate memory in shader."
+
+        copyInShader :: GenericC.Copy KernelOp ShaderState
+        copyInShader _ _ _ _ _ _ _ =
+          error "Cannot bulk copy in shader."
+
+        noStaticArrays :: GenericC.StaticArray KernelOp ShaderState
+        noStaticArrays _ _ _ _ =
+          error "Cannot create static array in shader."
+
+        shaderMemoryType space = do
+          return [C.cty|$ty:defaultMemBlockType|]
+
+        shaderWriteScalar =
+          GenericC.writeScalarPointerWithQuals pointerQuals
+
+        shaderReadScalar =
+          GenericC.readScalarPointerWithQuals pointerQuals
