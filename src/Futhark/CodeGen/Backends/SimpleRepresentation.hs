@@ -18,7 +18,6 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , glFloat32Ops, glFloat32Funs
   , glFloat64Ops, glFloat64Funs
   , glFloatConvOps
-  , glIntOps
   )
   where
 
