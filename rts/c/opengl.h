@@ -40,8 +40,6 @@ struct opengl_config {
   size_t      *size_values;
   const char **size_classes;
 
-  GLuint program;
-
 };
 
 static void opengl_config_init(struct opengl_config *cfg,
@@ -73,8 +71,6 @@ static void opengl_config_init(struct opengl_config *cfg,
   cfg->size_values  = size_values;
   cfg->size_classes = size_classes;
 
-  cfg->program = glCreateProgram();
-
 }
 
 struct opengl_context {
@@ -89,6 +85,9 @@ struct opengl_context {
   size_t max_shared_memory;
 
   size_t lockstep_width;
+
+  GLuint program;
+
 };
 
 static char *strclone(const char *str) {
@@ -324,6 +323,14 @@ static void setup_opengl(struct opengl_context *ctx,
 
 static void setup_shader(struct opengl_context *ctx,
                          const char *srcs[]) {
+  // We might use the attach/detach method, instead of deleting and
+  // creating entire program objects.
+  if(&ctx->program) {
+    glDeleteProgram(ctx->program);
+  }
+
+  ctx->program = glCreateProgram();
+
   // Create the compute shader object.
   GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
 
@@ -333,9 +340,9 @@ static void setup_shader(struct opengl_context *ctx,
   SHADER_SUCCEED(shader_compile_succeed(computeShader));
 
   // Attach and link the shader against to the compute program.
-  glAttachShader(&ctx->program, computeShader);
-  glLinkProgram(&ctx->program);
-  SHADER_SUCCEED(shader_link_succeed(&ctx->program));
+  glAttachShader(ctx->program, computeShader);
+  glLinkProgram(ctx->program);
+  SHADER_SUCCEED(shader_link_succeed(ctx->program));
 
   // Delete the compute shader object.
   glDeleteShader(computeShader);
