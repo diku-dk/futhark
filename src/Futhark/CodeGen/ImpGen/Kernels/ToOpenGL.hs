@@ -89,7 +89,7 @@ addSize key sclass =
   modify $ \s -> s { glSizes = M.insert key sclass $ glSizes s }
 
 onHostOp :: kernelsToOpenGL -> HostOp -> OnShaderM OpenGL
---onHostOp _ (CallKernel s) = onShader s
+onHostOp _ (CallKernel s) = onShader s
 onHostOp _ (ImpKernels.GetSize v key size_class) = do
  addSize key size_class
  return $ ImpOpenGL.GetSize v key
