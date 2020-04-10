@@ -106,7 +106,7 @@ let reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 -- | `reduce_by_index dest f ne is as` returns `dest`, but with each
 -- element given by the indices of `is` updated by applying `f` to the
 -- current value in `dest` and the corresponding value in `as`.  The
--- `ne` value must be a neutral element for `op`.  If `is` has
+-- `ne` value must be a neutral element for `f`.  If `is` has
 -- duplicates, `f` may be applied multiple times, and hence must be
 -- associative and commutative.  Out-of-bounds indices in `is` are
 -- ignored.
