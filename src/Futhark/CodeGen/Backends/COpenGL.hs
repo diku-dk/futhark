@@ -256,9 +256,9 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
       fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
       $id:time_start = get_wall_time();
     }
-    glDispatchComputeGroupSizeARB(global_work_size[0], global_work_size[1],
-                                  global_work_size[2], local_work_size[0],
-                                  local_work_size[1],  local_work_size[2]
+    glDispatchComputeGroupSizeARB($id:global_work_size[0], $id:global_work_size[1],
+                                  $id:global_work_size[2], $id:local_work_size[0],
+                                  $id:local_work_size[1],  $id:local_work_size[2]
                                  );
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
     if (ctx->debugging) {
