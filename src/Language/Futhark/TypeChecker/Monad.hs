@@ -97,7 +97,7 @@ data TypeError = TypeError SrcLoc Notes Doc
 
 instance Pretty TypeError where
   ppr (TypeError loc notes msg) =
-    "Error at" <+> text (locStr loc) <+> ":" </>
+    "Error at" <+> text (locStr loc) <> ":" </>
     msg <> ppr notes
 
 unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
