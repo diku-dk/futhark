@@ -45,7 +45,17 @@ translateKernels (ImpKernels.Functions funs) = do
       opengl_code    = openGlCode $ map snd $ M.elems shaders
       opengl_prelude = pretty $ genOpenGlPrelude used_types
   return $ ImpOpenGL.Program opengl_code opengl_prelude shaders'
-    (S.toList used_types) sizes prog'
+    (S.toList used_types) (cleanSizes sizes) prog'
+
+-- | Due to simplifications after kernel extraction, some threshold
+-- parameters may contain KernelPaths that reference threshold
+-- parameters that no longer exist.  We remove these here.
+cleanSizes :: M.Map Name SizeClass -> M.Map Name SizeClass
+cleanSizes m  = M.map clean m
+  where known = M.keys m
+        clean (SizeThreshold path) =
+          SizeThreshold $ filter ((`elem` known) . fst) path
+        clean s = s
 
 type LocalMemoryUse = (VName, Count Bytes Exp)
 
