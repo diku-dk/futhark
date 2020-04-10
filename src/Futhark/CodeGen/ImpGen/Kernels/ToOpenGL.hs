@@ -265,3 +265,41 @@ inShaderOperations body =
 
         shaderReadScalar =
           GenericC.readScalarPointerWithQuals pointerQuals
+
+typesInCode :: ImpKernels.KernelCode -> S.Set PrimType
+typesInCode Skip                     = mempty
+typesInCode (c1 :>>: c2)             = typesInCode c1 <> typesInCode c2
+typesInCode (For _ it e c)           = IntType it `S.insert` typesInExp e <> typesInCode c
+typesInCode (While e c)              = typesInExp e <> typesInCode c
+typesInCode DeclareMem{}             = mempty
+typesInCode (DeclareScalar _ _ t)    = S.singleton t
+typesInCode (DeclareArray _ _ t _)   = S.singleton t
+typesInCode (Allocate _ (Count e) _) = typesInExp e
+typesInCode Free{}                   = mempty
+typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
+  typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode (Write _ (Count e1) t _ _ e2) =
+  typesInExp e1 <> S.singleton t <> typesInExp e2
+typesInCode (SetScalar _ e)   = typesInExp e
+typesInCode SetMem{}          = mempty
+typesInCode (Call _ _ es)     = mconcat $ map typesInArg es
+  where typesInArg MemArg{}   = mempty
+        typesInArg (ExpArg e) = typesInExp e
+typesInCode (If e c1 c2) =
+  typesInExp e <> typesInCode c1 <> typesInCode c2
+typesInCode (Assert e _ _)   = typesInExp e
+typesInCode (Comment _ c)    = typesInCode c
+typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
+typesInCode Op{} = mempty
+
+typesInExp :: Exp -> S.Set PrimType
+typesInExp (ValueExp v)       = S.singleton $ primValueType v
+typesInExp (BinOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
+typesInExp (CmpOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
+typesInExp (ConvOpExp op e)   = S.fromList [from, to] <> typesInExp e
+  where (from, to) = convOpType op
+typesInExp (UnOpExp _ e)     = typesInExp e
+typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
+typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
+typesInExp (LeafExp ScalarVar{} _) = mempty
+typesInExp (LeafExp (SizeOf t) _)  = S.singleton t
