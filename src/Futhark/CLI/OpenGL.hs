@@ -26,6 +26,7 @@ main = compilerMain () []
                              , "-lX11"
                              , "-lXi"
                              , "-lXrandr"
+                             , "-fdiagnostics-color=always"
                              ]
 
          case mode of
