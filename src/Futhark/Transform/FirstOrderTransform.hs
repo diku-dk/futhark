@@ -8,6 +8,7 @@
 -- transformations in-place.
 module Futhark.Transform.FirstOrderTransform
   ( transformFunDef
+  , transformStms
 
   , Transformer
   , transformStmRecursively
@@ -32,11 +33,19 @@ import Futhark.Util (chunks, splitAt3)
 transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     LetAttr SOACS ~ LetAttr tolore,
                     CanBeAliased (Op tolore)) =>
-                   FunDef SOACS -> m (AST.FunDef tolore)
-transformFunDef (FunDef entry fname rettype params body) = do
-  (body',_) <- modifyNameSource $ runState $ runBinderT m mempty
+                   Scope tolore -> FunDef SOACS -> m (AST.FunDef tolore)
+transformFunDef consts_scope (FunDef entry fname rettype params body) = do
+  (body',_) <- modifyNameSource $ runState $ runBinderT m consts_scope
   return $ FunDef entry fname rettype params body'
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
+
+transformStms :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
+                  LetAttr SOACS ~ LetAttr tolore,
+                  CanBeAliased (Op tolore)) =>
+                   Stms SOACS -> m (AST.Stms tolore)
+transformStms stms =
+  fmap snd $ modifyNameSource $ runState $ runBinderT m mempty
+  where m = mapM_ transformStmRecursively stms
 
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.

@@ -25,7 +25,8 @@ import Futhark.Analysis.AlgSimplify as AS
 -- program with embedded range annotations.
 rangeAnalysis :: (Attributes lore, CanBeRanged (Op lore)) =>
                  Prog lore -> Prog (Ranges lore)
-rangeAnalysis = Prog . map analyseFun . progFuns
+rangeAnalysis (Prog consts funs) =
+  Prog (runRangeM $ mapM analyseStm consts) (map analyseFun funs)
 
 -- Implementation
 
