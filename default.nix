@@ -5,17 +5,23 @@
 #
 # Just run 'nix-build' and fish the binary out of 'result/bin/futhark'.
 
-{ nixpkgs ? import <nixpkgs> {}, compiler ? "ghc883" }:
+{ nixpkgs ? import <nixpkgs> {},
+  compiler ? "ghc883",
+  suffix ? "nightly" }:
 let
   pkgs = nixpkgs;
 
   futhark =
-    pkgs.haskell.packages.${compiler}.callCabal2nix "futhark"
-    ( pkgs.lib.cleanSource ./. ) { };
-in
-  pkgs.haskell.lib.overrideCabal
-    futhark
-    ( oldDrv: {
+    pkgs.haskell.lib.overrideCabal
+      (pkgs.haskell.lib.addBuildTools
+        (pkgs.haskell.packages.${compiler}.callCabal2nix "futhark"
+          ( pkgs.lib.cleanSourceWith { filter = name: type:
+                                         baseNameOf (toString name) != "default.nix";
+                                       src = pkgs.lib.cleanSource ./.;
+                                     })
+          { })
+        [ pkgs.python37Packages.sphinx ])
+    ( _drv: {
       isLibrary = false;
       isExecutable = true;
       enableSharedExecutables = false;
@@ -30,5 +36,35 @@ in
         "--extra-lib-dirs=${pkgs.zlib.static}/lib"
         "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
         ];
+
+      postBuild = (_drv.postBuild or "") + ''
+        make -C docs man
+        '';
+
+      postInstall = (_drv.postInstall or "") + ''
+        mkdir -p $out/share/man/man1
+        mv docs/_build/man/*.1 $out/share/man/man1/
+        '';
       }
-    )
+    );
+in pkgs.stdenv.mkDerivation rec {
+  name = "futhark-" + suffix;
+  version = futhark.version;
+  src = ./.;
+
+  buildInputs = [ futhark ];
+
+  buildPhase = ''
+    true
+  '';
+
+  installPhase = ''
+    mkdir futhark-${suffix}/
+    cp -r tools/release/skeleton/* futhark-${suffix}/
+    cp -r ${futhark}/bin futhark-${suffix}/bin
+    cp -r ${futhark}/share futhark-${suffix}/share
+    chmod +w -R futhark-${suffix}
+    mkdir -p $out
+    tar -Jcf $out/futhark-${suffix}.tar.xz futhark-${suffix}
+  '';
+}
