@@ -86,6 +86,7 @@ compileProg =
                                   }
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
+                                  ctx->profiling = cfg->debugging;
                                   ctx->error = NULL;
                                   create_lock(&ctx->lock);
                                   $stms:init_fields
