@@ -1910,10 +1910,8 @@ compileCode (Call dests fname args) = do
   case dests of
     [dest] | isBuiltInFunction fname ->
       stm [C.cstm|$id:dest = $id:(funName fname)($args:args'');|]
-    _        -> do
-      ret <- newVName "call_ret"
-      item [C.citem|int $id:ret = $id:(funName fname)($args:args'');|]
-      stm [C.cstm|assert($id:ret == 0);|]
+    _ ->
+      item [C.citem|if ($id:(funName fname)($args:args'') != 0) { return 1; }|]
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
         compileArg (ExpArg e) = compileExp e
 
