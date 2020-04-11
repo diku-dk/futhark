@@ -144,7 +144,7 @@ static void opengl_succeed(GLenum ret,
                            const char *file,
                            int line) {
   if (ret != GL_NO_ERROR) {
-    panic(-1, "%s:%d: OpenGL call\n  %s\nfailed with error code %d (%s)\n",
+    panic(-1, "%s:%d: OpenGL call:\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, opengl_error_string(ret));
   }
 }
@@ -154,7 +154,7 @@ static void shader_succeed(int ret,
                            const char *file,
                            int line) {
   if (ret) {
-    panic(-1, "%s:%d: OpenGL call\n  %s\nfailed with error code %d\n",
+    panic(-1, "%s:%d: Shader call:\n  %s\nfailed with error code %d\n",
           file, line, call, ret);
   }
 }
@@ -168,7 +168,7 @@ static int shader_link_succeed(GLuint shader) {
   if (!success) {
     glGetProgramInfoLog(shader, 2048, NULL, infoLog);
     printf("PROGRAM_LINKING_ERROR: \n%s\n", infoLog);
-    return success;
+    return 1;
   }
   return 0;
 }
@@ -182,7 +182,7 @@ static int shader_compile_succeed(GLuint shader) {
   if (!success) {
     glGetShaderInfoLog(shader, 2048, NULL, infoLog);
     printf("SHADER_COMPILATION_ERROR: \n%s\n", infoLog);
-    return success;
+    return 1;
   }
   return 0;
 }
