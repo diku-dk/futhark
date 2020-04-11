@@ -222,7 +222,7 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
 
         setShaderArg i (MemKArg v) = do
           v' <- GC.rawMem v
-          GC.stm [C.cstm|glUniform1i(ctx->$id:name, &$exp:v');|]
+          GC.stm [C.cstm|glUniform1uiv(ctx->$id:name, $int:i, &$exp:v');|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         setShaderArg i (SharedMemoryKArg num_bytes) = do
