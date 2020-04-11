@@ -153,34 +153,41 @@ jobs:
 
 - job: release_linux
 
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
+
   steps:
+
+  - checkout: self
+    submodules: false
 
   - script: |
       export githubTag=$(git describe --abbrev=0 --tags)
       export version=$(echo $githubTag | cut -c 2-)
       echo "##vso[task.setvariable variable=githubTag]$githubTag"
       echo "##vso[task.setvariable variable=version]$version"
-    condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
     displayName: Set tag to env variable githubTag and version
     failOnStderr: true
-
-  - checkout: self
-    submodules: false
 
   - script: |
       curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
       . $HOME/.nix-profile/etc/profile.d/nix.sh
-      nix-build --argstr suffix $version-linux-x86_64
+      nix-build --argstr suffix $(version)-linux-x86_64
 
   - task: GithubRelease@0
     displayName: 'Attach Linux x86_64 tarball to GitHub Release'
-    condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
     inputs:
       gitHubConnection: futhark-github
       repositoryName: diku-dk/futhark
-      assets: 'results/futhark-$version-linux-x86_64.tar.xz'
+      assets: 'results/futhark-$(version)-linux-x86_64.tar.xz'
       action: edit
       target: '$(Build.SourceVersion)'
       tag: '$(githubTag)'
       addChangeLog: false
       assetUploadMode: replace
+
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: 'result'
+      contents: 'futhark-$(version)-linux-x86_64.tar.xz'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
