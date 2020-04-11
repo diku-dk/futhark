@@ -410,7 +410,7 @@ static GLenum opengl_free(struct opengl_context *ctx,
     }
   }
 
-  glGetNamedBufferParameteri64v(&mem, GL_BUFFER_SIZE, (GLint64)&size);
+  glGetNamedBufferParameteri64v(mem, GL_BUFFER_SIZE, (GLint64*)&size);
   error = glGetError();
 
   if (error == GL_NO_ERROR) {

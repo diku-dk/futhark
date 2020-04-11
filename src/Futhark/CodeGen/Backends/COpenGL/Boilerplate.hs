@@ -322,7 +322,7 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
 loadShader :: [C.Initializer] -> (ShaderName, Safety) -> C.Stm
 loadShader srcs (name, safety) = [C.cstm|{
   const char *opengl_program[] = {$inits:srcs, NULL};
-  setup_shader(&ctx, &opengl_program);
+  setup_shader(&ctx->opengl, opengl_program);
   OPENGL_SUCCEED(glGetError());
   if (ctx->debugging) {
     fprintf(stderr, "Created shader %s.\n", $string:name);
