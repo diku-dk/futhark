@@ -728,9 +728,9 @@ addArrays = mapM_ addArray
 -- Note: a hack to be used only for functions.
 addFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore op ()
 addFParams = mapM_ addFParam
-  where addFParam fparam = do
-          entry <- memBoundToVarEntry Nothing $ noUniquenessReturns $ paramAttr fparam
-          addVar (paramName fparam) entry
+  where addFParam fparam =
+          addVar (paramName fparam) $
+          memBoundToVarEntry Nothing $ noUniquenessReturns $ paramAttr fparam
 
 -- | Another hack.
 addLoopVar :: VName -> IntType -> ImpM lore op ()
@@ -777,21 +777,28 @@ dPrimVE name e = do name' <- dPrim name $ primExpType e
                     return $ Imp.var name' $ primExpType e
 
 memBoundToVarEntry :: Maybe (Exp lore) -> MemBound NoUniqueness
-                   -> ImpM lore op (VarEntry lore)
+                   -> VarEntry lore
 memBoundToVarEntry e (MemPrim bt) =
-  return $ ScalarVar e ScalarEntry { entryScalarType = bt }
+  ScalarVar e ScalarEntry { entryScalarType = bt }
 memBoundToVarEntry e (MemMem space) =
-  return $ MemVar e $ MemEntry space
-memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
+  MemVar e $ MemEntry space
+memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
   let location = MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
-  return $ ArrayVar e ArrayEntry { entryArrayLocation = location
-                                 , entryArrayElemType = bt
-                                 }
+  in ArrayVar e ArrayEntry { entryArrayLocation = location
+                           , entryArrayElemType = bt
+                           }
+
+infoAttr :: NameInfo ExplicitMemory
+         -> MemInfo SubExp NoUniqueness MemBind
+infoAttr (LetInfo attr) = attr
+infoAttr (FParamInfo attr) = noUniquenessReturns attr
+infoAttr (LParamInfo attr) = attr
+infoAttr (IndexInfo it) = MemPrim $ IntType it
 
 dInfo :: Maybe (Exp lore) -> VName -> NameInfo ExplicitMemory
          -> ImpM lore op ()
 dInfo e name info = do
-  entry <- memBoundToVarEntry e $ infoAttr info
+  let entry = memBoundToVarEntry e $ infoAttr info
   case entry of
     MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
@@ -800,18 +807,14 @@ dInfo e name info = do
     ArrayVar _ _ ->
       return ()
   addVar name entry
-  where infoAttr (LetInfo attr) = attr
-        infoAttr (FParamInfo attr) = noUniquenessReturns attr
-        infoAttr (LParamInfo attr) = attr
-        infoAttr (IndexInfo it) = MemPrim $ IntType it
 
 dScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
 dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op ()
-dArray name bt shape membind = do
-  entry <- memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
-  addVar name entry
+dArray name bt shape membind =
+  addVar name $
+  memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
 
 everythingVolatile :: ImpM lore op a -> ImpM lore op a
 everythingVolatile = local $ \env -> env { envVolatility = Imp.Volatile }
