@@ -225,7 +225,7 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
   (fields, init_fields) <- GC.contextContents
 
   let ctx_opengl_fields = map (\k -> [C.csdecl|unsigned int $id:k;|])
-                              $ M.keys sizes
+                              $ M.keys shaders
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
