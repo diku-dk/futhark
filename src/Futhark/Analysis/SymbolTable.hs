@@ -35,6 +35,7 @@ module Futhark.Analysis.SymbolTable
   , IndexOp(..)
     -- * Insertion
   , insertStm
+  , insertStms
   , insertFParams
   , insertLParam
   , insertArrayLParam
@@ -496,6 +497,12 @@ insertStm stm vtable =
                   FParam entry
                   { fparamAliases = oneName (patElemName pe) <> fparamAliases entry }
                 update e = e
+
+insertStms :: (IndexOp (Op lore), Ranged lore, Aliases.Aliased lore) =>
+              Stms lore
+           -> SymbolTable lore
+           -> SymbolTable lore
+insertStms stms vtable = foldl' (flip insertStm) vtable $ stmsToList stms
 
 expandAliases :: Names -> SymbolTable lore -> Names
 expandAliases names vtable = names <> aliasesOfAliases

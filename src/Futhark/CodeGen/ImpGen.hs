@@ -82,6 +82,8 @@ module Futhark.CodeGen.ImpGen
 import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM, State)
 import Control.Monad.Writer hiding (mapM, forM)
+import Data.Bifunctor (first)
+import qualified Data.DList as DL
 import Data.Either
 import Data.Traversable
 import qualified Data.Map.Strict as M
@@ -301,17 +303,53 @@ hasFunction :: Name -> ImpM lore op Bool
 hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
                                  in isJust $ lookup fname fs
 
-compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
+constsVTable :: LetAttr lore ~ LetAttr ExplicitMemory =>
+                Stms lore -> VTable lore
+constsVTable = foldMap stmVtable
+  where stmVtable (Let pat _ e) =
+          foldMap (peVtable e) $ M.toList $
+          mconcat $ map scopeOfPatElem $ patternElements pat
+        peVtable e (name, info) =
+          M.singleton name $ memBoundToVarEntry (Just e) $ infoAttr info
+
+compileProg :: (ExplicitMemorish lore, FreeIn op, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
-            -> Prog lore -> m (Imp.Functions op)
-compileProg ops space prog =
+            -> Prog lore -> m (Imp.Definitions op)
+compileProg ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-  let s = foldl' compileFunDef' (newState src) (progFuns prog)
-  in (stateFunctions s, stateNameSource s)
+  let s = (newState src) { stateVTable = constsVTable consts }
+      s' =
+        foldl' compileFunDef' s funs
+      free_in_funs =
+        freeIn (stateFunctions s')
+      (consts', s'', _) =
+        runImpM (compileConsts free_in_funs consts) ops space
+        (nameFromString "val") s'
+  in (Imp.Definitions consts' (stateFunctions s''),
+      stateNameSource s')
   where compileFunDef' s fdef =
           let ((), s', _) =
                 runImpM (compileFunDef fdef) ops space (funDefName fdef) s
           in s'
+
+compileConsts :: Names -> Stms lore -> ImpM lore op (Imp.Constants op)
+compileConsts used_consts stms = do
+  code <- collect $ compileStms used_consts stms $ pure ()
+  pure $ uncurry Imp.Constants $ first DL.toList $ extract code
+  where -- Fish out those top-level declarations in the constant
+        -- initialisation code that are free in the functions.
+        extract (x Imp.:>>: y) =
+          extract x <> extract y
+        extract (Imp.DeclareMem name space)
+          | name `nameIn` used_consts =
+              (DL.singleton $ Imp.MemParam name space,
+               mempty)
+        extract (Imp.DeclareScalar name _ t)
+          | name `nameIn` used_consts =
+              (DL.singleton $ Imp.ScalarParam name t,
+               mempty)
+        extract s =
+          (mempty, s)
 
 compileInParam :: ExplicitMemorish lore =>
                   FParam lore -> ImpM lore op (Either Imp.Param ArrayDecl)

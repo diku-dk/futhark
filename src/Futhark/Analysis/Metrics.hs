@@ -73,7 +73,10 @@ inside what m = seen what >> censor addWhat m
         addWhat' (ctx, k) = (what : ctx, k)
 
 progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
-progMetrics = actualMetrics . execWriter . runMetricsM . mapM_ funDefMetrics . progFuns
+progMetrics prog =
+  actualMetrics $ execWriter $ runMetricsM $ do
+  mapM_ funDefMetrics $ progFuns prog
+  mapM_ bindingMetrics $ progConsts prog
 
 funDefMetrics :: OpMetrics (Op lore) => FunDef lore -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody

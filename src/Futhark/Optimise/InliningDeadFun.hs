@@ -3,7 +3,6 @@
 -- then removing those that have become dead.
 module Futhark.Optimise.InliningDeadFun
   ( inlineFunctions
-  , inlineConstants
   , removeDeadFunctions
   )
   where
@@ -16,32 +15,33 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Futhark.Representation.SOACS
-import Futhark.Representation.SOACS.Simplify (simpleSOACS, simplifyFun)
+import Futhark.Representation.SOACS.Simplify
+  (simpleSOACS, simplifyFun, simplifyConsts)
 import Futhark.Optimise.CSE
-import Futhark.Transform.CopyPropagate (copyPropagateInFun)
+import Futhark.Optimise.Simplify.Lore (addScopeWisdom)
+import Futhark.Transform.CopyPropagate
+  (copyPropagateInProg, copyPropagateInFun)
+import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Transform.Rename
 import Futhark.Analysis.CallGraph
 import Futhark.Binder
 import Futhark.Pass
 
 aggInlineFunctions :: MonadFreshNames m =>
-                      CallGraph -> [FunDef SOACS] -> m [FunDef SOACS]
+                      CallGraph
+                   -> (Stms SOACS, [FunDef SOACS])
+                   -> m (Stms SOACS, [FunDef SOACS])
 aggInlineFunctions cg =
-  fmap (filter keep) . recurse 0 . filter isFunInCallGraph
-  where isFunInCallGraph fundec =
-          isJust $ M.lookup (funDefName fundec) cg
-
-        constfuns =
-          S.fromList $ M.keys $ M.filter (==ConstFun) $ mconcat $ M.elems cg
-
-        fdmap fds =
+  fmap (fmap (filter keep)) . recurse 0 . addVtable
+  where fdmap fds =
           M.fromList $ zip (map funDefName fds) fds
 
-        noCallsTo :: (Name -> Bool) -> FunDef SOACS -> Bool
-        noCallsTo interesting fundec =
-          case M.lookup (funDefName fundec) cg of
-            Just calls -> not $ any interesting (M.keys calls)
-            _ -> False
+        addVtable (consts, funs) =
+          (ST.fromScope (addScopeWisdom (scopeOf consts)),
+           consts, funs)
+
+        noCallsTo which fundec =
+          not $ any (`S.member` which) $ allCalledBy (funDefName fundec) cg
 
         -- The inverse rate at which we perform full simplification
         -- after inlining.  For the other steps we just do copy
@@ -55,70 +55,76 @@ aggInlineFunctions cg =
         -- because it is more efficient to shrink the program as soon
         -- as possible, rather than wait until it has balooned after
         -- full inlining.
-        recurse i funs = do
+        recurse i (vtable, consts, funs) = do
           let remaining = S.fromList $ map funDefName funs
               (to_be_inlined, maybe_inline_in) =
-                partition (noCallsTo (`S.member` remaining)) funs
+                partition (noCallsTo remaining) funs
               (not_to_inline_in, to_inline_in) =
                 partition (noCallsTo
-                           (`elem` map funDefName to_be_inlined))
+                           (S.fromList $ map funDefName to_be_inlined))
                 maybe_inline_in
               (not_actually_inlined, to_be_inlined') =
                 partition keep to_be_inlined
           if null to_be_inlined
-            then return funs
-            else do let simplify fd
-                          | i `rem` simplifyRate == 0 ||
-                            funDefName fd `S.member` constfuns =
-                              copyPropagateInFun simpleSOACS =<<
-                              performCSEOnFunDef True <$> simplifyFun fd
-                          | otherwise =
-                              copyPropagateInFun simpleSOACS fd
+            then return (consts, funs)
+            else do
 
-                    let onFun = simplify <=< renameFun .
-                                doInlineInCaller (fdmap to_be_inlined') False
-                    to_inline_in' <- mapM onFun to_inline_in
-                    (not_actually_inlined<>) <$>
-                      recurse (i+1) (not_to_inline_in <> to_inline_in')
+            (vtable', consts') <-
+              if any ((`calledByConsts` cg) . funDefName) to_be_inlined'
+              then simplifyConsts =<<
+                   performCSEOnStms True <$>
+                   inlineInStms (fdmap to_be_inlined') consts
+              else pure (vtable, consts)
+
+            let simplifyFun' fd
+                  | i `rem` simplifyRate == 0 =
+                      copyPropagateInFun simpleSOACS vtable' =<<
+                      performCSEOnFunDef True <$>
+                      simplifyFun vtable' fd
+                  | otherwise =
+                      copyPropagateInFun simpleSOACS vtable' fd
+
+            let onFun = simplifyFun' <=<
+                        inlineInFunDef (fdmap to_be_inlined')
+            to_inline_in' <- mapM onFun to_inline_in
+            fmap (not_actually_inlined<>) <$>
+              recurse (i+1)
+              (vtable', consts', not_to_inline_in <> to_inline_in')
 
         keep fd =
-          isJust (funDefEntryPoint fd)
-          || callsRecursive fd
-          || expensiveConstant fd
+          isJust (funDefEntryPoint fd) || callsRecursive fd
 
-        expensiveConstant fd =
-          funDefName fd `S.member` constfuns &&
-          not (null (bodyStms (funDefBody fd)))
+        callsRecursive fd = any recursive $ allCalledBy (funDefName fd) cg
+        recursive fname = calls fname fname cg
 
-        callsRecursive fd = maybe False (any recursive . M.keys) $
-                            M.lookup (funDefName fd) cg
+-- | @inlineInFunDef constf fdmap caller@ inlines in @calleer@ the
+-- functions in @fdmap@ that are called as @constf@. At this point the
+-- preconditions are that if @fdmap@ is not empty, and, more
+-- importantly, the functions in @fdmap@ do not call any other
+-- functions.
+inlineInFunDef :: MonadFreshNames m =>
+                  M.Map Name (FunDef SOACS) -> FunDef SOACS
+               -> m (FunDef SOACS)
+inlineInFunDef fdmap (FunDef entry name rtp args body) =
+  FunDef entry name rtp args <$> inlineInBody fdmap body
 
-        recursive fname = case M.lookup fname cg of
-                            Just calls -> fname `M.member` calls
-                            Nothing -> False
-
--- | @doInlineInCaller constf fdmap caller@ inlines in @calleer@
--- the functions in @fdmap@ that are called as @constf@. At this
--- point the preconditions are that if @fdmap@ is not empty, and,
--- more importantly, the functions in @fdmap@ do not call any
--- other functions. Further extensions that transform a tail-recursive
--- function to a do or while loop, should do the transformation first
--- and then do the inlining.
-doInlineInCaller :: M.Map Name (FunDef SOACS) -> Bool -> FunDef SOACS
-                 -> FunDef SOACS
-doInlineInCaller fdmap always_reshape (FunDef entry name rtp args body) =
-  let body' = inlineInBody fdmap always_reshape body
-  in FunDef entry name rtp args body'
-
-inlineFunction :: Bool
-               -> Pattern
+inlineFunction :: MonadFreshNames m =>
+                  Pattern
                -> StmAux attr
                -> [(SubExp, Diet)]
-               -> (ConstFun, Safety, SrcLoc, [SrcLoc])
+               -> (Safety, SrcLoc, [SrcLoc])
                -> FunDef SOACS
-               -> [Stm]
-inlineFunction always_reshape pat aux args (_,safety,loc,locs) fun =
-  param_stms <> body_stms <> res_stms
+               -> m [Stm]
+inlineFunction pat aux args (safety,loc,locs) fun = do
+  Body _ stms res <-
+    renameBody $ mkBody
+    (stmsFromList param_stms <> stmsFromList body_stms)
+    (bodyResult (funDefBody fun))
+  let res_stms =
+        certify (stmAuxCerts aux) <$>
+        zipWith (reshapeIfNecessary (patternNames pat))
+        (patternIdents pat) res
+  pure $ stmsToList stms <> res_stms
   where param_names =
           map paramName $ funDefParams fun
 
@@ -131,14 +137,9 @@ inlineFunction always_reshape pat aux args (_,safety,loc,locs) fun =
           addLocations safety (filter notNoLoc (loc:locs)) $
           bodyStms $ funDefBody fun
 
-        res_stms =
-          certify (stmAuxCerts aux) <$>
-          zipWith (reshapeIfNecessary (patternNames pat))
-          (patternIdents pat) (bodyResult $ funDefBody fun)
-
         reshapeIfNecessary dim_names ident se
           | t@Array{} <- identType ident,
-            always_reshape || any (`elem` dim_names) (subExpVars $ arrayDims t),
+            any (`elem` dim_names) (subExpVars $ arrayDims t),
             Var v <- se =
               mkLet [] [ident] $ shapeCoerce (arrayDims t) v
           | otherwise =
@@ -146,39 +147,46 @@ inlineFunction always_reshape pat aux args (_,safety,loc,locs) fun =
 
         notNoLoc = (/=NoLoc) . locOf
 
-inlineInBody :: M.Map Name (FunDef SOACS) -> Bool -> Body -> Body
-inlineInBody fdmap always_reshape = onBody
+inlineInStms :: MonadFreshNames m =>
+                M.Map Name (FunDef SOACS) -> Stms SOACS -> m (Stms SOACS)
+inlineInStms fdmap stms =
+  bodyStms <$> inlineInBody fdmap (mkBody stms [])
+
+inlineInBody :: MonadFreshNames m =>
+                M.Map Name (FunDef SOACS) -> Body -> m Body
+inlineInBody fdmap = onBody
   where inline (Let pat aux (Apply fname args _ what) : rest)
           | Just fd <- M.lookup fname fdmap =
-              inlineFunction always_reshape pat aux args what fd
-              <> inline rest
+              (<>) <$> inlineFunction pat aux args what fd <*> inline rest
+
         inline (stm : rest) =
-          onStm stm : inline rest
-        inline [] = mempty
+          (:) <$> onStm stm <*> inline rest
+        inline [] =
+          pure mempty
 
         onBody (Body attr stms res) =
-          Body attr (stmsFromList $ inline (stmsToList stms)) res
+          Body attr . stmsFromList <$> inline (stmsToList stms) <*> pure res
 
         onStm (Let pat aux e) =
-          Let pat aux $ mapExp inliner e
+          Let pat aux <$> mapExpM inliner e
 
         inliner =
-          identityMapper { mapOnBody = const $ return . onBody
-                         , mapOnOp = return . onSOAC
+          identityMapper { mapOnBody = const onBody
+                         , mapOnOp = onSOAC
                          }
 
         onSOAC =
-          runIdentity . mapSOACM identitySOACMapper
-          { mapOnSOACLambda = return . onLambda }
+          mapSOACM identitySOACMapper
+          { mapOnSOACLambda = onLambda }
 
         onLambda (Lambda params body ret) =
-          Lambda params (onBody body) ret
+          Lambda params <$> onBody body <*> pure ret
 
 addLocations :: Safety -> [SrcLoc] -> Stms SOACS -> Stms SOACS
 addLocations caller_safety more_locs = fmap onStm
   where onStm stm = stm { stmExp = onExp $ stmExp stm }
-        onExp (Apply fname args t (constf, safety, loc,locs)) =
-          Apply fname args t (constf, min caller_safety safety, loc,locs++more_locs)
+        onExp (Apply fname args t (safety, loc,locs)) =
+          Apply fname args t (min caller_safety safety, loc,locs++more_locs)
         onExp (BasicOp (Assert cond desc (loc,locs))) =
           case caller_safety of
             Safe -> BasicOp $ Assert cond desc (loc,locs++more_locs)
@@ -200,57 +208,10 @@ inlineFunctions =
        , passDescription = "Inline and remove resulting dead functions."
        , passFunction = pass
        }
-  where pass prog = do
+  where pass prog@(Prog consts funs) = do
           let cg = buildCallGraph prog
-          Prog <$> aggInlineFunctions cg (progFuns prog)
-
-aggInlineConstants :: [FunDef SOACS] -> [FunDef SOACS]
-aggInlineConstants orig_fds =
-  map inlineInEntry $ filter (isJust . funDefEntryPoint) orig_fds
-  where fdmap = M.fromList $ zip (map funDefName orig_fds) orig_fds
-
-        inlineInEntry fd =
-          fd { funDefBody = constsInBody mempty $ funDefBody fd }
-
-        constsInBody prev body =
-          body { bodyStms = constsInStms prev (bodyStms body) }
-
-        constsInStms prev stms =
-          case stmsHead stms of
-            Nothing -> mempty
-
-            Just (Let pat aux (Apply fname args _ prop),
-                  stms')
-              | Just ses <- M.lookup fname prev ->
-                  stmsFromList
-                  (zipWith reshapeResult (patternIdents pat) ses)
-                  <> constsInStms prev stms'
-
-              | Just fd <- M.lookup fname fdmap ->
-                  let stm_stms =
-                        inlineFunction True pat aux args prop fd
-                      prev' =
-                        M.insert fname (map Var $ patternNames pat) prev
-                  in constsInStms prev' $ stmsFromList stm_stms <> stms'
-
-            Just (stm, stms') ->
-              oneStm stm <> constsInStms prev stms'
-
-        reshapeResult ident se
-          | t@Array{} <- identType ident,
-            Var v <- se =
-              mkLet [] [ident] $ shapeCoerce (arrayDims t) v
-          | otherwise =
-              mkLet [] [ident] $ BasicOp $ SubExp se
-
--- | Inline 'ConstFun' functions and remove the resulting dead functions.
-inlineConstants :: Pass SOACS SOACS
-inlineConstants =
-  Pass { passName = "Inline constants"
-       , passDescription = "Inline and remove dead constants."
-       , passFunction = pass
-       }
-  where pass prog = return $ Prog $ aggInlineConstants $ progFuns prog
+          (consts', funs') <- aggInlineFunctions cg (consts, funs)
+          copyPropagateInProg simpleSOACS $ Prog consts' funs'
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
@@ -262,6 +223,6 @@ removeDeadFunctions =
        }
   where pass prog =
           let cg        = buildCallGraph prog
-              live_funs = filter (isFunInCallGraph cg) (progFuns prog)
-          in Prog live_funs
-        isFunInCallGraph cg fundec = isJust $ M.lookup (funDefName fundec) cg
+              live_funs = filter ((`isFunInCallGraph` cg) . funDefName) $
+                          progFuns prog
+          in prog { progFuns = live_funs }

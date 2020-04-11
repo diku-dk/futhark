@@ -19,7 +19,6 @@ module Futhark.Internalise.TypesValues
   where
 
 import Control.Monad.State
-import Control.Monad.Reader
 import Data.List (delete, find, foldl')
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -47,8 +46,7 @@ boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
 internaliseParamTypes :: BoundInTypes
                       -> M.Map VName VName
                       -> [E.TypeBase (E.DimDecl VName) ()]
-                      -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
-                                       ConstParams)
+                      -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
 internaliseParamTypes (BoundInTypes bound) pnames ts =
   runInternaliseTypeM $ withDims (bound' <> M.map (Free . Var) pnames) $
   mapM internaliseTypeM ts
@@ -56,17 +54,13 @@ internaliseParamTypes (BoundInTypes bound) pnames ts =
                                  (map (Free . Var) $ S.toList bound))
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
-                      -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
-                                       ConstParams)
-internaliseReturnType t = do
-  (ts', cm') <- internaliseEntryReturnType t
-  return (concat ts', cm')
+                      -> InternaliseM [I.TypeBase ExtShape Uniqueness]
+internaliseReturnType = fmap concat . internaliseEntryReturnType
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
 internaliseEntryReturnType :: E.TypeBase (E.DimDecl VName) ()
-                           -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
-                                            ConstParams)
+                           -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
 internaliseEntryReturnType t = do
   let ts = case E.isTupleRecord t of Just tts | not $ null tts -> tts
                                      _ -> [t]
@@ -74,12 +68,11 @@ internaliseEntryReturnType t = do
 
 internaliseType :: E.TypeBase (E.DimDecl VName) ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
-internaliseType =
-  fmap fst . runInternaliseTypeM . internaliseTypeM
+internaliseType = runInternaliseTypeM . internaliseTypeM
 
 newId :: InternaliseTypeM Int
-newId = do (i,cm) <- get
-           put (i + 1, cm)
+newId = do i <- get
+           put $ i + 1
            return i
 
 internaliseDim :: E.DimDecl VName
@@ -90,22 +83,12 @@ internaliseDim d =
     E.ConstDim n -> return $ Free $ intConst I.Int32 $ toInteger n
     E.NamedDim name -> namedDim name
   where namedDim (E.QualName _ name) = do
-          subst <- liftInternaliseM $ asks $ M.lookup name . envSubsts
+          subst <- liftInternaliseM $ lookupSubst name
           is_dim <- lookupDim name
-          is_const <- liftInternaliseM $ lookupConst name
 
-          case (is_dim, is_const, subst) of
-            (Just dim, _, _) -> return dim
-
-            (Nothing, Nothing, Just [v]) -> return $ I.Free v
-
-            (_, Just (fname, _, _, _, _), _) -> do
-              (i,cm) <- get
-              case find ((==fname) . fst) cm of
-                Just (_, known) -> return $ I.Free $ I.Var known
-                Nothing -> do new <- liftInternaliseM $ newVName $ baseString name
-                              put (i, (fname,new):cm)
-                              return $ I.Free $ I.Var new
+          case (is_dim, subst) of
+            (Just dim, _) -> return dim
+            (Nothing, Just [v]) -> return $ I.Free v
             _ -> return $ I.Free $ I.Var name
 
 internaliseTypeM :: E.StructType
@@ -155,9 +138,8 @@ internaliseConstructors cs =
                        new_ts ++ [t])
 
 internaliseSumType :: M.Map Name [E.StructType]
-                   -> InternaliseM (([I.TypeBase ExtShape Uniqueness],
-                                     M.Map Name (Int, [Int])),
-                                     ConstParams)
+                   -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
+                                    M.Map Name (Int, [Int]))
 internaliseSumType cs =
   runInternaliseTypeM $ internaliseConstructors <$>
   traverse (fmap concat . mapM internaliseTypeM) cs

@@ -454,31 +454,32 @@ checkArrIdent v = do
 -- information.
 checkProg :: Checkable lore =>
              Prog (Aliases lore) -> Either (TypeError lore) ()
-checkProg prog = do
+checkProg (Prog consts funs) = do
   let typeenv = Env { envVtable = M.empty
                     , envFtable = mempty
                     , envContext = []
                     , envCheckOp = checkOp
                     }
-  let onFunction ftable fun =
+  let onFunction ftable vtable fun =
         fmap fst $ runTypeM typeenv $
-        local (\env -> env { envFtable = ftable }) $
+        local (\env -> env { envFtable = ftable, envVtable = vtable }) $
         checkFun fun
   (ftable, _) <- runTypeM typeenv buildFtable
-  sequence_ $ parMap rpar (onFunction ftable) $ progFuns prog
+  (vtable, _) <- runTypeM typeenv { envFtable = ftable } $
+                 checkStms consts $ asks envVtable
+  sequence_ $ parMap rpar (onFunction ftable vtable) funs
   where
-    buildFtable = do table <- initialFtable prog
-                     foldM expand table $ progFuns prog
+    buildFtable = do table <- initialFtable
+                     foldM expand table funs
     expand ftable (FunDef _ name ret params _)
       | M.member name ftable =
           bad $ DupDefinitionError name
       | otherwise =
           return $ M.insert name (ret,params) ftable
 
--- The prog argument is just to disambiguate the lore.
 initialFtable :: Checkable lore =>
-                 Prog (Aliases lore) -> TypeM lore (M.Map Name (FunBinding lore))
-initialFtable _ = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
+                 TypeM lore (M.Map Name (FunBinding lore))
+initialFtable = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts
           return (fname, ([primRetType t], ps))

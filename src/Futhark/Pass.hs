@@ -9,7 +9,9 @@ module Futhark.Pass
        , liftEitherM
        , Pass (..)
        , passLongOption
+       , parPass
        , intraproceduralTransformation
+       , intraproceduralTransformationWithConsts
        ) where
 
 import Control.Monad.Writer.Strict
@@ -73,16 +75,37 @@ passLongOption = map (spaceToDash . toLower) . passName
   where spaceToDash ' ' = '-'
         spaceToDash c   = c
 
-intraproceduralTransformation :: (FunDef fromlore -> PassM (FunDef tolore))
-                              -> Prog fromlore -> PassM (Prog tolore)
-intraproceduralTransformation ft prog = do
+-- | Apply a 'PassM' operation in parallel to multiple elements,
+-- joining together the name sources and logs, and propagating any
+-- error properly.
+parPass :: (a -> PassM b) -> [a] -> PassM [b]
+parPass f as = do
   (x, log) <- modifyNameSource $ \src ->
-    let (funs, logs, srcs) = unzip3 $ parMap rpar (onFunction src) (progFuns prog)
-    in ((Prog funs, mconcat logs), mconcat srcs)
+    let (bs, logs, srcs) = unzip3 $ parMap rpar (f' src) as
+    in ((bs, mconcat logs), mconcat srcs)
 
   addLog log
   return x
 
-  where onFunction src f =
-          let ((x, log), src') = runState (runPassM (ft f)) src
-          in (x, log, src')
+  where f' src a =
+          let ((x', log), src') = runState (runPassM (f a)) src
+          in (x', log, src')
+
+intraproceduralTransformationWithConsts :: (Stms fromlore -> PassM (Stms tolore))
+                                        -> (Stms tolore -> FunDef fromlore -> PassM (FunDef tolore))
+                                        -> Prog fromlore -> PassM (Prog tolore)
+intraproceduralTransformationWithConsts ct ft (Prog consts funs) = do
+  consts' <- ct consts
+  funs' <- parPass (ft consts') funs
+  return $ Prog consts' funs'
+
+intraproceduralTransformation :: (Scope lore -> Stms lore -> PassM (Stms lore))
+                              -> Prog lore
+                              -> PassM (Prog lore)
+intraproceduralTransformation f =
+  intraproceduralTransformationWithConsts (f mempty) f'
+  where f' consts fd = do
+          stms <- f
+                  (scopeOf consts<>scopeOfFParams (funDefParams fd))
+                  (bodyStms $ funDefBody fd)
+          return fd { funDefBody = (funDefBody fd) { bodyStms = stms } }

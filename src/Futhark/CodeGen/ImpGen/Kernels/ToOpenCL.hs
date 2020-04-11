@@ -36,15 +36,27 @@ kernelsToOpenCL = translateKernels TargetOpenCL
 translateKernels :: KernelTarget
                  -> ImpKernels.Program
                  -> ImpOpenCL.Program
-translateKernels target (ImpKernels.Functions funs) =
+translateKernels target prog =
   let (prog', ToOpenCL kernels used_types sizes failures) =
-        flip runState initialOpenCL $ fmap Functions $ forM funs $ \(fname, fun) ->
-        (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
+        flip runState initialOpenCL $ do
+          let ImpKernels.Definitions
+                (ImpKernels.Constants ps consts)
+                (ImpKernels.Functions funs) = prog
+          consts' <- runReaderT (traverse (onHostOp target) consts)
+                     (nameFromString "val")
+          funs' <- forM funs $ \(fname, fun) ->
+            (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
+          return $ ImpOpenCL.Definitions
+            (ImpOpenCL.Constants ps consts')
+            (ImpOpenCL.Functions funs')
+
       kernels' = M.map fst kernels
       opencl_code = openClCode $ map snd $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target used_types
+
   in ImpOpenCL.Program opencl_code opencl_prelude kernels'
      (S.toList used_types) (cleanSizes sizes) failures prog'
+
   where genPrelude TargetOpenCL = genOpenClPrelude
         genPrelude TargetCUDA = const genCUDAPrelude
 

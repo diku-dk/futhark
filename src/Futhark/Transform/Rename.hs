@@ -56,8 +56,10 @@ runRenamer (RenameM m) src = runReader (runStateT m src) env
 -- invalid program valid.
 renameProg :: (Renameable lore, MonadFreshNames m) =>
               Prog lore -> m (Prog lore)
-renameProg prog = modifyNameSource $
-                  runRenamer $ Prog <$> mapM rename (progFuns prog)
+renameProg prog = modifyNameSource $ runRenamer $
+  renamingStms (progConsts prog) $ \consts -> do
+  funs <- mapM rename (progFuns prog)
+  return prog { progConsts = consts, progFuns = funs }
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the expression is unaffected, under the assumption that the

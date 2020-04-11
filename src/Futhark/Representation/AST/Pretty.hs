@@ -160,6 +160,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
                         DoLoop{}           -> True
                         Op{}               -> True
                         If{}               -> True
+                        Apply{}            -> True
                         BasicOp ArrayLit{} -> False
                         BasicOp Assert{}   -> True
                         _                  -> cs /= mempty
@@ -220,12 +221,10 @@ instance PrettyLore lore => Pretty (Exp lore) where
           maybeNest b | null $ bodyStms b = ppr b
                       | otherwise         = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
-  ppr (Apply fname args _ (constf, safety, _, _)) =
-    text (nameToString fname) <> constf' <> safety' <> apply (map (align . pprArg) args)
+  ppr (Apply fname args _ (safety, _, _)) =
+    text (nameToString fname) <> safety' <> apply (map (align . pprArg) args)
     where pprArg (arg, Consume) = text "*" <> ppr arg
           pprArg (arg, _)       = ppr arg
-          constf' = case constf of ConstFun -> text "<constant>"
-                                   NotConstFun -> mempty
           safety' = case safety of Unsafe -> text "<unsafe>"
                                    Safe   -> mempty
   ppr (Op op) = ppr op
@@ -254,21 +253,22 @@ instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
     annot (mapMaybe ppAnnot params) $
     text "fn" <+> ppTuple' rettype <+/>
-    parens (commasep (map ppr params)) <+>
+    align (parens (commasep (map ppr params))) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry name rettype fparams body) =
     annot (mapMaybe ppAnnot fparams) $
-    text fun <+> ppTuple' rettype <+>
-    text (nameToString name) <//>
+    text fun <+> ppTuple' rettype <+/>
+    text (nameToString name) <+>
     apply (map ppr fparams) <+>
     equals <+> nestedBlock "{" "}" (ppr body)
     where fun | isJust entry = "entry"
               | otherwise    = "fun"
 
 instance PrettyLore lore => Pretty (Prog lore) where
-  ppr = stack . punctuate line . map ppr . progFuns
+  ppr (Prog consts funs) =
+    stack $ punctuate line $ ppr consts : map ppr funs
 
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se
