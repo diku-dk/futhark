@@ -176,7 +176,7 @@ jobs:
     displayName: 'Attach Linux x86_64 tarball to GitHub Release'
     condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
     inputs:
-      gitHubConnection: diku-dk
+      gitHubConnection: futhark-github
       repositoryName: diku-dk/futhark
       assets: 'results/futhark-$version-linux-x86_64.tar.xz'
       action: edit
