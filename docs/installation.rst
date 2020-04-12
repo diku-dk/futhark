@@ -16,14 +16,22 @@ are using Nix, simply install the ``futhark`` derivation from Nixpkgs.
 Dependencies
 ------------
 
-On non-Windows, you will need to have the ``gmp`` and ``tinfo``
-libraries installed.  These are pretty common, so you may already have
-them.  On Debian-like systems (e.g. Ubuntu), use::
+The Linux binaries we distribute are statically linked and should not
+require any special libraries installed system-wide.
+
+When building from source on Linux and macOS, you will need to have
+the ``gmp`` and ``tinfo`` libraries installed.  These are pretty
+common, so you may already have them.  On Debian-like systems
+(e.g. Ubuntu), use::
 
   sudo apt install libtinfo-dev libgmp-dev
 
 If you install Futhark via a package manager (e.g. Homebrew, Nix, or
-AUR), you shouldn't need to worry about this.
+AUR), you shouldn't need to worry about any of this.
+
+Actually *running* the output of the Futhark compiler may require
+additional dependencies, for example an OpenCL library and GPU driver.
+See the documentation for the respective compiler backends.
 
 Compiling from source
 ---------------------
