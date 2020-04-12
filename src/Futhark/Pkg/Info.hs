@@ -18,13 +18,13 @@ module Futhark.Pkg.Info
   )
   where
 
-import Control.Exception
 import Control.Monad.IO.Class
 import Data.Maybe
 import Data.IORef
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text.Encoding as T
 import Data.List (foldl', intersperse)
 import qualified System.FilePath.Posix as Posix
@@ -34,17 +34,26 @@ import System.IO
 import qualified Codec.Archive.Zip as Zip
 import Data.Time (UTCTime, UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
 import System.Process.ByteString (readProcessWithExitCode)
-import Network.HTTP.Client hiding (path)
-import Network.HTTP.Simple
 
 import Futhark.Pkg.Types
 import Futhark.Util.Log
 import Futhark.Util (maybeHead)
 
--- | Catch 'HttpException's and turn them into an ordinary return
--- value.
-httpMayThrow :: IO a -> IO (Either HttpException a)
-httpMayThrow m = (Right <$> m) `catch` (pure . Left)
+-- | Download URL via shelling out to @curl@.
+curl :: String -> IO (Either String BS.ByteString)
+curl url = do
+  (code, out, err) <-
+    -- The -L option follows HTTP redirects.
+    liftIO $ readProcessWithExitCode "curl" ["-L", url] mempty
+  case code of
+    ExitFailure 127 ->
+      return $ Left $
+      "'" <> unwords ["curl", "-L", url] <> "' failed (program not found?)."
+    ExitFailure _ -> do
+      liftIO $ BS.hPutStr stderr err
+      return $ Left $ "'" <> unwords ["curl", "-L", url] <> "' failed."
+    ExitSuccess ->
+      return $ Right out
 
 -- | The manifest is stored as a monadic action, because we want to
 -- fetch them on-demand.  It would be a waste to fetch it information
@@ -97,19 +106,15 @@ downloadZipball :: (MonadLogger m, MonadIO m, MonadFail m) =>
                    T.Text -> m Zip.Archive
 downloadZipball url = do
   logMsg $ "Downloading " <> T.unpack url
-  r <- liftIO $ parseRequest $ T.unpack url
 
   let bad = fail . (("When downloading " <> T.unpack url <> ": ")<>)
-  http <- liftIO $ httpMayThrow $ httpLBS r
+  http <- liftIO $ curl $ T.unpack url
   case http of
-    Left e -> bad $ "got network error:\n" ++ show e
-    Right r' ->
-      case getResponseStatusCode r' of
-        200 ->
-          case Zip.toArchiveOrFail $ getResponseBody r' of
-            Left e -> bad $ show e
-            Right a -> return a
-        x -> bad $ "got HTTP status " ++ show x
+    Left e -> bad e
+    Right r ->
+      case Zip.toArchiveOrFail $ LBS.fromStrict r of
+        Left e -> bad $ show e
+        Right a -> return a
 
 -- | Information about a package.  The name of the package is stored
 -- separately.
@@ -177,24 +182,20 @@ ghglRevGetManifest :: (MonadIO m, MonadLogger m, MonadFail m) =>
                       T.Text -> T.Text -> T.Text -> T.Text -> GetManifest m
 ghglRevGetManifest url owner repo tag = GetManifest $ do
   logMsg $ "Downloading package manifest from " <> url
-  r <- liftIO $ parseRequest $ T.unpack url
 
   let path = T.unpack $ owner <> "/" <> repo <> "@" <>
              tag <> "/" <> T.pack futharkPkg
       msg = (("When reading " <> path <> ": ")<>)
-  http <- liftIO $ httpMayThrow $ httpBS r
+  http <- liftIO $ curl $ T.unpack url
   case http of
-    Left e -> fail $ msg $ "got network error:\n" ++ show e
+    Left e -> fail e
     Right r' ->
-      case getResponseStatusCode r' of
-        200 ->
-          case T.decodeUtf8' $ getResponseBody r' of
-            Left e -> fail $ msg $ show e
-            Right s ->
-              case parsePkgManifest path s of
-                Left e -> fail $ msg $ errorBundlePretty e
-                Right pm -> return pm
-        x -> fail $ msg $ "got HTTP status " ++ show x
+      case T.decodeUtf8' r' of
+        Left e -> fail $ msg $ show e
+        Right s ->
+          case parsePkgManifest path s of
+            Left e -> fail $ msg $ errorBundlePretty e
+            Right pm -> return pm
 
 ghglLookupCommit :: (MonadIO m, MonadLogger m, MonadFail m) =>
                     T.Text -> T.Text -> (T.Text -> T.Text)

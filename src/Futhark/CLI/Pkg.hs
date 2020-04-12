@@ -21,8 +21,6 @@ import System.IO
 import System.Console.GetOpt
 
 import qualified Codec.Archive.Zip as Zip
-import Network.HTTP.Client
-import Network.HTTP.Client.TLS
 
 import Prelude
 
@@ -360,9 +358,6 @@ doVersions = cmdMain "PKGPATH" $ \args cfg ->
 
 main :: String -> [String] -> IO ()
 main prog args = do
-  -- Ensure that we can make HTTPS requests.
-  setGlobalManager =<< newManager tlsManagerSettings
-
   -- Avoid Git asking for credentials.  We prefer failure.
   liftIO $ setEnv "GIT_TERMINAL_PROMPT" "0"
 
