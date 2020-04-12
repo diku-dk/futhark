@@ -190,7 +190,7 @@ instance MonadPkgRegistry PkgM where
 instance MonadLogger PkgM where
   addLog l = do
     verbose <- asks pkgVerbose
-    when verbose $ liftIO $ T.hPutStr stderr $ toText l
+    when verbose $ liftIO $ T.hPutStrLn stderr $ toText l
 
 runPkgM :: PkgConfig -> PkgM a -> IO a
 runPkgM cfg (PkgM m) = evalStateT (runReaderT m cfg) mempty
