@@ -63,7 +63,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
-    -- Just arr_var_dims <- isInvarTo1of2InnerDims mempty space variance arrs,
+    Just arr_var_dims <- isInvarTo1of2InnerDims mempty space variance arrs,
 
     -- get the variables on which the first result of redomap depends on
     fst_res : _      <- patternValueElements pat_redomap,
@@ -79,16 +79,17 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (bid_x, width_B) : (bid_y, height_A) : rem_outer_dims <- reverse $ unSegSpace space,
+    (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims <- reverse $ unSegSpace space,
 
     -- sanity check that the reduce part is not missing
     not (null red_nes) = do
-      let inp_A : inp_B : _ = arrs
+      let inp_A  : inp_B  : _ = arrs
+      let load_A : load_B : _ = stmsToList code1 -- TODO: probably not safe in general, since first
+                                                 -- two elements of code1 may be something else.
       let red_ne : _ = red_nes
+      let map_t1 : map_t2 : _ = map (elemType . paramAttr) (lambdaParams map_lam)
 
-      -----------------------------------------------------------------------
-      -- in this binder: host code and outer seggroup (ie. the new kernel) --
-      -----------------------------------------------------------------------
+      ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBinder $ do -- host code
 
         tk_name    <- nameFromString . pretty <$> newVName "Tk"
@@ -102,145 +103,128 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
         rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeTile
         ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeTile
 
-        tx_rx      <- letSubExp "TxRx"       $ BasicOp $ BinOp (Mul Int32) tx rx
-        ty_ry      <- letSubExp "TyRy"       $ BasicOp $ BinOp (Mul Int32) ty ry
+        tx_rx      <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx
+        ty_ry      <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32) ty ry
+
+
+        gridDim_x  <- letSubExp "gridDim_x"  =<< ceilDiv width_B  tx_rx
+        gridDim_y  <- letSubExp "gridDim_y"  =<< ceilDiv height_A ty_ry
+        grid_size  <- letSubExp "grid_size"  $ BasicOp $ BinOp (Mul Int32) gridDim_x gridDim_y
         block_size <- letSubExp "block_size" $ BasicOp $ BinOp (Mul Int32) ty tx
 
-        gridDim_x  <- letSubExp "gridDim_x" =<< ceilDiv width_B  tx_rx
-        gridDim_y  <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
-        grid_size  <- letSubExp "grid_size" $ BasicOp $ BinOp (Mul Int32) gridDim_x gridDim_y
-
-        -- gtid_x     <- newVName "gtid_x"
-        -- gtid_y     <- newVName "gtid_y"
+        bid_x      <- newVName "bid_x"
+        bid_y      <- newVName "bid_y"
         bid_flat   <- newVName "bid_flat"
 
-        -----------------------------------------------
-        -- in this binder: the entire outer seggroup --
-        -----------------------------------------------
+        ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBinder $ do
-          addStms code1 -- TODO: temp hack to bring arrays into scope before kk loop.
+          iii <- letExp "iii" $ BasicOp $ BinOp (Mul Int32) (Var bid_y) ty_ry
+          jjj <- letExp "jjj" $ BasicOp $ BinOp (Mul Int32) (Var bid_x) tx_rx
 
           [cssss] <- segMap2D "cssss" (segThread grid_size block_size)
                        ResultPrivate (tx, ty) $ \(_, _) -> do
-            css <- letSubExp "css" $ BasicOp $ Replicate (Shape [rx, ry]) red_ne
+            css <- letExp "css" $ BasicOp $ Replicate (Shape [rx, ry]) red_ne
             return [css]
 
-          -------------------------
-          -- build outer kk loop --
-          -------------------------
+          ---- build outer k loop, computing this thread's result ----
           kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
-                                                                    -- TODO: is inScopeOf enough..?
-          loop_kk <- forLoop kk_bound cssss $ \kk -> inScopeOf code1 $ do
+          loop_thd_res <- forLoop kk_bound cssss $ \kk -> inScopeOf code1 $ do -- TODO: inScopeOf? 
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
-            iii <- letSubExp "iii" $ BasicOp $ BinOp (Mul Int32) (Var bid_y) ty_ry
-            jjj <- letSubExp "jjj" $ BasicOp $ BinOp (Mul Int32) (Var bid_x) tx_rx
-
+            ---- copy A from global to shared ----
             [a_shr] <- segMap2D "A_shr" (segThread grid_size block_size)
                          ResultNoSimplify (tk, ty) $ \(thd_x, thd_y) -> do
 
-              a_shr_init <- scratch "A_shr_init" float64 [ry]  -- TODO: make type generic
+              a_shr_init <- scratch "A_shr_init" float64 [ry] -- TODO: make type generic
               loop_a_shr <- forLoop ry a_shr_init $ \i -> do
-                t0 <- letSubExp "t0" $ BasicOp $ BinOp (Mul Int32) ty (Var i)
-                i' <- letSubExp "i'" $ BasicOp $ BinOp (Add Int32) t0 (Var thd_y)
 
-                -- a_row <- letSubExp "a_row" $ BasicOp $ BinOp (Add Int32) iii i'
-                a_col <- letSubExp "a_col" $ BasicOp $ BinOp (Add Int32) (Var kk') (Var thd_x)
+                letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp i int32 *
+                                         primExpFromSubExp int32 ty + LeafExp thd_y int32)
+                addStm load_A
 
-                a_elem <- indexSingle "A_elem" inp_A [{-a_row, -}a_col] -- TODO: how to index input arrays?
-                a_shr  <- update "A_shr" a_shr_init [Var i] a_elem
-                return $ resultBody [a_shr]
+                a_col_idx <- letExp "a_col" $ BasicOp $ BinOp (Add Int32) (Var kk') (Var thd_x)
+                a_shr <- update "A_shr" a_shr_init [i]
+                           =<< index "A_elem" inp_A [a_col_idx]
+                return $ resultBody [Var a_shr]
 
               return [loop_a_shr]
 
+            ---- copy B from global to shared ----
             [b_shr] <- segMap2D "B_shr" (segThread grid_size block_size)
                          ResultNoSimplify (tk, tx) $ \(thd_x, thd_y) -> do
 
               b_shr_init <- scratch "B_shr_init" float64 [rx] -- TODO: make type generic
               loop_b_shr <- forLoop rx b_shr_init $ \j -> do
-                t0 <- letSubExp "t0" $ BasicOp $ BinOp (Mul Int32) tx (Var j)
-                j' <- letSubExp "j'" $ BasicOp $ BinOp (Add Int32) t0 (Var thd_x)
 
-                -- b_row <- letSubExp "b_row" $ BasicOp $ BinOp (Add Int32) jjj j'
-                b_col <- letSubExp "b_col" $ BasicOp $ BinOp (Add Int32) (Var kk') (Var thd_y)
+                letBindNames_ [gtid_x] =<< toExp (LeafExp jjj int32 + LeafExp j int32 *
+                                         primExpFromSubExp int32 tx + LeafExp thd_x int32)
+                addStm load_B
 
-                b_elem <- indexSingle "B_elem" inp_B [{-b_row, -}b_col] -- TODO: how to index input arrays?
-                b_shr  <- update "B_shr" b_shr_init [Var j] b_elem
-                return $ resultBody [b_shr]
+                b_col_idx <- letExp "b_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_y int32)
+
+                b_shr <- update "B_shr" b_shr_init [j]
+                           =<< index "B_elem" inp_B [b_col_idx]
+                return $ resultBody [Var b_shr]
 
               return [loop_b_shr]
 
-            ------------------------
-            -- build inner k loop --
-            ------------------------
-            loop_k <- forLoop tk cssss $ \k -> do
-              [asss, bsss] <- segMap2D "asss_bsss" (segThread grid_size block_size)
-                                ResultPrivate (tx, ty) $ \(thd_x, thd_y) -> do
+            ---- build inner k loop, updating this thread's accumulator ----
+            loop_thd_acc <- forLoop tk cssss $ \k -> do
 
-                asss_init <- scratch "asss_init" float64 [ry] -- TODO: make type generic
-                bsss_init <- scratch "bsss_init" float64 [rx] -- TODO: make type generic
-
-                asss <- forLoop ry asss_init $ \i -> do
-                  -- in kernel code: A_shr :: [Ty][Tk][Ry]
-                  -- indexed as:     A_shr[thd_y][thd_x][i]
-                  --
-                  -- here:           A_shr :: [Tk][Ty][Ry]
-                  -- indexed as:     A_shr[thd_x][thd_y][i]
-
-                  a_shr_elem <- indexSingle "A_shr_elem" a_shr $ map Var [thd_x, thd_y, i] -- TODO: dummy index
-                  asss       <- update "asss" asss_init [Var i] a_shr_elem
-                  return $ resultBody [asss]
-
-
-                bsss <- forLoop rx bsss_init $ \j -> do
-
-                  b_shr_elem <- indexSingle "B_shr_elem" b_shr $ map Var [thd_x, thd_y, j] -- TODO: dummy index
-                  bsss       <- update "bsss" bsss_init [Var j] b_shr_elem
-                  return $ resultBody [bsss]
-
-                return [asss, bsss]
-
-              [res] <- segMap2D "res" (segThread grid_size block_size)
+              [thd_acc] <- segMap2D "acc" (segThread grid_size block_size)
                          ResultPrivate (tx, ty) $ \(thd_x, thd_y) -> do
 
-                let (x, y) = (Var thd_x, Var thd_y)
+                ---- copy from A_shr and B_shr to register mem ----
+                asss_init <- scratch "asss_init" map_t1 [ry]
+                bsss_init <- scratch "bsss_init" map_t2 [rx]
 
-                as <- index "as" asss [x, y] [ry]
-                bs <- index "bs" bsss [x, y] [rx]
-                css_init <- index "css_init" cssss [x, y] [rx, ry]
+                -- in kernel code: A_shr has dims [Ty][Tk][Ry] and is indexed A_shr[thd_y][thd_x][i]
+                -- here:           A_shr has dims [Tk][Ty][Ry] and is indexed A_shr[thd_x][thd_y][i]
+                asss <- forLoop ry asss_init $ \i -> do
+                  asss <- update "asss" asss_init [i] =<<
+                    index "A_shr_elem" a_shr [thd_x, thd_y, i] -- TODO: dummy index (?)
+                  return $ resultBody [Var asss]
+
+                bsss <- forLoop rx bsss_init $ \j -> do
+                  bsss <- update "bsss" bsss_init [j] =<<
+                    index "B_shr_elem" b_shr [thd_x, thd_y, j] -- TODO: dummy index (?)
+                  return $ resultBody [Var bsss]
+
+
+                ---- redomap ----
+                as <- indexSubArr "as" asss [thd_x, thd_y] [ry]
+                bs <- indexSubArr "bs" bsss [thd_x, thd_y] [rx]
+                css_init <- indexSubArr "css_init" cssss [thd_x, thd_y] [rx, ry]
 
                 css <- forLoop ry css_init $ \i -> do
 
-                  as_elem <- indexSingle "as_elem" as [Var i]
-
+                  a <- index "a" as [i]
                   css <- forLoop rx css_init $ \j -> do
 
-                    bs_elem  <- indexSingle "bs_elem" bs [Var j]
-                    css_elem <- indexSingle "css_elem" css_init [Var i, Var j]
+                    b <- index "b" bs [j]
+                    c <- index "c" css_init [i, j]
 
                     map_res  <- newVName "map_res"
                     map_lam' <- renameLambda map_lam
                     red_lam' <- renameLambda red_lam
 
-                    rebound_map_stms <- rebindLambda map_lam' ([as_elem,  bs_elem], map_res)
-                    rebound_red_stms <- rebindLambda red_lam' ([css_elem, map_res], css_elem)
+                    addStms $ rebindLambda map_lam' [a, b] map_res
+                           <> rebindLambda red_lam' [c, map_res] c
 
-                    addStms rebound_map_stms
-                    addStms rebound_red_stms
+                    css <- update "css" css_init [i, j] c
 
-                    css <- update "css" css_init [Var i, Var j] css_elem
-
-                    return $ resultBody [css] -- TODO: what should be returned in these three?
-                  return $ resultBody [css]
+                    return $ resultBody [Var css] -- TODO: what should be returned in these three?
+                  return $ resultBody [Var css]
                 return [css]
 
-              return $ resultBody [Var res] -- dummy
+              -- TODO: where to put code2..?
+              return $ resultBody [Var thd_acc]
             --------------- END inner k loop ----------------
 
-            return $ resultBody [loop_k]
+            return $ resultBody [Var loop_thd_acc]
           --------------- END outer kk loop ---------------
 
-          return [Returns ResultNoSimplify loop_kk]
+          return [Returns ResultNoSimplify $ Var loop_thd_res] -- TODO: dummy; should use new KernelResult
         --------------- END outer seggroup ---------------
 
         return $ Let pat aux $ Op $ SegOp $
@@ -252,11 +236,10 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
       ------------------------------------------------------------------------
 
       trace (
-              _pretty old_kbody  ++ "\n" ++
+              -- _pretty old_kbody  ++ "\n" ++
                pretty host_stms  ++ "\n" ++
               _pretty new_kernel ++
             "") $ return $ Just (host_stms, new_kernel)
-
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
@@ -285,77 +268,50 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
               Just (ss Seq.|> stm', tab)
           | otherwise = Nothing
 
-
         ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
         ceilDiv x y = eDivRoundingUp Int32 (eSubExp x) (eSubExp y)
-
 
         segThread :: SubExp -> SubExp -> SegLevel
         segThread grid_size block_size =
           SegThread (Count grid_size) (Count block_size) SegNoVirt
 
-
-        -- segGroup :: SubExp -> SubExp -> SegLevel
-        -- segGroup grid_size block_size =
-        --   SegGroup (Count grid_size) (Count block_size) SegNoVirt
-
-
-        -- slice2D :: VName           -- array to slice
-        --         -> SubExp          -- tile size
-        --         -> (VName, VName)  -- ltid_x, ltid_y
-        --         -> Binder Kernels [SubExp]
-        -- slice2D arr tile_size (x, y) = do
-        --   x' <- letSubExp (baseString x) $ BasicOp $ BinOp (Mul Int32) (Var x) tile_size
-        --   return [x', Var y]
-
-
         scratch :: MonadBinder m => String -> PrimType -> [SubExp] -> m VName
-        -- scratch se_name t shape = do
-        --   letExp se_name $ BasicOp $ Scratch t shape
         scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
-
-        -- index an array, slicing the entirety of some inner dimensions.
-        index :: MonadBinder m => String -> VName -> [SubExp] -> [SubExp] -> m VName
-        index se_desc arr outer_indices inner_dims =
+        -- index a subarray given by outer_indices, slicing the entirety of
+        -- any inner dimensions given in inner_dims.
+        indexSubArr :: MonadBinder m => String -> VName -> [VName] -> [SubExp] -> m VName
+        indexSubArr se_desc arr outer_indices inner_dims =
           letExp se_desc $ BasicOp $ Index arr indices
           where
-            inner_slices = map (\inner_dim -> DimSlice  (intConst Int32 0)
-                                              inner_dim (intConst Int32 1))
+            inner_slices = map (\inner_dim -> DimSlice (intConst Int32 0)
+                                             inner_dim (intConst Int32 1))
                                inner_dims
-            indices = map DimFix outer_indices ++ inner_slices
+            indices = map (DimFix . Var) outer_indices ++ inner_slices
 
+        index :: MonadBinder m => String -> VName -> [VName] -> m VName
+        index se_desc arr indices = indexSubArr se_desc arr indices []
 
-        indexSingle :: MonadBinder m => String -> VName -> [SubExp] -> m VName
-        indexSingle se_desc arr indices = index se_desc arr indices []
-
-
-        -- update :: MonadBinder m => String -> VName -> [SubExp] -> SubExp -> m SubExp
-        -- update se_desc arr indices new_elem =
-        --   letSubExp se_desc $ BasicOp $ Update arr (map DimFix indices) new_elem
-        update :: MonadBinder m => String -> VName -> [SubExp] -> VName -> m SubExp
+        update :: MonadBinder m => String -> VName -> [VName] -> VName -> m VName -- SubExp
         update se_desc arr indices new_elem =
-          letSubExp se_desc $ BasicOp $ Update arr (map DimFix indices) (Var new_elem)
+          letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) (Var new_elem)
 
-
-        forLoop :: SubExp    -- loop var bound
-                -> VName     -- merge
-                -> (VName -> Binder Kernels (Body Kernels)) -- loop var -> loop body
-                -> Binder Kernels SubExp
+        forLoop :: SubExp
+                -> VName
+                -> (VName -> Binder Kernels (Body Kernels))
+                -> Binder Kernels VName
         forLoop i_bound merge body = do
-          i <- newVName "i"
-
+          i <- newVName "i"     -- TODO: could give this in function parameter
           let desc = "loop_" ++ baseString i
 
-          merge_t  <- lookupType merge
-          merge_se <- letSubExp "merge_se" $ BasicOp $ SubExp $ Var merge
+          merge_t <- lookupType merge
 
           let loop_form = ForLoop i Int32 i_bound []
-          loop_init <- newParam (desc ++ "_init") $ toDecl merge_t Unique
           loop_body <- runBodyBinder $ inScopeOf loop_form $ body i
+          loop_init <- newParam (desc ++ "_init") $ toDecl merge_t Unique
 
-          return =<< letSubExp desc $ DoLoop [] [(loop_init, merge_se)]
-                                             loop_form loop_body
+          return =<< letExp desc $ DoLoop [] [(loop_init, Var merge)]
+                                          loop_form loop_body
 
         -- given a lambda "lam", a list "new_params" of new
         -- parameters which should be applied to the lambda,
@@ -363,15 +319,15 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
         -- be bound to:
         --   creates Stms corresponding to binding of new_params,
         --   lambda body, and binding of lambda result to res_name.
-        rebindLambda :: MonadBinder m =>
-                        Lambda Kernels
-                     -> ([VName], VName)
-                     -> m (Stms Kernels)
-        rebindLambda lam (new_params, res_name) = return $
+        rebindLambda :: Lambda Kernels
+                     -> [VName] 
+                     -> VName
+                     -> Stms Kernels
+        rebindLambda lam new_params res_name =
           (stmsFromList $
             map (\(ident, new_param) ->
                       mkLet [] [ident] $ BasicOp $ SubExp $ Var new_param)
-                (zip idents new_params))
+                $ zip idents new_params)
           <> bodyStms lam_body
           <> oneStm (mkLet [] [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res)
           where
@@ -382,13 +338,11 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
             lam_res : _ = bodyResult lam_body
 
 
-
 mmmTiling2D _ = do trace "nej" $ return Nothing
 
 ---------------
 --- HELPERS ---
 ---------------
-
 
 -- | Tries to identify the following pattern:
 --   code followed by some Screma followed by more code.
@@ -432,24 +386,24 @@ isTileableRedomap stm
 --   each of the two innermost parallel dimensions, there is at
 --   least one streamed array variant to it. The result is the
 --   number of the only variant parallel dimension for each array.
--- isInvarTo1of2InnerDims :: Names -> SegSpace -> VarianceTable -> [VName]
---                        -> Maybe [Int]
--- isInvarTo1of2InnerDims branch_variant kspace variance arrs =
---   let inner_perm0 = map varToOnly1of2InnerDims arrs
---       inner_perm  = catMaybes inner_perm0
---       ok1 = elem 0 inner_perm && elem 1 inner_perm
---       ok2 = length inner_perm0 == length inner_perm
---   in  if ok1 && ok2 then Just inner_perm else Nothing
---   where varToOnly1of2InnerDims :: VName -> Maybe Int
---         varToOnly1of2InnerDims arr = do
---           (j, _) : (i, _) : _ <- Just $ reverse $ unSegSpace kspace
---           let variant_to       = M.findWithDefault mempty arr variance
---               branch_invariant = not $ nameIn j branch_variant ||
---                                        nameIn i branch_variant
---           if not branch_invariant then Nothing     -- if i or j in branch_variant; return nothing
---           else if nameIn i variant_to && not (nameIn j variant_to) then Just 0
---           else if nameIn j variant_to && not (nameIn i variant_to) then Just 1
---           else Nothing
+isInvarTo1of2InnerDims :: Names -> SegSpace -> VarianceTable -> [VName]
+                       -> Maybe [Int]
+isInvarTo1of2InnerDims branch_variant kspace variance arrs =
+  let inner_perm0 = map varToOnly1of2InnerDims arrs
+      inner_perm  = catMaybes inner_perm0
+      ok1 = elem 0 inner_perm && elem 1 inner_perm
+      ok2 = length inner_perm0 == length inner_perm
+  in  if ok1 && ok2 then Just inner_perm else Nothing
+  where varToOnly1of2InnerDims :: VName -> Maybe Int
+        varToOnly1of2InnerDims arr = do
+          (j, _) : (i, _) : _ <- Just $ reverse $ unSegSpace kspace
+          let variant_to       = M.findWithDefault mempty arr variance
+              branch_invariant = not $ nameIn j branch_variant ||
+                                       nameIn i branch_variant
+          if not branch_invariant then Nothing     -- if i or j in branch_variant; return nothing
+          else if nameIn i variant_to && not (nameIn j variant_to) then Just 0
+          else if nameIn j variant_to && not (nameIn i variant_to) then Just 1
+          else Nothing
 
 
 varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
@@ -496,48 +450,22 @@ segMap2D :: String           -- desc
          -> ResultManifest   -- manifest
          -> (SubExp, SubExp) -- (dim_x, dim_y)
          -> ((VName, VName)  -- f
-             -> Binder Kernels [SubExp])
+             -> Binder Kernels [VName])
          -> Binder Kernels [VName]
 segMap2D desc lvl manifest (dim_x, dim_y) f = do
   ltid_x    <- newVName "ltid_x"
   ltid_y    <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let space_ = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
+  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
   ((ts, res), stms) <- runBinder $ do
     res <- f (ltid_x, ltid_y)
-    ts  <- mapM subExpType res
+    ts  <- mapM lookupType res
     return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
+  Body _ stms' res' <- renameBody $ mkBody stms $ map Var res
 
   letTupExp desc $ Op $ SegOp $
-    SegMap lvl space_ ts $ KernelBody () stms' $ map (Returns manifest) res'
-
-
--- Reconstruct the original gtid_s from block and thread indices.
--- reconstructGtids :: SubExp -> (VName, VName) -> (VName, VName) -> (VName, VName)
---                     -> Binder Kernels ()
--- reconstructGtids tile_size (gtid_x, gtid_y) (bid_x, bid_y) (ltid_x, ltid_y) = do
---   -- Reconstruct the original gtids from bid_x/bid_y and ltid_x/ltid_y.
---   letBindNames_ [gtid_x] =<<
---     toExp (LeafExp bid_x int32 * primExpFromSubExp int32 tile_size +
---            LeafExp ltid_x int32)
---   letBindNames_ [gtid_y] =<<
---     toExp (LeafExp bid_y int32 * primExpFromSubExp int32 tile_size +
---            LeafExp ltid_y int32)
-
-
--- we can only generate normalized loops, so this is
--- used to reconstruct loop variables in anormal loops.
--- reconstructLoopVar :: VName  -- loop variable
---                    -> SubExp -- tile size
---                    -> VName  -- thread index
---                    -> Binder Kernels ()
--- reconstructLoopVar i tile_size tid =
---   letBindNames_ [i] =<<
---     toExp (LeafExp i int32 * primExpFromSubExp int32 tile_size +
---            LeafExp tid int32)
-
+    SegMap lvl segspace ts $ KernelBody () stms' $ map (Returns manifest) res'
 
 -- | Translates an LParam to an FParam
 -- translLParamToFParam :: LParam Kernels -> FParam Kernels
@@ -569,13 +497,13 @@ from A to A_shr:
   assuming normalized loop variables i and kk, and assuming Tk == Tx == Ty:
                       A[blockIdx.y * Ty * Ry + i * Ty + threadIdx.y][kk * Tk + threadIdx.x]
 
-  setting iii := bid_y * Ty * Ry, i' := i * Ty + threadIdx.y, and kk' := kk * Tk:
+  setting iii := gtid_y * Ty * Ry, i' := i * Ty + threadIdx.y, and kk' := kk * Tk:
                       A[iii + i'][kk' + thd_x]
 
   t0 := i * ty
   i'  := t0 + thd_y
 
-  iii   = bid_y * ty_ry
+  iii   = gtid_y * ty_ry
   a_row = iii + i'
 
   a_col = kk' + thd_x, where kk' == kk * Tk
@@ -593,7 +521,7 @@ from B to B_shr, assuming B is transposed in global memory:
   t0 := j * tx
   j'  := t0 + thd_x
 
-  jjj   := bid_x * tx_rx
+  jjj   := gtid_x * tx_rx
   b_row := jjj + j'
   b_col := kk' + thd_y, where kk' := kk * Tk is set earlier
 -}
@@ -635,8 +563,8 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (bid_x, width_B) : (bid_y, height_A) : rem_outer_dims <- reverse $ unSegSpace space,
+    (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims <- reverse $ unSegSpace space,
 
     -- sanity check that the reduce part is not missing
     not (null red_nes) = do
-      -}
+     -}
