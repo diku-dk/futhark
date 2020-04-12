@@ -174,11 +174,9 @@ jobs:
     failOnStderr: true
 
   - script: |
-      mkdir result
-      echo test > result/futhark-$(version)-linux-x86_64.tar.xz
-#      curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
-#      . $HOME/.nix-profile/etc/profile.d/nix.sh
-#      nix-build --argstr suffix $(version)-linux-x86_64
+      curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
+      . $HOME/.nix-profile/etc/profile.d/nix.sh
+      nix-build --argstr suffix $(version)-linux-x86_64
 
   - task: GithubRelease@0
     displayName: 'Attach Linux x86_64 tarball to GitHub Release'
