@@ -37,9 +37,6 @@ standardPipeline =
          , inlineFunctions
          , simplifySOACS
          , performCSE True
-         , inlineConstants
-         , simplifySOACS
-         , performCSE True
          , simplifySOACS
            -- We run fusion twice
          , fuseSOACs

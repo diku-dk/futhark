@@ -54,6 +54,7 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyBody
        , SimplifiedBody
 
+       , hoistStms
        , blockIf
 
        , module Futhark.Optimise.Simplify.Lore
@@ -430,11 +431,6 @@ blockIf block m = do
   (blocked, hoisted) <- hoistStms rules block vtable usages stms
   return ((blocked, x), hoisted)
 
-insertAllStms :: SimplifiableLore lore =>
-                 SimpleM lore (SimplifiedBody lore Result)
-              -> SimpleM lore (Body (Wise lore))
-insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
-
 hasFree :: Attributes lore => Names -> BlockPred lore
 hasFree ks _ _ need = ks `namesIntersect` freeIn need
 
@@ -463,8 +459,6 @@ cheapExp DoLoop{}                 = False
 cheapExp (If _ tbranch fbranch _) = all cheapStm (bodyStms tbranch) &&
                                     all cheapStm (bodyStms fbranch)
 cheapExp (Op op)                  = cheapOp op
-cheapExp (Apply _ _ _ (constf, _, _, _)) =
-  constf == ConstFun
 cheapExp _                        = True -- Used to be False, but
                                          -- let's try it out.
 
@@ -513,7 +507,6 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       -- possible.
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp ArrayLit{})) = False
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp SubExp{})) = False
-      isNotHoistableBnd _ _ _ (Let _ _ (Apply _ _ _ (ConstFun, _, _, _))) = False
       isNotHoistableBnd nms _ _ stm = not (hasPatName nms stm)
 
       block = branch_blocker `orIf`
@@ -871,10 +864,18 @@ instance Simplifiable Certificates where
               Just (Var idd', _) -> return [idd']
               _ -> return [idd]
 
+
+insertAllStms :: SimplifiableLore lore =>
+                 SimpleM lore (SimplifiedBody lore Result)
+              -> SimpleM lore (Body (Wise lore))
+insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
+
+
 simplifyFun :: SimplifiableLore lore =>
                FunDef lore -> SimpleM lore (FunDef (Wise lore))
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
+  params' <- mapM (simplifyParam simplify) params
   let ds = map diet (retTypeValues rettype')
   body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
-  return $ FunDef entry fname rettype' params body'
+  return $ FunDef entry fname rettype' params' body'

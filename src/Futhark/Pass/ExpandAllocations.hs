@@ -36,18 +36,23 @@ import Futhark.Util (mapAccumLM)
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $
-  fmap Prog . mapM transformFunDef . progFuns
+  \(Prog consts funs) -> do
+    consts' <-
+      modifyNameSource $ runState $ runReaderT (transformStms consts) mempty
+    Prog consts' <$> mapM (transformFunDef $ scopeOf consts') funs
   -- Cannot use intraproceduralTransformation because it might create
   -- duplicate size keys (which are not fixed by renamer, and size
   -- keys must currently be globally unique).
 
 type ExpandM = ReaderT (Scope ExplicitMemory) (State VNameSource)
 
-transformFunDef :: FunDef ExplicitMemory -> PassM (FunDef ExplicitMemory)
-transformFunDef fundec = do
+transformFunDef :: Scope ExplicitMemory -> FunDef ExplicitMemory
+                -> PassM (FunDef ExplicitMemory)
+transformFunDef scope fundec = do
   body' <- modifyNameSource $ runState $ runReaderT m mempty
   return fundec { funDefBody = body' }
-  where m = inScopeOf fundec $ transformBody $ funDefBody fundec
+  where m = localScope scope $ inScopeOf fundec $
+            transformBody $ funDefBody fundec
 
 transformBody :: Body ExplicitMemory -> ExpandM (Body ExplicitMemory)
 transformBody (Body () stms res) = Body () <$> transformStms stms <*> pure res
@@ -291,7 +296,8 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
     sliceKernelSizes num_threads variant_sizes kspace kstms
   -- Note the recursive call to expand allocations inside the newly
   -- produced kernels.
-  slice_stms_tmp <- ExplicitMemory.simplifyStms =<< explicitAllocationsInStms slice_stms
+  (_, slice_stms_tmp) <-
+    ExplicitMemory.simplifyStms =<< explicitAllocationsInStms slice_stms
   slice_stms' <- transformStms slice_stms_tmp
 
   let variant_allocs' :: [(VName, (SubExp, SubExp, Space))]

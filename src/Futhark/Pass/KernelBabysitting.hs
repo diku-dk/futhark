@@ -26,21 +26,20 @@ import Futhark.Util
 babysitKernels :: Pass Kernels Kernels
 babysitKernels = Pass "babysit kernels"
                  "Transpose kernel input arrays for better performance." $
-                 intraproceduralTransformation transformFunDef
-
-transformFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-transformFunDef fundec = do
-  (body', _) <- modifyNameSource $ runState (runBinderT m M.empty)
-  return fundec { funDefBody = body' }
-  where m = inScopeOf fundec $
-            transformBody mempty $ funDefBody fundec
+                 intraproceduralTransformation onStms
+  where onStms scope stms = do
+          let m = localScope scope $ transformStms mempty stms
+          fmap fst $ modifyNameSource $ runState (runBinderT m M.empty)
 
 type BabysitM = Binder Kernels
 
+transformStms :: ExpMap -> Stms Kernels -> BabysitM (Stms Kernels)
+transformStms expmap stms = collectStms_ $ foldM_ transformStm expmap stms
+
 transformBody :: ExpMap -> Body Kernels -> BabysitM (Body Kernels)
-transformBody expmap (Body () bnds res) = insertStmsM $ do
-  foldM_ transformStm expmap bnds
-  return $ resultBody res
+transformBody expmap (Body () stms res) = do
+  stms' <- transformStms expmap stms
+  return $ Body () stms' res
 
 -- | Map from variable names to defining expression.  We use this to
 -- hackily determine whether something is transposed or otherwise

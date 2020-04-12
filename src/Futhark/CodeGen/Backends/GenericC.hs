@@ -234,9 +234,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           error "The default compiler cannot compile extended operations"
 
 
-newtype CompilerEnv op s = CompilerEnv {
-    envOperations :: Operations op s
-  }
+newtype CompilerEnv op s = CompilerEnv
+  { envOperations :: Operations op s }
 
 newtype CompilerAcc op s = CompilerAcc {
     accItems :: DL.DList C.BlockItem
@@ -1328,9 +1327,9 @@ compileProg :: MonadFreshNames m =>
             -> String
             -> [Space]
             -> [Option]
-            -> Functions op
+            -> Definitions op
             -> m CParts
-compileProg ops extra header_extra spaces options (Functions funs) = do
+compileProg ops extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
         runCompilerM ops src () compileProg'
@@ -1431,6 +1430,11 @@ int main(int argc, char** argv) {
   struct futhark_context *ctx = futhark_context_new(cfg);
   assert (ctx != NULL);
 
+  char* error = futhark_context_get_error(ctx);
+  if (error != NULL) {
+    panic(1, "%s", error);
+  }
+
   if (entry_point != NULL) {
     int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
     entry_point_fun *entry_point_fun = NULL;
@@ -1501,12 +1505,17 @@ $edecls:entry_point_decls
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
     where
       compileProg' = do
+          let Definitions consts (Functions funs) = prog
+
           (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
 
-          (prototypes, definitions) <- unzip <$> mapM compileFun funs
+          get_consts <- compileConstants consts
+
+          (prototypes, definitions) <- unzip <$> mapM (compileFun get_consts) funs
 
           mapM_ earlyDecl memstructs
-          entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
+          entry_points <-
+            mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
           extra
           mapM_ earlyDecl $ concat memfuns
           profilereport <- gets $ DL.toList . compProfileItems
@@ -1538,8 +1547,64 @@ $edecls:entry_point_decls
       lock_h   = $(embedStringFile "rts/c/lock.h")
       tuning_h = $(embedStringFile "rts/c/tuning.h")
 
-compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun (fname, Function _ outputs inputs body _ _) = do
+compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
+compileConstants (Constants ps init_consts) = do
+  ctx_ty <- contextType
+  const_fields <- mapM constParamField ps
+  contextField "constants" [C.cty|struct { $sdecls:const_fields }|] Nothing
+  earlyDecl [C.cedecl|int init_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|int free_constants($ty:ctx_ty*);|]
+
+  -- We locally define macros for the constants, so that when we
+  -- generate assignments to local variables, we actually assign into
+  -- the constants struct.  This is not needed for functions, because
+  -- they can only read constants, not write them.
+  let (defs, undefs) = unzip $ map constMacro ps
+  init_consts' <- blockScope $ do
+                    mapM_ resetMemConst ps
+                    compileCode init_consts
+  libDecl [C.cedecl|int init_constants($ty:ctx_ty *ctx) {
+      $items:defs
+      $items:init_consts'
+      $items:undefs
+      return 0;
+    }|]
+
+  free_consts <- collect $ mapM_ freeConst ps
+  libDecl [C.cedecl|int free_constants($ty:ctx_ty *ctx) {
+      $items:free_consts
+      return 0;
+    }|]
+
+  mapM getConst ps
+
+  where constParamField (ScalarParam name bt) = do
+          let ctp = primTypeToCType bt
+          return [C.csdecl|$ty:ctp $id:name;|]
+        constParamField (MemParam name space) = do
+          ty <- memToCType space
+          return [C.csdecl|$ty:ty $id:name;|]
+
+        constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
+          where p' = pretty (C.toIdent (paramName p) mempty)
+                def = "#define " ++ p' ++ " (" ++ "ctx->constants." ++ p' ++ ")"
+                undef = "#undef " ++ p'
+
+        resetMemConst ScalarParam{} = return ()
+        resetMemConst (MemParam name space) = resetMem name space
+
+        freeConst ScalarParam{} = return ()
+        freeConst (MemParam name space) = unRefMem [C.cexp|ctx->constants.$id:name|] space
+
+        getConst (ScalarParam name bt) = do
+          let ctp = primTypeToCType bt
+          return [C.citem|$ty:ctp $id:name = ctx->constants.$id:name;|]
+        getConst (MemParam name space) = do
+          ty <- memToCType space
+          return [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
+
+compileFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
+compileFun get_constants (fname, Function _ outputs inputs body _ _) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
   body' <- blockScope $ compileFunBody out_ptrs outputs body
@@ -1548,6 +1613,7 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
                                                    $params:outparams, $params:inparams);|],
           [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
                                                  $params:outparams, $params:inparams) {
+             $items:get_constants
              $items:body'
              return 0;
 }|])

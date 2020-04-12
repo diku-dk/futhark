@@ -43,9 +43,12 @@ simplifyExplicitMemory =
         blockAllocs _ _ _ = False
 
 simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
-                Stms ExplicitMemory -> m (Stms ExplicitMemory)
-simplifyStms =
+                Stms ExplicitMemory -> m (ST.SymbolTable (Wise ExplicitMemory),
+                                          Stms ExplicitMemory)
+simplifyStms stms = do
+  scope <- askScope
   Simplify.simplifyStms simpleExplicitMemory callKernelRules blockers
+    scope stms
 
 isResultAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isResultAlloc _ usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc{})) =

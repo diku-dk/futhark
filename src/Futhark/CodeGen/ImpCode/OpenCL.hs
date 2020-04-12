@@ -42,7 +42,7 @@ data Program = Program { openClProgram :: String
                          -- ^ Runtime-configurable constants.
                        , openClFailures :: [FailureMsg]
                          -- ^ Assertion failure error messages.
-                       , hostFunctions :: Functions OpenCL
+                       , hostDefinitions :: Definitions OpenCL
                        }
 
 -- | Something that can go wrong in a kernel.  Part of the machinery

@@ -26,14 +26,14 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Util
 
 bindingParams :: [E.TypeParam] -> [E.Pattern]
-              -> (ConstParams -> [I.FParam] -> [[I.FParam]] -> InternaliseM a)
+              -> ([I.FParam] -> [[I.FParam]] -> InternaliseM a)
               -> InternaliseM a
 bindingParams tparams params m = do
   flattened_params <- mapM flattenPattern params
   let (params_idents, params_types) = unzip $ concat flattened_params
       bound = boundInTypes tparams
       param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
-  (params_ts, cm) <- internaliseParamTypes bound param_names params_types
+  params_ts <- internaliseParamTypes bound param_names params_types
   let num_param_idents = map length flattened_params
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
 
@@ -49,22 +49,22 @@ bindingParams tparams params m = do
       shape_subst = M.fromList [ (I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params ]
   bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
     I.localScope (I.scopeOfFParams $ shape_params++concat valueparams) $
-    substitutingVars shape_subst $ m cm shape_params $ chunks num_param_ts (concat valueparams)
+    substitutingVars shape_subst $ m shape_params $ chunks num_param_ts (concat valueparams)
 
 bindingLambdaParams :: [E.Pattern] -> [I.Type]
-                    -> (ConstParams -> [I.LParam] -> InternaliseM a)
+                    -> ([I.LParam] -> InternaliseM a)
                     -> InternaliseM a
 bindingLambdaParams params ts m = do
   (params_idents, params_types) <-
     unzip . concat <$> mapM flattenPattern params
   let param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
-  (params_ts, cm) <- internaliseParamTypes mempty param_names params_types
+  params_ts <- internaliseParamTypes mempty param_names params_types
 
   let ascript_substs = lambdaShapeSubstitutions (concat params_ts) ts
 
   bindingFlatPattern params_idents ts $ \params' ->
     local (\env -> env { envSubsts = ascript_substs `M.union` envSubsts env }) $
-    I.localScope (I.scopeOfLParams $ concat params') $ m cm $ concat params'
+    I.localScope (I.scopeOfLParams $ concat params') $ m $ concat params'
 
 processFlatPattern :: Show t => [(E.Ident,VName)] -> [t]
                    -> InternaliseM ([[I.Param t]], VarSubstitutions)
@@ -95,10 +95,8 @@ processFlatPattern x y = processFlatPattern' [] x y
 
     internaliseBindee :: (E.Ident, VName) -> InternaliseM [(VName, I.DeclExtType)]
     internaliseBindee (bindee, name) = do
-      -- XXX: we gotta be screwing up somehow by ignoring the extra
-      -- return values.  If not, why not?
-      (tss, _) <- internaliseParamTypes nothing_bound mempty
-                  [flip E.setAliases () $ E.unInfo $ E.identType bindee]
+      tss <- internaliseParamTypes nothing_bound mempty
+             [flip E.setAliases () $ E.unInfo $ E.identType bindee]
       case concat tss of
         [t] -> return [(name, t)]
         tss' -> forM tss' $ \t -> do
@@ -148,15 +146,15 @@ flattenPattern = flattenPattern'
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 
 stmPattern :: E.Pattern -> [I.ExtType]
-           -> (ConstParams -> [VName] -> MatchPattern -> InternaliseM a)
+           -> ([VName] -> MatchPattern -> InternaliseM a)
            -> InternaliseM a
 stmPattern pat ts m = do
   (pat', pat_types) <- unzip <$> flattenPattern pat
   (ts',_) <- instantiateShapes' ts
-  (pat_types', cm) <- internaliseParamTypes mempty mempty pat_types
+  pat_types' <- internaliseParamTypes mempty mempty pat_types
   let pat_types'' = map I.fromDecl $ concat pat_types'
   let addShapeStms l =
-        m cm (map I.paramName $ concat l) (matchPattern pat_types'')
+        m (map I.paramName $ concat l) (matchPattern pat_types'')
   bindingFlatPattern pat' ts' addShapeStms
 
 matchPattern :: [I.ExtType] -> MatchPattern

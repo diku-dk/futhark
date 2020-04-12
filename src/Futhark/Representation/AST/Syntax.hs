@@ -43,7 +43,6 @@ module Futhark.Representation.AST.Syntax
   , LoopForm (..)
   , IfAttr (..)
   , IfSort (..)
-  , ConstFun (..)
   , Safety (..)
   , LambdaT(..)
   , Lambda
@@ -275,7 +274,7 @@ data ExpT lore
   = BasicOp (BasicOp lore)
     -- ^ A simple (non-recursive) operation.
 
-  | Apply  Name [(SubExp, Diet)] [RetType lore] (ConstFun, Safety, SrcLoc, [SrcLoc])
+  | Apply  Name [(SubExp, Diet)] [RetType lore] (Safety, SrcLoc, [SrcLoc])
 
   | If     SubExp (BodyT lore) (BodyT lore) (IfAttr (BranchType lore))
 
@@ -288,10 +287,6 @@ data ExpT lore
 deriving instance Annotations lore => Eq (ExpT lore)
 deriving instance Annotations lore => Show (ExpT lore)
 deriving instance Annotations lore => Ord (ExpT lore)
-
--- | Does this function call actually represent a reference to a
--- run-time constant?  This has implications for inlining.
-data ConstFun = ConstFun | NotConstFun deriving (Eq, Ord, Show)
 
 -- | Whether something is safe or unsafe (mostly function calls, and
 -- in the context of whether operations are dynamically checked).
@@ -377,5 +372,14 @@ data EntryPointType = TypeUnsigned
                     deriving (Eq, Show, Ord)
 
 -- | An entire Futhark program.
-newtype Prog lore = Prog { progFuns :: [FunDef lore] }
-                    deriving (Eq, Ord, Show)
+data Prog lore = Prog
+  { progConsts :: Stms lore
+    -- ^ Top-level constants that are computed at program startup, and
+    -- which are in scope inside all functions.
+
+  , progFuns :: [FunDef lore]
+    -- ^ The functions comprising the program.  All funtions are also
+    -- available in scope in the definitions of the constants, so be
+    -- careful not to introduce circular dependencies (not currently
+    -- checked).
+  } deriving (Eq, Ord, Show)

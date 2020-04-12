@@ -12,7 +12,7 @@ module Futhark.Analysis.Alias
          -- * Ad-hoc utilities
        , AliasTable
        , analyseFun
-       , analyseStm
+       , analyseStms
        , analyseExp
        , analyseBody
        , analyseLambda
@@ -28,7 +28,8 @@ import Futhark.Representation.Aliases
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis :: (Attributes lore, CanBeAliased (Op lore)) =>
                  Prog lore -> Prog (Aliases lore)
-aliasAnalysis = Prog . map analyseFun . progFuns
+aliasAnalysis (Prog consts funs) =
+  Prog (fst (analyseStms mempty consts)) (map analyseFun funs)
 
 analyseFun :: (Attributes lore, CanBeAliased (Op lore)) =>
               FunDef lore -> FunDef (Aliases lore)

@@ -29,7 +29,7 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
 
-type Program = Functions HostOp
+type Program = Imp.Definitions HostOp
 type Function = Imp.Function HostOp
 -- | Host-level code that can call kernels.
 type Code = Imp.Code HostOp
