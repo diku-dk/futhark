@@ -13,6 +13,9 @@ trigger:
     include:
       - v*
 
+variables:
+  System.Debug: true
+
 pool:
   vmImage: ubuntu-18.04
 
