@@ -178,7 +178,7 @@ jobs:
     inputs:
       gitHubConnection: release
       repositoryName: diku-dk/futhark
-      assets: 'results/futhark-$(version)-linux-x86_64.tar.xz'
+      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
       action: edit
       target: '$(Build.SourceVersion)'
       tag: '$(githubTag)'
