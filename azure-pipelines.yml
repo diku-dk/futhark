@@ -176,13 +176,14 @@ jobs:
   - task: GithubRelease@0
     displayName: 'Attach Linux x86_64 tarball to GitHub Release'
     inputs:
-      gitHubConnection: release
-      repositoryName: diku-dk/futhark
+      gitHubConnection: 'release'
+      repositoryName: 'diku-dk/futhark'
       assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
-      action: edit
+      action: 'edit'
+      target: '$(build.sourceVersion)'
       tag: '$(githubTag)'
-      addChangeLog: false
-      assetUploadMode: replace
+      tagSource: 'Git tag'
+      assetUploadMode: 'replace'
 
   - task: CopyFilesOverSSH@0
     inputs:
