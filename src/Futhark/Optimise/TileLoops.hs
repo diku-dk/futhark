@@ -1,4 +1,4 @@
-{-egmap LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | Perform a restricted form of loop tiling within SegMaps.  We only
 -- tile primitive types, to avoid excessive local memory use.
@@ -42,7 +42,7 @@ optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
   mmm_tiling <- mmmTiling2D stm
-  -- let mmm_tiling = Nothing -- use this instead of the above to disable mmm_tiling.
+  let mmm_tiling = Nothing -- use this instead of the above to disable mmm_tiling.
   case mmm_tiling of
     Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
     Nothing -> do
@@ -803,7 +803,7 @@ readTile2D :: (SubExp, SubExp) -> (VName, VName) -> (VName, VName) -> SubExp
            -> Binder Kernels [VName]
 readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size
   num_groups group_size kind privstms tile_id arrs_and_perms =
-  segMap2D "readTile2D.full_tile" (SegThread num_groups group_size SegNoVirt)
+  segMap2D "full_tile" (SegThread num_groups group_size SegNoVirt)
   ResultNoSimplify (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
 
     i <- letSubExp "i" =<<
