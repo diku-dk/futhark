@@ -184,7 +184,7 @@ jobs:
       target: '$(build.sourceVersion)'
       tagSource: 'Git tag'
       tag: '$(githubTag)'
-      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
+#      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
       assetUploadMode: 'replace'
       addChangeLog: false
 
