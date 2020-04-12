@@ -460,9 +460,9 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
               map mkSExt [minBound..maxBound] ++
               map mkZExt [minBound..maxBound]
 
-        taggedI s Int8  = s
-        taggedI s Int16 = s
-        taggedI s Int32 = s
+        taggedI s Int8  = s ++ "8"
+        taggedI s Int16 = s ++ "16"
+        taggedI s Int32 = s ++ "32"
         taggedI s Int64 = s ++ "64"
 
         -- Use unsigned types for add/sub/mul so we can do
