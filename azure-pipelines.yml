@@ -163,6 +163,8 @@ jobs:
   - script: |
       export githubTag=$(git describe --abbrev=0 --tags)
       export version=$(echo $githubTag | cut -c 2-)
+      echo tag: $githubTag
+      echo version: $version
       echo "##vso[task.setvariable variable=githubTag]$githubTag"
       echo "##vso[task.setvariable variable=version]$version"
     displayName: Set tag to env variable githubTag and version
@@ -181,10 +183,9 @@ jobs:
       gitHubConnection: 'release'
       repositoryName: 'diku-dk/futhark'
       action: 'edit'
-      target: '$(build.sourceVersion)'
       tagSource: 'Git tag'
       tag: '$(githubTag)'
-#      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
+      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
       assetUploadMode: 'replace'
       addChangeLog: false
 
