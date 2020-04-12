@@ -50,21 +50,20 @@ let
 in pkgs.stdenv.mkDerivation rec {
   name = "futhark-" + suffix;
   version = futhark.version;
-  src = ./.;
+  src = tools/release;
 
   buildInputs = [ futhark ];
 
   buildPhase = ''
-    true
-  '';
-
-  installPhase = ''
-    mkdir futhark-${suffix}/
-    cp -r tools/release/skeleton/* futhark-${suffix}/
+    mv skeleton futhark-${suffix}/
     cp -r ${futhark}/bin futhark-${suffix}/bin
     cp -r ${futhark}/share futhark-${suffix}/share
     chmod +w -R futhark-${suffix}
+    tar -Jcf futhark-${suffix}.tar.xz futhark-${suffix}
+  '';
+
+  installPhase = ''
     mkdir -p $out
-    tar -Jcf $out/futhark-${suffix}.tar.xz futhark-${suffix}
+    cp futhark-${suffix}.tar.xz $out/futhark-${suffix}.tar.xz
   '';
 }
