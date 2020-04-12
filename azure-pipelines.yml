@@ -178,6 +178,13 @@ jobs:
       . $HOME/.nix-profile/etc/profile.d/nix.sh
       nix-build --argstr suffix $(version)-linux-x86_64
 
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: 'result'
+      contents: 'futhark-$(version)-linux-x86_64.tar.xz'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
+
   - task: GithubRelease@0
     displayName: 'Attach Linux x86_64 tarball to GitHub Release'
     inputs:
@@ -189,10 +196,3 @@ jobs:
       assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
       assetUploadMode: 'replace'
       addChangeLog: false
-
-  - task: CopyFilesOverSSH@0
-    inputs:
-      sshEndpoint: 'futhark-lang.org'
-      sourceFolder: 'result'
-      contents: 'futhark-$(version)-linux-x86_64.tar.xz'
-      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
