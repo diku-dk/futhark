@@ -18,8 +18,8 @@ import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import Data.String (fromString)
 import Data.Version
-import qualified Data.Text.Lazy as LT
-import Text.Markdown
+import qualified Data.Text as T
+import qualified CMarkGFM as GFM
 
 import Prelude hiding (abs)
 
@@ -588,7 +588,9 @@ typeAbbrevHtml l name params =
 
 docHtml :: Maybe DocComment -> DocM Html
 docHtml (Just (DocComment doc loc)) =
-  markdown def { msAddHeadingId = True } . LT.pack <$> identifierLinks loc doc
+  H.preEscapedText .
+  GFM.commonmarkToHtml [] [GFM.extAutolink] .
+  T.pack <$> identifierLinks loc doc
 docHtml Nothing = return mempty
 
 identifierLinks :: SrcLoc -> String -> DocM String
