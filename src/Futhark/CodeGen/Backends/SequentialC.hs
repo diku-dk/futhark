@@ -86,15 +86,18 @@ compileProg =
                                   }
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
+                                  ctx->profiling = cfg->debugging;
                                   ctx->error = NULL;
                                   create_lock(&ctx->lock);
                                   $stms:init_fields
+                                  init_constants(ctx);
                                   return ctx;
                                }|])
 
           GC.publicDef_ "context_free" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 free_constants(ctx);
                                  free_lock(&ctx->lock);
                                  free(ctx);
                                }|])

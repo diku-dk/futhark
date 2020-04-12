@@ -9,6 +9,7 @@ module Futhark.Representation.SOACS.Simplify
        , simplifyLambda
        , simplifyFun
        , simplifyStms
+       , simplifyConsts
 
        , simpleSOACS
        , simplifySOAC
@@ -62,7 +63,8 @@ getShapeNames bnd =
       tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
   in  namesFromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
-simplifyFun :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
+simplifyFun :: MonadFreshNames m =>
+               ST.SymbolTable (Wise SOACS) -> FunDef SOACS -> m (FunDef SOACS)
 simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
@@ -72,9 +74,16 @@ simplifyLambda =
   Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyStms :: (HasScope SOACS m, MonadFreshNames m) =>
-                Stms SOACS -> m (Stms SOACS)
-simplifyStms =
+                Stms SOACS -> m (ST.SymbolTable (Wise SOACS), Stms SOACS)
+simplifyStms stms = do
+  scope <- askScope
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers
+    scope stms
+
+simplifyConsts :: MonadFreshNames m =>
+                  Stms SOACS -> m (ST.SymbolTable (Wise SOACS), Stms SOACS)
+simplifyConsts =
+  Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
 simplifySOAC :: Simplify.SimplifiableLore lore =>
                 Simplify.SimplifyOp lore (SOAC lore)

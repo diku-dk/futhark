@@ -82,6 +82,8 @@ module Futhark.CodeGen.ImpGen
 import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM, State)
 import Control.Monad.Writer hiding (mapM, forM)
+import Data.Bifunctor (first)
+import qualified Data.DList as DL
 import Data.Either
 import Data.Traversable
 import qualified Data.Map.Strict as M
@@ -301,17 +303,53 @@ hasFunction :: Name -> ImpM lore op Bool
 hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
                                  in isJust $ lookup fname fs
 
-compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
+constsVTable :: LetAttr lore ~ LetAttr ExplicitMemory =>
+                Stms lore -> VTable lore
+constsVTable = foldMap stmVtable
+  where stmVtable (Let pat _ e) =
+          foldMap (peVtable e) $ M.toList $
+          mconcat $ map scopeOfPatElem $ patternElements pat
+        peVtable e (name, info) =
+          M.singleton name $ memBoundToVarEntry (Just e) $ infoAttr info
+
+compileProg :: (ExplicitMemorish lore, FreeIn op, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
-            -> Prog lore -> m (Imp.Functions op)
-compileProg ops space prog =
+            -> Prog lore -> m (Imp.Definitions op)
+compileProg ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-  let s = foldl' compileFunDef' (newState src) (progFuns prog)
-  in (stateFunctions s, stateNameSource s)
+  let s = (newState src) { stateVTable = constsVTable consts }
+      s' =
+        foldl' compileFunDef' s funs
+      free_in_funs =
+        freeIn (stateFunctions s')
+      (consts', s'', _) =
+        runImpM (compileConsts free_in_funs consts) ops space
+        (nameFromString "val") s'
+  in (Imp.Definitions consts' (stateFunctions s''),
+      stateNameSource s')
   where compileFunDef' s fdef =
           let ((), s', _) =
                 runImpM (compileFunDef fdef) ops space (funDefName fdef) s
           in s'
+
+compileConsts :: Names -> Stms lore -> ImpM lore op (Imp.Constants op)
+compileConsts used_consts stms = do
+  code <- collect $ compileStms used_consts stms $ pure ()
+  pure $ uncurry Imp.Constants $ first DL.toList $ extract code
+  where -- Fish out those top-level declarations in the constant
+        -- initialisation code that are free in the functions.
+        extract (x Imp.:>>: y) =
+          extract x <> extract y
+        extract (Imp.DeclareMem name space)
+          | name `nameIn` used_consts =
+              (DL.singleton $ Imp.MemParam name space,
+               mempty)
+        extract (Imp.DeclareScalar name _ t)
+          | name `nameIn` used_consts =
+              (DL.singleton $ Imp.ScalarParam name t,
+               mempty)
+        extract s =
+          (mempty, s)
 
 compileInParam :: ExplicitMemorish lore =>
                   FParam lore -> ImpM lore op (Either Imp.Param ArrayDecl)
@@ -728,9 +766,9 @@ addArrays = mapM_ addArray
 -- Note: a hack to be used only for functions.
 addFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore op ()
 addFParams = mapM_ addFParam
-  where addFParam fparam = do
-          entry <- memBoundToVarEntry Nothing $ noUniquenessReturns $ paramAttr fparam
-          addVar (paramName fparam) entry
+  where addFParam fparam =
+          addVar (paramName fparam) $
+          memBoundToVarEntry Nothing $ noUniquenessReturns $ paramAttr fparam
 
 -- | Another hack.
 addLoopVar :: VName -> IntType -> ImpM lore op ()
@@ -777,21 +815,28 @@ dPrimVE name e = do name' <- dPrim name $ primExpType e
                     return $ Imp.var name' $ primExpType e
 
 memBoundToVarEntry :: Maybe (Exp lore) -> MemBound NoUniqueness
-                   -> ImpM lore op (VarEntry lore)
+                   -> VarEntry lore
 memBoundToVarEntry e (MemPrim bt) =
-  return $ ScalarVar e ScalarEntry { entryScalarType = bt }
+  ScalarVar e ScalarEntry { entryScalarType = bt }
 memBoundToVarEntry e (MemMem space) =
-  return $ MemVar e $ MemEntry space
-memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
+  MemVar e $ MemEntry space
+memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
   let location = MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
-  return $ ArrayVar e ArrayEntry { entryArrayLocation = location
-                                 , entryArrayElemType = bt
-                                 }
+  in ArrayVar e ArrayEntry { entryArrayLocation = location
+                           , entryArrayElemType = bt
+                           }
+
+infoAttr :: NameInfo ExplicitMemory
+         -> MemInfo SubExp NoUniqueness MemBind
+infoAttr (LetInfo attr) = attr
+infoAttr (FParamInfo attr) = noUniquenessReturns attr
+infoAttr (LParamInfo attr) = attr
+infoAttr (IndexInfo it) = MemPrim $ IntType it
 
 dInfo :: Maybe (Exp lore) -> VName -> NameInfo ExplicitMemory
          -> ImpM lore op ()
 dInfo e name info = do
-  entry <- memBoundToVarEntry e $ infoAttr info
+  let entry = memBoundToVarEntry e $ infoAttr info
   case entry of
     MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
@@ -800,18 +845,14 @@ dInfo e name info = do
     ArrayVar _ _ ->
       return ()
   addVar name entry
-  where infoAttr (LetInfo attr) = attr
-        infoAttr (FParamInfo attr) = noUniquenessReturns attr
-        infoAttr (LParamInfo attr) = attr
-        infoAttr (IndexInfo it) = MemPrim $ IntType it
 
 dScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
 dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op ()
-dArray name bt shape membind = do
-  entry <- memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
-  addVar name entry
+dArray name bt shape membind =
+  addVar name $
+  memBoundToVarEntry Nothing $ MemArray bt shape NoUniqueness membind
 
 everythingVolatile :: ImpM lore op a -> ImpM lore op a
 everythingVolatile = local $ \env -> env { envVolatility = Imp.Volatile }

@@ -252,8 +252,8 @@ distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
-      stream_stms' <-
-        runReaderT (copyPropagateInStms simpleSOACS stream_stms) types
+      (_, stream_stms') <-
+        runReaderT (copyPropagateInStms simpleSOACS types stream_stms) types
       onStms acc $ stmsToList (fmap (certify cs) stream_stms') ++ stms
 
     onStms acc (stm:stms) =

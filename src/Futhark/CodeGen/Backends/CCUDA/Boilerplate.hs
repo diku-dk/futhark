@@ -285,12 +285,19 @@ generateContextFuns cfg kernels sizes failures = do
                  $stms:final_inits
                  $stms:set_sizes
 
+                 init_constants(ctx);
+                 // Clear the free list of any deallocations that occurred while initialising constants.
+                 CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+
+                 futhark_context_sync(ctx);
+
                  return ctx;
                }|])
 
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 free_constants(ctx);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
                                  free(ctx);

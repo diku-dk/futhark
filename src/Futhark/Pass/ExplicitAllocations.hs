@@ -509,7 +509,9 @@ linearFuncallArg _ _ arg =
 explicitAllocations :: Pass Kernels ExplicitMemory
 explicitAllocations =
   Pass "explicit allocations" "Transform program to explicit memory representation" $
-  intraproceduralTransformation allocInFun
+  intraproceduralTransformationWithConsts onStms allocInFun
+  where onStms stms =
+          runAllocM handleHostOp kernelExpHints $ allocInStms stms pure
 
 explicitAllocationsInStms :: (MonadFreshNames m, HasScope ExplicitMemory m) =>
                              Stms Kernels -> m (Stms ExplicitMemory)
@@ -532,9 +534,10 @@ memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
 startOfFreeIDRange = S.size . shapeContext
 
-allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
-allocInFun (FunDef entry fname rettype params fbody) =
-  runAllocM handleHostOp kernelExpHints $
+allocInFun :: MonadFreshNames m =>
+              Stms ExplicitMemory -> FunDef Kernels -> m (FunDef ExplicitMemory)
+allocInFun consts (FunDef entry fname rettype params fbody) =
+  runAllocM handleHostOp kernelExpHints $ inScopeOf consts $
   allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
     fbody' <- insertStmsM $ allocInFunBody
               (map (const $ Just DefaultSpace) rettype) fbody

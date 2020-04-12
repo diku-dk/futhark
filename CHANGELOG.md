@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `futhark pkg` now shells out to `curl` for HTTP requests.
+
+  * `futhark doc` now supports proper GitHub-flavored Markdown, as it
+    uses the `cmark-gfm` library internally.
+
 ### Removed
 
 ### Changed
