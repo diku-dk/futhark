@@ -180,7 +180,6 @@ jobs:
       repositoryName: diku-dk/futhark
       assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
       action: edit
-      target: '$(Build.SourceVersion)'
       tag: '$(githubTag)'
       addChangeLog: false
       assetUploadMode: replace
