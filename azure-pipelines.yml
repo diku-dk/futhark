@@ -180,9 +180,11 @@ jobs:
     inputs:
       gitHubConnection: 'release'
       repositoryName: 'diku-dk/futhark'
-      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
+      target: '$(build.sourceVersion)'
+      tagSource: 'Git tag'
+      tag: '0.0.1'
       action: 'edit'
-      tag: '$(Build.SourceBranchName)'
+      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
       assetUploadMode: 'replace'
 
   - task: CopyFilesOverSSH@0
