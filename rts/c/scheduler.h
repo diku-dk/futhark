@@ -14,23 +14,6 @@
 #include <sys/sysinfo.h>
 #endif
 
-static inline int check_err(int errval, int sets_errno, const char *fun, int line,
-                            const char *msg, ...)
-{
-  if (errval) {
-    char str[256];
-    char errnum[10];
-    sprintf(errnum, "%d", errval);
-    sprintf(str, "ERROR: %s in %s() at line %d with error code %s\n", msg, fun, line,
-            sets_errno ? strerror(errno) : errnum);
-    fprintf(stderr, "%s", str);
-  }
-  return errval;
-}
-
-#define CHECK_ERR(err, msg...) check_err(err, 0, __func__, __LINE__, msg)
-#define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
-
 // returns the number of logical cores
 static int num_processors() {
 #ifdef _WIN32

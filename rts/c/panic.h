@@ -1,6 +1,8 @@
 // Start of panic.h.
 
 #include <stdarg.h>
+#include <errno.h>
+#include <string.h>
 
 static const char *fut_progname;
 
@@ -26,5 +28,23 @@ static char* msgprintf(const char *s, ...) {
   vsnprintf(buffer, needed, s, vl);
   return buffer;
 }
+
+
+static inline void check_err(int errval, int sets_errno, const char *fun, int line,
+                            const char *msg, ...)
+{
+  if (errval) {
+    char str[256];
+    char errnum[10];
+    sprintf(errnum, "%d", errval);
+    sprintf(str, "ERROR: %s in %s() at line %d with error code %s\n", msg, fun, line,
+            sets_errno ? strerror(errno) : errnum);
+    fprintf(stderr, "%s", str);
+    exit(errval);
+  }
+}
+
+#define CHECK_ERR(err, msg...) check_err(err, 0, __func__, __LINE__, msg)
+#define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
 
 // End of panic.h.
