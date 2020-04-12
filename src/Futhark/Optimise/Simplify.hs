@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE TupleSections #-}
 module Futhark.Optimise.Simplify
   ( simplifyProg
   , simplifySomething
@@ -18,10 +19,12 @@ module Futhark.Optimise.Simplify
   )
   where
 
+import Data.Bifunctor (second)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Lore
 import Futhark.Pass
@@ -35,22 +38,48 @@ simplifyProg :: Engine.SimplifiableLore lore =>
              -> Engine.HoistBlockers lore
              -> Prog lore
              -> PassM (Prog lore)
-simplifyProg simpl rules blockers =
-  intraproceduralTransformation $ simplifyFun simpl rules blockers
+simplifyProg simpl rules blockers (Prog consts funs) = do
+  (consts_vtable, consts') <-
+    simplifyConsts (UT.usages $ foldMap (freeIn . funDefBody) funs)
+                   (mempty, consts)
+
+  funs' <- parPass (simplifyFun' consts_vtable) funs
+  let funs_uses = UT.usages $ foldMap (freeIn . funDefBody) funs'
+
+  (_, consts'') <- simplifyConsts funs_uses (mempty, consts')
+
+  return $ Prog consts'' funs'
+
+  where simplifyFun' consts_vtable =
+          simplifySomething
+          (Engine.localVtable (consts_vtable<>) . Engine.simplifyFun)
+          removeFunDefWisdom
+          simpl rules blockers mempty
+
+        simplifyConsts uses =
+          simplifySomething (onConsts uses . snd)
+          (second (removeStmWisdom<$>))
+          simpl rules blockers mempty
+
+        onConsts uses consts' = do
+          (_, consts'') <-
+            Engine.simplifyStms consts' (pure ((), mempty))
+          (consts''', _) <-
+            Engine.hoistStms rules (Engine.isFalse False) mempty uses consts''
+          return (ST.insertStms consts''' mempty, consts''')
 
 -- | Run a simplification operation to convergence.
-simplifySomething :: (MonadFreshNames m, HasScope lore m,
-                      Engine.SimplifiableLore lore) =>
+simplifySomething :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                      (a -> Engine.SimpleM lore b)
                   -> (b -> a)
                   -> Engine.SimpleOps lore
                   -> RuleBook (Wise lore)
                   -> Engine.HoistBlockers lore
+                  -> ST.SymbolTable (Wise lore)
                   -> a
                   -> m a
-simplifySomething f g simpl rules blockers x = do
-  scope <- askScope
-  let f' x' = Engine.localVtable (ST.fromScope (addScopeWisdom scope)<>) $ f x'
+simplifySomething f g simpl rules blockers vtable x = do
+  let f' x' = Engine.localVtable (vtable<>) $ f x'
   loopUntilConvergence env simpl f' g x
   where env = Engine.emptyEnv rules blockers
 
@@ -62,33 +91,38 @@ simplifyFun :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                 Engine.SimpleOps lore
              -> RuleBook (Engine.Wise lore)
              -> Engine.HoistBlockers lore
+             -> ST.SymbolTable (Wise lore)
              -> FunDef lore
              -> m (FunDef lore)
-simplifyFun simpl rules blockers =
-  loopUntilConvergence env simpl Engine.simplifyFun removeFunDefWisdom
-  where env = Engine.emptyEnv rules blockers
+simplifyFun = simplifySomething Engine.simplifyFun removeFunDefWisdom
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambda :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lore) =>
+simplifyLambda :: (MonadFreshNames m, HasScope lore m,
+                   Engine.SimplifiableLore lore) =>
                   Engine.SimpleOps lore
                -> RuleBook (Engine.Wise lore)
                -> Engine.HoistBlockers lore
                -> Lambda lore -> [Maybe VName]
                -> m (Lambda lore)
-simplifyLambda simpl rules blockers orig_lam args =
-  simplifySomething f removeLambdaWisdom simpl rules blockers orig_lam
+simplifyLambda simpl rules blockers orig_lam args = do
+  vtable <- ST.fromScope . addScopeWisdom <$> askScope
+  simplifySomething f removeLambdaWisdom simpl rules blockers vtable orig_lam
   where f lam' = Engine.simplifyLambdaNoHoisting lam' args
 
 -- | Simplify a list of 'Stm's.
-simplifyStms :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lore) =>
+simplifyStms :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                 Engine.SimpleOps lore
              -> RuleBook (Engine.Wise lore)
              -> Engine.HoistBlockers lore
+             -> Scope lore
              -> Stms lore
-             -> m (Stms lore)
-simplifyStms = simplifySomething f g
-  where f stms = fmap snd $ Engine.simplifyStms stms $ return ((), mempty)
-        g = fmap removeStmWisdom
+             -> m (ST.SymbolTable (Wise lore), Stms lore)
+simplifyStms simpl rules blockers scope =
+  simplifySomething f g simpl rules blockers vtable . (mempty,)
+  where vtable = ST.fromScope $ addScopeWisdom scope
+        f (_, stms) =
+          Engine.simplifyStms stms ((,mempty) <$> Engine.askVtable)
+        g = second $ fmap removeStmWisdom
 
 loopUntilConvergence :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                         Engine.Env lore

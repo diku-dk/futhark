@@ -52,7 +52,6 @@ import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.Range as Range
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.MonadFreshNames
 import Futhark.Representation.Aliases
 import Futhark.Representation.Ranges
 import Futhark.Representation.Kernels
@@ -175,13 +174,16 @@ optimiseKernelBody vtable sinking (KernelBody attr stms res) =
   let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
   in (KernelBody attr stms' res, sunk)
 
-optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-optimiseFunDef fundef = do
-  let fundef' = Range.analyseFun $ Alias.analyseFun fundef
-      vtable = ST.insertFParams (funDefParams fundef') mempty
-      (body, _) = optimiseBody vtable mempty $ funDefBody fundef'
-  return fundef { funDefBody = removeBodyAliases $ removeBodyRanges body }
-
 sink :: Pass Kernels Kernels
 sink = Pass "sink" "move memory loads closer to their uses" $
-       intraproceduralTransformation optimiseFunDef
+       fmap (removeProgAliases . removeProgRanges) .
+       intraproceduralTransformationWithConsts onConsts onFun .
+       Range.rangeAnalysis . Alias.aliasAnalysis
+  where onFun _ fd = do
+          let vtable = ST.insertFParams (funDefParams fd) mempty
+              (body, _) = optimiseBody vtable mempty $ funDefBody fd
+          return fd { funDefBody = body }
+
+        onConsts consts =
+          pure $ fst $ optimiseStms mempty mempty consts $
+          namesFromList $ M.keys $ scopeOf consts

@@ -8,9 +8,11 @@
 -- Originally inspired by the paper "Defunctionalizing Push Arrays"
 -- (FHPC '14).
 module Futhark.CodeGen.ImpCode
-  ( Functions (..)
+  ( Definitions (..)
+  , Functions (..)
   , Function
   , FunctionT (..)
+  , Constants (..)
   , ValueDesc (..)
   , Signedness (..)
   , ExternalValue (..)
@@ -79,6 +81,9 @@ paramName :: Param -> VName
 paramName (MemParam name _) = name
 paramName (ScalarParam name _) = name
 
+-- | A collection of imperative functions and constants.
+data Definitions a = Definitions (Constants a) (Functions a)
+
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
 
@@ -87,6 +92,15 @@ instance Semigroup (Functions a) where
 
 instance Monoid (Functions a) where
   mempty = Functions []
+
+-- | A collection of imperative constants.
+data Constants a = Constants
+  { constsDecl :: [Param]
+    -- ^ The constants that are made available to the functions.
+  , constsInit :: Code a
+    -- ^ Setting the value of the constants.  Note that this must not
+    -- contain declarations of the names defined in 'constsDecl'.
+  }
 
 data Signedness = TypeUnsigned
                 | TypeDirect
@@ -239,10 +253,21 @@ index arr i t s vol = LeafExp (Index arr i t s vol) t
 
 -- Prettyprinting definitions.
 
+instance Pretty op => Pretty (Definitions op) where
+  ppr (Definitions consts funs) =
+    ppr consts </> ppr funs
+
 instance Pretty op => Pretty (Functions op) where
   ppr (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where ppFun (name, fun) =
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
+
+instance Pretty op => Pretty (Constants op) where
+  ppr (Constants decls code) =
+    text "Constants:" </> indent 2 (stack $ map ppr decls) </>
+    mempty </>
+    text "Initialisation:" </>
+    indent 2 (ppr code)
 
 instance Pretty op => Pretty (FunctionT op) where
   ppr (Function _ outs ins body results args) =
@@ -431,6 +456,10 @@ declaredIn (For i _ _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
+
+instance FreeIn a => FreeIn (Functions a) where
+  freeIn' (Functions fs) =
+    foldMap (freeIn' . functionBody . snd) fs
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn' (x :>>: y) =

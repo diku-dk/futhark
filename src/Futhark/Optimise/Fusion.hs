@@ -176,13 +176,21 @@ fuseSOACs :: Pass SOACS SOACS
 fuseSOACs =
   Pass { passName = "Fuse SOACs"
        , passDescription = "Perform higher-order optimisation, i.e., fusion."
-       , passFunction = simplifySOACS <=< renameProg <=< intraproceduralTransformation fuseFun
+       , passFunction = \prog ->
+           simplifySOACS =<< renameProg =<<
+           intraproceduralTransformationWithConsts
+           (fuseConsts (freeIn (progFuns prog))) fuseFun prog
        }
 
-fuseFun :: FunDef SOACS -> PassM (FunDef SOACS)
-fuseFun fun = do
-  stms <- fuseStms (scopeOfFParams (funDefParams fun))
-          (bodyStms $ funDefBody fun) (bodyResult $ funDefBody fun)
+fuseConsts :: Names -> Stms SOACS -> PassM (Stms SOACS)
+fuseConsts used_consts consts =
+  fuseStms mempty consts $ map Var $ namesToList used_consts
+
+fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
+fuseFun consts fun = do
+  stms <- fuseStms (scopeOf consts <> scopeOfFParams (funDefParams fun))
+          (bodyStms $ funDefBody fun)
+          (bodyResult $ funDefBody fun)
   let body = (funDefBody fun) { bodyStms = stms }
   return fun { funDefBody = body }
 

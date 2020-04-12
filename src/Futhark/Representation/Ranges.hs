@@ -21,6 +21,7 @@ module Futhark.Representation.Ranges
        , mkPatternRanges
        , mkBodyRanges
          -- * Removing ranges
+       , removeProgRanges
        , removeExpRanges
        , removeBodyRanges
        , removeStmRanges
@@ -106,6 +107,10 @@ removeRanges = Rephraser { rephraseExpLore = return
                          , rephraseBranchType = return
                          , rephraseOp = return . removeOpRanges
                          }
+
+removeProgRanges :: CanBeRanged (Op lore) =>
+                    Prog (Ranges lore) -> Prog lore
+removeProgRanges = runIdentity . rephraseProg removeRanges
 
 removeExpRanges :: CanBeRanged (Op lore) =>
                    Exp (Ranges lore) -> Exp lore
