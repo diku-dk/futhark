@@ -27,7 +27,6 @@ module Futhark.Representation.Aliases
        , removeProgAliases
        , removeFunDefAliases
        , removeExpAliases
-       , removeBodyAliases
        , removeStmAliases
        , removeLambdaAliases
        , removePatternAliases
@@ -213,10 +212,6 @@ removeFunDefAliases = runIdentity . rephraseFunDef removeAliases
 removeExpAliases :: CanBeAliased (Op lore) =>
                     Exp (Aliases lore) -> Exp lore
 removeExpAliases = runIdentity . rephraseExp removeAliases
-
-removeBodyAliases :: CanBeAliased (Op lore) =>
-                     Body (Aliases lore) -> Body lore
-removeBodyAliases = runIdentity . rephraseBody removeAliases
 
 removeStmAliases :: CanBeAliased (Op lore) =>
                         Stm (Aliases lore) -> Stm lore

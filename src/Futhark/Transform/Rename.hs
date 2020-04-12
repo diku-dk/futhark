@@ -22,7 +22,6 @@ module Futhark.Transform.Rename
   , renameStm
   , renameBody
   , renameLambda
-  , renameFun
   , renamePattern
   -- * Renaming annotations
   , RenameM
@@ -93,14 +92,6 @@ renameBody = modifyNameSource . runRenamer . rename
 renameLambda :: (Renameable lore, MonadFreshNames m) =>
                 Lambda lore -> m (Lambda lore)
 renameLambda = modifyNameSource . runRenamer . rename
-
--- | Rename bound variables such that each is unique.  The semantics
--- of the function is unaffected, under the assumption that the body
--- was correct to begin with.  Any free variables are left untouched.
--- Note in particular that the parameters of the lambda are renamed.
-renameFun :: (Renameable lore, MonadFreshNames m) =>
-             FunDef lore -> m (FunDef lore)
-renameFun = modifyNameSource . runRenamer . rename
 
 -- | Produce an equivalent pattern but with each pattern element given
 -- a new name.
