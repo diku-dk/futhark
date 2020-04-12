@@ -83,11 +83,11 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
     -- sanity check that the reduce part is not missing
     not (null red_nes) = do
-      let inp_A  : inp_B  : _ = arrs
       let load_A : load_B : _ = stmsToList code1 -- TODO: probably not safe in general, since first
                                                  -- two elements of code1 may be something else.
-      let red_ne : _ = red_nes
+      let inp_A  : inp_B  : _ = arrs
       let map_t1 : map_t2 : _ = map (elemType . paramAttr) (lambdaParams map_lam)
+      let red_ne : _ = red_nes
 
       ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBinder $ do -- host code
@@ -106,7 +106,6 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
         tx_rx      <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx
         ty_ry      <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32) ty ry
 
-
         gridDim_x  <- letSubExp "gridDim_x"  =<< ceilDiv width_B  tx_rx
         gridDim_y  <- letSubExp "gridDim_y"  =<< ceilDiv height_A ty_ry
         grid_size  <- letSubExp "grid_size"  $ BasicOp $ BinOp (Mul Int32) gridDim_x gridDim_y
@@ -121,26 +120,29 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
           iii <- letExp "iii" $ BasicOp $ BinOp (Mul Int32) (Var bid_y) ty_ry
           jjj <- letExp "jjj" $ BasicOp $ BinOp (Mul Int32) (Var bid_x) tx_rx
 
+          -- initialize register mem with neutral elements
           [cssss] <- segMap2D "cssss" (segThread grid_size block_size)
                        ResultPrivate (tx, ty) $ \(_, _) -> do
             css <- letExp "css" $ BasicOp $ Replicate (Shape [rx, ry]) red_ne
             return [css]
 
-          ---- build outer k loop, computing this thread's result ----
+          -- build outer k loop, computing this thread's result
           kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
-          loop_thd_res <- forLoop kk_bound cssss $ \kk -> inScopeOf code1 $ do -- TODO: inScopeOf? 
+          loop_thd_res <- forLoop kk_bound cssss $ \kk -> do              -- TODO: inScopeOf something..?
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
-            ---- copy A from global to shared ----
+            -- copy A from global to shared mem
             [a_shr] <- segMap2D "A_shr" (segThread grid_size block_size)
                          ResultNoSimplify (tk, ty) $ \(thd_x, thd_y) -> do
 
-              a_shr_init <- scratch "A_shr_init" float64 [ry] -- TODO: make type generic
+              a_shr_init <- scratch "A_shr_init" map_t1 [ry]
               loop_a_shr <- forLoop ry a_shr_init $ \i -> do
 
+                -- let gtid_y := blockIdx.y * Ty * Ry + i * Ty + threadIdx.y
                 letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp i int32 *
                                          primExpFromSubExp int32 ty + LeafExp thd_y int32)
-                addStm load_A
+
+                addStm load_A -- at this point, inp_A contains the slice A[gtid_y, 0:U]
 
                 a_col_idx <- letExp "a_col" $ BasicOp $ BinOp (Add Int32) (Var kk') (Var thd_x)
                 a_shr <- update "A_shr" a_shr_init [i]
@@ -149,49 +151,51 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
               return [loop_a_shr]
 
-            ---- copy B from global to shared ----
+            -- copy B from global to shared mem
             [b_shr] <- segMap2D "B_shr" (segThread grid_size block_size)
                          ResultNoSimplify (tk, tx) $ \(thd_x, thd_y) -> do
 
-              b_shr_init <- scratch "B_shr_init" float64 [rx] -- TODO: make type generic
+              b_shr_init <- scratch "B_shr_init" map_t2 [rx]
               loop_b_shr <- forLoop rx b_shr_init $ \j -> do
 
+                -- let gtid_x := blockIdx.x * Tx * Rx + j * Tx + threadIdx.x
                 letBindNames_ [gtid_x] =<< toExp (LeafExp jjj int32 + LeafExp j int32 *
                                          primExpFromSubExp int32 tx + LeafExp thd_x int32)
-                addStm load_B
+
+                addStm load_B -- at this point, inp_B contains the slice B[gtid_x, 0:U]
 
                 b_col_idx <- letExp "b_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_y int32)
-
                 b_shr <- update "B_shr" b_shr_init [j]
                            =<< index "B_elem" inp_B [b_col_idx]
                 return $ resultBody [Var b_shr]
 
               return [loop_b_shr]
 
-            ---- build inner k loop, updating this thread's accumulator ----
+            -- build inner k loop, updating this thread's accumulator
             loop_thd_acc <- forLoop tk cssss $ \k -> do
 
               [thd_acc] <- segMap2D "acc" (segThread grid_size block_size)
                          ResultPrivate (tx, ty) $ \(thd_x, thd_y) -> do
 
-                ---- copy from A_shr and B_shr to register mem ----
+                -- copy from shared mem to register mem
                 asss_init <- scratch "asss_init" map_t1 [ry]
                 bsss_init <- scratch "bsss_init" map_t2 [rx]
 
                 -- in kernel code: A_shr has dims [Ty][Tk][Ry] and is indexed A_shr[thd_y][thd_x][i]
                 -- here:           A_shr has dims [Tk][Ty][Ry] and is indexed A_shr[thd_x][thd_y][i]
+                -- TODO: are these dimensions correct or should anything be rearranged?
                 asss <- forLoop ry asss_init $ \i -> do
                   asss <- update "asss" asss_init [i] =<<
-                    index "A_shr_elem" a_shr [thd_x, thd_y, i] -- TODO: dummy index (?)
+                    index "A_shr_elem" a_shr [thd_x, thd_y, i] -- TODO: this indexing correct?
                   return $ resultBody [Var asss]
 
+                -- TODO: similarly for B_shr?
                 bsss <- forLoop rx bsss_init $ \j -> do
                   bsss <- update "bsss" bsss_init [j] =<<
-                    index "B_shr_elem" b_shr [thd_x, thd_y, j] -- TODO: dummy index (?)
+                    index "B_shr_elem" b_shr [thd_x, thd_y, j] -- TODO: this indexing correct?
                   return $ resultBody [Var bsss]
 
-
-                ---- redomap ----
+                -- redomap
                 as <- indexSubArr "as" asss [thd_x, thd_y] [ry]
                 bs <- indexSubArr "bs" bsss [thd_x, thd_y] [rx]
                 css_init <- indexSubArr "css_init" cssss [thd_x, thd_y] [rx, ry]
@@ -213,18 +217,18 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
 
                     css <- update "css" css_init [i, j] c
 
-                    return $ resultBody [Var css] -- TODO: what should be returned in these three?
+                    return $ resultBody [Var css] -- TODO: what to return here..?
                   return $ resultBody [Var css]
                 return [css]
 
-              -- TODO: where to put code2..?
+              -- TODO: where to put code2..? ie. the code that follows the redomap
               return $ resultBody [Var thd_acc]
             --------------- END inner k loop ----------------
 
             return $ resultBody [Var loop_thd_acc]
           --------------- END outer kk loop ---------------
 
-          return [Returns ResultNoSimplify $ Var loop_thd_res] -- TODO: dummy; should use new KernelResult
+          return [Returns ResultNoSimplify $ Var loop_thd_res] -- TODO: here we place the new KernelResult :)
         --------------- END outer seggroup ---------------
 
         return $ Let pat aux $ Op $ SegOp $
@@ -296,12 +300,19 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts old_kbo
         update se_desc arr indices new_elem =
           letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) (Var new_elem)
 
+        -- bind a for loop with the given loop bound, merge initializor, and loop body.
+        -- TODO: we are having problems with invalid consumption inside loop bodies.
+        --       we need some way to access the VName in "loop_init" from inside
+        --       the loop body, which should be possible if we let "body" take an
+        --       additional arg such that the init name can be accessed when using
+        --       this function, but this has not worked thus far due to names not
+        --       present in scope. TODO: ask Troels! 
         forLoop :: SubExp
                 -> VName
                 -> (VName -> Binder Kernels (Body Kernels))
                 -> Binder Kernels VName
         forLoop i_bound merge body = do
-          i <- newVName "i"     -- TODO: could give this in function parameter
+          i <- newVName "i"     -- could give this as arg to the function
           let desc = "loop_" ++ baseString i
 
           merge_t <- lookupType merge
