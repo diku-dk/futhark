@@ -1,9 +1,7 @@
-# This default.nix builds a statically linked futhark binary.
+# This default.nix builds a tarball containing a statically linked
+# Futhark binary and some manpages.  Likely to only work on linux.
 #
-# It currently does not build documentation and is likely to only work
-# on Linux.
-#
-# Just run 'nix-build' and fish the binary out of 'result/bin/futhark'.
+# Just run 'nix-build' and fish the tarball out of 'result/'.
 
 { nixpkgs ? import <nixpkgs> {},
   compiler ? "ghc883",
