@@ -34,9 +34,15 @@ static void free_list_pack(struct free_list *l) {
       p++;
     }
   }
-  // Now p == l->used.
-  l->entries = realloc(l->entries, l->used * sizeof(struct free_list_entry));
-  l->capacity = l->used;
+
+  // Now p is the number of used elements.  We don't want it to go
+  // less than the default capacity (although in practice it's OK as
+  // long as it doesn't become 1).
+  if (p < 30) {
+    p = 30;
+  }
+  l->entries = realloc(l->entries, p * sizeof(struct free_list_entry));
+  l->capacity = p;
 }
 
 static void free_list_destroy(struct free_list *l) {

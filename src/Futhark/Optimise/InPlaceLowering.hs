@@ -84,16 +84,25 @@ inPlaceLowering :: Pass Kernels Kernels
 inPlaceLowering =
   Pass "In-place lowering" "Lower in-place updates into loops" $
   fmap removeProgAliases .
-  intraproceduralTransformation optimiseFunDef .
+  intraproceduralTransformationWithConsts optimiseConsts optimiseFunDef .
   aliasAnalysis
 
-optimiseFunDef :: MonadFreshNames m => FunDef (Aliases Kernels)
-               -> m (FunDef (Aliases Kernels))
-optimiseFunDef fundec =
+optimiseConsts :: MonadFreshNames m => Stms (Aliases Kernels)
+               -> m (Stms (Aliases Kernels))
+optimiseConsts stms =
   modifyNameSource $ runForwardingM lowerUpdateKernels onKernelOp $
-  bindingFParams (funDefParams fundec) $ do
+  stmsFromList <$> optimiseStms (stmsToList stms) (pure ())
+
+optimiseFunDef :: MonadFreshNames m =>
+                  Stms (Aliases Kernels) -> FunDef (Aliases Kernels)
+               -> m (FunDef (Aliases Kernels))
+optimiseFunDef consts fundec =
+  modifyNameSource $ runForwardingM lowerUpdateKernels onKernelOp $
+  descend (stmsToList consts) $ bindingFParams (funDefParams fundec) $ do
     body <- optimiseBody $ funDefBody fundec
     return $ fundec { funDefBody = body }
+  where descend [] m = m
+        descend (stm:stms) m = bindingStm stm $ descend stms m
 
 type Constraints lore = (Bindable lore, CanBeAliased (Op lore))
 

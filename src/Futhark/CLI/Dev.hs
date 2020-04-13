@@ -303,7 +303,6 @@ commandLineOptions =
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineFunctions []
-  , soacsPassOption inlineConstants []
   , kernelsPassOption inPlaceLowering []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []

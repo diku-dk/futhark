@@ -116,12 +116,17 @@ compileProg =
                              "Failed to create worker %d\n", i);
                  }
                  CHECK_ERR(pthread_mutex_init(&ctx->profile_mutex, NULL), "pthred_mutex_init");
+
+                 init_constants(ctx);
+
                  return ctx;
               }|])
 
           GC.publicDef_ "context_free" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                 free_constants(ctx);
+                 job_queue_destroy(&ctx->scheduler.q);
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
                    CHECK_ERR(job_queue_destroy(&ctx->scheduler.workers[i].q), "job_queue_destroy");
                    CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
@@ -175,26 +180,28 @@ copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbyt
 copyMulticoreMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
+closureStructField :: VName -> String
+closureStructField v = "free_" ++ pretty v
 
-compileStructFields :: C.ToIdent a =>
-                       [a] -> [C.Type] -> [C.FieldGroup]
-compileStructFields  fargs fctypes =
-  [ [C.csdecl|$ty:ty *$id:name;|]| (name, ty) <- zip fargs fctypes]
+compileStructFields :: [VName] -> [C.Type] -> [C.FieldGroup]
+compileStructFields = zipWith field
+  where
+    field name ty =
+      [C.csdecl|$ty:ty *$id:(closureStructField name);|]
 
+compileSetStructValues :: C.ToIdent a =>
+                          a -> [VName] -> [C.Stm]
+compileSetStructValues struct = map field
+  where
+    field name =
+      [C.cstm|$id:struct.$id:(closureStructField name)=&$id:name;|]
 
--- | Sets the field values of the struct
---   Assummes that vnames are fields of the struct
-compileSetStructValues :: (C.ToIdent a1, C.ToIdent a2) =>
-                           a1 -> [a2] -> [C.Stm]
-compileSetStructValues struct vnames =
-  [ [C.cstm|$id:struct.$id:name=&$id:name;|] | name <- vnames]
-
-
-compileGetStructVals :: (C.ToIdent a1, C.ToIdent a2) =>
-                         a2 -> [a1] -> [C.Type] -> [C.InitGroup]
-compileGetStructVals struct fargs fctypes =
-  [ [C.cdecl|$ty:ty $id:name = *$id:struct->$id:name;|]
-            | (name, ty) <- zip fargs fctypes ]
+compileGetStructVals :: C.ToIdent a =>
+                        a -> [VName] -> [C.Type] -> [C.InitGroup]
+compileGetStructVals struct = zipWith field
+  where
+    field name ty =
+      [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureStructField name);|]
 
 paramToCType :: Param -> GC.CompilerM op s C.Type
 paramToCType (ScalarParam _ pt) = pure $ GC.primTypeToCType pt
@@ -275,7 +282,7 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   e' <- GC.compileExp e
 
   let ((prebody', body'), _) =
-        GC.runCompilerM mempty operations blankNameSource () $
+        GC.runCompilerM operations blankNameSource () $
         (,)
         <$> GC.blockScope (GC.compileCode prebody)
         <*> GC.blockScope (GC.compileCode body)

@@ -276,12 +276,9 @@ library
     , free >=4.12.4
     , gitrev >=1.2.0
     , haskeline
-    , http-client >=0.5.7.0
-    , http-client-tls >=0.3.5.1
-    , http-conduit >=2.2.4
     , language-c-quote >=0.12
     , mainland-pretty >=0.6.1
-    , markdown >=0.1.16
+    , cmark-gfm >=0.2.1
     , megaparsec >=8.0.0
     , mtl >=2.2.1
     , neat-interpolation >=0.3

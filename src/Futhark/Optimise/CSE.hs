@@ -29,6 +29,7 @@
 module Futhark.Optimise.CSE
        ( performCSE
        , performCSEOnFunDef
+       , performCSEOnStms
        , CSEInOp
        )
        where
@@ -40,7 +41,8 @@ import Futhark.Analysis.Alias
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (removeFunDefAliases, Aliases, consumedInStms)
+  (removeProgAliases, removeFunDefAliases, removeStmAliases,
+   Aliases, consumedInStms)
 import qualified Futhark.Representation.Kernels.Kernel as Kernel
 import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
@@ -53,8 +55,14 @@ performCSE :: (Attributes lore, CanBeAliased (Op lore),
               Bool -> Pass lore lore
 performCSE cse_arrays =
   Pass "CSE" "Combine common subexpressions." $
-  intraproceduralTransformation $
-  return . removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
+  fmap removeProgAliases .
+  intraproceduralTransformationWithConsts onConsts onFun .
+  aliasAnalysis
+  where onConsts stms =
+          pure $ fst $
+          runReader (cseInStms (consumedInStms stms) (stmsToList stms) (return ()))
+          (newCSEState cse_arrays)
+        onFun _ = pure . cseInFunDef cse_arrays
 
 -- | Perform CSE on a single function.
 performCSEOnFunDef :: (Attributes lore, CanBeAliased (Op lore),
@@ -62,6 +70,17 @@ performCSEOnFunDef :: (Attributes lore, CanBeAliased (Op lore),
                       Bool -> FunDef lore -> FunDef lore
 performCSEOnFunDef cse_arrays =
   removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
+
+-- | Perform CSE on some statements.
+performCSEOnStms :: (Attributes lore, CanBeAliased (Op lore),
+                     CSEInOp (OpWithAliases (Op lore))) =>
+                    Bool -> Stms lore -> Stms lore
+performCSEOnStms cse_arrays =
+  fmap removeStmAliases . f . fst . analyseStms mempty
+  where f stms =
+          fst $ runReader (cseInStms (consumedInStms stms)
+                           (stmsToList stms) (return ()))
+          (newCSEState cse_arrays)
 
 cseInFunDef :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                Bool -> FunDef lore -> FunDef lore
@@ -75,10 +94,12 @@ type CSEM lore = Reader (CSEState lore)
 
 cseInBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              [Diet] -> Body lore -> CSEM lore (Body lore)
-cseInBody ds (Body bodyattr bnds res) =
-  cseInStms (res_cons <> consumedInStms bnds res) (stmsToList bnds) $ do
+cseInBody ds (Body bodyattr bnds res) = do
+  (bnds', res') <-
+    cseInStms (res_cons <> consumedInStms bnds) (stmsToList bnds) $ do
     CSEState (_, nsubsts) _ <- ask
-    return $ Body bodyattr mempty $ substituteNames nsubsts res
+    return $ substituteNames nsubsts res
+  return $ Body bodyattr bnds' res'
   where res_cons = mconcat $ zipWith consumeResult ds res
         consumeResult Consume se = freeIn se
         consumeResult _ _ = mempty
@@ -91,14 +112,15 @@ cseInLambda lam = do
 
 cseInStms :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              Names -> [Stm lore]
-          -> CSEM lore (Body lore)
-          -> CSEM lore (Body lore)
-cseInStms _ [] m = m
+          -> CSEM lore a
+          -> CSEM lore (Stms lore, a)
+cseInStms _ [] m = do a <- m
+                      return (mempty, a)
 cseInStms consumed (bnd:bnds) m =
   cseInStm consumed bnd $ \bnd' -> do
-    Body bodyattr bnds' es <- cseInStms consumed bnds m
+    (bnds', a) <- cseInStms consumed bnds m
     bnd'' <- mapM nestedCSE bnd'
-    return $ Body bodyattr (stmsFromList bnd''<>bnds') es
+    return (stmsFromList bnd''<>bnds', a)
   where nestedCSE bnd' = do
           let ds = map patElemDiet $ patternValueElements $ stmPattern bnd'
           e <- mapExpM (cse ds) $ stmExp bnd'

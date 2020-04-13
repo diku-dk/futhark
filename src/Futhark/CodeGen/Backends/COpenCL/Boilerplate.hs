@@ -335,7 +335,11 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                      $stms:final_inits
                      $stms:set_sizes
 
-                     return 0;
+                     init_constants(ctx);
+                     // Clear the free list of any deallocations that occurred while initialising constants.
+                     OPENCL_SUCCEED_OR_RETURN(opencl_free_all(&ctx->opencl));
+
+                     return futhark_context_sync(ctx);
   }|]
 
   let set_required_types = [ [C.cstm|required_types |= OPENCL_F64; |]
@@ -354,11 +358,8 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
 
                           init_context_early(cfg, ctx);
                           typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types, cfg->build_opts);
-                          if (init_context_late(cfg, ctx, prog) == 0) {
-                            return ctx;
-                          } else {
-                            return NULL;
-                          }
+                          init_context_late(cfg, ctx, prog);
+                          return ctx;
                        }|])
 
   GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
@@ -381,6 +382,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 free_constants(ctx);
                                  free_lock(&ctx->lock);
                                  opencl_tally_profiling_records(&ctx->opencl);
                                  free(ctx->opencl.profiling_records);

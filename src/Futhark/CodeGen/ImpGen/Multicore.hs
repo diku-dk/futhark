@@ -58,7 +58,7 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
 
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
-            -> m Imp.Program
+            -> m (Imp.Definitions Imp.Multicore)
 compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
         opCompiler :: OpCompiler ExplicitMemory Imp.Multicore

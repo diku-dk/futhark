@@ -5,6 +5,20 @@
 #
 # https://docs.haskellstack.org/en/stable/azure_ci/
 
+trigger:
+  branches:
+    include:
+      - master
+  tags:
+    include:
+      - v*
+
+variables:
+  System.Debug: true
+
+pool:
+  vmImage: ubuntu-18.04
+
 jobs:
 - job: build_windows
   pool:
@@ -43,8 +57,6 @@ jobs:
     displayName: Build Futhark compiler
 
 - job: build_linux
-  pool:
-    vmImage: ubuntu-18.04
 
   timeoutInMinutes: 120
 
@@ -120,3 +132,67 @@ jobs:
       export PATH=$HOME/.local/bin:$PATH
       futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
     displayName: Compile benchmarks with backend=opencl
+
+- job: build_linux_nightly
+
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+
+  steps:
+
+  - checkout: self
+    submodules: false
+
+  - script: |
+      curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
+      . $HOME/.nix-profile/etc/profile.d/nix.sh
+      nix-build --argstr suffix nightly-linux-x86_64
+
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: 'result'
+      contents: 'futhark-nightly-linux-x86_64.tar.xz'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
+
+- job: release_linux
+
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
+
+  steps:
+
+  - checkout: self
+    submodules: false
+
+  - script: |
+      export githubTag=$(git describe --abbrev=0 --tags)
+      export version=$(echo $githubTag | cut -c 2-)
+      echo tag: $githubTag
+      echo version: $version
+      echo "##vso[task.setvariable variable=githubTag]$githubTag"
+      echo "##vso[task.setvariable variable=version]$version"
+    displayName: Set tag to env variable githubTag and version
+    failOnStderr: true
+
+  - script: |
+      curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
+      . $HOME/.nix-profile/etc/profile.d/nix.sh
+      nix-build --argstr suffix $(version)-linux-x86_64
+
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: 'result'
+      contents: 'futhark-$(version)-linux-x86_64.tar.xz'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
+
+  - task: GithubRelease@0
+    displayName: 'Attach Linux x86_64 tarball to GitHub Release'
+    inputs:
+      gitHubConnection: 'release'
+      repositoryName: 'diku-dk/futhark'
+      action: 'edit'
+      tagSource: 'Git tag'
+      tag: '$(githubTag)'
+      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
+      assetUploadMode: 'replace'
+      addChangeLog: false
