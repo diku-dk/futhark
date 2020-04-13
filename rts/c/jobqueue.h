@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <assert.h>
 
+
 struct job_queue {
   int capacity; // Size of the buffer.
   int first; // Index of the start of the ring buffer.
@@ -30,13 +31,8 @@ static inline int job_queue_init(struct job_queue *job_queue, int capacity) {
   job_queue->dead = 0;
   job_queue->buffer = calloc(capacity, sizeof(void*));
 
-  if (pthread_mutex_init(&job_queue->mutex, NULL) != 0) {
-    return -1;
-  }
-
-  if (pthread_cond_init(&job_queue->cond, NULL) != 0) {
-    return -1;
-  }
+  CHECK_ERRNO(pthread_mutex_init(&job_queue->mutex, NULL), "pthread_mutex_init");
+  CHECK_ERRNO(pthread_cond_init(&job_queue->cond, NULL), "pthread_cond_init");
 
   if (job_queue->buffer == NULL) {
     return -1;
@@ -48,18 +44,19 @@ static inline int job_queue_init(struct job_queue *job_queue, int capacity) {
 // Destroy the job queue.  Blocks until the queue is empty before it
 // is destroyed.
 static inline int job_queue_destroy(struct job_queue *job_queue) {
-  assert(pthread_mutex_lock(&job_queue->mutex) == 0);
+  assert(job_queue != NULL);
+
+  CHECK_ERR(pthread_mutex_lock(&job_queue->mutex), "pthread_mutex_lock");
 
   while (job_queue->num_used != 0) {
-    pthread_cond_wait(&job_queue->cond, &job_queue->mutex);
+    CHECK_ERR(pthread_cond_wait(&job_queue->cond, &job_queue->mutex), "pthread_cond_wait");
   }
 
   // Queue is now empty.  Let's kill it!
   job_queue->dead = 1;
   free(job_queue->buffer);
-  pthread_cond_broadcast(&job_queue->cond);
-
-  assert(pthread_mutex_unlock(&job_queue->mutex) == 0);
+  CHECK_ERR(pthread_cond_broadcast(&job_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&job_queue->mutex), "pthread_mutex_unlock");
 
   return 0;
 }
@@ -69,15 +66,16 @@ static inline int job_queue_destroy(struct job_queue *job_queue) {
 // non-zero on error.  It is an error to push a job onto a queue that
 // has been destroyed.
 static inline int job_queue_push(struct job_queue *job_queue, void *data) {
-  assert(pthread_mutex_lock(&job_queue->mutex) == 0);
+  assert(job_queue != NULL);
+  CHECK_ERR(pthread_mutex_lock(&job_queue->mutex), "pthread_mutex_lock");
 
   // Wait until there is room in the job_queue.
   while (job_queue->num_used == job_queue->capacity && !job_queue->dead) {
-    pthread_cond_wait(&job_queue->cond, &job_queue->mutex);
+    CHECK_ERR(pthread_cond_wait(&job_queue->cond, &job_queue->mutex), "pthread_cond_wait");
   }
 
   if (job_queue->dead) {
-    assert(pthread_mutex_unlock(&job_queue->mutex) == 0);
+    CHECK_ERR(pthread_mutex_unlock(&job_queue->mutex), "pthread_mutex_unlock");
     return -1;
   }
 
@@ -86,9 +84,8 @@ static inline int job_queue_push(struct job_queue *job_queue, void *data) {
   job_queue->num_used++;
 
   // Signal a reader (if any) that there is now an element.
-  pthread_cond_broadcast(&job_queue->cond);
-
-  assert(pthread_mutex_unlock(&job_queue->mutex) == 0);
+  CHECK_ERR(pthread_cond_broadcast(&job_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&job_queue->mutex), "pthread_mutex_unlock");
 
   return 0;
 }
@@ -98,15 +95,16 @@ static inline int job_queue_push(struct job_queue *job_queue, void *data) {
 // job_queue_destroy() has been called (possibly after the call to
 // job_queue_pop() blocked), this function will return -1.
 static inline int job_queue_pop(struct job_queue *job_queue, void **data) {
-  assert(pthread_mutex_lock(&job_queue->mutex) == 0);
+  assert(job_queue != NULL);
+  CHECK_ERR(pthread_mutex_lock(&job_queue->mutex), "pthread_mutex_lock");
 
   // Wait until the job_queue contains an element.
   while (job_queue->num_used == 0 && !job_queue->dead) {
-    pthread_cond_wait(&job_queue->cond, &job_queue->mutex);
+    CHECK_ERR(pthread_cond_wait(&job_queue->cond, &job_queue->mutex), "pthread_cond_wait");
   }
 
   if (job_queue->dead) {
-    assert(pthread_mutex_unlock(&job_queue->mutex) == 0);
+    CHECK_ERR(pthread_mutex_unlock(&job_queue->mutex), "pthread_mutex_unlock");
     return -1;
   }
 
@@ -116,9 +114,8 @@ static inline int job_queue_pop(struct job_queue *job_queue, void **data) {
   job_queue->first = (job_queue->first + 1) % job_queue->capacity;
 
   // Signal a writer (if any) that there is now room for more.
-  pthread_cond_broadcast(&job_queue->cond);
-
-  assert(pthread_mutex_unlock(&job_queue->mutex) == 0);
+  CHECK_ERR(pthread_cond_broadcast(&job_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&job_queue->mutex), "pthread_mutex_unlock");
 
   return 0;
 }

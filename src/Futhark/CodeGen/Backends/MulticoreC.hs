@@ -100,17 +100,20 @@ compileProg =
                  create_lock(&ctx->lock);
                  $stms:init_fields
 
-                 ctx->scheduler.ctx = ctx;
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
-                 if (job_queue_init(&ctx->scheduler.q, 64)) return NULL;
-                 ctx->scheduler.threads = calloc(ctx->scheduler.num_threads, sizeof(pthread_t));
+
+                 ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
+                 if (ctx->scheduler.workers == NULL) return NULL;
 
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
-                   if (pthread_create(&ctx->scheduler.threads[i], NULL, &futhark_worker, &ctx->scheduler) != 0) {
-                     fprintf(stderr, "Failed to create thread (%d)\n", i);
-                     return NULL;
-                   }
+                   struct worker *cur_worker = &ctx->scheduler.workers[i];
+                   cur_worker->ctx = ctx;
+                   CHECK_ERR(job_queue_init(&cur_worker->q, 32),
+                             "failed to init jobqueue for worker %d\n", i);
+                   CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &futhark_worker,
+                                            cur_worker),
+                             "Failed to create worker %d\n", i);
                  }
                  CHECK_ERR(pthread_mutex_init(&ctx->profile_mutex, NULL), "pthred_mutex_init");
 
@@ -125,9 +128,8 @@ compileProg =
                  free_constants(ctx);
                  job_queue_destroy(&ctx->scheduler.q);
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
-                   if (pthread_join(ctx->scheduler.threads[i], NULL) != 0) {
-                     fprintf(stderr, "pthread_join failed on thread %d\n", i);
-                   }
+                   CHECK_ERR(job_queue_destroy(&ctx->scheduler.workers[i].q), "job_queue_destroy");
+                   CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
                  }
                  free_lock(&ctx->lock);
                  free(ctx);
@@ -239,6 +241,7 @@ addBenchmarkFields name = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
 
+
 benchmarkCode :: String -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name code = do
   addBenchmarkFields name
@@ -259,6 +262,7 @@ benchmarkCode name code = do
 
   where start = name ++ "_start"
         end = name ++"_end"
+
 
 multicoreName :: String -> GC.CompilerM op s String
 multicoreName s = do
@@ -290,16 +294,16 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
                };|]
 
   ftask <- multicoreDef "parloop" $ \s -> do
-    fbody'' <- benchmarkCode s [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)
-                                         int $id:i = start;
-                                         $items:prebody'
-                                         for (; $id:i < end; $id:i++) {
-                                             $items:body'
-                                         };|]
+    fbody <- benchmarkCode s [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)
+                                       int $id:i = start;
+                                       $items:prebody'
+                                       for (; $id:i < end; $id:i++) {
+                                           $items:body'
+                                       };|]
     return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
                struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                struct futhark_context *ctx = $id:fstruct->ctx;
-               $items:fbody''
+               $items:fbody
                return 0;
               }|]
 
@@ -318,8 +322,6 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
                                               "scheduler failed to do task %s", $string:ftask);|]
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport [ftask_name, ftask]
-
-
 
 compileOp (MulticoreCall [] f) =
   GC.stm [C.cstm|$id:f(ctx);|]

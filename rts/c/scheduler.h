@@ -14,23 +14,6 @@
 #include <sys/sysinfo.h>
 #endif
 
-static inline int check_err(int errval, int sets_errno, const char *fun, int line,
-                            const char *msg, ...)
-{
-  if (errval) {
-    char str[256];
-    char errnum[10];
-    sprintf(errnum, "%d", errval);
-    sprintf(str, "ERROR: %s in %s() at line %d with error code %s\n", msg, fun, line,
-            sets_errno ? strerror(errno) : errnum);
-    fprintf(stderr, "%s", str);
-  }
-  return errval;
-}
-
-#define CHECK_ERR(err, msg...) check_err(err, 0, __func__, __LINE__, msg)
-#define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
-
 // returns the number of logical cores
 static int num_processors() {
 #ifdef _WIN32
@@ -70,35 +53,34 @@ struct subtask {
   int subtask_id;
 
   // Shared variables across subtasks
-  int *counter; // Counter ongoing subtasks
+  int *counter; // Counter for ongoing subtasks
   pthread_mutex_t *mutex;
   pthread_cond_t *cond;
 };
 
 
-struct scheduler {
+struct worker {
+  pthread_t thread;
   struct job_queue q;
-  pthread_t *threads; // An array of threads
-  int num_threads;
 
   // Temp fix for error printing
   struct futhark_context* ctx;
 };
 
-
-enum SegOp {
-  SegMap,
-  SegRed,
+struct scheduler {
+  struct worker *workers;
+  int num_threads;
 };
 
+
 static inline void *futhark_worker(void* arg) {
-  struct scheduler *scheduler = (struct scheduler*) arg;
+  struct worker *worker = (struct worker*) arg;
   while(1) {
     struct subtask *subtask;
-    if (job_queue_pop(&scheduler->q, (void**)&subtask) == 0) {
+    if (job_queue_pop(&worker->q, (void**)&subtask) == 0) {
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
       if (err != 0) {
-        panic(err, futhark_context_get_error(scheduler->ctx));
+        panic(err, futhark_context_get_error(worker->ctx));
       }
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       (*subtask->counter)--;
@@ -164,29 +146,33 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   struct subtask *subtask = setup_subtask(task, subtask_id,
                                           &mutex, &cond, &shared_counter,
                                           0, remainder + iter_pr_subtask);
-  subtask_id++;
+
+  assert(subtask != NULL);
 
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
   shared_counter++;
   CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-  CHECK_ERR(job_queue_push(&scheduler->q, (void*)subtask), "job_queue_push");
+  CHECK_ERR(job_queue_push(&scheduler->workers[subtask_id].q, (void*)subtask), "job_queue_push");
+  subtask_id++;
 
 
-  for (int i = remainder + iter_pr_subtask; i < task->iterations; i += iter_pr_subtask)
+  for (int i = remainder + iter_pr_subtask;
+       i < task->iterations;
+       i += iter_pr_subtask)
   {
     struct subtask *subtask = setup_subtask(task, subtask_id,
                                             &mutex, &cond, &shared_counter,
                                             i, i + iter_pr_subtask);
-    subtask_id++;
 
+    assert(subtask != NULL);
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
     shared_counter++;
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-    CHECK_ERR(job_queue_push(&scheduler->q, (void*)subtask), "job_queue_push");
+    CHECK_ERR(job_queue_push(&scheduler->workers[subtask_id].q, (void*)subtask), "job_queue_push");
+    subtask_id++;
   }
 
-
-  // Join (wait for tasks to finish)
+  // Join (wait for subtasks to finish)
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
   while (shared_counter != 0) {
     CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
@@ -199,8 +185,6 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   return 0;
 }
 
-
 #endif
-
 
 // End of scheduler.h
