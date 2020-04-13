@@ -6,8 +6,6 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , defaultMemBlockType
   , primTypeToCType
   , signedPrimTypeToCType
-  , glPrimTypeToCType
-  , glSignedPrimTypeToCType
 
     -- * Primitive value operations
   , cIntOps
@@ -35,26 +33,12 @@ intTypeToCType Int16 = [C.cty|typename int16_t|]
 intTypeToCType Int32 = [C.cty|typename int32_t|]
 intTypeToCType Int64 = [C.cty|typename int64_t|]
 
--- | The GLSL type corresponding to a signed integer type.
-glIntTypeToCType :: IntType -> C.Type
-glIntTypeToCType Int8  = [C.cty|int|]
-glIntTypeToCType Int16 = [C.cty|int|]
-glIntTypeToCType Int32 = [C.cty|int|]
-glIntTypeToCType Int64 = [C.cty|typename int64_t|]
-
 -- | The C type corresponding to an unsigned integer type.
 uintTypeToCType :: IntType -> C.Type
 uintTypeToCType Int8  = [C.cty|typename uint8_t|]
 uintTypeToCType Int16 = [C.cty|typename uint16_t|]
 uintTypeToCType Int32 = [C.cty|typename uint32_t|]
 uintTypeToCType Int64 = [C.cty|typename uint64_t|]
-
--- | The GLSL type corresponding to an unsigned integer type.
-glUintTypeToCType :: IntType -> C.Type
-glUintTypeToCType Int8  = [C.cty|typename uint|]
-glUintTypeToCType Int16 = [C.cty|typename uint|]
-glUintTypeToCType Int32 = [C.cty|typename uint|]
-glUintTypeToCType Int64 = [C.cty|typename uint64_t|]
 
 -- | The C type corresponding to a float type.
 floatTypeToCType :: FloatType -> C.Type
@@ -69,27 +53,12 @@ primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|typename bool|]
 primTypeToCType Cert = [C.cty|typename bool|]
 
--- | The GLSL type corresponding to a primitive type. Integers are
--- assumed to be unsigned.
-glPrimTypeToCType :: PrimType -> C.Type
-glPrimTypeToCType (IntType t)   = glIntTypeToCType t
-glPrimTypeToCType (FloatType t) = floatTypeToCType t
-glPrimTypeToCType Bool = [C.cty|typename bool|]
-glPrimTypeToCType Cert = [C.cty|typename bool|]
-
 -- | The C type corresponding to a primitive type. Integers are
 -- assumed to have the specified sign.
 signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
 signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
 signedPrimTypeToCType TypeDirect (IntType t)   = intTypeToCType t
 signedPrimTypeToCType _ t = primTypeToCType t
-
--- | The GLSL type corresponding to a primitive type. Integers are
--- assumed to have the specified sign.
-glSignedPrimTypeToCType :: Signedness -> PrimType -> C.Type
-glSignedPrimTypeToCType TypeUnsigned (IntType t) = glUintTypeToCType t
-glSignedPrimTypeToCType TypeDirect (IntType t)   = glIntTypeToCType t
-glSignedPrimTypeToCType _ t = glPrimTypeToCType t
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
@@ -476,7 +445,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
         mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
 
         mkSDiv t =
-          let ct = glIntTypeToCType t
+          let ct = intTypeToCType t
           in [C.cedecl|$ty:ct $id:(taggedI "sdiv" t)($ty:ct x, $ty:ct y) {
                          $ty:ct q = x / y;
                          $ty:ct r = x % y;
@@ -484,7 +453,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
                            (((r != 0) && ((r < 0) != (y < 0))) ? 1 : 0);
              }|]
         mkSMod t =
-          let ct = glIntTypeToCType t
+          let ct = intTypeToCType t
           in [C.cedecl|$ty:ct $id:(taggedI "smod" t)($ty:ct x, $ty:ct y) {
                          $ty:ct r = x % y;
                          return r +
@@ -513,7 +482,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
           [C.cedecl|$esc:("#define " ++ name ++ "(x) (" ++ prettyOneLine rhs ++ ")")|]
 
         mkPow t =
-          let ct = glIntTypeToCType t
+          let ct = intTypeToCType t
           in [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
                          $ty:ct res = 1, rem = y;
                          while (rem != 0) {
@@ -528,40 +497,40 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
 
         mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name    = "sext_"++pretty from_t++"_"++pretty to_t
-                from_ct = glIntTypeToCType from_t
-                to_ct   = glIntTypeToCType to_t
+                from_ct = intTypeToCType from_t
+                to_ct   = intTypeToCType to_t
 
         mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name    = "zext_"++pretty from_t++"_"++pretty to_t
-                from_ct = glUintTypeToCType from_t
-                to_ct   = glUintTypeToCType to_t
+                from_ct = uintTypeToCType from_t
+                to_ct   = uintTypeToCType to_t
 
         mkBToI to_t =
           [C.cedecl|$ty:to_ct
                     $id:name($ty:from_ct x) { return x; } |]
           where name    = "btoi_bool_"++pretty to_t
-                from_ct = glPrimTypeToCType Bool
-                to_ct   = glIntTypeToCType to_t
+                from_ct = primTypeToCType Bool
+                to_ct   = intTypeToCType to_t
 
         mkIToB from_t =
           [C.cedecl|$ty:to_ct
                     $id:name($ty:from_ct x) { return x; } |]
           where name    = "itob_"++pretty from_t++"_bool"
-                to_ct   = glPrimTypeToCType Bool
-                from_ct = glIntTypeToCType from_t
+                to_ct   = primTypeToCType Bool
+                from_ct = intTypeToCType from_t
 
         simpleUintOp s e t =
           [C.cedecl|$ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = glUintTypeToCType t
+            where ct = uintTypeToCType t
         simpleIntOp s e t =
           [C.cedecl|$ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = glIntTypeToCType t
+            where ct = intTypeToCType t
         intCmpOp s e t =
           [C.cedecl|typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = glIntTypeToCType t
+            where ct = intTypeToCType t
         uintCmpOp s e t =
           [C.cedecl|typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = glUintTypeToCType t
+            where ct = uintTypeToCType t
 
 -- | Same as `cIntPrimFuns` but without static inlined functions to adapt for GLSL.
 glIntPrimFuns :: [C.Definition]
@@ -611,16 +580,6 @@ glIntPrimFuns = [C.cunit|
      return futrts_mul_hi64(a, b) + c;
     }
 
-   int $id:(funName' "clz32") (int x) {
-    int n = 0;
-    int bits = sizeof(x) * 8;
-    for (int i = 0; i < bits; i++) {
-        if (x < 0) break;
-        n++;
-        x <<= 1;
-    }
-    return n;
-   }
    static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
