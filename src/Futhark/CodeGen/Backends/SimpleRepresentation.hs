@@ -1011,7 +1011,7 @@ glFloatConvOps :: [C.Definition]
 
         mkFPConv from_f to_f s from_t to_t =
           [C.cedecl|$ty:to_ct
-                    $id:(convOp s from_t to_t)($ty:from_ct x) { return ($ty:to_ct)x;} |]
+                    $id:(convOp s from_t to_t)($ty:from_ct x) { return to_ct(x);} |]
           where from_ct = from_f from_t
                 to_ct = to_f to_t
 
