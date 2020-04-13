@@ -563,27 +563,48 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
           [C.cedecl|typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = glUintTypeToCType t
 
--- | Same as `cIntPrimFuns` but without static inlined functions, 8-bit ints
--- and 16-bit ints to adapt for GLSL.
+-- | Same as `cIntPrimFuns` but without static inlined functions to adapt for GLSL.
 glIntPrimFuns :: [C.Definition]
 glIntPrimFuns = [C.cunit|
-   int $id:(funName' "popc32") (int x) {
+   typename int32_t $id:(funName' "popc8") (typename int8_t x) {
       return bitCount(x);
    }
-   int $id:(funName' "popc64") (typename int64_t x) {
+   typename int32_t $id:(funName' "popc16") (typename int16_t x) {
+      return bitCount(x);
+   }
+   typename int32_t $id:(funName' "popc32") (typename int32_t x) {
+      return bitCount(x);
+   }
+   typename int32_t $id:(funName' "popc64") (typename int64_t x) {
       return bitCount(x);
    }
 
-   typename uint $id:(funName' "mul_hi32") (typename uint a, typename uint b) {
+   typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
+     typename uint16_t aa = a;
+     typename uint16_t bb = b;
+     return (aa * bb) >> 32;
+    }
+   typename uint16_t $id:(funName' "mul_hi16") (typename uint16_t a, typename uint16_t b) {
+     typename uint32_t aa = a;
+     typename uint32_t bb = b;
+     return (aa * bb) >> 32;
+    }
+   typename uint $id:(funName' "mul_hi32") (typename uint32_t a, typename uint32_t b) {
      typename uint64_t aa = a;
      typename uint64_t bb = b;
      return (aa * bb) >> 32;
     }
    typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
-     return aa * bb;
+     return aa * bb; //TODO >> 64
     }
 
-   typename uint $id:(funName' "mad_hi32") (typename uint a, typename uint b, typename uint c) {
+   typename uint8_t $id:(funName' "mad_hi8") (typename uint8_t a, typename uint8_t b, typename uint8_t c) {
+     return futrts_mul_hi8(a, b) + c;
+    }
+   typename uint16_t $id:(funName' "mad_hi16") (typename uint16_t a, typename uint16_t b, typename uint16_t c) {
+     return futrts_mul_hi16(a, b) + c;
+    }
+   typename uint32_t $id:(funName' "mad_hi32") (typename uint32_t a, typename uint32_t b, typename uint32_t c) {
      return futrts_mul_hi32(a, b) + c;
     }
    typename uint64_t $id:(funName' "mad_hi64") (typename uint64_t a, typename uint64_t b, typename uint64_t c) {
@@ -600,7 +621,37 @@ glIntPrimFuns = [C.cunit|
     }
     return n;
    }
-   int $id:(funName' "clz64") (typename int64 x) {
+   static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+   static typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+   static typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+    int n = 0;
+    int bits = sizeof(x) * 8;
+    for (int i = 0; i < bits; i++) {
+        if (x < 0) break;
+        n++;
+        x <<= 1;
+    }
+    return n;
+   }
+   static typename int32_t $id:(funName' "clz64") (typename int64_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
