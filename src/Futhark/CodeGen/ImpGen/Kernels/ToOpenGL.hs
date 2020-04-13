@@ -184,6 +184,12 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("#extension GL_ARB_compute_variable_group_size : enable")|]
   , [C.cedecl|$esc:("#extension GL_ARB_gpu_shader_int64 : enable")|]
   , [C.cedecl|$esc:("layout (local_size_variable) in;")|]
+  , [C.cedecl|$esc:("#define int8_t int")|]
+  , [C.cedecl|$esc:("#define int16_t int")|]
+  , [C.cedecl|$esc:("#define int32_t int")|]
+  , [C.cedecl|$esc:("#define uint8_t uint")|]
+  , [C.cedecl|$esc:("#define uint16_t uint")|]
+  , [C.cedecl|$esc:("#define uint32_t uint")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
 
