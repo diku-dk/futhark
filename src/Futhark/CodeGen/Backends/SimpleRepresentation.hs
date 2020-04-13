@@ -582,7 +582,7 @@ glIntPrimFuns = [C.cunit|
 
    typename int32_t $id:(funName' "clz8") (typename int8_t x) {
     int n = 0;
-    int bits = sizeof(x) * 8;
+    int bits = 32;
     for (int i = 0; i < bits; i++) {
         if (x < 0) break;
         n++;
@@ -592,7 +592,7 @@ glIntPrimFuns = [C.cunit|
    }
    typename int32_t $id:(funName' "clz16") (typename int16_t x) {
     int n = 0;
-    int bits = sizeof(x) * 8;
+    int bits = 32;
     for (int i = 0; i < bits; i++) {
         if (x < 0) break;
         n++;
@@ -602,7 +602,7 @@ glIntPrimFuns = [C.cunit|
    }
    typename int32_t $id:(funName' "clz32") (typename int32_t x) {
     int n = 0;
-    int bits = sizeof(x) * 8;
+    int bits = 32;
     for (int i = 0; i < bits; i++) {
         if (x < 0) break;
         n++;
@@ -612,7 +612,7 @@ glIntPrimFuns = [C.cunit|
    }
    typename int32_t $id:(funName' "clz64") (typename int64_t x) {
     int n = 0;
-    int bits = sizeof(x) * 8;
+    int bits = 64;
     for (int i = 0; i < bits; i++) {
         if (x < 0) break;
         n++;
