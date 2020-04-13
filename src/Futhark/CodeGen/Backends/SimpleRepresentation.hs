@@ -580,7 +580,7 @@ glIntPrimFuns = [C.cunit|
      return futrts_mul_hi64(a, b) + c;
     }
 
-   static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
+   typename int32_t $id:(funName' "clz8") (typename int8_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
@@ -590,7 +590,7 @@ glIntPrimFuns = [C.cunit|
     }
     return n;
    }
-   static typename int32_t $id:(funName' "clz16") (typename int16_t x) {
+   typename int32_t $id:(funName' "clz16") (typename int16_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
@@ -600,7 +600,7 @@ glIntPrimFuns = [C.cunit|
     }
     return n;
    }
-   static typename int32_t $id:(funName' "clz32") (typename int32_t x) {
+   typename int32_t $id:(funName' "clz32") (typename int32_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
@@ -610,7 +610,7 @@ glIntPrimFuns = [C.cunit|
     }
     return n;
    }
-   static typename int32_t $id:(funName' "clz64") (typename int64_t x) {
+   typename int32_t $id:(funName' "clz64") (typename int64_t x) {
     int n = 0;
     int bits = sizeof(x) * 8;
     for (int i = 0; i < bits; i++) {
