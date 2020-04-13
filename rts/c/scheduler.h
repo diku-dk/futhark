@@ -79,9 +79,6 @@ static inline void *futhark_worker(void* arg) {
     struct subtask *subtask;
     if (job_queue_pop(&worker->q, (void**)&subtask) == 0) {
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
-      if (err != 0) {
-        panic(err, futhark_context_get_error(worker->ctx));
-      }
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       (*subtask->counter)--;
       CHECK_ERR(pthread_cond_signal(subtask->cond), "pthread_cond_signal");

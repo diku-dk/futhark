@@ -126,7 +126,6 @@ compileProg =
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
-                 job_queue_destroy(&ctx->scheduler.q);
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
                    CHECK_ERR(job_queue_destroy(&ctx->scheduler.workers[i].q), "job_queue_destroy");
                    CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
@@ -180,8 +179,9 @@ copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbyt
 copyMulticoreMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
-closureStructField :: VName -> String
-closureStructField v = "free_" ++ pretty v
+closureStructField :: VName -> Name
+closureStructField v =
+  nameFromString "free_" <> nameFromString (pretty v)
 
 compileStructFields :: [VName] -> [C.Type] -> [C.FieldGroup]
 compileStructFields = zipWith field
