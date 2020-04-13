@@ -316,6 +316,7 @@ static void setup_opengl(struct opengl_context *ctx,
       exit(1);
     }
 
+  free_list_init(&ctx->free_list);
   setup_size_opengl(ctx);
   OPENGL_SUCCEED(glGetError());
 
