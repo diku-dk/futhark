@@ -62,9 +62,6 @@ struct subtask {
 struct worker {
   pthread_t thread;
   struct job_queue q;
-
-  // Temp fix for error printing
-  struct futhark_context* ctx;
 };
 
 struct scheduler {
@@ -73,6 +70,8 @@ struct scheduler {
 };
 
 
+static int scheduler_error = 0;
+
 static inline void *futhark_worker(void* arg) {
   struct worker *worker = (struct worker*) arg;
   while(1) {
@@ -80,6 +79,12 @@ static inline void *futhark_worker(void* arg) {
     if (job_queue_pop(&worker->q, (void**)&subtask) == 0) {
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+      // Only one error can be returned at the time now
+      // Maybe we can provide a stack like structure for pushing errors onto
+      // if we wish to backpropagte multiple errors
+      if (err != 0) {
+        scheduler_error = err;
+      }
       (*subtask->counter)--;
       CHECK_ERR(pthread_cond_signal(subtask->cond), "pthread_cond_signal");
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
@@ -114,7 +119,7 @@ static inline struct subtask* setup_subtask(struct task* task, int subtask_id,
 
 
 static inline int scheduler_do_task(struct scheduler *scheduler,
-                                    struct task * task,
+                                    struct task *task,
                                     int *ntask)
 {
 
@@ -179,7 +184,7 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
     *ntask = subtask_id;
   }
 
-  return 0;
+  return scheduler_error;
 }
 
 #endif

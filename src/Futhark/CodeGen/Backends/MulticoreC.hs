@@ -108,7 +108,6 @@ compileProg =
 
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
-                   cur_worker->ctx = ctx;
                    CHECK_ERR(job_queue_init(&cur_worker->q, 32),
                              "failed to init jobqueue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &futhark_worker,
@@ -318,10 +317,16 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
 
-  code' <- benchmarkCode ftask_name [C.citems|CHECK_ERR(scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks),
-                                              "scheduler failed to do task %s", $string:ftask);|]
+  let ftask_err = ftask ++ "_err"
+  code' <- benchmarkCode ftask_name [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
+                                              if ($id:ftask_err != 0) {
+                                                panic($id:ftask_err, futhark_context_get_error(ctx));
+                                              }|]
+
+
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport [ftask_name, ftask]
+
 
 compileOp (MulticoreCall [] f) =
   GC.stm [C.cstm|$id:f(ctx);|]
