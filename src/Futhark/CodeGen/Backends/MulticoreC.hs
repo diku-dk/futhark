@@ -326,5 +326,9 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
 compileOp (MulticoreCall [] f) =
   GC.stm [C.cstm|$id:f(ctx);|]
 
-compileOp (MulticoreCall retvals f) =
-  forM_ retvals $ \retval -> GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
+compileOp (MulticoreCall [retval] f) =
+  GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
+
+compileOp (MulticoreCall _ f) =
+  error $ "Can't handle multiple retval for MulticoreCall to function " ++ f
+  -- GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
