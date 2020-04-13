@@ -1313,7 +1313,8 @@ data CParts = CParts { cHeader :: String
 
 -- | Produce header and implementation files.
 asLibrary :: CParts -> (String, String)
-asLibrary parts = ("#pragma once\n\n" <> cHeader parts, cUtils parts <> cLib parts)
+asLibrary parts = ("#pragma once\n\n" <> cHeader parts,
+                   cHeader parts <> cUtils parts <> cLib parts)
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
