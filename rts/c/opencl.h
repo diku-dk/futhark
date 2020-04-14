@@ -222,7 +222,7 @@ static void opencl_succeed_fatal(unsigned int ret,
                                  const char *file,
                                  int line) {
   if (ret != CL_SUCCESS) {
-    panic(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
+    futhark_panic(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, opencl_error_string(ret));
   }
 }
@@ -444,7 +444,7 @@ static struct opencl_device_option get_preferred_device(const struct opencl_conf
     }
   }
 
-  panic(1, "Could not find acceptable OpenCL device.\n");
+  futhark_panic(1, "Could not find acceptable OpenCL device.\n");
   exit(1); // Never reached
 }
 
@@ -535,7 +535,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
                                    sizeof(cl_uint), &supported, NULL));
     if (!supported) {
-      panic(1, "Program uses double-precision floats, but this is not supported on the chosen device: %s\n",
+      futhark_panic(1, "Program uses double-precision floats, but this is not supported on the chosen device: %s\n",
             device_option.device_name);
     }
   }
