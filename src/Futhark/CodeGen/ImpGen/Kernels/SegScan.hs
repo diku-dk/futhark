@@ -42,6 +42,12 @@ localArrayIndex constants t =
   then kernelLocalThreadId constants
   else kernelGlobalThreadId constants
 
+barrierFor :: Lambda ExplicitMemory -> (Bool, Imp.Fence, InKernelGen ())
+barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
+  where array_scan = not $ all primType $ lambdaReturnType scan_op
+        fence | array_scan = Imp.FenceGlobal
+              | otherwise = Imp.FenceLocal
+
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 :: Pattern ExplicitMemory
            -> Count NumGroups SubExp -> Count GroupSize SubExp -> SegSpace
@@ -162,11 +168,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
 
   return (num_threads, elems_per_group, crossesSegment)
 
-  where array_scan = not $ all primType $ lambdaReturnType scan_op
-        fence | array_scan = Imp.FenceGlobal
-              | otherwise = Imp.FenceLocal
-        barrier = sOp $ Imp.Barrier fence
-
+  where (array_scan, fence, barrier) = barrierFor scan_op
 
 scanStage2 :: Pattern ExplicitMemory
            -> VName -> Imp.Exp -> Count NumGroups SubExp -> CrossesSegment -> SegSpace
@@ -214,10 +216,7 @@ scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crosses
       copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
       (Var arr) [localArrayIndex constants t]
 
-  where array_scan = not $ all primType $ lambdaReturnType scan_op
-        fence | array_scan = Imp.FenceGlobal
-              | otherwise = Imp.FenceLocal
-        barrier = sOp $ Imp.Barrier fence
+  where (_, _, barrier) = barrierFor scan_op
 
 scanStage3 :: Pattern ExplicitMemory
            -> Count NumGroups SubExp -> Count GroupSize SubExp
