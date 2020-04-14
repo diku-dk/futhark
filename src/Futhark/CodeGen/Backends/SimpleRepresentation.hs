@@ -516,7 +516,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
           in [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
                          $ty:ct res = 1, rem = y;
                          while (rem != 0) {
-                           if (rem & 1) {
+                           if ((rem & 1) != 0) {
                              res *= x;
                            }
                            rem >>= 1;
