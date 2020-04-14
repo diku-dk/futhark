@@ -20,6 +20,7 @@ main = compilerMain () []
              hpath = outpath `addExtension` "h"
              extra_options = [ "-lcuda"
                              , "-lnvrtc"
+                             , "-fdiagnostics-color=always"
                              ]
          case mode of
            ToLibrary -> do
