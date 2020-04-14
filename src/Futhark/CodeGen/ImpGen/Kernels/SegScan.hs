@@ -204,6 +204,8 @@ scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crosses
     sComment "threads in bound read carries; others get neutral element" $
       sIf in_bounds when_in_bounds when_out_of_bounds
 
+    barrier
+
     groupScan constants crossesSegment'
       (Imp.vi32 stage1_num_threads) (kernelGroupSize constants) scan_op local_arrs
 
@@ -211,6 +213,11 @@ scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crosses
       sWhen in_bounds $ forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
       copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
       (Var arr) [localArrayIndex constants t]
+
+  where array_scan = not $ all primType $ lambdaReturnType scan_op
+        fence | array_scan = Imp.FenceGlobal
+              | otherwise = Imp.FenceLocal
+        barrier = sOp $ Imp.Barrier fence
 
 scanStage3 :: Pattern ExplicitMemory
            -> Count NumGroups SubExp -> Count GroupSize SubExp
