@@ -6,7 +6,7 @@
 
 static const char *fut_progname;
 
-static void panic(int eval, const char *fmt, ...)
+static void futhark_panic(int eval, const char *fmt, ...)
 {
 	va_list ap;
 

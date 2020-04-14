@@ -636,10 +636,10 @@ commonOptions =
                 if (equals != NULL) {
                   *equals = 0;
                   if (futhark_context_config_set_size(cfg, name, value) != 0) {
-                    panic(1, "Unknown size: %s\n", name);
+                    futhark_panic(1, "Unknown size: %s\n", name);
                   }
                 } else {
-                  panic(1, "Invalid argument for size option: %s\n", optarg);
+                  futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
                 }}|]
             }
    , Option { optionLongName = "tuning"
@@ -649,7 +649,7 @@ commonOptions =
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                           futhark_context_config_set_size);
                 if (ret != NULL) {
-                  panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
             }
    ]

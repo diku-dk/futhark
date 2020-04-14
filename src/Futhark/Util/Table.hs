@@ -8,6 +8,8 @@ module Futhark.Util.Table
 import Data.List (intercalate, transpose)
 import System.Console.ANSI
 
+import Futhark.Util.Pretty (color)
+
 data RowTemplate = RowTemplate [Int] Int deriving (Show)
 
 -- | A table entry. Consists of the content as well a list of
@@ -17,9 +19,6 @@ type Entry = (String, [SGR])
 -- | Makes a table entry with the default SGR mode.
 mkEntry :: String -> (String, [SGR])
 mkEntry s = (s, [])
-
-color :: [SGR] -> String -> String
-color sgr s = setSGRCode sgr ++ s ++ setSGRCode [Reset]
 
 buildRowTemplate :: [[Entry]] -> Int -> RowTemplate
 
