@@ -324,29 +324,93 @@ static void setup_opengl(struct opengl_context *ctx,
 
 static void setup_shader(struct opengl_context *ctx,
                          const char *srcs[]) {
-  // We might use the attach/detach method, instead of deleting and
-  // creating entire program objects.
-  if(&ctx->program) {
-    glDeleteProgram(ctx->program);
+
+  char *gl_src = NULL;
+
+  if (ctx->cfg.load_binary_from == NULL) {
+    size_t src_size = 0;
+
+    // We might have to read OpenGL source from somewhere else (used for debugging).
+    if (ctx->cfg.load_program_from != NULL) {
+      gl_src = slurp_file(ctx->cfg.load_program_from, NULL);
+      assert(gl_src != NULL);
+    }
+    else if (ctx->cfg.load_binary_from == NULL) {
+      // Construct the OpenGL source concatenating all the fragments.
+      for (const char **src = srcs; src && *src; src++) {
+        src_size += strlen(*src);
+      }
+
+      gl_src = (char*)malloc(src_size + 1);
+
+      size_t n, i;
+      for (i = 0, n = 0; srcs && srcs[i]; i++) {
+        strncpy(gl_src+n, srcs[i], src_size-n);
+        n += strlen(srcs[i]);
+      }
+      gl_src[src_size] = 0;
   }
 
-  ctx->program = glCreateProgram();
+    if (ctx->cfg.dump_program_to != NULL) {
+      if (ctx->cfg.debugging) {
+        fprintf(stderr, "Dumping OpenGL source to %s...\n", ctx->cfg.dump_program_to);
+      }
+      FILE *f = fopen(ctx->cfg.dump_program_to, "w");
+      assert(f != NULL);
+      fputs(gl_src, f);
+      fclose(f);
+    }
 
-  // Create the compute shader object.
-  GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
+    // We might use the attach/detach method, instead of deleting and
+    // creating entire program objects.
+    if(&ctx->program) {
+      glDeleteProgram(ctx->program);
+    }
 
-  // Create and compile the compute shader.
-  glShaderSource(computeShader, 1, srcs, NULL);
-  glCompileShader(computeShader);
-  SHADER_SUCCEED(shader_compile_succeed(computeShader));
+    ctx->program = glCreateProgram();
 
-  // Attach and link the shader against to the compute program.
-  glAttachShader(ctx->program, computeShader);
-  glLinkProgram(ctx->program);
-  SHADER_SUCCEED(shader_link_succeed(ctx->program));
+    // Create the compute shader object.
+    GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
 
-  // Delete the compute shader object.
-  glDeleteShader(computeShader);
+    // Create and compile the compute shader.
+    //TODO: delete these
+    FILE *fp;
+    fp = fopen("temp", "w");
+    if (fp) {
+      fputs(gl_src, fp);
+    }
+    fclose(fp);
+    const char* src_ptr = gl_src;
+    glShaderSource(computeShader, 1, &src_ptr, NULL);
+    glCompileShader(computeShader);
+    SHADER_SUCCEED(shader_compile_succeed(computeShader));
+
+    // Attach and link the shader against to the compute program.
+    glAttachShader(ctx->program, computeShader);
+    glLinkProgram(ctx->program);
+    SHADER_SUCCEED(shader_link_succeed(ctx->program));
+
+    // Delete the compute shader object.
+    glDeleteShader(computeShader);
+  }
+  else {
+    if (ctx->cfg.debugging) {
+      fprintf(stderr, "Loading OpenGL binary from %s...\n", ctx->cfg.load_binary_from);
+    }
+    size_t binary_size;
+    GLenum binary_format;
+    unsigned char *gl_bin =
+      (unsigned char*)slurp_file(ctx->cfg.load_binary_from, &binary_size);
+    assert(gl_bin != NULL);
+    const unsigned char *binaries = gl_bin;
+    glGetProgramBinary(ctx->program, &binary_size, NULL,
+                       &binary_format, binaries);
+    OPENGL_SUCCEED(glGetError());
+    glProgramBinary(ctx->program, &binary_format,
+                    binaries, &binary_size);
+    OPENGL_SUCCEED(glGetError());
+
+  }
 }
 
 static GLenum opengl_alloc(struct opengl_context *ctx,
