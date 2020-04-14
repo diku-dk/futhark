@@ -513,17 +513,30 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
 
         mkPow t =
           let ct = intTypeToCType t
-          in [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
-                         $ty:ct res = 1, rem = y;
-                         while (rem != 0) {
-                           if ((rem & int64_t(1)) != 0) {
-                             res *= x;
+          in if t == Int64 then
+            [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
+                           $ty:ct res = 1, rem = y;
+                           while (rem != 0) {
+                             if ((rem & int64_t(1)) != 0) {
+                               res *= x;
+                             }
+                             rem >>= 1;
+                             x *= x;
                            }
-                           rem >>= 1;
-                           x *= x;
-                         }
-                         return res;
-              }|]
+                           return res;
+                }|]
+          else
+            [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
+                           $ty:ct res = 1, rem = y;
+                           while (rem != 0) {
+                             if ((rem & 1) != 0) {
+                               res *= x;
+                             }
+                             rem >>= 1;
+                             x *= x;
+                           }
+                           return res;
+                }|]
 
         mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name    = "sext_"++pretty from_t++"_"++pretty to_t
