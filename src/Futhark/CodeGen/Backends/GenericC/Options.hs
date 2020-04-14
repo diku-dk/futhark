@@ -50,11 +50,11 @@ generateOptionParser fname options =
                  getopt_long(argc, argv, $string:option_string, long_options, NULL)) != -1) {
          $stms:option_applications
          if ($id:chosen_option == ':') {
-           panic(-1, "Missing argument for option %s\n", argv[optind-1]);
+           futhark_panic(-1, "Missing argument for option %s\n", argv[optind-1]);
          }
          if ($id:chosen_option == '?') {
            fprintf(stderr, "Usage: %s: %s\n", fut_progname, $string:option_descriptions);
-           panic(1, "Unknown option: %s\n", argv[optind-1]);
+           futhark_panic(1, "Unknown option: %s\n", argv[optind-1]);
          }
        }
        return optind;
