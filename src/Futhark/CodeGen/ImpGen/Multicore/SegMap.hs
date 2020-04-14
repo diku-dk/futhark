@@ -24,7 +24,6 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   num_tasks <- dPrim "ntask" $ IntType Int32
 
   body' <- collect $ do
-   emit $ Imp.DebugPrint "SegMap fbody" Nothing
    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
    compileStms (freeIn kres) kstms $ do
      let writeResult pe (Returns _ se) =

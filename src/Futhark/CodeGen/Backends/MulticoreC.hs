@@ -288,23 +288,24 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
 
   fstruct <- multicoreDef "parloop_struct" $ \s ->
      return [C.cedecl|struct $id:s {
-                 struct futhark_context *ctx;
-                 $sdecls:(compileStructFields fargs fctypes)
-               };|]
+                        struct futhark_context *ctx;
+                        $sdecls:(compileStructFields fargs fctypes)
+                      };|]
 
   ftask <- multicoreDef "parloop" $ \s -> do
     fbody <- benchmarkCode s [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)
                                        int $id:i = start;
                                        $items:prebody'
+                                       $pragma:("clang loop vectorize(enable) unroll(enable) interleave(enable)")
                                        for (; $id:i < end; $id:i++) {
                                            $items:body'
                                        };|]
     return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
-               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
-               struct futhark_context *ctx = $id:fstruct->ctx;
-               $items:fbody
-               return 0;
-              }|]
+                       struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+                       struct futhark_context *ctx = $id:fstruct->ctx;
+                       $items:fbody
+                       return 0;
+                     }|]
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]

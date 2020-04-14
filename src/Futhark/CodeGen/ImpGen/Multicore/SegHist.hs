@@ -108,7 +108,7 @@ segmentedHist pat space histops kbody = do
 
 
   fbody <- collect $ do
-    emit $ Imp.DebugPrint "Segmented segHist" Nothing
+    -- emit $ Imp.DebugPrint "Segmented segHist" Nothing
     let inner_bound = last ns'
 
     sFor "i" inner_bound $ \i -> do
@@ -168,7 +168,7 @@ nonsegmentedHist :: Pattern ExplicitMemory
                 -> KernelBody ExplicitMemory
                 -> MulticoreGen ()
 nonsegmentedHist pat space histops kbody = do
-  emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
+  -- emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
 
   -- variable for how many subhistograms to allocate

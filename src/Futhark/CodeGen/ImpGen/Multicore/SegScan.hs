@@ -72,7 +72,7 @@ segmentedScan pat space scan_op nes kbody = do
 
 
   fbody <- collect $ do
-    emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
+    -- emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
     dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
     forM_ (zip scan_x_params nes) $ \(p, ne) ->
       copyDWIMFix (paramName p) [] ne []
@@ -160,7 +160,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
   slug <- segScanOpSlug tid' scan_op stage_one_red_res
 
   prebody <- collect $ do
-    emit $ Imp.DebugPrint "nonsegmented segScan stage 1" Nothing
+    -- emit $ Imp.DebugPrint "nonsegmented segScan stage 1" Nothing
     sComment "neutral-initialise the acc used by this thread" $
       forM_ (zip (slugAccs slug) nes) $ \((acc, acc_is), ne) ->
         copyDWIMFix acc acc_is ne []

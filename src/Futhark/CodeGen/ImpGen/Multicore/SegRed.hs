@@ -126,8 +126,8 @@ nonsegmentedReduction pat space reds kbody = do
   -- reduce6.fut still doesn't work though
   dPrimV_ (segFlat space) 0
 
-  prebody <- collect $ do
-    emit $ Imp.DebugPrint "nonsegmented segRed stage 1" Nothing
+  prebody <- collect $
+    -- emit $ Imp.DebugPrint "nonsegmented segRed stage 1" Nothing
     sComment "neutral-initialise the acc used by this thread" $
       forM_ slugs $ \slug ->
         forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
@@ -141,16 +141,16 @@ nonsegmentedReduction pat space reds kbody = do
       let all_red_res' = chunks (map (length . slugNeutral) slugs) all_red_res
       forM_ (zip all_red_res' slugs) $ \(red_res, slug) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
-          sComment "load acc params" $
-            forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+          -- sComment "load acc params" $
+          forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
               copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
-          sComment "load next params" $
-            forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+          -- sComment "load next params" $
+          forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
               copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
           forM_ (zip (slugParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
               copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
-          sComment "red body" $
-            compileStms mempty (bodyStms $ slugBody slug) $
+          -- sComment "red body" $
+          compileStms mempty (bodyStms $ slugBody slug) $
                 forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
                   \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
@@ -173,8 +173,8 @@ nonsegmentedReduction pat space reds kbody = do
   -- Reduce over intermediate results
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
   sFor "i" ntasks' $ \i' -> do
-    emit $ Imp.DebugPrint "nonsegmented segRed stage 2" Nothing
-    emit $ Imp.SetScalar tid i'
+    -- emit $ Imp.DebugPrint "nonsegmented segRed stage 2" Nothing
+    tid <-- i'
     sComment "Apply main thread reduction" $
       forM_ slugs $ \slug ->
         sLoopNest (slugShape slug) $ \vec_is -> do
@@ -213,7 +213,7 @@ segmentedReduction pat space reds kbody = do
 
   -- Perform sequential reduce on inner most dimension
   fbody <- collect $ do
-    emit $ Imp.DebugPrint "segmented segRed stage 1" Nothing
+    -- emit $ Imp.DebugPrint "segmented segRed stage 1" Nothing
     sComment "neutral-initialise the accumulators" $
       forM_ reds $ \red->
         forM_ (zip (patternElements pat) (segRedNeutral red)) $ \(pe, ne) ->
@@ -221,33 +221,33 @@ segmentedReduction pat space reds kbody = do
             copyDWIMFix (patElemName pe) (n_segments' : vec_is) ne []
 
 
-    sComment "function main body" $ do
-      let inner_bound = last ns'
-      dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segRedLambda) reds
-      sFor "i" inner_bound $ \i -> do
-        dPrimV_ (segFlat space) (n_segments' * inner_bound + i)
-        zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-        kbody $ \all_red_res -> do
-          let red_res' = chunks (map (length . segRedNeutral) reds) all_red_res
-          forM_ (zip reds red_res') $ \(red, res') ->
-            sLoopNest (segRedShape red) $ \vec_is -> do
+    -- sComment "function main body" $ do
+    let inner_bound = last ns'
+    dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segRedLambda) reds
+    sFor "i" inner_bound $ \i -> do
+      dPrimV_ (segFlat space) (n_segments' * inner_bound + i)
+      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+      kbody $ \all_red_res -> do
+        let red_res' = chunks (map (length . segRedNeutral) reds) all_red_res
+        forM_ (zip reds red_res') $ \(red, res') ->
+          sLoopNest (segRedShape red) $ \vec_is -> do
 
-            sComment "load acuum " $ do
-              let acc_params = take (length (segRedNeutral red)) $ (lambdaParams . segRedLambda) red
-              forM_ (zip acc_params (patternElements pat)) $ \(p, pe) ->
-                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (n_segments' : vec_is)
+          sComment "load acuum " $ do
+            let acc_params = take (length (segRedNeutral red)) $ (lambdaParams . segRedLambda) red
+            forM_ (zip acc_params (patternElements pat)) $ \(p, pe) ->
+              copyDWIMFix (paramName p) [] (Var $ patElemName pe) (n_segments' : vec_is)
 
-            sComment "load new val" $ do
-              let next_params = drop (length (segRedNeutral red)) $ (lambdaParams . segRedLambda) red
-              forM_ (zip next_params res') $ \(p, (res, res_is)) ->
-                copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+          sComment "load new val" $ do
+            let next_params = drop (length (segRedNeutral red)) $ (lambdaParams . segRedLambda) red
+            forM_ (zip next_params res') $ \(p, (res, res_is)) ->
+              copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
 
-            sComment "apply reduction" $ do
-              let lbody = (lambdaBody . segRedLambda) red
-              compileStms mempty (bodyStms lbody) $
-                sComment "write back to res" $
-                forM_ (zip (patternElements pat) (bodyResult lbody)) $
-                  \(pe, se') -> copyDWIMFix (patElemName pe) (n_segments' : vec_is) se' []
+          sComment "apply reduction" $ do
+            let lbody = (lambdaBody . segRedLambda) red
+            compileStms mempty (bodyStms lbody) $
+              sComment "write back to res" $
+              forM_ (zip (patternElements pat) (bodyResult lbody)) $
+                \(pe, se') -> copyDWIMFix (patElemName pe) (n_segments' : vec_is) se' []
 
 
   let paramsNames = namesToList $ freeIn fbody `namesSubtract`
