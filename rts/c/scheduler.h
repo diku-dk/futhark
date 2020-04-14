@@ -22,7 +22,7 @@
 /* A wrapper for getting rusage on Linux and MacOS */
 int getrusage_thread(struct rusage *rusage)
 {
-  int ret = -1;
+  int err = -1;
 #ifdef __APPLE__
     thread_basic_info_data_t info = { 0 };
     mach_msg_type_number_t info_count = THREAD_BASIC_INFO_COUNT;
@@ -38,14 +38,14 @@ int getrusage_thread(struct rusage *rusage)
         rusage->ru_utime.tv_usec = info.user_time.microseconds;
         rusage->ru_stime.tv_sec = info.system_time.seconds;
         rusage->ru_stime.tv_usec = info.system_time.microseconds;
-        ret = 0;
+        err = 0;
     } else {
         errno = EINVAL;
     }
 #else // Linux
     err = getrusage(RUSAGE_THREAD, rusage);
 #endif
-    return ret;
+    return err;
 }
 
 
