@@ -10,9 +10,44 @@
 #include <windows.h>
 #elif __APPLE__
 #include <sys/sysctl.h>
-#else
+// Used for getting cpu usage of threads
+#include <mach/mach.h>
+#include <sys/resource.h>
+#else // Linux
 #include <sys/sysinfo.h>
+#include <sys/resource.h>
 #endif
+
+
+/* A wrapper for getting rusage on Linux and MacOS */
+int getrusage_thread(struct rusage *rusage)
+{
+  int ret = -1;
+#ifdef __APPLE__
+    thread_basic_info_data_t info = { 0 };
+    mach_msg_type_number_t info_count = THREAD_BASIC_INFO_COUNT;
+    kern_return_t kern_err;
+
+    kern_err = thread_info(mach_thread_self(),
+                           THREAD_BASIC_INFO,
+                           (thread_info_t)&info,
+                           &info_count);
+    if (kern_err == KERN_SUCCESS) {
+        memset(rusage, 0, sizeof(struct rusage));
+        rusage->ru_utime.tv_sec = info.user_time.seconds;
+        rusage->ru_utime.tv_usec = info.user_time.microseconds;
+        rusage->ru_stime.tv_sec = info.system_time.seconds;
+        rusage->ru_stime.tv_usec = info.system_time.microseconds;
+        ret = 0;
+    } else {
+        errno = EINVAL;
+    }
+#else // Linux
+    err = getrusage(RUSAGE_THREAD, rusage);
+#endif
+    return ret;
+}
+
 
 // returns the number of logical cores
 static int num_processors() {
@@ -36,7 +71,7 @@ static int num_processors() {
 
 typedef int (*task_fn)(void*, int, int, int);
 
-// A task for the scheduler to execute
+/* A task for the scheduler to execute */
 struct task {
   const char* name;
   task_fn fn;
@@ -90,7 +125,14 @@ static inline void *futhark_worker(void* arg) {
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
     } else {
-       break;
+      struct rusage usage;
+      CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
+      struct timeval user_cpu_time = usage.ru_utime;
+      struct timeval sys_cpu_time = usage.ru_stime;
+      /* printf("tid: %d\n", pthread_self()); */
+      printf("user time: %ld\n", user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec);
+      printf("sys time:  %ld\n", sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
+      break;
     }
   }
   return NULL;
@@ -148,7 +190,6 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   struct subtask *subtask = setup_subtask(task, subtask_id,
                                           &mutex, &cond, &shared_counter,
                                           0, remainder + iter_pr_subtask);
-
   assert(subtask != NULL);
 
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
