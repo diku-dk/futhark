@@ -1341,6 +1341,11 @@ compileProg ops extra header_extra spaces options prog = do
 
   let headerdefs = [C.cunit|
 $esc:("/*\n * Headers\n*/\n")
+/* We need to define _GNU_SOURCE before
+   _any_ headers files are imported to get
+   the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
+   https://manpages.courier-mta.org/htmlman2/getrusage.2.html */
+$esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")

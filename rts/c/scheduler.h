@@ -130,8 +130,8 @@ static inline void *futhark_worker(void* arg) {
       struct timeval user_cpu_time = usage.ru_utime;
       struct timeval sys_cpu_time = usage.ru_stime;
       /* printf("tid: %d\n", pthread_self()); */
-      printf("user time: %ld\n", user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec);
-      printf("sys time:  %ld\n", sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
+      fprintf(stderr, "user time: %ld\n", user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec);
+      fprintf(stderr, "sys time:  %ld\n", sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
       break;
     }
   }
