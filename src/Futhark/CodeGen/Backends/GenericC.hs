@@ -539,7 +539,7 @@ defineMemorySpace space = do
         stm [C.cstm|block->mem = (char*) malloc(size);|]
   let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
-    panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
+    futhark_panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
   int ret = $id:(fatMemUnRef space)(ctx, block, desc);
@@ -1066,7 +1066,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e = do
 readPrimStm :: C.ToExp a => a -> Int -> PrimType -> Signedness -> C.Stm
 readPrimStm place i t ept =
   [C.cstm|if (read_scalar(&$exp:(primTypeInfo t ept),&$exp:place) != 0) {
-        panic(1, "Error when reading input #%d of type %s (errno: %s).\n",
+        futhark_panic(1, "Error when reading input #%d of type %s (errno: %s).\n",
               $int:i,
               $exp:(primTypeInfo t ept).type_name,
               strerror(errno));
@@ -1077,7 +1077,7 @@ readInputs = zipWithM readInput [0..]
 
 readInput :: Int -> ExternalValue -> CompilerM op s (C.Stm, C.Stm, C.Stm, C.Exp)
 readInput i (OpaqueValue desc _) = do
-  stm [C.cstm|panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:desc);|]
+  stm [C.cstm|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:desc);|]
   return ([C.cstm|;|], [C.cstm|;|], [C.cstm|;|], [C.cexp|NULL|])
 readInput i (TransparentValue (ScalarValue t ept _)) = do
   dest <- newVName "read_value"
@@ -1109,7 +1109,7 @@ readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
                     $id:shape,
                     $int:(length dims))
          != 0) {
-       panic(1, "Cannot read input #%d of type %s%s (errno: %s).\n",
+       futhark_panic(1, "Cannot read input #%d of type %s%s (errno: %s).\n",
                  $int:i,
                  $string:dims_s,
                  $exp:(primTypeInfo t ept).type_name,
@@ -1176,7 +1176,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   /* Run the program once. */
                   $stms:pack_input
                   if ($id:sync_ctx(ctx) != 0) {
-                    panic(1, "%s", $id:error_ctx(ctx));
+                    futhark_panic(1, "%s", $id:error_ctx(ctx));
                   };
                   // Only profile last run.
                   if (profile_run) {
@@ -1187,10 +1187,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                                                     $args:(map addrOf output_vals),
                                                     $args:input_args);
                   if (r != 0) {
-                    panic(1, "%s", $id:error_ctx(ctx));
+                    futhark_panic(1, "%s", $id:error_ctx(ctx));
                   }
                   if ($id:sync_ctx(ctx) != 0) {
-                    panic(1, "%s", $id:error_ctx(ctx));
+                    futhark_panic(1, "%s", $id:error_ctx(ctx));
                   };
                   if (profile_run) {
                     $id:pause_profiling(ctx);
@@ -1215,7 +1215,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     $items:input_items
 
     if (end_of_input() != 0) {
-      panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
+      futhark_panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
     }
 
     $items:output_decls
@@ -1288,14 +1288,14 @@ benchmarkOptions =
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
           if (runtime_file == NULL) {
-            panic(1, "Cannot open %s: %s\n", optarg, strerror(errno));
+            futhark_panic(1, "Cannot open %s: %s\n", optarg, strerror(errno));
           }
         }|]
         set_num_runs = [C.cstm|{
           num_runs = atoi(optarg);
           perform_warmup = 1;
           if (num_runs <= 0) {
-            panic(1, "Need a positive number of runs, not %s\n", optarg);
+            futhark_panic(1, "Need a positive number of runs, not %s\n", optarg);
           }
         }|]
 
@@ -1373,7 +1373,7 @@ $esc:("#include <stdint.h>")
 $esc:("#undef NDEBUG")
 $esc:("#include <assert.h>")
 
-$esc:panic_h
+$esc:futhark_panic_h
 
 $esc:timing_h
 |]
@@ -1425,7 +1425,7 @@ int main(int argc, char** argv) {
   argv += parsed_options;
 
   if (argc != 0) {
-    panic(1, "Excess non-option: %s\n", argv[0]);
+    futhark_panic(1, "Excess non-option: %s\n", argv[0]);
   }
 
   struct futhark_context *ctx = futhark_context_new(cfg);
@@ -1433,7 +1433,7 @@ int main(int argc, char** argv) {
 
   char* error = futhark_context_get_error(ctx);
   if (error != NULL) {
-    panic(1, "%s", error);
+    futhark_panic(1, "%s", error);
   }
 
   if (entry_point != NULL) {
@@ -1542,7 +1542,7 @@ $edecls:entry_point_decls
       builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
                 cFloat32Funs ++ cFloat64Funs
 
-      panic_h  = $(embedStringFile "rts/c/panic.h")
+      futhark_panic_h  = $(embedStringFile "rts/c/panic.h")
       values_h = $(embedStringFile "rts/c/values.h")
       timing_h = $(embedStringFile "rts/c/timing.h")
       lock_h   = $(embedStringFile "rts/c/lock.h")
