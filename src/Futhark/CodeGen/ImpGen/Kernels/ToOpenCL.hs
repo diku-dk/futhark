@@ -181,7 +181,7 @@ onKernel target kernel = do
                   [C.citems|if (*global_failure >= 0) { return; }|])
             else (SafetyFull,
                   [C.citems|
-                     volatile __local bool local_failure;
+                     __local int local_failure;
                      if (failure_is_an_option) {
                        if (get_local_id(0) == 0) {
                          local_failure = *global_failure >= 0;
@@ -189,7 +189,7 @@ onKernel target kernel = do
                        barrier(CLK_LOCAL_MEM_FENCE);
                        if (local_failure) { return; }
                      } else {
-                       local_failure = false;
+                       local_failure = 0;
                      }
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |])
