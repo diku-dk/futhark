@@ -464,7 +464,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
           let ct = intTypeToCType t
           in if t == Int64 then
             [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
-                       return x * pow(2,y);
+                       return x * pow64(int64_t(2),y);
             }|]
           else
             [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
@@ -475,7 +475,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
           let ct = intTypeToCType t
           in if t == Int64 then
             [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
-                       return x / floor(pow(2,y));
+                       return x / pow64(int64_t(2),y);
             }|]
           else
             [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
@@ -486,7 +486,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
           let ct = intTypeToCType t
           in if t == Int64 then
             [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
-                       return x / floor(pow(2,y));
+                       return x / pow64(int64_t(2),y);
             }|]
           else
             [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
