@@ -460,13 +460,43 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
                            ((r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0)) ? 0 : y);
               }|]
 
+        mkShl t =
+          let ct = intTypeToCType t
+          in if t == Int64 then
+            [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
+                       return x * pow(2,y); //x << y
+            }|]
+          else
+            [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
+                       return x << y;
+            }|]
+
+        mkLShr t =
+          let ct = intTypeToCType t
+          in if t == Int64 then
+            [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
+                       return x / floor(pow(2,y)); //x >> y
+            }|]
+          else
+            [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
+                       return x << y;
+            }|]
+
+        mkAShr t =
+          let ct = intTypeToCType t
+          in if t == Int64 then
+            [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
+                       return x / floor(pow(2,y)); //x >> y
+            }|]
+          else
+            [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
+                       return x << y;
+            }|]
+
         mkSQuot = simpleIntOp  "squot" [C.cexp|x / y|]
         mkSRem  = simpleIntOp  "srem"  [C.cexp|x % y|]
         mkSMax  = simpleIntOp  "smax"  [C.cexp|x < y ? y : x|]
         mkSMin  = simpleIntOp  "smin"  [C.cexp|x < y ? x : y|]
-        mkShl   = simpleUintOp "shl"   [C.cexp|x << y|]
-        mkLShr  = simpleUintOp "lshr"  [C.cexp|x >> y|]
-        mkAShr  = simpleIntOp  "ashr"  [C.cexp|x >> y|]
         mkAnd   = simpleUintOp "and"   [C.cexp|x & y|]
         mkOr    = simpleUintOp "or"    [C.cexp|x | y|]
         mkXor   = simpleUintOp "xor"   [C.cexp|x ^ y|]
@@ -616,7 +646,7 @@ glIntPrimFuns = [C.cunit|
     for (int i = 0; i < bits; i++) {
         if (x < 0) break;
         n++;
-        x <<= 1;
+        x *= 2;
     }
     return n;
    }
