@@ -265,6 +265,7 @@ generateContextFuns cfg kernels sizes failures = do
                    return NULL;
                  }
                  ctx->profiling = ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
+                 ctx->error = NULL;
 
                  ctx->cuda.cfg = cfg->cu_cfg;
                  create_lock(&ctx->lock);
@@ -328,6 +329,7 @@ generateContextFuns cfg kernels sizes failures = do
                      return 1;
                    }
                  }
+                 return 0;
                }|])
 
   GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
