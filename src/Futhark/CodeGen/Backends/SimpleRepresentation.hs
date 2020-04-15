@@ -614,6 +614,22 @@ glIntPrimFuns = [C.cunit|
      typename uint64_t bb = b;
      return uint32_t(aa * bb) >> 32;
     }
+   typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t xx, typename uint64_t yy) {
+     typename uint64_t x = xx;
+     typename uint64_t y = yy;
+     typename uint64_t accum = uint64_t(uint32_t(x)) * uint64_t(uint32_t(y));
+     accum /= uint64_t(pow64(int64_t(2), int64_t(32)));
+     typename uint64_t term1 = (x / uint64_t(pow64(int64_t(2), int64_t(32)))) *
+                      uint64_t(uint32_t(y));
+     typename uint64_t term2 = (y / uint64_t(pow64(int64_t(2), int64_t(32)))) *
+                      uint64_t(uint32_t(x));
+     accum += uint32_t(term1);
+     accum += uint32_t(term2);
+     accum /= uint64_t(pow64(int64_t(2), int64_t(32)));
+     accum += (term1 / uint64_t(pow64(int64_t(2), int64_t(32)))) +
+              (term2 / uint64_t(pow64(int64_t(2), int64_t(32))));
+     return accum;
+   }
 
    typename uint8_t $id:(funName' "mad_hi8") (typename uint8_t a, typename uint8_t b, typename uint8_t c) {
      return futrts_mul_hi8(a, b) + c;
@@ -623,6 +639,9 @@ glIntPrimFuns = [C.cunit|
     }
    typename uint32_t $id:(funName' "mad_hi32") (typename uint32_t a, typename uint32_t b, typename uint32_t c) {
      return futrts_mul_hi32(a, b) + c;
+    }
+   typename uint64_t $id:(funName' "mad_hi64") (typename uint64_t a, typename uint64_t b, typename uint64_t c) {
+     return futrts_mul_hi64(a, b) + c;
     }
 
    typename int32_t $id:(funName' "clz8") (typename int8_t x) {
