@@ -414,7 +414,8 @@ $esc:("#endif")
 glIntOps :: [C.Definition]
 glIntOps = concatMap (`map` [minBound..maxBound]) ops
           ++ glIntPrimFuns
-  where ops = [mkAdd,   mkSub, mkMul,
+  where ops = [mkPow,
+               mkAdd,   mkSub, mkMul,
                mkUDiv,  mkUMod,
                mkSDiv,  mkSMod,
                mkSQuot, mkSRem,
@@ -423,7 +424,6 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
                mkShl,   mkLShr, mkAShr,
                mkAnd,   mkOr,   mkXor,
                mkUlt,   mkUle,  mkSlt, mkSle,
-               mkPow,
                mkIToB, mkBToI
               ] ++
               map mkSExt [minBound..maxBound] ++
@@ -549,15 +549,19 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
                 to_ct   = uintTypeToCType to_t
 
         mkBToI to_t =
-          [C.cedecl|$ty:to_ct
-                    $id:name($ty:from_ct x) { return x; } |]
+          if to_t == Int64 then
+            [C.cedecl|$ty:to_ct
+                      $id:name($ty:from_ct x) { return int64_t(x); } |]
+          else
+            [C.cedecl|$ty:to_ct
+                      $id:name($ty:from_ct x) { return int32_t(x); } |]
           where name    = "btoi_bool_"++pretty to_t
                 from_ct = primTypeToCType Bool
                 to_ct   = intTypeToCType to_t
 
         mkIToB from_t =
           [C.cedecl|$ty:to_ct
-                    $id:name($ty:from_ct x) { return x; } |]
+                    $id:name($ty:from_ct x) { return bool(x); } |]
           where name    = "itob_"++pretty from_t++"_bool"
                 to_ct   = primTypeToCType Bool
                 from_ct = intTypeToCType from_t
