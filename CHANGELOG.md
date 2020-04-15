@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark doc` now supports proper GitHub-flavored Markdown, as it
     uses the `cmark-gfm` library internally.
 
+  * Top-level constants are now executed only once per program
+    instance.  This matters when Futhark is used to generate library
+    code.
+
+  * `futhark autotune` is better at handling degrees of parallelism
+    that assume multiple magnitudes during a single run.
+
+  * `futhark pkg` now uses `curl` to retrieve packages.
+
 ### Removed
 
 ### Changed
