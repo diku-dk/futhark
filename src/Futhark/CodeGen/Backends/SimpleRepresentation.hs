@@ -592,7 +592,11 @@ glIntPrimFuns = [C.cunit|
       return bitCount(x);
    }
    typename int32_t $id:(funName' "popc64") (typename int64_t x) {
-      return bitCount(x);
+     int c = 0;
+     for (; x > 0; ++c) {
+       x &= x - 1;
+     }
+     return c;
    }
 
    typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
@@ -1052,7 +1056,7 @@ glFloatConvOps :: [C.Definition]
 
         mkFPConv from_f to_f s from_t to_t =
           [C.cedecl|$ty:to_ct
-                    $id:(convOp s from_t to_t)($ty:from_ct x) { return to_ct(x);} |]
+                    $id:(convOp s from_t to_t)($ty:from_ct x) { return x;} |]
           where from_ct = from_f from_t
                 to_ct = to_f to_t
 
