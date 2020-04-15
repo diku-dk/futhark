@@ -16,6 +16,7 @@ module Futhark.Pass.ExtractKernels.Interchange
 
 import Control.Monad.RWS.Strict
 import Data.Maybe
+import qualified Data.Map as M
 import Data.List (find)
 
 import Futhark.Pass.ExtractKernels.Distribution
@@ -150,13 +151,13 @@ interchangeBranch1
           Pattern [] $ map (fmap (`arrayOfRow` w)) $ patternElements branch_pat
 
         mkBranch branch = (renameBody=<<) $ do
-          branch' <- if null $ bodyStms branch
-                     then runBodyBinder $
-                          -- XXX: We need a temporary dummy binding to
-                          -- prevent an empty map body.  The kernel
-                          -- extractor does not like empty map bodies.
-                          resultBody <$> mapM dummyBind (bodyResult branch)
-                     else return branch
+          let bound_in_branch = scopeOf (bodyStms branch)
+          branch' <-
+            -- XXX: We may need dummys binding to prevent identity
+            -- mappings.  The kernel extractor does not like identity
+            -- mappings.
+            runBodyBinder $
+            resultBody <$> (mapM (dummyBindIfNotIn bound_in_branch) =<< bodyBind branch)
           let lam = Lambda params branch' lam_ret
               res = map Var $ patternNames branch_pat'
               map_bnd = Let branch_pat' (StmAux cs ()) $ Op $ Screma w (mapSOAC lam) arrs
@@ -170,6 +171,11 @@ interchangeBranch1
           dummy <- newVName "dummy"
           letBindNames_ [dummy] (BasicOp $ SubExp se)
           return $ Var dummy
+
+        dummyBindIfNotIn bound_in_branch se
+          | Var v <- se,
+            v `M.member` bound_in_branch = return se
+          | otherwise = dummyBind se
 
 interchangeBranch :: (MonadFreshNames m, HasScope SOACS m) =>
                      KernelNest -> Branch -> m (Stms SOACS)
