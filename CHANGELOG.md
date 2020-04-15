@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark pkg` now uses `curl` to retrieve packages.
 
+  * Type errors are now printed in red for better legibility (thanks
+    to @mxxo!).
+
 ### Removed
 
 ### Changed
