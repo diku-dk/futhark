@@ -320,7 +320,7 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   let ftask_err = ftask ++ "_err"
   code' <- benchmarkCode ftask_name [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
                                               if ($id:ftask_err != 0) {
-                                                panic($id:ftask_err, futhark_context_get_error(ctx));
+                                                futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                                               }|]
 
 
