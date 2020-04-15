@@ -183,14 +183,13 @@ onKernel target kernel = do
                   [C.citems|
                      volatile __local bool local_failure;
                      if (failure_is_an_option) {
-                       if (get_local_id(0) == 0) {
-                         local_failure = *global_failure >= 0;
+                       int failed = *global_failure >= 0;
+                       if (failed) {
+                         return;
                        }
-                       barrier(CLK_LOCAL_MEM_FENCE);
-                       if (local_failure) { return; }
-                     } else {
-                       local_failure = false;
                      }
+                     // All threads write this value - it looks like CUDA has a compiler bug otherwise.
+                     local_failure = false;
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |])
 
