@@ -1166,21 +1166,11 @@ glFloat32Funs = [C.cunit|
     }
 
     typename int32_t $id:(funName' "to_bits32")(float x) {
-      union {
-        float f;
-        typename int32_t t;
-      } p;
-      p.f = x;
-      return p.t;
+      return floatBitsToInt(x);
     }
 
     float $id:(funName' "from_bits32")(typename int32_t x) {
-      union {
-        typename int32_t f;
-        float t;
-      } p;
-      p.f = x;
-      return p.t;
+      return intBitsToFloat(x);
     }
 
     float fmod32(float x, float y) {
