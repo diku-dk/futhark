@@ -1063,15 +1063,46 @@ glFloatConvOps :: [C.Definition]
         mkFAdd  = simpleFloatOp "fadd"  [C.cexp|x + y|]
         mkFSub  = simpleFloatOp "fsub"  [C.cexp|x - y|]
         mkFMul  = simpleFloatOp "fmul"  [C.cexp|x * y|]
-        mkFMin  = simpleFloatOp "fmin"  [C.cexp|fmin(x, y)|]
-        mkFMax  = simpleFloatOp "fmax"  [C.cexp|fmax(x, y)|]
         mkCmpLt = floatCmpOp    "cmplt" [C.cexp|x < y|]
         mkCmpLe = floatCmpOp    "cmple" [C.cexp|x <= y|]
+
+        mkFMin t =
+          let ct = floatTypeToCType t
+          in if t == Float64 then
+            [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) {
+                           if (x < y) {
+                             return x;
+                           }
+                           return y;
+               }|]
+          else
+            [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) { return fmin(x, y); }|]
+
+        mkFMax t =
+          let ct = floatTypeToCType t
+          in if t == Float64 then
+            [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) {
+                           if (x > y) {
+                             return x;
+                           }
+                           return y;
+               }|]
+          else
+            [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) { return fmax(x, y); }|]
 
         mkPow Float32 =
           [C.cedecl|float fpow32(float x, float y) { return pow(x, y); }|]
         mkPow Float64 =
-          [C.cedecl|double fpow64(double x, double y) { return pow(x, y); }|]
+          [C.cedecl|double fpow64(double x, double y) {
+                      double res = 1.0, rem = y;
+                      while (rem != 0.0) {
+                          if (float64((int64_t(rem) & int64_t(1.0))) != 0.0)
+                              res *= x;
+                          rem = float64(int64_t(rem) >> 1);
+                          x *= x;
+                      }
+                      return res;
+              }|]
 
         mkFPConv from_f to_f s from_t to_t =
           [C.cedecl|$ty:to_ct
