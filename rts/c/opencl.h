@@ -627,7 +627,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     if (ctx->cfg.load_program_from != NULL) {
       fut_opencl_src = slurp_file(ctx->cfg.load_program_from, NULL);
       assert(fut_opencl_src != NULL);
-    } else if (ctx->cfg.load_binary_from == NULL) {
+    } else {
       // Construct the OpenCL source concatenating all the fragments.
       for (const char **src = srcs; src && *src; src++) {
         src_size += strlen(*src);
