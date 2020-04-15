@@ -1105,7 +1105,7 @@ glFloat32Funs = [C.cunit|
     }
 
     float $id:(funName' "log10_32")(float x) {
-      return log10(x);
+      return (log(x) / log(10));
     }
 
     float $id:(funName' "sqrt32")(float x) {
@@ -1165,15 +1165,15 @@ glFloat32Funs = [C.cunit|
     }
 
     float $id:(funName' "atan2_32")(float x, float y) {
-      return atan2(x,y);
+      return atan(x,y);
     }
 
     float $id:(funName' "gamma32")(float x) {
-      return tgamma(x);
+      return x;
     }
 
     float $id:(funName' "lgamma32")(float x) {
-      return lgamma(x);
+      return x;
     }
 
     typename bool $id:(funName' "isnan32")(float x) {
@@ -1193,25 +1193,25 @@ glFloat32Funs = [C.cunit|
     }
 
     float fmod32(float x, float y) {
-      return fmodf(x, y);
+      return mod(x, y);
     }
     float $id:(funName' "round32")(float x) {
-      return rintf(x);
+      return round(x);
     }
     float $id:(funName' "floor32")(float x) {
-      return floorf(x);
+      return floor(x);
     }
     float $id:(funName' "ceil32")(float x) {
-      return ceilf(x);
+      return ceil(x);
     }
     float $id:(funName' "lerp32")(float v0, float v1, float t) {
-      return v0 + (v1-v0)*t;
+      return mix(v0, v1, t);
     }
     float $id:(funName' "mad32")(float a, float b, float c) {
       return a*b+c;
     }
     float $id:(funName' "fma32")(float a, float b, float c) {
-      return fmaf(a,b,c);
+      return fma(a,b,c);
     }
 |]
 
@@ -1228,7 +1228,7 @@ glFloat64Funs = [C.cunit|
     }
 
     double $id:(funName' "log10_64")(double x) {
-      return log10(x);
+      return (log(x) / log(10));
     }
 
     double $id:(funName' "sqrt64")(double x) {
@@ -1288,15 +1288,15 @@ glFloat64Funs = [C.cunit|
     }
 
     double $id:(funName' "atan2_64")(double x, double y) {
-      return atan2(x,y);
+      return atan(x,y);
     }
 
     double $id:(funName' "gamma64")(double x) {
-      return tgamma(x);
+      return x;
     }
 
     double $id:(funName' "lgamma64")(double x) {
-      return lgamma(x);
+      return x;
     }
 
     double $id:(funName' "fma64")(double a, double b, double c) {
@@ -1304,7 +1304,7 @@ glFloat64Funs = [C.cunit|
     }
 
     double $id:(funName' "round64")(double x) {
-      return rint(x);
+      return round(x);
     }
 
     double $id:(funName' "ceil64")(double x) {
@@ -1342,11 +1342,11 @@ glFloat64Funs = [C.cunit|
     }
 
     double fmod64(double x, double y) {
-      return fmod(x, y);
+      return mod(x, y);
     }
 
     double $id:(funName' "lerp64")(double v0, double v1, double t) {
-      return v0 + (v1-v0)*t;
+      return mix(v0, v1, t);
     }
     double $id:(funName' "mad64")(double a, double b, double c) {
       return a*b+c;
