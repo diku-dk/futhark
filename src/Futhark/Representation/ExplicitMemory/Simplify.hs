@@ -40,7 +40,13 @@ simplifyExplicitMemory =
   blockers { Engine.blockHoistBranch = blockAllocs }
   where blockAllocs vtable _ (Let _ _ (Op Alloc{})) =
           not $ ST.simplifyMemory vtable
-        blockAllocs _ _ _ = False
+        -- Do not hoist statements that produce arrays.  This is
+        -- because in the ExplicitMemory representation, multiply
+        -- arrays can be located in the same memory block, and moving
+        -- their creation out of a branch can thus cause memory
+        -- corruption.
+        blockAllocs _ _ (Let pat _ _) =
+          not $ all primType $ patternTypes pat
 
 simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
                 Stms ExplicitMemory -> m (ST.SymbolTable (Wise ExplicitMemory),
