@@ -126,12 +126,50 @@ static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, str
   return 0;
 }
 
-
+/* TODO: Do I need to acquire locks here? */
 static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 {
   return subtask_queue->num_used == 0;
-
 }
+
+
+/* Like subtask_queue_dequeue, but returns immediately if there is no tasks queued,
+   as we dont' want to block on another workers queue */
+static inline int subtask_queue_steal(struct subtask_queue *subtask_queue,
+                                      struct subtask **subtask)
+{
+  assert(subtask_queue != NULL);
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+
+  if (subtask_queue_is_empty(subtask_queue)) {
+    // Signal a writer (if any) that there is now room for more.
+    CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return -1;
+  }
+  // Wait until the subtask_queue contains an element.
+  while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
+    CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
+  }
+
+  if (subtask_queue->dead) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return -1;
+  }
+
+  // We now know that num_used is nonzero.
+  subtask_queue->num_used--;
+  *subtask = subtask_queue->buffer[subtask_queue->first];
+  subtask_queue->first = (subtask_queue->first + 1) % subtask_queue->capacity;
+
+  // Signal a writer (if any) that there is now room for more.
+  CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+
+  return 0;
+}
+
+
 
 #endif
 

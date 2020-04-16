@@ -1,7 +1,7 @@
 // start of scheduler.h
 
-#ifndef SCHEDULER_H
-#define SCHEDULER_H
+#ifndef _SCHEDULER_H_
+#define _SCHEDULER_H_
 
 #define MULTICORE
 /* #define MCDEBUG */
@@ -17,6 +17,47 @@
 #include <sys/sysinfo.h>
 #include <sys/resource.h>
 #endif
+
+
+typedef int (*task_fn)(void*, int, int, int);
+
+
+static int scheduler_error = 0;
+struct scheduler {
+  struct worker *workers;
+  int num_threads;
+};
+
+/* A task for the scheduler to execute */
+struct scheduler_task {
+  const char* name;
+  task_fn fn;
+  void* args;
+  long int iterations;
+  int is_static; // Whether it's possible to schedule the task as dynamic or not
+};
+
+
+struct worker {
+  pthread_t thread;
+  struct subtask_queue q;
+  int tid; // Just a thread id
+  struct scheduler *scheduler;
+};
+
+/* A subtask that can be executed by a thread */
+struct subtask {
+  task_fn fn;
+  void* args;
+  int start, end;
+  int subtask_id;
+
+  // Shared variables across subtasks
+  int *counter; // Counter for ongoing subtasks
+  pthread_mutex_t *mutex;
+  pthread_cond_t *cond;
+
+};
 
 
 /* A wrapper for getting rusage on Linux and MacOS */
@@ -48,6 +89,16 @@ int getrusage_thread(struct rusage *rusage)
     return err;
 }
 
+void output_thread_usage(struct worker *worker)
+{
+  struct rusage usage;
+  CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
+  struct timeval user_cpu_time = usage.ru_utime;
+  struct timeval sys_cpu_time = usage.ru_stime;
+  fprintf(stderr, "tid: %d - user time: %ld us - sys: %ld us\n",
+          worker->tid, user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec,
+          sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
+}
 
 // returns the number of logical cores
 static int num_processors()
@@ -70,45 +121,20 @@ static int num_processors()
 #endif
 }
 
-typedef int (*task_fn)(void*, int, int, int);
 
-/* A task for the scheduler to execute */
-struct scheduler_task {
-  const char* name;
-  task_fn fn;
-  void* args;
-  long int iterations;
-  int is_static; // Whether it's possible to schedule the task as dynamic or not
-};
+/* Ask for a random queue from another worker */
+static inline struct worker* query_a_subtask_queue(struct scheduler* scheduler, int tid)
+{
+  assert(scheduler != NULL);
 
+  if (scheduler->num_threads == 1) return &scheduler->workers[0];
 
-/* A subtask that can be executed by a thread */
-struct subtask {
-  task_fn fn;
-  void* args;
-  int start, end;
-  int subtask_id;
-
-  // Shared variables across subtasks
-  int *counter; // Counter for ongoing subtasks
-  pthread_mutex_t *mutex;
-  pthread_cond_t *cond;
-};
-
-
-struct worker {
-  pthread_t thread;
-  struct subtask_queue q;
-  int tid; // Just a thread id
-};
-
-struct scheduler {
-  struct worker *workers;
-  int num_threads;
-};
-
-
-static int scheduler_error = 0;
+  int worker_idx;
+  do {
+     worker_idx = rand() % scheduler->num_threads;
+  } while (worker_idx == tid);
+  return &scheduler->workers[worker_idx];
+}
 
 static inline void *futhark_worker(void* arg)
 {
@@ -130,15 +156,25 @@ static inline void *futhark_worker(void* arg)
       free(subtask);
       if (subtask_queue_is_empty(&worker->q)) {
         // Steal some work
+        struct worker *rand_worker = query_a_subtask_queue(worker->scheduler, worker->tid);
+        if (rand_worker == NULL)  {
+          assert(!"failed to find queue \n");
+          continue;
+        }
+        struct subtask *subtask;
+        int retval = subtask_queue_steal(&rand_worker->q, &subtask);
+        if (retval != 0) { // We didn't find any work here
+          // TODO the return val can also mean queue failed
+          // so avoid this overloading of return values
+          continue;
+        }
+        // else we take the work and put into our own queue
+        CHECK_ERR(subtask_queue_enqueue(&worker->q, subtask), "subtask_queue_enqueue");
       }
     } else {
-      struct rusage usage;
-      CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
-      struct timeval user_cpu_time = usage.ru_utime;
-      struct timeval sys_cpu_time = usage.ru_stime;
-      fprintf(stderr, "tid: %d - user time: %ld us - sys: %ld us\n",
-              worker->tid, user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec,
-              sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
+      output_thread_usage(worker);
+#ifdef MCDEBUG
+#endif
       break;
     }
   }
@@ -173,7 +209,52 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
                                     struct scheduler_task *task,
                                     int *ntask)
 {
+#ifdef MCDEBUG
   fprintf(stderr, "Performing dynamic scheduling\n");
+#endif
+
+  pthread_mutex_t mutex;
+  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
+  pthread_cond_t cond;
+  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
+
+  /* For now just set this to 100 subtasks; */
+  /* As we don't have any information about the load balancing yet */
+  int max_num_tasks = 100;
+  int subtask_id = 0;
+  int shared_counter = 0;
+  int iter_pr_subtask = task->iterations / max_num_tasks;
+  int remainder = task->iterations % max_num_tasks;
+
+  int nsubtasks = iter_pr_subtask == 0 ? 1 : ((task->iterations - remainder) / iter_pr_subtask);
+
+  int start = 0;
+  int end = iter_pr_subtask + remainder;
+  for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
+    struct subtask *subtask = setup_subtask(task, subtask_id,
+                                            &mutex, &cond, &shared_counter,
+                                            start, end);
+    assert(subtask != NULL);
+    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
+    shared_counter++;
+    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads].q, subtask), "subtask_queue_enqueue");
+
+    // Update range params
+    start = end;
+    end += iter_pr_subtask;
+  }
+
+  // Join (wait for subtasks to finish)
+  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
+  while (shared_counter != 0) {
+    CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
+  }
+
+  if (ntask != NULL) {
+    *ntask = nsubtasks;
+  }
+
   return scheduler_error;
 }
 
@@ -195,32 +276,26 @@ static inline int scheduler_static(struct scheduler *scheduler,
   int iter_pr_subtask = task->iterations / scheduler->num_threads;
   int remainder = task->iterations % scheduler->num_threads;
 
-  struct subtask *subtask = setup_subtask(task, subtask_id,
-                                          &mutex, &cond, &shared_counter,
-                                          0, remainder + iter_pr_subtask);
-  assert(subtask != NULL);
 
-  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-  shared_counter++;
-  CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-  CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask), "subtask_queue_enqueue");
-  subtask_id++;
+  int nsubtasks = iter_pr_subtask == 0 ? 1 : ((task->iterations - remainder) / iter_pr_subtask);
 
 
-  for (int i = remainder + iter_pr_subtask;
-       i < task->iterations;
-       i += iter_pr_subtask)
-  {
+  int start = 0;
+  int end = iter_pr_subtask + remainder;
+  for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task, subtask_id,
                                             &mutex, &cond, &shared_counter,
-                                            i, i + iter_pr_subtask);
-
+                                            start, end);
     assert(subtask != NULL);
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
     shared_counter++;
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
+
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask), "subtask_queue_enqueue");
-    subtask_id++;
+
+    // Update range params
+    start = end;
+    end += iter_pr_subtask;
   }
 
   // Join (wait for subtasks to finish)
@@ -230,7 +305,7 @@ static inline int scheduler_static(struct scheduler *scheduler,
   }
 
   if (ntask != NULL) {
-    *ntask = subtask_id;
+    *ntask = nsubtasks;
   }
 
   return scheduler_error;
