@@ -106,7 +106,7 @@ segmentedScan pat space scan_op nes kbody = do
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop ntask n_segments (product $ init ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntask n_segments (product $ init ns')
                               (Imp.MulticoreFunc params mempty fbody tid)
 
 
@@ -196,7 +196,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
   ntasks <- dPrim "ntasks" $ IntType Int32
   ntasks' <- toExp $ Var ntasks
 
-  emit $ Imp.Op $ Imp.ParLoop ntasks (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
                               (Imp.MulticoreFunc params prebody reduce_body tid)
 
   -- |
@@ -249,5 +249,5 @@ nonsegmentedScan pat space scan_op nes kbody = do
   ts' <- mapM lookupType paramsNames'
   let params' = zipWith toParam paramsNames' ts'
 
-  emit $ Imp.Op $ Imp.ParLoop ntasks (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
                              (Imp.MulticoreFunc params' prebody' scan_body tid)

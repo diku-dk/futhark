@@ -6,6 +6,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Code
        , Multicore(..)
        , MulticoreFunc(..)
+       , Scheduling(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -28,8 +29,15 @@ type Code = Imp.Code Multicore
 data MulticoreFunc = MulticoreFunc [Param] Code Code VName
 
 -- | A parallel operation.
-data Multicore = ParLoop VName VName Imp.Exp MulticoreFunc
+data Multicore = ParLoop Scheduling VName VName Imp.Exp MulticoreFunc
                | MulticoreCall [VName] String  -- This needs to be fixed
+
+-- | Whether the Scheduler can/should schedule the tasks as Dynamic
+-- or it is restainted to Static
+-- This could carry more information
+data Scheduling = Dynamic
+                | Static
+
 
 instance Pretty MulticoreFunc where
   ppr (MulticoreFunc params prebody body _ ) =
@@ -39,7 +47,7 @@ instance Pretty MulticoreFunc where
     nestedBlock "{" "}" (ppr body)
 
 instance Pretty Multicore where
-  ppr (ParLoop _ntask i e func) =
+  ppr (ParLoop _ _ntask i e func) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     nestedBlock "{" "}" (ppr func)
   ppr (MulticoreCall dests f) =
@@ -50,5 +58,5 @@ instance FreeIn MulticoreFunc where
   freeIn' (MulticoreFunc _ prebody body _) = freeIn' prebody <> freeIn' body
 
 instance FreeIn Multicore where
-  freeIn' (ParLoop ntask _ e func) = freeIn' ntask <> freeIn' e <> freeIn' func
+  freeIn' (ParLoop _ ntask _ e func) = freeIn' ntask <> freeIn' e <> freeIn' func
   freeIn' (MulticoreCall dests _ ) = freeIn' dests

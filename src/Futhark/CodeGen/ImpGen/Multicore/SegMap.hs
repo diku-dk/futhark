@@ -48,5 +48,5 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
 
-  emit $ Imp.Op $ Imp.ParLoop num_tasks (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static num_tasks (segFlat space) (product ns')
                              (Imp.MulticoreFunc params mempty body' num_tasks)

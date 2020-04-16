@@ -154,14 +154,14 @@ nonsegmentedReduction pat space reds kbody = do
                 forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
                   \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
-  let paramsNames = namesToList $ (freeIn fbody <> freeIn prebody) `namesSubtract`
+  let paramsNames = namesToList $ freeIn (fbody <> prebody) `namesSubtract`
                                   namesFromList (tid : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
 
   ntasks <- dPrim "num_tasks" $ IntType Int32
   ntasks' <- toExp $ Var ntasks
-  emit $ Imp.Op $ Imp.ParLoop ntasks (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
                               (Imp.MulticoreFunc params prebody fbody tid)
 
   sComment "neutral-initialise the output" $
@@ -258,4 +258,5 @@ segmentedReduction pat space reds kbody = do
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop ntask n_segments (product $ init ns') (Imp.MulticoreFunc params mempty fbody tid)
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntask n_segments (product $ init ns')
+                              (Imp.MulticoreFunc params mempty fbody tid)

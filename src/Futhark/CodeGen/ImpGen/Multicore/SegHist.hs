@@ -157,7 +157,7 @@ segmentedHist pat space histops kbody = do
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop ntask n_segments (product $ init ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntask n_segments (product $ init ns')
                               (Imp.MulticoreFunc params mempty fbody tid)
 
 
@@ -281,7 +281,7 @@ smallDestHistogram pat space histops num_threads kbody = do
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop num_histos (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static num_histos (segFlat space) (product ns')
                               (Imp.MulticoreFunc params prebody body' thread_id)
 
 
@@ -318,7 +318,6 @@ smallDestHistogram pat space histops num_threads kbody = do
 
       let segred_op = SegRedOp Commutative (histOp op) (histNeutral op) (histShape op)
       compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont -> do
-        let
         red_cont $ flip map hists $ \subhisto ->
               (Var subhisto, map Imp.vi32 $
                 map fst segment_dims ++ [subhistogram_id, bucket_id])
@@ -393,5 +392,5 @@ largeDestHistogram pat space histops kbody = do
   -- How many subtasks was used by scheduler
   num_subtasks <- dPrim "num_histos" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop num_subtasks (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop Imp.Static num_subtasks (segFlat space) (product ns')
                               (Imp.MulticoreFunc params mempty body' thread_id)

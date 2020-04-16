@@ -202,6 +202,10 @@ compileGetStructVals struct = zipWith field
     field name ty =
       [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureStructField name);|]
 
+compileSchedulingVal :: Scheduling -> GC.CompilerM op s C.Exp
+compileSchedulingVal Static =  return [C.cexp|1|]
+compileSchedulingVal Dynamic =  return [C.cexp|0|]
+
 paramToCType :: Param -> GC.CompilerM op s C.Type
 paramToCType (ScalarParam _ pt) = pure $ GC.primTypeToCType pt
 paramToCType (MemParam _ space') = GC.memToCType space'
@@ -275,10 +279,11 @@ multicoreDef s f = do
   return s'
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
+compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)) = do
   fctypes <- mapM paramToCType params
   let fargs = map paramName params
   e' <- GC.compileExp e
+  scheduling' <- compileSchedulingVal scheduling
 
   let ((prebody', body'), _) =
         GC.runCompilerM operations blankNameSource () $
@@ -311,12 +316,12 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
 
   let ftask_name = ftask ++ "_task"
-  GC.decl [C.cdecl|struct task $id:ftask_name;|]
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
+  GC.stm  [C.cstm|$id:ftask_name.is_static = $exp:scheduling';|]
 
   let ftask_err = ftask ++ "_err"
   code' <- benchmarkCode ftask_name [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
