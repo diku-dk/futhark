@@ -8,9 +8,9 @@ Its optimising compiler is able to compile it to typically very
 performant GPU code.  The language and compiler are developed at
 [DIKU](http://diku.dk) at the University of Copenhagen, originally as
 part of the [HIPERFIT centre](http://hiperfit.dk).  The language and
-compiler are quite stable, and suitable for practical programming.
+compiler are quite stable and suitable for practical programming.
 
-For more information, see [the website](http://futhark-lang.org).
+For more information see [the website](http://futhark-lang.org).
 
 There also exists a book, [Parallel Programming in Futhark](https://futhark-book.readthedocs.io/en/latest/), that serves as an extensive introduction and guide.
 
