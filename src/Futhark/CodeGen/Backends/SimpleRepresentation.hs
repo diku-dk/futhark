@@ -1270,59 +1270,59 @@ glFloat64Funs = [C.cunit|
     }
 
     double $id:(funName' "exp64")(double x) {
-      return exp(x);
+      return exp(float32(x));
     }
 
     double $id:(funName' "cos64")(double x) {
-      return cos(x);
+      return cos(float32(x));
     }
 
     double $id:(funName' "sin64")(double x) {
-      return sin(x);
+      return sin(float32(x));
     }
 
     double $id:(funName' "tan64")(double x) {
-      return tan(x);
+      return tan(float32(x));
     }
 
     double $id:(funName' "acos64")(double x) {
-      return acos(x);
+      return acos(float32(x));
     }
 
     double $id:(funName' "asin64")(double x) {
-      return asin(x);
+      return asin(float32(x));
     }
 
     double $id:(funName' "atan64")(double x) {
-      return atan(x);
+      return atan(float32(x));
     }
 
     double $id:(funName' "cosh64")(double x) {
-      return cosh(x);
+      return cosh(float32(x));
     }
 
     double $id:(funName' "sinh64")(double x) {
-      return sinh(x);
+      return sinh(float32(x));
     }
 
     double $id:(funName' "tanh64")(double x) {
-      return tanh(x);
+      return tanh(float32(x));
     }
 
     double $id:(funName' "acosh64")(double x) {
-      return acosh(x);
+      return acosh(float32(x));
     }
 
     double $id:(funName' "asinh64")(double x) {
-      return asinh(x);
+      return asinh(float32(x));
     }
 
     double $id:(funName' "atanh64")(double x) {
-      return atanh(x);
+      return atanh(float32(x));
     }
 
     double $id:(funName' "atan2_64")(double x, double y) {
-      return atan(x,y);
+      return atan(float32(x),float32(y));
     }
 
     double $id:(funName' "gamma64")(double x) {

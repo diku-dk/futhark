@@ -191,7 +191,9 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("#define uint8_t uint")|]
   , [C.cedecl|$esc:("#define uint16_t uint")|]
   , [C.cedecl|$esc:("#define uint32_t uint")|]
+  , [C.cedecl|$esc:("#define float32 float")|]
   , [C.cedecl|$esc:("#define float64 double")|]
+  , [C.cedecl|$esc:("#define E_CONST 2.71828182845904523536028747135266250")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
 
