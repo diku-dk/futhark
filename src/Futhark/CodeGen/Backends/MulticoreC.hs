@@ -108,6 +108,7 @@ compileProg =
 
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
+                   cur_worker->tid = i;
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 32),
                              "failed to init jobqueue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &futhark_worker,

@@ -99,6 +99,7 @@ struct subtask {
 struct worker {
   pthread_t thread;
   struct subtask_queue q;
+  int tid; // Just a thread id
 };
 
 struct scheduler {
@@ -135,9 +136,9 @@ static inline void *futhark_worker(void* arg)
       CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
       struct timeval user_cpu_time = usage.ru_utime;
       struct timeval sys_cpu_time = usage.ru_stime;
-      /* printf("tid: %d\n", pthread_self()); */
-      fprintf(stderr, "user time: %ld\n", user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec);
-      fprintf(stderr, "sys time:  %ld\n", sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
+      fprintf(stderr, "tid: %d - user time: %ld us - sys: %ld us\n",
+              worker->tid, user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec,
+              sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
       break;
     }
   }
