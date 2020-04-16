@@ -26,7 +26,8 @@ struct subtask_queue {
 
 // Initialise a job queue with the given capacity.  The queue starts out
 // empty.  Returns non-zero on error.
-static inline int subtask_queue_init(struct subtask_queue *subtask_queue, int capacity) {
+static inline int subtask_queue_init(struct subtask_queue *subtask_queue, int capacity)
+{
   subtask_queue->capacity = capacity;
   subtask_queue->first = 0;
   subtask_queue->num_used = 0;
@@ -45,7 +46,8 @@ static inline int subtask_queue_init(struct subtask_queue *subtask_queue, int ca
 
 // Destroy the job queue.  Blocks until the queue is empty before it
 // is destroyed.
-static inline int subtask_queue_destroy(struct subtask_queue *subtask_queue) {
+static inline int subtask_queue_destroy(struct subtask_queue *subtask_queue)
+{
   assert(subtask_queue != NULL);
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
@@ -67,7 +69,8 @@ static inline int subtask_queue_destroy(struct subtask_queue *subtask_queue) {
 // subtask_queue is full (its size is equal to its capacity).  Returns
 // non-zero on error.  It is an error to push a job onto a queue that
 // has been destroyed.
-static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, struct subtask *subtask ) {
+static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, struct subtask *subtask )
+{
   assert(subtask_queue != NULL);
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
 
@@ -96,7 +99,8 @@ static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, str
 // subtask_queue contains zero elements.  Returns non-zero on error.  If
 // subtask_queue_destroy() has been called (possibly after the call to
 // subtask_queue_pop() blocked), this function will return -1.
-static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, struct subtask **subtask) {
+static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, struct subtask **subtask)
+{
   assert(subtask_queue != NULL);
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
 
@@ -120,6 +124,13 @@ static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, str
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
 
   return 0;
+}
+
+
+static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
+{
+  return subtask_queue->num_used == 0;
+
 }
 
 #endif

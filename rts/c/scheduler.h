@@ -50,7 +50,8 @@ int getrusage_thread(struct rusage *rusage)
 
 
 // returns the number of logical cores
-static int num_processors() {
+static int num_processors()
+{
 #ifdef _WIN32
 /* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
     SYSTEM_INFO sysinfo;
@@ -95,7 +96,6 @@ struct subtask {
 };
 
 
-
 struct worker {
   pthread_t thread;
   struct subtask_queue q;
@@ -109,7 +109,8 @@ struct scheduler {
 
 static int scheduler_error = 0;
 
-static inline void *futhark_worker(void* arg) {
+static inline void *futhark_worker(void* arg)
+{
   struct worker *worker = (struct worker*) arg;
   while(1) {
     struct subtask *subtask;
@@ -126,6 +127,9 @@ static inline void *futhark_worker(void* arg) {
       CHECK_ERR(pthread_cond_signal(subtask->cond), "pthread_cond_signal");
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
+      if (subtask_queue_is_empty(&worker->q)) {
+        // Steal some work
+      }
     } else {
       struct rusage usage;
       CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
@@ -140,9 +144,13 @@ static inline void *futhark_worker(void* arg) {
   return NULL;
 }
 
-static inline struct subtask* setup_subtask(struct scheduler_task* task, int subtask_id,
-                                            pthread_mutex_t *mutex, pthread_cond_t *cond,
-                                            int* counter, int start, int end) {
+static inline struct subtask* setup_subtask(struct scheduler_task* task,
+                                            int subtask_id,
+                                            pthread_mutex_t *mutex,
+                                            pthread_cond_t *cond,
+                                            int* counter,
+                                            int start, int end)
+{
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
     assert(!"malloc failed in setup_subtask");
@@ -160,23 +168,22 @@ static inline struct subtask* setup_subtask(struct scheduler_task* task, int sub
 }
 
 
-static inline int scheduler_do_task(struct scheduler *scheduler,
+static inline int scheduler_dynamic(struct scheduler *scheduler,
                                     struct scheduler_task *task,
                                     int *ntask)
 {
+  fprintf(stderr, "Performing dynamic scheduling\n");
+  return scheduler_error;
+}
 
-  assert(scheduler != NULL);
-  assert(task != NULL);
-
-#ifdef MCDEBUG
-  fprintf(stderr, "starting %s\n", task->name);
-  fprintf(stderr, "iterations %ld\n", task->iterations);
-#endif
-  if (task->iterations == 0) {
-    if (ntask != NULL)  *ntask = 0;
-    return 0;
-  }
-
+/* Performs static scheduling of a task */
+/* Divides the number of iterations into num_threads equal sized chunks */
+/* (with the first thread taking the remaining iterations that does
+   not divide the number of threads) */
+static inline int scheduler_static(struct scheduler *scheduler,
+                                   struct scheduler_task *task,
+                                   int *ntask)
+{
   pthread_mutex_t mutex;
   CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
   pthread_cond_t cond;
@@ -226,6 +233,35 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   }
 
   return scheduler_error;
+
+}
+
+static inline int scheduler_do_task(struct scheduler *scheduler,
+                                    struct scheduler_task *task,
+                                    int *ntask)
+{
+
+  assert(scheduler != NULL);
+  assert(task != NULL);
+
+#ifdef MCDEBUG
+  fprintf(stderr, "starting %s\n", task->name);
+  fprintf(stderr, "iterations %ld\n", task->iterations);
+#endif
+  if (task->iterations == 0) {
+    if (ntask != NULL)  *ntask = 0;
+    return 0;
+  }
+
+  switch(task->is_static)
+  {
+  case 0:
+    return scheduler_dynamic(scheduler, task, ntask);
+  case 1:
+    return scheduler_static(scheduler, task, ntask);
+  default:
+    return -1;
+  }
 }
 
 #endif
