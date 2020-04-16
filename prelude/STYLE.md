@@ -14,7 +14,7 @@ widely used and have only one sensible implementation and name.
 Hence, we do not expect a great deal of development to happen here.
 
 If you disagree with any of these instructions, feel free to open a
-Github issue for discussion.
+GitHub issue for discussion.
 
 Style Rules
 ===========
