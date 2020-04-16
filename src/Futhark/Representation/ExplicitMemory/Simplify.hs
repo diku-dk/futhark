@@ -41,10 +41,11 @@ simplifyExplicitMemory =
   where blockAllocs vtable _ (Let _ _ (Op Alloc{})) =
           not $ ST.simplifyMemory vtable
         -- Do not hoist statements that produce arrays.  This is
-        -- because in the ExplicitMemory representation, multiply
+        -- because in the ExplicitMemory representation, multiple
         -- arrays can be located in the same memory block, and moving
         -- their creation out of a branch can thus cause memory
-        -- corruption.
+        -- corruption.  At this point in the compiler we have probably
+        -- already moved all the array creations that matter.
         blockAllocs _ _ (Let pat _ _) =
           not $ all primType $ patternTypes pat
 
