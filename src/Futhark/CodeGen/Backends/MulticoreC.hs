@@ -251,17 +251,17 @@ benchmarkCode name code = do
   return [C.citems|
      typename int64_t $id:start, $id:end;
      if (ctx->profiling) {
-                      $id:start = get_wall_time();
-                   }
+       $id:start = get_wall_time();
+     }
      $items:code
      if (ctx->profiling) {
-                   $id:end = get_wall_time();
-                   typename uint64_t elapsed = $id:end - $id:start;
-                   CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
-                   ctx->$id:(functionRuns name)++;
-                   ctx->$id:(functionRuntime name) += elapsed;
-                   CHECK_ERR(pthread_mutex_unlock(&ctx->profile_mutex), "pthread_mutex_unlock");
-                }|]
+       $id:end = get_wall_time();
+       typename uint64_t elapsed = $id:end - $id:start;
+       CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
+       ctx->$id:(functionRuns name)++;
+       ctx->$id:(functionRuntime name) += elapsed;
+       CHECK_ERR(pthread_mutex_unlock(&ctx->profile_mutex), "pthread_mutex_unlock");
+     }|]
 
   where start = name ++ "_start"
         end = name ++"_end"
@@ -293,9 +293,9 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
 
   fstruct <- multicoreDef "parloop_struct" $ \s ->
      return [C.cedecl|struct $id:s {
-                 struct futhark_context *ctx;
-                 $sdecls:(compileStructFields fargs fctypes)
-               };|]
+                        struct futhark_context *ctx;
+                        $sdecls:(compileStructFields fargs fctypes)
+                      };|]
 
   ftask <- multicoreDef "parloop" $ \s -> do
     fbody <- benchmarkCode s [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)
@@ -305,11 +305,11 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
                                            $items:body'
                                        };|]
     return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
-               struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
-               struct futhark_context *ctx = $id:fstruct->ctx;
-               $items:fbody
-               return 0;
-              }|]
+                       struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+                       struct futhark_context *ctx = $id:fstruct->ctx;
+                       $items:fbody
+                       return 0;
+                     }|]
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
@@ -328,7 +328,6 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
                                               if ($id:ftask_err != 0) {
                                                 futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                                               }|]
-
 
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport [ftask_name, ftask]
