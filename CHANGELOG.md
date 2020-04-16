@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixed kernel extractor bug in `if`-interchange (#921).
+
+  * Fixed some cases of malformed kernel code generation (#922).
+
+  * Fixed rare memory corruption bug involving branches returning
+    arrays (#923).
+
 ## [0.15.4]
 
 ### Added
