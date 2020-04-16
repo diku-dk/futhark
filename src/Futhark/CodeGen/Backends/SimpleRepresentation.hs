@@ -1251,15 +1251,18 @@ glFloat32Funs = [C.cunit|
 glFloat64Funs :: [C.Definition]
 glFloat64Funs = [C.cunit|
     double $id:(funName' "log64")(double x) {
-      return log(x);
+      double h = 0.0000001;
+      return ((fpow64(x, h)-1.0)/h) / ((fpow64(E_CONST,h)-1.0)/h);
     }
 
     double $id:(funName' "log2_64")(double x) {
-      return log2(x);
+      double h = 0.0000001;
+      return ((fpow64(x, h)-1.0)/h) / ((fpow64(2.0,h)-1.0)/h);
     }
 
     double $id:(funName' "log10_64")(double x) {
-      return (log(x) / log(10));
+      double h = 0.0000001;
+      return ((fpow64(x, h)-1.0)/h) / ((fpow64(10.0,h)-1.0)/h);
     }
 
     double $id:(funName' "sqrt64")(double x) {
