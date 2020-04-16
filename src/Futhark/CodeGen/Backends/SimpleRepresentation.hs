@@ -1076,7 +1076,7 @@ glFloatConvOps :: [C.Definition]
                            return y;
                }|]
           else
-            [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) { return fmin(x, y); }|]
+            [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) { return min(x, y); }|]
 
         mkFMax t =
           let ct = floatTypeToCType t
@@ -1088,7 +1088,7 @@ glFloatConvOps :: [C.Definition]
                            return y;
                }|]
           else
-            [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) { return fmax(x, y); }|]
+            [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) { return max(x, y); }|]
 
         mkPow Float32 =
           [C.cedecl|float fpow32(float x, float y) { return pow(x, y); }|]
