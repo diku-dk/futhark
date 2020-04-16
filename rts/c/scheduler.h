@@ -72,11 +72,12 @@ static int num_processors() {
 typedef int (*task_fn)(void*, int, int, int);
 
 /* A task for the scheduler to execute */
-struct task {
+struct scheduler_task {
   const char* name;
   task_fn fn;
   void* args;
   long int iterations;
+  int is_static; // Whether it's possible to schedule the task as dynamic or not
 };
 
 
@@ -94,9 +95,10 @@ struct subtask {
 };
 
 
+
 struct worker {
   pthread_t thread;
-  struct job_queue q;
+  struct subtask_queue q;
 };
 
 struct scheduler {
@@ -111,7 +113,7 @@ static inline void *futhark_worker(void* arg) {
   struct worker *worker = (struct worker*) arg;
   while(1) {
     struct subtask *subtask;
-    if (job_queue_pop(&worker->q, (void**)&subtask) == 0) {
+    if (subtask_queue_dequeue(&worker->q, &subtask) == 0) {
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       // Only one error can be returned at the time now
@@ -138,9 +140,7 @@ static inline void *futhark_worker(void* arg) {
   return NULL;
 }
 
-
-
-static inline struct subtask* setup_subtask(struct task* task, int subtask_id,
+static inline struct subtask* setup_subtask(struct scheduler_task* task, int subtask_id,
                                             pthread_mutex_t *mutex, pthread_cond_t *cond,
                                             int* counter, int start, int end) {
   struct subtask* subtask = malloc(sizeof(struct subtask));
@@ -161,7 +161,7 @@ static inline struct subtask* setup_subtask(struct task* task, int subtask_id,
 
 
 static inline int scheduler_do_task(struct scheduler *scheduler,
-                                    struct task *task,
+                                    struct scheduler_task *task,
                                     int *ntask)
 {
 
@@ -195,7 +195,7 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
   shared_counter++;
   CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-  CHECK_ERR(job_queue_push(&scheduler->workers[subtask_id].q, (void*)subtask), "job_queue_push");
+  CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask), "subtask_queue_enqueue");
   subtask_id++;
 
 
@@ -211,7 +211,7 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
     shared_counter++;
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-    CHECK_ERR(job_queue_push(&scheduler->workers[subtask_id].q, (void*)subtask), "job_queue_push");
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask), "subtask_queue_enqueue");
     subtask_id++;
   }
 

@@ -27,11 +27,11 @@ compileProg =
   ImpGen.compileProg
   where generateContext = do
 
-          let jobqueue_h  = $(embedStringFile "rts/c/jobqueue.h")
+          let subtask_queue_h  = $(embedStringFile "rts/c/subtask_queue.h")
               scheduler_h = $(embedStringFile "rts/c/scheduler.h")
 
           mapM_ GC.earlyDecl [C.cunit|
-                              $esc:jobqueue_h
+                              $esc:subtask_queue_h
                               $esc:scheduler_h
                              |]
 
@@ -108,7 +108,7 @@ compileProg =
 
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
-                   CHECK_ERR(job_queue_init(&cur_worker->q, 32),
+                   CHECK_ERR(subtask_queue_init(&cur_worker->q, 32),
                              "failed to init jobqueue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &futhark_worker,
                                             cur_worker),
@@ -126,7 +126,7 @@ compileProg =
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
                  for (int i = 0; i < ctx->scheduler.num_threads; i++) {
-                   CHECK_ERR(job_queue_destroy(&ctx->scheduler.workers[i].q), "job_queue_destroy");
+                   CHECK_ERR(subtask_queue_destroy(&ctx->scheduler.workers[i].q), "subtask_queue_destroy");
                    CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
                  }
                  free_lock(&ctx->lock);
@@ -312,6 +312,7 @@ compileOp (ParLoop ntasks i e (MulticoreFunc params prebody body tid)) = do
 
   let ftask_name = ftask ++ "_task"
   GC.decl [C.cdecl|struct task $id:ftask_name;|]
+  GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
