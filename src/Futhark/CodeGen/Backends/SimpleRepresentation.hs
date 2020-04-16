@@ -1354,24 +1354,6 @@ glFloat64Funs = [C.cunit|
       return isinf(x);
     }
 
-    typename int64_t $id:(funName' "to_bits64")(double x) {
-      union {
-        double f;
-        typename int64_t t;
-      } p;
-      p.f = x;
-      return p.t;
-    }
-
-    double $id:(funName' "from_bits64")(typename int64_t x) {
-      union {
-        typename int64_t f;
-        double t;
-      } p;
-      p.f = x;
-      return p.t;
-    }
-
     double fmod64(double x, double y) {
       return mod(x, y);
     }
