@@ -27,6 +27,7 @@ import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (prettyOneLine)
 
 kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateKernels TargetCUDA
@@ -261,7 +262,7 @@ constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
 constDef (ConstUse v e) = Just ([C.citem|$escstm:def|],
                                 [C.citem|$escstm:undef|])
   where e' = compilePrimExp e
-        def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ pretty e' ++ ")"
+        def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
         undef = "#undef " ++ pretty (C.toIdent v mempty)
 constDef _ = Nothing
 
