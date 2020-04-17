@@ -409,7 +409,8 @@ atomicUpdateLocking :: ExplicitMemorish lore =>
 
 atomicUpdateLocking lam
   | Just ops_and_ts <- splitOp lam,
-    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts = AtomicPrim $ \space arrs bucket ->
+    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts =
+    primOrCas ops_and_ts $ \space arrs bucket ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
   -- operator has an atomic implementation we use that, otherwise it
@@ -430,6 +431,12 @@ atomicUpdateLocking lam
   where opHasAtomicSupport space old arr' bucket' bop = do
           let atomic f = Imp.Atomic space . f old arr' bucket'
           atomic <$> Imp.atomicBinOp bop
+
+        primOrCas ops
+          | all isPrim ops = AtomicPrim
+          | otherwise      = AtomicCAS
+
+        isPrim (op, _, _, _) = isJust $ Imp.atomicBinOp op
 
 -- If the operator functions purely on single 32-bit values, we can
 -- use an implementation based on CAS, no matter what the operator
