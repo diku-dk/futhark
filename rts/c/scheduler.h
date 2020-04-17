@@ -19,7 +19,7 @@
 #endif
 
 
-typedef int (*task_fn)(void*, int, int, int);
+typedef int (*task_fn)(void* args, int start, int end, int subtask_id);
 
 
 static int scheduler_error = 0;
@@ -154,7 +154,7 @@ static inline void *futhark_worker(void* arg)
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
       if (subtask_queue_is_empty(&worker->q)) {
-        // Steal some work
+        // try to steal some work as we have nothing better to do anyway
         struct worker *rand_worker = query_a_subtask_queue(worker->scheduler, worker->tid);
         if (rand_worker == NULL)  {
           assert(!"failed to find queue \n");
