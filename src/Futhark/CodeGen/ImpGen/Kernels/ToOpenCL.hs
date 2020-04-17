@@ -622,7 +622,7 @@ inKernelOperations body =
                 | has_communication = [C.citems|local_failure = true;
                                                 goto $id:label;|]
                 | otherwise         = [C.citems|return;|]
-          GenericC.stm [C.cstm|{ if (atomic_cmpxchg(global_failure, -1, $int:n) == -1)
+          GenericC.stm [C.cstm|{ if (atomic_cmpxchg_i32_global(global_failure, -1, $int:n) == -1)
                                  { $stms:argstms; }
                                  $items:what_next
                                }|]
