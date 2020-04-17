@@ -26,8 +26,8 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
       openGL_h    = $(embedStringFile "rts/c/opengl.h")
       glad_h      = $(embedStringFile "rts/c/glad/include/glad/glad.h")
       glad_c      = $(embedStringFile "rts/c/glad/src/glad.c")
-      -- fragments might need ctx_fields, ctx_inits and openGL_load
 
+      -- fragments might need ctx_fields, ctx_inits and openGL_load
       fragments        = map (\s -> [C.cinit|$string:s|])
                              $ chunk 2000 (opengl_prelude ++ opengl_code)
       size_name_inits  = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes

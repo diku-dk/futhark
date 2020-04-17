@@ -409,8 +409,7 @@ $esc:("#else")
 $esc:("#endif")
 |]
 
--- | Same as `cIntOps` but to adapt for GLSL and therefore without
--- static inlined functions, 8-bit ints and 16-bit ints.
+-- | Same as `cIntOps` but to adapt for GLSL.
 glIntOps :: [C.Definition]
 glIntOps = concatMap (`map` [minBound..maxBound]) ops
           ++ glIntPrimFuns
@@ -583,7 +582,7 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
           [C.cedecl|typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = uintTypeToCType t
 
--- | Same as `cIntPrimFuns` but without static inlined functions to adapt for GLSL.
+-- | Same as `cIntPrimFuns` but to adapt for GLSL.
 glIntPrimFuns :: [C.Definition]
 glIntPrimFuns = [C.cunit|
    typename int32_t $id:(funName' "popc8") (typename int8_t x) {
@@ -1194,8 +1193,7 @@ glFloatConvOps :: [C.Definition]
           [C.cedecl|typename bool $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = floatTypeToCType t
 
--- | Same as `cFloat32Funs` but without static inlined functions to
--- adapt for GLSL.
+-- | Same as `cFloat32Funs` but to adapt for GLSL.
 glFloat32Funs :: [C.Definition]
 glFloat32Funs = [C.cunit|
     float $id:(funName' "log32")(float x) {
@@ -1309,8 +1307,7 @@ glFloat32Funs = [C.cunit|
     }
 |]
 
--- | Same as `cFloat64Funs` but without static inlined functions to
--- adapt for GLSL.
+-- | Same as `cFloat64Funs` but to adapt for GLSL.
 glFloat64Funs :: [C.Definition]
 glFloat64Funs = [C.cunit|
     double $id:(funName' "log64")(double x) {
