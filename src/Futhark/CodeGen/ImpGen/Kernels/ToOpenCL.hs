@@ -556,13 +556,13 @@ inKernelOperations body =
           doAtomic s t old arr ind val "atomic_umin" [C.cty|unsigned int|]
 
         atomicOps s (AtomicAnd t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_and" [C.cty|unsigned int|]
+          doAtomic s t old arr ind val "atomic_and" [C.cty|int|]
 
         atomicOps s (AtomicOr t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_or" [C.cty|unsigned int|]
+          doAtomic s t old arr ind val "atomic_or" [C.cty|int|]
 
         atomicOps s (AtomicXor t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_xor" [C.cty|unsigned int|]
+          doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
 
         atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ unCount ind
