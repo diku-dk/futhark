@@ -126,7 +126,6 @@ static int num_processors()
 static inline struct worker* query_a_subtask_queue(struct scheduler* scheduler, int tid)
 {
   assert(scheduler != NULL);
-
   if (scheduler->num_threads == 1) return &scheduler->workers[0];
 
   int worker_idx;
@@ -222,24 +221,21 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   /* As we don't have any information about the load balancing yet */
   int max_num_tasks = 100;
   int subtask_id = 0;
-  int shared_counter = 0;
   int iter_pr_subtask = task->iterations / max_num_tasks;
   int remainder = task->iterations % max_num_tasks;
 
   int nsubtasks = iter_pr_subtask == 0 ? 1 : ((task->iterations - remainder) / iter_pr_subtask);
+  int shared_counter = nsubtasks;
 
   int start = 0;
   int end = iter_pr_subtask + remainder;
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task, subtask_id,
+    struct subtask *subtask = setup_subtask(task, subtask_id % scheduler->num_threads,
                                             &mutex, &cond, &shared_counter,
                                             start, end);
     assert(subtask != NULL);
-    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    shared_counter++;
-    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads].q, subtask), "subtask_queue_enqueue");
-
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads].q, subtask),
+              "subtask_queue_enqueue");
     // Update range params
     start = end;
     end += iter_pr_subtask;
@@ -272,13 +268,12 @@ static inline int scheduler_static(struct scheduler *scheduler,
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
   int subtask_id = 0;
-  int shared_counter = 0;
   int iter_pr_subtask = task->iterations / scheduler->num_threads;
   int remainder = task->iterations % scheduler->num_threads;
 
 
   int nsubtasks = iter_pr_subtask == 0 ? 1 : ((task->iterations - remainder) / iter_pr_subtask);
-
+  int shared_counter = nsubtasks;
 
   int start = 0;
   int end = iter_pr_subtask + remainder;
@@ -287,12 +282,7 @@ static inline int scheduler_static(struct scheduler *scheduler,
                                             &mutex, &cond, &shared_counter,
                                             start, end);
     assert(subtask != NULL);
-    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    shared_counter++;
-    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask), "subtask_queue_enqueue");
-
     // Update range params
     start = end;
     end += iter_pr_subtask;
