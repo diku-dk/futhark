@@ -455,13 +455,15 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
   -- Critical section
   let try_acquire_lock =
         sOp $ Imp.Atomic space $
-        Imp.AtomicCmpXchg old locks' locks_offset (lockingIsUnlocked locking) (lockingToLock locking)
+        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        (lockingIsUnlocked locking) (lockingToLock locking)
       lock_acquired = Imp.var old int32 .==. lockingIsUnlocked locking
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock =
         sOp $ Imp.Atomic space $
-        Imp.AtomicCmpXchg old locks' locks_offset (lockingToLock locking) (lockingToUnlock locking)
+        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        (lockingToLock locking) (lockingToUnlock locking)
       break_loop = continue <-- false
 
   -- Preparing parameters. It is assumed that the caller has already
@@ -542,7 +544,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     do_op
     old_bits <- dPrim "old_bits" int32
     sOp $ Imp.Atomic space $
-      Imp.AtomicCmpXchg old_bits arr' bucket_offset
+      Imp.AtomicCmpXchg int32 old_bits arr' bucket_offset
       (toBits (Imp.var assumed t)) (toBits (Imp.var x t))
     old <-- fromBits (Imp.var old_bits int32)
     sWhen (toBits (Imp.var assumed t) .==. Imp.var old_bits int32)

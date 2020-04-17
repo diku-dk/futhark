@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TemplateHaskell #-}
 -- | This module defines a translation from imperative code with
 -- kernels to imperative code with OpenCL calls.
 module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
@@ -11,6 +12,7 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 import Control.Monad.State
 import Control.Monad.Identity
 import Control.Monad.Reader
+import Data.FileEmbed
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
@@ -273,6 +275,9 @@ openClCode kernels =
           [[C.cedecl|$func:kernel_func|] |
            kernel_func <- kernels ]
 
+atomicsDefs :: String
+atomicsDefs = $(embedStringFile "rts/c/atomics.cl")
+
 genOpenClPrelude :: S.Set PrimType -> [C.Definition]
 genOpenClPrelude ts =
   -- Clang-based OpenCL implementations need this for 'static' to work.
@@ -318,39 +323,18 @@ static inline void mem_fence_local() {
 |] ++
   cIntOps ++ cFloat32Ops ++ cFloat32Funs ++
   (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
+  ++ [[C.cedecl|$esc:atomicsDefs|]]
   where uses_float64 = FloatType Float64 `S.member` ts
-
-
-cudaAtomicOps :: [C.Definition]
-cudaAtomicOps = (mkOp <$> opNames <*> types) ++ extraOps
-  where
-    mkOp (clName, cuName) t =
-      [C.cedecl|static inline $ty:t $id:clName(volatile $ty:t *p, $ty:t val) {
-                 return $id:cuName(($ty:t *)p, val);
-               }|]
-    types = [ [C.cty|int|]
-            , [C.cty|unsigned int|]
-            , [C.cty|unsigned long long|]
-            ]
-    opNames = [ ("atomic_add",  "atomicAdd")
-              , ("atomic_max",  "atomicMax")
-              , ("atomic_min",  "atomicMin")
-              , ("atomic_and",  "atomicAnd")
-              , ("atomic_or",   "atomicOr")
-              , ("atomic_xor",  "atomicXor")
-              , ("atomic_xchg", "atomicExch")
-              ]
-    extraOps =
-      [ [C.cedecl|static inline $ty:t atomic_cmpxchg(volatile $ty:t *p, $ty:t cmp, $ty:t val) {
-                  return atomicCAS(($ty:t *)p, cmp, val);
-                }|] | t <- types]
 
 genCUDAPrelude :: [C.Definition]
 genCUDAPrelude =
-  cudafy ++ cudaAtomicOps ++ ops
+  cudafy ++ ops
   where ops = cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
-                ++ cFloat64Funs ++ cFloatConvOps
+              ++ cFloat64Funs ++ cFloatConvOps
+              ++ [[C.cedecl|$esc:atomicsDefs|]]
         cudafy = [CUDAC.cunit|
+$esc:("#define FUTHARK_CUDA")
+
 typedef char int8_t;
 typedef short int16_t;
 typedef int int32_t;
@@ -446,6 +430,7 @@ static inline void mem_fence_local() {
 static inline void mem_fence_global() {
   __threadfence();
 }
+
 $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
 extern volatile __shared__ char shared_mem[];
@@ -542,48 +527,54 @@ inKernelOperations body =
                              _            -> pointerQuals "global"
           return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
-        doAtomic s old arr ind val op ty = do
+        atomicSpace (Space sid) = sid
+        atomicSpace _           = "global"
+
+        doAtomic s t old arr ind val op ty = do
           ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
           cast <- atomicCast s ty
-          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+          where op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
 
-        atomicOps s (AtomicAdd old arr ind val) =
-          doAtomic s old arr ind val "atomic_add" [C.cty|int|]
+        atomicOps s (AtomicAdd t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
 
-        atomicOps s (AtomicSMax old arr ind val) =
-          doAtomic s old arr ind val "atomic_max" [C.cty|int|]
+        atomicOps s (AtomicSMax t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
 
-        atomicOps s (AtomicSMin old arr ind val) =
-          doAtomic s old arr ind val "atomic_min" [C.cty|int|]
+        atomicOps s (AtomicSMin t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_smin" [C.cty|int|]
 
-        atomicOps s (AtomicUMax old arr ind val) =
-          doAtomic s old arr ind val "atomic_max" [C.cty|unsigned int|]
+        atomicOps s (AtomicUMax t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_umax" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicUMin old arr ind val) =
-          doAtomic s old arr ind val "atomic_min" [C.cty|unsigned int|]
+        atomicOps s (AtomicUMin t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_umin" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicAnd old arr ind val) =
-          doAtomic s old arr ind val "atomic_and" [C.cty|unsigned int|]
+        atomicOps s (AtomicAnd t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_and" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicOr old arr ind val) =
-          doAtomic s old arr ind val "atomic_or" [C.cty|unsigned int|]
+        atomicOps s (AtomicOr t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_or" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicXor old arr ind val) =
-          doAtomic s old arr ind val "atomic_xor" [C.cty|unsigned int|]
+        atomicOps s (AtomicXor t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_xor" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
+        atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ unCount ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+          where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
 
-        atomicOps s (AtomicXchg old arr ind val) = do
+        atomicOps s (AtomicXchg t old arr ind val) = do
           ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+          where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
 
         cannotAllocate :: GenericC.Allocate KernelOp KernelState
         cannotAllocate _ =
