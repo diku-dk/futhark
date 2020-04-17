@@ -1266,14 +1266,6 @@ glFloat32Funs = [C.cunit|
       return atan(x,y);
     }
 
-    float $id:(funName' "gamma32")(float x) {
-      return x;
-    }
-
-    float $id:(funName' "lgamma32")(float x) {
-      return x;
-    }
-
     typename bool $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
@@ -1390,14 +1382,6 @@ glFloat64Funs = [C.cunit|
 
     double $id:(funName' "atan2_64")(double x, double y) {
       return atan(float32(x),float32(y));
-    }
-
-    double $id:(funName' "gamma64")(double x) {
-      return x;
-    }
-
-    double $id:(funName' "lgamma64")(double x) {
-      return x;
     }
 
     double $id:(funName' "fma64")(double a, double b, double c) {
