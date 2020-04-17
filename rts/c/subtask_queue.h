@@ -142,14 +142,9 @@ static inline int subtask_queue_steal(struct subtask_queue *subtask_queue,
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
 
   if (subtask_queue_is_empty(subtask_queue)) {
-    // Signal a writer (if any) that there is now room for more.
     CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
     return -1;
-  }
-  // Wait until the subtask_queue contains an element.
-  while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
-    CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
   }
 
   if (subtask_queue->dead) {
