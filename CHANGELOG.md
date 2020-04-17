@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `reduce_by_index` with `f32`-addition is now approximately 2x
+    faster in the CUDA backend.
+
 ### Removed
 
 ### Changed
