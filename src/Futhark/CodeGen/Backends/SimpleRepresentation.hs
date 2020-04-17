@@ -415,7 +415,8 @@ glIntOps :: [C.Definition]
 glIntOps = concatMap (`map` [minBound..maxBound]) ops
           ++ glIntPrimFuns
   where ops = [mkPow,
-               mkAdd,   mkSub, mkMul,
+               mkAdd,   mkSub,  mkMul,
+               mkUAdd,  mkUSub, mkUMul,
                mkUDiv,  mkUMod,
                mkSDiv,  mkSMod,
                mkSQuot, mkSRem,
@@ -436,9 +437,12 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
 
         -- Use unsigned types for add/sub/mul so we can do
         -- well-defined overflow.
-        mkAdd  = simpleUintOp "add"  [C.cexp|x + y|]
-        mkSub  = simpleUintOp "sub"  [C.cexp|x - y|]
-        mkMul  = simpleUintOp "mul"  [C.cexp|x * y|]
+        mkUAdd = simpleUintOp "add"  [C.cexp|x + y|]
+        mkUSub = simpleUintOp "sub"  [C.cexp|x - y|]
+        mkUMul = simpleUintOp "mul"  [C.cexp|x * y|]
+        mkAdd  = simpleIntOp  "add"  [C.cexp|x + y|]
+        mkSub  = simpleIntOp  "sub"  [C.cexp|x - y|]
+        mkMul  = simpleIntOp  "mul"  [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
