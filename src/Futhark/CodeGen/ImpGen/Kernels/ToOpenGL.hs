@@ -258,15 +258,15 @@ inShaderOperations body =
 
         shaderOps :: GenericC.OpCompiler KernelOp ShaderState
         shaderOps (GetGroupId v i) =
-          GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
+          GenericC.stm [C.cstm|$id:v = gl_WorkGroupID[$int:i];|]
         shaderOps (GetLocalId v i) =
-          GenericC.stm [C.cstm|$id:v = get_local_id($int:i);|]
+          GenericC.stm [C.cstm|$id:v = gl_LocalInvocationID[$int:i];|]
         shaderOps (GetLocalSize v i) =
-          GenericC.stm [C.cstm|$id:v = get_local_size($int:i);|]
+          GenericC.stm [C.cstm|$id:v = gl_LocalGroupSizeARB[$int:i];|]
         shaderOps (GetGlobalId v i) =
-          GenericC.stm [C.cstm|$id:v = get_global_id($int:i);|]
+          GenericC.stm [C.cstm|$id:v = gl_GlobalInvocationID[$int:i];|]
         shaderOps (GetGlobalSize v i) =
-          GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
+          GenericC.stm [C.cstm|$id:v = gl_NumWorkGroups[$int:i];|]
         shaderOps (GetLockstepWidth v) =
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
         shaderOps (Barrier f) = do
