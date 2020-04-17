@@ -89,7 +89,7 @@ import Data.Traversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.List (find, foldl', sortOn)
+import Data.List (find, sortOn)
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
@@ -193,12 +193,12 @@ data Env lore op = Env {
   , envAllocCompilers :: M.Map Space (AllocCompiler lore op)
   , envDefaultSpace :: Imp.Space
   , envVolatility :: Imp.Volatility
-  , envFunction :: Name
-    -- ^ Name of the function we are compiling.
+  , envFunction :: Maybe Name
+    -- ^ Name of the function we are compiling, if any.
   }
 
-newEnv :: Operations lore op -> Imp.Space -> Name -> Env lore op
-newEnv ops ds fname =
+newEnv :: Operations lore op -> Imp.Space -> Env lore op
+newEnv ops ds =
   Env { envExpCompiler = opsExpCompiler ops
       , envStmsCompiler = opsStmsCompiler ops
       , envOpCompiler = opsOpCompiler ops
@@ -206,7 +206,7 @@ newEnv ops ds fname =
       , envAllocCompilers = mempty
       , envDefaultSpace = ds
       , envVolatility = Imp.Nonvolatile
-      , envFunction = fname
+      , envFunction = Nothing
       }
 
 -- | The symbol table used during compilation.
@@ -245,9 +245,9 @@ instance HasScope SOACS (ImpM lore op) where
             Prim $ entryScalarType scalarEntry
 
 runImpM :: ImpM lore op a
-        -> Operations lore op -> Imp.Space -> Name -> State lore op
+        -> Operations lore op -> Imp.Space -> State lore op
         -> (a, State lore op, Imp.Code op)
-runImpM (ImpM m) ops space fname = runRWS m $ newEnv ops space fname
+runImpM (ImpM m) ops space = runRWS m $ newEnv ops space
 
 subImpM_ :: Operations lore op' -> ImpM lore op' a
          -> ImpM lore op (Imp.Code op')
@@ -317,20 +317,19 @@ compileProg :: (ExplicitMemorish lore, FreeIn op, MonadFreshNames m) =>
             -> Prog lore -> m (Imp.Definitions op)
 compileProg ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-  let s = (newState src) { stateVTable = constsVTable consts }
-      s' =
-        foldl' compileFunDef' s funs
-      free_in_funs =
-        freeIn (stateFunctions s')
-      (consts', s'', _) =
-        runImpM (compileConsts free_in_funs consts) ops space
-        (nameFromString "val") s'
-  in (Imp.Definitions consts' (stateFunctions s''),
+  let (consts', s', _) =
+        runImpM compile ops space
+        (newState src) { stateVTable = constsVTable consts }
+  in (Imp.Definitions consts' (stateFunctions s'),
       stateNameSource s')
-  where compileFunDef' s fdef =
-          let ((), s', _) =
-                runImpM (compileFunDef fdef) ops space (funDefName fdef) s
-          in s'
+  where compile = do
+          mapM_ compileFunDef' funs
+          free_in_funs <- gets (freeIn . stateFunctions)
+          compileConsts free_in_funs consts
+
+        compileFunDef' fdef =
+          local (\env -> env { envFunction = Just $ funDefName fdef }) $
+          compileFunDef fdef
 
 compileConsts :: Names -> Stms lore -> ImpM lore op (Imp.Constants op)
 compileConsts used_consts stms = do

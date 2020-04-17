@@ -64,9 +64,9 @@ data KernelConstants = KernelConstants
                        , kernelThreadActive :: Imp.Exp
                        }
 
-keyWithEntryPoint :: Name -> Name -> Name
+keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
-  nameFromString $ nameToString fname ++ "." ++ nameToString key
+  nameFromString $ maybe "" ((++".") . nameToString) fname ++ nameToString key
 
 allocLocal :: AllocCompiler ExplicitMemory Imp.KernelOp
 allocLocal mem size =
