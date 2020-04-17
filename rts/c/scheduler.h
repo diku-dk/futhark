@@ -41,8 +41,10 @@ struct scheduler_task {
 struct worker {
   pthread_t thread;
   struct subtask_queue q;
-  int tid; // Just a thread id
   struct scheduler *scheduler;
+
+  int tid;                     /* Just a thread id */
+  long int time_spent_working; /* Time spent in tasks functions */
 };
 
 /* A subtask that can be executed by a thread */
@@ -56,7 +58,6 @@ struct subtask {
   int *counter; // Counter for ongoing subtasks
   pthread_mutex_t *mutex;
   pthread_cond_t *cond;
-
 };
 
 
@@ -95,8 +96,10 @@ void output_thread_usage(struct worker *worker)
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
   struct timeval user_cpu_time = usage.ru_utime;
   struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %d - user time: %ld us - sys: %ld us\n",
-          worker->tid, user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec,
+  fprintf(stderr, "tid: %d - work time %ld - user time: %ld us - sys: %ld us \n",
+          worker->tid,
+          worker->time_spent_working,
+          user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec,
           sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
 }
 
@@ -141,7 +144,10 @@ static inline void *futhark_worker(void* arg)
   while(1) {
     struct subtask *subtask;
     if (subtask_queue_dequeue(&worker->q, &subtask) == 0) {
+      int64_t start = get_wall_time();
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
+      int64_t end = get_wall_time();
+      worker->time_spent_working += end - start;
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       // Only one error can be returned at the time now
       // Maybe we can provide a stack like structure for pushing errors onto
