@@ -80,15 +80,15 @@ data KernelUse = ScalarUse VName PrimType
 
 -- | Get an atomic operator corresponding to a binary operator.
 atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Elements Imp.Exp -> Exp -> AtomicOp)
-atomicBinOp = flip lookup [ (Add Int32, AtomicAdd $ IntType Int32)
-                          , (FAdd Float32, AtomicAdd $ FloatType Float32)
-                          , (SMax Int32, AtomicSMax $ IntType Int32)
-                          , (SMin Int32, AtomicSMin $ IntType Int32)
-                          , (UMax Int32, AtomicUMax $ IntType Int32)
-                          , (UMin Int32, AtomicUMin $ IntType Int32)
-                          , (And Int32, AtomicAnd $ IntType Int32)
-                          , (Or Int32, AtomicOr $ IntType Int32)
-                          , (Xor Int32, AtomicXor $ IntType Int32)
+atomicBinOp = flip lookup [ (Add Int32, AtomicAdd Int32)
+                          , (FAdd Float32, AtomicFAdd Float32)
+                          , (SMax Int32, AtomicSMax Int32)
+                          , (SMin Int32, AtomicSMin Int32)
+                          , (UMax Int32, AtomicUMax Int32)
+                          , (UMin Int32, AtomicUMin Int32)
+                          , (And Int32, AtomicAnd Int32)
+                          , (Or Int32, AtomicOr Int32)
+                          , (Xor Int32, AtomicXor Int32)
                           ]
 
 instance Pretty KernelConst where
@@ -164,20 +164,22 @@ data KernelOp = GetGroupId VName Int
 
 -- Atomic operations return the value stored before the update.
 -- This value is stored in the first VName.
-data AtomicOp = AtomicAdd PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicSMax PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicSMin PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicUMax PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicUMin PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicAnd PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicOr PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicXor PrimType VName VName (Count Elements Imp.Exp) Exp
+data AtomicOp = AtomicAdd IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicFAdd FloatType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicSMax IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicSMin IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicUMax IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicUMin IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicAnd IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicOr IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicXor IntType VName VName (Count Elements Imp.Exp) Exp
               | AtomicCmpXchg PrimType VName VName (Count Elements Imp.Exp) Exp Exp
               | AtomicXchg PrimType VName VName (Count Elements Imp.Exp) Exp
               deriving (Show)
 
 instance FreeIn AtomicOp where
   freeIn' (AtomicAdd _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicFAdd _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicSMax _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicSMin _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicUMax _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
@@ -223,6 +225,9 @@ instance Pretty KernelOp where
      "error_sync_global()"
   ppr (Atomic _ (AtomicAdd t old arr ind x)) =
     ppr old <+>  "<-" <+>  "atomic_add_" <> ppr t <>
+    parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
+  ppr (Atomic _ (AtomicFAdd t old arr ind x)) =
+    ppr old <+>  "<-" <+>  "atomic_fadd_" <> ppr t <>
     parens (commasep [ppr arr <> brackets (ppr ind), ppr x])
   ppr (Atomic _ (AtomicSMax t old arr ind x)) =
     ppr old <+>  "<-" <+>  "atomic_smax" <> ppr t <>

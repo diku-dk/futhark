@@ -1,6 +1,6 @@
 // Start of atomics.cl
 
-// Despite the name, this file is also used for the CUDA backend.
+// Despite its extension, this file is also used for the CUDA backend.
 
 inline int32_t atomic_add_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
@@ -18,7 +18,7 @@ inline int32_t atomic_add_i32_local(volatile __local int32_t *p, int32_t x) {
 #endif
 }
 
-inline float atomic_add_f32_global(volatile __global float *p, float x) {
+inline float atomic_fadd_f32_global(volatile __global float *p, float x) {
 #ifdef FUTHARK_CUDA
   return atomicAdd((__global float*)p, x);
 #else
@@ -30,10 +30,11 @@ inline float atomic_add_f32_global(volatile __global float *p, float x) {
     old.f = old.f + x;
     old.i = atomic_cmpxchg((volatile __global int32_t*)p, assumed.i, old.i);
   } while (assumed.i != old.i);
+  return old.f;
 #endif
 }
 
-inline float atomic_add_f32_local(volatile __local float *p, float x) {
+inline float atomic_fadd_f32_local(volatile __local float *p, float x) {
 #ifdef FUTHARK_CUDA
   return atomicAdd((__global float*)p, x);
 #else
@@ -45,6 +46,7 @@ inline float atomic_add_f32_local(volatile __local float *p, float x) {
     old.f = old.f + x;
     old.i = atomic_cmpxchg((volatile __local int32_t*)p, assumed.i, old.i);
   } while (assumed.i != old.i);
+  return old.f;
 #endif
 }
 

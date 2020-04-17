@@ -540,6 +540,9 @@ inKernelOperations body =
         atomicOps s (AtomicAdd t old arr ind val) =
           doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
 
+        atomicOps s (AtomicFAdd t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
+
         atomicOps s (AtomicSMax t old arr ind val) =
           doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
 
