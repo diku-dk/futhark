@@ -164,7 +164,7 @@ inline int32_t atomic_xor_i32_local(volatile __local int32_t *p, int32_t x) {
 
 inline int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicXor((__global int32_t*)p, x);
+  return atomicExch((__global int32_t*)p, x);
 #else
   return atomic_xor(p, x);
 #endif
@@ -172,7 +172,7 @@ inline int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_xchg_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicXor((__global int32_t*)p, x);
+  return atomicExch((__global int32_t*)p, x);
 #else
   return atomic_xor(p, x);
 #endif
