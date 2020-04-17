@@ -93,7 +93,7 @@ opCompiler pat e =
   compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
-sizeClassWithEntryPoint :: Name -> Imp.SizeClass -> Imp.SizeClass
+sizeClassWithEntryPoint :: Maybe Name -> Imp.SizeClass -> Imp.SizeClass
 sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
   Imp.SizeThreshold $ map f path
   where f (name, x) = (keyWithEntryPoint fname name, x)

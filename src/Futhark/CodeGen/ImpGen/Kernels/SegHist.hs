@@ -217,7 +217,8 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
   hist_L2 <- dPrim "L2_size" int32
   entry <- asks envFunction
   -- Equivalent to F_L2*L2 in paper.
-  sOp $ Imp.GetSize hist_L2 (entry <> "." <> nameFromString (pretty hist_L2)) $
+  sOp $ Imp.GetSize hist_L2
+    (keyWithEntryPoint entry $ nameFromString (pretty hist_L2)) $
     Imp.SizeBespoke (nameFromString "L2_for_histogram") hist_L2_def
 
   let hist_L2_ln_sz = 16*4 -- L2 cache line size approximation
