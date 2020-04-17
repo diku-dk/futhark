@@ -4,7 +4,7 @@
 
 inline int32_t atomic_add_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicAdd((__global int32_t*)p, x);
+  return atomicAdd((int32_t*)p, x);
 #else
   return atomic_add(p, x);
 #endif
@@ -12,7 +12,7 @@ inline int32_t atomic_add_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_add_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicAdd((__global int32_t*)p, x);
+  return atomicAdd((int32_t*)p, x);
 #else
   return atomic_add(p, x);
 #endif
@@ -20,7 +20,7 @@ inline int32_t atomic_add_i32_local(volatile __local int32_t *p, int32_t x) {
 
 inline float atomic_fadd_f32_global(volatile __global float *p, float x) {
 #ifdef FUTHARK_CUDA
-  return atomicAdd((__global float*)p, x);
+  return atomicAdd((float*)p, x);
 #else
   union { int32_t i; float f; } old;
   union { int32_t i; float f; } assumed;
@@ -36,7 +36,7 @@ inline float atomic_fadd_f32_global(volatile __global float *p, float x) {
 
 inline float atomic_fadd_f32_local(volatile __local float *p, float x) {
 #ifdef FUTHARK_CUDA
-  return atomicAdd((__global float*)p, x);
+  return atomicAdd((float*)p, x);
 #else
   union { int32_t i; float f; } old;
   union { int32_t i; float f; } assumed;
@@ -52,7 +52,7 @@ inline float atomic_fadd_f32_local(volatile __local float *p, float x) {
 
 inline int32_t atomic_smax_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMax((__global int32_t*)p, x);
+  return atomicMax((int32_t*)p, x);
 #else
   return atomic_max(p, x);
 #endif
@@ -60,7 +60,7 @@ inline int32_t atomic_smax_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_smax_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMax((__global int32_t*)p, x);
+  return atomicMax((int32_t*)p, x);
 #else
   return atomic_max(p, x);
 #endif
@@ -68,7 +68,7 @@ inline int32_t atomic_smax_i32_local(volatile __local int32_t *p, int32_t x) {
 
 inline int32_t atomic_smin_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMin((__global int32_t*)p, x);
+  return atomicMin((int32_t*)p, x);
 #else
   return atomic_min(p, x);
 #endif
@@ -76,7 +76,7 @@ inline int32_t atomic_smin_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_smin_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMin((__global int32_t*)p, x);
+  return atomicMin((int32_t*)p, x);
 #else
   return atomic_min(p, x);
 #endif
@@ -84,7 +84,7 @@ inline int32_t atomic_smin_i32_local(volatile __local int32_t *p, int32_t x) {
 
 inline uint32_t atomic_umax_i32_global(volatile __global uint32_t *p, uint32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMax((__global int32_t*)p, x);
+  return atomicMax((uint32_t*)p, x);
 #else
   return atomic_max(p, x);
 #endif
@@ -92,7 +92,7 @@ inline uint32_t atomic_umax_i32_global(volatile __global uint32_t *p, uint32_t x
 
 inline uint32_t atomic_umax_i32_local(volatile __local uint32_t *p, uint32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMax((__global int32_t*)p, x);
+  return atomicMax((uint32_t*)p, x);
 #else
   return atomic_max(p, x);
 #endif
@@ -100,7 +100,7 @@ inline uint32_t atomic_umax_i32_local(volatile __local uint32_t *p, uint32_t x) 
 
 inline uint32_t atomic_umin_i32_global(volatile __global uint32_t *p, uint32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMin((__global int32_t*)p, x);
+  return atomicMin((uint32_t*)p, x);
 #else
   return atomic_min(p, x);
 #endif
@@ -108,7 +108,7 @@ inline uint32_t atomic_umin_i32_global(volatile __global uint32_t *p, uint32_t x
 
 inline uint32_t atomic_umin_i32_local(volatile __local uint32_t *p, uint32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicMin((__global int32_t*)p, x);
+  return atomicMin((uint32_t*)p, x);
 #else
   return atomic_min(p, x);
 #endif
@@ -116,7 +116,7 @@ inline uint32_t atomic_umin_i32_local(volatile __local uint32_t *p, uint32_t x) 
 
 inline int32_t atomic_and_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicAnd((__global int32_t*)p, x);
+  return atomicAnd((int32_t*)p, x);
 #else
   return atomic_and(p, x);
 #endif
@@ -124,7 +124,7 @@ inline int32_t atomic_and_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_and_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicAnd((__global int32_t*)p, x);
+  return atomicAnd((int32_t*)p, x);
 #else
   return atomic_and(p, x);
 #endif
@@ -132,7 +132,7 @@ inline int32_t atomic_and_i32_local(volatile __local int32_t *p, int32_t x) {
 
 inline int32_t atomic_or_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicOr((__global int32_t*)p, x);
+  return atomicOr((int32_t*)p, x);
 #else
   return atomic_or(p, x);
 #endif
@@ -140,7 +140,7 @@ inline int32_t atomic_or_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_or_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicOr((__global int32_t*)p, x);
+  return atomicOr((int32_t*)p, x);
 #else
   return atomic_or(p, x);
 #endif
@@ -148,7 +148,7 @@ inline int32_t atomic_or_i32_local(volatile __local int32_t *p, int32_t x) {
 
 inline int32_t atomic_xor_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicXor((__global int32_t*)p, x);
+  return atomicXor((int32_t*)p, x);
 #else
   return atomic_xor(p, x);
 #endif
@@ -156,7 +156,7 @@ inline int32_t atomic_xor_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_xor_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicXor((__global int32_t*)p, x);
+  return atomicXor((int32_t*)p, x);
 #else
   return atomic_xor(p, x);
 #endif
@@ -164,7 +164,7 @@ inline int32_t atomic_xor_i32_local(volatile __local int32_t *p, int32_t x) {
 
 inline int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicExch((__global int32_t*)p, x);
+  return atomicExch((int32_t*)p, x);
 #else
   return atomic_xor(p, x);
 #endif
@@ -172,7 +172,7 @@ inline int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int32_t x) {
 
 inline int32_t atomic_xchg_i32_local(volatile __local int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
-  return atomicExch((__global int32_t*)p, x);
+  return atomicExch((int32_t*)p, x);
 #else
   return atomic_xor(p, x);
 #endif
@@ -181,7 +181,7 @@ inline int32_t atomic_xchg_i32_local(volatile __local int32_t *p, int32_t x) {
 inline int32_t atomic_cmpxchg_i32_global(volatile __global int32_t *p,
                                          int32_t cmp, int32_t val) {
 #ifdef FUTHARK_CUDA
-  return atomicCAS((__global int32_t*)p, cmp, val);
+  return atomicCAS((int32_t*)p, cmp, val);
 #else
   return atomic_cmpxchg(p, cmp, val);
 #endif
@@ -190,7 +190,7 @@ inline int32_t atomic_cmpxchg_i32_global(volatile __global int32_t *p,
 inline int32_t atomic_cmpxchg_i32_local(volatile __local int32_t *p,
                                          int32_t cmp, int32_t val) {
 #ifdef FUTHARK_CUDA
-  return atomicCAS((__global int32_t*)p, cmp, val);
+  return atomicCAS((int32_t*)p, cmp, val);
 #else
   return atomic_cmpxchg(p, cmp, val);
 #endif
