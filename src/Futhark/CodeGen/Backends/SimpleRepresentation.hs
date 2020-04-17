@@ -1203,7 +1203,7 @@ glFloat32Funs = [C.cunit|
     }
 
     float $id:(funName' "log10_32")(float x) {
-      return (log(x) / log(10));
+      return (log(x) / log(10.0));
     }
 
     float $id:(funName' "sqrt32")(float x) {
@@ -1310,18 +1310,15 @@ glFloat32Funs = [C.cunit|
 glFloat64Funs :: [C.Definition]
 glFloat64Funs = [C.cunit|
     double $id:(funName' "log64")(double x) {
-      double h = 0.0000001;
-      return ((fpow64(x, h)-1.0)/h) / ((fpow64(E_CONST,h)-1.0)/h);
+      return log(float32(x));
     }
 
     double $id:(funName' "log2_64")(double x) {
-      double h = 0.0000001;
-      return ((fpow64(x, h)-1.0)/h) / ((fpow64(2.0,h)-1.0)/h);
+      return log2(float32(x));
     }
 
     double $id:(funName' "log10_64")(double x) {
-      double h = 0.0000001;
-      return ((fpow64(x, h)-1.0)/h) / ((fpow64(10.0,h)-1.0)/h);
+      return (log(float32(x)) / log(10.0));
     }
 
     double $id:(funName' "sqrt64")(double x) {
