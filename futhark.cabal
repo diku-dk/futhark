@@ -20,7 +20,6 @@ license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     rts/c/*.h
-    rts/c/*.cl
     rts/csharp/*.cs
     rts/futhark-doc/*.css
     rts/python/*.py

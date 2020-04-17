@@ -1,6 +1,4 @@
-// Start of atomics.cl
-
-// Despite its extension, this file is also used for the CUDA backend.
+// Start of atomics.h
 
 inline int32_t atomic_add_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
@@ -196,4 +194,4 @@ inline int32_t atomic_cmpxchg_i32_local(volatile __local int32_t *p,
 #endif
 }
 
-// End of atomics.cl
+// End of atomics.h

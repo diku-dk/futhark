@@ -276,7 +276,7 @@ openClCode kernels =
            kernel_func <- kernels ]
 
 atomicsDefs :: String
-atomicsDefs = $(embedStringFile "rts/c/atomics.cl")
+atomicsDefs = $(embedStringFile "rts/c/atomics.h")
 
 genOpenClPrelude :: S.Set PrimType -> [C.Definition]
 genOpenClPrelude ts =
