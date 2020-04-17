@@ -81,6 +81,7 @@ data KernelUse = ScalarUse VName PrimType
 -- | Get an atomic operator corresponding to a binary operator.
 atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Elements Imp.Exp -> Exp -> AtomicOp)
 atomicBinOp = flip lookup [ (Add Int32, AtomicAdd $ IntType Int32)
+                          , (FAdd Float32, AtomicAdd $ FloatType Float32)
                           , (SMax Int32, AtomicSMax $ IntType Int32)
                           , (SMin Int32, AtomicSMin $ IntType Int32)
                           , (UMax Int32, AtomicUMax $ IntType Int32)
