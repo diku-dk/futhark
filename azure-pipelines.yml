@@ -133,6 +133,12 @@ jobs:
       futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
     displayName: Compile benchmarks with backend=opencl
 
+  - script: |
+      set -e
+      export PATH=$HOME/.local/bin:$PATH
+      (cd libtests/c; make)
+    displayName: Run library tests
+
 - job: build_linux_nightly
 
   condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')

@@ -45,3 +45,4 @@ jobs:
     - stack install
     - futhark test --no-terminal tests examples --no-tuning
     - "(cd pkgtests; ./test.sh)"
+    - "(cd libtests/c; make)"
