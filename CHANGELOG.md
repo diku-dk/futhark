@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed rare memory corruption bug involving branches returning
     arrays (#923).
 
+  * Fixed spurious warning about entry points involving opaque return
+    types, where the type annotations are put on a higher-order return
+    type.
+
 ## [0.15.4]
 
 ### Added
