@@ -303,8 +303,10 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
       -- Number of subhistograms per result histogram.
       hist_M <- dPrimVE "hist_M" $
-                Imp.BinOpExp (SMax Int32) hist_M_min $
-                t64 $ r64 hist_T / hist_C
+        case slugAtomicUpdate slug of
+          AtomicPrim{} -> 1
+          _ -> Imp.BinOpExp (SMax Int32) hist_M_min $
+               t64 $ r64 hist_T / hist_C
 
       emit $ Imp.DebugPrint "Elements/thread in L2 cache (k_max)" $ Just hist_k_max
       emit $ Imp.DebugPrint "Multiplication degree (M)" $ Just hist_M
