@@ -566,8 +566,11 @@ nastyType t@Array{} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType _ (Scalar (Arrow _ _ t1 t2)) =
+nastyReturnType Nothing (Scalar (Arrow _ _ t1 t2)) =
   nastyType t1 || nastyReturnType Nothing t2
+nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ t1 t2)) =
+  (not (niceTypeExp te1) && nastyType t1) ||
+  nastyReturnType (Just te2) t2
 nastyReturnType (Just te) _
   | niceTypeExp te = False
 nastyReturnType te t
