@@ -186,9 +186,12 @@ data KernelResult = Returns ResultManifest SubExp
                     -- The TileReturns must not expect more than one
                     -- result to be written per physical thread.
                   | RegTileReturns
-                    [(SubExp, SubExp)] -- for each dim of result: size of this dim/tile size for this dim
-                    [SubExp]           -- dims of register tile (should correspond to inner dims of tile)
-                    VName              -- tile returned by this worker/group
+                               -- For each dim of result:
+                    [(SubExp,  -- size of this dim.
+                      SubExp,  -- block tile size for this dim.
+                      SubExp)] -- reg tile size for this dim.
+
+                    VName      -- Tile returned by this worker/group.
                   deriving (Eq, Show, Ord)
 
 kernelResultSubExp :: KernelResult -> SubExp
@@ -196,7 +199,7 @@ kernelResultSubExp (Returns _ se) = se
 kernelResultSubExp (WriteReturns _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
 kernelResultSubExp (TileReturns _ v) = Var v
-kernelResultSubExp (RegTileReturns _ _ v) = Var v
+kernelResultSubExp (RegTileReturns _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ what) = freeIn' what
@@ -205,8 +208,8 @@ instance FreeIn KernelResult where
     freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
   freeIn' (TileReturns dims v) =
     freeIn' dims <> freeIn' v
-  freeIn' (RegTileReturns dims reg_tile_dims v) =
-    freeIn' dims <> freeIn' reg_tile_dims <> freeIn' v
+  freeIn' (RegTileReturns dims_n_tiles v) =
+    freeIn' dims_n_tiles <> freeIn' v
 
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn' (KernelBody attr stms res) =
@@ -235,9 +238,8 @@ instance Substitute KernelResult where
     (substituteNames subst v)
   substituteNames subst (TileReturns dims v) =
     TileReturns (substituteNames subst dims) (substituteNames subst v)
-  substituteNames subst (RegTileReturns dims reg_tiles v) =
-    RegTileReturns (substituteNames subst dims)
-                   (substituteNames subst reg_tiles)
+  substituteNames subst (RegTileReturns dims_n_tiles v) =
+    RegTileReturns (substituteNames subst dims_n_tiles)
                    (substituteNames subst v)
 
 instance Attributes lore => Rename (KernelBody lore) where
@@ -327,23 +329,21 @@ checkKernelBody ts (KernelBody (_, attr) stms kres) = do
           unless (vt == t `arrayOfShape` Shape (map snd dims)) $
             TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
 
-        checkKernelResult (RegTileReturns outer_dims reg_tiles arr) t = do
+        checkKernelResult (RegTileReturns dims_n_tiles arr) t = do
           -- assert that dimension and tile sizes have type int32
-          forM_ outer_dim_sizes $ TC.require [Prim int32]
-          forM_ outer_tiles     $ TC.require [Prim int32]
-          forM_ reg_tiles       $ TC.require [Prim int32]
+          forM_ dims      $ TC.require [Prim int32]
+          forM_ blk_tiles $ TC.require [Prim int32]
+          forM_ reg_tiles $ TC.require [Prim int32]
+
           -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
           arr_t <- lookupType arr
           unless (arr_t == expected)
             $ TC.bad $ TC.TypeError $ "Invalid type for TileReturns. Expected:\n  " ++
               pretty expected ++ ",\ngot:\n  " ++ pretty arr_t
           where
-            (outer_dim_sizes, outer_tiles) = unzip outer_dims
-
-            -- TODO: there probably exists a better, more general way to do this.
-            expected = t `arrayOfShape` (Shape (reverse outer_tiles ++ reg_tiles))
+            (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
+            expected = t `arrayOfShape` (Shape $ blk_tiles ++ reg_tiles) -- TODO: different solution?
             
-
 
 kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
 kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
@@ -375,11 +375,12 @@ instance Pretty KernelResult where
     parens (commasep $ map onDim dims) <+> ppr v
     where onDim (dim, tile) = ppr dim <+> text "/" <+> ppr tile
 
-  ppr (RegTileReturns dims _ v) =
+  ppr (RegTileReturns dims_n_tiles  v) =
     -- TODO: finish this!!! but for now, just pretty print like TileReturns.
-    text "reg_tile" <>
-    parens (commasep $ map onDim dims) <+> ppr v
-    where onDim (outer_dim, outer_tile) = ppr outer_dim <+> text "/" <+> ppr outer_tile
+    text "blkreg_tile" <>
+    parens (commasep $ map onDim dims_n_tiles) <+> ppr v
+    where onDim (dim, blk_tile, reg_tile) = ppr dim <+> text "/ (" <+>
+            ppr blk_tile <+> text "*" <+> ppr reg_tile <+> text ")"
 
 --- Segmented operations
 
@@ -452,8 +453,8 @@ segResultShape _ t (ConcatReturns _ w _ _) =
   t `arrayOfRow` w
 segResultShape _ t (TileReturns dims _) =
   t `arrayOfShape` Shape (map fst dims)
-segResultShape _ t (RegTileReturns outer_dims _ _ ) =
-  t `arrayOfShape` Shape (map fst outer_dims)
+segResultShape _ t (RegTileReturns dims_n_tiles _) =
+  t `arrayOfShape` Shape (map (\(dim, _, _) -> dim) dims_n_tiles)
 
 segOpType :: SegOp lore -> [Type]
 segOpType (SegMap _ space ts kbody) =

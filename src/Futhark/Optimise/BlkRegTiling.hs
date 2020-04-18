@@ -23,6 +23,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Sequence as Seq
 import Data.List
 import Data.Maybe
+import Data.Tuple
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
@@ -36,13 +37,6 @@ import Futhark.Util.Pretty
 
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
-
-_pretty :: Pretty a => a -> String
-_pretty = (++ "\n\n====================="
-           ++ "========================="
-           ++ "========================="
-           ++ "=====================\n\n") . pretty
-
 
 mmmTiling2D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
 mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
@@ -124,18 +118,18 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
           -- initialize register mem with neutral elements
           [cssss] <- segMap2D "cssss" (segThread grid_size block_size)
-                       ResultPrivate (tx, ty) $ \(_, _) -> do
-            css <- letExp "css" $ BasicOp $ Replicate (Shape [rx, ry]) red_ne
+                       ResultPrivate (ty, tx) $ \(_, _) -> do
+            css <- letExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
             return [css]
 
-          -- build outer k loop, computing this thread's result.
+          -- outer loop computing this thread's result (loop kk in mmm_kernels)
           kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
-          loop_thd_res <- forLoop kk_bound cssss $ \kk thd_res_merge -> do
+          thd_res <- forLoop kk_bound cssss $ \kk thd_res_merge -> do
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
             -- copy A from global to shared mem
             [a_shr] <- segMap2D "A_shr" (segThread grid_size block_size)
-                         ResultNoSimplify (tk, ty) $ \(thd_x, thd_y) -> do
+                         ResultNoSimplify (ty, tk) $ \(thd_x, thd_y) -> do
 
               a_shr_init <- scratch "A_shr_init" map_t1 [ry]
               loop_a_shr <- forLoop ry a_shr_init $ \i a_shr_init' -> do
@@ -155,7 +149,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
             -- copy B from global to shared mem
             [b_shr] <- segMap2D "B_shr" (segThread grid_size block_size)
-                         ResultNoSimplify (tk, tx) $ \(thd_x, thd_y) -> do
+                         ResultNoSimplify (tx, tk) $ \(thd_x, thd_y) -> do
 
               b_shr_init <- scratch "B_shr_init" map_t2 [rx]
               loop_b_shr <- forLoop rx b_shr_init $ \j b_shr_init' -> do
@@ -173,11 +167,12 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
               return [loop_b_shr]
 
-            -- build inner k loop, updating this thread's accumulator
-            loop_thd_acc <- forLoop tk thd_res_merge $ \k acc_merge -> do
+            -- inner loop updating this thread's accumulator (loop k in mmm_kernels)
+            thd_acc <- forLoop tk thd_res_merge $ \k acc_merge -> do
 
+              -- before the redomap, write from shared to register mem
               [asss, bsss] <- segMap2D "shr_mem" (segThread grid_size block_size)
-                                ResultPrivate (tx, ty) $ \(thd_x, thd_y) -> do
+                                ResultPrivate (ty, tx) $ \(thd_x, thd_y) -> do
 
                 -- copy from shared mem to register mem
                 asss_init <- scratch "asss_init" map_t1 [ry]
@@ -188,22 +183,23 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                 -- TODO: are these dimensions correct or should anything be rearranged?
                 asss <- forLoop ry asss_init $ \i asss_merge -> do
                   asss <- update "asss" asss_merge [i] =<<
-                    index "A_shr_elem" a_shr [thd_x, thd_y, i] -- TODO: this indexing correct?
+                    index "A_shr_elem" a_shr [thd_y, thd_x, i] -- TODO: this indexing correct?
                   return $ resultBody [Var asss]
 
                 -- TODO: similarly for B_shr?
                 bsss <- forLoop rx bsss_init $ \j bsss_merge -> do
                   bsss <- update "bsss" bsss_merge [j] =<<
-                    index "B_shr_elem" b_shr [thd_x, thd_y, j] -- TODO: this indexing correct?
+                    index "B_shr_elem" b_shr [thd_y, thd_x, j] -- TODO: this indexing correct?
                   return $ resultBody [Var bsss]
                 return [asss, bsss]
 
-              [thd_acc] <- segMap2D "thd_acc" (segThread grid_size block_size)
-                             ResultPrivate (tx, ty) $ \(thd_x, thd_y) -> do
-                -- redomap
-                as <- indexSubArr "as" asss [thd_x, thd_y] [ry]
-                bs <- indexSubArr "bs" bsss [thd_x, thd_y] [rx]
-                css_init <- indexSubArr "css_init" acc_merge [thd_x, thd_y] [rx, ry]
+              -- the actual redomap
+              [redomap_res] <- segMap2D "redomap_res" (segThread grid_size block_size)
+                             ResultPrivate (ty, tx) $ \(thd_y, thd_x) -> do
+
+                as <- indexSubArr "as" asss [thd_y, thd_x] [ry]
+                bs <- indexSubArr "bs" bsss [thd_y, thd_x] [rx]
+                css_init <- indexSubArr "css_init" acc_merge [thd_y, thd_x] [ry, rx]
 
                 css <- forLoop ry css_init $ \i css_merge -> do
 
@@ -226,31 +222,25 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                   return $ resultBody [Var css]
                 return [css]
 
-              -- TODO: where to put code2..? ie. the code that follows the redomap
-              return $ resultBody [Var thd_acc]
+              -- TODO: where to put code2..? ie. code following the redomap
+              return $ resultBody [Var redomap_res]
             --------------- END inner k loop ----------------
 
-            return $ resultBody [Var loop_thd_acc]
+            return $ resultBody [Var thd_acc]
           --------------- END outer kk loop ---------------
-          -- return [RegTileReturns [(width_B, tx), (height_A, ty)] -- TODO: here we place the new KernelResult :)
-          return [RegTileReturns [(height_A, ty), (width_B, tx)] -- TODO: here we place the new KernelResult :)
-                                 [rx, ry]
-                                 loop_thd_res]
-                              -- foo]
+
+          -- TODO: RegTileReturns still a work in progress.
+          return [RegTileReturns [(height_A, ty, ry), (width_B, tx, rx)]
+                                 thd_res]
         --------------- END outer seggroup ---------------
 
-        return $ Let pat aux $ Op $ SegOp $
-                   SegMap (SegGroup (Count grid_size) (Count block_size) SegNoVirt)
-                          (SegSpace bid_flat [(bid_x, gridDim_x), (bid_y, gridDim_y)])
-                          ts
-                          (KernelBody () stms_seggroup ret_seggroup)
 
-      ------------------------------------------------------------------------
-      trace (
-              -- _pretty old_kbody  ++ "\n" ++
-               pretty host_stms  ++ "\n" ++
-              _pretty new_kernel ++
-            "") $ return $ Just (host_stms, new_kernel)
+        let level' = SegGroup (Count grid_size) (Count block_size) SegNoVirt
+            space' = SegSpace bid_flat [(bid_y, gridDim_y), (bid_x, gridDim_x)]
+            kbody' = KernelBody () stms_seggroup ret_seggroup
+        return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
+
+      return $ Just (host_stms, new_kernel)
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
@@ -314,8 +304,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                 -> Binder Kernels VName
         forLoop i_bound merge body = do
           i <- newVName "i"     -- could give this as arg to the function
-          -- let desc = "loop_" ++ baseString i
-          let desc = "loop"
+          let desc = "loop" -- "loop_" ++ baseString i
 
           let loop_form = ForLoop i Int32 i_bound []
 
@@ -479,58 +468,3 @@ segMap2D desc lvl manifest (dim_x, dim_y) f = do
 
   letTupExp desc $ Op $ SegOp $
     SegMap lvl segspace ts $ KernelBody () stms' $ map (Returns manifest) res'
-
--- sufficientGroups :: MonadBinder m =>
---                     [(VName, SubExp, VName, SubExp)] -- gspace
---                  -> SubExp                           -- block_size
---                  -> m (SubExp, SubExp)               -- (x, y) grid dimensions?
--- sufficientGroups gspace block_size = do
---
---   groups_in_dims <- forM gspace $ \(_, gd, _, ld) ->
---                       letSubExp "groups_in_dim" =<<
---                       eDivRoundingUp Int32 (eSubExp gd) (eSubExp ld)
---
---   num_groups <- letSubExp "num_groups" =<<
---                 foldBinOp (Mul Int32) (constant (1::Int32)) groups_in_dims
---
---   num_threads <- letSubExp "num_threads" (BasicOp (BinOp (Mul Int32) num_groups block_size))
---
---   return (num_threads, num_groups)
-
-
-{-
-from A to A_shr:
-  in the kernel code:
-                      A[blockIdx.y * Ty * Ry + i][kk + k]
-
-  assuming normalized loop variables i and kk, and assuming Tk == Tx == Ty:
-                      A[blockIdx.y * Ty * Ry + i * Ty + threadIdx.y][kk * Tk + threadIdx.x]
-
-  setting iii := gtid_y * Ty * Ry, i' := i * Ty + threadIdx.y, and kk' := kk * Tk:
-                      A[iii + i'][kk' + thd_x]
-
-  t0 := i * ty
-  i'  := t0 + thd_y
-
-  iii   = gtid_y * ty_ry
-  a_row = iii + i'
-
-  a_col = kk' + thd_x, where kk' == kk * Tk
-
-
-from B to B_shr, assuming B is transposed in global memory:
-  in the kernel code:
-                      B[blockIdx.x * Tx * Rx + j][kk + k]
-
-  assuming normalized loop variables j and kk, and assuming Tk == Tx == Ty:
-                      B[blockIdx.x * Tx * Rx + j * Tx + threadIdx.x][kk + threadIdx.y]
-  setting jjj := blockIdx.x * Tx * Rx, j' := j * Tx + threadIdx.x, and kk' := kk * Ty
-                      B[jjj + j'][kk' + thd_y]
-
-  t0 := j * tx
-  j'  := t0 + thd_x
-
-  jjj   := gtid_x * tx_rx
-  b_row := jjj + j'
-  b_col := kk' + thd_y, where kk' := kk * Tk is set earlier
--}

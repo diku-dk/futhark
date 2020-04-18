@@ -40,6 +40,7 @@ import qualified Data.Map.Strict as M
 import Data.List
 
 import Prelude hiding (quot, rem)
+import Debug.Trace
 
 import Futhark.Error
 import Futhark.MonadFreshNames
@@ -1275,6 +1276,61 @@ compileGroupResult space constants pe (TileReturns dims what) = do
   sWhen (isActive $ zip is_for_thread $ map fst dims) $
     copyDWIMFix (patElemName pe) (map Imp.vi32 is_for_thread) (Var what) local_is
 
+compileGroupResult space constants pe (RegTileReturns dims_n_tiles what) = do
+  let gids = map fst $ unSegSpace space
+  let (dims, blk_tiles, reg_tiles) = unzip3 $ map (\(dim, blk_tile, reg_tile) ->
+        (dim, toExp' int32 blk_tile, toExp' int32 reg_tile)) dims_n_tiles
+
+  let outer_tiles = zipWith (*) blk_tiles reg_tiles -- [Ty*Ry, Tx*Rx]
+
+  -- compute local and group offsets, ie. where this particular group or thread
+  -- should start writing - this is analogous to "local_is" and "group_is", but
+  -- here, each thread writes multiple elements starting at these offsets.
+  -- TODO: local_offsets needs to somehow factor in the fact that each thread is
+  --       now reponsible for multiple elements, and thus each thread index
+  --       should be multiplied with some register tile size. can this simply be
+  --       done straight-forwardly once the flat index has been unflattened?
+  -- FOR NOW, DO: just that. unflatten local thread indices, and for each
+  --              unflattened index, multiply it with the register tile size
+  --              corresponding to the dimension it indexes. intuitively, this
+  --              feels correct, but am not sure.
+  let local_offsets = zipWith (*) reg_tiles $
+                        unflattenIndex reg_tiles $ kernelLocalThreadId constants
+
+  let group_offsets = zipWith (*) (map Imp.vi32 gids) outer_tiles
+
+  global_offsets <- mapM (dPrimV "thd_out_index") $ zipWith (+) group_offsets local_offsets
+
+  traceM ("\nouter_tile_sizes: " ++ pretty outer_tiles ++
+          "\nreg_tile_sizes:   " ++ pretty reg_tiles ++
+          "\ngroup_offsets:    " ++ pretty group_offsets ++
+          "\nlocal_offsets:    " ++ pretty local_offsets)
+
+  -- TODO: assume blk_tiles == [Ty, Tx], reg_tiles == [Ry, Rx]. then here, each
+  -- group should write its `what` of dimensions [Ty, Tx, Ry, Rx]. in reality,
+  -- however, threads individually write their [Ry, Rx] tiles.
+  --
+  -- * does this mean that at this point, we can generate imperative code from
+  -- the point of view of a single thread? in that case, here should simply be
+  -- placed two nested loops iterating the reg tile and copying it to some dest.
+  --
+  -- * how to construct a loop nest of some arbitrary depth equal to the number
+  --   of register tile dimensions when we lose the assumptions?
+
+
+  -- TODO: the below code is definitely incorrect, but mostly just an exercise.
+  let ry : rx : _ = reg_tiles
+  _ <- sFor "i" ry $ \i -> do
+         sFor "j" rx $ \j -> do
+           let global_is = map (\(offset, k) -> k + (Imp.vi32 offset))
+                               (zip global_offsets [i, j])
+           traceM ("global_is: " ++ pretty global_is ++ "\n\n\n")
+           sWhen (isActive $ zip global_offsets dims) $
+             copyDWIMFix (patElemName pe) global_is (Var what) [i, j] -- [thd_y, thd_x, i, j] ??
+
+  compilerLimitationS "compileGroupResult: RegTileReturns not quite handled yet :):)"
+
+
 compileGroupResult space constants pe (Returns _ what) = do
   in_local_memory <- arrayInLocalMemory what
   let gids = map (Imp.vi32 . fst) $ unSegSpace space
@@ -1298,6 +1354,9 @@ compileGroupResult _ _ _ ConcatReturns{} =
 compileThreadResult :: SegSpace
                     -> KernelConstants -> PatElem ExplicitMemory -> KernelResult
                     -> InKernelGen ()
+
+compileThreadResult _ _ _ RegTileReturns{} = do
+  compilerLimitationS "compileThreadResult: RegTileReturns not yet handled."
 
 compileThreadResult space _ pe (Returns _ what) = do
   let is = map (Imp.vi32 . fst) $ unSegSpace space

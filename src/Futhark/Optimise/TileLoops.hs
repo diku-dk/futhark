@@ -20,7 +20,6 @@ import Futhark.Transform.Rename
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Optimise.BlkRegTiling
-import Debug.Trace
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $

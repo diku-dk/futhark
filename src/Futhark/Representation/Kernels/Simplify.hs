@@ -214,10 +214,11 @@ instance Engine.Simplifiable KernelResult where
     <*> Engine.simplify what
   simplify (TileReturns dims what) =
     TileReturns <$> Engine.simplify dims <*> Engine.simplify what
-  simplify (RegTileReturns outer_dims reg_tiles arr) =
-    RegTileReturns <$> Engine.simplify outer_dims <*> Engine.simplify reg_tiles
-    <*> Engine.simplify arr
-
+  simplify (RegTileReturns dims_n_tiles what) =
+    RegTileReturns
+    <$> Engine.simplify dims_n_tiles
+    <*> Engine.simplify what
+              
 instance BinderOps (Wise Kernels) where
   mkExpAttrB = bindableMkExpAttrB
   mkBodyB = bindableMkBodyB
