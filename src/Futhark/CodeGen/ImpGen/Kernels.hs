@@ -163,10 +163,7 @@ callKernelCopy bt
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
-  -- FIXME: The leading underscore is to avoid clashes with a
-  -- programmer-defined function of the same name (this is a bad
-  -- solution...).
-  let fname = nameFromString $ "_" <> mapTransposeName bt
+  fname <- nameFromString . pretty <$> newVName (mapTransposeName bt)
 
   exists <- hasFunction fname
   unless exists $ emitFunction fname $ mapTransposeFunction bt
