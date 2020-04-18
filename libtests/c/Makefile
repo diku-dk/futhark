@@ -11,4 +11,4 @@ test_%: test_%.c %.o
 
 %.o: %.fut
 	futhark $(FUTHARK_BACKEND) --library $^
-	gcc $*.c -c
+	gcc $*.c -c -std=c99
