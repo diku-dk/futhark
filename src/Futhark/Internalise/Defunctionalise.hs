@@ -989,8 +989,6 @@ defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 defuncValBind (ValBind entry name _ (Info (rettype, retext)) tparams params body _ loc)
   | Scalar Arrow{} <- rettype = do
       (body_pats, body', rettype') <- etaExpand (fromStruct rettype) body
-      -- FIXME: we should also handle non-constant size annotations
-      -- here.
       defuncValBind $ ValBind entry name Nothing
         (Info (rettype', retext))
         tparams (params <> body_pats) body' Nothing loc
