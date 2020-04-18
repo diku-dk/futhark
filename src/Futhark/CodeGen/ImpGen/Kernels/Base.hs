@@ -1196,10 +1196,7 @@ replicateName bt = "replicate_" ++ pretty bt
 
 replicateForType :: PrimType -> CallKernelGen Name
 replicateForType bt = do
-  -- FIXME: The leading underscore is to avoid clashes with a
-  -- programmer-defined function of the same name (this is a bad
-  -- solution...).
-  let fname = nameFromString $ "_" <> replicateName bt
+  fname <- nameFromString . pretty <$> newVName (replicateName bt)
 
   exists <- hasFunction fname
   unless exists $ emitFunction fname =<< replicateFunction bt
