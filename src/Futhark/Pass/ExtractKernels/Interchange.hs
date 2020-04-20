@@ -70,7 +70,7 @@ interchangeLoop
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
     return $
-      SeqLoop [0..patternSize pat-1] pat' merge_expanded form $
+      SeqLoop perm pat' merge_expanded form $
       mkBody (pre_copy_bnds<>oneStm map_bnd) res
   where free_in_body = freeIn body
 
@@ -124,7 +124,8 @@ interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                  -> m (Stms SOACS)
 interchangeLoops nest loop = do
   (loop', bnds) <-
-    runBinder $ foldM (interchangeLoop isMapParameter) loop $ reverse $ kernelNestLoops nest
+    runBinder $ foldM (interchangeLoop isMapParameter) loop $
+    reverse $ kernelNestLoops nest
   return $ bnds <> oneStm (seqLoopStm loop')
   where isMapParameter v =
           fmap snd $ find ((==v) . paramName . fst) $
