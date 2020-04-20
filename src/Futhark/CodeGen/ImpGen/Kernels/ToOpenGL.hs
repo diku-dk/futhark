@@ -105,7 +105,7 @@ onShader shader = do
         GenericC.runCompilerM mempty (inShaderOperations (kernelBody shader))
         blankNameSource
         newShaderState $
-        GenericC.blockScope $ GenericC.compileCode $ kernelBody shader
+        GenericC.blockScope $ GenericC.compileCode Nothing $ kernelBody shader
       s_state = GenericC.compUserState cstate
 
       use_params = mapMaybe useAsParam $ kernelUses shader
@@ -193,6 +193,7 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("#define uint32_t uint")|]
   , [C.cedecl|$esc:("#define float32 float")|]
   , [C.cedecl|$esc:("#define float64 double")|]
+  , [C.cedecl|$esc:("#define boolean bool")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
 

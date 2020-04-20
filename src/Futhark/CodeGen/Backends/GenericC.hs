@@ -128,6 +128,11 @@ data HeaderSection = ArrayDecl String
                    | InitDecl
                    deriving (Eq, Ord)
 
+-- | The target backend when generating GPU code.
+data BackendTarget = TargetKernel
+                   | TargetShader
+                   deriving (Eq)
+
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
 type OpCompiler op s = op -> CompilerM op s ()
@@ -1749,21 +1754,21 @@ compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
   return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
-compileCode :: Code op -> CompilerM op s ()
+compileCode :: Maybe BackendTarget -> Code op -> CompilerM op s ()
 
-compileCode (Op op) =
+compileCode _ (Op op) =
   join $ asks envOpCompiler <*> pure op
 
-compileCode Skip = return ()
+compileCode _ Skip = return ()
 
-compileCode (Comment s code) = do
-  items <- blockScope $ compileCode code
+compileCode _ (Comment s code) = do
+  items <- blockScope $ compileCode Nothing code
   let comment = "// " ++ s
   stm [C.cstm|$comment:comment
               { $items:items }
              |]
 
-compileCode (DebugPrint s (Just e)) = do
+compileCode _ (DebugPrint s (Just e)) = do
   e' <- compileExp e
   stm [C.cstm|if (ctx->debugging) {
           fprintf(stderr, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
@@ -1774,59 +1779,59 @@ compileCode (DebugPrint s (Just e)) = do
                        _ -> ("d", [C.cty|int|])
         fmtstr = "%s: %" ++ fmt ++ "%c"
 
-compileCode (DebugPrint s Nothing) =
+compileCode _ (DebugPrint s Nothing) =
   stm [C.cstm|if (ctx->debugging) {
           fprintf(stderr, "%s\n", $exp:s);
        }|]
 
-compileCode c
+compileCode _ c
   | Just (name, vol, t, e, c') <- declareAndSet c = do
     let ct = primTypeToCType t
     e' <- compileExp e
     item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-    compileCode c'
+    compileCode Nothing c'
 
-compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
+compileCode _ (c1 :>>: c2) = compileCode Nothing c1 >> compileCode Nothing c2
 
-compileCode (Assert e msg (loc, locs)) = do
+compileCode _ (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   err <- collect $ join $
          asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
-compileCode (Allocate _ _ ScalarSpace{}) =
+compileCode _ (Allocate _ _ ScalarSpace{}) =
   -- Handled by the declaration of the memory block, which is
   -- translated to an actual array.
   return ()
 
-compileCode (Allocate name (Count e) space) = do
+compileCode _ (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space [C.cstm|return 1;|]
 
-compileCode (Free name space) =
+compileCode _ (Free name space) =
   unRefMem name space
 
-compileCode (For i it bound body) = do
+compileCode _ (For i it bound body) = do
   let i'  = C.toIdent i
       it' = primTypeToCType $ IntType it
   bound'  <- compileExp bound
-  body'   <- blockScope $ compileCode body
+  body'   <- blockScope $ compileCode Nothing body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 
-compileCode (While cond body) = do
+compileCode _ (While cond body) = do
   cond' <- compileExp cond
-  body' <- blockScope $ compileCode body
+  body' <- blockScope $ compileCode Nothing body
   stm [C.cstm|while ($exp:cond') {
             $items:body'
           }|]
 
-compileCode (If cond tbranch fbranch) = do
+compileCode _ (If cond tbranch fbranch) = do
   cond'    <- compileExp cond
-  tbranch' <- blockScope $ compileCode tbranch
-  fbranch' <- blockScope $ compileCode fbranch
+  tbranch' <- blockScope $ compileCode Nothing tbranch
+  fbranch' <- blockScope $ compileCode Nothing fbranch
   stm $ case (tbranch', fbranch') of
     (_, []) ->
       [C.cstm|if ($exp:cond') { $items:tbranch' }|]
@@ -1835,7 +1840,8 @@ compileCode (If cond tbranch fbranch) = do
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
-compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
+compileCode _ (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset)
+               DefaultSpace (Count size)) = do
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
   size' <- compileExp size
@@ -1845,14 +1851,15 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
                       $exp:src' + $exp:srcoffset',
                       $exp:size');|]
 
-compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
+compileCode _ (Copy dest (Count destoffset) destspace src (Count srcoffset)
+               srcspace (Count size)) = do
   copy <- asks envCopy
   join $ copy
     <$> rawMem dest <*> compileExp destoffset <*> pure destspace
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
 
-compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
+compileCode _ (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
            <$> compileExp idx
@@ -1860,12 +1867,12 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
-compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
+compileCode _ (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
   stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 
-compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
+compileCode _ (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
     <*> compileExp idx
@@ -1874,17 +1881,17 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
     <*> pure vol
     <*> compileExp elemexp
 
-compileCode (DeclareMem name space) =
+compileCode _ (DeclareMem name space) =
   declMem name space
 
-compileCode (DeclareScalar name vol t) = do
+compileCode _ (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 
-compileCode (DeclareArray name ScalarSpace{} _ _) =
+compileCode _ (DeclareArray name ScalarSpace{} _ _) =
   error $ "Cannot declare array " ++ pretty name ++ " in scalar space."
 
-compileCode (DeclareArray name DefaultSpace t vs) = do
+compileCode _ (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = primTypeToCType t
   case vs of
@@ -1899,26 +1906,26 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
     Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]
 
-compileCode (DeclareArray name (Space space) t vs) =
+compileCode _ (DeclareArray name (Space space) t vs) =
   join $ asks envStaticArray <*>
   pure name <*> pure space <*> pure t <*> pure vs
 
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.
-compileCode (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
+compileCode _ (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
   | dest == x, Just f <- assignmentOperator op = do
       y' <- compileExp y
       stm [C.cstm|$exp:(f dest y');|]
 
-compileCode (SetScalar dest src) = do
+compileCode _ (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]
 
-compileCode (SetMem dest src space) =
+compileCode _ (SetMem dest src space) =
   setMem dest src space
 
-compileCode (Call dests fname args) = do
+compileCode _ (Call dests fname args) = do
   args' <- mapM compileArg args
   let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
       args'' | isBuiltInFunction fname = args'
@@ -1951,7 +1958,7 @@ blockScope' m = do
 compileFunBody :: [C.Exp] -> [Param] -> Code op -> CompilerM op s ()
 compileFunBody output_ptrs outputs code = do
   mapM_ declareOutput outputs
-  compileCode code
+  compileCode Nothing code
   zipWithM_ setRetVal' output_ptrs outputs
   where declareOutput (MemParam name space) =
           declMem name space
