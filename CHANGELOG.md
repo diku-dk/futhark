@@ -9,14 +9,52 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `reduce_by_index` with `f32`-addition is now approximately 2x
+    faster in the CUDA backend.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Fixed kernel extractor bug in `if`-interchange (#921).
+
+  * Fixed some cases of malformed kernel code generation (#922).
+
+  * Fixed rare memory corruption bug involving branches returning
+    arrays (#923).
+
+  * Fixed spurious warning about entry points involving opaque return
+    types, where the type annotations are put on a higher-order return
+    type.
+
+  * Fixed incorrect size type checking for sum types in negative
+    position with unknown constructors (#927).
+
+  * Fixed loop interchange for permuted sequential loops with more
+    than one outer parallel loop (#928).
+
+## [0.15.4]
+
+### Added
+
   * `futhark pkg` now shells out to `curl` for HTTP requests.
 
   * `futhark doc` now supports proper GitHub-flavored Markdown, as it
     uses the `cmark-gfm` library internally.
 
-### Removed
+  * Top-level constants are now executed only once per program
+    instance.  This matters when Futhark is used to generate library
+    code.
 
-### Changed
+  * `futhark autotune` is better at handling degrees of parallelism
+    that assume multiple magnitudes during a single run.
+
+  * `futhark pkg` now uses `curl` to retrieve packages.
+
+  * Type errors are now printed in red for better legibility (thanks
+    to @mxxo!).
 
 ### Fixed
 

@@ -42,6 +42,12 @@ localArrayIndex constants t =
   then kernelLocalThreadId constants
   else kernelGlobalThreadId constants
 
+barrierFor :: Lambda ExplicitMemory -> (Bool, Imp.Fence, InKernelGen ())
+barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
+  where array_scan = not $ all primType $ lambdaReturnType scan_op
+        fence | array_scan = Imp.FenceGlobal
+              | otherwise = Imp.FenceLocal
+
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 :: Pattern ExplicitMemory
            -> Count NumGroups SubExp -> Count GroupSize SubExp -> SegSpace
@@ -71,7 +77,8 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
             (to-from) .>. (to `rem` segment_size)
           _ -> Nothing
 
-  sKernelThread "scan_stage1" num_groups' group_size' (segFlat space) $ \constants -> do
+  sKernelThread "scan_stage1" num_groups' group_size' (segFlat space) $ do
+    constants <- kernelConstants <$> askEnv
     local_arrs <- makeLocalArrays group_size (Var num_threads) nes scan_op
 
     -- The variables from scan_op will be used for the carry and such
@@ -123,7 +130,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
 
       sOp $ Imp.ErrorSync fence
 
-      groupScan constants crossesSegment'
+      groupScan crossesSegment'
         (Imp.vi32 num_threads)
         (kernelGroupSize constants) scan_op_renamed local_arrs
 
@@ -162,11 +169,7 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
 
   return (num_threads, elems_per_group, crossesSegment)
 
-  where array_scan = not $ all primType $ lambdaReturnType scan_op
-        fence | array_scan = Imp.FenceGlobal
-              | otherwise = Imp.FenceLocal
-        barrier = sOp $ Imp.Barrier fence
-
+  where (array_scan, fence, barrier) = barrierFor scan_op
 
 scanStage2 :: Pattern ExplicitMemory
            -> VName -> Imp.Exp -> Count NumGroups SubExp -> CrossesSegment -> SegSpace
@@ -185,7 +188,8 @@ scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crosses
         Just $ \from to ->
           f ((from + 1) * elems_per_group - 1) ((to + 1) * elems_per_group - 1)
 
-  sKernelThread  "scan_stage2" 1 group_size' (segFlat space) $ \constants -> do
+  sKernelThread  "scan_stage2" 1 group_size' (segFlat space) $ do
+    constants <- kernelConstants <$> askEnv
     local_arrs <- makeLocalArrays group_size (Var stage1_num_threads) nes scan_op
 
     flat_idx <- dPrimV "flat_idx" $
@@ -204,13 +208,17 @@ scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crosses
     sComment "threads in bound read carries; others get neutral element" $
       sIf in_bounds when_in_bounds when_out_of_bounds
 
-    groupScan constants crossesSegment'
+    barrier
+
+    groupScan crossesSegment'
       (Imp.vi32 stage1_num_threads) (kernelGroupSize constants) scan_op local_arrs
 
     sComment "threads in bounds write scanned carries" $
       sWhen in_bounds $ forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
       copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
       (Var arr) [localArrayIndex constants t]
+
+  where (_, _, barrier) = barrierFor scan_op
 
 scanStage3 :: Pattern ExplicitMemory
            -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -225,8 +233,10 @@ scanStage3 (Pattern _ pes) num_groups group_size elems_per_group crossesSegment 
   required_groups <- dPrimVE "required_groups" $
                      product dims' `quotRoundingUp` unCount group_size'
 
-  sKernelThread "scan_stage3" num_groups' group_size' (segFlat space) $ \constants ->
-    virtualiseGroups constants SegVirt required_groups $ \virt_group_id -> do
+  sKernelThread "scan_stage3" num_groups' group_size' (segFlat space) $
+    virtualiseGroups SegVirt required_groups $ \virt_group_id -> do
+    constants <- kernelConstants <$> askEnv
+
     -- Compute our logical index.
     flat_idx <- dPrimVE "flat_idx" $
                 Imp.vi32 virt_group_id * unCount group_size' +

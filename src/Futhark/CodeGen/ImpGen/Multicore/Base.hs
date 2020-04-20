@@ -16,7 +16,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.Representation.ExplicitMemory
 
 
-type MulticoreGen = ImpM ExplicitMemory Imp.Multicore
+type MulticoreGen = ImpM ExplicitMemory () Imp.Multicore
 
 
 toParam :: VName -> TypeBase shape u -> Imp.Param
@@ -27,8 +27,8 @@ toParam name t = case t of
 
 
 compileKBody :: KernelBody ExplicitMemory
-             -> ([(SubExp, [Imp.Exp])] -> ImpM ExplicitMemory Imp.Multicore ())
-             -> ImpM ExplicitMemory Imp.Multicore ()
+             -> ([(SubExp, [Imp.Exp])] -> ImpM ExplicitMemory () Imp.Multicore ())
+             -> ImpM ExplicitMemory () Imp.Multicore ()
 compileKBody kbody red_cont =
   compileStms (freeIn $ kernelBodyResult kbody) (kernelBodyStms kbody) $ do
     let red_res = kernelBodyResult kbody
