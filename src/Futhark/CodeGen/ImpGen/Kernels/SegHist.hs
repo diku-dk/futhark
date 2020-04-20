@@ -42,7 +42,6 @@ module Futhark.CodeGen.ImpGen.Kernels.SegHist
   where
 
 import Control.Monad.Except
-import Control.Monad.Reader
 import Data.Maybe
 import Data.List (foldl', genericLength, zip4, zip6)
 
@@ -71,7 +70,7 @@ data SegHistSlug = SegHistSlug
                    { slugOp :: HistOp ExplicitMemory
                    , slugNumSubhistos :: VName
                    , slugSubhistos :: [SubhistosInfo]
-                   , slugAtomicUpdate :: AtomicUpdate ExplicitMemory
+                   , slugAtomicUpdate :: AtomicUpdate ExplicitMemory KernelEnv
                    }
 
 histoSpaceUsage :: HistOp ExplicitMemory
@@ -139,10 +138,12 @@ computeHistoUsage space op = do
   let h = histoSpaceUsage op
       segmented_h = h * product (map (Imp.bytes . toExp' int32) $ init $ segSpaceDims space)
 
+  atomics <- kernelAtomics <$> askEnv
+
   return (h,
           segmented_h,
           SegHistSlug op num_subhistos subhisto_infos $
-          atomicUpdateLocking $ histOp op)
+          atomicUpdateLocking atomics $ histOp op)
 
 prepareAtomicUpdateGlobal :: Maybe Locking -> [VName] -> SegHistSlug
                           -> CallKernelGen (Maybe Locking,
@@ -215,7 +216,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
   -- tunable knob with a hopefully sane default.
   let hist_L2_def = 5632 * 1024
   hist_L2 <- dPrim "L2_size" int32
-  entry <- asks envFunction
+  entry <- askFunction
   -- Equivalent to F_L2*L2 in paper.
   sOp $ Imp.GetSize hist_L2
     (keyWithEntryPoint entry $ nameFromString (pretty hist_L2)) $
@@ -348,9 +349,9 @@ histKernelGlobalPass :: [PatElem ExplicitMemory]
                      -> SegSpace
                      -> [SegHistSlug]
                      -> KernelBody ExplicitMemory
-                     -> [[Imp.Exp] -> ImpM ExplicitMemory Imp.KernelOp ()]
+                     -> [[Imp.Exp] -> InKernelGen ()]
                      -> Imp.Exp -> Imp.Exp
-                     -> ImpM ExplicitMemory Imp.HostOp ()
+                     -> CallKernelGen ()
 histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms hist_S chk_i = do
 
   let (space_is, space_sizes) = unzip $ unSegSpace space
@@ -737,7 +738,7 @@ localMemoryCase :: [PatElem ExplicitMemory]
                 -> Imp.Exp -> Imp.Exp -> Imp.Exp -> Imp.Exp
                 -> [SegHistSlug]
                 -> KernelBody ExplicitMemory
-                -> CallKernelGen (Imp.Exp, ImpM ExplicitMemory Imp.HostOp ())
+                -> CallKernelGen (Imp.Exp, CallKernelGen ())
 localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kbody = do
   let space_sizes = segSpaceDims space
       segment_dims = init space_sizes

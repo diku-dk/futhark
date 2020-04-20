@@ -6,6 +6,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , keyWithEntryPoint
   , CallKernelGen
   , InKernelGen
+  , KernelEnv (..)
   , computeThreadChunkSize
   , groupReduce
   , groupScan
@@ -23,6 +24,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , groupCoverSpace
 
   , atomicUpdateLocking
+  , AtomicBinOp
   , Locking(..)
   , AtomicUpdate(..)
   , DoAtomicUpdate
@@ -30,7 +32,6 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   where
 
 import Control.Monad.Except
-import Control.Monad.Reader
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import Data.List (elemIndex, find, nub, zip4)
@@ -47,8 +48,11 @@ import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 import Futhark.Util (chunks, maybeNth, mapAccumLM, takeLast, dropLast)
 
-type CallKernelGen = ImpM ExplicitMemory Imp.HostOp
-type InKernelGen = ImpM ExplicitMemory Imp.KernelOp
+newtype KernelEnv = KernelEnv
+  { kernelAtomics :: AtomicBinOp }
+
+type CallKernelGen = ImpM ExplicitMemory KernelEnv Imp.HostOp
+type InKernelGen = ImpM ExplicitMemory KernelEnv Imp.KernelOp
 
 data KernelConstants = KernelConstants
                        { kernelGlobalThreadId :: Imp.Exp
@@ -68,14 +72,14 @@ keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
   nameFromString $ maybe "" ((++".") . nameToString) fname ++ nameToString key
 
-allocLocal :: AllocCompiler ExplicitMemory Imp.KernelOp
+allocLocal :: AllocCompiler ExplicitMemory r Imp.KernelOp
 allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
 
 kernelAlloc :: KernelConstants
             -> Pattern ExplicitMemory
             -> SubExp -> Space
-            -> ImpM ExplicitMemory Imp.KernelOp ()
+            -> InKernelGen ()
 kernelAlloc _ (Pattern _ [_]) _ ScalarSpace{} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
@@ -90,7 +94,7 @@ kernelAlloc _ dest _ _ =
 
 splitSpace :: (ToExp w, ToExp i, ToExp elems_per_thread) =>
               Pattern ExplicitMemory -> SplitOrdering -> w -> i -> elems_per_thread
-           -> ImpM lore op ()
+           -> ImpM lore r op ()
 splitSpace (Pattern [] [size]) o w i elems_per_thread = do
   num_elements <- Imp.elements <$> toExp w
   i' <- toExp i
@@ -99,7 +103,7 @@ splitSpace (Pattern [] [size]) o w i elems_per_thread = do
 splitSpace pat _ _ _ _ =
   error $ "Invalid target for splitSpace: " ++ pretty pat
 
-compileThreadExp :: ExpCompiler ExplicitMemory Imp.KernelOp
+compileThreadExp :: ExpCompiler ExplicitMemory KernelEnv Imp.KernelOp
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
@@ -145,7 +149,7 @@ groupCopy constants to to_is from from_is = do
   groupCoverSpace constants ds $ \is ->
     copyDWIMFix to (to_is++ is) from (from_is ++ is)
 
-compileGroupExp :: KernelConstants -> ExpCompiler ExplicitMemory Imp.KernelOp
+compileGroupExp :: KernelConstants -> ExpCompiler ExplicitMemory KernelEnv Imp.KernelOp
 -- The static arrays stuff does not work inside kernels.
 compileGroupExp _ (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
@@ -190,17 +194,19 @@ compileGroupSpace constants lvl space = do
 
 -- Construct the necessary lock arrays for an intra-group histogram.
 prepareIntraGroupSegHist :: KernelConstants
-                           -> Count GroupSize SubExp
-                           -> [HistOp ExplicitMemory]
-                           -> InKernelGen [[Imp.Exp] -> InKernelGen ()]
+                         -> Count GroupSize SubExp
+                         -> [HistOp ExplicitMemory]
+                         -> InKernelGen [[Imp.Exp] -> InKernelGen ()]
 prepareIntraGroupSegHist constants group_size =
   fmap snd . mapAccumLM onOp Nothing
   where
     onOp l op = do
 
+      atomicBinOp <- kernelAtomics <$> askEnv
+
       let local_subhistos = histDest op
 
-      case (l, atomicUpdateLocking $ histOp op) of
+      case (l, atomicUpdateLocking atomicBinOp $ histOp op) of
         (_, AtomicPrim f) -> return (l, f (Space "local") local_subhistos)
         (_, AtomicCAS f) -> return (l, f (Space "local") local_subhistos)
         (Just l', AtomicLocking f) -> return (l, f l' (Space "local") local_subhistos)
@@ -225,7 +231,7 @@ prepareIntraGroupSegHist constants group_size =
 
           return (Just l', f l' (Space "local") local_subhistos)
 
-compileGroupOp :: KernelConstants -> OpCompiler ExplicitMemory Imp.KernelOp
+compileGroupOp :: KernelConstants -> OpCompiler ExplicitMemory KernelEnv Imp.KernelOp
 
 compileGroupOp constants pat (Alloc size space) =
   kernelAlloc constants pat size space
@@ -362,7 +368,7 @@ compileGroupOp constants pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = d
 compileGroupOp _ pat _ =
   compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
 
-compileThreadOp :: KernelConstants -> OpCompiler ExplicitMemory Imp.KernelOp
+compileThreadOp :: KernelConstants -> OpCompiler ExplicitMemory KernelEnv Imp.KernelOp
 compileThreadOp constants pat (Alloc size space) =
   kernelAlloc constants pat size space
 compileThreadOp _ pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
@@ -388,26 +394,31 @@ data Locking =
 
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
-type DoAtomicUpdate lore =
-  Space -> [VName] -> [Imp.Exp] -> ImpM lore Imp.KernelOp ()
+type DoAtomicUpdate lore r =
+  Space -> [VName] -> [Imp.Exp] -> ImpM lore r Imp.KernelOp ()
 
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
 -- efficient.
-data AtomicUpdate lore
-  = AtomicPrim (DoAtomicUpdate lore)
+data AtomicUpdate lore r
+  = AtomicPrim (DoAtomicUpdate lore r)
     -- ^ Supported directly by primitive.
-  | AtomicCAS (DoAtomicUpdate lore)
+  | AtomicCAS (DoAtomicUpdate lore r)
     -- ^ Can be done by efficient swaps.
-  | AtomicLocking (Locking -> DoAtomicUpdate lore)
+  | AtomicLocking (Locking -> DoAtomicUpdate lore r)
     -- ^ Requires explicit locking.
+
+-- | Is there an atomic 'BinOp' corresponding to this 'BinOp'?
+type AtomicBinOp =
+  BinOp ->
+  Maybe (VName -> VName -> Count Imp.Elements Imp.Exp -> Imp.Exp -> Imp.AtomicOp)
 
 -- | 'atomicUpdate', but where it is explicitly visible whether a
 -- locking strategy is necessary.
-atomicUpdateLocking :: ExplicitMemorish lore =>
-                       Lambda lore -> AtomicUpdate lore
+atomicUpdateLocking :: AtomicBinOp -> Lambda ExplicitMemory
+                    -> AtomicUpdate ExplicitMemory KernelEnv
 
-atomicUpdateLocking lam
+atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- splitOp lam,
     all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts =
     primOrCas ops_and_ts $ \space arrs bucket ->
@@ -430,18 +441,18 @@ atomicUpdateLocking lam
 
   where opHasAtomicSupport space old arr' bucket' bop = do
           let atomic f = Imp.Atomic space . f old arr' bucket'
-          atomic <$> Imp.atomicBinOp bop
+          atomic <$> atomicBinOp bop
 
         primOrCas ops
           | all isPrim ops = AtomicPrim
           | otherwise      = AtomicCAS
 
-        isPrim (op, _, _, _) = isJust $ Imp.atomicBinOp op
+        isPrim (op, _, _, _) = isJust $ atomicBinOp op
 
 -- If the operator functions purely on single 32-bit values, we can
 -- use an implementation based on CAS, no matter what the operator
 -- does.
-atomicUpdateLocking op
+atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     primBitSize t == 32 = AtomicCAS $ \space [arr] bucket -> do
@@ -449,7 +460,7 @@ atomicUpdateLocking op
       atomicUpdateCAS space t arr old bucket (paramName xp) $
         compileBody' [xp] $ lambdaBody op
 
-atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
+atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
   old <- dPrim "old" int32
   continue <- newVName "continue"
   dPrimVol_ continue Bool
@@ -519,8 +530,8 @@ atomicUpdateLocking op = AtomicLocking $ \locking space arrs bucket -> do
 atomicUpdateCAS :: Space -> PrimType
                 -> VName -> VName
                 -> [Imp.Exp] -> VName
-                -> ImpM lore Imp.KernelOp ()
-                -> ImpM lore Imp.KernelOp ()
+                -> InKernelGen ()
+                -> InKernelGen ()
 atomicUpdateCAS space t arr old bucket x do_op = do
   -- Code generation target:
   --
@@ -599,9 +610,9 @@ readsFromSet free =
                   | otherwise  -> return $ Just $ Imp.ScalarUse var bt
 
 isConstExp :: VTable ExplicitMemory -> Imp.Exp
-           -> ImpM lore op (Maybe Imp.KernelConstExp)
+           -> ImpM lore r op (Maybe Imp.KernelConstExp)
 isConstExp vtable size = do
-  fname <- asks envFunction
+  fname <- askFunction
   let onLeaf (Imp.ScalarVar name) _ = lookupConstExp name
       onLeaf (Imp.SizeOf pt) _ = Just $ primByteSize pt
       onLeaf Imp.Index{} _ = Nothing
@@ -620,7 +631,7 @@ computeThreadChunkSize :: SplitOrdering
                        -> Imp.Count Imp.Elements Imp.Exp
                        -> Imp.Count Imp.Elements Imp.Exp
                        -> VName
-                       -> ImpM lore op ()
+                       -> ImpM lore r op ()
 computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var = do
   stride' <- toExp stride
   chunk_var <--
@@ -696,31 +707,28 @@ isActive limit = case actives of
 -- kernel).
 makeAllMemoryGlobal :: CallKernelGen a -> CallKernelGen a
 makeAllMemoryGlobal =
-  local (\env -> env { envDefaultSpace = Imp.Space "global" }) .
-  localVTable (M.map globalMemory)
+  localDefaultSpace (Imp.Space "global") . localVTable (M.map globalMemory)
   where globalMemory (MemVar _ entry)
           | entryMemSpace entry /= Space "local" =
               MemVar Nothing entry { entryMemSpace = Imp.Space "global" }
         globalMemory entry =
           entry
 
-groupReduce :: ExplicitMemorish lore =>
-               KernelConstants
+groupReduce :: KernelConstants
             -> Imp.Exp
-            -> Lambda lore
+            -> Lambda ExplicitMemory
             -> [VName]
-            -> ImpM lore Imp.KernelOp ()
+            -> InKernelGen ()
 groupReduce constants w lam arrs = do
   offset <- dPrim "offset" int32
   groupReduceWithOffset constants offset w lam arrs
 
-groupReduceWithOffset :: ExplicitMemorish lore =>
-                         KernelConstants
+groupReduceWithOffset :: KernelConstants
                       -> VName
                       -> Imp.Exp
-                      -> Lambda lore
+                      -> Lambda ExplicitMemory
                       -> [VName]
-                      -> ImpM lore Imp.KernelOp ()
+                      -> InKernelGen ()
 groupReduceWithOffset constants offset w lam arrs = do
   let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
 
@@ -805,7 +813,7 @@ groupScan :: KernelConstants
           -> Imp.Exp
           -> Lambda ExplicitMemory
           -> [VName]
-          -> ImpM ExplicitMemory Imp.KernelOp ()
+          -> InKernelGen ()
 groupScan constants seg_flag arrs_full_size w lam arrs = do
   renamed_lam <- renameLambda lam
 
@@ -1021,7 +1029,7 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 computeMapKernelGroups :: Imp.Exp -> CallKernelGen (Imp.Exp, Imp.Exp)
 computeMapKernelGroups kernel_size = do
   group_size <- dPrim "group_size" int32
-  fname <- asks envFunction
+  fname <- askFunction
   let group_size_var = Imp.var group_size int32
       group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty group_size
   sOp $ Imp.GetSize group_size group_size_key Imp.SizeGroup
@@ -1093,13 +1101,14 @@ sKernelGroup :: String
 sKernelGroup = sKernel groupOperations kernelGroupId
 
 sKernelFailureTolerant :: Bool
-                       -> Operations ExplicitMemory Imp.KernelOp
+                       -> Operations ExplicitMemory KernelEnv Imp.KernelOp
                        -> KernelConstants
                        -> Name
-                       -> ImpM ExplicitMemory Imp.KernelOp a
+                       -> InKernelGen ()
                        -> CallKernelGen ()
 sKernelFailureTolerant tol ops constants name m = do
-  body <- makeAllMemoryGlobal $ subImpM_ ops m
+  r <- askEnv
+  body <- makeAllMemoryGlobal $ subImpM_ r ops m
   uses <- computeKernelUses body mempty
   emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
     { Imp.kernelBody = body
@@ -1110,14 +1119,14 @@ sKernelFailureTolerant tol ops constants name m = do
     , Imp.kernelFailureTolerant = tol
     }
 
-sKernel :: (KernelConstants -> Operations ExplicitMemory Imp.KernelOp)
+sKernel :: (KernelConstants -> Operations ExplicitMemory KernelEnv Imp.KernelOp)
         -> (KernelConstants -> Imp.Exp)
         -> String
         -> Count NumGroups Imp.Exp
         -> Count GroupSize Imp.Exp
         -> VName
-        -> (KernelConstants -> ImpM ExplicitMemory Imp.KernelOp a)
-        -> ImpM ExplicitMemory Imp.HostOp ()
+        -> (KernelConstants -> InKernelGen ())
+        -> CallKernelGen ()
 sKernel ops flatf name num_groups group_size v f = do
   (constants, set_constants) <- kernelInitialisationSimple num_groups group_size
   let name' = nameFromString $ name ++ "_" ++ show (baseTag v)
@@ -1126,7 +1135,7 @@ sKernel ops flatf name num_groups group_size v f = do
     dPrimV_ v $ flatf constants
     f constants
 
-copyInGroup :: CopyCompiler ExplicitMemory Imp.KernelOp
+copyInGroup :: CopyCompiler ExplicitMemory KernelEnv Imp.KernelOp
 copyInGroup pt destloc srcloc = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
@@ -1139,7 +1148,7 @@ copyInGroup pt destloc srcloc = do
         isScalarMem _ = False
 
 threadOperations, groupOperations :: KernelConstants
-                                  -> Operations ExplicitMemory Imp.KernelOp
+                                  -> Operations ExplicitMemory KernelEnv Imp.KernelOp
 threadOperations constants =
   (defaultOperations $ compileThreadOp constants)
   { opsCopyCompiler = copyElementWise
