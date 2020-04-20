@@ -5,6 +5,7 @@
 
 #define MULTICORE
 /* #define MCDEBUG */
+#define MCPROFILE
 
 #ifdef _WIN32
 #include <windows.h>
@@ -18,9 +19,9 @@
 #include <sys/resource.h>
 #endif
 
-
-typedef int (*task_fn)(void* args, int start, int end, int subtask_id);
-
+#ifdef MCPROFILE
+static long int ran_iter, start_iter = 0;
+#endif
 
 static int scheduler_error = 0;
 struct scheduler {
@@ -37,31 +38,17 @@ struct scheduler_task {
   int is_static; // Whether it's possible to schedule the task as dynamic or not
 };
 
-
 struct worker {
   pthread_t thread;
   struct subtask_queue q;
   struct scheduler *scheduler;
 
   int tid;                     /* Just a thread id */
-  long int time_spent_working; /* Time spent in tasks functions */
+  uint64_t time_spent_working; /* Time spent in tasks functions */
 };
-
-/* A subtask that can be executed by a thread */
-struct subtask {
-  task_fn fn;
-  void* args;
-  int start, end;
-  int subtask_id;
-
-  // Shared variables across subtasks
-  int *counter; // Counter for ongoing subtasks
-  pthread_mutex_t *mutex;
-  pthread_cond_t *cond;
-};
-
 
 /* A wrapper for getting rusage on Linux and MacOS */
+/* TODO maybe figure out this for windows */
 int getrusage_thread(struct rusage *rusage)
 {
   int err = -1;
@@ -96,14 +83,20 @@ void output_thread_usage(struct worker *worker)
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
   struct timeval user_cpu_time = usage.ru_utime;
   struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %d - work time %ld - user time: %ld us - sys: %ld us \n",
+  fprintf(stderr, "tid: %d - work time %llu - user time: %llu us - sys: %llu us - dequeue: (%llu/%llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
           worker->tid,
           worker->time_spent_working,
-          user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec,
-          sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec);
+          (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
+          (uint64_t)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec),
+          worker->q.time_dequeue,
+          worker->q.n_dequeues,
+          worker->q.time_dequeue / (worker->q.n_dequeues == 0 ? 1 : worker->q.n_dequeues),
+          worker->q.time_enqueue,
+          worker->q.n_dequeues,
+          worker->q.time_enqueue / (worker->q.n_enqueues == 0 ? 1 : worker->q.n_enqueues));
 }
 
-// returns the number of logical cores
+/* returns the number of logical cores */
 static int num_processors()
 {
 #ifdef _WIN32
@@ -125,30 +118,50 @@ static int num_processors()
 }
 
 
-/* Ask for a random queue from another worker */
-static inline struct worker* query_a_subtask_queue(struct scheduler* scheduler, int tid)
+
+/* Ask for a random subtask from another worker */
+const int MAX_NUM_TRIES = 10;
+static inline int query_a_subtask(struct scheduler* scheduler,
+                                  int tid,
+                                  struct subtask** subtask)
 {
   assert(scheduler != NULL);
-  if (scheduler->num_threads == 1) return &scheduler->workers[0];
-
-  int worker_idx;
-  do {
-     worker_idx = rand() % scheduler->num_threads;
-  } while (worker_idx == tid);
-  return &scheduler->workers[worker_idx];
+  int num_tries = 0;
+  while (*subtask == NULL && num_tries < MAX_NUM_TRIES) {
+    int worker_idx = rand() % scheduler->num_threads;
+    if (worker_idx == tid) continue;
+    struct subtask_queue *rand_queue = &scheduler->workers[worker_idx].q;
+    assert(rand_queue != NULL);
+    CHECK_ERR(subtask_queue_steal(rand_queue, subtask), "subtask_queue_steal");
+    num_tries++;
+  }
+  return 0;
 }
 
 static inline void *futhark_worker(void* arg)
 {
   struct worker *worker = (struct worker*) arg;
+  struct subtask *subtask;
   while(1) {
-    struct subtask *subtask;
     if (subtask_queue_dequeue(&worker->q, &subtask) == 0) {
+      assert(subtask->fn != NULL);
+      assert(subtask->args != NULL);
+#ifdef MCPROFILE
       int64_t start = get_wall_time();
+#endif
+
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
+
+#ifdef MCPROFILE
       int64_t end = get_wall_time();
       worker->time_spent_working += end - start;
+#endif
+
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+#ifdef MCDEBUG
+      ran_iter += (subtask->end-subtask->start);
+#endif
+
       // Only one error can be returned at the time now
       // Maybe we can provide a stack like structure for pushing errors onto
       // if we wish to backpropagte multiple errors
@@ -156,29 +169,22 @@ static inline void *futhark_worker(void* arg)
         scheduler_error = err;
       }
       (*subtask->counter)--;
-      CHECK_ERR(pthread_cond_signal(subtask->cond), "pthread_cond_signal");
+      CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
+      subtask = NULL;
       if (subtask_queue_is_empty(&worker->q)) {
         // try to steal some work as we have nothing better to do anyway
-        struct worker *rand_worker = query_a_subtask_queue(worker->scheduler, worker->tid);
-        if (rand_worker == NULL)  {
-          assert(!"failed to find queue \n");
-          continue;
-        }
-        struct subtask *subtask;
-        int retval = subtask_queue_steal(&rand_worker->q, &subtask);
-        if (retval != 0) { // We didn't find any work here
-          // TODO the return val can also mean queue failed
-          // so avoid this overloading of return values
+        CHECK_ERR(query_a_subtask(worker->scheduler, worker->tid, &subtask), "query_a_subtask");
+        if (subtask == NULL) { // We didn't find any work here so just go back to waiting
           continue;
         }
         // else we take the work and put into our own queue
         CHECK_ERR(subtask_queue_enqueue(&worker->q, subtask), "subtask_queue_enqueue");
       }
     } else {
+#ifdef MCPROFILE
       output_thread_usage(worker);
-#ifdef MCDEBUG
 #endif
       break;
     }
@@ -186,29 +192,13 @@ static inline void *futhark_worker(void* arg)
   return NULL;
 }
 
-static inline struct subtask* setup_subtask(struct scheduler_task* task,
-                                            int subtask_id,
-                                            pthread_mutex_t *mutex,
-                                            pthread_cond_t *cond,
-                                            int* counter,
-                                            int start, int end)
+static inline void scheduler_set_queue_profiling(struct scheduler *scheduler, int val)
 {
-  struct subtask* subtask = malloc(sizeof(struct subtask));
-  if (subtask == NULL) {
-    assert(!"malloc failed in setup_subtask");
-    return  NULL;
+  for (int i = 0; i < scheduler->num_threads; i++) {
+    scheduler->workers[i].q.profile = val;
   }
-  subtask->fn         = task->fn;
-  subtask->args       = task->args;
-  subtask->subtask_id = subtask_id;
-  subtask->mutex      = mutex;
-  subtask->cond       = cond;
-  subtask->counter    = counter;
-  subtask->start      = start;
-  subtask->end        = end;
-  return subtask;
+  return;
 }
-
 
 static inline int scheduler_dynamic(struct scheduler *scheduler,
                                     struct scheduler_task *task,
@@ -223,9 +213,8 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   pthread_cond_t cond;
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
-  /* For now just set this to 100 subtasks; */
-  /* As we don't have any information about the load balancing yet */
-  int max_num_tasks = 100;
+  int max_num_tasks = scheduler->num_threads;
+
   int subtask_id = 0;
   int iter_pr_subtask = task->iterations / max_num_tasks;
   int remainder = task->iterations % max_num_tasks;
@@ -233,12 +222,18 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   int nsubtasks = iter_pr_subtask == 0 ? 1 : ((task->iterations - remainder) / iter_pr_subtask);
   int shared_counter = nsubtasks;
 
+  /* Each subtasks is processed in chunks */
+  /* For now just set this to some constant; */
+  /* As we don't have any information about the load balancing yet */
+  int chunks = iter_pr_subtask / 10;
+
+
   int start = 0;
   int end = iter_pr_subtask + remainder;
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task, subtask_id % scheduler->num_threads,
+    struct subtask *subtask = setup_subtask(task->fn, task->args, subtask_id%scheduler->num_threads,
                                             &mutex, &cond, &shared_counter,
-                                            start, end);
+                                            start, end, chunks);
     assert(subtask != NULL);
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads].q, subtask),
               "subtask_queue_enqueue");
@@ -253,12 +248,25 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
     CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
   }
 
+  // TODO potentially FIX THIS!!
+  // Some tasks rely on this value to be set correctly
+  // But those cannot (for now) be scheduled dynamically
   if (ntask != NULL) {
     *ntask = nsubtasks;
   }
 
+#ifdef MCDEBUG
+  assert(ran_iter == start_iter);
+#endif
+
+#ifdef MCPROFILE
+  scheduler_set_queue_profiling(scheduler, 0);
+#endif
+
   return scheduler_error;
 }
+
+
 
 /* Performs static scheduling of a task */
 /* Divides the number of iterations into num_threads equal sized chunks */
@@ -268,6 +276,10 @@ static inline int scheduler_static(struct scheduler *scheduler,
                                    struct scheduler_task *task,
                                    int *ntask)
 {
+#ifdef MCDEBUG
+  fprintf(stderr, "Performing static scheduling\n");
+#endif
+
   pthread_mutex_t mutex;
   CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
   pthread_cond_t cond;
@@ -284,11 +296,12 @@ static inline int scheduler_static(struct scheduler *scheduler,
   int start = 0;
   int end = iter_pr_subtask + remainder;
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task, subtask_id,
+    struct subtask *subtask = setup_subtask(task->fn, task->args, subtask_id,
                                             &mutex, &cond, &shared_counter,
-                                            start, end);
+                                            start, end, 0);
     assert(subtask != NULL);
-    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask), "subtask_queue_enqueue");
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask),
+              "subtask_queue_enqueue");
     // Update range params
     start = end;
     end += iter_pr_subtask;
@@ -304,6 +317,10 @@ static inline int scheduler_static(struct scheduler *scheduler,
     *ntask = nsubtasks;
   }
 
+#ifdef MCPROFILE
+  scheduler_set_queue_profiling(scheduler, 0);
+#endif
+
   return scheduler_error;
 
 }
@@ -312,7 +329,6 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
                                     struct scheduler_task *task,
                                     int *ntask)
 {
-
   assert(scheduler != NULL);
   assert(task != NULL);
 
@@ -320,10 +336,21 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   fprintf(stderr, "starting %s\n", task->name);
   fprintf(stderr, "iterations %ld\n", task->iterations);
 #endif
+#ifdef MCPROFILE
+  scheduler_set_queue_profiling(scheduler,1);
+#endif
+
   if (task->iterations == 0) {
     if (ntask != NULL)  *ntask = 0;
     return 0;
   }
+
+  start_iter = task->iterations;
+  ran_iter = 0;
+
+  /* Run task directly if below some threshold */
+  /* if (task->iterations < 1000) { */
+  /* } */
 
   switch(task->is_static)
   {

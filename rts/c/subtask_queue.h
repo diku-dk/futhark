@@ -8,8 +8,49 @@
 #include <assert.h>
 
 
-// Forward declare struct subtask;
-struct subtask;
+typedef int (*task_fn)(void* args, int start, int end, int subtask_id);
+
+/* A subtask that can be executed by a thread */
+struct subtask {
+  task_fn fn;
+  void* args;
+  int start, end;
+  int subtask_id;
+  int chunk;
+
+  // Shared variables across subtasks
+  int *counter; // Counter for ongoing subtasks
+  pthread_mutex_t *mutex;
+  pthread_cond_t *cond;
+};
+
+static inline struct subtask* setup_subtask(task_fn fn,
+                                            void* args,
+                                            int subtask_id,
+                                            pthread_mutex_t *mutex,
+                                            pthread_cond_t *cond,
+                                            int* counter,
+                                            int start, int end,
+                                            int chunk)
+{
+  struct subtask* subtask = malloc(sizeof(struct subtask));
+  if (subtask == NULL) {
+    assert(!"malloc failed in setup_subtask");
+    return  NULL;
+  }
+  subtask->fn         = fn;
+  subtask->args       = args;
+  subtask->subtask_id = subtask_id;
+  subtask->mutex      = mutex;
+  subtask->cond       = cond;
+  subtask->counter    = counter;
+  subtask->start      = start;
+  subtask->end        = end;
+  subtask->chunk      = chunk;
+  return subtask;
+}
+
+
 
 struct subtask_queue {
   int capacity; // Size of the buffer.
@@ -21,18 +62,56 @@ struct subtask_queue {
   pthread_cond_t cond;   // Condition variable used for synchronisation.
 
   int dead;
+
+  /* Profiling fields */
+  uint64_t time_enqueue;
+  uint64_t time_dequeue;
+  uint64_t n_dequeues;
+  uint64_t n_enqueues;
+  int profile;
 };
 
+
+
+static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *subtask_queue)
+{
+  struct subtask *cur_head = subtask_queue->buffer[subtask_queue->first];
+
+  int remaining_iter = cur_head->end - cur_head->start;
+  assert(remaining_iter > 0);
+
+  if (cur_head->chunk > 0 && remaining_iter > cur_head->chunk)
+  {
+    struct subtask *new_subtask = malloc(sizeof(struct subtask));
+    *new_subtask = *cur_head;
+
+    // Update ranges on new subtasks
+    new_subtask->end = cur_head->start + cur_head->chunk;
+    cur_head->start += cur_head->chunk;
+
+    CHECK_ERR(pthread_mutex_lock(cur_head->mutex), "pthread_mutex_lock");
+    (*cur_head->counter)++;
+    CHECK_ERR(pthread_cond_broadcast(cur_head->cond), "pthread_cond_signal");
+    CHECK_ERR(pthread_mutex_unlock(cur_head->mutex), "pthread_mutex_unlock");
+
+    return new_subtask;
+  }
+
+  subtask_queue->num_used--;
+  subtask_queue->first = (subtask_queue->first + 1) % subtask_queue->capacity;
+
+  return cur_head;
+}
 
 // Initialise a job queue with the given capacity.  The queue starts out
 // empty.  Returns non-zero on error.
 static inline int subtask_queue_init(struct subtask_queue *subtask_queue, int capacity)
 {
+  assert(subtask_queue != NULL);
+  memset(subtask_queue, 0, sizeof(struct subtask_queue));
+
   subtask_queue->capacity = capacity;
-  subtask_queue->first = 0;
-  subtask_queue->num_used = 0;
-  subtask_queue->dead = 0;
-  subtask_queue->buffer = calloc(capacity, sizeof(void*));
+  subtask_queue->buffer = calloc(capacity, sizeof(struct subtask*));
 
   CHECK_ERRNO(pthread_mutex_init(&subtask_queue->mutex, NULL), "pthread_mutex_init");
   CHECK_ERRNO(pthread_cond_init(&subtask_queue->cond, NULL), "pthread_cond_init");
@@ -72,8 +151,9 @@ static inline int subtask_queue_destroy(struct subtask_queue *subtask_queue)
 static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, struct subtask *subtask )
 {
   assert(subtask_queue != NULL);
-  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+  uint64_t start = get_wall_time();
 
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Wait until there is room in the subtask_queue.
   while (subtask_queue->num_used == subtask_queue->capacity && !subtask_queue->dead) {
     CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
@@ -88,9 +168,16 @@ static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, str
   subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used) % subtask_queue->capacity] = subtask;
   subtask_queue->num_used++;
 
-  // Signal a reader (if any) that there is now an element.
+  if (subtask_queue->profile) {
+    uint64_t end = get_wall_time();
+    subtask_queue->time_enqueue += (end - start);
+    subtask_queue->n_enqueues++;
+  }
+
+  // Broadcast a reader (if any) that there is now an element.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+
 
   return 0;
 }
@@ -102,8 +189,13 @@ static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, str
 static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, struct subtask **subtask)
 {
   assert(subtask_queue != NULL);
-  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
 
+  // I don't want to measure time waiting from initial initailization of queue
+  // until first task so we use a little hack here
+  int was_profiling = subtask_queue->profile;
+  uint64_t start = get_wall_time();
+
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Wait until the subtask_queue contains an element.
   while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
     CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
@@ -114,12 +206,20 @@ static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, str
     return -1;
   }
 
-  // We now know that num_used is nonzero.
-  subtask_queue->num_used--;
-  *subtask = subtask_queue->buffer[subtask_queue->first];
-  subtask_queue->first = (subtask_queue->first + 1) % subtask_queue->capacity;
+  *subtask = jobqueue_get_subtask_chunk(subtask_queue);
+  if (*subtask == NULL) {
+    assert(!"got NULL ptr");
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
+    return -1;
+  }
 
-  // Signal a writer (if any) that there is now room for more.
+  if (subtask_queue->profile) {
+    uint64_t end = get_wall_time();
+    subtask_queue->time_dequeue += (end - start);
+    subtask_queue->n_dequeues++;
+  }
+
+  // Broadcast a writer (if any) that there is now room for more.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
 
@@ -139,12 +239,13 @@ static inline int subtask_queue_steal(struct subtask_queue *subtask_queue,
                                       struct subtask **subtask)
 {
   assert(subtask_queue != NULL);
+  int was_profiling = subtask_queue->profile;
+  uint64_t start = get_wall_time();
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
-
   if (subtask_queue_is_empty(subtask_queue)) {
     CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
-    return -1;
+    return 0;
   }
 
   if (subtask_queue->dead) {
@@ -152,12 +253,19 @@ static inline int subtask_queue_steal(struct subtask_queue *subtask_queue,
     return -1;
   }
 
-  // We now know that num_used is nonzero.
-  subtask_queue->num_used--;
-  *subtask = subtask_queue->buffer[subtask_queue->first];
-  subtask_queue->first = (subtask_queue->first + 1) % subtask_queue->capacity;
+  *subtask = jobqueue_get_subtask_chunk(subtask_queue);
+  if (*subtask == NULL) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
+    return -1;
+  }
 
-  // Signal a writer (if any) that there is now room for more.
+  if (subtask_queue->profile && was_profiling){
+    uint64_t end = get_wall_time();
+    subtask_queue->time_dequeue += (end - start);
+    subtask_queue->n_dequeues++;
+  }
+
+  // Broadcast a writer (if any) that there is now room for more.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
 
