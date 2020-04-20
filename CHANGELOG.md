@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed loop interchange for permuted sequential loops with more
     than one outer parallel loop (#928).
 
+  * Fixed a type checking bug for branches returning incomplete sum
+    types (#931).
+
 ## [0.15.4]
 
 ### Added
