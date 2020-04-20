@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed incorrect size type checking for sum types in negative
     position with unknown constructors (#927).
 
+  * Fixed loop interchange for permuted sequential loops with more
+    than one outer parallel loop (#928).
+
 ## [0.15.4]
 
 ### Added
