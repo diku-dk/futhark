@@ -31,7 +31,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
 
-callKernelOperations :: Operations ExplicitMemory KernelEnv Imp.HostOp
+callKernelOperations :: Operations ExplicitMemory HostEnv Imp.HostOp
 callKernelOperations =
   Operations { opsExpCompiler = expCompiler
              , opsCopyCompiler = callKernelCopy
@@ -53,15 +53,15 @@ openclAtomics, cudaAtomics :: AtomicBinOp
                  ]
         cuda = opencl ++ [(FAdd Float32, Imp.AtomicFAdd Float32)]
 
-compileProg :: MonadFreshNames m => KernelEnv -> Prog ExplicitMemory -> m Imp.Program
+compileProg :: MonadFreshNames m => HostEnv -> Prog ExplicitMemory -> m Imp.Program
 compileProg env prog =
   setDefaultSpace (Imp.Space "device") <$>
   Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
 
 compileProgOpenCL, compileProgCUDA
   :: MonadFreshNames m => Prog ExplicitMemory -> m Imp.Program
-compileProgOpenCL = compileProg $ KernelEnv openclAtomics
-compileProgCUDA = compileProg $ KernelEnv cudaAtomics
+compileProgOpenCL = compileProg $ HostEnv openclAtomics
+compileProgCUDA = compileProg $ HostEnv cudaAtomics
 
 opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
@@ -130,7 +130,7 @@ segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
-expCompiler :: ExpCompiler ExplicitMemory KernelEnv Imp.HostOp
+expCompiler :: ExpCompiler ExplicitMemory HostEnv Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
@@ -150,7 +150,7 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 expCompiler dest e =
   defCompileExp dest e
 
-callKernelCopy :: CopyCompiler ExplicitMemory KernelEnv Imp.HostOp
+callKernelCopy :: CopyCompiler ExplicitMemory HostEnv Imp.HostOp
 callKernelCopy bt
   destloc@(MemLocation destmem _ destIxFun)
   srcloc@(MemLocation srcmem srcshape srcIxFun)

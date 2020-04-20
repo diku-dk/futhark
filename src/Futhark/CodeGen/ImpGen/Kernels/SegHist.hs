@@ -138,7 +138,7 @@ computeHistoUsage space op = do
   let h = histoSpaceUsage op
       segmented_h = h * product (map (Imp.bytes . toExp' int32) $ init $ segSpaceDims space)
 
-  atomics <- kernelAtomics <$> askEnv
+  atomics <- hostAtomics <$> askEnv
 
   return (h,
           segmented_h,
@@ -362,7 +362,9 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
     w' <- toExp w
     dPrimVE "hist_H_chk" $ w' `quotRoundingUp` hist_S
 
-  sKernelThread "seghist_global" num_groups group_size (segFlat space) $ \constants -> do
+  sKernelThread "seghist_global" num_groups group_size (segFlat space) $ do
+    constants <- kernelConstants <$> askEnv
+
     -- Compute subhistogram index for each thread, per histogram.
     subhisto_inds <- forM slugs $ \slug ->
       dPrimVE "subhisto_ind" $
@@ -446,7 +448,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
     histograms hist_S chk_i
 
 type InitLocalHistograms = [([VName],
-                              (KernelConstants, SubExp) ->
+                              SubExp ->
                               InKernelGen ([VName],
                                             [Imp.Exp] -> InKernelGen ()))]
 
@@ -470,7 +472,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
         case do_op of
           AtomicPrim f -> return $ const $ return f
           AtomicCAS f -> return $ const $ return f
-          AtomicLocking f -> return $ \(constants, hist_H_chk) -> do
+          AtomicLocking f -> return $ \hist_H_chk -> do
             let lock_shape =
                   Shape $ Var num_subhistos_per_group :
                   shapeDims (histShape op) ++
@@ -481,14 +483,14 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
             locks <- sAllocArray "locks" int32 lock_shape $ Space "local"
 
             sComment "All locks start out unlocked" $
-              groupCoverSpace constants dims $ \is ->
+              groupCoverSpace dims $ \is ->
               copyDWIMFix locks is (intConst Int32 0) []
 
             return $ f $ Locking locks 0 1 0 id
 
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
-      let init_local_subhistos (constants, hist_H_chk) = do
+      let init_local_subhistos hist_H_chk = do
             local_subhistos <-
               forM (histType op) $ \t -> do
                 let sub_local_shape =
@@ -497,7 +499,7 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
                 sAllocArray "subhistogram_local"
                   (elemType t) sub_local_shape (Space "local")
 
-            do_op' <- mk_op (constants, hist_H_chk)
+            do_op' <- mk_op hist_H_chk
 
             return (local_subhistos, do_op' (Space "local") local_subhistos)
 
@@ -533,8 +535,10 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
     w' <- toExp w
     dPrimV "hist_H_chk" $ w' `quotRoundingUp` hist_S
 
-  sKernelThread "seghist_local" num_groups group_size (segFlat space) $ \constants ->
-    virtualiseGroups constants SegVirt (unCount groups_per_segment * num_segments) $ \group_id_var -> do
+  sKernelThread "seghist_local" num_groups group_size (segFlat space) $
+    virtualiseGroups SegVirt (unCount groups_per_segment * num_segments) $ \group_id_var -> do
+
+    constants <- kernelConstants <$> askEnv
 
     let group_id = Imp.vi32 group_id_var
 
@@ -553,7 +557,7 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
 
     histograms <- forM (zip init_histograms hist_H_chks) $
                   \((glob_subhistos, init_local_subhistos), hist_H_chk) -> do
-      (local_subhistos, do_op) <- init_local_subhistos (constants, Var hist_H_chk)
+      (local_subhistos, do_op) <- init_local_subhistos $ Var hist_H_chk
       return (zip glob_subhistos local_subhistos, hist_H_chk, do_op)
 
     -- Find index of local subhistograms updated by this thread.  We
@@ -1010,7 +1014,7 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
               [(subhistogram_id, Var num_histos)]
 
         let segred_op = SegRedOp Commutative (histOp op) (histNeutral op) mempty
-        compileSegRed' (Pattern [] red_pes) lvl segred_space [segred_op] $ \_ red_cont ->
+        compileSegRed' (Pattern [] red_pes) lvl segred_space [segred_op] $ \red_cont ->
           red_cont $ flip map subhistos $ \subhisto ->
             (Var subhisto, map Imp.vi32 $
               map fst segment_dims ++ [subhistogram_id, bucket_id] ++ vector_ids)
