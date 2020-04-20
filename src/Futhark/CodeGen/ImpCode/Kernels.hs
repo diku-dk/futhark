@@ -18,8 +18,6 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
   , module Futhark.Representation.Kernels.Sizes
-  -- * Utility functions
-  , atomicBinOp
   )
   where
 
@@ -77,19 +75,6 @@ data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName
                | ConstUse VName KernelConstExp
                  deriving (Eq, Show)
-
--- | Get an atomic operator corresponding to a binary operator.
-atomicBinOp :: BinOp -> Maybe (VName -> VName -> Count Elements Imp.Exp -> Exp -> AtomicOp)
-atomicBinOp = flip lookup [ (Add Int32, AtomicAdd Int32)
-                          , (FAdd Float32, AtomicFAdd Float32)
-                          , (SMax Int32, AtomicSMax Int32)
-                          , (SMin Int32, AtomicSMin Int32)
-                          , (UMax Int32, AtomicUMax Int32)
-                          , (UMin Int32, AtomicUMin Int32)
-                          , (And Int32, AtomicAnd Int32)
-                          , (Or Int32, AtomicOr Int32)
-                          , (Xor Int32, AtomicXor Int32)
-                          ]
 
 instance Pretty KernelConst where
   ppr (SizeConst key) = text "get_size" <> parens (ppr key)

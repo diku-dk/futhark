@@ -9,4 +9,4 @@ import Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m OpenCL.Program
-compileProg prog = kernelsToCUDA <$> ImpGenKernels.compileProg prog
+compileProg prog = kernelsToCUDA <$> ImpGenKernels.compileProgCUDA prog
