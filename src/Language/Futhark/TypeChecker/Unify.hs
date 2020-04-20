@@ -320,6 +320,10 @@ isNonRigid v constraints = do
 type UnifyDims m =
   BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> DimDecl VName -> DimDecl VName -> m ()
 
+flipUnifyDims :: UnifyDims m -> UnifyDims m
+flipUnifyDims onDims bcs bound nonrigid t1 t2 =
+  onDims bcs bound nonrigid t2 t1
+
 unifyWith :: MonadUnify m =>
              UnifyDims m -> Usage -> BreadCrumbs
           -> StructType -> StructType -> m ()
@@ -340,9 +344,14 @@ unifyWith onDims usage = subunify False mempty
 
           -- Remove any of the intermediate dimensions we added just
           -- for unification purposes.
-          link v lvl = linkVarToType onDims usage bcs v lvl . applySubst unbind
+          link ord' v lvl =
+            linkVarToType linkDims usage bcs v lvl . applySubst unbind
             where unbind d | d `elem` bound = Just $ SizeSubst AnyDim
                            | otherwise      = Nothing
+                  -- We may have to flip the order of future calls to
+                  -- onDims inside linkVarToType.
+                  linkDims | ord' = flipUnifyDims onDims
+                           | otherwise = onDims
 
           unifyTypeArg bcs' (TypeArgDim d1 _) (TypeArgDim d2 _) =
             onDims' bcs' (swap ord d1 d2)
@@ -379,18 +388,18 @@ unifyWith onDims usage = subunify False mempty
          Scalar (TypeVar _ _ (TypeName [] v2) [])) ->
           case (nonrigid v1, nonrigid v2) of
             (Nothing, Nothing) -> failure
-            (Just lvl1, Nothing) -> link v1 lvl1 t2'
-            (Nothing, Just lvl2) -> link v2 lvl2 t1'
+            (Just lvl1, Nothing) -> link ord v1 lvl1 t2'
+            (Nothing, Just lvl2) -> link (not ord) v2 lvl2 t1'
             (Just lvl1, Just lvl2)
-              | lvl1 <= lvl2 -> link v1 lvl1 t2'
-              | otherwise    -> link v2 lvl2 t1'
+              | lvl1 <= lvl2 -> link ord v1 lvl1 t2'
+              | otherwise    -> link (not ord) v2 lvl2 t1'
 
         (Scalar (TypeVar _ _ (TypeName [] v1) []), _)
           | Just lvl <- nonrigid v1 ->
-              link v1 lvl t2'
+              link ord v1 lvl t2'
         (_, Scalar (TypeVar _ _ (TypeName [] v2) []))
           | Just lvl <- nonrigid v2 ->
-              link v2 lvl t1'
+              link (not ord) v2 lvl t1'
 
         (Scalar (Arrow _ p1 a1 b1),
          Scalar (Arrow _ p2 a2 b2)) -> do

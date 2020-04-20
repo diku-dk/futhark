@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     types, where the type annotations are put on a higher-order return
     type.
 
+  * Fixed incorrect size type checking for sum types in negative
+    position with unknown constructors (#927).
+
 ## [0.15.4]
 
 ### Added
