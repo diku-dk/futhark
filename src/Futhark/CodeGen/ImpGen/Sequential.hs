@@ -10,9 +10,9 @@ import Futhark.Representation.ExplicitMemory
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m Imp.Program
-compileProg = ImpGen.compileProg ops Imp.DefaultSpace
+compileProg = ImpGen.compileProg () ops Imp.DefaultSpace
   where ops = ImpGen.defaultOperations opCompiler
-        opCompiler :: ImpGen.OpCompiler ExplicitMemory Imp.Sequential
+        opCompiler :: ImpGen.OpCompiler ExplicitMemory () Imp.Sequential
         opCompiler dest (Alloc e space) =
           ImpGen.compileAlloc dest e space
         opCompiler _ (Inner _) =
