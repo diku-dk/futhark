@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.GenericC
   , CParts(..)
   , asLibrary
   , asExecutable
+  , BackendTarget (..)
 
   -- * Pluggable compiler
   , Operations (..)
