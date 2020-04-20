@@ -1762,8 +1762,8 @@ compileCode _ (Op op) =
 
 compileCode _ Skip = return ()
 
-compileCode _ (Comment s code) = do
-  items <- blockScope $ compileCode Nothing code
+compileCode target (Comment s code) = do
+  items <- blockScope $ compileCode target code
   let comment = "// " ++ s
   stm [C.cstm|$comment:comment
               { $items:items }
@@ -1785,14 +1785,14 @@ compileCode _ (DebugPrint s Nothing) =
           fprintf(stderr, "%s\n", $exp:s);
        }|]
 
-compileCode _ c
+compileCode target c
   | Just (name, vol, t, e, c') <- declareAndSet c = do
     let ct = primTypeToCType t
     e' <- compileExp e
     item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-    compileCode Nothing c'
+    compileCode target c'
 
-compileCode _ (c1 :>>: c2) = compileCode Nothing c1 >> compileCode Nothing c2
+compileCode target (c1 :>>: c2) = compileCode target c1 >> compileCode target c2
 
 compileCode _ (Assert e msg (loc, locs)) = do
   e' <- compileExp e
@@ -1813,26 +1813,39 @@ compileCode _ (Allocate name (Count e) space) = do
 compileCode _ (Free name space) =
   unRefMem name space
 
-compileCode _ (For i it bound body) = do
+compileCode target (For i it bound body) = do
   let i'  = C.toIdent i
       it' = primTypeToCType $ IntType it
   bound'  <- compileExp bound
-  body'   <- blockScope $ compileCode Nothing body
+  body'   <- blockScope $ compileCode target body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 
-compileCode _ (While cond body) = do
+compileCode target (While cond body) = do
   cond' <- compileExp cond
-  body' <- blockScope $ compileCode Nothing body
+  body' <- blockScope $ compileCode target body
   stm [C.cstm|while ($exp:cond') {
             $items:body'
           }|]
 
-compileCode _ (If cond tbranch fbranch) = do
+compileCode (Just TargetShader) (If cond tbranch fbranch) = do
   cond'    <- compileExp cond
-  tbranch' <- blockScope $ compileCode Nothing tbranch
-  fbranch' <- blockScope $ compileCode Nothing fbranch
+  tbranch' <- blockScope $ compileCode (Just TargetShader) tbranch
+  fbranch' <- blockScope $ compileCode (Just TargetShader) fbranch
+  stm $ case (tbranch', fbranch') of
+    (_, []) ->
+      [C.cstm|if (boolean($exp:cond')) { $items:tbranch' }|]
+    ([], _) ->
+      [C.cstm|if (!boolean(($exp:cond'))) { $items:fbranch' }|]
+    _ ->
+      [C.cstm|if (boolean($exp:cond')) { $items:tbranch' }
+              else { $items:fbranch' }|]
+
+compileCode target (If cond tbranch fbranch) = do
+  cond'    <- compileExp cond
+  tbranch' <- blockScope $ compileCode target tbranch
+  fbranch' <- blockScope $ compileCode target fbranch
   stm $ case (tbranch', fbranch') of
     (_, []) ->
       [C.cstm|if ($exp:cond') { $items:tbranch' }|]
