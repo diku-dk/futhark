@@ -269,7 +269,7 @@ inShaderOperations body =
         shaderOps (GetGlobalSize v i) =
           GenericC.stm [C.cstm|$id:v = int32_t(gl_NumWorkGroups[$int:i]);|]
         shaderOps (GetLockstepWidth v) =
-          GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
+          GenericC.stm [C.cstm|$id:v = 1;|]
         shaderOps (Barrier f) = do
           GenericC.stm [C.cstm|barrier();|]
           GenericC.modifyUserState $ \s -> s { shaderHasBarriers = True }
