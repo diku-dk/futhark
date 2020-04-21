@@ -27,7 +27,7 @@ computeThreadChunkSize :: SplitOrdering
                        -> Imp.Count Imp.Elements Imp.Exp
                        -> Imp.Count Imp.Elements Imp.Exp
                        -> VName
-                       -> ImpM lore op ()
+                       -> ImpM lore r op ()
 computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var = do
   stride' <- toExp stride
   chunk_var <--
@@ -59,9 +59,9 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory
             -> m (Imp.Definitions Imp.Multicore)
-compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
+compileProg = Futhark.CodeGen.ImpGen.compileProg () ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
-        opCompiler :: OpCompiler ExplicitMemory Imp.Multicore
+        opCompiler :: OpCompiler ExplicitMemory () Imp.Multicore
         opCompiler dest (Alloc e space) =
           compileAlloc dest e space
         opCompiler dest (Inner (SegOp op)) =
@@ -83,7 +83,7 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg ops Imp.DefaultSpace
 
 
 compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
-             -> ImpM ExplicitMemory Imp.Multicore ()
+             -> ImpM ExplicitMemory () Imp.Multicore ()
 compileSegOp pat  (SegHist _ space histops _ kbody) =
   compileSegHist pat space histops kbody
 

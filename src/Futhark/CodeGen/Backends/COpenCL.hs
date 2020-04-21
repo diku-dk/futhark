@@ -46,7 +46,8 @@ compileProg prog = do
                      , GC.opsMemoryType = openclMemoryType
                      , GC.opsFatMemory = True
                      }
-        include_opencl_h = unlines ["#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
+        include_opencl_h = unlines ["#define CL_TARGET_OPENCL_VERSION 120",
+                                    "#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
                                     "#ifdef __APPLE__",
                                     "#define CL_SILENCE_DEPRECATION",
                                     "#include <OpenCL/cl.h>",

@@ -56,7 +56,7 @@ kernelImpCodeGenAction :: Action ExplicitMemory
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
-         , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenKernels.compileProg
+         , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenKernels.compileProgOpenCL
          }
 
 multicoreImpCodeGenAction :: Action ExplicitMemory

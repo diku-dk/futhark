@@ -1174,7 +1174,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
   let run_it = [C.citems|
                   int r;
-                  /* Run the program once. */
+                  // Run the program once.
                   $stms:pack_input
                   if ($id:sync_ctx(ctx) != 0) {
                     futhark_panic(1, "%s", $id:error_ctx(ctx));
@@ -1211,7 +1211,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     // We do not want to profile all the initialisation.
     $id:pause_profiling(ctx);
 
-    /* Declare and read input. */
+    // Declare and read input.
     set_binary_mode(stdin);
     $items:input_items
 
@@ -1221,13 +1221,13 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
     $items:output_decls
 
-    /* Warmup run */
+    // Warmup run
     if (perform_warmup) {
       $items:run_it
       $stms:free_outputs
     }
     time_runs = 1;
-    /* Proper run. */
+    // Proper run.
     for (int run = 0; run < num_runs; run++) {
       // Only profile last run.
       profile_run = run == num_runs -1;
@@ -1237,10 +1237,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
       }
     }
 
-    /* Free the parsed input. */
+    // Free the parsed input.
     $stms:free_parsed
 
-    /* Print the final result. */
+    // Print the final result.
     if (binary_output) {
       set_binary_mode(stdout);
     }
@@ -1340,7 +1340,7 @@ compileProg ops extra header_extra spaces options prog = do
       option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
 
   let headerdefs = [C.cunit|
-$esc:("/*\n * Headers\n*/\n")
+$esc:("// Headers\n")
 /* We need to define _GNU_SOURCE before
    _any_ headers files are imported to get
    the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
@@ -1351,19 +1351,19 @@ $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
 $esc:(header_extra)
 
-$esc:("\n/*\n * Initialisation\n*/\n")
+$esc:("\n// Initialisation\n")
 $edecls:(initDecls endstate)
 
-$esc:("\n/*\n * Arrays\n*/\n")
+$esc:("\n// Arrays\n")
 $edecls:(arrayDecls endstate)
 
-$esc:("\n/*\n * Opaque values\n*/\n")
+$esc:("\n// Opaque values\n")
 $edecls:(opaqueDecls endstate)
 
-$esc:("\n/*\n * Entry points\n*/\n")
+$esc:("\n// Entry points\n")
 $edecls:(entryDecls endstate)
 
-$esc:("\n/*\n * Miscellaneous\n*/\n")
+$esc:("\n// Miscellaneous\n")
 $edecls:(miscDecls endstate)
                            |]
 
@@ -1373,9 +1373,9 @@ $esc:("#include <stdlib.h>")
 $esc:("#include <stdbool.h>")
 $esc:("#include <math.h>")
 $esc:("#include <stdint.h>")
-/* If NDEBUG is set, the assert() macro will do nothing. Since Futhark
-   (unfortunately) makes use of assert() for error detection (and even some
-   side effects), we want to avoid that. */
+// If NDEBUG is set, the assert() macro will do nothing. Since Futhark
+// (unfortunately) makes use of assert() for error detection (and even some
+// side effects), we want to avoid that.
 $esc:("#undef NDEBUG")
 $esc:("#include <assert.h>")
 
