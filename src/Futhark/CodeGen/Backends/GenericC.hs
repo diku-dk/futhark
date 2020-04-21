@@ -1825,34 +1825,38 @@ compileCode target (For i it bound body) = do
 compileCode target (While cond body) = do
   cond' <- compileExp cond
   body' <- blockScope $ compileCode target body
-  stm [C.cstm|while ($exp:cond') {
-            $items:body'
-          }|]
-
-compileCode TargetShader (If cond tbranch fbranch) = do
-  cond'    <- compileExp cond
-  tbranch' <- blockScope $ compileCode TargetShader tbranch
-  fbranch' <- blockScope $ compileCode TargetShader fbranch
-  stm $ case (tbranch', fbranch') of
-    (_, []) ->
-      [C.cstm|if (boolean($exp:cond')) { $items:tbranch' }|]
-    ([], _) ->
-      [C.cstm|if (!boolean(($exp:cond'))) { $items:fbranch' }|]
-    _ ->
-      [C.cstm|if (boolean($exp:cond')) { $items:tbranch' }
-              else { $items:fbranch' }|]
+  case target of
+    TargetShader ->
+      stm [C.cstm|while (boolean($exp:cond')) {
+                $items:body'
+              }|]
+    _            ->
+      stm [C.cstm|while ($exp:cond') {
+                $items:body'
+              }|]
 
 compileCode target (If cond tbranch fbranch) = do
   cond'    <- compileExp cond
   tbranch' <- blockScope $ compileCode target tbranch
   fbranch' <- blockScope $ compileCode target fbranch
-  stm $ case (tbranch', fbranch') of
-    (_, []) ->
-      [C.cstm|if ($exp:cond') { $items:tbranch' }|]
-    ([], _) ->
-      [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
-    _ ->
-      [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
+  case target of
+    TargetShader ->
+      stm $ case (tbranch', fbranch') of
+        (_, []) ->
+          [C.cstm|if (boolean($exp:cond')) { $items:tbranch' }|]
+        ([], _) ->
+          [C.cstm|if (!boolean(($exp:cond'))) { $items:fbranch' }|]
+        _ ->
+          [C.cstm|if (boolean($exp:cond')) { $items:tbranch' }
+                  else { $items:fbranch' }|]
+    _            ->
+      stm $ case (tbranch', fbranch') of
+        (_, []) ->
+          [C.cstm|if ($exp:cond') { $items:tbranch' }|]
+        ([], _) ->
+          [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
+        _ ->
+          [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
 compileCode _ (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset)
                DefaultSpace (Count size)) = do
