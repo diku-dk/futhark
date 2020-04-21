@@ -214,7 +214,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
   -- Querying L2 cache size is not reliable.  Instead we provide a
   -- tunable knob with a hopefully sane default.
-  let hist_L2_def = 5632 * 1024
+  let hist_L2_def = 4 * 1024 * 1024 -- 5632 * 1024
   hist_L2 <- dPrim "L2_size" int32
   entry <- askFunction
   -- Equivalent to F_L2*L2 in paper.
@@ -732,9 +732,9 @@ histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_group
 slugMaxLocalMemPasses :: SegHistSlug -> Int
 slugMaxLocalMemPasses slug =
   case slugAtomicUpdate slug of
-    AtomicPrim _ -> 2
+    AtomicPrim _ -> 3
     AtomicCAS _  -> 4
-    AtomicLocking _ -> 5
+    AtomicLocking _ -> 6
 
 localMemoryCase :: [PatElem ExplicitMemory]
                 -> Imp.Exp
@@ -743,7 +743,7 @@ localMemoryCase :: [PatElem ExplicitMemory]
                 -> [SegHistSlug]
                 -> KernelBody ExplicitMemory
                 -> CallKernelGen (Imp.Exp, CallKernelGen ())
-localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kbody = do
+localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = do
   let space_sizes = segSpaceDims space
       segment_dims = init space_sizes
       segmented = not $ null segment_dims
@@ -763,7 +763,6 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
       t64 = ConvOpExp (FPToSI Float64 Int32)
       i32_to_i64 = ConvOpExp (SExt Int32 Int64)
       i64_to_i32 = ConvOpExp (SExt Int64 Int32)
-      f64ceil x = t64 $ FunExp "round64" [x] $ FloatType Float64
 
   -- M approximation.
   hist_m' <- dPrimVE "hist_m_prime" $
@@ -772,50 +771,15 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N hist_RF slugs kb
                   (hist_N `quotRoundingUp` unCount num_groups'))
              / r64 hist_H
 
-  hist_m <- dPrimVE "hist_m" $
-            Imp.BinOpExp (FMax Float64) (r64 1) hist_m'
-
-  -- FIXME: query the lockstep width at runtime.
-  hist_W <- dPrimVE "hist_W" 32
-
-  hist_RFC <- dPrimVE "hist_RFC" $
-              Imp.BinOpExp (FMin Float64) (r64 hist_RF) $
-              r64 hist_W * Imp.BinOpExp (FPow Float64) (r64 hist_RF / r64 hist_W) (1.0 / 3.0)
-
   let hist_B = unCount group_size'
-  hist_f' <- dPrimVE "hist_f_prime" $
-             (r64 hist_B * hist_RFC) /
-             (hist_m * hist_m * r64 hist_H)
 
-  let casOp AtomicCAS{} = True
-      casOp _ = False
-      lockOp AtomicLocking{} = True
-      lockOp _ = False
-
-      hwdCase =
+  let hwdCase =
         dPrimVE "hist_M0" $
         Imp.BinOpExp (SMax Int32) 1 $
         Imp.BinOpExp (SMin Int32) (t64 hist_m') hist_B
 
-      casCase = do
-        hist_f_cas <- dPrimVE "hist_f_cas" $ Imp.BinOpExp (SMax Int32) 1 $ f64ceil hist_f'
-        dPrimVE "hist_M0" $
-          Imp.BinOpExp (SMax Int32) 1 $
-          Imp.BinOpExp (SMin Int32) (t64 $ hist_m * r64 hist_f_cas) hist_B
-
-      lockCase = do
-        hist_f_cas <- dPrimVE "hist_f_lock" $ Imp.BinOpExp (SMax Int32) 1 $ f64ceil hist_f'
-        dPrimVE "hist_M0" $
-          Imp.BinOpExp (SMax Int32) 1 $
-          Imp.BinOpExp (SMin Int32) (t64 $ hist_m' * r64 hist_f_cas) hist_B
-
   -- M in the paper, but not adjusted for asymptotic efficiency.
-  hist_M0 <-
-    if any (lockOp . slugAtomicUpdate) slugs
-    then lockCase
-    else if any (casOp . slugAtomicUpdate) slugs
-    then casCase
-    else hwdCase
+  hist_M0 <- hwdCase
 
   -- Minimal sequential chunking factor.
   let q_small = 2
