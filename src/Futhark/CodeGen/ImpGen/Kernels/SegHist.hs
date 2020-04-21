@@ -773,13 +773,10 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
   let hist_B = unCount group_size'
 
-  let hwdCase =
-        dPrimVE "hist_M0" $
-        Imp.BinOpExp (SMax Int32) 1 $
-        Imp.BinOpExp (SMin Int32) (t64 hist_m') hist_B
-
   -- M in the paper, but not adjusted for asymptotic efficiency.
-  hist_M0 <- hwdCase
+  hist_M0 <- dPrimVE "hist_M0" $
+             Imp.BinOpExp (SMax Int32) 1 $
+             Imp.BinOpExp (SMin Int32) (t64 hist_m') hist_B
 
   -- Minimal sequential chunking factor.
   let q_small = 2
