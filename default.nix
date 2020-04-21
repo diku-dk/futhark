@@ -5,7 +5,8 @@
 
 { nixpkgs ? import <nixpkgs> {},
   compiler ? "ghc883",
-  suffix ? "nightly" }:
+  suffix ? "nightly",
+  commit ? "" }:
 let
   pkgs = nixpkgs;
 
@@ -41,7 +42,9 @@ let
 
       postInstall = (_drv.postInstall or "") + ''
         mkdir -p $out/share/man/man1
-        mv docs/_build/man/*.1 $out/share/man/man1/
+        cp docs/_build/man/*.1 $out/share/man/man1/
+        mkdir -p $out/share/futhark/
+        cp LICENSE $out/share/futhark/
         '';
       }
     );
@@ -53,10 +56,13 @@ in pkgs.stdenv.mkDerivation rec {
   buildInputs = [ futhark ];
 
   buildPhase = ''
-    mv skeleton futhark-${suffix}/
+    cp -r skeleton futhark-${suffix}
     cp -r ${futhark}/bin futhark-${suffix}/bin
-    cp -r ${futhark}/share futhark-${suffix}/share
+    mkdir -p futhark-${suffix}/share
+    cp -r ${futhark}/share/man futhark-${suffix}/share/
     chmod +w -R futhark-${suffix}
+    cp ${futhark}/share/futhark/LICENSE futhark-${suffix}/
+    [ "${commit}" ] && echo "${commit}" > futhark-${suffix}/commit-id
     tar -Jcf futhark-${suffix}.tar.xz futhark-${suffix}
   '';
 
