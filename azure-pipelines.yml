@@ -151,7 +151,7 @@ jobs:
   - script: |
       curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
       . $HOME/.nix-profile/etc/profile.d/nix.sh
-      nix-build --argstr suffix nightly-linux-x86_64
+      nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $(Build.SourceVersion)
 
   - task: CopyFilesOverSSH@0
     inputs:
