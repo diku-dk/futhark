@@ -229,7 +229,7 @@ multiCoreReport names = report_kernels
         format_string name =
           let padding = replicate (longest_name - length name) ' '
           in unwords [name ++ padding,
-                      "--  ran %5d times; avg: %8ldus; total: %8ldus\n"]
+                      "ran %5d times; avg: %8ldus; total: %8ldus\n"]
         reportKernel name =
           let runs = functionRuns name
               total_runtime = functionRuntime name
