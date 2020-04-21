@@ -105,7 +105,7 @@ onShader shader = do
         GenericC.runCompilerM mempty (inShaderOperations (kernelBody shader))
         blankNameSource
         newShaderState $
-        GenericC.blockScope $ GenericC.compileCode (Just GenericC.TargetShader)
+        GenericC.blockScope $ GenericC.compileCode GenericC.TargetShader
                                                    $ kernelBody shader
       s_state = GenericC.compUserState cstate
 

@@ -33,7 +33,7 @@ compileProg prog = do
             [copyDevToDev, copyDevToHost, copyHostToDev,
              copyScalarToDev, copyScalarFromDev]
             ++ M.keys kernels
-      Right <$> GC.compileProg operations
+      Right <$> GC.compileProg GC.TargetKernel operations
                 (generateBoilerplate opencl_code opencl_prelude
                  cost_centres kernels types sizes failures)
                 include_opencl_h [Space "device", DefaultSpace]

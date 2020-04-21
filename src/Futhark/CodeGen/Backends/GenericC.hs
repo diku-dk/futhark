@@ -1,4 +1,5 @@
-{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances #-}
+{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances,
+             RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -1346,15 +1347,12 @@ asExecutable (CParts a b c d) = a <> b <> c <> d
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
-compileProg :: MonadFreshNames m =>
-               Operations op ()
-            -> CompilerM op () ()
-            -> String
-            -> [Space]
-            -> [Option]
-            -> Functions op
-            -> m CParts
-compileProg ops extra header_extra spaces options prog@(Functions funs) = do
+compileProg :: BackendTarget
+               -> MonadFreshNames m =>
+                  Operations op ()
+                  -> CompilerM op () ()
+                     -> String -> [Space] -> [Option] -> Functions op -> m CParts
+compileProg target ops extra header_extra spaces options prog@(Functions funs) = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
         runCompilerM prog ops src () compileProg'
@@ -1525,7 +1523,7 @@ $edecls:entry_point_decls
       compileProg' = do
           (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
 
-          (prototypes, definitions) <- unzip <$> mapM compileFun funs
+          (prototypes, definitions) <- unzip <$> mapM (compileFun target) funs
 
           mapM_ libDecl memstructs
           entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
@@ -1560,11 +1558,13 @@ $edecls:entry_point_decls
       lock_h   = $(embedStringFile "rts/c/lock.h")
       tuning_h = $(embedStringFile "rts/c/tuning.h")
 
-compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun (fname, Function _ outputs inputs body _ _) = do
+compileFun :: BackendTarget
+           -> (Name, Function op)
+           -> CompilerM op s (C.Definition, C.Func)
+compileFun target (fname, Function _ outputs inputs body _ _) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
-  body'    <- blockScope $ compileFunBody out_ptrs outputs body
+  body'    <- blockScope $ compileFunBody target out_ptrs outputs body
   ctx_ty   <- contextType
   return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
                                                    $params:outparams, $params:inparams);|],
@@ -1755,7 +1755,7 @@ compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
   return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
-compileCode :: Maybe BackendTarget -> Code op -> CompilerM op s ()
+compileCode :: BackendTarget -> Code op -> CompilerM op s ()
 
 compileCode _ (Op op) =
   join $ asks envOpCompiler <*> pure op
@@ -1829,10 +1829,10 @@ compileCode target (While cond body) = do
             $items:body'
           }|]
 
-compileCode (Just TargetShader) (If cond tbranch fbranch) = do
+compileCode TargetShader (If cond tbranch fbranch) = do
   cond'    <- compileExp cond
-  tbranch' <- blockScope $ compileCode (Just TargetShader) tbranch
-  fbranch' <- blockScope $ compileCode (Just TargetShader) fbranch
+  tbranch' <- blockScope $ compileCode TargetShader tbranch
+  fbranch' <- blockScope $ compileCode TargetShader fbranch
   stm $ case (tbranch', fbranch') of
     (_, []) ->
       [C.cstm|if (boolean($exp:cond')) { $items:tbranch' }|]
@@ -1969,10 +1969,14 @@ blockScope' m = do
   releases <- collect $ mapM_ (uncurry unRefMem) new_allocs
   return (x, items <> releases)
 
-compileFunBody :: [C.Exp] -> [Param] -> Code op -> CompilerM op s ()
-compileFunBody output_ptrs outputs code = do
+compileFunBody :: BackendTarget
+               -> [C.Exp]
+               -> [Param]
+               -> Code op
+               -> CompilerM op s ()
+compileFunBody target output_ptrs outputs code = do
   mapM_ declareOutput outputs
-  compileCode Nothing code
+  compileCode target code
   zipWithM_ setRetVal' output_ptrs outputs
   where declareOutput (MemParam name space) =
           declMem name space

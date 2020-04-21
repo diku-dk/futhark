@@ -122,7 +122,8 @@ onKernel target kernel = do
         GenericC.runCompilerM mempty (inKernelOperations (kernelBody kernel))
         blankNameSource
         (newKernelState failures) $
-        GenericC.blockScope $ GenericC.compileCode Nothing $ kernelBody kernel
+        GenericC.blockScope $ GenericC.compileCode GenericC.TargetKernel
+                                                 $ kernelBody kernel
       kstate = GenericC.compUserState cstate
 
       use_params = mapMaybe useAsParam $ kernelUses kernel

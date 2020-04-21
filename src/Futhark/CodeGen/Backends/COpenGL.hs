@@ -32,7 +32,7 @@ compileProg prog = do
             [copyDevToDev, copyDevToHost, copyHostToDev,
              copyScalarToDev, copyScalarFromDev]
             ++ M.keys shaders
-      Right <$> GC.compileProg operations
+      Right <$> GC.compileProg GC.TargetShader operations
                 (generateBoilerplate opengl_code opengl_prelude
                  shaders sizes)
                 include_opengl_h [Space "device", DefaultSpace]
