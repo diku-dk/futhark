@@ -46,6 +46,7 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
+  scheduling <- decideScheduling body'
 
-  emit $ Imp.Op $ Imp.ParLoop Imp.Dynamic num_tasks (segFlat space) (product ns')
+  emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks (segFlat space) (product ns')
                              (Imp.MulticoreFunc params mempty body' num_tasks)

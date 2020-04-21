@@ -5,6 +5,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , MulticoreGen
  , getNumThreads
  , getNumThreads'
+ , decideScheduling
  )
  where
 
@@ -20,10 +21,9 @@ type MulticoreGen = ImpM ExplicitMemory () Imp.Multicore
 
 
 toParam :: VName -> TypeBase shape u -> Imp.Param
-toParam name t = case t of
-                    Prim pt      -> Imp.ScalarParam name pt
-                    Mem space'   -> Imp.MemParam name space'
-                    Array pt _ _ -> Imp.ScalarParam name pt -- TODO: Fix this!
+toParam name (Prim pt)   = Imp.ScalarParam name pt
+toParam name (Mem space) = Imp.MemParam name space
+toParam _     Array{}    = error "Cannot make Array into Imp.Param"
 
 
 compileKBody :: KernelBody ExplicitMemory
@@ -61,3 +61,22 @@ getNumThreads = do
   v <- dPrim "num_threads" (IntType Int32)
   getNumThreads' v
   return v
+
+
+
+isLoadBalanced :: Imp.Code -> Bool
+isLoadBalanced (a Imp.:>>: b)    = isLoadBalanced a && isLoadBalanced b
+isLoadBalanced (Imp.For _ _ _ a) = isLoadBalanced a
+isLoadBalanced (Imp.If _ a b)    = isLoadBalanced a && isLoadBalanced b
+isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
+isLoadBalanced Imp.While{}       = False
+isLoadBalanced _                 = True
+
+
+
+decideScheduling :: Imp.Code -> MulticoreGen Imp.Scheduling
+decideScheduling code  =
+  if isLoadBalanced code then
+    return Imp.Static
+  else
+    return Imp.Dynamic
