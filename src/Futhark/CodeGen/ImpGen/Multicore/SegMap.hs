@@ -37,8 +37,7 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
              let in_bounds = foldl1 (.&&.) ( zipWith (.<.) is' dims') .&&.
                              foldl1 (.&&.) ( map (0.<=.) is')
                  when_in_bounds = copyDWIMFix (patElemName pe) is' v []
-                 when_oob = return ()
-             sIf in_bounds when_in_bounds when_oob
+             sWhen in_bounds when_in_bounds
 
          writeResult _ res =
            error $ "writeResult: cannot handle " ++ pretty res
