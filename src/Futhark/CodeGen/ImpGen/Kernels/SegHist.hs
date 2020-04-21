@@ -214,7 +214,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
   -- Querying L2 cache size is not reliable.  Instead we provide a
   -- tunable knob with a hopefully sane default.
-  let hist_L2_def = 4 * 1024 * 1024 -- 5632 * 1024
+  let hist_L2_def = 4 * 1024 * 1024
   hist_L2 <- dPrim "L2_size" int32
   entry <- askFunction
   -- Equivalent to F_L2*L2 in paper.
