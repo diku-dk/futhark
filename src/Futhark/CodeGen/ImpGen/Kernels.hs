@@ -182,7 +182,7 @@ callKernelCopy bt
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
-  fname <- nameFromString . pretty <$> newVName (mapTransposeName bt)
+  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
 
   exists <- hasFunction fname
   unless exists $ emitFunction fname $ mapTransposeFunction bt
