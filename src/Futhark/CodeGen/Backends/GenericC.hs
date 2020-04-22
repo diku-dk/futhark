@@ -133,6 +133,8 @@ data HeaderSection = ArrayDecl String
 -- | The target backend when generating GPU code.
 data BackendTarget = TargetKernel
                    | TargetShader
+                   | TargetHost
+                   | TargetSeqC
                    deriving (Eq)
 
 -- | A substitute expression compiler, tried before the main
