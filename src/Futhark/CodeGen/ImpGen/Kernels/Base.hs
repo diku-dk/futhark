@@ -1213,7 +1213,7 @@ replicateName bt = "replicate_" ++ pretty bt
 
 replicateForType :: PrimType -> CallKernelGen Name
 replicateForType bt = do
-  fname <- nameFromString . pretty <$> newVName (replicateName bt)
+  let fname = nameFromString $ "builtin#" <> replicateName bt
 
   exists <- hasFunction fname
   unless exists $ emitFunction fname =<< replicateFunction bt
