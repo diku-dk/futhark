@@ -836,6 +836,15 @@ simplifyConcat _ _ _  _ = Skip
 
 ruleIf :: BinderOps lore => TopDownRuleIf lore
 
+ruleIf vtable pat (StmAux (Certificates uncs) _) (Var v, tb, _, _)
+  | Just _ <- find (\c -> case ST.lookupBasicOp c vtable of
+                       Just (Assert (Var v2) _ _, _) -> v == v2
+                       _ -> False) uncs = Simplify $ do
+  let ses = bodyResult tb
+  addStms $ bodyStms tb
+  sequence_ [ letBindNames_ [patElemName p] $ BasicOp $ SubExp se
+            | (p, se) <- zip (patternElements pat) ses ]
+
 ruleIf _ pat _ (e1, tb, fb, IfAttr _ ifsort)
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = Simplify $ do
