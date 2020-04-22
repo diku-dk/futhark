@@ -1789,7 +1789,11 @@ compileCode target c
   | Just (name, vol, t, e, c') <- declareAndSet c = do
     let ct = primTypeToCType t
     e' <- compileExp e
-    item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
+    case target of
+      TargetShader ->
+        item [C.citem|$ty:ct $id:name = $exp:e';|]
+      _            ->
+        item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
     compileCode target c'
 
 compileCode target (c1 :>>: c2) = compileCode target c1 >> compileCode target c2
@@ -1861,10 +1865,10 @@ compileCode target (If cond tbranch fbranch) = do
 compileCode _ (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset)
                DefaultSpace (Count size)) = do
   destoffset' <- compileExp destoffset
-  srcoffset' <- compileExp srcoffset
-  size' <- compileExp size
-  dest' <- rawMem dest
-  src' <- rawMem src
+  srcoffset'  <- compileExp srcoffset
+  size'       <- compileExp size
+  dest'       <- rawMem dest
+  src'        <- rawMem src
   stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
                       $exp:src' + $exp:srcoffset',
                       $exp:size');|]
@@ -1874,8 +1878,12 @@ compileCode _ (Copy dest (Count destoffset) destspace src (Count srcoffset)
   copy <- asks envCopy
   join $ copy
     <$> rawMem dest <*> compileExp destoffset <*> pure destspace
-    <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
+    <*> rawMem src  <*> compileExp srcoffset  <*> pure srcspace
     <*> compileExp size
+
+-- FIXME:
+compileCode TargetShader (Write dest (Count idx) elemtype DefaultSpace vol elemexp) =
+  undefined
 
 compileCode _ (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
@@ -1902,12 +1910,20 @@ compileCode _ (Write dest (Count idx) elemtype (Space space) vol elemexp) =
 compileCode _ (DeclareMem name space) =
   declMem name space
 
+compileCode TargetShader (DeclareScalar name vol t) = do
+  let ct = primTypeToCType t
+  decl [C.cdecl|$ty:ct $id:name;|]
+
 compileCode _ (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 
 compileCode _ (DeclareArray name ScalarSpace{} _ _) =
   error $ "Cannot declare array " ++ pretty name ++ " in scalar space."
+
+-- FIXME:
+compileCode TargetShader (DeclareArray name DefaultSpace t vs) =
+  undefined
 
 compileCode _ (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
@@ -1942,6 +1958,10 @@ compileCode _ (SetScalar dest src) = do
 
 compileCode _ (SetMem dest src space) =
   setMem dest src space
+
+-- FIXME:
+compileCode TargetShader (Call dests fname args) =
+  undefined
 
 compileCode _ (Call dests fname args) = do
   args' <- mapM compileArg args
