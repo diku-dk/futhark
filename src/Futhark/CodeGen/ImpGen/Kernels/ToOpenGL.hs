@@ -363,10 +363,10 @@ inShaderOperations body =
           return [C.cty|$ty:defaultMemBlockType|]
 
         shaderWriteScalar =
-          GenericC.writeScalarPointerWithQuals pointerQuals
+          GenericC.writeScalarShader
 
         shaderReadScalar =
-          GenericC.readScalarPointerWithQuals pointerQuals
+          GenericC.readScalarShader
 
 -- Checking requirements
 

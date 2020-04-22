@@ -20,8 +20,10 @@ module Futhark.CodeGen.Backends.GenericC
   , PointerQuals
   , MemoryType
   , WriteScalar
+  , writeScalarShader
   , writeScalarPointerWithQuals
   , ReadScalar
+  , readScalarShader
   , readScalarPointerWithQuals
   , Allocate
   , Deallocate
@@ -1642,6 +1644,14 @@ readScalarPointerWithQuals quals_f dest i elemtype space vol = do
   quals <- quals_f space
   let quals' = volQuals vol ++ quals
   return $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
+
+writeScalarShader :: WriteScalar op s
+writeScalarShader dest i elemtype space vol v =
+  stm [C.cstm|$exp:dest[$exp:i] = $exp:v;|]
+
+readScalarShader ::  ReadScalar op s
+readScalarShader dest i elemtype space vol =
+  return [C.cexp|$exp:dest[$exp:i]|]
 
 compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
 compileExpToName _ _ (LeafExp (ScalarVar v) _) =
