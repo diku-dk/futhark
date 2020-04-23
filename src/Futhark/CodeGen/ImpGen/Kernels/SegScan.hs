@@ -122,10 +122,14 @@ compileSegScan  (Pattern _ pes)
 
       let copyNpad = do
             compileStms mempty (kernelBodyStms kbody) $ do
-              let (input_elm, []) = splitAt (length nes) $ kernelBodyResult kbody
+              let (input_elm, map_res) = splitAt (length nes) $ kernelBodyResult kbody
 
               forM_ (zip exchange input_elm) $ \(arr, input) ->
                 copyDWIMFix arr [ltid] (kernelResultSubExp input) []
+              sComment "write mapped values results to global memory" $
+                forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
+                copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
+                (kernelResultSubExp se) []
 
       let padding = do
             forM_ (zip exchange nes) $ \(arr, neutral) ->
@@ -141,6 +145,20 @@ compileSegScan  (Pattern _ pes)
       sIf (dgtid.<. arraysize)
           copyNpad
           padding
+
+      -- let in_bounds =
+      --       foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
+      --     when_in_bounds = compileStms mempty (kernelBodyStms kbody) $ do
+      --       let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
+      --       sComment "write to-scan values to parameters" $
+      --         forM_ (zip scan_y_params scan_res) $ \(p, se) ->
+      --         copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
+      --       sComment "write mapped values results to global memory" $
+      --         forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
+      --         copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
+      --         (kernelResultSubExp se) []
+      --     when_out_of_bounds = forM_ (zip scan_y_params nes) $ \(p, ne) ->
+      --       copyDWIMFix (paramName p) [] ne []
 
       ress <- forM nes $ \ne -> do
                 ne' <- toExp ne
