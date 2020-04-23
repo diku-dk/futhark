@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
