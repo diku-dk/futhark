@@ -24,8 +24,8 @@ import Futhark.CodeGen.ImpGen.Kernels.Base
 -- import Futhark.Construct  hiding (toExp)
 -- one pass scan will be implemented here
 compileSegScan :: Pattern ExplicitMemory
-               -> SegLevel      --At which level the *body* of a SegOp executes.
-               -> SegSpace                            -- Index space of a SegOp.
+               -> SegLevel -- At which level the *body* of a SegOp executes.
+               -> SegSpace -- Index space of a SegOp.
                -> Lambda ExplicitMemory
                -> [SubExp]
                -> KernelBody ExplicitMemory
@@ -38,7 +38,7 @@ compileSegScan  (Pattern _ pes)
                 kbody = do
     let (gtids, dims) = unzip $ unSegSpace space
     let arrsize = head dims
-    arraysize <- toExp $ arrsize
+    arraysize <- toExp arrsize
     let gtid = head gtids
 
     -- let num_groups = segNumGroups lvl
@@ -63,14 +63,14 @@ compileSegScan  (Pattern _ pes)
 
     aggregates <- forM hxp $ \p -> do
             let pt = elemType $ paramType p
-            sAllocArray "aggregates" pt (Shape $ [Var ng]) $ Space "device"
+            sAllocArray "aggregates" pt (Shape [Var ng]) $ Space "device"
 
     incprefix <- forM hxp $ \p -> do
             let pt = elemType $ paramType p
-            sAllocArray "incprefix" pt (Shape $ [Var ng]) $ Space "device"
+            sAllocArray "incprefix" pt (Shape [Var ng]) $ Space "device"
 
 
-    statusflgs <- sAllocArray "statusflgs" int8 (Shape $ [Var ng]) (Space "device")
+    statusflgs <- sAllocArray "statusflgs" int8 (Shape [Var ng]) (Space "device")
     -- statusflgs <- sAllocArray "statusflgs" int8 (Shape [num_groups_subexp]) (Space "device")
 
     g_dyn_id <- sAllocArray "dyn_id" int32 (Shape [intConst Int32 1]) (Space "device")
@@ -115,12 +115,12 @@ compileSegScan  (Pattern _ pes)
       let (Count gsz) = group_size
       exchange <- forM xp $ \p -> do
             let pt = elemType $ paramType p
-                shape = Shape $ [gsz]
+                shape = Shape [gsz]
             sAllocArray "exchange" pt shape $ Space "local"
 
 
 
-      let copyNpad = do
+      let copyNpad =
             compileStms mempty (kernelBodyStms kbody) $ do
               let (input_elm, map_res) = splitAt (length nes) $ kernelBodyResult kbody
 
@@ -131,9 +131,8 @@ compileSegScan  (Pattern _ pes)
                 copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
                 (kernelResultSubExp se) []
 
-      let padding = do
-            forM_ (zip exchange nes) $ \(arr, neutral) ->
-              copyDWIMFix arr [ltid] neutral []
+      let padding = forM_ (zip exchange nes) $ \(arr, neutral) ->
+                    copyDWIMFix arr [ltid] neutral []
 
 --       -- let global_tid = Imp.vi32 group_id * unCount group_size' + kernelLocalThreadId constants
 
@@ -185,14 +184,14 @@ compileSegScan  (Pattern _ pes)
           forM_ (zip scan_y_params exchange) $ \(param, arr) ->
             copyDWIMFix (paramName param) [] (Var arr) [ltid - p1Var]
 
-          compileStms mempty (bodyStms $ lambdaBody scan_op) $ do
+          compileStms mempty (bodyStms $ lambdaBody scan_op) $
             forM_ (zip ress (bodyResult $ lambdaBody scan_op)) $ \(res, sr) ->
               copyDWIMFix res [] sr []
 
         sOp Imp.LocalBarrier
 
         -- if tid >= p then array[tid] = res
-        sWhen (ltid .>=. p1Var) $ do
+        sWhen (ltid .>=. p1Var) $
           forM_ (zip exchange ress) $ \(arr, res) ->
             copyDWIMFix arr [ltid] (Var res) []
         sOp Imp.LocalBarrier
@@ -279,7 +278,7 @@ compileSegScan  (Pattern _ pes)
             used <-- 0
             sWhen (readiExp .>=. 0) $ do
               copyDWIMFix flag [] (Var statusflgs) [readiExp]
-              sWhen (flagExp .==. 2) $ do -- STATUS_P
+              sWhen (flagExp .==. 2) $ -- STATUS_P
                 forM_ (zip aggr incprefix) $ \(ag,inc) ->
                   copyDWIMFix ag [] (Var inc) [readiExp]
               sWhen (flagExp .==. 1) $ do -- STATUS_A
@@ -368,7 +367,7 @@ compileSegScan  (Pattern _ pes)
                   forM_ (zip scan_y_params agg2) $ \(param, ag) ->
                     copyDWIMFix (paramName param) [] (Var ag) []
 
-                  compileStms mempty (bodyStms $ lambdaBody scan_op) $ do
+                  compileStms mempty (bodyStms $ lambdaBody scan_op) $
                     forM_ (zip exchange (bodyResult $ lambdaBody scan_op)) $ \(ex, sr) ->
                       copyDWIMFix ex [cur_th] sr []
 
@@ -401,7 +400,7 @@ compileSegScan  (Pattern _ pes)
               forM_ (zip scan_y_params prefix) $ \(param, pre) ->
                 copyDWIMFix (paramName param) [] (Var pre) []
 
-              compileStms mempty (bodyStms $ lambdaBody scan_op) $ do
+              compileStms mempty (bodyStms $ lambdaBody scan_op) $
                 forM_ (zip prefix (bodyResult $ lambdaBody scan_op)) $ \(pre, sr) ->
                   copyDWIMFix pre [] sr []
             sOp Imp.MemFenceGlobal
@@ -417,7 +416,7 @@ compileSegScan  (Pattern _ pes)
           forM_ (zip scan_y_params acc) $ \(param, ac) ->
             copyDWIMFix (paramName param) [] (Var ac) []
 
-          compileStms mempty (bodyStms $ lambdaBody scan_op) $ do
+          compileStms mempty (bodyStms $ lambdaBody scan_op) $
             forM_ (zip incprefix (bodyResult $ lambdaBody scan_op)) $ \(ipre, sr) ->
               copyDWIMFix ipre [Imp.var wG_ID int32] sr []
 
@@ -457,12 +456,12 @@ compileSegScan  (Pattern _ pes)
         copyDWIMFix (paramName param) [] (Var ma) []
       forM_ (zip scan_y_params2 chunk) $ \(param, ch) ->
         copyDWIMFix (paramName param) [] (Var ch) []
-      compileStms mempty (bodyStms $ lambdaBody scan_op_renamed) $ do
+      compileStms mempty (bodyStms $ lambdaBody scan_op_renamed) $
         forM_ (zip exchange (bodyResult $ lambdaBody scan_op_renamed)) $ \(e, sr) ->
           copyDWIMFix e [ltid] sr []
 
 
-      sWhen (dgtid .<. arraysize) $ do
+      sWhen (dgtid .<. arraysize) $
         forM_ (zip pes exchange) $ \(dest, arr) ->
           copyDWIMFix (patElemName dest) [dgtid] (Var arr) [ltid]
 
