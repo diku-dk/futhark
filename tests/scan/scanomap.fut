@@ -1,11 +1,13 @@
 -- ==
--- input @kA-13.data auto output
-let main input =
+-- random input { [524288]i32 } auto output
+
+let main (input:[]i32) =
     let arr = map (+2) input
     let arr' = scan (+) 0 arr
     -- in arr'
     in (arr, arr')
 
+-- input @kA-13.data auto output
 -- input @kA-42.data auto output
 -- input @kA-8704.data auto output
 -- input @kA-32768.data auto output
