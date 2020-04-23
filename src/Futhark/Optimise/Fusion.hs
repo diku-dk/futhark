@@ -474,6 +474,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
 
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
   -- kernel until which fusion succeded, and @fused_ker@ is the resulting kernel.
+  use_scope <- (<>scopeOf rem_bnds) <$> askScope
   (_,ok_ind,_,fused_ker,_) <-
       foldM (\(cur_ok,n,prev_ind,cur_ker,ufus_nms) (ker, _ker_nm, bnd_ind) -> do
                 -- check that we still try fusion and that the intermediate
@@ -493,7 +494,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                     cons_no_out_transf = SOAC.nullTransforms $ outputTransform ker
 
                 consumer_ok   <- do let consumer_bnd   = rem_bnds !! bnd_ind
-                                    maybesoac <- SOAC.fromExp $ stmExp consumer_bnd
+                                    maybesoac <- runReaderT (SOAC.fromExp $ stmExp consumer_bnd) use_scope
                                     case maybesoac of
                                       -- check that consumer's lambda body does not use
                                       -- directly the produced arrays (e.g., see noFusion3.fut).
