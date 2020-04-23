@@ -15,8 +15,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Alg
   )
 where
 
-import Data.List hiding (repeat)
-
 import Prelude hiding (repeat, mod)
 
 import Futhark.Representation.AST.Syntax
