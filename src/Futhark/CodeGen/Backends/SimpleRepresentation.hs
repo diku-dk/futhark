@@ -465,36 +465,39 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
 
         mkShl t =
           let ct = intTypeToCType t
-          in if t == Int64 then
-            [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
-                       return x * pow64(int64_t(2),y);
-            }|]
-          else
-            [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
-                       return x << y;
-            }|]
+          in case t of
+            Int64 ->
+              [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
+                         return x * pow64(int64_t(2),y);
+              }|]
+            _     ->
+              [C.cedecl|$ty:ct $id:(taggedI "shl" t)($ty:ct x, $ty:ct y) {
+                         return x << y;
+              }|]
 
         mkLShr t =
           let ct = intTypeToCType t
-          in if t == Int64 then
-            [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
-                       return x / pow64(int64_t(2),y);
-            }|]
-          else
-            [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
-                       return x << y;
-            }|]
+          in case t of
+            Int64 ->
+              [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
+                         return x / pow64(int64_t(2),y);
+              }|]
+            _     ->
+              [C.cedecl|$ty:ct $id:(taggedI "lshr" t)($ty:ct x, $ty:ct y) {
+                         return x << y;
+              }|]
 
         mkAShr t =
           let ct = intTypeToCType t
-          in if t == Int64 then
-            [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
-                       return x / pow64(int64_t(2),y);
-            }|]
-          else
-            [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
-                       return x << y;
-            }|]
+          in case t of
+            Int64 ->
+              [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
+                         return x / pow64(int64_t(2),y);
+              }|]
+            _     ->
+              [C.cedecl|$ty:ct $id:(taggedI "ashr" t)($ty:ct x, $ty:ct y) {
+                         return x << y;
+              }|]
 
         mkSQuot = simpleIntOp  "squot" [C.cexp|x / y|]
         mkSRem  = simpleIntOp  "srem"  [C.cexp|x % y|]
@@ -516,30 +519,31 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
 
         mkPow t =
           let ct = intTypeToCType t
-          in if t == Int64 then
-            [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
-                           $ty:ct res = 1, rem = y;
-                           while (rem != 0) {
-                             if ((rem & int64_t(1)) != 0) {
-                               res *= x;
+          in case t of
+            Int64 ->
+              [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
+                             $ty:ct res = 1, rem = y;
+                             while (rem != 0) {
+                               if ((rem & int64_t(1)) != 0) {
+                                 res *= x;
+                               }
+                               rem >>= 1;
+                               x *= x;
                              }
-                             rem >>= 1;
-                             x *= x;
-                           }
-                           return res;
-                }|]
-          else
-            [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
-                           $ty:ct res = 1, rem = y;
-                           while (rem != 0) {
-                             if ((rem & 1) != 0) {
-                               res *= x;
+                             return res;
+                  }|]
+            _     ->
+              [C.cedecl|$ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
+                             $ty:ct res = 1, rem = y;
+                             while (rem != 0) {
+                               if ((rem & 1) != 0) {
+                                 res *= x;
+                               }
+                               rem >>= 1;
+                               x *= x;
                              }
-                             rem >>= 1;
-                             x *= x;
-                           }
-                           return res;
-                }|]
+                             return res;
+                  }|]
 
         mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name    = "sext_"++pretty from_t++"_"++pretty to_t
@@ -1071,27 +1075,29 @@ glFloatConvOps :: [C.Definition]
 
         mkFMin t =
           let ct = floatTypeToCType t
-          in if t == Float64 then
-            [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) {
-                           if (x < y) {
-                             return x;
-                           }
-                           return y;
-               }|]
-          else
-            [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) { return min(x, y); }|]
+          in case t of
+            Float64 ->
+              [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) {
+                             if (x < y) {
+                               return x;
+                             }
+                             return y;
+                 }|]
+            _       ->
+              [C.cedecl|$ty:ct $id:(taggedF "fmin" t)($ty:ct x, $ty:ct y) { return min(x, y); }|]
 
         mkFMax t =
           let ct = floatTypeToCType t
-          in if t == Float64 then
-            [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) {
-                           if (x > y) {
-                             return x;
-                           }
-                           return y;
-               }|]
-          else
-            [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) { return max(x, y); }|]
+          in case t of
+            Float64 ->
+              [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) {
+                             if (x > y) {
+                               return x;
+                             }
+                             return y;
+                 }|]
+            _       ->
+              [C.cedecl|$ty:ct $id:(taggedF "fmax" t)($ty:ct x, $ty:ct y) { return max(x, y); }|]
 
         mkPow Float32 =
           [C.cedecl|float fpow32(float x, float y) { return pow(x, y); }|]
@@ -1108,75 +1114,79 @@ glFloatConvOps :: [C.Definition]
               }|]
 
         mkFPConv from_f to_f s from_t to_t =
-          -- from float to int
-          if from_ct == [C.cty|float|] && to_ct == [C.cty|typename int8_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int8_t(x);} |]
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename int16_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int16_t(x);} |]
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename int64_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int64_t(x);} |]
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename int32_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int32_t(x);} |]
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename int64_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int64_t(x);} |]
-          -- from float to uint
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename uint8_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint8_t(x);} |]
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename uint16_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint16_t(x);} |]
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename uint32_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint32_t(x);} |]
-          else if from_ct == [C.cty|float|] && to_ct == [C.cty|typename uint64_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint64_t(x);} |]
-          -- from 64-bit ints to float
-          else if from_ct == [C.cty|typename int64_t|] && to_ct == [C.cty|float|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return float32(x);} |]
-          else if from_ct == [C.cty|typename uint64_t|] && to_ct == [C.cty|float|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return float32(x);} |]
-          -- from double to int
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename int8_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int8_t(x);} |]
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename int16_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int16_t(x);} |]
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename int32_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int32_t(x);} |]
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename int64_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return int64_t(x);} |]
-          -- from double to uint
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename uint8_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint8_t(x);} |]
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename uint16_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint16_t(x);} |]
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename uint32_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint32_t(x);} |]
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|typename uint64_t|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return uint64_t(x);} |]
-          -- from double to float
-          else if from_ct == [C.cty|double|] && to_ct == [C.cty|float|] then
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return float32(x);} |]
-          else
-            [C.cedecl|$ty:to_ct
-                      $id:(convOp s from_t to_t)($ty:from_ct x) { return x;} |]
+          case (from_ct, to_ct) of
+            -- from float to int
+            ([C.cty|float|], [C.cty|typename int8_t|])   ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int8_t(x);} |]
+            ([C.cty|float|], [C.cty|typename int16_t|])  ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int16_t(x);} |]
+            ([C.cty|float|], [C.cty|typename int32_t|] ) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int32_t(x);} |]
+            ([C.cty|float|], [C.cty|typename int64_t|])  ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int64_t(x);} |]
+
+            -- from float to uint
+            ([C.cty|float|], [C.cty|typename uint8_t|])  ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint8_t(x);} |]
+            ([C.cty|float|], [C.cty|typename uint16_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint16_t(x);} |]
+            ([C.cty|float|], [C.cty|typename uint32_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint32_t(x);} |]
+            ([C.cty|float|], [C.cty|typename uint64_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint64_t(x);} |]
+
+            -- from 64-bit ints to float
+            ([C.cty|typename int64_t|], [C.cty|float|])  ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return float32(x);} |]
+            ([C.cty|typename uint64_t|], [C.cty|float|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return float32(x);} |]
+
+            -- from double to int
+            ([C.cty|double|], [C.cty|typename int8_t|])  ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int8_t(x);} |]
+            ([C.cty|double|], [C.cty|typename int16_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int16_t(x);} |]
+            ([C.cty|double|], [C.cty|typename int32_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int32_t(x);} |]
+            ([C.cty|double|], [C.cty|typename int64_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return int64_t(x);} |]
+
+            -- from double to uint
+            ([C.cty|double|], [C.cty|typename uint8_t|])  ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint8_t(x);} |]
+            ([C.cty|double|], [C.cty|typename uint16_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint16_t(x);} |]
+            ([C.cty|double|], [C.cty|typename uint32_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint32_t(x);} |]
+            ([C.cty|double|], [C.cty|typename uint64_t|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return uint64_t(x);} |]
+
+            -- from double to float
+            ([C.cty|double|], [C.cty|float|]) ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return float32(x);} |]
+
+            _ ->
+              [C.cedecl|$ty:to_ct
+                        $id:(convOp s from_t to_t)($ty:from_ct x) { return x;} |]
           where from_ct = from_f from_t
                 to_ct = to_f to_t
 
