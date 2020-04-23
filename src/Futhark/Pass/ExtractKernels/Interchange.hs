@@ -102,7 +102,7 @@ interchangeLoop
         -- | The kernel extractor cannot handle identity mappings, so
         -- insert dummy statements for body results that are just a
         -- lambda parameter.
-        mkDummyStms params (Body () stms res) = do
+        mkDummyStms params (Body _ stms res) = do
           (res', extra_stms) <- unzip <$> mapM dummyStm res
           return $ Body () (stms<>mconcat extra_stms) res'
           where dummyStm (Var v)
