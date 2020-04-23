@@ -74,9 +74,9 @@ isLoadBalanced _                 = True
 
 
 
-decideScheduling :: Imp.Code -> MulticoreGen Imp.Scheduling
+decideScheduling :: Imp.Code -> Imp.Scheduling
 decideScheduling code  =
   if isLoadBalanced code then
-    return Imp.Static
+    Imp.Static
   else
-    return Imp.Dynamic
+    Imp.Dynamic

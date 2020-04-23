@@ -15,7 +15,8 @@ struct subtask {
   task_fn fn;
   void* args;
   int start, end;
-  int subtask_id;
+  // How much of to take a the time
+  // If it's zero , then the subtasks is not stealable
   int chunk;
 
   // Shared variables across subtasks
@@ -26,7 +27,6 @@ struct subtask {
 
 static inline struct subtask* setup_subtask(task_fn fn,
                                             void* args,
-                                            int subtask_id,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
                                             int* counter,
@@ -40,7 +40,6 @@ static inline struct subtask* setup_subtask(task_fn fn,
   }
   subtask->fn         = fn;
   subtask->args       = args;
-  subtask->subtask_id = subtask_id;
   subtask->mutex      = mutex;
   subtask->cond       = cond;
   subtask->counter    = counter;
@@ -242,7 +241,10 @@ static inline int subtask_queue_steal(struct subtask_queue *subtask_queue,
   int was_profiling = subtask_queue->profile;
   uint64_t start = get_wall_time();
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
-  if (subtask_queue_is_empty(subtask_queue)) {
+
+  // chunk == 0 indicates that task is not stealable
+  // so we just return also
+  if (subtask_queue_is_empty(subtask_queue) || subtask_queue->buffer[subtask_queue->first]->chunk == 0) {
     CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
     return 0;

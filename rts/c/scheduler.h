@@ -150,7 +150,7 @@ static inline void *futhark_worker(void* arg)
       int64_t start = get_wall_time();
 #endif
 
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->subtask_id);
+      int err = subtask->fn(subtask->args, subtask->start, subtask->end, worker->tid);
 
 #ifdef MCPROFILE
       int64_t end = get_wall_time();
@@ -180,6 +180,11 @@ static inline void *futhark_worker(void* arg)
           continue;
         }
         // else we take the work and put into our own queue
+#ifdef MCDEBUG
+
+        fprintf(stderr, "stole work start: %d - end %d\n", subtask->start, subtask->end);
+#endif
+
         CHECK_ERR(subtask_queue_enqueue(&worker->q, subtask), "subtask_queue_enqueue");
       }
     } else {
@@ -231,7 +236,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   int start = 0;
   int end = iter_pr_subtask + remainder;
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args, subtask_id%scheduler->num_threads,
+    struct subtask *subtask = setup_subtask(task->fn, task->args,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks);
     assert(subtask != NULL);
@@ -248,11 +253,11 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
     CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
   }
 
-  // TODO potentially FIX THIS!!
-  // Some tasks rely on this value to be set correctly
-  // But those cannot (for now) be scheduled dynamically
+  // As any thread can take any subtasks
+  // we are being safe with returning
+  // an upper bound on the number of tasks
   if (ntask != NULL) {
-    *ntask = nsubtasks;
+    *ntask = scheduler->num_threads;
   }
 
 #ifdef MCDEBUG
@@ -296,7 +301,7 @@ static inline int scheduler_static(struct scheduler *scheduler,
   int start = 0;
   int end = iter_pr_subtask + remainder;
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args, subtask_id,
+    struct subtask *subtask = setup_subtask(task->fn, task->args,
                                             &mutex, &cond, &shared_counter,
                                             start, end, 0);
     assert(subtask != NULL);
@@ -314,6 +319,7 @@ static inline int scheduler_static(struct scheduler *scheduler,
   }
 
   if (ntask != NULL) {
+
     *ntask = nsubtasks;
   }
 

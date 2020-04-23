@@ -93,6 +93,9 @@ accParams, nextParams :: SegRedOpSlug -> [LParam ExplicitMemory]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
+slugsComm :: [SegRedOpSlug] -> Commutativity
+slugsComm = mconcat . map (segRedComm . slugOp)
+
 
 segRedOpSlug :: Imp.Exp
              -> (SegRedOp ExplicitMemory, [VName])
@@ -112,6 +115,7 @@ nonsegmentedReduction pat space reds kbody = do
   emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
   let (is, ns) = unzip $ unSegSpace space
   num_threads <- getNumThreads
+  num_threads' <- toExp $ Var num_threads
 
   ns' <- mapM toExp ns
   stage_one_red_arrs <- groupResultArrays (Count $ Var num_threads) reds
@@ -126,9 +130,9 @@ nonsegmentedReduction pat space reds kbody = do
   -- reduce6.fut still doesn't work though
   dPrimV_ (segFlat space) 0
 
-  prebody <- collect $ do
-    emit $ Imp.DebugPrint "nonsegmented segRed stage 1" Nothing
-    sComment "neutral-initialise the acc used by this thread" $
+  sFor "i" num_threads' $ \i -> do
+    tid <-- i
+    sComment "neutral-initialise the acc used by tid" $
       forM_ slugs $ \slug ->
         forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
           sLoopNest (slugShape slug) $ \vec_is ->
@@ -154,15 +158,18 @@ nonsegmentedReduction pat space reds kbody = do
                 forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
                   \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
-  let paramsNames = namesToList $ freeIn (fbody <> prebody) `namesSubtract`
+  let paramsNames = namesToList $ freeIn fbody `namesSubtract`
                                   namesFromList (tid : [segFlat space])
   ts <- mapM lookupType paramsNames
   let params = zipWith toParam paramsNames ts
+      scheduling = case slugsComm slugs of
+                     Commutative -> decideScheduling fbody
+                     Noncommutative -> Imp.Static
 
   ntasks <- dPrim "num_tasks" $ IntType Int32
   ntasks' <- toExp $ Var ntasks
-  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
-                              (Imp.MulticoreFunc params prebody fbody tid)
+  emit $ Imp.Op $ Imp.ParLoop scheduling ntasks (segFlat space) (product ns')
+                              (Imp.MulticoreFunc params mempty fbody tid)
 
   sComment "neutral-initialise the output" $
     forM_ slugs $ \slug ->
@@ -174,7 +181,7 @@ nonsegmentedReduction pat space reds kbody = do
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
   sFor "i" ntasks' $ \i' -> do
     emit $ Imp.DebugPrint "nonsegmented segRed stage 2" Nothing
-    emit $ Imp.SetScalar tid i'
+    tid <-- i'
     sComment "Apply main thread reduction" $
       forM_ slugs $ \slug ->
         sLoopNest (slugShape slug) $ \vec_is -> do
@@ -258,5 +265,6 @@ segmentedReduction pat space reds kbody = do
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntask n_segments (product $ init ns')
+  emit $ Imp.Op $ Imp.ParLoop (decideScheduling fbody)
+                               ntask n_segments (product $ init ns')
                               (Imp.MulticoreFunc params mempty fbody tid)
