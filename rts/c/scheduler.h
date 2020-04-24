@@ -35,7 +35,7 @@ struct scheduler_task {
   task_fn fn;
   void* args;
   long int iterations;
-  int is_static; // Whether it's possible to schedule the task as dynamic or not
+  int granularity;
 };
 
 struct worker {
@@ -228,10 +228,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   int shared_counter = nsubtasks;
 
   /* Each subtasks is processed in chunks */
-  /* For now just set this to some constant; */
-  /* As we don't have any information about the load balancing yet */
-  int chunks = iter_pr_subtask / 10;
-
+  int chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
 
   int start = 0;
   int end = iter_pr_subtask + remainder;
@@ -358,13 +355,13 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   /* if (task->iterations < 1000) { */
   /* } */
 
-  switch(task->is_static)
+  // TODO reevaluate if you really need two functions
+  switch(task->granularity)
   {
   case 0:
-    return scheduler_dynamic(scheduler, task, ntask);
-  case 1:
     return scheduler_static(scheduler, task, ntask);
   default:
+    return scheduler_dynamic(scheduler, task, ntask);
     return -1;
   }
 }

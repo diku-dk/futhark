@@ -32,10 +32,12 @@ data MulticoreFunc = MulticoreFunc [Param] Code Code VName
 data Multicore = ParLoop Scheduling VName VName Imp.Exp MulticoreFunc
                | MulticoreCall [VName] String  -- This needs to be fixed
 
+type Granularity = Int32
+
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic
 -- or it is restainted to Static
 -- This could carry more information
-data Scheduling = Dynamic
+data Scheduling = Dynamic Granularity
                 | Static
 
 

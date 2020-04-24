@@ -63,7 +63,6 @@ getNumThreads = do
   return v
 
 
-
 isLoadBalanced :: Imp.Code -> Bool
 isLoadBalanced (a Imp.:>>: b)    = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.For _ _ _ a) = isLoadBalanced a
@@ -79,4 +78,4 @@ decideScheduling code  =
   if isLoadBalanced code then
     Imp.Static
   else
-    Imp.Dynamic
+    Imp.Dynamic 10
