@@ -227,24 +227,24 @@ nonsegmentedScan pat space scan_op nes kbody = do
 
   prebody' <- collect $ do
     emit $ Imp.DebugPrint "nonsegmented segScan stage 3" Nothing
-    dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
-    forM_ (zip scan_x_params stage_two_red_res) $ \(p, ne) ->
+    dScope Nothing $ scopeOfLParams $ lambdaParams scan_op'
+    forM_ (zip scan_x_params' stage_two_red_res) $ \(p, ne) ->
        copyDWIMFix (paramName p) [] (Var ne) [tid']
 
   scan_body <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     compileStms mempty (kernelBodyStms kbody) $ do
       let scan_res = take (length nes) $ kernelBodyResult kbody
-      forM_ (zip scan_y_params scan_res) $ \(p, se) ->
+      forM_ (zip scan_y_params' scan_res) $ \(p, se) ->
          copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
-      compileStms mempty (bodyStms $ lambdaBody scan_op) $
-       forM_ (zip3 scan_x_params (patternElements pat) $ bodyResult $ lambdaBody scan_op)
+      compileStms mempty (bodyStms $ lambdaBody scan_op') $
+       forM_ (zip3 scan_x_params' (patternElements pat) $ bodyResult $ lambdaBody scan_op')
        $ \(p, pe, se) -> do
          copyDWIMFix (paramName p) [] se []
          copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
 
-  let paramsNames' = namesToList (freeIn (scan_body <> prebody') `namesSubtract`
-                     namesFromList (tid : segFlat space : map paramName (lambdaParams scan_op)))
+  let paramsNames' = namesToList (freeIn (prebody' <> scan_body) `namesSubtract`
+                     namesFromList [tid, segFlat space])
 
   ts' <- mapM lookupType paramsNames'
   let params' = zipWith toParam paramsNames' ts'
