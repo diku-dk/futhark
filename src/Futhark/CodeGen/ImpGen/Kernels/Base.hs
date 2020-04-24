@@ -249,7 +249,7 @@ compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   void $ compileGroupSpace lvl space
 
-  sWhen (isActive $ unSegSpace space) $
+  sWhen (isActive $ unSegSpace space) $ localOps threadOperations $
     compileStms mempty (kernelBodyStms body) $
     zipWithM_ (compileThreadResult space) (patternElements pat) $
     kernelBodyResult body
@@ -1145,13 +1145,13 @@ sKernel ops flatf name num_groups group_size v f = do
     f
 
 copyInGroup :: CopyCompiler ExplicitMemory KernelEnv Imp.KernelOp
-copyInGroup pt destloc srcloc = do
+copyInGroup pt destloc destslice srcloc srcslice = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
 
   if isScalarMem dest_space && isScalarMem src_space
     then memLocationName destloc <-- Imp.var (memLocationName srcloc) pt
-    else copyElementWise pt destloc srcloc
+    else copyElementWise pt destloc destslice srcloc srcslice
 
   where isScalarMem ScalarSpace{} = True
         isScalarMem _ = False
@@ -1265,17 +1265,14 @@ sIota arr n x s et = do
         Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
         Imp.ConvOpExp (SExt Int32 et) gtid * s + x
 
-sCopy :: PrimType
-      -> MemLocation
-      -> MemLocation
-      -> CallKernelGen ()
+sCopy :: CopyCompiler ExplicitMemory HostEnv Imp.HostOp
 sCopy bt
-  destloc@(MemLocation destmem _ _)
-  srcloc@(MemLocation srcmem srcshape _)
+  destloc@(MemLocation destmem _ _) destslice
+  srcloc@(MemLocation srcmem _ _) srcslice
   = do
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
-  let shape = map (toExp' int32) srcshape
+  let shape = sliceDims srcslice
       kernel_size = product shape
 
   (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
@@ -1290,8 +1287,10 @@ sCopy bt
         dest_is = unflattenIndex shape gtid
         src_is = dest_is
 
-    (_, destspace, destidx) <- fullyIndexArray' destloc dest_is
-    (_, srcspace, srcidx) <- fullyIndexArray' srcloc src_is
+    (_, destspace, destidx) <-
+      fullyIndexArray' destloc $ fixSlice destslice dest_is
+    (_, srcspace, srcidx) <-
+      fullyIndexArray' srcloc $ fixSlice srcslice src_is
 
     sWhen (gtid .<. kernel_size) $ emit $
       Imp.Write destmem destidx bt destspace Imp.Nonvolatile $

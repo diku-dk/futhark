@@ -152,11 +152,11 @@ expCompiler dest e =
 
 callKernelCopy :: CopyCompiler ExplicitMemory HostEnv Imp.HostOp
 callKernelCopy bt
-  destloc@(MemLocation destmem _ destIxFun)
-  srcloc@(MemLocation srcmem srcshape srcIxFun)
+  destloc@(MemLocation destmem _ destIxFun) destslice
+  srcloc@(MemLocation srcmem srcshape srcIxFun) srcslice
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
-          src_elems, dest_elems) <- isMapTransposeKernel bt destloc srcloc = do
+          src_elems, dest_elems) <- isMapTransposeKernel bt destloc destslice srcloc srcslice = do
 
       fname <- mapTransposeForType bt
       emit $ Imp.Call [] fname
@@ -167,9 +167,9 @@ callKernelCopy bt
 
   | bt_size <- primByteSize bt,
     Just destoffset <-
-      IxFun.linearWithOffset destIxFun bt_size,
+      IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
     Just srcoffset  <-
-      IxFun.linearWithOffset srcIxFun bt_size = do
+      IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
         let num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
@@ -178,7 +178,7 @@ callKernelCopy bt
           srcmem (bytes srcoffset) srcspace $
           num_elems `Imp.withElemType` bt
 
-  | otherwise = sCopy bt destloc srcloc
+  | otherwise = sCopy bt destloc destslice srcloc srcslice
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
@@ -296,20 +296,22 @@ mapTransposeFunction bt =
             v32 mulx, v32 muly, v32 num_arrays,
             block) bt
 
-isMapTransposeKernel :: PrimType -> MemLocation -> MemLocation
+isMapTransposeKernel :: PrimType
+                     -> MemLocation -> Slice Imp.Exp
+                     -> MemLocation -> Slice Imp.Exp
                      -> Maybe (Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
-  (MemLocation _ _ destIxFun)
-  (MemLocation _ _ srcIxFun)
-  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
+  (MemLocation _ _ destIxFun) destslice
+  (MemLocation _ _ srcIxFun) srcslice
+  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun' bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
-    Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
+    Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
       isOk (product destshape) destshape swap r1 r2 dest_offset src_offset
-  | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
+  | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
+    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
     Just (r1, r2, _) <- isMapTranspose perm =
       isOk (product srcshape) srcshape id r1 r2 dest_offset src_offset
@@ -317,6 +319,9 @@ isMapTransposeKernel bt
       Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
+
+        destIxFun' = IxFun.slice destIxFun destslice
+        srcIxFun' = IxFun.slice srcIxFun srcslice
 
         isOk elems shape f r1 r2 dest_offset src_offset = do
           let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
