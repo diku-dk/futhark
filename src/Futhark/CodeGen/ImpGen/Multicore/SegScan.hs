@@ -17,9 +17,9 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.Transform.Rename
 
 
-makeLocalArrays :: SubExp -> [SubExp] -> Lambda ExplicitMemory
+createTemporaryArrays :: SubExp -> [SubExp] -> Lambda ExplicitMemory
                 -> MulticoreGen [VName]
-makeLocalArrays num_threads nes scan_op = do
+createTemporaryArrays num_threads nes scan_op = do
   let (scan_x_params, _scan_y_params) =
         splitAt (length nes) $ lambdaParams scan_op
   forM scan_x_params $ \p ->
@@ -98,11 +98,11 @@ segmentedScan pat space scan_op nes kbody = do
           copyDWIMFix (paramName p) [] se []
 
 
-  let paramsNames = namesToList $ freeIn fbody `namesSubtract`
+  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                   namesFromList (tid : [n_segments])
 
-  ts <- mapM lookupType paramsNames
-  let params = zipWith toParam paramsNames ts
+  ts <- mapM lookupType freeVariables
+  let params = zipWith toParam freeVariables ts
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
@@ -150,7 +150,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
 
   num_threads <- getNumThreads
 
-  stage_one_red_res <- makeLocalArrays (Var num_threads) nes scan_op
+  stage_one_red_res <- createTemporaryArrays (Var num_threads) nes scan_op
 
   let (scan_x_params, scan_y_params) =
         splitAt (length nes) $ lambdaParams scan_op
@@ -187,17 +187,16 @@ nonsegmentedScan pat space scan_op nes kbody = do
           forM_ (zip (slugAccs slug) $ bodyResult $ lambdaBody scan_op) $ \((acc, acc_is), se) ->
             copyDWIMFix acc acc_is se []
 
-  let paramsNames = namesToList $ freeIn (reduce_body <> prebody) `namesSubtract`
+  let freeVariables = namesToList $ freeIn (prebody <> reduce_body) `namesSubtract`
                                   namesFromList (tid : [segFlat space])
-  ts <- mapM lookupType paramsNames
-  let params = zipWith toParam paramsNames ts
-
+  ts <- mapM lookupType freeVariables
+  let freeParams = zipWith toParam freeVariables ts
 
   ntasks <- dPrim "ntasks" $ IntType Int32
   ntasks' <- toExp $ Var ntasks
 
   emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
-                              (Imp.MulticoreFunc params prebody reduce_body tid)
+                              (Imp.MulticoreFunc freeParams prebody reduce_body tid)
 
   -- |
   -- Begin stage two of scan
@@ -205,7 +204,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
   let (scan_x_params', scan_y_params') =
         splitAt (length nes) $ lambdaParams scan_op'
 
-  stage_two_red_res <- makeLocalArrays (Var ntasks) nes scan_op'
+  stage_two_red_res <- createTemporaryArrays (Var ntasks) nes scan_op'
 
   -- Set neutral element value
   forM_ (zip stage_two_red_res nes) $ \(stage_two_res, ne) ->
@@ -243,11 +242,11 @@ nonsegmentedScan pat space scan_op nes kbody = do
          copyDWIMFix (paramName p) [] se []
          copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
 
-  let paramsNames' = namesToList (freeIn (prebody' <> scan_body) `namesSubtract`
+  let freeVariables' = namesToList (freeIn (prebody' <> scan_body) `namesSubtract`
                      namesFromList [tid, segFlat space])
 
-  ts' <- mapM lookupType paramsNames'
-  let params' = zipWith toParam paramsNames' ts'
+  ts' <- mapM lookupType freeVariables'
+  let freeParams' = zipWith toParam freeVariables' ts'
 
   emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
-                             (Imp.MulticoreFunc params' prebody' scan_body tid)
+                             (Imp.MulticoreFunc freeParams' prebody' scan_body tid)

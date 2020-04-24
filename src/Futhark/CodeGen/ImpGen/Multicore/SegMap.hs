@@ -43,10 +43,10 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
            error $ "writeResult: cannot handle " ++ pretty res
      zipWithM_ writeResult (patternElements pat) kres
 
-  let paramsNames = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
-  ts <- mapM lookupType paramsNames
-  let params = zipWith toParam paramsNames ts
+  let freeVariables = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
+  ts <- mapM lookupType freeVariables
+  let freeParams = zipWith toParam freeVariables ts
   let scheduling = decideScheduling body'
 
   emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks (segFlat space) (product ns')
-                             (Imp.MulticoreFunc params mempty body' num_tasks)
+                             (Imp.MulticoreFunc freeParams mempty body' num_tasks)

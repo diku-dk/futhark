@@ -14,10 +14,9 @@ import Futhark.Representation.ExplicitMemory
 import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
-
 type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
 
--- Compile SegReduce
+-- Compile a SegRed construct
 compileSegRed :: Pattern ExplicitMemory
                  -> SegSpace
                  -> [SegRedOp ExplicitMemory]
@@ -33,9 +32,6 @@ compileSegRed pat space reds kbody =
       zipWithM_ (compileThreadResult space) map_arrs map_res
 
     red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
-
-
-
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' :: Pattern ExplicitMemory
@@ -126,10 +122,6 @@ nonsegmentedReduction pat space reds kbody = do
 
   slugs <- mapM (segRedOpSlug tid') $ zip reds stage_one_red_arrs
 
-  -- TODO: Need to declare this for reduce6.fut
-  -- reduce6.fut still doesn't work though
-  dPrimV_ (segFlat space) 0
-
   sFor "i" num_threads' $ \i -> do
     tid <-- i
     sComment "neutral-initialise the acc used by tid" $
@@ -158,10 +150,10 @@ nonsegmentedReduction pat space reds kbody = do
                 forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
                   \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
-  let paramsNames = namesToList $ freeIn fbody `namesSubtract`
+  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                   namesFromList (tid : [segFlat space])
-  ts <- mapM lookupType paramsNames
-  let params = zipWith toParam paramsNames ts
+  ts <- mapM lookupType freeVariables
+  let freeParams = zipWith toParam freeVariables ts
       scheduling = case slugsComm slugs of
                      Commutative -> decideScheduling fbody
                      Noncommutative -> Imp.Static
@@ -169,7 +161,7 @@ nonsegmentedReduction pat space reds kbody = do
   ntasks <- dPrim "num_tasks" $ IntType Int32
   ntasks' <- toExp $ Var ntasks
   emit $ Imp.Op $ Imp.ParLoop scheduling ntasks (segFlat space) (product ns')
-                              (Imp.MulticoreFunc params mempty fbody tid)
+                              (Imp.MulticoreFunc freeParams mempty fbody tid)
 
   sComment "neutral-initialise the output" $
     forM_ slugs $ \slug ->
@@ -257,14 +249,14 @@ segmentedReduction pat space reds kbody = do
                   \(pe, se') -> copyDWIMFix (patElemName pe) (n_segments' : vec_is) se' []
 
 
-  let paramsNames = namesToList $ freeIn fbody `namesSubtract`
+  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                   namesFromList (tid : [n_segments])
 
-  ts <- mapM lookupType paramsNames
-  let params = zipWith toParam paramsNames ts
+  ts <- mapM lookupType freeVariables
+  let freeParams = zipWith toParam freeVariables ts
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
   emit $ Imp.Op $ Imp.ParLoop (decideScheduling fbody)
                                ntask n_segments (product $ init ns')
-                              (Imp.MulticoreFunc params mempty fbody tid)
+                              (Imp.MulticoreFunc freeParams mempty fbody tid)
