@@ -4,16 +4,13 @@
 module Futhark.Analysis.UsageTable
   ( UsageTable
   , empty
-  , contains
   , without
   , lookup
-  , keys
   , used
   , expand
   , isConsumed
   , isInResult
   , isUsedDirectly
-  , allConsumed
   , usages
   , usage
   , consumedUsage
@@ -53,8 +50,6 @@ instance Substitute UsageTable where
 empty :: UsageTable
 empty = UsageTable M.empty
 
-contains :: UsageTable -> [VName] -> Bool
-contains (UsageTable table) = Foldable.any (`M.member` table)
 
 without :: UsageTable -> [VName] -> UsageTable
 without (UsageTable table) = UsageTable . Foldable.foldl (flip M.delete) table
@@ -75,9 +70,6 @@ expand look (UsageTable m) = UsageTable $ foldl' grow m $ M.toList m
                          namesToList $ look k
         grow'' v m'' k = M.insertWith (<>) k v m''
 
-keys :: UsageTable -> [VName]
-keys (UsageTable table) = M.keys table
-
 is :: Usages -> VName -> UsageTable -> Bool
 is = lookupPred . matches
 
@@ -91,10 +83,6 @@ isInResult = is inResultU
 -- remove it without anyone noticing?)
 isUsedDirectly :: VName -> UsageTable -> Bool
 isUsedDirectly = is presentU
-
-allConsumed :: UsageTable -> Names
-allConsumed (UsageTable m) =
-  namesFromList . map fst . filter (matches consumedU . snd) $ M.toList m
 
 usages :: Names -> UsageTable
 usages names = UsageTable $ M.fromList [ (name, presentU) | name <- namesToList names ]

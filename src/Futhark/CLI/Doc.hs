@@ -6,7 +6,7 @@ module Futhark.CLI.Doc (main) where
 
 import Control.Monad.State
 import Data.FileEmbed
-import Data.List
+import Data.List (nubBy)
 import System.FilePath
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt

@@ -16,21 +16,20 @@ import qualified Futhark.Transform.FirstOrderTransform as FOT
 
 unstream :: Pass Kernels Kernels
 unstream = Pass "unstream" "sequentialise remaining SOACs" $
-           intraproceduralTransformation optimiseFunDef
-
-optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-optimiseFunDef fundec = do
-  body' <- modifyNameSource $ runState $
-           runReaderT m (scopeOfFParams (funDefParams fundec))
-  return fundec { funDefBody = body' }
-  where m = optimiseBody $ funDefBody fundec
+           intraproceduralTransformation optimise
+  where optimise scope stms =
+          modifyNameSource $ runState $ runReaderT (optimiseStms stms) scope
 
 type UnstreamM = ReaderT (Scope Kernels) (State VNameSource)
 
+optimiseStms :: Stms Kernels -> UnstreamM (Stms Kernels)
+optimiseStms stms =
+  localScope (scopeOf stms) $
+  stmsFromList . concat <$> mapM optimiseStm (stmsToList stms)
+
 optimiseBody :: Body Kernels -> UnstreamM (Body Kernels)
 optimiseBody (Body () stms res) =
-  localScope (scopeOf stms) $
-  Body () <$> (stmsFromList . concat <$> mapM optimiseStm (stmsToList stms)) <*> pure res
+  Body () <$> optimiseStms stms <*> pure res
 
 optimiseKernelBody :: KernelBody Kernels -> UnstreamM (KernelBody Kernels)
 optimiseKernelBody (KernelBody () stms res) =

@@ -2,7 +2,7 @@ Futhark binary distribution
 ===========================
 
 This is a precompiled distribution of the Futhark compiler.  For more
-information on Futhark itself, see our [website][1] or [Github
+information on Futhark itself, see our [website][1] or [GitHub
 repository][2].
 
 Installation

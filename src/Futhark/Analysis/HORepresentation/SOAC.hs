@@ -43,7 +43,6 @@ module Futhark.Analysis.HORepresentation.SOAC
   , isVarInput
   , isVarishInput
   , addTransform
-  , addTransforms
   , addInitialTransforms
   , inputArray
   , inputRank
@@ -54,7 +53,6 @@ module Futhark.Analysis.HORepresentation.SOAC
   -- ** Input transformations
   , ArrayTransforms
   , noTransforms
-  , singleTransform
   , nullTransforms
   , (|>)
   , (<|)
@@ -143,10 +141,6 @@ noTransforms = ArrayTransforms Seq.empty
 -- | Is it an empty transformation list?
 nullTransforms :: ArrayTransforms -> Bool
 nullTransforms (ArrayTransforms s) = Seq.null s
-
--- | A transformation list containing just a single transformation.
-singleTransform :: ArrayTransform -> ArrayTransforms
-singleTransform = ArrayTransforms . Seq.singleton
 
 -- | Decompose the input-end of the transformation sequence.
 viewf :: ArrayTransforms -> ViewF
@@ -260,11 +254,6 @@ isVarishInput _ = Nothing
 addTransform :: ArrayTransform -> Input -> Input
 addTransform tr (Input trs a t) =
   Input (trs |> tr) a t
-
--- | Add several transformations to the end of the transformation
--- list.
-addTransforms :: ArrayTransforms -> Input -> Input
-addTransforms ts (Input ots a t) = Input (ots <> ts) a t
 
 -- | Add several transformations to the start of the transformation
 -- list.

@@ -15,10 +15,10 @@ DESCRIPTION
 ===========
 
 ``futhark pyopencl`` translates a Futhark program to Python code
-invoking OpenCL kernels.  By default, the program uses the first
-device of the first OpenCL platform - this can be changed by passing
-``-p`` and ``-d`` options to the generated program (not to
-``futhark pyopencl`` itself).
+invoking OpenCL kernels, which depends on Numpy and PyOpenCL.  By
+default, the program uses the first device of the first OpenCL
+platform - this can be changed by passing ``-p`` and ``-d`` options to
+the generated program (not to ``futhark pyopencl`` itself).
 
 The resulting program will otherwise behave exactly as one compiled
 with ``futhark py``.  While the sequential host-level code is pure

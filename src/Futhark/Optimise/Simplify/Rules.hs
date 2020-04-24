@@ -21,7 +21,7 @@ where
 
 import Control.Monad
 import Data.Either
-import Data.List
+import Data.List (find, isSuffixOf, partition, sort)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 
@@ -343,7 +343,7 @@ removeUnnecessaryCopy :: BinderOps lore => BottomUpRuleBasicOp lore
 removeUnnecessaryCopy (vtable,used) (Pattern [] [d]) _ (Copy v)
   | not (v `UT.isConsumed` used),
     (not (v `UT.used` used) && consumable) || not (patElemName d `UT.isConsumed` used) =
-      Simplify $ letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
+      Simplify $ letBindNames_ [patElemName d] $ BasicOp $ SubExp $ Var v
   where -- We need to make sure we can even consume the original.
         -- This is currently a hacky check, much too conservative,
         -- because we don't have the information conveniently
@@ -365,8 +365,17 @@ simplifyCmpOp _ _ (CmpOp cmp e1 e2)
                            FCmpLe{} -> True
                            CmpLlt -> False
                            CmpLle -> True
+
 simplifyCmpOp _ _ (CmpOp cmp (Constant v1) (Constant v2)) =
   constRes =<< BoolValue <$> doCmpOp cmp v1 v2
+
+simplifyCmpOp look _ (CmpOp CmpEq{} (Constant (IntValue x)) (Var v))
+  | Just (BasicOp (ConvOp BToI{} b), cs) <- look v =
+      case valueIntegral x :: Int of
+        1 -> Just (SubExp b, cs)
+        0 -> Just (UnOp Not b, cs)
+        _ -> Just (SubExp (Constant (BoolValue False)), cs)
+
 simplifyCmpOp _ _ _ = Nothing
 
 simplifyBinOp :: SimpleRule lore
@@ -579,8 +588,8 @@ simplifyIndex (vtable, used) pat@(Pattern [] [pe]) (StmAux cs _) (Index idd inds
       res <- m
       case res of
         SubExpResult cs' se ->
-          certifying (cs<>cs') $ letBindNames_ (patternNames pat) $
-          BasicOp $ SubExp se
+          certifying (cs<>cs') $
+          letBindNames_ (patternNames pat) $ BasicOp $ SubExp se
         IndexResult extra_cs idd' inds' ->
           certifying (cs<>extra_cs) $
           letBindNames_ (patternNames pat) $ BasicOp $ Index idd' inds'
@@ -832,7 +841,7 @@ ruleIf _ pat _ (e1, tb, fb, IfAttr _ ifsort)
     ifsort /= IfFallback || isCt1 e1 = Simplify $ do
   let ses = bodyResult branch
   addStms $ bodyStms branch
-  sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
+  sequence_ [ letBindNames_ [patElemName p] $ BasicOp $ SubExp se
             | (p,se) <- zip (patternElements pat) ses]
 
   where checkBranch
@@ -869,8 +878,20 @@ ruleIf _ pat _ (_, tbranch, _, IfAttr _ IfFallback)
     all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
       let ses = bodyResult tbranch
       addStms $ bodyStms tbranch
-      sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
+      sequence_ [ letBindNames_ [patElemName p] $ BasicOp $ SubExp se
                 | (p,se) <- zip (patternElements pat) ses]
+
+ruleIf _ pat _ (cond, tb, fb, _)
+  | Body _ _ [Constant (IntValue t)] <- tb,
+    Body _ _ [Constant (IntValue f)] <- fb =
+      if oneIshInt t && zeroIshInt f
+      then Simplify $
+           letBind_ pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond
+      else if zeroIshInt t && oneIshInt f
+      then Simplify $ do
+        cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
+        letBind_ pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
+      else Skip
 
 ruleIf _ _ _ _ = Skip
 
@@ -914,7 +935,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = Simplify $ do
         branchInvariant (pe, t, (tse, fse))
           -- Do both branches return the same value?
           | tse == fse = do
-              letBind_ (Pattern [] [pe]) $ BasicOp $ SubExp tse
+              letBindNames_ [patElemName pe] $ BasicOp $ SubExp tse
               hoisted pe t
 
           -- Do both branches return values that are free in the
@@ -923,7 +944,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = Simplify $ do
           | invariant tse, invariant fse, patternSize pat > 1,
             Prim _ <- patElemType pe, not $ sizeOfMem $ patElemName pe = do
               bt <- expTypesFromPattern $ Pattern [] [pe]
-              letBind_ (Pattern [] [pe]) =<<
+              letBindNames_ [patElemName pe] =<<
                 (If cond <$> resultBodyM [tse]
                          <*> resultBodyM [fse]
                          <*> pure (IfAttr bt ifsort))

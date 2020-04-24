@@ -3,14 +3,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.CodeGen.ImpGen.Kernels
-  ( Futhark.CodeGen.ImpGen.Kernels.compileProg
+  ( compileProgOpenCL
+  , compileProgCUDA
   )
   where
 
 import Control.Monad.Except
-import Control.Monad.Reader
 import Data.Maybe
-import Data.List
+import Data.List ()
 
 import Prelude hiding (quot)
 
@@ -19,7 +19,8 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
-import Futhark.CodeGen.ImpGen
+import Futhark.CodeGen.ImpGen hiding (compileProg)
+import qualified Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen.Kernels.SegMap
 import Futhark.CodeGen.ImpGen.Kernels.SegRed
@@ -30,7 +31,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
 
-callKernelOperations :: Operations ExplicitMemory Imp.HostOp
+callKernelOperations :: Operations ExplicitMemory HostEnv Imp.HostOp
 callKernelOperations =
   Operations { opsExpCompiler = expCompiler
              , opsCopyCompiler = callKernelCopy
@@ -39,10 +40,28 @@ callKernelOperations =
              , opsAllocCompilers = mempty
              }
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
-compileProg prog =
-  fmap (setDefaultSpace (Imp.Space "device")) <$>
-  Futhark.CodeGen.ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
+openclAtomics, cudaAtomics :: AtomicBinOp
+(openclAtomics, cudaAtomics) = (flip lookup opencl, flip lookup cuda)
+  where opencl = [ (Add Int32, Imp.AtomicAdd Int32)
+                 , (SMax Int32, Imp.AtomicSMax Int32)
+                 , (SMin Int32, Imp.AtomicSMin Int32)
+                 , (UMax Int32, Imp.AtomicUMax Int32)
+                 , (UMin Int32, Imp.AtomicUMin Int32)
+                 , (And Int32, Imp.AtomicAnd Int32)
+                 , (Or Int32, Imp.AtomicOr Int32)
+                 , (Xor Int32, Imp.AtomicXor Int32)
+                 ]
+        cuda = opencl ++ [(FAdd Float32, Imp.AtomicFAdd Float32)]
+
+compileProg :: MonadFreshNames m => HostEnv -> Prog ExplicitMemory -> m Imp.Program
+compileProg env prog =
+  setDefaultSpace (Imp.Space "device") <$>
+  Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
+
+compileProgOpenCL, compileProgCUDA
+  :: MonadFreshNames m => Prog ExplicitMemory -> m Imp.Program
+compileProgOpenCL = compileProg $ HostEnv openclAtomics
+compileProgCUDA = compileProg $ HostEnv cudaAtomics
 
 opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
            -> CallKernelGen ()
@@ -51,12 +70,12 @@ opCompiler dest (Alloc e space) =
   compileAlloc dest e space
 
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSize key size_class))) = do
-  fname <- asks envFunction
+  fname <- askFunction
   sOp $ Imp.GetSize (patElemName pe) (keyWithEntryPoint fname key) $
     sizeClassWithEntryPoint fname size_class
 
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
-  fname <- asks envFunction
+  fname <- askFunction
   let size_class' = sizeClassWithEntryPoint fname size_class
   sOp . Imp.CmpSizeLe (patElemName pe) (keyWithEntryPoint fname key) size_class'
     =<< toExp x
@@ -65,7 +84,7 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
-  fname <- asks envFunction
+  fname <- askFunction
   max_num_groups <- dPrim "max_num_groups" int32
   sOp $ Imp.GetSize max_num_groups (keyWithEntryPoint fname max_num_groups_key) $
     sizeClassWithEntryPoint fname SizeNumGroups
@@ -93,7 +112,7 @@ opCompiler pat e =
   compilerBugS $ "opCompiler: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
-sizeClassWithEntryPoint :: Name -> Imp.SizeClass -> Imp.SizeClass
+sizeClassWithEntryPoint :: Maybe Name -> Imp.SizeClass -> Imp.SizeClass
 sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
   Imp.SizeThreshold $ map f path
   where f (name, x) = (keyWithEntryPoint fname name, x)
@@ -111,7 +130,7 @@ segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
-expCompiler :: ExpCompiler ExplicitMemory Imp.HostOp
+expCompiler :: ExpCompiler ExplicitMemory HostEnv Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
@@ -131,9 +150,9 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 expCompiler dest e =
   defCompileExp dest e
 
-callKernelCopy :: CopyCompiler ExplicitMemory Imp.HostOp
+callKernelCopy :: CopyCompiler ExplicitMemory HostEnv Imp.HostOp
 callKernelCopy bt
-  destloc@(MemLocation destmem destshape destIxFun)
+  destloc@(MemLocation destmem _ destIxFun)
   srcloc@(MemLocation srcmem srcshape srcIxFun)
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
@@ -147,10 +166,6 @@ callKernelCopy bt
          Imp.ExpArg src_elems, Imp.ExpArg dest_elems]
 
   | bt_size <- primByteSize bt,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) destshape) destIxFun,
-    ixFunMatchesInnerShape
-      (Shape $ map (toExp' int32) srcshape) srcIxFun,
     Just destoffset <-
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
@@ -167,10 +182,7 @@ callKernelCopy bt
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
-  -- FIXME: The leading underscore is to avoid clashes with a
-  -- programmer-defined function of the same name (this is a bad
-  -- solution...).
-  let fname = nameFromString $ "_" <> mapTransposeName bt
+  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
 
   exists <- hasFunction fname
   unless exists $ emitFunction fname $ mapTransposeFunction bt
@@ -293,26 +305,24 @@ isMapTransposeKernel bt
   (MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
-    srcshape' <- IxFun.shape srcIxFun,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk (product srcshape') (product destshape) destshape swap r1 r2 dest_offset src_offset
+      isOk (product destshape) destshape swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
-    destshape' <- IxFun.shape destIxFun,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk (product srcshape) (product destshape') srcshape id r1 r2 dest_offset src_offset
+      isOk (product srcshape) srcshape id r1 r2 dest_offset src_offset
   | otherwise =
-    Nothing
+      Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
 
-        isOk src_elems dest_elems shape f r1 r2 dest_offset src_offset = do
+        isOk elems shape f r1 r2 dest_offset src_offset = do
           let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
           return (dest_offset, src_offset,
                   num_arrays, size_x, size_y,
-                  src_elems, dest_elems)
+                  elems, elems)
 
         getSizes shape f r1 r2 =
           let (mapped, notmapped) = splitAt r1 shape

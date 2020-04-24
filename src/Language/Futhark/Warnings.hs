@@ -4,7 +4,7 @@ module Language.Futhark.Warnings
   ) where
 
 import Data.Monoid
-import Data.List
+import Data.List (sortOn, intercalate)
 import Data.Loc
 
 import Prelude

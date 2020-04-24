@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | The type checker checks whether the program is type-consistent
 -- and adds type annotations and various other elaborations.  The
 -- program does not need to have any particular properties for the
@@ -10,7 +11,6 @@ module Language.Futhark.TypeChecker
   , checkDec
   , checkModExp
   , TypeError
-  , prettyTypeError
   , Warnings
   , initialEnv
   )
@@ -18,7 +18,7 @@ module Language.Futhark.TypeChecker
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
-import Data.List
+import Data.List (isPrefixOf)
 import Data.Loc
 import Data.Maybe
 import Data.Either
@@ -131,8 +131,8 @@ dupDefinitionError :: MonadTypeChecker m =>
                       Namespace -> Name -> SrcLoc -> SrcLoc -> m a
 dupDefinitionError space name loc1 loc2 =
   typeError loc1 mempty $
-  "Duplicate definition of " ++ ppSpace space ++ " " ++
-  nameToString name ++ ".  Previously defined at " ++ locStr loc2
+  "Duplicate definition of" <+> ppr space <+>
+  pprName name <> ".  Previously defined at" <+> text (locStr loc2) <> "."
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -196,8 +196,13 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
 
     when (emptyDimParam $ unInfo $ expandedType vtype') $
       typeError loc mempty $
-      "All function parameters must have non-anonymous sizes.\n" ++
-      "Hint: add size parameters to " ++ quote (prettyName name') ++ "."
+      "All function parameters must have non-anonymous sizes." </>
+      "Hint: add size parameters to" <+> pquote (pprName name') <> "."
+
+    let (params, _) = unfoldFunType $ unInfo $ expandedType vtype'
+    when (null params && any isSizeParam tparams) $
+      typeError loc mempty
+      "Size parameters are only allowed on bindings that also have value parameters."
 
     let binding = BoundV tparams' $ unInfo $ expandedType vtype'
         valenv =
@@ -455,27 +460,26 @@ checkTypeBind (TypeBind name l tps td doc loc) =
     case filter ((`S.notMember` used_dims) . typeParamName) $
          filter isSizeParam tps' of
       [] -> return ()
-      tp:_ -> typeError loc mempty $ pretty $
-              text "Size parameter" <+> ppr tp <+>
-              text "unused."
+      tp:_ -> typeError loc mempty $
+              "Size parameter" <+> pquote (ppr tp) <+> "unused."
 
     case (l, l') of
       (_, Lifted)
         | l < Lifted ->
           typeError loc mempty $
-          "Non-lifted type abbreviations may not contain functions.\n" ++
+          "Non-lifted type abbreviations may not contain functions." </>
           "Hint: consider using 'type^'."
       (_, SizeLifted)
         | l < SizeLifted ->
           typeError loc mempty $
-          "Non-size-lifted type abbreviations may not contain size-lifted types.\n" ++
+          "Non-size-lifted type abbreviations may not contain size-lifted types." </>
           "Hint: consider using 'type~'."
       (Unlifted, _)
         | emptyDimParam $ unInfo $ expandedType td' ->
             typeError loc mempty $
-            "Non-lifted type abbreviations may not use anonymous sizes in their definition.\n" ++
-            "Hint: use 'type~' or add size parameters to " ++
-            quote (prettyName name) ++ "."
+            "Non-lifted type abbreviations may not use anonymous sizes in their definition." </>
+            "Hint: use 'type~' or add size parameters to" <+>
+            pquote (pprName name) <> "."
       _ -> return ()
 
     bindSpaced [(Type, name)] $ do
@@ -487,13 +491,36 @@ checkTypeBind (TypeBind name l tps td doc loc) =
                      },
                TypeBind name' l tps' td' doc loc)
 
+
+entryPoint :: [Pattern] -> Maybe (TypeExp VName) -> StructType -> EntryPoint
+entryPoint params orig_ret_te orig_ret =
+  EntryPoint (map patternEntry params ++ more_params) rettype'
+  where (more_params, rettype') =
+          onRetType orig_ret_te orig_ret
+
+        patternEntry (PatternParens p _) =
+          patternEntry p
+        patternEntry (PatternAscription _ tdecl _) =
+          EntryType (unInfo (expandedType tdecl)) (Just (declaredType tdecl))
+        patternEntry p =
+          EntryType (patternStructType p) Nothing
+
+        onRetType (Just (TEArrow _ t1_te t2_te _)) (Scalar (Arrow _ _ t1 t2)) =
+          let (xs, y) = onRetType (Just t2_te) t2
+          in (EntryType t1 (Just t1_te) : xs, y)
+        onRetType _ (Scalar (Arrow _ _ t1 t2)) =
+          let (xs, y) = onRetType Nothing t2
+          in (EntryType t1 Nothing : xs, y)
+        onRetType te t =
+          ([], EntryType t te)
+
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let (rettype_params, rettype') = unfoldFunType rettype
-      entry' = Info (foldFunType (map patternStructType params') rettype) <$ entry
+      entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
 
   case entry' of
     Just _
@@ -505,13 +532,22 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
         || not (orderZero rettype') ->
           typeError loc mempty "Entry point functions may not be higher-order."
 
+      | sizes_only_in_ret <-
+          S.fromList (map typeParamName tparams') `S.intersection`
+          typeDimNames rettype' `S.difference`
+          foldMap typeDimNames (map patternStructType params' ++ rettype_params),
+        not $ S.null sizes_only_in_ret ->
+          typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
+
       | p : _ <- filter nastyParameter params' ->
-          warn loc $ "Entry point parameter\n\n  " <>
-          pretty p <> "\n\nwill have an opaque type, so the entry point will likely not be callable."
+          warn loc $ pretty $ "Entry point parameter\n" </>
+          indent 2 (ppr p) </>
+          "\nwill have an opaque type, so the entry point will likely not be callable."
 
       | nastyReturnType maybe_tdecl' rettype ->
-          warn loc $ "Entry point return type\n\n  " <>
-          pretty rettype <> "\n\nwill have an opaque type, so the result will likely not be usable."
+          warn loc $ pretty $ "Entry point return type\n" </>
+          indent 2 (ppr rettype) </>
+          "\nwill have an opaque type, so the result will likely not be usable."
 
     _ -> return ()
 
@@ -530,8 +566,11 @@ nastyType t@Array{} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType _ (Scalar (Arrow _ _ t1 t2)) =
+nastyReturnType Nothing (Scalar (Arrow _ _ t1 t2)) =
   nastyType t1 || nastyReturnType Nothing t2
+nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ t1 t2)) =
+  (not (niceTypeExp te1) && nastyType t1) ||
+  nastyReturnType (Just te2) t2
 nastyReturnType (Just te) _
   | niceTypeExp te = False
 nastyReturnType te t
@@ -578,8 +617,8 @@ checkOneDec (LocalDec d loc) = do
 
 checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
-  when ("/futlib" `isPrefixOf` name) $
-    warn loc $ name ++ " is already implicitly imported."
+  when ("/prelude" `isPrefixOf` name) $
+    typeError loc mempty $ ppr name <+> "may not be explicitly imported."
   return (mempty, env, ImportDec name (Info name') loc)
 
 checkOneDec (ValDec vb) = do

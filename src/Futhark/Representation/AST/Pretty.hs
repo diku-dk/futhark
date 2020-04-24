@@ -160,6 +160,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
                         DoLoop{}           -> True
                         Op{}               -> True
                         If{}               -> True
+                        Apply{}            -> True
                         BasicOp ArrayLit{} -> False
                         BasicOp Assert{}   -> True
                         _                  -> cs /= mempty
@@ -252,21 +253,22 @@ instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
     annot (mapMaybe ppAnnot params) $
     text "fn" <+> ppTuple' rettype <+/>
-    parens (commasep (map ppr params)) <+>
+    align (parens (commasep (map ppr params))) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry name rettype fparams body) =
     annot (mapMaybe ppAnnot fparams) $
-    text fun <+> ppTuple' rettype <+>
-    text (nameToString name) <//>
+    text fun <+> ppTuple' rettype <+/>
+    text (nameToString name) <+>
     apply (map ppr fparams) <+>
     equals <+> nestedBlock "{" "}" (ppr body)
     where fun | isJust entry = "entry"
               | otherwise    = "fun"
 
 instance PrettyLore lore => Pretty (Prog lore) where
-  ppr = stack . punctuate line . map ppr . progFunctions
+  ppr (Prog consts funs) =
+    stack $ punctuate line $ ppr consts : map ppr funs
 
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se

@@ -16,7 +16,7 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Util.Pretty
 
 -- | An imperative program.
-type Program = Imp.Functions Sequential
+type Program = Imp.Definitions Sequential
 
 -- | An imperative function.
 type Function = Imp.Function Sequential

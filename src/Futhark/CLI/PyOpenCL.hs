@@ -5,10 +5,8 @@ import Control.Monad.IO.Class
 import System.FilePath
 import System.Directory
 
-import Futhark.Pipeline
 import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.PyOpenCL as PyOpenCL
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 
 main :: String -> [String] -> IO ()
@@ -18,8 +16,7 @@ main = compilerMain () []
           let class_name =
                 case mode of ToLibrary -> Just $ takeBaseName outpath
                              ToExecutable -> Nothing
-          pyprog <- either (`internalError` prettyText prog) return =<<
-                    PyOpenCL.compileProg class_name prog
+          pyprog <- PyOpenCL.compileProg class_name prog
 
           case mode of
             ToLibrary ->

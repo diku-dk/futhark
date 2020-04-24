@@ -5,19 +5,70 @@
 #
 # https://docs.haskellstack.org/en/stable/azure_ci/
 
+trigger:
+  branches:
+    include:
+      - master
+  tags:
+    include:
+      - v*
+
+variables:
+  System.Debug: true
+  GHC_VERSION: "8.10.1"
+  CABAL_VERSION: "3.0.0.0"
+
+pool:
+  vmImage: ubuntu-18.04
+
 jobs:
-- job: build
+- job: build_windows
   pool:
-    vmImage: ubuntu-18.04
+    vmImage: windows-2019
+
+  timeoutInMinutes: 120
+
+  variables:
+    CABAL_DIR: ""
+    CABAL_STORE_DIR: "C:\\sd"
+
+  steps:
+
+  - checkout: self
+    submodules: true
+
+  - bash: |
+      choco install -y msys2
+    displayName: Install MSYS2
+
+  - bash: |
+      choco install -y ghc --version=$(GHC_VERSION)
+    displayName: Install GHC
+
+  - bash: |
+      choco install -y cabal
+    displayName: Install cabal
+
+  - bash: |
+      export PATH=`cygpath $ProgramData`/chocolatey/lib/ghc/tools/ghc-$(GHC_VERSION)/bin:$PATH
+      echo $PATH
+      cabal update
+      cabal install -j1
+    displayName: Build Futhark compiler
+
+- job: build_linux
 
   timeoutInMinutes: 120
 
   steps:
 
+  - checkout: self
+    submodules: true
+
   - script: |
       set -e
       sudo apt update
-      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy hpack
+      sudo apt install opencl-headers nvidia-cuda-dev nvidia-opencl-dev python-numpy
     displayName: Install OS-level dependencies
 
   - script: |
@@ -25,15 +76,15 @@ jobs:
       mkdir -p ~/.ghcup/bin
       curl https://gitlab.haskell.org/haskell/ghcup/raw/master/ghcup > ~/.ghcup/bin/ghcup
       chmod +x ~/.ghcup/bin/ghcup
-      ~/.ghcup/bin/ghcup install 8.8.2
-      ~/.ghcup/bin/ghcup set 8.8.2
+      ~/.ghcup/bin/ghcup install $(GHC_VERSION)
+      ~/.ghcup/bin/ghcup set $(GHC_VERSION)
       ~/.ghcup/bin/ghcup install-cabal
     displayName: Install GHC and cabal
 
   - script: |
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
-      hpack
+      cabal check
       cabal update
       cabal install --only-dependencies
     displayName: Build Haskell dependencies
@@ -44,7 +95,6 @@ jobs:
       mkdir -p $HOME/.local/bin
       cabal install --installdir=$HOME/.local/bin --install-method=copy
     displayName: Build and install Futhark compiler
-
 
   - script: |
       set -e
@@ -58,26 +108,99 @@ jobs:
       cabal test
     displayName: Run unit tests
 
-  # - script: |
-  #     export PATH=$HOME/.local/bin:$PATH
-  #     stack install
-  #     futhark test --no-terminal --no-tuning tests examples
-  #   displayName: Compile and run tests
+  - script: |
+      set -e
+      export PATH=$HOME/.local/bin:$PATH
+      futhark test -C --no-terminal --backend=opencl --exclude=no_opencl tests examples
+    displayName: Compile tests with backend=opencl
 
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
-      futhark test -C --no-terminal --backend=opencl tests examples --exclude=no_opencl
-    displayName: Compile with backend=opencl
+      futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
+    displayName: Compile tests with backend=cuda
 
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
-      futhark test -C --no-terminal --backend=cuda tests examples --exclude=no_opencl
-    displayName: Compile with backend=cuda
+      futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
+    displayName: Compile tests and run with backend=python
+
 
   - script: |
       set -e
       export PATH=$HOME/.local/bin:$PATH
-      futhark test -c --no-terminal --no-tuning --backend=python tests examples --exclude=no_python
-    displayName: Compile and run with backend=python
+      futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
+    displayName: Compile benchmarks with backend=opencl
+
+  - script: |
+      set -e
+      export PATH=$HOME/.local/bin:$PATH
+      (cd libtests/c; make)
+    displayName: Run library tests
+
+- job: build_linux_nightly
+
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+
+  steps:
+
+  - checkout: self
+    submodules: false
+
+  - script: |
+      curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
+      . $HOME/.nix-profile/etc/profile.d/nix.sh
+      commit=$(git describe --tags --long)
+      nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $commit
+
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: 'result'
+      contents: 'futhark-nightly-linux-x86_64.tar.xz'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
+
+- job: release_linux
+
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
+
+  steps:
+
+  - checkout: self
+    submodules: false
+
+  - script: |
+      export githubTag=$(git describe --abbrev=0 --tags)
+      export version=$(echo $githubTag | cut -c 2-)
+      echo tag: $githubTag
+      echo version: $version
+      echo "##vso[task.setvariable variable=githubTag]$githubTag"
+      echo "##vso[task.setvariable variable=version]$version"
+    displayName: Set tag to env variable githubTag and version
+    failOnStderr: true
+
+  - script: |
+      curl -L --proto '=https' --tlsv1.2 https://nixos.org/nix/install | sh
+      . $HOME/.nix-profile/etc/profile.d/nix.sh
+      commit=$(git describe --tags --long)
+      nix-build --argstr suffix $(version)-linux-x86_64 --argstr commit $commit
+
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: 'result'
+      contents: 'futhark-$(version)-linux-x86_64.tar.xz'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
+
+  - task: GithubRelease@0
+    displayName: 'Attach Linux x86_64 tarball to GitHub Release'
+    inputs:
+      gitHubConnection: 'release'
+      repositoryName: 'diku-dk/futhark'
+      action: 'edit'
+      tagSource: 'Git tag'
+      tag: '$(githubTag)'
+      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
+      assetUploadMode: 'replace'
+      addChangeLog: false
