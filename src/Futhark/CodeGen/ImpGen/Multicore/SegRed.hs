@@ -122,6 +122,10 @@ nonsegmentedReduction pat space reds kbody = do
 
   slugs <- mapM (segRedOpSlug tid') $ zip reds stage_one_red_arrs
 
+  -- TODO: Need to declare this for reduce6.fut
+  -- reduce6.fut still doesn't work though
+  dPrimV_ (segFlat space) 0
+
   sFor "i" num_threads' $ \i -> do
     tid <-- i
     sComment "neutral-initialise the acc used by tid" $
