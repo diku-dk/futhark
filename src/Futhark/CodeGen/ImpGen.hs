@@ -21,6 +21,7 @@ module Futhark.CodeGen.ImpGen
   , ImpM
   , localDefaultSpace, askFunction
   , askEnv, localEnv
+  , localOps
   , VTable
   , getVTable
   , localVTable
@@ -90,7 +91,7 @@ import Data.Traversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.List (find, sortOn)
+import Data.List (find, sortOn, genericLength)
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
@@ -113,8 +114,8 @@ type StmsCompiler lore r op = Names -> Stms lore -> ImpM lore r op () -> ImpM lo
 type ExpCompiler lore r op = Pattern lore -> Exp lore -> ImpM lore r op ()
 
 type CopyCompiler lore r op = PrimType
-                           -> MemLocation
-                           -> MemLocation
+                           -> MemLocation -> Slice Imp.Exp
+                           -> MemLocation -> Slice Imp.Exp
                            -> ImpM lore r op ()
 
 -- | An alternate way of compiling an allocation.
@@ -701,25 +702,20 @@ defCompileBasicOp (Pattern _ [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 
 defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
-    MemLocation destmem destshape destixfun <-
-      entryArrayLocation <$> lookupArray (patElemName pe)
-    offs_glb <- dPrim "tmp_offs" int32
-    emit $ Imp.SetScalar offs_glb 0
-    let perm = [i] ++ [0..i-1] ++ [i+1..length destshape-1]
-        invperm = rearrangeInverse perm
-        destloc = MemLocation destmem destshape
-                  (IxFun.permute (IxFun.offsetIndex (IxFun.permute destixfun perm) $
-                                  Imp.vi32 offs_glb)
-                   invperm)
+  offs_glb <- dPrim "tmp_offs" int32
+  emit $ Imp.SetScalar offs_glb 0
 
-    forM_ (x:ys) $ \y -> do
-      yentry <- lookupArray y
-      let srcloc = entryArrayLocation yentry
-          rows = case drop i $ entryArrayShape yentry of
-                  []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
-                  r:_ -> toExp' int32 r
-      copy (elemType $ patElemType pe) destloc srcloc
-      emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
+  forM_ (x:ys) $ \y -> do
+    y_dims <- arrayDims <$> lookupType y
+    let rows = case drop i y_dims of
+                 []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
+                 r:_ -> toExp' int32 r
+        skip_dims = take i y_dims
+        sliceAllDim d = DimSlice 0 d 1
+        skip_slices = map (sliceAllDim . toExp' int32) skip_dims
+        destslice = skip_slices ++ [DimSlice (Imp.vi32 offs_glb) rows 1]
+    copyDWIM (patElemName pe) destslice (Var y) []
+    emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
 defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
   | Just vs@(v:_) <- mapM isLiteral es = do
@@ -732,7 +728,8 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
                        IxFun.iota [fromIntegral $ length es]
           entry = MemVar Nothing $ MemEntry dest_space
       addVar static_array entry
-      copy t dest_mem static_src
+      let slice = [DimSlice 0 (genericLength es) 1]
+      copy t dest_mem slice static_src slice
   | otherwise =
     forM_ (zip [0..] es) $ \(i,e) ->
       copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
@@ -912,6 +909,15 @@ askEnv = asks envEnv
 localEnv :: (r -> r) -> ImpM lore r op a -> ImpM lore r op a
 localEnv f = local $ \env -> env { envEnv = f $ envEnv env }
 
+localOps :: Operations lore r op -> ImpM lore r op a -> ImpM lore r op a
+localOps ops = local $ \env ->
+                         env { envExpCompiler = opsExpCompiler ops
+                             , envStmsCompiler = opsStmsCompiler ops
+                             , envCopyCompiler = opsCopyCompiler ops
+                             , envOpCompiler = opsOpCompiler ops
+                             , envAllocCompilers = opsAllocCompilers ops
+                             }
+
 -- | Get the current symbol table.
 getVTable :: ImpM lore r op (VTable lore)
 getVTable = gets stateVTable
@@ -984,39 +990,30 @@ fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   return (mem, space,
           elements $ IxFun.index ixfun indices')
 
-sliceArray :: MemLocation
-           -> Slice Imp.Exp
-           -> MemLocation
-sliceArray (MemLocation mem shape ixfun) slice =
-  MemLocation mem (update shape slice) $ IxFun.slice ixfun slice
-  where update (d:ds) (DimSlice{}:is) = d : update ds is
-        update (_:ds) (DimFix{}:is) = update ds is
-        update _      _               = []
-
 -- More complicated read/write operations that use index functions.
 
 copy :: CopyCompiler lore r op
-copy bt pat src = do
+copy bt dest destslice src srcslice = do
   cc <- asks envCopyCompiler
-  cc bt pat src
+  cc bt dest destslice src srcslice
 
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler lore r op
-defaultCopy bt dest src
+defaultCopy bt dest destslice src srcslice
   | Just destoffset <-
-      IxFun.linearWithOffset destIxFun bt_size,
+      IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
     Just srcoffset  <-
-      IxFun.linearWithOffset srcIxFun bt_size = do
+      IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
         if isScalarSpace srcspace || isScalarSpace destspace
-          then copyElementWise bt dest src
+          then copyElementWise bt dest destslice src srcslice
           else emit $ Imp.Copy
                destmem (bytes destoffset) destspace
                srcmem (bytes srcoffset) srcspace $
                num_elems `withElemType` bt
   | otherwise =
-      copyElementWise bt dest src
+      copyElementWise bt dest destslice src srcslice
   where bt_size = primByteSize bt
         num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         MemLocation destmem _ destIxFun = dest
@@ -1025,12 +1022,14 @@ defaultCopy bt dest src
         isScalarSpace _ = False
 
 copyElementWise :: CopyCompiler lore r op
-copyElementWise bt dest src = do
-    let bounds = map (toExp' int32) $ memLocationShape src
+copyElementWise bt dest destslice src srcslice = do
+    let bounds = sliceDims srcslice
     is <- replicateM (length bounds) (newVName "i")
     let ivars = map Imp.vi32 is
-    (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
-    (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
+    (destmem, destspace, destidx) <-
+      fullyIndexArray' dest $ fixSlice destslice ivars
+    (srcmem, srcspace, srcidx) <-
+      fullyIndexArray' src $ fixSlice srcslice ivars
     vol <- asks envVolatility
     emit $ foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
       Imp.Write destmem destidx bt destspace vol $
@@ -1059,23 +1058,21 @@ copyArrayDWIM bt
     Imp.index srcmem srcoffset bt srcspace vol
 
   | otherwise = do
-      let destlocation' =
-            sliceArray destlocation $
+      let destslice' =
             fullSliceNum (map (toExp' int32) destshape) destslice
-          srclocation'  =
-            sliceArray srclocation $
+          srcslice'  =
             fullSliceNum (map (toExp' int32) srcshape) srcslice
-          destrank = length (memLocationShape destlocation')
-          srcrank = length (memLocationShape srclocation')
+          destrank = length $ sliceDims destslice'
+          srcrank = length $ sliceDims srcslice'
       if destrank /= srcrank
         then error $ "copyArrayDWIM: cannot copy to " ++
-             pretty (memLocationName destlocation') ++
-             " from " ++ pretty (memLocationName srclocation') ++
+             pretty (memLocationName destlocation) ++
+             " from " ++ pretty (memLocationName srclocation) ++
              " because ranks do not match (" ++ pretty destrank ++
              " vs " ++ pretty srcrank ++ ")"
-      else if destlocation' == srclocation'
+      else if destlocation == srclocation && destslice' == srcslice'
         then return mempty -- Copy would be no-op.
-        else collect $ copy bt destlocation' srclocation'
+        else collect $ copy bt destlocation destslice' srclocation srcslice'
 
 -- | Like 'copyDWIM', but the target is a 'ValueDestination'
 -- instead of a variable name.
@@ -1309,10 +1306,7 @@ sWrite arr is v = do
   emit $ Imp.Write mem offset (primExpType v) space vol v
 
 sUpdate :: VName -> Slice Imp.Exp -> SubExp -> ImpM lore r op ()
-sUpdate arr slice v = do
-  MemLocation mem shape ixfun <- entryArrayLocation <$> lookupArray arr
-  let memdest = sliceArray (MemLocation mem shape ixfun) slice
-  copyDWIMDest (ArrayDestination $ Just memdest) [] v []
+sUpdate arr slice v = copyDWIM arr slice v []
 
 sLoopNest :: Shape
           -> ([Imp.Exp] -> ImpM lore r op ())
