@@ -15,14 +15,13 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
+
 -- import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 -- import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 -- import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
-
 -- import Futhark.Tools hiding (toExp)--(letSubExp)
-
 -- import Futhark.Construct  hiding (toExp)
--- one pass scan will be implemented here
+
 compileSegScan :: Pattern ExplicitMemory
                -> SegLevel -- At which level the *body* of a SegOp executes.
                -> SegSpace -- Index space of a SegOp.
@@ -41,19 +40,9 @@ compileSegScan  (Pattern _ pes)
     arraysize <- toExp arrsize
     let gtid = head gtids
 
-    -- let num_groups = segNumGroups lvl
-    -- num_groups' <- traverse toExp $ segNumGroups lvl
-
     let group_size = segGroupSize lvl                                  -- Subexp
     group_size' <- traverse toExp $ segGroupSize lvl                  -- Imp.Exp
 
-    -- Make Subexp of roundup(N/blocksize)
-    -- let num_groups_subexp = arrsize `quotRoundingUp` (unCount  group_size)
-    -- num_groups_subexp <- letSubExp "num_groups_subexp" $ BasicOp $ BinOp (Mul Int32) arrsize (unCount  group_size)
-
-
-    -- Make Imp.Exp of roundup(N/blocksize)
-    -- num_groups_impexp = arraysize + group_size - 1 / group_size
     let apg = Imp.BinOpExp (Add Int32) arraysize (unCount group_size')
     let apgmone = Imp.BinOpExp (Sub Int32) apg 1
     let num_groups_impexp = Imp.BinOpExp (SDiv Int32) apgmone (unCount group_size')
@@ -71,19 +60,16 @@ compileSegScan  (Pattern _ pes)
 
 
     statusflgs <- sAllocArray "statusflgs" int8 (Shape [Var ng]) (Space "device")
-    -- statusflgs <- sAllocArray "statusflgs" int8 (Shape [num_groups_subexp]) (Space "device")
 
     g_dyn_id <- sAllocArray "dyn_id" int32 (Shape [intConst Int32 1]) (Space "device")
     copyDWIMFix g_dyn_id [0] (intConst Int32 0) []
     (global_id, _, _) <- fullyIndexArray g_dyn_id [0]
-    -- dyn_id <- dPrimV "dyn_id" 0
-  -- sKernelThread :: String
+
+    -- sKernelThread :: String
                 -- -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
                 -- -> VName
                 -- -> (KernelConstants -> InKernelGen ())
                 -- -> CallKernelGen ()
-      -- incprefix <- sAllocArray "incprefix" (Prim (FloatType Float32)) (Shape [num_groups]) (Space "device")
-
     sKernelThread "my_scan" (Imp.Count num_groups_impexp) group_size' (segFlat space) $ \constants -> do
 
       let ltid = kernelLocalThreadId constants
@@ -118,8 +104,6 @@ compileSegScan  (Pattern _ pes)
                 shape = Shape [gsz]
             sAllocArray "exchange" pt shape $ Space "local"
 
-
-
       let copyNpad =
             compileStms mempty (kernelBodyStms kbody) $ do
               let (input_elm, map_res) = splitAt (length nes) $ kernelBodyResult kbody
@@ -134,30 +118,11 @@ compileSegScan  (Pattern _ pes)
       let padding = forM_ (zip exchange nes) $ \(arr, neutral) ->
                     copyDWIMFix arr [ltid] neutral []
 
---       -- let global_tid = Imp.vi32 group_id * unCount group_size' + kernelLocalThreadId constants
-
-      -- sIf (kernelGlobalThreadId constants .<. arraysize)
       let dgtid = Imp.vi32 wG_ID * unCount group_size' + ltid
-
       dPrimV_ gtid dgtid
-
       sIf (dgtid.<. arraysize)
           copyNpad
           padding
-
-      -- let in_bounds =
-      --       foldl1 (.&&.) $ zipWith (.<.) (map (`Imp.var` int32) gtids) dims'
-      --     when_in_bounds = compileStms mempty (kernelBodyStms kbody) $ do
-      --       let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
-      --       sComment "write to-scan values to parameters" $
-      --         forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-      --         copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
-      --       sComment "write mapped values results to global memory" $
-      --         forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
-      --         copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
-      --         (kernelResultSubExp se) []
-      --     when_out_of_bounds = forM_ (zip scan_y_params nes) $ \(p, ne) ->
-      --       copyDWIMFix (paramName p) [] ne []
 
       ress <- forM nes $ \ne -> do
                 ne' <- toExp ne
@@ -302,11 +267,6 @@ compileSegScan  (Pattern _ pes)
             -- wsmone <-- 0
             copyDWIMFix wsmone [] (Var warpscan) [waveSize-1]
             sUnless (Imp.var wsmone int32 .==. 2) $ do -- STATUS_P
-
-              -- #pragma unroll -- TODO unroll
-              -- for(uint32_t i=0; i<lgWARP; i++) {
-              --     const uint32_t p = (1<<i);
-              --     if( lane >= p ) binOpInLocMem( sh_data, sh_status, lane-p, lane );}
 
               -- p = 1
               p <- dPrim "p" int32
@@ -464,12 +424,5 @@ compileSegScan  (Pattern _ pes)
       sWhen (dgtid .<. arraysize) $
         forM_ (zip pes exchange) $ \(dest, arr) ->
           copyDWIMFix (patElemName dest) [dgtid] (Var arr) [ltid]
-
-
-
-
-
-
-      --
 
       return ()

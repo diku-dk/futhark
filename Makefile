@@ -24,6 +24,9 @@ dump-simple:
 gpu-simple:
 	$(FUTHARK) dev --gpu tests/scan/simple.fut > tests/scan/simple.gpu
 
+gpu-seg:
+	$(FUTHARK) dev --gpu tests/scan/seg-scan.fut > tests/scan/seg.gpu
+
 dump-fused:
 	$(FUTHARK) dev --gpu tests/intragroup/scan0.fut > tests/intragroup/scan0.gpu
 	# ./tests/intragroup/scan0 --dump-opencl tests/intragroup/scan0-kernel.c
