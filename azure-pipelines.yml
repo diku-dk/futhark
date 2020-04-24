@@ -45,15 +45,22 @@ jobs:
       choco install -y ghc --version=$(GHC_VERSION)
     displayName: Install GHC
 
-  - bash: |
-      choco install -y cabal
-    displayName: Install cabal
+  - task: Cache@2
+    inputs:
+      key: 'cabal | "$(Agent.OS)" | azure-pipelines.yml | "$(GHC_VERSION)" | futhark.cabal'
+      restoreKeys: |
+        cabal | "$(Agent.OS)"
+      path: "$(APPDATA)\\cabal"
+    displayName: Cache cabal packages
 
   - bash: |
       export PATH=`cygpath $ProgramData`/chocolatey/lib/ghc/tools/ghc-$(GHC_VERSION)/bin:$PATH
-      echo $PATH
       cabal update
-      cabal install -j1
+    displayName: Install cabal dependencies
+
+  - bash: |
+      export PATH=`cygpath $ProgramData`/chocolatey/lib/ghc/tools/ghc-$(GHC_VERSION)/bin:$PATH
+      cabal install -j1 --install-method=copy --overwrite-policy=always
     displayName: Build Futhark compiler
 
 - job: build_linux
