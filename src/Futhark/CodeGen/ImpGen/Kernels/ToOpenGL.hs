@@ -123,7 +123,7 @@ onShader shader = do
           [C.citem|const int block_dim2 = 2;|]]
         )
 
-      (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses shader
+      const_defs = mapMaybe constDef $ kernelUses shader
 
 -- We do currently not account safety within shaders.
   let (safety, error_init) = (SafetyNone, [])
@@ -136,8 +136,6 @@ onShader shader = do
                   $items:block_dim_init
                   $items:local_memory_init
                   $items:shader_body
-
-                  $items:const_undefs
                 }|]
   modify $ \s -> s
     { glShaders   = M.insert name (safety, shader_fun) $ glShaders s
@@ -169,7 +167,16 @@ useAsParam (MemoryUse name) =
 useAsParam ConstUse{} =
   Nothing
 
-constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
+compilePrimExp :: PrimExp KernelConst -> C.Exp
+compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
+  where compileKernelConst (SizeConst key) =
+          return [C.cexp|$id:(zEncodeString (pretty key))|]
+
+constDef :: KernelUse -> Maybe C.BlockItem
+constDef (ConstUse v e) = Just [C.citem|$escstm:def|]
+  where e' = compilePrimExp e
+        def = "const int " ++ pretty (C.toIdent v mempty)
+                           ++ " = " ++ pretty e' ++ ";"
 constDef _ = Nothing
 
 openGlCode :: [C.Func] -> String

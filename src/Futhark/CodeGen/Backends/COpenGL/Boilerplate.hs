@@ -27,13 +27,24 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
       glad_h      = $(embedStringFile "rts/c/glad/include/glad/glad.h")
       glad_c      = $(embedStringFile "rts/c/glad/src/glad.c")
 
+      shader_size_value = pretty $ zipWith shaderSizeInit (M.keys  sizes)
+                                                          (M.elems sizes)
+      shaderSizeInit k size = [C.cedecl|const int $id:k = $int:val;|]
+         where val = case size of SizeBespoke _ x -> x
+                                  _               -> 0
+
       -- fragments might need ctx_fields, ctx_inits and openGL_load
       fragments        = map (\s -> [C.cinit|$string:s|])
-                             $ chunk 2000 (opengl_prelude ++ opengl_code)
+                             $ chunk 2000 (opengl_prelude ++ shader_size_value
+                                                          ++ opengl_code)
+
       size_name_inits  = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
+
       size_var_inits   = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|])
                                                                    $ M.keys sizes
+
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+
       num_sizes        = M.size sizes
 
   GC.earlyDecls [C.cunit|$esc:glad_h
