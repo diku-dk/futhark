@@ -15,7 +15,6 @@ module Futhark.Pipeline
        , onePass
        , passes
        , runPasses
-       , runPipeline
        )
        where
 
@@ -109,18 +108,7 @@ runPasses :: Pipeline fromlore tolore
           -> FutharkM (Prog tolore)
 runPasses = unPipeline
 
-runPipeline :: Pipeline fromlore tolore
-            -> PipelineConfig
-            -> Prog fromlore
-            -> Action tolore
-            -> FutharkM ()
-runPipeline p cfg prog a = do
-  prog' <- runPasses p cfg prog
-  when (pipelineVerbose cfg) $ logMsg $
-    "Running action " <> T.pack (actionName a)
-  actionProcedure a prog'
-
-onePass :: (Checkable fromlore, Checkable tolore) =>
+onePass :: Checkable tolore =>
            Pass fromlore tolore -> Pipeline fromlore tolore
 onePass pass = Pipeline perform
   where perform cfg prog = do
@@ -144,13 +132,11 @@ validationError pass prog err =
   throwError $ InternalError msg (prettyText prog) CompilerBug
   where msg = "Type error after pass '" <> T.pack (passName pass) <> "':\n" <> T.pack err
 
-runPass :: PrettyLore fromlore =>
-           Pass fromlore tolore
+runPass :: Pass fromlore tolore
         -> Prog fromlore
         -> FutharkM (Prog tolore)
 runPass pass prog = do
-  (res, logged) <- runPassM (passFunction pass prog)
+  (prog', logged) <- runPassM (passFunction pass prog)
   verb <- asks $ (>=VeryVerbose) . futharkVerbose
   when verb $ addLog logged
-  case res of Left err -> internalError err $ prettyText prog
-              Right x  -> return x
+  return prog'

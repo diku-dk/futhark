@@ -49,7 +49,7 @@ import qualified Data.Map.Strict as M
 import Data.Char
 import Data.Functor
 import Data.Maybe
-import Data.List
+import Data.List (foldl')
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T

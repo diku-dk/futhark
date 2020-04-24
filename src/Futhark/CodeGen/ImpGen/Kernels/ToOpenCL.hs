@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TemplateHaskell #-}
 -- | This module defines a translation from imperative code with
 -- kernels to imperative code with OpenCL calls.
 module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
@@ -11,6 +12,7 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 import Control.Monad.State
 import Control.Monad.Identity
 import Control.Monad.Reader
+import Data.FileEmbed
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
@@ -19,7 +21,6 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Quote.CUDA as CUDAC
 
-import Futhark.Error
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
@@ -28,25 +29,37 @@ import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (prettyOneLine)
 
-kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program
-                               -> Either InternalError ImpOpenCL.Program
+kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateKernels TargetCUDA
 kernelsToOpenCL = translateKernels TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.
 translateKernels :: KernelTarget
                  -> ImpKernels.Program
-                 -> Either InternalError ImpOpenCL.Program
-translateKernels target (ImpKernels.Functions funs) = do
-  (prog', ToOpenCL kernels used_types sizes failures) <-
-    flip runStateT initialOpenCL $ fmap Functions $ forM funs $ \(fname, fun) ->
-    (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
-  let kernels' = M.map fst kernels
+                 -> ImpOpenCL.Program
+translateKernels target prog =
+  let (prog', ToOpenCL kernels used_types sizes failures) =
+        flip runState initialOpenCL $ do
+          let ImpKernels.Definitions
+                (ImpKernels.Constants ps consts)
+                (ImpKernels.Functions funs) = prog
+          consts' <- runReaderT (traverse (onHostOp target) consts)
+                     (nameFromString "val")
+          funs' <- forM funs $ \(fname, fun) ->
+            (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
+          return $ ImpOpenCL.Definitions
+            (ImpOpenCL.Constants ps consts')
+            (ImpOpenCL.Functions funs')
+
+      kernels' = M.map fst kernels
       opencl_code = openClCode $ map snd $ M.elems kernels
       opencl_prelude = pretty $ genPrelude target used_types
-  return $ ImpOpenCL.Program opencl_code opencl_prelude kernels'
-    (S.toList used_types) (cleanSizes sizes) failures prog'
+
+  in ImpOpenCL.Program opencl_code opencl_prelude kernels'
+     (S.toList used_types) (cleanSizes sizes) failures prog'
+
   where genPrelude TargetOpenCL = genOpenClPrelude
         genPrelude TargetCUDA = const genCUDAPrelude
 
@@ -98,7 +111,7 @@ data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (Safety, C.Func)
 initialOpenCL :: ToOpenCL
 initialOpenCL = ToOpenCL mempty mempty mempty mempty
 
-type OnKernelM = ReaderT Name (StateT ToOpenCL (Either InternalError))
+type OnKernelM = ReaderT Name (State ToOpenCL)
 
 addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =
@@ -120,7 +133,7 @@ onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 onKernel target kernel = do
   failures <- gets clFailures
   let (kernel_body, cstate) =
-        GenericC.runCompilerM mempty (inKernelOperations (kernelBody kernel))
+        GenericC.runCompilerM (inKernelOperations (kernelBody kernel))
         blankNameSource
         (newKernelState failures) $
         GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
@@ -173,14 +186,13 @@ onKernel target kernel = do
                   [C.citems|
                      volatile __local bool local_failure;
                      if (failure_is_an_option) {
-                       if (get_local_id(0) == 0) {
-                         local_failure = *global_failure >= 0;
+                       int failed = *global_failure >= 0;
+                       if (failed) {
+                         return;
                        }
-                       barrier(CLK_LOCAL_MEM_FENCE);
-                       if (local_failure) { return; }
-                     } else {
-                       local_failure = false;
                      }
+                     // All threads write this value - it looks like CUDA has a compiler bug otherwise.
+                     local_failure = false;
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |])
 
@@ -252,7 +264,7 @@ constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
 constDef (ConstUse v e) = Just ([C.citem|$escstm:def|],
                                 [C.citem|$escstm:undef|])
   where e' = compilePrimExp e
-        def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ pretty e' ++ ")"
+        def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
         undef = "#undef " ++ pretty (C.toIdent v mempty)
 constDef _ = Nothing
 
@@ -262,6 +274,9 @@ openClCode kernels =
   where funcs =
           [[C.cedecl|$func:kernel_func|] |
            kernel_func <- kernels ]
+
+atomicsDefs :: String
+atomicsDefs = $(embedStringFile "rts/c/atomics.h")
 
 genOpenClPrelude :: S.Set PrimType -> [C.Definition]
 genOpenClPrelude ts =
@@ -308,39 +323,18 @@ static inline void mem_fence_local() {
 |] ++
   cIntOps ++ cFloat32Ops ++ cFloat32Funs ++
   (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
+  ++ [[C.cedecl|$esc:atomicsDefs|]]
   where uses_float64 = FloatType Float64 `S.member` ts
-
-
-cudaAtomicOps :: [C.Definition]
-cudaAtomicOps = (mkOp <$> opNames <*> types) ++ extraOps
-  where
-    mkOp (clName, cuName) t =
-      [C.cedecl|static inline $ty:t $id:clName(volatile $ty:t *p, $ty:t val) {
-                 return $id:cuName(($ty:t *)p, val);
-               }|]
-    types = [ [C.cty|int|]
-            , [C.cty|unsigned int|]
-            , [C.cty|unsigned long long|]
-            ]
-    opNames = [ ("atomic_add",  "atomicAdd")
-              , ("atomic_max",  "atomicMax")
-              , ("atomic_min",  "atomicMin")
-              , ("atomic_and",  "atomicAnd")
-              , ("atomic_or",   "atomicOr")
-              , ("atomic_xor",  "atomicXor")
-              , ("atomic_xchg", "atomicExch")
-              ]
-    extraOps =
-      [ [C.cedecl|static inline $ty:t atomic_cmpxchg(volatile $ty:t *p, $ty:t cmp, $ty:t val) {
-                  return atomicCAS(($ty:t *)p, cmp, val);
-                }|] | t <- types]
 
 genCUDAPrelude :: [C.Definition]
 genCUDAPrelude =
-  cudafy ++ cudaAtomicOps ++ ops
+  cudafy ++ ops
   where ops = cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
-                ++ cFloat64Funs ++ cFloatConvOps
+              ++ cFloat64Funs ++ cFloatConvOps
+              ++ [[C.cedecl|$esc:atomicsDefs|]]
         cudafy = [CUDAC.cunit|
+$esc:("#define FUTHARK_CUDA")
+
 typedef char int8_t;
 typedef short int16_t;
 typedef int int32_t;
@@ -436,6 +430,7 @@ static inline void mem_fence_local() {
 static inline void mem_fence_global() {
   __threadfence();
 }
+
 $esc:("#define NAN (0.0/0.0)")
 $esc:("#define INFINITY (1.0/0.0)")
 extern volatile __shared__ char shared_mem[];
@@ -466,9 +461,8 @@ pendingError b =
 
 hasCommunication :: ImpKernels.KernelCode -> Bool
 hasCommunication = any communicates
-  where communicates ErrorSync = True
-        communicates LocalBarrier = True
-        communicates GlobalBarrier = True
+  where communicates ErrorSync{} = True
+        communicates Barrier{} = True
         communicates _ = False
 
 inKernelOperations :: ImpKernels.KernelCode -> GenericC.Operations KernelOp KernelState
@@ -487,6 +481,9 @@ inKernelOperations body =
   }
   where has_communication = hasCommunication body
 
+        fence FenceLocal = [C.cexp|CLK_LOCAL_MEM_FENCE|]
+        fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE|]
+
         kernelOps :: GenericC.OpCompiler KernelOp KernelState
         kernelOps (GetGroupId v i) =
           GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
@@ -500,34 +497,26 @@ inKernelOperations body =
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
         kernelOps (GetLockstepWidth v) =
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-        kernelOps LocalBarrier = do
-          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+        kernelOps (Barrier f) = do
+          GenericC.stm [C.cstm|barrier($exp:(fence f));|]
           GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
-        kernelOps GlobalBarrier = do
-          GenericC.stm [C.cstm|barrier(CLK_GLOBAL_MEM_FENCE);|]
-          GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
-        kernelOps MemFenceLocal =
+        kernelOps (MemFence FenceLocal) =
           GenericC.stm [C.cstm|mem_fence_local();|]
-        kernelOps MemFenceGlobal =
+        kernelOps (MemFence FenceGlobal) =
           GenericC.stm [C.cstm|mem_fence_global();|]
-        kernelOps (PrivateAlloc name size) = do
-          size' <- GenericC.compileExp $ unCount size
-          name' <- newVName $ pretty name ++ "_backing"
-          GenericC.item [C.citem|__private char $id:name'[$exp:size'];|]
-          GenericC.stm [C.cstm|$id:name = $id:name';|]
         kernelOps (LocalAlloc name size) = do
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.modifyUserState $ \s ->
             s { kernelLocalMemory = (name', size) : kernelLocalMemory s }
           GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
-        kernelOps ErrorSync = do
+        kernelOps (ErrorSync f) = do
           label <- nextErrorLabel
           pending <- kernelSyncPending <$> GenericC.getUserState
           when pending $ do
             pendingError False
-            GenericC.stm [C.cstm|$id:label: barrier(CLK_LOCAL_MEM_FENCE);|]
+            GenericC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
             GenericC.stm [C.cstm|if (local_failure) { return; }|]
-          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
           GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
           incErrorLabel
         kernelOps (Atomic space aop) = atomicOps space aop
@@ -538,48 +527,57 @@ inKernelOperations body =
                              _            -> pointerQuals "global"
           return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
-        doAtomic s old arr ind val op ty = do
+        atomicSpace (Space sid) = sid
+        atomicSpace _           = "global"
+
+        doAtomic s t old arr ind val op ty = do
           ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
           cast <- atomicCast s ty
-          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+          where op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
 
-        atomicOps s (AtomicAdd old arr ind val) =
-          doAtomic s old arr ind val "atomic_add" [C.cty|int|]
+        atomicOps s (AtomicAdd t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
 
-        atomicOps s (AtomicSMax old arr ind val) =
-          doAtomic s old arr ind val "atomic_max" [C.cty|int|]
+        atomicOps s (AtomicFAdd t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
 
-        atomicOps s (AtomicSMin old arr ind val) =
-          doAtomic s old arr ind val "atomic_min" [C.cty|int|]
+        atomicOps s (AtomicSMax t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
 
-        atomicOps s (AtomicUMax old arr ind val) =
-          doAtomic s old arr ind val "atomic_max" [C.cty|unsigned int|]
+        atomicOps s (AtomicSMin t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_smin" [C.cty|int|]
 
-        atomicOps s (AtomicUMin old arr ind val) =
-          doAtomic s old arr ind val "atomic_min" [C.cty|unsigned int|]
+        atomicOps s (AtomicUMax t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_umax" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicAnd old arr ind val) =
-          doAtomic s old arr ind val "atomic_and" [C.cty|unsigned int|]
+        atomicOps s (AtomicUMin t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_umin" [C.cty|unsigned int|]
 
-        atomicOps s (AtomicOr old arr ind val) =
-          doAtomic s old arr ind val "atomic_or" [C.cty|unsigned int|]
+        atomicOps s (AtomicAnd t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_and" [C.cty|int|]
 
-        atomicOps s (AtomicXor old arr ind val) =
-          doAtomic s old arr ind val "atomic_xor" [C.cty|unsigned int|]
+        atomicOps s (AtomicOr t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_or" [C.cty|int|]
 
-        atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
+        atomicOps s (AtomicXor t old arr ind val) =
+          doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
+
+        atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
           ind' <- GenericC.compileExp $ unCount ind
           cmp' <- GenericC.compileExp cmp
           val' <- GenericC.compileExp val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+          where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
 
-        atomicOps s (AtomicXchg old arr ind val) = do
+        atomicOps s (AtomicXchg t old arr ind val) = do
           ind' <- GenericC.compileExp $ unCount ind
           val' <- GenericC.compileExp val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+          where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
 
         cannotAllocate :: GenericC.Allocate KernelOp KernelState
         cannotAllocate _ =
@@ -624,7 +622,7 @@ inKernelOperations body =
                 | has_communication = [C.citems|local_failure = true;
                                                 goto $id:label;|]
                 | otherwise         = [C.citems|return;|]
-          GenericC.stm [C.cstm|{ if (atomic_cmpxchg(global_failure, -1, $int:n) == -1)
+          GenericC.stm [C.cstm|{ if (atomic_cmpxchg_i32_global(global_failure, -1, $int:n) == -1)
                                  { $stms:argstms; }
                                  $items:what_next
                                }|]

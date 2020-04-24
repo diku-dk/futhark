@@ -15,7 +15,7 @@ where
 
 import Control.Monad
 import Data.Foldable
-import Data.List
+import Data.List (isPrefixOf, groupBy, partition)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 
@@ -67,6 +67,7 @@ simplifyKernelOp _ (SegOp (SegRed lvl space reds ts kbody)) = do
   (reds', reds_hoisted) <- fmap unzip $ forM reds $ \(SegRedOp comm lam nes shape) -> do
     (lam', hoisted) <-
       Engine.localVtable (<>scope_vtable) $
+      Engine.localVtable (\vtable -> vtable { ST.simplifyMemory = True }) $
       Engine.simplifyLambda lam $ replicate (length nes * 2) Nothing
     shape' <- Engine.simplify shape
     nes' <- mapM Engine.simplify nes
@@ -99,6 +100,7 @@ simplifyKernelOp _ (SegOp (SegHist lvl space ops ts kbody)) = do
       dims' <- Engine.simplify dims
       (lam', op_hoisted) <-
         Engine.localVtable (<>scope_vtable) $
+        Engine.localVtable (\vtable -> vtable { ST.simplifyMemory = True }) $
         Engine.simplifyLambda lam $
         replicate (length nes * 2) Nothing
       return (HistOp w' rf' arrs' nes' dims' lam',
@@ -142,6 +144,7 @@ simplifyRedOrScan space scan_op nes ts kbody = do
 
   (scan_op', scan_op_hoisted) <-
     Engine.localVtable (<>scope_vtable) $
+    Engine.localVtable (\vtable -> vtable { ST.simplifyMemory = True }) $
     Engine.simplifyLambda scan_op $ replicate (length nes * 2) Nothing
 
   (kbody', body_hoisted) <- simplifyKernelBody space kbody

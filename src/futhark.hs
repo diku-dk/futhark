@@ -5,7 +5,7 @@ module Main (main) where
 import Data.Maybe
 import Control.Exception
 import Control.Monad
-import Data.List
+import Data.List (sortOn)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import GHC.IO.Encoding (setLocaleEncoding)
@@ -15,6 +15,7 @@ import System.Environment
 
 import Prelude
 
+import Futhark.Error
 import Futhark.Util.Options
 
 import qualified Futhark.CLI.Dev as Dev
@@ -83,9 +84,20 @@ msg = unlines $
 -- | Catch all IO exceptions and print a better error message if they
 -- happen.
 reportingIOErrors :: IO () -> IO ()
-reportingIOErrors = flip catches [Handler onExit, Handler onError]
+reportingIOErrors = flip catches [Handler onExit, Handler onICE, Handler onError]
   where onExit :: ExitCode -> IO ()
         onExit = throwIO
+
+        onICE :: InternalError -> IO ()
+        onICE (Error CompilerLimitation s) = do
+          T.hPutStrLn stderr "Known compiler limitation encountered.  Sorry."
+          T.hPutStrLn stderr "Revise your program or try a different Futhark compiler."
+          T.hPutStrLn stderr s
+        onICE (Error CompilerBug s) = do
+          T.hPutStrLn stderr "Internal compiler error."
+          T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues."
+          T.hPutStrLn stderr s
+
         onError :: SomeException -> IO ()
         onError e
           | Just UserInterrupt <- asyncExceptionFromException e =

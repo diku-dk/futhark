@@ -1,4 +1,6 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- | Futhark core language skeleton.  Concrete representations further
 -- extend this skeleton by defining a "lore", which specifies concrete
 -- annotations ("Futhark.Representation.AST.Annotations") and
@@ -372,5 +374,14 @@ data EntryPointType = TypeUnsigned
                     deriving (Eq, Show, Ord)
 
 -- | An entire Futhark program.
-newtype Prog lore = Prog { progFunctions :: [FunDef lore] }
-                    deriving (Eq, Ord, Show)
+data Prog lore = Prog
+  { progConsts :: Stms lore
+    -- ^ Top-level constants that are computed at program startup, and
+    -- which are in scope inside all functions.
+
+  , progFuns :: [FunDef lore]
+    -- ^ The functions comprising the program.  All funtions are also
+    -- available in scope in the definitions of the constants, so be
+    -- careful not to introduce circular dependencies (not currently
+    -- checked).
+  } deriving (Eq, Ord, Show)

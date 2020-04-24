@@ -19,7 +19,6 @@ module Futhark.Representation.AST.Attributes.Reshape
 
          -- * Simplification
        , fuseReshape
-       , fuseReshapes
        , informReshape
 
          -- * Shape calculations
@@ -118,13 +117,6 @@ fuseReshape s1 s2
           d2
 -- TODO: intelligently handle case where s1 is a prefix of s2.
 fuseReshape _ s2 = s2
-
--- | @fuseReshapes s ss@ creates a fused 'ShapeChange' that is
--- logically the same as first applying @s@ and then the changes in
--- @ss@ from left to right.
-fuseReshapes :: (Eq d, Data.Foldable.Foldable t) =>
-                ShapeChange d -> t (ShapeChange d) -> ShapeChange d
-fuseReshapes = Data.Foldable.foldl fuseReshape
 
 -- | Given concrete information about the shape of the source array,
 -- convert some 'DimNew's into 'DimCoercion's.

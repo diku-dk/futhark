@@ -136,6 +136,11 @@ instance Semigroup Env where
   Env vt1 tt1 st1 mt1 nt1 <> Env vt2 tt2 st2 mt2 nt2 =
     Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
 
+instance Pretty Namespace where
+  ppr Term = text "name"
+  ppr Type = text "type"
+  ppr Signature = text "module type"
+
 instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
 

@@ -50,7 +50,7 @@ module Futhark.CodeGen.ImpGen.Kernels.SegRed
 
 import Control.Monad.Except
 import Data.Maybe
-import Data.List
+import Data.List (genericLength, zip4, zip7)
 
 import Prelude hiding (quot, rem)
 
@@ -69,7 +69,7 @@ import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 maxNumOps :: Int32
 maxNumOps = 10
 
-type DoSegBody = (KernelConstants -> ([(SubExp, [Imp.Exp])] -> InKernelGen ()) -> InKernelGen ())
+type DoSegBody = ([(SubExp, [Imp.Exp])] -> InKernelGen ()) -> InKernelGen ()
 
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.
@@ -79,13 +79,13 @@ compileSegRed :: Pattern ExplicitMemory
               -> KernelBody ExplicitMemory
               -> CallKernelGen ()
 compileSegRed pat lvl space reds body =
-  compileSegRed' pat lvl space reds $ \constants red_cont ->
+  compileSegRed' pat lvl space reds $ \red_cont ->
   compileStms mempty (kernelBodyStms body) $ do
   let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult body
 
   sComment "save map-out results" $ do
     let map_arrs = drop (segRedResults reds) $ patternElements pat
-    zipWithM_ (compileThreadResult space constants) map_arrs map_res
+    zipWithM_ (compileThreadResult space) map_arrs map_res
 
   red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
 
@@ -176,7 +176,10 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
 
   num_threads <- dPrimV "num_threads" $ unCount num_groups' * unCount group_size'
 
-  sKernelThread "segred_nonseg" num_groups' group_size' (segFlat space) $ \constants -> do
+  emit $ Imp.DebugPrint "\n# SegRed" Nothing
+
+  sKernelThread "segred_nonseg" num_groups' group_size' (segFlat space) $ do
+    constants <- kernelConstants <$> askEnv
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
     reds_arrs <- mapM (intermediateArrays group_size (Var num_threads)) reds
 
@@ -235,14 +238,14 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
   emit $ Imp.DebugPrint "segments_per_group" $ Just segments_per_group
   emit $ Imp.DebugPrint "required_groups" $ Just required_groups
 
-  sKernelThread "segred_small" num_groups' group_size' (segFlat space) $ \constants -> do
-
+  sKernelThread "segred_small" num_groups' group_size' (segFlat space) $ do
+    constants <- kernelConstants <$> askEnv
     reds_arrs <- mapM (intermediateArrays group_size (Var num_threads)) reds
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
     -- duty; we put an outer loop to accomplish this.
-    virtualiseGroups constants SegVirt required_groups $ \group_id_var' -> do
+    virtualiseGroups SegVirt required_groups $ \group_id_var' -> do
       let group_id' = Imp.vi32 group_id_var'
       -- Compute the 'n' input indices.  The outer 'n-1' correspond to
       -- the segment ID, and are computed from the group id.  The inner
@@ -260,7 +263,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
             copyDWIMFix arr [ltid] ne []
 
           in_bounds =
-            body constants $ \red_res ->
+            body $ \red_res ->
             sComment "save results to be reduced" $ do
             let red_dests = zip (concat reds_arrs) $ repeat [ltid]
             forM_ (zip red_dests red_res) $ \((d,d_is), (res, res_is)) ->
@@ -271,15 +274,16 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
              isActive (init $ zip gtids dims) .&&.
              ltid .<. segment_size * segments_per_group) in_bounds out_of_bounds
 
-      sOp Imp.ErrorSync -- Also implicitly barrier.
+      sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
 
       let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
       sWhen (segment_size .>. 0) $
         sComment "perform segmented scan to imitate reduction" $
         forM_ (zip reds reds_arrs) $ \(SegRedOp _ red_op _ _, red_arrs) ->
-        groupScan constants (Just crossesSegment) (segment_size*segments_per_group) red_op red_arrs
+        groupScan (Just crossesSegment) (Imp.vi32 num_threads)
+        (segment_size*segments_per_group) red_op red_arrs
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
       sComment "save final values of segments" $
         sWhen (group_id' * segments_per_group + ltid .<. num_segments .&&.
@@ -293,7 +297,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
 
       -- Finally another barrier, because we will be writing to the
       -- local memory array first thing in the next iteration.
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
 largeSegmentsReduction :: Pattern ExplicitMemory
                        -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -347,15 +351,15 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
     sStaticArray "counter" (Space "device") int32 $
     Imp.ArrayZeros num_counters
 
-  sKernelThread "segred_large" num_groups' group_size' (segFlat space) $ \constants -> do
-
+  sKernelThread "segred_large" num_groups' group_size' (segFlat space) $ do
+    constants <- kernelConstants <$> askEnv
     reds_arrs <- mapM (intermediateArrays group_size (Var num_threads)) reds
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
     -- duty; we put an outer loop to accomplish this.
-    virtualiseGroups constants SegVirt (Imp.vi32 virt_num_groups) $ \group_id_var -> do
+    virtualiseGroups SegVirt (Imp.vi32 virt_num_groups) $ \group_id_var -> do
       let segment_gtids = init gtids
           group_id = Imp.vi32 group_id_var
           flat_segment_id = group_id `quot` groups_per_segment
@@ -498,11 +502,11 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
               when (primType $ paramType p) $
               copyDWIMFix arr [local_tid] (Var $ paramName p) []
 
-          sOp Imp.ErrorSync -- Also implicitly barrier.
+          sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
 
-          groupReduce constants (kernelGroupSize constants) slug_op_renamed (slugArrs slug)
+          groupReduce (kernelGroupSize constants) slug_op_renamed (slugArrs slug)
 
-          sOp Imp.LocalBarrier
+          sOp $ Imp.Barrier Imp.FenceLocal
 
           sComment "first thread saves the result in accumulator" $
             sWhen (local_tid .==. 0) $
@@ -532,7 +536,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
              kernelGroupSize constants
 
     check_bounds $ sComment "apply map function" $
-      body constants $ \all_red_res -> do
+      body $ \all_red_res -> do
 
       let slugs_res = chunks (map (length . slugNeutral) slugs) all_red_res
 
@@ -614,16 +618,15 @@ reductionStageTwo constants segred_pes
     sWhen (local_tid .==. 0) $ do
     forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
       copyDWIMFix v [0, group_id] (Var acc) acc_is
-    sOp Imp.MemFenceGlobal
+    sOp $ Imp.MemFence Imp.FenceGlobal
     -- Increment the counter, thus stating that our result is
     -- available.
-    sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd old_counter counter_mem counter_offset 1
+    sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd Int32 old_counter counter_mem counter_offset 1
     -- Now check if we were the last group to write our result.  If
     -- so, it is our responsibility to produce the final result.
     sWrite sync_arr [0] $ Imp.var old_counter int32 .==. groups_per_segment - 1
 
-  sOp Imp.LocalBarrier
-  sOp Imp.GlobalBarrier
+  sOp $ Imp.Barrier Imp.FenceGlobal
 
   is_last_group <- dPrim "is_last_group" Bool
   copyDWIMFix is_last_group [] (Var sync_arr) [0]
@@ -635,7 +638,8 @@ reductionStageTwo constants segred_pes
     -- with an atomic to avoid warnings about write/write
     -- races in oclgrind.
     sWhen (local_tid .==. 0) $
-      sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd old_counter counter_mem counter_offset $
+      sOp $ Imp.Atomic DefaultSpace $
+      Imp.AtomicAdd Int32 old_counter counter_mem counter_offset $
       negate groups_per_segment
     sLoopNest (slugShape slug) $ \vec_is -> do
       comment "read in the per-group-results" $
@@ -651,10 +655,10 @@ reductionStageTwo constants segred_pes
           when (primType $ paramType p) $
             copyDWIMFix arr [local_tid] (Var $ paramName p) []
 
-      sOp Imp.LocalBarrier
+      sOp $ Imp.Barrier Imp.FenceLocal
 
       sComment "reduce the per-group results" $ do
-        groupReduce constants group_size red_op_renamed red_arrs
+        groupReduce group_size red_op_renamed red_arrs
 
         sComment "and back to memory with the final result" $
           sWhen (local_tid .==. 0) $

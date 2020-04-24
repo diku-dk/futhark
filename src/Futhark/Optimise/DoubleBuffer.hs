@@ -30,7 +30,7 @@ import           Control.Monad.Writer
 import           Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import           Data.Maybe
-import           Data.List
+import           Data.List (find)
 
 import           Futhark.Construct
 import           Futhark.Representation.AST
@@ -46,15 +46,14 @@ doubleBuffer :: Pass ExplicitMemory ExplicitMemory
 doubleBuffer =
   Pass { passName = "Double buffer"
        , passDescription = "Perform double buffering for merge parameters of sequential loops."
-       , passFunction = intraproceduralTransformation optimiseFunDef
+       , passFunction = intraproceduralTransformation optimise
        }
+  where optimise scope stms = modifyNameSource $ \src ->
+          let m = runDoubleBufferM $ localScope scope $
+                  fmap stmsFromList $ optimiseStms $ stmsToList stms
+          in runState (runReaderT m env) src
 
-optimiseFunDef :: FunDef ExplicitMemory -> PassM (FunDef ExplicitMemory)
-optimiseFunDef fundec = modifyNameSource $ \src ->
-  let m = runDoubleBufferM $ inScopeOf fundec $ optimiseBody $ funDefBody fundec
-      (body', src') = runState (runReaderT m env) src
-  in (fundec { funDefBody = body' }, src')
-  where env = Env mempty doNotTouchLoop
+        env = Env mempty doNotTouchLoop
         doNotTouchLoop ctx val body = return (mempty, ctx, val, body)
 
 data Env = Env { envScope :: Scope ExplicitMemory

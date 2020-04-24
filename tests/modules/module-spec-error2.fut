@@ -1,5 +1,5 @@
 -- ==
--- error: M1.M.t.*with.*M0.M.t
+-- error: M1.M.t.*M0.M.t
 
 
 module type MT = {

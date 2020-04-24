@@ -9,15 +9,13 @@ import Futhark.Pipeline
 import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import Futhark.Util
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile CUDA" "Generate CUDA/C code from optimised Futhark program."
        gpuPipeline $ \() mode outpath prog -> do
-         cprog <- either (`internalError` prettyText prog) return =<<
-                  CCUDA.compileProg prog
+         cprog <- CCUDA.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
              extra_options = [ "-lcuda"

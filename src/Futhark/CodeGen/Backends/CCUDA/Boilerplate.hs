@@ -23,7 +23,7 @@ generateBoilerplate :: String -> String -> M.Map KernelName Safety
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
 generateBoilerplate cuda_program cuda_prelude kernels sizes failures = do
-  GC.earlyDecls [C.cunit|
+  mapM_ GC.earlyDecl [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
       $esc:("typedef CUdeviceptr fl_mem_t;")
@@ -48,9 +48,9 @@ generateSizeFuns sizes = do
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
-  GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
-  GC.libDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
-  GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
 
   GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(void);|],
@@ -74,7 +74,7 @@ generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
 generateConfigFuns sizes = do
   let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
       num_sizes = M.size sizes
-  GC.libDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
+  GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s { struct cuda_config cu_cfg;
@@ -265,6 +265,7 @@ generateContextFuns cfg kernels sizes failures = do
                    return NULL;
                  }
                  ctx->profiling = ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
+                 ctx->error = NULL;
 
                  ctx->cuda.cfg = cfg->cu_cfg;
                  create_lock(&ctx->lock);
@@ -285,12 +286,19 @@ generateContextFuns cfg kernels sizes failures = do
                  $stms:final_inits
                  $stms:set_sizes
 
+                 init_constants(ctx);
+                 // Clear the free list of any deallocations that occurred while initialising constants.
+                 CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+
+                 futhark_context_sync(ctx);
+
                  return ctx;
                }|])
 
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 free_constants(ctx);
                                  cuda_cleanup(&ctx->cuda);
                                  free_lock(&ctx->lock);
                                  free(ctx);
@@ -321,6 +329,7 @@ generateContextFuns cfg kernels sizes failures = do
                      return 1;
                    }
                  }
+                 return 0;
                }|])
 
   GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->

@@ -4,7 +4,6 @@ module Futhark.CodeGen.Backends.SequentialPython
 
 import Control.Monad
 
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
@@ -14,15 +13,15 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory -> m (Either InternalError String)
+               Maybe String -> Prog ExplicitMemory -> m String
 compileProg module_name =
   ImpGen.compileProg >=>
-  traverse (GenericPython.compileProg
-            module_name
-            GenericPython.emptyConstructor
-            imports
-            defines
-            operations () [] [])
+  GenericPython.compileProg
+  module_name
+  GenericPython.emptyConstructor
+  imports
+  defines
+  operations () [] []
   where imports = [Import "sys" Nothing,
                    Import "numpy" $ Just "np",
                    Import "ctypes" $ Just "ct",

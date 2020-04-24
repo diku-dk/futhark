@@ -11,7 +11,8 @@ import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
 import Data.Maybe
-import Data.List
+import Data.List (foldl', sortBy)
+import Data.Ord
 import qualified Data.Text as T
 import System.Console.GetOpt
 import System.Directory
@@ -41,11 +42,12 @@ data BenchOptions = BenchOptions
                    , optEntryPoint :: Maybe String
                    , optTuning :: Maybe String
                    , optConcurrency :: Maybe Int
+                   , optVerbose :: Int
                    }
 
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "c" Nothing "" 10 [] [] Nothing (-1) False
-                      ["nobench", "disable"] [] Nothing (Just "tuning") Nothing
+                      ["nobench", "disable"] [] Nothing (Just "tuning") Nothing 0
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -64,7 +66,8 @@ runBenchmarks opts paths = do
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
 
-  results <- concat <$> mapM (runBenchmark opts) compiled_benchmarks
+  results <- concat <$> mapM (runBenchmark opts)
+             (sortBy (comparing fst) compiled_benchmarks)
   case optJSON opts of
     Nothing -> return ()
     Just file -> LBS.writeFile file $ encodeBenchResults results
@@ -160,6 +163,7 @@ runOptions opts = RunOptions { runRunner = optRunner opts
                              , runRuns = optRuns opts
                              , runExtraOptions = optExtraOptions opts
                              , runTimeout = optTimeout opts
+                             , runVerbose = optVerbose opts
                              }
 
 runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
@@ -273,6 +277,9 @@ commandLineOptions = [
                    Left $ error $ "'" ++ n ++ "' is not a positive integer.")
     "NUM")
     "Number of benchmarks to prepare (not run) concurrently."
+  , Option "v" ["verbose"]
+    (NoArg $ Right $ \config -> config { optVerbose = optVerbose config + 1 })
+    "Enable logging.  Pass multiple times for more."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
