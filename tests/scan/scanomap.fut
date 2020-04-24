@@ -4,7 +4,6 @@
 let main (input:[]i32) =
     let arr = map (+2) input
     let arr' = scan (+) 0 arr
-    -- in arr'
     in (arr, arr')
 
 -- input @kA-13.data auto output

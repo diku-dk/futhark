@@ -104,16 +104,13 @@ compileSegScan  (Pattern _ pes)
                 shape = Shape [gsz]
             sAllocArray "exchange" pt shape $ Space "local"
 
-      let copyNpad =
-            compileStms mempty (kernelBodyStms kbody) $ do
-              let (input_elm, map_res) = splitAt (length nes) $ kernelBodyResult kbody
-
-              forM_ (zip exchange input_elm) $ \(arr, input) ->
-                copyDWIMFix arr [ltid] (kernelResultSubExp input) []
-              sComment "write mapped values results to global memory" $
-                forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
-                copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
-                (kernelResultSubExp se) []
+      let inrange = compileStms mempty (kernelBodyStms kbody) $ do
+            let (input_elm, map_res) = splitAt (length nes) $ kernelBodyResult kbody
+            forM_ (zip exchange input_elm) $ \(arr, input) ->
+              copyDWIMFix arr [ltid] (kernelResultSubExp input) []
+            forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
+              copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
+              (kernelResultSubExp se) []
 
       let padding = forM_ (zip exchange nes) $ \(arr, neutral) ->
                     copyDWIMFix arr [ltid] neutral []
@@ -121,7 +118,7 @@ compileSegScan  (Pattern _ pes)
       let dgtid = Imp.vi32 wG_ID * unCount group_size' + ltid
       dPrimV_ gtid dgtid
       sIf (dgtid.<. arraysize)
-          copyNpad
+          inrange
           padding
 
       ress <- forM nes $ \ne -> do
