@@ -116,12 +116,14 @@ compileThreadExp dest e =
   defCompileExp dest e
 
 
--- | Assign iterations of a for-loop to all threads in the kernel.  The
--- passed-in function is invoked with the (symbolic) iteration.  For
+-- | Assign iterations of a for-loop to all threads in the kernel.
+-- The passed-in function is invoked with the (symbolic) iteration.
+-- 'threadOperations' will be in effect in the body.  For
 -- multidimensional loops, use 'groupCoverSpace'.
 kernelLoop :: Imp.Exp -> Imp.Exp -> Imp.Exp
            -> (Imp.Exp -> InKernelGen ()) -> InKernelGen ()
 kernelLoop tid num_threads n f =
+  localOps threadOperations $
   if n == num_threads then
     f tid
   else do
@@ -149,23 +151,11 @@ groupCoverSpace :: [Imp.Exp]
 groupCoverSpace ds f =
   groupLoop (product ds) $ f . unflattenIndex ds
 
-groupCopy :: VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> InKernelGen ()
-groupCopy to to_is from from_is = do
-  ds <- mapM toExp . arrayDims =<< subExpType from
-  groupCoverSpace ds $ \is ->
-    copyDWIMFix to (to_is++ is) from (from_is ++ is)
-
 compileGroupExp :: ExpCompiler ExplicitMemory KernelEnv Imp.KernelOp
 -- The static arrays stuff does not work inside kernels.
 compileGroupExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
-compileGroupExp (Pattern _ [dest]) (BasicOp (Copy arr)) = do
-  groupCopy (patElemName dest) [] (Var arr) []
-  sOp $ Imp.Barrier Imp.FenceLocal
-compileGroupExp (Pattern _ [dest]) (BasicOp (Manifest _ arr)) = do
-  groupCopy (patElemName dest) [] (Var arr) []
-  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
   ds' <- mapM toExp $ shapeDims ds
   groupCoverSpace ds' $ \is ->
@@ -179,9 +169,10 @@ compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIMFix (patElemName dest) [i'] (Var x) []
   sOp $ Imp.Barrier Imp.FenceLocal
-
-compileGroupExp dest e =
+compileGroupExp dest e = do
   defCompileExp dest e
+  when (any ((>0) . arrayRank) (patternTypes dest)) $
+    sOp $ Imp.Barrier Imp.FenceLocal
 
 sanityCheckLevel :: SegLevel -> InKernelGen ()
 sanityCheckLevel SegThread{} = return ()
@@ -1149,12 +1140,21 @@ copyInGroup pt destloc destslice srcloc srcslice = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
 
-  if isScalarMem dest_space && isScalarMem src_space
-    then memLocationName destloc <-- Imp.var (memLocationName srcloc) pt
-    else copyElementWise pt destloc destslice srcloc srcslice
+  case (dest_space, src_space) of
+    (ScalarSpace destds _, ScalarSpace srcds _) -> do
+      let destslice' =
+            replicate (length destslice - length destds) (DimFix 0) ++
+            takeLast (length destds) destslice
+          srcslice' =
+            replicate (length srcslice - length srcds) (DimFix 0) ++
+            takeLast (length srcds) srcslice
+      copyElementWise pt destloc destslice' srcloc srcslice'
 
-  where isScalarMem ScalarSpace{} = True
-        isScalarMem _ = False
+    _ ->
+      groupCoverSpace (sliceDims destslice) $ \is ->
+      copyElementWise pt
+      destloc (map DimFix $ fixSlice destslice is)
+      srcloc (map DimFix $ fixSlice srcslice is)
 
 threadOperations, groupOperations :: Operations ExplicitMemory KernelEnv Imp.KernelOp
 threadOperations =
@@ -1335,6 +1335,7 @@ compileGroupResult space pe (Returns _ what) = do
   let gids = map (Imp.vi32 . fst) $ unSegSpace space
 
   if not in_local_memory then
+    localOps threadOperations $
     sWhen (kernelLocalThreadId constants .==. 0) $
     copyDWIMFix (patElemName pe) gids what []
     else
@@ -1342,7 +1343,7 @@ compileGroupResult space pe (Returns _ what) = do
       -- store it by collective copying among all the threads of the
       -- group.  TODO: also do this if the array is in global memory
       -- (but this is a bit more tricky, synchronisation-wise).
-      groupCopy (patElemName pe) gids what []
+      copyDWIMFix (patElemName pe) gids what []
 
 compileGroupResult _ _ WriteReturns{} =
   compilerLimitationS "compileGroupResult: WriteReturns not handled yet."
