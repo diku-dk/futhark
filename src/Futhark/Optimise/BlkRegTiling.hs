@@ -94,8 +94,8 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
         tk         <- letSubExp "Tk" $ Op $ SizeOp $ GetSize ty_name SizeTile
         tx         <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tk_name SizeTile
         ty         <- letSubExp "Ty" $ Op $ SizeOp $ GetSize tx_name SizeTile
-        rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeTile
-        ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeTile
+        rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeRegTile
+        ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeRegTile
         -- rx         <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 1
         -- ry         <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 1
 

@@ -25,6 +25,7 @@ data SizeClass = SizeThreshold KernelPath
                | SizeGroup
                | SizeNumGroups
                | SizeTile
+               | SizeRegTile
                | SizeLocalMemory
                -- ^ Likely not useful on its own, but querying the
                -- maximum can be handy.
@@ -39,6 +40,7 @@ instance Pretty SizeClass where
   ppr SizeGroup = text "group_size"
   ppr SizeNumGroups = text "num_groups"
   ppr SizeTile = text "tile_size"
+  ppr SizeRegTile = text "reg_tile_size"
   ppr SizeLocalMemory = text "local_memory"
   ppr (SizeBespoke k _) = ppr k
 

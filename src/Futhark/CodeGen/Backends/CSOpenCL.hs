@@ -128,6 +128,7 @@ callKernel (Imp.GetSizeMax v size_class) = do
     case size_class of Imp.SizeGroup -> "MaxGroupSize"
                        Imp.SizeNumGroups -> "MaxNumGroups"
                        Imp.SizeTile -> "MaxTileSize"
+                       Imp.SizeRegTile -> "MaxRegTileSize"
                        Imp.SizeThreshold{} -> "MaxThreshold"
                        Imp.SizeLocalMemory -> "MaxLocalMemory"
                        Imp.SizeBespoke{} -> "MaxBespoke"

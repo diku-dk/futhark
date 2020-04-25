@@ -576,6 +576,7 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
                    NumGroups -> [C.cexp|ctx->cfg.default_num_groups|]
                    GroupSize -> [C.cexp|ctx->cfg.default_group_size|]
                    TileSize -> [C.cexp|ctx->cfg.default_tile_size|]
+                   RegTileSize -> [C.cexp|ctx->cfg.default_reg_tile_size|]
                    Threshold -> [C.cexp|ctx->cfg.default_threshold|]
 
         get_size = case what of
