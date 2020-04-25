@@ -59,9 +59,9 @@ intraGroupParallelise knest lam = runMaybeT $ do
     lift $ localScope (scopeOfLParams $ lambdaParams lam) $
     intraGroupParalleliseBody intra_lvl body
 
-  known_outside <- lift $ M.keys <$> askScope
-  unless (all (`elem` known_outside) $ namesToList $ freeIn $
-          wss_min ++ wss_avail) $
+  outside_scope <- lift askScope
+  unless (all (`M.member` outside_scope) $ namesToList $
+          freeIn (wss_min ++ wss_avail)) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
