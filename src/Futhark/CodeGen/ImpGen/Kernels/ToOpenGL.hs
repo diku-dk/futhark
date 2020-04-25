@@ -158,8 +158,15 @@ onShader shader = do
                   $items:shader_body
                 }|]
 
+      shader_main =
+        [C.cunit|void main (void) {
+                 $id:name();
+                }|]
+
   modify $ \s -> s
-    { glShaders   = M.insert name (safety, (cLayoutQuals ++ shader_fun)) $ glShaders s
+    { glShaders   =
+           M.insert name (safety, (cLayoutQuals ++ shader_fun ++ shader_main)
+                         ) $ glShaders s
     , glUsedTypes = typesInShader shader <> glUsedTypes s
     }
 
