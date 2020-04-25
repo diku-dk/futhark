@@ -267,6 +267,7 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
                                   $id:local_work_size[1],  $id:local_work_size[2]
                                  );
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+    OPENGL_SUCCEED(glGetError());
     if (ctx->debugging) {
       glFinish();
       OPENGL_SUCCEED(glGetError());
