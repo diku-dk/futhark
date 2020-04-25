@@ -15,7 +15,7 @@ trigger:
 
 variables:
   System.Debug: true
-  GHC_VERSION: "8.10.1"
+  GHC_VERSION: "8.8.2"
   CABAL_VERSION: "3.0.0.0"
 
 pool:
