@@ -306,18 +306,32 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       -- Segmented intra-group reductions are turned into (regular)
       -- segmented scans.  It is possible that this can be done
       -- better, but at least this approach is simple.
+
+      -- groupScan operates on flattened arrays.  This does not
+      -- involve copying anything; merely playing with the index
+      -- function.
+      dims_flat <- dPrimV "dims_flat" $ product dims'
+      let flatten arr = do
+            ArrayEntry arr_loc pt <- lookupArray arr
+            let flat_shape = Shape $ Var dims_flat :
+                             drop (length ltids) (memLocationShape arr_loc)
+            sArray "red_arr_flat" pt flat_shape $
+              ArrayIn (memLocationName arr_loc) $
+              IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims flat_shape
+
       let segment_size = last dims'
           crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
-      forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
+      forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
+        tmps_flat <- mapM flatten tmps
         groupScan (Just crossesSegment) (product dims') (product dims')
-        (segRedLambda op) tmps
+          (segRedLambda op) tmps_flat
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      let segment_is = map Imp.vi32 $ init ltids
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
-        copyDWIMFix (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
+        copyDWIM (patElemName pe) [] (Var arr)
+        (map (unitSlice 0) (init dims') ++ [DimFix $ last dims'-1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
@@ -961,7 +975,8 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
         copyDWIM (paramName x) [] (Var (paramName y)) []
 
   -- Set initial y values
-  sWhen active $ do
+  sComment "read input for in-block scan" $
+    sWhen active $ do
     zipWithM_ readInitial y_params arrs
     -- Since the final result is expected to be in x_params, we may
     -- need to copy it there for the first thread in the block.
