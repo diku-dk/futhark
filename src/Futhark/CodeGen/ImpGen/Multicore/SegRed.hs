@@ -107,8 +107,8 @@ nonsegmentedReduction :: Pattern ExplicitMemory
                       -> MulticoreGen ()
 nonsegmentedReduction pat space reds kbody = do
   emit $ Imp.DebugPrint "nonsegmented segRed " Nothing
+  sUnpauseProfiling
 
-  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
   let (is, ns) = unzip $ unSegSpace space
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
@@ -198,13 +198,13 @@ nonsegmentedReduction pat space reds kbody = do
 -- Maybe we should select the work of the inner loop
 -- based on n_segments and dimensions etc.
 segmentedReduction :: Pattern ExplicitMemory
-                      -> SegSpace
-                      -> [SegRedOp ExplicitMemory]
-                      -> DoSegBody
-                      -> MulticoreGen ()
+                   -> SegSpace
+                   -> [SegRedOp ExplicitMemory]
+                   -> DoSegBody
+                   -> MulticoreGen ()
 segmentedReduction pat space reds kbody = do
   emit $ Imp.DebugPrint "segmented segRed " Nothing
-  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -254,7 +254,7 @@ segmentedReduction pat space reds kbody = do
 
 
   let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                  namesFromList (tid : [n_segments])
+                                    namesFromList (tid : [n_segments])
 
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts

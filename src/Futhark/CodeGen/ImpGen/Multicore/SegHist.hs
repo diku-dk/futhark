@@ -92,7 +92,7 @@ segmentedHist :: Pattern ExplicitMemory
                 -> MulticoreGen ()
 segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
-  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -169,7 +169,7 @@ nonsegmentedHist :: Pattern ExplicitMemory
                 -> MulticoreGen ()
 nonsegmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
-  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+  sUnpauseProfiling
 
   -- variable for how many subhistograms to allocate
   num_threads <- getNumThreads

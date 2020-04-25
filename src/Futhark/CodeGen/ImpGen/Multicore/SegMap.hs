@@ -17,7 +17,7 @@ compileSegMap :: Pattern ExplicitMemory
               -> MulticoreGen ()
 compileSegMap pat space (KernelBody _ kstms kres) = do
   emit $ Imp.DebugPrint "SegMap " Nothing
-  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns

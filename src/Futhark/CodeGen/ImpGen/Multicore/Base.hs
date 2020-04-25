@@ -6,6 +6,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , getNumThreads
  , getNumThreads'
  , decideScheduling
+ , sUnpauseProfiling
  )
  where
 
@@ -79,3 +80,7 @@ decideScheduling code  =
     Imp.Static
   else
     Imp.Dynamic 10
+
+sUnpauseProfiling :: MulticoreGen ()
+sUnpauseProfiling =
+  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
