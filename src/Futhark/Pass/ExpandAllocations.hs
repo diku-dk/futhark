@@ -119,6 +119,13 @@ transformScanRed lvl space ops kbody = do
       allocs = kbody_allocs <> mconcat ops_allocs
       (variant_allocs, invariant_allocs) = M.partition (variantAlloc . fst) allocs
 
+  case lvl of
+    SegGroup{}
+      | not $ null variant_allocs ->
+          compilerLimitationS "Cannot handle invariant allocations in SegGroup."
+    _ ->
+      return ()
+
   allocsForBody variant_allocs invariant_allocs lvl space kbody' $ \alloc_stms kbody'' -> do
     ops'' <- forM ops' $ \op' ->
       localScope (scopeOf op') $ offsetMemoryInLambda op'
