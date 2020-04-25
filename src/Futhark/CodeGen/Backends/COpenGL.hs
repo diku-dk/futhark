@@ -217,17 +217,23 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
   launchShader name num_workgroups' workgroup_size' local_bytes
   where setShaderArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName "shader_arg" bt e
-          GC.stm [C.cstm|glUniform1i(ctx->$id:name, &$id:v);|]
+          GC.stm [C.cstm|glUniform1i($int:i, &$id:v);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         setShaderArg i (MemKArg v) = do
           v' <- GC.rawMem v
-          GC.stm [C.cstm|glUniform1uiv(ctx->$id:name, $int:i, &$exp:v');|]
+          GC.stm [C.cstm|glCreateBuffers(1, ctx->$id:name);|]
+          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
+          GC.stm [C.cstm|glNamedBufferData(ctx->$id:name, sizeof($exp:v'),
+                                           &$exp:v', GL_DYNAMIC_DRAW);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         setShaderArg i (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp $ unCount num_bytes
-          GC.stm [C.cstm|glUniform1i(ctx->$id:name, NULL);|]
+          GC.stm [C.cstm|glCreateBuffers(1, ctx->$id:name);|]
+          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
+          GC.stm [C.cstm|glNamedBufferData(ctx->$id:name, $exp:num_bytes',
+                                           NULL, GL_DYNAMIC_DRAW);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
