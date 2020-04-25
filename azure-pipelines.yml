@@ -16,7 +16,6 @@ trigger:
 variables:
   System.Debug: true
   GHC_VERSION: "8.8.2"
-  CABAL_VERSION: "3.0.0.0"
 
 pool:
   vmImage: ubuntu-18.04
@@ -27,10 +26,6 @@ jobs:
     vmImage: windows-2019
 
   timeoutInMinutes: 120
-
-  variables:
-    CABAL_DIR: ""
-    CABAL_STORE_DIR: "C:\\sd"
 
   steps:
 
