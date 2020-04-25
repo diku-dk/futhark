@@ -42,7 +42,7 @@ translateKernels (ImpKernels.Functions funs) = do
     flip runStateT initialOpenGL $ fmap Functions $ forM funs $ \(fname, fun) ->
     (fname,) <$> runReaderT (traverse (onHostOp fname) fun) fname
   let shaders'       = M.map fst shaders
-      opengl_code    = openGlCode $ map snd $ M.elems shaders
+      opengl_code    = openGlCode $ concat $ map snd $ M.elems shaders
       opengl_prelude = pretty $ genOpenGlPrelude used_types
   return $ ImpOpenGL.Program opengl_code opengl_prelude shaders'
     (S.toList used_types) (cleanSizes sizes) prog'
@@ -56,6 +56,10 @@ cleanSizes m  = M.map clean m
         clean (SizeThreshold path) =
           SizeThreshold $ filter ((`elem` known) . fst) path
         clean s = s
+
+data ParamUse = AScalarUse
+              | AMemoryUse
+              | AConstUse
 
 type LocalMemoryUse = (VName, Count Bytes Exp)
 
@@ -74,7 +78,7 @@ newShaderState = ShaderState mempty 0 False False
 errorLabel :: ShaderState -> String
 errorLabel = ("error_"++) . show . shaderNextSync
 
-data ToOpenGL = ToOpenGL { glShaders   :: M.Map ShaderName (Safety, C.Func)
+data ToOpenGL = ToOpenGL { glShaders   :: M.Map ShaderName (Safety, [C.Definition])
                          , glUsedTypes :: S.Set PrimType
                          , glSizes     :: M.Map Name SizeClass
                          }
@@ -109,7 +113,7 @@ onShader shader = do
                                                  $ kernelBody shader
       s_state = GenericC.compUserState cstate
 
-      use_params = mapMaybe useAsParam $ kernelUses shader
+      (use_params, uses) = unzip $ mapMaybe useAsParam $ kernelUses shader
 
       (local_memory_args, local_memory_params, local_memory_init) =
         unzip3 $
@@ -128,17 +132,34 @@ onShader shader = do
 -- We do currently not account safety within shaders.
   let (safety, error_init) = (SafetyNone, [])
 
-      params = perm_params ++ catMaybes local_memory_params ++ use_params
+      --FIXME:
+      params = perm_params ++ catMaybes local_memory_params -- ++ use_params
+
+      layoutQuals = concat $
+                    map (\(i, k, u) -> case u of
+                                       AScalarUse ->
+                                         "layout(location = " ++ show i ++
+                                         ") " ++ "uniform " ++ pretty k
+                                       AMemoryUse ->
+                                         "layout(std430, binding = " ++
+                                         show i ++ ") " ++ "buffer SSBO" ++ show i
+                                         ++ "\n{\n  "  ++ pretty k ++ "\n};"
+                                       _ ->
+                                         ""
+                        ) $ zip3 [(0::Int)..] use_params uses
+
+      cLayoutQuals = [C.cunit|$esc:(layoutQuals)|]
 
       shader_fun =
-        [C.cfun|void $id:name ($params:params) {
+        [C.cunit|void $id:name ($params:params) {
                   $items:const_defs
                   $items:block_dim_init
                   $items:local_memory_init
                   $items:shader_body
                 }|]
+
   modify $ \s -> s
-    { glShaders   = M.insert name (safety, shader_fun) $ glShaders s
+    { glShaders   = M.insert name (safety, (cLayoutQuals ++ shader_fun)) $ glShaders s
     , glUsedTypes = typesInShader shader <> glUsedTypes s
     }
 
@@ -156,14 +177,14 @@ onShader shader = do
                   Just [C.cparam|uint $id:param|],
                   [C.citem|volatile int *$id:mem = &shared_mem[$id:param];|])
 
-useAsParam :: KernelUse -> Maybe C.Param
+useAsParam :: KernelUse -> Maybe (C.BlockItem, ParamUse)
 useAsParam (ScalarUse name bt) =
   let ctp = case bt of
         Bool -> [C.cty|bool|]
         _    -> GenericC.primTypeToCType bt
-  in Just [C.cparam|$ty:ctp $id:name|]
+  in Just ([C.citem|$ty:ctp $id:name;|], AScalarUse)
 useAsParam (MemoryUse name) =
-  Just [C.cparam|bool *$id:name|]
+  Just ([C.citem|typename int32_t $id:name[];|], AMemoryUse)
 useAsParam ConstUse{} =
   Nothing
 
@@ -179,12 +200,8 @@ constDef (ConstUse v e) = Just [C.citem|$escstm:def|]
                            ++ " = " ++ pretty e' ++ ";"
 constDef _ = Nothing
 
-openGlCode :: [C.Func] -> String
-openGlCode shaders =
- pretty [C.cunit|$edecls:funcs|]
- where funcs =
-         [[C.cedecl|$func:shader_func|] |
-          shader_func <- shaders ]
+openGlCode :: [C.Definition] -> String
+openGlCode shaders = pretty shaders
 
 genOpenGlPrelude :: S.Set PrimType -> [C.Definition]
 genOpenGlPrelude ts =
