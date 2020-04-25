@@ -129,8 +129,8 @@ onShader shader = do
 
       const_defs = mapMaybe constDef $ kernelUses shader
 
--- We do currently not account safety within shaders.
-  let (safety, error_init) = (SafetyNone, [])
+-- We do not account for safety within shaders.
+      safety = SafetyNone
 
       --FIXME:
       params = perm_params ++ catMaybes local_memory_params -- ++ use_params
@@ -247,23 +247,9 @@ hasCommunication = any communicates
         communicates _           = False
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
--- Layout qualifiers:
---pointerQuals "layout"    = return [C.ctyquals|layout|]
--- Constant qualifier
 pointerQuals "const"     = return [C.ctyquals|const|]
--- Uniform qualifiers:
---pointerQuals "uniform"   = return [C.ctyquals|uniform|]
--- Shader stage input and output qualifiers:
---pointerQuals "in"        = return [C.ctyquals|in|]
---pointerQuals "out"       = return [C.ctyquals|out|]
--- Shared variables:
---pointerQuals "shared"    = return [C.ctyquals|shared|]
--- Memory qualifiers:
---pointerQuals "coherent"  = return [C.ctyquals|coherent|]
 pointerQuals "volatile"  = return [C.ctyquals|volatile|]
 pointerQuals "restrict"  = return [C.ctyquals|restrict|]
---pointerQuals "readonly"  = return [C.ctyquals|readonly|]
---pointerQuals "writeonly" = return [C.ctyquals|writeonly|]
 pointerQuals s           = error $ "'" ++ s ++ "' is not an OpenGL type qualifier."
 
 inShaderOperations :: ImpKernels.KernelCode -> GenericC.Operations KernelOp ShaderState
