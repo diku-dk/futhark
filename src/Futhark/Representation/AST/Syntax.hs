@@ -319,6 +319,11 @@ data IfSort = IfNormal -- ^ An ordinary branch.
                          -- evaluated.  the compiler is permitted to
                          -- optimise away the branch if the true case
                          -- contains only safe statements.
+            | IfEquiv -- ^ Both of these branches are semantically
+                      -- equivalent, and it is fine to eliminate one
+                      -- if it turns out to have problems
+                      -- (e.g. contain things we cannot generate code
+                      -- for).
             deriving (Eq, Show, Ord)
 
 -- | A type alias for namespace control.
