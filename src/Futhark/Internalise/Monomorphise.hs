@@ -343,10 +343,10 @@ transformExp (BinOp (fname, oploc) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
       -- involves existential sizes will necessarily go through here.
       (x_param_e, x_param) <- makeVarParam e1'
       (y_param_e, y_param) <- makeVarParam e2'
-      let lam_body = applyOp fname' x_param_e y_param_e
-          lam = Lambda [y_param, x_param] lam_body Nothing
-                (Info (mempty, toStruct $ unInfo tp)) noLoc
-      return $ applyOp lam e2' e1'
+      return $ LetPat x_param e1'
+        (LetPat y_param e2'
+          (applyOp fname' x_param_e y_param_e) (tp, Info mempty) noLoc)
+        (tp, Info mempty) noLoc
   where applyOp fname' x y =
           Apply (Apply fname' x (Info (Observe, snd (unInfo d1)))
                  (Info (foldFunType [fromStruct $ fst (unInfo d2)] (unInfo tp)),
