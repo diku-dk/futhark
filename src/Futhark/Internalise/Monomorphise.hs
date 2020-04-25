@@ -331,15 +331,34 @@ transformExp (BinOp (fname, oploc) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
   fname' <- transformFName loc fname $ toStruct t
   e1' <- transformExp e1
   e2' <- transformExp e2
-  return $
-    case fname' of
-      Var fname'' _ _ ->
-        BinOp (fname'', oploc) (Info t) (e1', d1) (e2', d2) tp ext loc
-      _ ->
-        Apply (Apply fname' e1' (Info (Observe, snd (unInfo d1)))
-               (Info (foldFunType [fromStruct $ fst (unInfo d2)] (unInfo tp)),
-                Info mempty) loc)
-        e2' (Info (Observe, snd (unInfo d2))) (tp, ext) loc
+  case fname' of
+    Var fname'' _ _ | orderZero (typeOf e1'), orderZero (typeOf e2') ->
+      return $ BinOp (fname'', oploc) (Info t) (e1', d1) (e2', d2) tp ext loc
+    _ -> do
+      -- We have to flip the arguments to the function, because
+      -- operator application is left-to-right, while function
+      -- application is outside-in.  This matters when the arguments
+      -- produce existential sizes.  There are later places in the
+      -- compiler where we transform BinOp to Apply, but anything that
+      -- involves existential sizes will necessarily go through here.
+      (x_param_e, x_param) <- makeVarParam e1'
+      (y_param_e, y_param) <- makeVarParam e2'
+      let lam_body = applyOp fname' x_param_e y_param_e
+          lam = Lambda [y_param, x_param] lam_body Nothing
+                (Info (mempty, toStruct $ unInfo tp)) noLoc
+      return $ applyOp lam e2' e1'
+  where applyOp fname' x y =
+          Apply (Apply fname' x (Info (Observe, snd (unInfo d1)))
+                 (Info (foldFunType [fromStruct $ fst (unInfo d2)] (unInfo tp)),
+                  Info mempty) loc)
+          y (Info (Observe, snd (unInfo d2))) (tp, ext) loc
+
+        makeVarParam arg = do
+          let argtype = typeOf arg
+          x <- newNameFromString "binop_p"
+          return (Var (qualName x) (Info argtype) noLoc,
+                  Id x (Info $ fromStruct argtype) noLoc)
+
 
 transformExp (Project n e tp loc) = do
   maybe_fs <- case e of
