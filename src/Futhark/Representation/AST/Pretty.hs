@@ -218,6 +218,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
     text "else" <+> maybeNest f
     where info' = case ifsort of IfNormal -> mempty
                                  IfFallback -> text "<fallback>"
+                                 IfEquiv -> text "<equiv>"
           maybeNest b | null $ bodyStms b = ppr b
                       | otherwise         = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op

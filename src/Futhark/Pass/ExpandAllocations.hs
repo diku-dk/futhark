@@ -29,6 +29,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Pass.ExtractKernels.BlockedKernel (segThread, nonSegRed)
 import Futhark.Pass.ExplicitAllocations (explicitAllocationsInStms)
 import Futhark.Transform.Rename (renameStm)
+import Futhark.Transform.CopyPropagate (copyPropagateInFun)
 import Futhark.Util.IntegralExp
 import Futhark.Util (mapAccumLM)
 
@@ -38,19 +39,23 @@ expandAllocations =
   Pass "expand allocations" "Expand allocations" $
   \(Prog consts funs) -> do
     consts' <-
-      modifyNameSource $ runState $ runReaderT (transformStms consts) mempty
+      modifyNameSource $ limitationOnLeft . runStateT (runReaderT (transformStms consts) mempty)
     Prog consts' <$> mapM (transformFunDef $ scopeOf consts') funs
   -- Cannot use intraproceduralTransformation because it might create
   -- duplicate size keys (which are not fixed by renamer, and size
   -- keys must currently be globally unique).
 
-type ExpandM = ReaderT (Scope ExplicitMemory) (State VNameSource)
+type ExpandM = ReaderT (Scope ExplicitMemory) (StateT VNameSource (Either String))
+
+limitationOnLeft :: Either String a -> a
+limitationOnLeft = either compilerLimitationS id
 
 transformFunDef :: Scope ExplicitMemory -> FunDef ExplicitMemory
                 -> PassM (FunDef ExplicitMemory)
 transformFunDef scope fundec = do
-  body' <- modifyNameSource $ runState $ runReaderT m mempty
-  return fundec { funDefBody = body' }
+  body' <- modifyNameSource $ limitationOnLeft . runStateT (runReaderT m mempty)
+  copyPropagateInFun ExplicitMemory.simpleExplicitMemory
+    mempty fundec { funDefBody = body' }
   where m = localScope scope $ inScopeOf fundec $
             transformBody $ funDefBody fundec
 
@@ -62,6 +67,28 @@ transformStms stms =
   inScopeOf stms $ mconcat <$> mapM transformStm (stmsToList stms)
 
 transformStm :: Stm ExplicitMemory -> ExpandM (Stms ExplicitMemory)
+
+-- It is possible that we are unable to expand allocations in some
+-- code versions.  If so, we can remove the offending branch.  Only if
+-- both versions fail do we propagate the error.
+transformStm (Let pat aux (If cond tbranch fbranch (IfAttr ts IfEquiv))) = do
+  tbranch' <- (Right <$> transformBody tbranch) `catchError` (return . Left)
+  fbranch' <- (Right <$> transformBody fbranch) `catchError` (return . Left)
+  case (tbranch', fbranch') of
+    (Left _, Right fbranch'') ->
+      return $ useBranch fbranch''
+    (Right tbranch'', Left _) ->
+      return $ useBranch tbranch''
+    (Right tbranch'', Right fbranch'') ->
+      return $ oneStm $ Let pat aux $ If cond tbranch'' fbranch'' (IfAttr ts IfEquiv)
+    (Left e, _) ->
+      throwError e
+
+  where bindRes pe se = Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+
+        useBranch b =
+          bodyStms b <>
+          stmsFromList (zipWith bindRes (patternElements pat) (bodyResult b))
 
 transformStm (Let pat aux e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
@@ -112,8 +139,8 @@ transformScanRed :: SegLevel -> SegSpace
 transformScanRed lvl space ops kbody = do
   bound_outside <- asks $ namesFromList . M.keys
   let (kbody', kbody_allocs) =
-        extractKernelBodyAllocations (bound_outside<>bound_in_kernel) kbody
-      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations bound_outside) ops
+        extractKernelBodyAllocations bound_outside bound_in_kernel kbody
+      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations bound_outside mempty) ops
       variantAlloc (Var v) = v `nameIn` bound_in_kernel
       variantAlloc _ = False
       allocs = kbody_allocs <> mconcat ops_allocs
@@ -122,7 +149,7 @@ transformScanRed lvl space ops kbody = do
   case lvl of
     SegGroup{}
       | not $ null variant_allocs ->
-          compilerLimitationS "Cannot handle invariant allocations in SegGroup."
+          throwError "Cannot handle invariant allocations in SegGroup."
     _ ->
       return ()
 
@@ -147,7 +174,7 @@ allocsForBody variant_allocs invariant_allocs lvl space kbody' m = do
 
   scope <- askScope
   let scope' = scopeOfSegSpace space <> M.map nameInfoConv scope
-  either compilerLimitationS pure $ runOffsetM scope' alloc_offsets $ do
+  either throwError pure $ runOffsetM scope' alloc_offsets $ do
     kbody'' <- offsetMemoryInKernelBody kbody'
     m alloc_stms kbody''
 
@@ -180,33 +207,33 @@ type Extraction = M.Map VName (SubExp, Space)
 
 -- | Extract allocations from 'Thread' statements with
 -- 'extractThreadAllocations'.
-extractKernelBodyAllocations :: Names -> KernelBody ExplicitMemory
+extractKernelBodyAllocations :: Names -> Names -> KernelBody ExplicitMemory
                              -> (KernelBody ExplicitMemory,
                                  Extraction)
-extractKernelBodyAllocations bound_outside =
-  extractGenericBodyAllocations bound_outside kernelBodyStms $
+extractKernelBodyAllocations bound_outside bound_kernel =
+  extractGenericBodyAllocations bound_outside bound_kernel kernelBodyStms $
   \stms kbody -> kbody { kernelBodyStms = stms }
 
-extractBodyAllocations :: Names -> Body ExplicitMemory
+extractBodyAllocations :: Names -> Names -> Body ExplicitMemory
                        -> (Body ExplicitMemory, Extraction)
-extractBodyAllocations bound_outside =
-  extractGenericBodyAllocations bound_outside bodyStms $
+extractBodyAllocations bound_outside bound_kernel =
+  extractGenericBodyAllocations bound_outside bound_kernel bodyStms $
   \stms body -> body { bodyStms = stms }
 
-extractLambdaAllocations :: Names -> Lambda ExplicitMemory
+extractLambdaAllocations :: Names -> Names -> Lambda ExplicitMemory
                          -> (Lambda ExplicitMemory, Extraction)
-extractLambdaAllocations bound_outside lam = (lam { lambdaBody = body' }, allocs)
-  where (body', allocs) = extractBodyAllocations bound_outside $ lambdaBody lam
+extractLambdaAllocations bound_outside bound_kernel lam = (lam { lambdaBody = body' }, allocs)
+  where (body', allocs) = extractBodyAllocations bound_outside bound_kernel $ lambdaBody lam
 
-extractGenericBodyAllocations :: Names
+extractGenericBodyAllocations :: Names -> Names
                               -> (body -> Stms ExplicitMemory)
                               -> (Stms ExplicitMemory -> body -> body)
                               -> body
                               -> (body,
                                   Extraction)
-extractGenericBodyAllocations bound_outside get_stms set_stms body =
+extractGenericBodyAllocations bound_outside bound_kernel get_stms set_stms body =
   let (stms, allocs) = runWriter $ fmap catMaybes $
-                       mapM (extractStmAllocations bound_outside) $
+                       mapM (extractStmAllocations bound_outside bound_kernel) $
                        stmsToList $ get_stms body
   in (set_stms (stmsFromList stms) body, allocs)
 
@@ -215,25 +242,26 @@ expandable (Space "local") = False
 expandable ScalarSpace{} = False
 expandable _ = True
 
-extractStmAllocations :: Names -> Stm ExplicitMemory
+extractStmAllocations :: Names -> Names -> Stm ExplicitMemory
                       -> Writer Extraction (Maybe (Stm ExplicitMemory))
-extractStmAllocations bound_outside (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
-  | expandable space,
-    visibleOutside size = do
+extractStmAllocations bound_outside bound_kernel (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
+  | expandable space && expandableSize size || boundInKernel size = do
       tell $ M.singleton (patElemName patElem) (size, space)
       return Nothing
 
-        where visibleOutside (Var v) = v `nameIn` bound_outside
-              visibleOutside Constant{} = True
+        where expandableSize (Var v) = v `nameIn` bound_outside || v `nameIn` bound_kernel
+              expandableSize Constant{} = True
+              boundInKernel (Var v) = v `nameIn` bound_kernel
+              boundInKernel Constant{} = False
 
-extractStmAllocations bound_outside stm = do
+extractStmAllocations bound_outside bound_kernel stm = do
   e <- mapExpM expMapper $ stmExp stm
   return $ Just $ stm { stmExp = e }
   where expMapper = identityMapper { mapOnBody = const onBody
                                    , mapOnOp = onOp }
 
         onBody body = do
-          let (body', allocs) = extractBodyAllocations bound_outside body
+          let (body', allocs) = extractBodyAllocations bound_outside bound_kernel body
           tell allocs
           return body'
 
@@ -245,7 +273,7 @@ extractStmAllocations bound_outside stm = do
                                        }
 
         onKernelBody body = do
-          let (body', allocs) = extractKernelBodyAllocations bound_outside body
+          let (body', allocs) = extractKernelBodyAllocations bound_outside bound_kernel body
           tell allocs
           return body'
 
@@ -549,7 +577,7 @@ removeCommonSizes = M.toList . foldl' comb mempty . M.toList
 sliceKernelSizes :: SubExp -> [SubExp] -> SegSpace -> Stms ExplicitMemory
                  -> ExpandM (Stms Kernels.Kernels, [VName], [VName])
 sliceKernelSizes num_threads sizes space kstms = do
-  kstms' <- either compilerLimitationS return $ unAllocKernelsStms kstms
+  kstms' <- either throwError return $ unAllocKernelsStms kstms
   let num_sizes = length sizes
       i64s = replicate num_sizes $ Prim int64
 

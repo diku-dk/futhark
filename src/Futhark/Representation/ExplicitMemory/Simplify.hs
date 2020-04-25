@@ -6,6 +6,7 @@
 module Futhark.Representation.ExplicitMemory.Simplify
        ( simplifyExplicitMemory
        , simplifyStms
+       , simpleExplicitMemory
        )
 where
 
