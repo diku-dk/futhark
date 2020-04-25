@@ -2363,12 +2363,18 @@ causalityCheck binding_body = do
         sequencePoint known arg f $ maybeToList p ++ ext
         return e
 
+      onExp known e@(BinOp (f, floc) ft
+                     (x, Info (_, xp)) (y, Info (_, yp)) _ (Info ext) _) = do
+        args_known <- lift $
+          execStateT (sequencePoint known x y $ catMaybes [xp, yp]) mempty
+        void $ onExp (args_known<>known) (Var f ft floc)
+        modify ((args_known<>S.fromList ext)<>)
+        return e
+
       onExp known e = do
         recurse known e
 
         case e of
-          BinOp _ _ (_, Info (_, xp)) (_, Info (_, yp)) _ (Info ext) _ ->
-            modify (<>S.fromList (catMaybes [xp,yp]++ext))
           DoLoop _ _ _ _ _ (Info (_, ext)) _ ->
             modify (<>S.fromList ext)
           If _ _ _ (_, Info ext) _ ->
