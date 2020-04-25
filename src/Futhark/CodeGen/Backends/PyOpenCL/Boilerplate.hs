@@ -91,6 +91,7 @@ sizeHeuristicsToPython = List . map f
                                        NumGroups     -> String "num_groups"
                                        GroupSize     -> String "group_size"
                                        TileSize      -> String "tile_size"
+                                       RegTileSize   -> String "reg_tile_size"
                                        Threshold     -> String "threshold"
 
                 what' = case what of
