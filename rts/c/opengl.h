@@ -375,7 +375,7 @@ static void setup_shader(struct opengl_context *ctx,
     // Create and compile the compute shader.
     //TODO: delete these
     FILE *fp;
-    fp = fopen("temp", "w");
+    fp = fopen("temp.glsl", "w");
     if (fp) {
       fputs(gl_src, fp);
     }
@@ -403,11 +403,11 @@ static void setup_shader(struct opengl_context *ctx,
       (unsigned char*)slurp_file(ctx->cfg.load_binary_from, &binary_size);
     assert(gl_bin != NULL);
     const unsigned char *binaries = gl_bin;
-    glGetProgramBinary(ctx->program, &binary_size, NULL,
-                       &binary_format, binaries);
+    glGetProgramBinary(ctx->program, binary_size, NULL,
+                       &binary_format, &binaries);
     OPENGL_SUCCEED(glGetError());
-    glProgramBinary(ctx->program, &binary_format,
-                    binaries, &binary_size);
+    glProgramBinary(ctx->program, binary_format,
+                    binaries, binary_size);
     OPENGL_SUCCEED(glGetError());
 
   }
