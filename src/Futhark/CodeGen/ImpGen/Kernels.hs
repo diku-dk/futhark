@@ -16,7 +16,7 @@ import Prelude hiding (quot)
 
 import Futhark.Error
 import Futhark.MonadFreshNames
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.KernelsMem
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import Futhark.CodeGen.ImpGen hiding (compileProg)
@@ -27,11 +27,11 @@ import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
 
-callKernelOperations :: Operations ExplicitMemory HostEnv Imp.HostOp
+callKernelOperations :: Operations KernelsMem HostEnv Imp.HostOp
 callKernelOperations =
   Operations { opsExpCompiler = expCompiler
              , opsCopyCompiler = callKernelCopy
@@ -53,17 +53,17 @@ openclAtomics, cudaAtomics :: AtomicBinOp
                  ]
         cuda = opencl ++ [(FAdd Float32, Imp.AtomicFAdd Float32)]
 
-compileProg :: MonadFreshNames m => HostEnv -> Prog ExplicitMemory -> m Imp.Program
+compileProg :: MonadFreshNames m => HostEnv -> Prog KernelsMem -> m Imp.Program
 compileProg env prog =
   setDefaultSpace (Imp.Space "device") <$>
   Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
 
 compileProgOpenCL, compileProgCUDA
-  :: MonadFreshNames m => Prog ExplicitMemory -> m Imp.Program
+  :: MonadFreshNames m => Prog KernelsMem -> m Imp.Program
 compileProgOpenCL = compileProg $ HostEnv openclAtomics
 compileProgCUDA = compileProg $ HostEnv cudaAtomics
 
-opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
+opCompiler :: Pattern KernelsMem -> Op KernelsMem
            -> CallKernelGen ()
 
 opCompiler dest (Alloc e space) =
@@ -118,7 +118,7 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
   where f (name, x) = (keyWithEntryPoint fname name, x)
 sizeClassWithEntryPoint _ size_class = size_class
 
-segOpCompiler :: Pattern ExplicitMemory -> SegOp ExplicitMemory -> CallKernelGen ()
+segOpCompiler :: Pattern KernelsMem -> SegOp KernelsMem -> CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
 segOpCompiler pat (SegRed lvl@SegThread{} space reds _ kbody) =
@@ -130,7 +130,7 @@ segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
-expCompiler :: ExpCompiler ExplicitMemory HostEnv Imp.HostOp
+expCompiler :: ExpCompiler KernelsMem HostEnv Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
@@ -150,7 +150,7 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 expCompiler dest e =
   defCompileExp dest e
 
-callKernelCopy :: CopyCompiler ExplicitMemory HostEnv Imp.HostOp
+callKernelCopy :: CopyCompiler KernelsMem HostEnv Imp.HostOp
 callKernelCopy bt
   destloc@(MemLocation destmem _ destIxFun) destslice
   srcloc@(MemLocation srcmem srcshape srcIxFun) srcslice

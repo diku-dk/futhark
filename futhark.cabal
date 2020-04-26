@@ -157,6 +157,8 @@ library
       Futhark.Pass
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
+      Futhark.Pass.ExplicitAllocations.Kernels
+      Futhark.Pass.ExplicitAllocations.Seq
       Futhark.Pass.ExtractKernels
       Futhark.Pass.ExtractKernels.BlockedKernel
       Futhark.Pass.ExtractKernels.DistributeNests
@@ -192,15 +194,18 @@ library
       Futhark.Representation.AST.Syntax
       Futhark.Representation.AST.Syntax.Core
       Futhark.Representation.AST.Traversals
-      Futhark.Representation.ExplicitMemory
-      Futhark.Representation.ExplicitMemory.IndexFunction
-      Futhark.Representation.ExplicitMemory.Simplify
+      Futhark.Representation.Mem
+      Futhark.Representation.Mem.IxFun
+      Futhark.Representation.Mem.Simplify
       Futhark.Representation.Kernels
       Futhark.Representation.Kernels.Kernel
       Futhark.Representation.Kernels.Simplify
       Futhark.Representation.Kernels.Sizes
+      Futhark.Representation.KernelsMem
       Futhark.Representation.Primitive
       Futhark.Representation.Ranges
+      Futhark.Representation.Seq
+      Futhark.Representation.SeqMem
       Futhark.Representation.SOACS
       Futhark.Representation.SOACS.Simplify
       Futhark.Representation.SOACS.SOAC
@@ -319,9 +324,9 @@ test-suite unit
       Futhark.Representation.AST.AttributesTests
       Futhark.Representation.AST.Syntax.CoreTests
       Futhark.Representation.AST.SyntaxTests
-      Futhark.Representation.ExplicitMemory.IndexFunction.Alg
-      Futhark.Representation.ExplicitMemory.IndexFunctionTests
-      Futhark.Representation.ExplicitMemory.IndexFunctionWrapper
+      Futhark.Representation.Mem.IxFun.Alg
+      Futhark.Representation.Mem.IxFunTests
+      Futhark.Representation.Mem.IxFunWrapper
       Futhark.Representation.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
