@@ -452,11 +452,17 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
   glNamedBufferData(ssbo, min_size, NULL, GL_DYNAMIC_DRAW);
   OPENGL_SUCCEED(glGetError());
 
-  error = glGetError();
+  // FIXME: Second arg must be the shader argument number.
+  // I.e if the buffer is the second argument to the shader,
+  // then it must be 2.
+  // FIXME: We might allocate buffers that do not intervene
+  // with shaders, hence no binding needed.
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ssbo);
+  OPENGL_SUCCEED(glGetError());
 
   *mem_out = ssbo;
 
-  return error;
+  return 0;
 }
 
 static GLenum opengl_free(struct opengl_context *ctx,
