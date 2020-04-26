@@ -30,7 +30,6 @@ module Futhark.CodeGen.Backends.GenericC
   , CompilerM
   , CompilerState (compUserState)
   , getUserState
-  , putUserState
   , modifyUserState
   , contextContents
   , contextFinalInits
@@ -54,7 +53,7 @@ module Futhark.CodeGen.Backends.GenericC
   , profileReport
   , HeaderSection(..)
   , libDecl
-  , earlyDecls
+  , earlyDecl
   , publicName
   , contextType
   , contextField
@@ -73,7 +72,7 @@ import Data.Bits (xor, shiftR)
 import Data.Char (ord, isDigit, isAlphaNum)
 import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
-import Data.List
+import Data.List (unzip4)
 import Data.Loc
 import Data.Maybe
 import Data.FileEmbed
@@ -87,7 +86,7 @@ import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (isBuiltInFunction, builtInFunctions)
+import Futhark.Representation.AST.Attributes (isBuiltInFunction)
 
 
 data CompilerState s = CompilerState {
@@ -235,10 +234,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           error "The default compiler cannot compile extended operations"
 
 
-data CompilerEnv op s = CompilerEnv {
-    envOperations :: Operations op s
-  , envFtable     :: M.Map Name [Type]
-  }
+newtype CompilerEnv op s = CompilerEnv
+  { envOperations :: Operations op s }
 
 newtype CompilerAcc op s = CompilerAcc {
     accItems :: DL.DList C.BlockItem
@@ -278,17 +275,8 @@ envStaticArray = opsStaticArray . envOperations
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
 
-newCompilerEnv :: Functions op -> Operations op s
-               -> CompilerEnv op s
-newCompilerEnv (Functions funs) ops =
-  CompilerEnv { envOperations = ops
-              , envFtable = ftable <> builtinFtable
-              }
-  where ftable = M.fromList $ map funReturn funs
-        funReturn (name, fun) =
-          (name, paramsTypes $ functionOutput fun)
-        builtinFtable =
-          M.map (map Scalar . snd) builtInFunctions
+newCompilerEnv :: Operations op s -> CompilerEnv op s
+newCompilerEnv ops = CompilerEnv { envOperations = ops }
 
 tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 tupleDefinitions = map (snd . snd) . compTypeStructs
@@ -331,18 +319,15 @@ instance MonadFreshNames (CompilerM op s) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-runCompilerM :: Functions op -> Operations op s -> VNameSource -> s
+runCompilerM :: Operations op s -> VNameSource -> s
              -> CompilerM op s a
              -> (a, CompilerState s)
-runCompilerM prog ops src userstate (CompilerM m) =
-  let (x, s, _) = runRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
+runCompilerM ops src userstate (CompilerM m) =
+  let (x, s, _) = runRWS m (newCompilerEnv ops) (newCompilerState src userstate)
   in (x, s)
 
 getUserState :: CompilerM op s s
 getUserState = gets compUserState
-
-putUserState :: s -> CompilerM op s ()
-putUserState s = modify $ \compstate -> compstate { compUserState = s }
 
 modifyUserState :: (s -> s) -> CompilerM op s ()
 modifyUserState f = modify $ \compstate ->
@@ -363,6 +348,10 @@ collect' m = pass $ do
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
+
+fatMemory :: Space -> CompilerM op s Bool
+fatMemory ScalarSpace{} = return False
+fatMemory _ = asks envFatMemory
 
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeString . nameToString
@@ -404,7 +393,7 @@ publicDef s h f = do
   s' <- publicName s
   let (pub, priv) = f s'
   headerDecl h pub
-  libDecl priv
+  earlyDecl priv
   return s'
 
 -- | As 'publicDef', but ignores the public name.
@@ -421,9 +410,9 @@ libDecl :: C.Definition -> CompilerM op s ()
 libDecl def = modify $ \s ->
   s { compLibDecls = compLibDecls s <> DL.singleton def }
 
-earlyDecls :: [C.Definition] -> CompilerM op s ()
-earlyDecls def = modify $ \s ->
-  s { compEarlyDecls = compEarlyDecls s <> DL.fromList def }
+earlyDecl :: C.Definition -> CompilerM op s ()
+earlyDecl def = modify $ \s ->
+  s { compEarlyDecls = compEarlyDecls s <> DL.singleton def }
 
 contextField :: String -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
@@ -459,7 +448,7 @@ contextType = do
 
 memToCType :: Space -> CompilerM op s C.Type
 memToCType space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   if refcount
      then return $ fatMemType space
      else rawMemCType space
@@ -470,8 +459,8 @@ rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
 rawMemCType (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)[1]|]
 rawMemCType (ScalarSpace ds t) =
-  return $ foldl' addDim [C.cty|$ty:(primTypeToCType t)|] ds
-  where addDim t' d = [C.cty|$ty:t'[$exp:d]|]
+  return [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
+  where ds' = map (`C.toExp` noLoc) ds
 
 fatMemType :: Space -> C.Type
 fatMemType space =
@@ -550,7 +539,7 @@ defineMemorySpace space = do
         stm [C.cstm|block->mem = (char*) malloc(size);|]
   let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
-    panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
+    futhark_panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
           (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
   int ret = $id:(fatMemUnRef space)(ctx, block, desc);
@@ -609,18 +598,18 @@ declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
   ty <- memToCType space
   decl [C.cdecl|$ty:ty $id:name;|]
-  resetMem name
+  resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
-resetMem :: C.ToExp a => a -> CompilerM op s ()
-resetMem mem = do
-  refcount <- asks envFatMemory
+resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
+resetMem mem space = do
+  refcount <- fatMemory space
   when refcount $
     stm [C.cstm|$exp:mem.references = NULL;|]
 
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let src_s = pretty $ C.toExp src noLoc
   if refcount
     then stm [C.cstm|if ($id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
@@ -631,7 +620,7 @@ setMem dest src space = do
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let mem_s = pretty $ C.toExp mem noLoc
   when refcount $
     stm [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
@@ -641,7 +630,7 @@ unRefMem mem space = do
 allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> C.Stm -> CompilerM op s ()
 allocMem name size space on_failure = do
-  refcount <- asks envFatMemory
+  refcount <- fatMemory space
   let name_s = pretty $ C.toExp name noLoc
   if refcount
     then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
@@ -677,13 +666,6 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
   stm [C.cstm|memmove($exp:destmem + $exp:destidx,
                       $exp:srcmem + $exp:srcidx,
                       $exp:nbytes);|]
-
-paramsTypes :: [Param] -> [Type]
-paramsTypes = map paramType
-  -- Let's hope we don't need the size for anything, because we are
-  -- just making something up.
-  where paramType (MemParam _ space) = Mem space
-        paramType (ScalarParam _ t) = Scalar t
 
 --- Entry points.
 
@@ -741,7 +723,7 @@ arrayLibraryFunctions space pt signed shape = do
   memty <- rawMemCType space
 
   let prepare_new = do
-        resetMem [C.cexp|arr->mem|]
+        resetMem [C.cexp|arr->mem|] space
         allocMem [C.cexp|arr->mem|] [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|] space
                  [C.cstm|return NULL;|]
         forM_ [0..rank-1] $ \i ->
@@ -1084,7 +1066,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e = do
 readPrimStm :: C.ToExp a => a -> Int -> PrimType -> Signedness -> C.Stm
 readPrimStm place i t ept =
   [C.cstm|if (read_scalar(&$exp:(primTypeInfo t ept),&$exp:place) != 0) {
-        panic(1, "Error when reading input #%d of type %s (errno: %s).\n",
+        futhark_panic(1, "Error when reading input #%d of type %s (errno: %s).\n",
               $int:i,
               $exp:(primTypeInfo t ept).type_name,
               strerror(errno));
@@ -1095,7 +1077,7 @@ readInputs = zipWithM readInput [0..]
 
 readInput :: Int -> ExternalValue -> CompilerM op s (C.Stm, C.Stm, C.Stm, C.Exp)
 readInput i (OpaqueValue desc _) = do
-  stm [C.cstm|panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:desc);|]
+  stm [C.cstm|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:desc);|]
   return ([C.cstm|;|], [C.cstm|;|], [C.cstm|;|], [C.cexp|NULL|])
 readInput i (TransparentValue (ScalarValue t ept _)) = do
   dest <- newVName "read_value"
@@ -1127,7 +1109,7 @@ readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
                     $id:shape,
                     $int:(length dims))
          != 0) {
-       panic(1, "Cannot read input #%d of type %s%s (errno: %s).\n",
+       futhark_panic(1, "Cannot read input #%d of type %s%s (errno: %s).\n",
                  $int:i,
                  $string:dims_s,
                  $exp:(primTypeInfo t ept).type_name,
@@ -1191,10 +1173,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
   let run_it = [C.citems|
                   int r;
-                  /* Run the program once. */
+                  // Run the program once.
                   $stms:pack_input
                   if ($id:sync_ctx(ctx) != 0) {
-                    panic(1, "%s", $id:error_ctx(ctx));
+                    futhark_panic(1, "%s", $id:error_ctx(ctx));
                   };
                   // Only profile last run.
                   if (profile_run) {
@@ -1205,10 +1187,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                                                     $args:(map addrOf output_vals),
                                                     $args:input_args);
                   if (r != 0) {
-                    panic(1, "%s", $id:error_ctx(ctx));
+                    futhark_panic(1, "%s", $id:error_ctx(ctx));
                   }
                   if ($id:sync_ctx(ctx) != 0) {
-                    panic(1, "%s", $id:error_ctx(ctx));
+                    futhark_panic(1, "%s", $id:error_ctx(ctx));
                   };
                   if (profile_run) {
                     $id:pause_profiling(ctx);
@@ -1228,18 +1210,23 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
     // We do not want to profile all the initialisation.
     $id:pause_profiling(ctx);
 
-    /* Declare and read input. */
+    // Declare and read input.
     set_binary_mode(stdin);
     $items:input_items
+
+    if (end_of_input() != 0) {
+      futhark_panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
+    }
+
     $items:output_decls
 
-    /* Warmup run */
+    // Warmup run
     if (perform_warmup) {
       $items:run_it
       $stms:free_outputs
     }
     time_runs = 1;
-    /* Proper run. */
+    // Proper run.
     for (int run = 0; run < num_runs; run++) {
       // Only profile last run.
       profile_run = run == num_runs -1;
@@ -1249,10 +1236,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
       }
     }
 
-    /* Free the parsed input. */
+    // Free the parsed input.
     $stms:free_parsed
 
-    /* Print the final result. */
+    // Print the final result.
     if (binary_output) {
       set_binary_mode(stdout);
     }
@@ -1301,14 +1288,14 @@ benchmarkOptions =
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
           if (runtime_file == NULL) {
-            panic(1, "Cannot open %s: %s\n", optarg, strerror(errno));
+            futhark_panic(1, "Cannot open %s: %s\n", optarg, strerror(errno));
           }
         }|]
         set_num_runs = [C.cstm|{
           num_runs = atoi(optarg);
           perform_warmup = 1;
           if (num_runs <= 0) {
-            panic(1, "Need a positive number of runs, not %s\n", optarg);
+            futhark_panic(1, "Need a positive number of runs, not %s\n", optarg);
           }
         }|]
 
@@ -1326,7 +1313,8 @@ data CParts = CParts { cHeader :: String
 
 -- | Produce header and implementation files.
 asLibrary :: CParts -> (String, String)
-asLibrary parts = ("#pragma once\n\n" <> cHeader parts, cUtils parts <> cLib parts)
+asLibrary parts = ("#pragma once\n\n" <> cHeader parts,
+                   cHeader parts <> cUtils parts <> cLib parts)
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
@@ -1340,36 +1328,36 @@ compileProg :: MonadFreshNames m =>
             -> String
             -> [Space]
             -> [Option]
-            -> Functions op
+            -> Definitions op
             -> m CParts
-compileProg ops extra header_extra spaces options prog@(Functions funs) = do
+compileProg ops extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
-        runCompilerM prog ops src () compileProg'
+        runCompilerM ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
       option_parser = generateOptionParser "parse_options" $ benchmarkOptions++options
 
   let headerdefs = [C.cunit|
-$esc:("/*\n * Headers\n*/\n")
+$esc:("// Headers\n")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
 $esc:(header_extra)
 
-$esc:("\n/*\n * Initialisation\n*/\n")
+$esc:("\n// Initialisation\n")
 $edecls:(initDecls endstate)
 
-$esc:("\n/*\n * Arrays\n*/\n")
+$esc:("\n// Arrays\n")
 $edecls:(arrayDecls endstate)
 
-$esc:("\n/*\n * Opaque values\n*/\n")
+$esc:("\n// Opaque values\n")
 $edecls:(opaqueDecls endstate)
 
-$esc:("\n/*\n * Entry points\n*/\n")
+$esc:("\n// Entry points\n")
 $edecls:(entryDecls endstate)
 
-$esc:("\n/*\n * Miscellaneous\n*/\n")
+$esc:("\n// Miscellaneous\n")
 $edecls:(miscDecls endstate)
                            |]
 
@@ -1379,13 +1367,13 @@ $esc:("#include <stdlib.h>")
 $esc:("#include <stdbool.h>")
 $esc:("#include <math.h>")
 $esc:("#include <stdint.h>")
-/* If NDEBUG is set, the assert() macro will do nothing. Since Futhark
-   (unfortunately) makes use of assert() for error detection (and even some
-   side effects), we want to avoid that. */
+// If NDEBUG is set, the assert() macro will do nothing. Since Futhark
+// (unfortunately) makes use of assert() for error detection (and even some
+// side effects), we want to avoid that.
 $esc:("#undef NDEBUG")
 $esc:("#include <assert.h>")
 
-$esc:panic_h
+$esc:futhark_panic_h
 
 $esc:timing_h
 |]
@@ -1399,6 +1387,8 @@ $esc:("#include <errno.h>")
 $esc:("#include <getopt.h>")
 
 $esc:values_h
+
+$esc:("#define __private")
 
 static int binary_output = 0;
 static typename FILE *runtime_file;
@@ -1435,11 +1425,16 @@ int main(int argc, char** argv) {
   argv += parsed_options;
 
   if (argc != 0) {
-    panic(1, "Excess non-option: %s\n", argv[0]);
+    futhark_panic(1, "Excess non-option: %s\n", argv[0]);
   }
 
   struct futhark_context *ctx = futhark_context_new(cfg);
   assert (ctx != NULL);
+
+  char* error = futhark_context_get_error(ctx);
+  if (error != NULL) {
+    futhark_panic(1, "%s", error);
+  }
 
   if (entry_point != NULL) {
     int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
@@ -1485,17 +1480,19 @@ $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
 
+$esc:(header_extra)
+
 $esc:lock_h
 
+$edecls:builtin
+
 $edecls:early_decls
+
+$edecls:prototypes
 
 $edecls:lib_decls
 
 $edecls:(tupleDefinitions endstate)
-
-$edecls:prototypes
-
-$edecls:builtin
 
 $edecls:(map funcToDef definitions)
 
@@ -1509,14 +1506,19 @@ $edecls:entry_point_decls
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
     where
       compileProg' = do
+          let Definitions consts (Functions funs) = prog
+
           (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
 
-          (prototypes, definitions) <- unzip <$> mapM compileFun funs
+          get_consts <- compileConstants consts
 
-          mapM_ libDecl memstructs
-          entry_points <- mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
+          (prototypes, definitions) <- unzip <$> mapM (compileFun get_consts) funs
+
+          mapM_ earlyDecl memstructs
+          entry_points <-
+            mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
           extra
-          mapM_ libDecl $ concat memfuns
+          mapM_ earlyDecl $ concat memfuns
           profilereport <- gets $ DL.toList . compProfileItems
 
           ctx_ty <- contextType
@@ -1540,14 +1542,70 @@ $edecls:entry_point_decls
       builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
                 cFloat32Funs ++ cFloat64Funs
 
-      panic_h  = $(embedStringFile "rts/c/panic.h")
+      futhark_panic_h  = $(embedStringFile "rts/c/panic.h")
       values_h = $(embedStringFile "rts/c/values.h")
       timing_h = $(embedStringFile "rts/c/timing.h")
       lock_h   = $(embedStringFile "rts/c/lock.h")
       tuning_h = $(embedStringFile "rts/c/tuning.h")
 
-compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun (fname, Function _ outputs inputs body _ _) = do
+compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
+compileConstants (Constants ps init_consts) = do
+  ctx_ty <- contextType
+  const_fields <- mapM constParamField ps
+  contextField "constants" [C.cty|struct { $sdecls:const_fields }|] Nothing
+  earlyDecl [C.cedecl|int init_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|int free_constants($ty:ctx_ty*);|]
+
+  -- We locally define macros for the constants, so that when we
+  -- generate assignments to local variables, we actually assign into
+  -- the constants struct.  This is not needed for functions, because
+  -- they can only read constants, not write them.
+  let (defs, undefs) = unzip $ map constMacro ps
+  init_consts' <- blockScope $ do
+                    mapM_ resetMemConst ps
+                    compileCode init_consts
+  libDecl [C.cedecl|int init_constants($ty:ctx_ty *ctx) {
+      $items:defs
+      $items:init_consts'
+      $items:undefs
+      return 0;
+    }|]
+
+  free_consts <- collect $ mapM_ freeConst ps
+  libDecl [C.cedecl|int free_constants($ty:ctx_ty *ctx) {
+      $items:free_consts
+      return 0;
+    }|]
+
+  mapM getConst ps
+
+  where constParamField (ScalarParam name bt) = do
+          let ctp = primTypeToCType bt
+          return [C.csdecl|$ty:ctp $id:name;|]
+        constParamField (MemParam name space) = do
+          ty <- memToCType space
+          return [C.csdecl|$ty:ty $id:name;|]
+
+        constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
+          where p' = pretty (C.toIdent (paramName p) mempty)
+                def = "#define " ++ p' ++ " (" ++ "ctx->constants." ++ p' ++ ")"
+                undef = "#undef " ++ p'
+
+        resetMemConst ScalarParam{} = return ()
+        resetMemConst (MemParam name space) = resetMem name space
+
+        freeConst ScalarParam{} = return ()
+        freeConst (MemParam name space) = unRefMem [C.cexp|ctx->constants.$id:name|] space
+
+        getConst (ScalarParam name bt) = do
+          let ctp = primTypeToCType bt
+          return [C.citem|$ty:ctp $id:name = ctx->constants.$id:name;|]
+        getConst (MemParam name space) = do
+          ty <- memToCType space
+          return [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
+
+compileFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
+compileFun get_constants (fname, Function _ outputs inputs body _ _) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
   body' <- blockScope $ compileFunBody out_ptrs outputs body
@@ -1556,6 +1614,7 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
                                                    $params:outparams, $params:inparams);|],
           [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
                                                  $params:outparams, $params:inparams) {
+             $items:get_constants
              $items:body'
              return 0;
 }|])
@@ -1654,9 +1713,8 @@ compileExp = compilePrimExp compileLeaf
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (Index src (Count iexp) _ ScalarSpace{} _) = do
-          src' <- rawMem src
           iexp' <- compileExp iexp
-          return [C.cexp|$exp:src'[$exp:iexp']|]
+          return [C.cexp|$id:src[$exp:iexp']|]
 
         compileLeaf (SizeOf t) =
           return [C.cexp|(typename int32_t)sizeof($ty:t')|]
@@ -1720,12 +1778,14 @@ compilePrimExp f (ConvOpExp conv x) = do
 compilePrimExp f (BinOpExp bop x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
+  -- Note that integer addition, subtraction, and multiplication are
+  -- not handled by explicit operators, but rather by functions.  This
+  -- is because we want to implicitly convert them to unsigned
+  -- numbers, so we can do overflow without invoking undefined
+  -- behaviour.
   return $ case bop of
-             Add{} -> [C.cexp|$exp:x' + $exp:y'|]
              FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]
-             Sub{} -> [C.cexp|$exp:x' - $exp:y'|]
              FSub{} -> [C.cexp|$exp:x' - $exp:y'|]
-             Mul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FMul{} -> [C.cexp|$exp:x' * $exp:y'|]
              FDiv{} -> [C.cexp|$exp:x' / $exp:y'|]
              Xor{} -> [C.cexp|$exp:x' ^ $exp:y'|]
@@ -1786,6 +1846,11 @@ compileCode (Assert e msg (loc, locs)) = do
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
+compileCode (Allocate _ _ ScalarSpace{}) =
+  -- Handled by the declaration of the memory block, which is
+  -- translated to an actual array.
+  return ()
+
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space [C.cstm|return 1;|]
@@ -1795,7 +1860,7 @@ compileCode (Free name space) =
 
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
-      it' = intTypeToCType it
+      it' = primTypeToCType $ IntType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
@@ -1847,10 +1912,9 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
-  dest' <- rawMem dest
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  stm [C.cstm|$exp:dest'[$exp:idx'] = $exp:elemexp';|]
+  stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
@@ -1877,9 +1941,9 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
   case vs of
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs']
-      libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
+      earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
     ArrayZeros n ->
-      libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
+      earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
   contextField (pretty name)
     [C.cty|struct memblock|] $
@@ -1913,10 +1977,8 @@ compileCode (Call dests fname args) = do
   case dests of
     [dest] | isBuiltInFunction fname ->
       stm [C.cstm|$id:dest = $id:(funName fname)($args:args'');|]
-    _        -> do
-      ret <- newVName "call_ret"
-      item [C.citem|int $id:ret = $id:(funName fname)($args:args'');|]
-      stm [C.cstm|assert($id:ret == 0);|]
+    _ ->
+      item [C.citem|if ($id:(funName fname)($args:args'') != 0) { return 1; }|]
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
         compileArg (ExpArg e) = compileExp e
 
@@ -1947,7 +2009,7 @@ compileFunBody output_ptrs outputs code = do
           decl [C.cdecl|$ty:ctp $id:name;|]
 
         setRetVal' p (MemParam name space) = do
-          resetMem [C.cexp|*$exp:p|]
+          resetMem [C.cexp|*$exp:p|] space
           setMem [C.cexp|*$exp:p|] name space
         setRetVal' p (ScalarParam name _) =
           stm [C.cstm|*$exp:p = $id:name;|]

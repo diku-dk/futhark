@@ -4,10 +4,8 @@ module Futhark.CodeGen.Backends.CSOpenCL
   ) where
 
 import Control.Monad
-import Data.List
+import Data.List (intersperse)
 
-
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory, int32)
 import Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericCSharp as CS
@@ -17,28 +15,26 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util (zEncodeString)
-import Futhark.MonadFreshNames hiding (newVName')
+import Futhark.MonadFreshNames
 
 
-compileProg :: MonadFreshNames m => Maybe String
-            -> Prog ExplicitMemory -> m (Either InternalError String)
+compileProg :: MonadFreshNames m =>
+               Maybe String -> Prog ExplicitMemory -> m String
 compileProg module_name prog = do
-  res <- ImpGen.compileProg prog
-  case res of
-    Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes failures prog') ->
-      Right <$> CS.compileProg
-                  module_name
-                  CS.emptyConstructor
-                  imports
-                  defines
-                  operations
-                  ()
-                  (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes failures)
-                  []
-                  [Imp.Space "device", Imp.Space "local", Imp.DefaultSpace]
-                  cliOptions
-                  prog'
+  Imp.Program opencl_code opencl_prelude kernel_names types sizes failures prog' <-
+    ImpGen.compileProg prog
+  CS.compileProg
+    module_name
+    CS.emptyConstructor
+    imports
+    defines
+    operations
+    ()
+    (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes failures)
+    []
+    [Imp.Space "device", Imp.Space "local", Imp.DefaultSpace]
+    cliOptions
+    prog'
 
   where operations :: CS.Operations Imp.OpenCL ()
         operations = CS.defaultOperations
@@ -125,15 +121,16 @@ callKernel (Imp.GetSize v key) =
   CS.stm $ Reassign (Var (CS.compileName v)) $
     Field (Var "Ctx.Sizes") $ zEncodeString $ pretty key
 
-callKernel (Imp.GetSizeMax v size_class) =
-  CS.stm $ Reassign (Var (CS.compileName v)) $
-  Field (Var "Ctx.OpenCL") $
-  case size_class of Imp.SizeGroup -> "MaxGroupSize"
-                     Imp.SizeNumGroups -> "MaxNumGroups"
-                     Imp.SizeTile -> "MaxTileSize"
-                     Imp.SizeThreshold{} -> "MaxThreshold"
-                     Imp.SizeLocalMemory -> "MaxLocalMemory"
-                     Imp.SizeBespoke{} -> "MaxBespoke"
+callKernel (Imp.GetSizeMax v size_class) = do
+  v' <- CS.compileVar v
+  CS.stm $ Reassign v' $
+    Field (Var "Ctx.OpenCL") $
+    case size_class of Imp.SizeGroup -> "MaxGroupSize"
+                       Imp.SizeNumGroups -> "MaxNumGroups"
+                       Imp.SizeTile -> "MaxTileSize"
+                       Imp.SizeThreshold{} -> "MaxThreshold"
+                       Imp.SizeLocalMemory -> "MaxLocalMemory"
+                       Imp.SizeBespoke{} -> "MaxBespoke"
 
 callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM CS.compileExp num_workgroups
@@ -146,8 +143,9 @@ callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = d
   where mult_exp = BinOp "*"
 
 callKernel (Imp.CmpSizeLe v key x) = do
+  v' <- CS.compileVar v
   x' <- CS.compileExp x
-  CS.stm $ Reassign (Var (CS.compileName v)) $
+  CS.stm $ Reassign v' $
     BinOp "<=" (Field (Var "Ctx.Sizes") (zEncodeString $ pretty key)) x'
 
 launchKernel :: Imp.Safety -> String -> [CSExp] -> [CSExp] -> [Imp.KernelArg] -> CS.CompilerM op s ()
@@ -212,8 +210,10 @@ launchKernel safety kernel_name kernel_dims workgroup_dims args = do
           err <- newVName' "setargErr"
           dest <- newVName "kArgDest"
           let err_var = Var err
-          return [ Fixed (Var $ CS.compileName dest) (Addr mem)
-                   [ Assign err_var $ getKernelCall kernel argnum (CS.sizeOf $ Primitive IntPtrT) (Var $ CS.compileName dest)]
+          dest' <- CS.compileVar dest
+          return [ Fixed dest' (Addr mem)
+                   [ Assign err_var $ getKernelCall kernel argnum
+                     (CS.sizeOf $ Primitive IntPtrT) dest']
                  ]
 
         processValueArg kernel argnum et e = do
@@ -230,9 +230,8 @@ launchKernel safety kernel_name kernel_dims workgroup_dims args = do
                          -> CS.CompilerM op s [CSStmt]
         processKernelArg kernel argnum (Imp.ValueKArg e et) =
           processValueArg kernel argnum et =<< CS.compileExp e
-
         processKernelArg kernel argnum (Imp.MemKArg v) =
-          processMemArg kernel argnum $ memblockFromMem v
+          processMemArg kernel argnum . memblockFromMem =<< CS.compileVar v
 
         processKernelArg kernel argnum (Imp.SharedMemoryKArg (Imp.Count num_bytes)) = do
           err <- newVName' "setargErr"
@@ -304,19 +303,17 @@ computeErrCodeT = CustomT "ComputeErrorCode"
 
 allocateOpenCLBuffer :: CS.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
-  let mem' = CS.compileName mem
   errcode <- CS.compileName <$> newVName "errCode"
   CS.stm $ AssignTyped computeErrCodeT (Var errcode) Nothing
-  CS.stm $ Reassign (Var mem') (CS.simpleCall "MemblockAllocDevice" [Ref $ Var "Ctx", Var mem', size, String mem'])
+  CS.stm $ Reassign mem (CS.simpleCall "MemblockAllocDevice" [Ref $ Var "Ctx", mem, size, String $ pretty mem])
 
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 
 copyOpenCLMemory :: CS.Copy Imp.OpenCL ()
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes _ = do
-  let destmem' = Var $ CS.compileName destmem
   ptr <- newVName' "ptr"
-  CS.stm $ Fixed (Var ptr) (Addr $ Index destmem' $ IdxExp $ Integer 0)
+  CS.stm $ Fixed (Var ptr) (Addr $ Index destmem $ IdxExp $ Integer 0)
     [ ifNotZeroSize nbytes $
       Exp $ CS.simpleCall "CL10.EnqueueReadBuffer"
       [ Var "Ctx.Opencl.Queue", memblockFromMem srcmem, Bool True
@@ -325,9 +322,8 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
     ]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
-  let srcmem'  = CS.compileName srcmem
   ptr <- newVName' "ptr"
-  CS.stm $ Fixed (Var ptr) (Addr $ Index (Var srcmem') $ IdxExp $ Integer 0)
+  CS.stm $ Fixed (Var ptr) (Addr $ Index srcmem $ IdxExp $ Integer 0)
     [ ifNotZeroSize nbytes $
       Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
         [ Var "Ctx.OpenCL.Queue", memblockFromMem destmem, Bool True
@@ -351,8 +347,8 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
 
 staticOpenCLArray :: CS.StaticArray Imp.OpenCL ()
 staticOpenCLArray name "device" t vs = do
-  let name' = CS.compileName name
-  CS.staticMemDecl $ AssignTyped (CustomT "OpenCLMemblock") (Var name') Nothing
+  name' <- CS.compileVar name
+  CS.staticMemDecl $ AssignTyped (CustomT "OpenCLMemblock") name' Nothing
 
   -- Create host-side C# array with intended values.
   tmp_arr <- newVName' "tmpArr"
@@ -369,17 +365,20 @@ staticOpenCLArray name "device" t vs = do
                              Imp.ArrayZeros n -> n
       size = Integer $ toInteger num_elems * Imp.primByteSize t
 
-  CS.staticMemAlloc $ Reassign (Var name') (CS.simpleCall "EmptyMemblock" [Var "Ctx.EMPTY_MEM_HANDLE"])
+  CS.staticMemAlloc $ Reassign name' $
+    CS.simpleCall "EmptyMemblock" [Var "Ctx.EMPTY_MEM_HANDLE"]
   errcode <- CS.compileName <$> newVName "errCode"
   CS.staticMemAlloc $ AssignTyped computeErrCodeT (Var errcode) Nothing
-  CS.staticMemAlloc $ Reassign (Var name') (CS.simpleCall "MemblockAllocDevice" [Ref $ Var "Ctx", Var name', size, String name'])
+  CS.staticMemAlloc $ Reassign name' $
+    CS.simpleCall "MemblockAllocDevice"
+    [Ref $ Var "Ctx", name', size, String $ pretty name']
 
   -- Copy Numpy array to the device memory block.
   CS.staticMemAlloc $ Unsafe [
     Fixed (Var ptr) (Addr $ Index (Var tmp_arr) $ IdxExp $ Integer 0)
       [ ifNotZeroSize size $
         Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
-          [ Var "Ctx.OpenCL.Queue", memblockFromMem name, Bool True
+          [ Var "Ctx.OpenCL.Queue", memblockFromMem name', Bool True
           , CS.toIntPtr (Integer 0),CS.toIntPtr size
           , CS.toIntPtr $ Var ptr, Integer 0, Null, Null ]
       ]
@@ -388,10 +387,8 @@ staticOpenCLArray name "device" t vs = do
 staticOpenCLArray _ space _ _ =
   error $ "CSOpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
-memblockFromMem :: VName -> CSExp
-memblockFromMem mem =
-  let mem' = Var $ CS.compileName mem
-  in Field mem' "Mem"
+memblockFromMem :: CSExp -> CSExp
+memblockFromMem mem = Field mem "Mem"
 
 packArrayOutput :: CS.EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do
@@ -415,12 +412,13 @@ unpackArrayInput mem "device" t _ dims e = do
   zipWithM_ (CS.unpackDim e) dims [0..]
   ptr <- pretty <$> newVName "ptr"
 
+  mem' <- CS.compileVar mem
   CS.stm $ CS.getDefaultDecl (Imp.MemParam mem (Imp.Space "device"))
-  allocateOpenCLBuffer mem nbytes "device"
+  allocateOpenCLBuffer mem' nbytes "device"
   CS.stm $ Unsafe [Fixed (Var ptr) (Addr $ Index (Field e "Item1") $ IdxExp $ Integer 0)
       [ ifNotZeroSize nbytes $
         Exp $ CS.simpleCall "CL10.EnqueueWriteBuffer"
-        [ Var "Ctx.OpenCL.Queue", memblockFromMem mem, Bool True
+        [ Var "Ctx.OpenCL.Queue", memblockFromMem mem', Bool True
         , CS.toIntPtr (Integer 0), CS.toIntPtr nbytes, CS.toIntPtr (Var ptr)
         , Integer 0, Null, Null]
       ]]

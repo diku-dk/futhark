@@ -29,12 +29,12 @@ import Futhark.Transform.Substitute
 import Futhark.Pass
 
 data VarEntry = IsArray VName (NameInfo SOACS) Names SOAC.Input
-              | IsNotArray VName (NameInfo SOACS)
+              | IsNotArray (NameInfo SOACS)
 
 varEntryType :: VarEntry -> NameInfo SOACS
 varEntryType (IsArray _ attr _ _) =
   attr
-varEntryType (IsNotArray _ attr) =
+varEntryType (IsNotArray attr) =
   attr
 
 varEntryAliases :: VarEntry -> Names
@@ -82,7 +82,7 @@ bindVar env (Ident name t, aliases) =
   env { varsInScope = M.insert name entry $ varsInScope env }
   where entry = case t of
           Array {} -> IsArray name (LetInfo t) aliases' $ SOAC.identInput $ Ident name t
-          _        -> IsNotArray name $ LetInfo t
+          _        -> IsNotArray $ LetInfo t
         expand = maybe mempty varEntryAliases . flip M.lookup (varsInScope env)
         aliases' = aliases <> mconcat (map expand $ namesToList aliases)
 
@@ -176,32 +176,39 @@ fuseSOACs :: Pass SOACS SOACS
 fuseSOACs =
   Pass { passName = "Fuse SOACs"
        , passDescription = "Perform higher-order optimisation, i.e., fusion."
-       , passFunction = simplifySOACS <=< renameProg <=< intraproceduralTransformation fuseFun
+       , passFunction = \prog ->
+           simplifySOACS =<< renameProg =<<
+           intraproceduralTransformationWithConsts
+           (fuseConsts (freeIn (progFuns prog))) fuseFun prog
        }
 
-fuseFun :: FunDef SOACS -> PassM (FunDef SOACS)
-fuseFun fun = do
+fuseConsts :: Names -> Stms SOACS -> PassM (Stms SOACS)
+fuseConsts used_consts consts =
+  fuseStms mempty consts $ map Var $ namesToList used_consts
+
+fuseFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
+fuseFun consts fun = do
+  stms <- fuseStms (scopeOf consts <> scopeOfFParams (funDefParams fun))
+          (bodyStms $ funDefBody fun)
+          (bodyResult $ funDefBody fun)
+  let body = (funDefBody fun) { bodyStms = stms }
+  return fun { funDefBody = body }
+
+fuseStms :: Scope SOACS -> Stms SOACS -> Result -> PassM (Stms SOACS)
+fuseStms scope stms res = do
   let env  = FusionGEnv { soacs = M.empty
-                        , varsInScope = M.empty
+                        , varsInScope = mempty
                         , fusedRes = mempty
                         }
   k <- cleanFusionResult <$>
-       liftEitherM (runFusionGatherM (fusionGatherFun fun) env)
+       liftEitherM (runFusionGatherM
+                    (binding scope' $ fusionGatherStms mempty (stmsToList stms) res)
+                    env)
   if not $ rsucc k
-  then return fun
-  else liftEitherM $ runFusionGatherM (fuseInFun k fun) env
-
-fusionGatherFun :: FunDef SOACS -> FusionGM FusedRes
-fusionGatherFun fundec =
-  bindingParams (funDefParams fundec) $
-  fusionGatherBody mempty $ funDefBody fundec
-
-fuseInFun :: FusedRes -> FunDef SOACS -> FusionGM (FunDef SOACS)
-fuseInFun res fundec = do
-  body' <- bindingParams (funDefParams fundec) $
-           bindRes res $
-           fuseInBody $ funDefBody fundec
-  return $ fundec { funDefBody = body' }
+  then return stms
+  else liftEitherM $ runFusionGatherM (binding scope' $ bindRes k $ fuseInStms stms) env
+  where scope' = map toBind $ M.toList scope
+        toBind (k, t) = (Ident k $ typeOf t, mempty)
 
 ---------------------------------------------------
 ---------------------------------------------------
@@ -467,6 +474,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
 
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
   -- kernel until which fusion succeded, and @fused_ker@ is the resulting kernel.
+  use_scope <- (<>scopeOf rem_bnds) <$> askScope
   (_,ok_ind,_,fused_ker,_) <-
       foldM (\(cur_ok,n,prev_ind,cur_ker,ufus_nms) (ker, _ker_nm, bnd_ind) -> do
                 -- check that we still try fusion and that the intermediate
@@ -486,7 +494,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                     cons_no_out_transf = SOAC.nullTransforms $ outputTransform ker
 
                 consumer_ok   <- do let consumer_bnd   = rem_bnds !! bnd_ind
-                                    maybesoac <- SOAC.fromExp $ stmExp consumer_bnd
+                                    maybesoac <- runReaderT (SOAC.fromExp $ stmExp consumer_bnd) use_scope
                                     case maybesoac of
                                       -- check that consumer's lambda body does not use
                                       -- directly the produced arrays (e.g., see noFusion3.fut).
@@ -750,14 +758,18 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
 -------------------------------------------------------------
 -------------------------------------------------------------
 
-fuseInBody :: Body -> FusionGM Body
-
-fuseInBody (Body _ stms res)
-  | Let pat aux e:bnds <- stmsToList stms = do
-      body' <- bindingPat pat $ fuseInBody $ mkBody (stmsFromList bnds) res
+fuseInStms :: Stms SOACS -> FusionGM (Stms SOACS)
+fuseInStms stms
+  | Just (Let pat aux e, stms') <- stmsHead stms = do
+      stms'' <- bindingPat pat $ fuseInStms stms'
       soac_bnds <- replaceSOAC pat aux e
-      return $ insertStms soac_bnds body'
-  | otherwise = return $ Body () mempty res
+      pure $ soac_bnds <> stms''
+  | otherwise =
+      pure mempty
+
+fuseInBody :: Body -> FusionGM Body
+fuseInBody (Body _ stms res) =
+  Body () <$> fuseInStms stms <*> pure res
 
 fuseInExp :: Exp -> FusionGM Exp
 

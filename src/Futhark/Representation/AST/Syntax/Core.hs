@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.Representation.AST.Syntax" in order for
 -- "Futhark.Representation.AST.Annotations" to use these definitions.  This
@@ -16,7 +18,6 @@ module Futhark.Representation.AST.Syntax.Core
          , ShapeBase(..)
          , Shape
          , Ext(..)
-         , isExt
          , ExtSize
          , ExtShape
          , Rank(..)
@@ -73,11 +74,6 @@ type Shape = ShapeBase SubExp
 data Ext a = Ext Int
            | Free a
            deriving (Eq, Ord, Show)
-
--- | Returns the existential if any
-isExt :: Ext a -> Maybe Int
-isExt (Ext i) = Just i
-isExt _ = Nothing
 
 -- | The size of this dimension.
 type ExtSize = Ext SubExp

@@ -108,6 +108,11 @@ OPTIONS
 
   A negative timeout means to wait indefinitely.
 
+-v, --verbose
+
+  Print verbose information about what the benchmark is doing.  Pass
+  multiple times to increase the amount of information printed.
+
 --tuning=EXTENSION
 
   For each program being run, look for a tuning file with this

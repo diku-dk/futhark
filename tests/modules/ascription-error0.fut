@@ -1,6 +1,6 @@
 -- Abstract types must be abstract.
 -- ==
--- error: Types do not match
+-- error: Function body does not have
 
 module type SIG = {
 type t

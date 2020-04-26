@@ -10,7 +10,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Sequence as Seq
 import qualified Data.Map.Strict as M
-import Data.List
+import Data.List (foldl')
 
 import Prelude hiding (quot)
 
@@ -23,7 +23,8 @@ import Futhark.Optimise.BlkRegTiling
 
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
-            fmap Prog . mapM optimiseFunDef . progFunctions
+            \(Prog consts funs) ->
+              Prog consts <$> mapM optimiseFunDef funs
 
 optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 optimiseFunDef fundec = do

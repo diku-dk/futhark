@@ -15,7 +15,7 @@ DESCRIPTION
 ===========
 
 ``futhark python`` translates a Futhark program to sequential Python
-code.
+code, which depends on Numpy.
 
 The resulting program will read the arguments to the ``main`` function
 from standard input and print its return value on standard output.

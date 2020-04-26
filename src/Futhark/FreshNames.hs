@@ -5,8 +5,6 @@ module Futhark.FreshNames
   , blankNameSource
   , newNameSource
   , newName
-  , newVName
-  , newVNameFromName
   ) where
 
 import Language.Haskell.TH.Syntax (Lift)
@@ -31,7 +29,8 @@ instance Monoid VNameSource where
 
 -- | Produce a fresh name, using the given name as a template.
 newName :: VNameSource -> VName -> (VName, VNameSource)
-newName (VNameSource i) k = (VName (baseName k) i, VNameSource (i+1))
+newName (VNameSource i) k = i' `seq` (VName (baseName k) i, VNameSource i')
+  where i' = i+1
 
 -- | A blank name source.
 blankNameSource :: VNameSource
@@ -40,11 +39,3 @@ blankNameSource = newNameSource 0
 -- | A new name source that starts counting from the given number.
 newNameSource :: Int -> VNameSource
 newNameSource = VNameSource
-
--- | Produce a fresh 'VName', using the given base name as a template.
-newVName :: VNameSource -> String -> (VName, VNameSource)
-newVName src = newVNameFromName src . nameFromString
-
--- | Produce a fresh 'VName', using the given base name as a template.
-newVNameFromName :: VNameSource -> Name -> (VName, VNameSource)
-newVNameFromName src s = newName src $ VName s 0

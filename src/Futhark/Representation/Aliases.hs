@@ -27,7 +27,6 @@ module Futhark.Representation.Aliases
        , removeProgAliases
        , removeFunDefAliases
        , removeExpAliases
-       , removeBodyAliases
        , removeStmAliases
        , removeLambdaAliases
        , removePatternAliases
@@ -214,10 +213,6 @@ removeExpAliases :: CanBeAliased (Op lore) =>
                     Exp (Aliases lore) -> Exp lore
 removeExpAliases = runIdentity . rephraseExp removeAliases
 
-removeBodyAliases :: CanBeAliased (Op lore) =>
-                     Body (Aliases lore) -> Body lore
-removeBodyAliases = runIdentity . rephraseBody removeAliases
-
 removeStmAliases :: CanBeAliased (Op lore) =>
                         Stm (Aliases lore) -> Stm lore
 removeStmAliases = runIdentity . rephraseStm removeAliases
@@ -312,9 +307,10 @@ mkStmsAliases bnds res = delve mempty $ stmsToList bnds
           names <> mconcat (map look $ namesToList names)
           where look k = M.findWithDefault mempty k aliasmap
 
--- | Everything consumed in the given bindings and result (even transitively).
-consumedInStms :: Aliased lore => Stms lore -> [SubExp] -> Names
-consumedInStms bnds res = snd $ mkStmsAliases bnds res
+-- | Everything consumed in the given statements and result (even
+-- transitively).
+consumedInStms :: Aliased lore => Stms lore -> Names
+consumedInStms = snd . flip mkStmsAliases []
 
 type AliasesAndConsumed = (M.Map VName Names,
                            Names)

@@ -16,7 +16,7 @@ install:
 	@echo \# Installing manual page to ${MANPREFIX}/man1
 	@mkdir -p ${MANPREFIX}/man1/
 	@echo \# Installing manpages to ${MANPREFIX}/man1/
-	install -D -m 644 share/man/man1/*.1 ${MANPREFIX}/man1/
+	install -D -m 644 share/man/man1/* ${MANPREFIX}/man1/
 
 
 .PHONY: all install

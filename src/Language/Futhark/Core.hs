@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -26,7 +28,6 @@ module Language.Futhark.Core
   , pretty
   , quote
   , pquote
-  , shorten
 
   -- * Special identifiers
   , defaultEntryPoint
@@ -191,10 +192,3 @@ quote s = "\"" ++ s ++ "\""
 -- | As 'quote', but works on prettyprinted representation.
 pquote :: Doc -> Doc
 pquote = dquotes
-
--- | Shorten a (single-line) string to at most some appropriate number
--- of characters, with trailing ... if necessary.  Used for error
--- messages.
-shorten :: String -> String
-shorten s | length s > 70 = take 70 s <> "..."
-          | otherwise = s
