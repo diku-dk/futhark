@@ -52,7 +52,6 @@ import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.Range as Range
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.MonadFreshNames
 import Futhark.Representation.Aliases
 import Futhark.Representation.Ranges
 import Futhark.Representation.Kernels
@@ -81,10 +80,10 @@ multiplicity stm =
 optimiseBranch :: SymbolTable -> Sinking -> Body SinkLore
                -> (Body SinkLore, Sunk)
 optimiseBranch vtable sinking (Body attr stms res) =
-  let (stms', stms_sunk) = optimiseStms vtable sinking' stms
+  let (stms', stms_sunk) = optimiseStms vtable sinking' stms $ freeIn res
   in (Body attr (sunk_stms <> stms') res,
       sunk <> stms_sunk)
-  where free_in_stms = freeIn stms
+  where free_in_stms = freeIn stms <> freeIn res
         (sinking_here, sinking') = M.partitionWithKey sunkHere sinking
         sunk_stms = stmsFromList $ M.elems sinking_here
         sunkHere v stm =
@@ -92,15 +91,16 @@ optimiseBranch vtable sinking (Body attr stms res) =
           all (`ST.available` vtable) (namesToList (freeIn stm))
         sunk = S.fromList $ concatMap (patternNames . stmPattern) sunk_stms
 
-optimiseStms :: SymbolTable -> Sinking -> Stms SinkLore
+optimiseStms :: SymbolTable -> Sinking -> Stms SinkLore -> Names
              -> (Stms SinkLore, Sunk)
-optimiseStms init_vtable init_sinking all_stms =
+optimiseStms init_vtable init_sinking all_stms free_in_res =
   let (all_stms', sunk) =
         optimiseStms' init_vtable init_sinking $ stmsToList all_stms
   in (stmsFromList all_stms', sunk)
   where
-    multiplicities = foldl' (M.unionWith (+)) mempty $
-                     map multiplicity $ stmsToList all_stms
+    multiplicities = foldl' (M.unionWith (+))
+                     (M.fromList (zip (namesToList free_in_res) [1..]))
+                     (map multiplicity $ stmsToList all_stms)
 
     optimiseStms' _ _ [] = ([], mempty)
 
@@ -165,22 +165,25 @@ optimiseStms init_vtable init_sinking all_stms =
 optimiseBody :: SymbolTable -> Sinking -> Body SinkLore
              -> (Body SinkLore, Sunk)
 optimiseBody vtable sinking (Body attr stms res) =
-  let (stms', sunk) = optimiseStms vtable sinking stms
+  let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
   in (Body attr stms' res, sunk)
 
 optimiseKernelBody :: SymbolTable -> Sinking -> KernelBody SinkLore
                    -> (KernelBody SinkLore, Sunk)
 optimiseKernelBody vtable sinking (KernelBody attr stms res) =
-  let (stms', sunk) = optimiseStms vtable sinking stms
+  let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
   in (KernelBody attr stms' res, sunk)
-
-optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-optimiseFunDef fundef = do
-  let fundef' = Range.analyseFun $ Alias.analyseFun fundef
-      vtable = ST.insertFParams (funDefParams fundef') mempty
-      (body, _) = optimiseBody vtable mempty $ funDefBody fundef'
-  return fundef { funDefBody = removeBodyAliases $ removeBodyRanges body }
 
 sink :: Pass Kernels Kernels
 sink = Pass "sink" "move memory loads closer to their uses" $
-       intraproceduralTransformation optimiseFunDef
+       fmap (removeProgAliases . removeProgRanges) .
+       intraproceduralTransformationWithConsts onConsts onFun .
+       Range.rangeAnalysis . Alias.aliasAnalysis
+  where onFun _ fd = do
+          let vtable = ST.insertFParams (funDefParams fd) mempty
+              (body, _) = optimiseBody vtable mempty $ funDefBody fd
+          return fd { funDefBody = body }
+
+        onConsts consts =
+          pure $ fst $ optimiseStms mempty mempty consts $
+          namesFromList $ M.keys $ scopeOf consts

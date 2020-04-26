@@ -53,6 +53,9 @@ afterwards.
 Most commands take a ``-v``/``--verbose`` option that makes
 ``futhark pkg`` write running diagnostics to stderr.
 
+Network requests (exclusively HTTP GETs) are done via ``curl``, which
+must be available on the ``PATH``.
+
 COMMANDS
 ========
 

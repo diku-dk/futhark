@@ -11,8 +11,7 @@ import Control.Monad.Except hiding (throwError)
 import qualified Control.Monad.Except as E
 import qualified Data.ByteString as SBS
 import qualified Data.ByteString.Lazy as LBS
-
-import Data.List
+import Data.List (delete, partition)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -30,7 +29,7 @@ import Text.Regex.TDFA
 import Futhark.Analysis.Metrics
 import Futhark.Test
 import Futhark.Util.Options
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (prettyText, inRed)
 import Futhark.Util.Table
 
 --- Test execution
@@ -473,9 +472,6 @@ runTests config paths = do
   putStr excluded_str
   exitWith $ case testStatusFail ts of 0 -> ExitSuccess
                                        _ -> ExitFailure 1
-
-inRed :: String -> String
-inRed s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]
 
 ---
 --- Configuration and command line parsing

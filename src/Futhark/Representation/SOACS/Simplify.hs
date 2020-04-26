@@ -8,8 +8,8 @@ module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
        , simplifyLambda
        , simplifyFun
-       , simplifyFun'
        , simplifyStms
+       , simplifyConsts
 
        , simpleSOACS
        , simplifySOAC
@@ -24,7 +24,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Foldable
 import Data.Either
-import Data.List
+import Data.List (partition, transpose, unzip6, zip6)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
@@ -63,13 +63,10 @@ getShapeNames bnd =
       tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
   in  namesFromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
-simplifyFun :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
+simplifyFun :: MonadFreshNames m =>
+               ST.SymbolTable (Wise SOACS) -> FunDef SOACS -> m (FunDef SOACS)
 simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
-
-simplifyFun' :: MonadFreshNames m => FunDef SOACS -> m (FunDef SOACS)
-simplifyFun' =
-  Simplify.simplifyFun simpleSOACS mempty Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> [Maybe VName] -> m Lambda
@@ -77,9 +74,16 @@ simplifyLambda =
   Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyStms :: (HasScope SOACS m, MonadFreshNames m) =>
-                Stms SOACS -> m (Stms SOACS)
-simplifyStms =
+                Stms SOACS -> m (ST.SymbolTable (Wise SOACS), Stms SOACS)
+simplifyStms stms = do
+  scope <- askScope
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers
+    scope stms
+
+simplifyConsts :: MonadFreshNames m =>
+                  Stms SOACS -> m (ST.SymbolTable (Wise SOACS), Stms SOACS)
+simplifyConsts =
+  Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
 simplifySOAC :: Simplify.SimplifiableLore lore =>
                 Simplify.SimplifyOp lore (SOAC lore)

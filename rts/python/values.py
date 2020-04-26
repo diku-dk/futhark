@@ -573,6 +573,11 @@ representation of the Futhark type."""
             return read_scalar(reader, basetype)
         return (dims, basetype)
 
+def end_of_input(entry, f=input_reader):
+    skip_spaces(f)
+    if f.get_char() != b'':
+        panic(1, "Expected EOF on stdin after reading input for \"%s\".", entry)
+
 def write_value_text(v, out=sys.stdout):
     if type(v) == np.uint8:
         out.write("%uu8" % v)

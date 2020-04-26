@@ -10,7 +10,7 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.ByteString.Lazy as LBS
-import Data.List
+import Data.List (isPrefixOf, intercalate)
 import Data.Monoid
 import System.Directory
 import System.FilePath
@@ -21,8 +21,6 @@ import System.IO
 import System.Console.GetOpt
 
 import qualified Codec.Archive.Zip as Zip
-import Network.HTTP.Client
-import Network.HTTP.Client.TLS
 
 import Prelude
 
@@ -40,7 +38,7 @@ installInDir (BuildList bl) dir = do
   let putEntry from_dir pdir entry
         -- The archive may contain all kinds of other stuff that we don't want.
         | not (isInPkgDir from_dir $ Zip.eRelativePath entry)
-          || hasTrailingPathSeparator (Zip.eRelativePath entry) = return ()
+          || hasTrailingPathSeparator (Zip.eRelativePath entry) = return Nothing
         | otherwise = do
         -- Since we are writing to paths indicated in a zipfile we
         -- downloaded from the wild Internet, we are going to be a
@@ -56,6 +54,7 @@ installInDir (BuildList bl) dir = do
         let f = pdir </> makeRelative from_dir (Zip.eRelativePath entry)
         createDirectoryIfMissing True $ takeDirectory f
         LBS.writeFile f $ Zip.fromEntry entry
+        return $ Just f
 
       isInPkgDir from_dir f =
         Posix.splitPath from_dir `isPrefixOf` Posix.splitPath f
@@ -82,7 +81,12 @@ installInDir (BuildList bl) dir = do
     liftIO $ removePathForcibly pdir
     liftIO $ createDirectoryIfMissing True pdir
 
-    liftIO $ mapM_ (putEntry from_dir pdir) $ Zip.zEntries a
+    written <-
+      catMaybes <$> liftIO (mapM (putEntry from_dir pdir) $ Zip.zEntries a)
+
+    when (null written) $
+      fail $ "Zip archive for package " ++ T.unpack p ++
+      " does not contain any files in " ++ from_dir
 
 libDir, libNewDir, libOldDir :: FilePath
 (libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
@@ -186,7 +190,7 @@ instance MonadPkgRegistry PkgM where
 instance MonadLogger PkgM where
   addLog l = do
     verbose <- asks pkgVerbose
-    when verbose $ liftIO $ T.hPutStr stderr $ toText l
+    when verbose $ liftIO $ T.hPutStrLn stderr $ toText l
 
 runPkgM :: PkgConfig -> PkgM a -> IO a
 runPkgM cfg (PkgM m) = evalStateT (runReaderT m cfg) mempty
@@ -354,9 +358,6 @@ doVersions = cmdMain "PKGPATH" $ \args cfg ->
 
 main :: String -> [String] -> IO ()
 main prog args = do
-  -- Ensure that we can make HTTPS requests.
-  setGlobalManager =<< newManager tlsManagerSettings
-
   -- Avoid Git asking for credentials.  We prefer failure.
   liftIO $ setEnv "GIT_TERMINAL_PROMPT" "0"
 

@@ -173,6 +173,17 @@ instance (FreeAttr (ExpAttr lore),
           FreeIn (FParamAttr lore),
           FreeIn (LParamAttr lore),
           FreeIn (LetAttr lore),
+          FreeIn (RetType lore),
+          FreeIn (Op lore)) => FreeIn (FunDef lore) where
+  freeIn' (FunDef _ _ rettype params body) =
+    fvBind (namesFromList $ map paramName params) $
+    freeIn' rettype <> freeIn' params <> freeIn' body
+
+instance (FreeAttr (ExpAttr lore),
+          FreeAttr (BodyAttr lore),
+          FreeIn (FParamAttr lore),
+          FreeIn (LParamAttr lore),
+          FreeIn (LetAttr lore),
           FreeIn (Op lore)) => FreeIn (Lambda lore) where
   freeIn' (Lambda params body rettype) =
     fvBind (namesFromList $ map paramName params) $

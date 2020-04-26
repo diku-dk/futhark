@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.GenericCSharp
   , assignScalarPointer
   , toIntPtr
   , compileName
+  , compileVar
   , compileDim
   , compileExp
   , compileCode
@@ -52,18 +53,14 @@ module Futhark.CodeGen.Backends.GenericCSharp
   , simpleCall
   , callMethod
   , simpleInitClass
-  , parametrizedCall
 
   , copyMemoryDefaultSpace
   , consoleErrorWrite
   , consoleErrorWriteLine
-  , consoleWrite
-  , consoleWriteLine
 
   , publicName
   , sizeOf
   , privateFunDef
-  , publicFunDef
   , getDefaultDecl
   ) where
 
@@ -74,7 +71,7 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import Control.Arrow((&&&))
 import Data.Maybe
-import qualified Data.Map.Strict as M
+import qualified Data.Map as M
 
 import Futhark.Representation.Primitive hiding (Bool)
 import Futhark.MonadFreshNames
@@ -84,7 +81,6 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options
 import Futhark.CodeGen.Backends.GenericCSharp.Definitions
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (builtInFunctions)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
@@ -92,22 +88,22 @@ type OpCompiler op s = op -> CompilerM op s ()
 
 -- | Write a scalar to the given memory block with the given index and
 -- in the given memory space.
-type WriteScalar op s = VName -> CSExp -> PrimType -> Imp.SpaceId -> CSExp
+type WriteScalar op s = CSExp -> CSExp -> PrimType -> Imp.SpaceId -> CSExp
                         -> CompilerM op s ()
 
 -- | Read a scalar from the given memory block with the given index and
 -- in the given memory space.
-type ReadScalar op s = VName -> CSExp -> PrimType -> Imp.SpaceId
+type ReadScalar op s = CSExp -> CSExp -> PrimType -> Imp.SpaceId
                        -> CompilerM op s CSExp
 
 -- | Allocate a memory block of the given size in the given memory
 -- space, saving a reference in the given variable name.
-type Allocate op s = VName -> CSExp -> Imp.SpaceId
+type Allocate op s = CSExp -> CSExp -> Imp.SpaceId
                      -> CompilerM op s ()
 
 -- | Copy from one memory block to another.
-type Copy op s = VName -> CSExp -> Imp.Space ->
-                 VName -> CSExp -> Imp.Space ->
+type Copy op s = CSExp -> CSExp -> Imp.Space ->
+                 CSExp -> CSExp -> Imp.Space ->
                  CSExp -> PrimType ->
                  CompilerM op s ()
 
@@ -115,7 +111,7 @@ type Copy op s = VName -> CSExp -> Imp.Space ->
 type StaticArray op s = VName -> Imp.SpaceId -> PrimType -> Imp.ArrayContents -> CompilerM op s ()
 
 -- | Construct the C# array being returned from an entry point.
-type EntryOutput op s = VName -> Imp.SpaceId ->
+type EntryOutput op s = CSExp -> Imp.SpaceId ->
                         PrimType -> Imp.Signedness ->
                         [Imp.DimSize] ->
                         CompilerM op s CSExp
@@ -171,10 +167,10 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
         defSyncRun =
           Pass
 
-data CompilerEnv op s = CompilerEnv {
-    envOperations :: Operations op s
-  , envFtable     :: M.Map Name [Imp.Type]
-}
+data CompilerEnv op s = CompilerEnv
+  { envOperations :: Operations op s
+  , envVarExp :: M.Map VName CSExp
+  }
 
 data CompilerAcc op s = CompilerAcc {
     accItems :: [CSStmt]
@@ -215,14 +211,10 @@ envEntryInput = opsEntryInput . envOperations
 envSyncFun :: CompilerEnv op s -> CSStmt
 envSyncFun = opsSyncRun . envOperations
 
-newCompilerEnv :: Imp.Functions op -> Operations op s -> CompilerEnv op s
-newCompilerEnv (Imp.Functions funs) ops =
+newCompilerEnv :: Operations op s -> CompilerEnv op s
+newCompilerEnv ops =
   CompilerEnv { envOperations = ops
-              , envFtable = ftable <> builtinFtable
-              }
-  where ftable = M.fromList $ map funReturn funs
-        funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
-        builtinFtable = M.map (map Imp.Scalar . snd) builtInFunctions
+              , envVarExp = mempty }
 
 data CompilerState s = CompilerState {
     compNameSrc :: VNameSource
@@ -234,7 +226,7 @@ data CompilerState s = CompilerState {
   , compUserState :: s
   , compMemberDecls :: [CSStmt]
   , compAssignedVars :: [VName]
-  , compDeclaredMem :: [(VName, Space)]
+  , compDeclaredMem :: [(CSExp, Space)]
 }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -319,9 +311,6 @@ setVarAssigned vname = modify $ \s ->
 futharkFun :: String -> String
 futharkFun s = "futhark_" ++ zEncodeString s
 
-paramsTypes :: [Imp.Param] -> [Imp.Type]
-paramsTypes = map paramType
-
 paramType :: Imp.Param -> Imp.Type
 paramType (Imp.MemParam _ space) = Imp.Mem space
 paramType (Imp.ScalarParam _ t) = Imp.Scalar t
@@ -341,14 +330,13 @@ getDefaultDecl (Imp.ScalarParam v Cert) =
 getDefaultDecl (Imp.ScalarParam v t) =
   Assign (Var $ compileName v) $ simpleInitClass (compilePrimType t) []
 
-
-runCompilerM :: Imp.Functions op -> Operations op s
+runCompilerM :: Operations op s
              -> VNameSource
              -> s
              -> CompilerM op s a
              -> a
-runCompilerM prog ops src userstate (CompilerM m) =
-  fst $ evalRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
+runCompilerM ops src userstate (CompilerM m) =
+  fst $ evalRWS m (newCompilerEnv ops) (newCompilerState src userstate)
 
 standardOptions :: [Option]
 standardOptions = [
@@ -405,11 +393,11 @@ compileProg :: MonadFreshNames m =>
             -> [CSStmt]
             -> [Space]
             -> [Option]
-            -> Imp.Functions op
+            -> Imp.Definitions op
             -> m String
-compileProg module_name constructor imports defines ops userstate boilerplate pre_timing _ options prog@(Imp.Functions funs) = do
+compileProg module_name constructor imports defines ops userstate boilerplate pre_timing _ options prog = do
   src <- getNameSource
-  let prog' = runCompilerM prog ops src userstate compileProg'
+  let prog' = runCompilerM ops src userstate compileProg'
   let imports' = [ Using Nothing "System"
                  , Using Nothing "System.Diagnostics"
                  , Using Nothing "System.Collections"
@@ -424,7 +412,9 @@ compileProg module_name constructor imports defines ops userstate boilerplate pr
                  , Using Nothing "Mono.Options" ] ++ imports
 
   return $ pretty (CSProg $ imports' ++ prog')
-  where compileProg' = do
+  where Imp.Definitions consts (Imp.Functions funs) = prog
+        compileProg' = do
+          compileConstants consts
           definitions <- mapM compileFunc funs
           opencl_boilerplate <- collect boilerplate
           compBeforeParses <- gets compBeforeParse
@@ -515,6 +505,19 @@ compileProg module_name constructor imports defines ops userstate boilerplate pr
               , Exp $ simpleCall "entryPointFun.Invoke" []]
           ]
 
+compileConstants :: Imp.Constants op -> CompilerM op s ()
+compileConstants (Imp.Constants ps init_consts) = do
+  mapM_ addConstDecl ps
+  mapM_ staticMemAlloc =<< collect (compileCode init_consts)
+  where addConstDecl (Imp.ScalarParam p bt) = do
+          let t = compileType $ Imp.Scalar bt
+          addMemberDecl $ AssignTyped t (Var (compileName p)) Nothing
+        addConstDecl (Imp.MemParam p space) = do
+          let t = compileType $ Imp.Mem space
+          addMemberDecl $ AssignTyped t (Var (compileName p)) Nothing
+          case memInitExp space of
+            Nothing -> return ()
+            Just e -> atInit $ Reassign (Var (compileName p)) e
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s CSFunDef
 compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
@@ -561,12 +564,6 @@ assignScalarPointer e ptr =
 simpleCall :: String -> [CSExp] -> CSExp
 simpleCall fname = Call (Var fname) . map simpleArg
 
--- | A 'Call' where the function is a variable and every argument is a
--- simple 'Arg'.
-parametrizedCall :: String -> String -> [CSExp] -> CSExp
-parametrizedCall fname primtype = Call (Var fname') . map simpleArg
-  where fname' = concat [fname, "<", primtype, ">"]
-
 simpleArg :: CSExp -> CSArg
 simpleArg = Arg Nothing
 
@@ -579,6 +576,10 @@ simpleInitClass fname =CreateObject (Var fname) . map simpleArg
 
 compileName :: VName -> String
 compileName = zEncodeString . pretty
+
+compileVar :: VName -> CompilerM op s CSExp
+compileVar v =
+  asks $ fromMaybe (Var $ compileName v) . M.lookup v . envVarExp
 
 compileType :: Imp.Type -> CSType
 compileType (Imp.Scalar p) = compilePrimTypeToAST p
@@ -622,7 +623,7 @@ unpackDim arr_name (Imp.Constant c) i = do
 unpackDim arr_name (Imp.Var var) i = do
   let shape_name = Field arr_name "Item2"
   let src = Index shape_name $ IdxExp $ Integer $ toInteger i
-  let dest = Var $ compileName var
+  dest <- compileVar var
   isAssigned <- getVarAssigned var
   if isAssigned
     then
@@ -636,16 +637,17 @@ entryPointOutput (Imp.OpaqueValue _ vs) =
   CreateSystemTuple <$> mapM (entryPointOutput . Imp.TransparentValue) vs
 
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
-  return $ cast $ Var $ compileName name
+  cast <$> compileVar name
   where cast = compileTypecastExt bt ept
 
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims)) = do
-  unRefMem mem (Imp.Space sid)
+  mem' <- compileVar mem
+  unRefMem mem' (Imp.Space sid)
   pack_output <- asks envEntryOutput
-  pack_output mem sid bt ept dims
+  pack_output mem' sid bt ept dims
 
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ bt ept dims)) = do
-  let src = Var $ compileName mem
+  src <- compileVar mem
   let createTuple = "createTuple_" ++ compilePrimTypeExt bt ept
   return $ simpleCall createTuple [src, CreateArray (Primitive $ CSInt Int64T) $ Right $ map compileDim dims]
 
@@ -655,8 +657,8 @@ entryPointInput (i, Imp.OpaqueValue _ vs, e) =
     map (\idx -> Field e $ "Item" ++ show (idx :: Int)) [1..]
 
 entryPointInput (_, Imp.TransparentValue (Imp.ScalarValue bt _ name), e) = do
-  let vname' = Var $ compileName name
-      cast = compileTypecast bt
+  vname' <- compileVar name
+  let cast = compileTypecast bt
   stm $ Assign vname' (cast e)
 
 entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ept dims), e) = do
@@ -667,8 +669,8 @@ entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt 
 entryPointInput (_, Imp.TransparentValue (Imp.ArrayValue mem _ bt _ dims), e) = do
   zipWithM_ (unpackDim e) dims [0..]
   let arrayData = Field e "Item1"
-  let dest = Var $ compileName mem
-      unwrap_call = simpleCall "unwrapArray" [arrayData, sizeOf $ compilePrimTypeToAST bt]
+  dest <- compileVar mem
+  let unwrap_call = simpleCall "unwrapArray" [arrayData, sizeOf $ compilePrimTypeToAST bt]
   stm $ Assign dest unwrap_call
 
 extValueDescName :: Imp.ExternalValue -> String
@@ -683,9 +685,6 @@ extName = (++"_ext")
 sizeOf :: CSType -> CSExp
 sizeOf t = simpleCall "sizeof" [(Var . pretty) t]
 
-publicFunDef :: String -> CSType -> [(CSType, String)] -> [CSStmt] -> CSStmt
-publicFunDef s t args stmts = PublicFunDef $ Def s t args stmts
-
 privateFunDef :: String -> CSType -> [(CSType, String)] -> [CSStmt] -> CSStmt
 privateFunDef s t args stmts = PrivateFunDef $ Def s t args stmts
 
@@ -695,12 +694,6 @@ valueDescName = compileName . valueDescVName
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _) = vname
-
-consoleWrite :: String -> [CSExp] -> CSExp
-consoleWrite str exps = simpleCall "Console.Write" $ String str:exps
-
-consoleWriteLine :: String -> [CSExp] -> CSExp
-consoleWriteLine str exps = simpleCall "Console.WriteLine" $ String str:exps
 
 consoleErrorWrite :: String -> [CSExp] -> CSExp
 consoleErrorWrite str exps = simpleCall "Console.Error.Write" $ String str:exps
@@ -874,17 +867,16 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
       allocate <- asks envAllocate
 
       let size = Var (compileName name ++ "_nbytes")
-          dest = name'
-          src = name
+          dest = Var $ compileName name'
+          src = Var $ compileName name
           offset = Integer 0
       case space of
         Space sid ->
-          allocate name' size sid
+          allocate dest size sid
         _ ->
-          stm $ Reassign (Var (compileName name'))
-                       (simpleCall "allocateMem" [size]) -- FIXME
+          stm $ Reassign dest (simpleCall "allocateMem" [size]) -- FIXME
       copy dest offset space src offset space size (IntType Int64) -- FIXME
-      return $ Just (compileName name')
+      return $ Just dest
     _ -> return Nothing
 
   prepareIn <- collect $ mapM_ entryPointInput $ zip3 [0..] args $
@@ -894,14 +886,14 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let mem_copies = mapMaybe liftMaybe $ zip argexps_mem_copies inputs
       mem_copy_inits = map initCopy mem_copies
 
-      argexps_lib = map (compileName . Imp.paramName) inputs
+      argexps_lib = map (Var . compileName . Imp.paramName) inputs
       argexps_bin = zipWith fromMaybe argexps_lib argexps_mem_copies
       fname' = futharkFun (nameToString fname)
       arg_types = map (fst . compileTypedInput) inputs
       inputs' = zip arg_types (map extValueDescName args)
       output_type = tupleOrSingleEntryT output_types
-      call_lib = [Reassign funTuple $ simpleCall fname' (fmap Var argexps_lib)]
-      call_bin = [Reassign funTuple $ simpleCall fname' (fmap Var argexps_bin)]
+      call_lib = [Reassign funTuple $ simpleCall fname' argexps_lib]
+      call_bin = [Reassign funTuple $ simpleCall fname' argexps_bin]
       prepareIn' = prepareIn ++ mem_copy_inits ++ sizeDecls
 
   return (nameToString fname, inputs', output_type,
@@ -923,12 +915,12 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
         declsfunction (Imp.TransparentValue v) = valueDescFun v
         declsfunction (Imp.OpaqueValue _ vs) = mapM_ valueDescFun vs
 
-copyMemoryDefaultSpace :: VName -> CSExp -> VName -> CSExp -> CSExp ->
+copyMemoryDefaultSpace :: CSExp -> CSExp -> CSExp -> CSExp -> CSExp ->
                           CompilerM op s ()
 copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
-  stm $ Exp $ simpleCall "Buffer.BlockCopy" [ Var (compileName srcmem), srcidx
-                                            , Var (compileName destmem), destidx,
-                                              nbytes]
+  stm $ Exp $ simpleCall "Buffer.BlockCopy" [ srcmem, srcidx
+                                            , destmem, destidx
+                                            , nbytes]
 
 compileEntryFun :: [CSStmt] -> (Name, Imp.Function op)
                 -> CompilerM op s CSFunDef
@@ -969,8 +961,9 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args) =
   if any isOpaque decl_args then
     return (Def fname' VoidT [] [exitException], nameToString fname, Var fname')
   else do
-    (_, _, _, prepareIn, _, body_bin, prepare_out, res, prepare_run) <- prepareEntry entry
+    (_, _, _, prepare_in, _, body_bin, prepare_out, res, prepare_run) <- prepareEntry entry
     let str_input = map readInput decl_args
+        end_of_input = [Exp $ simpleCall "EndOfInput" [String $ pretty fname]]
 
     let outputDecls = map getDefaultDecl outputs
         exitcall = [
@@ -997,7 +990,7 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ outputs _ _ _ decl_args) =
     str_output <- printValue res
 
     return (Def fname' VoidT [] $
-             str_input ++ prepareIn ++ outputDecls ++
+             str_input ++ end_of_input ++ prepare_in ++ outputDecls ++
              [Try [do_warmup_run, do_num_runs] [except']] ++
              [close_runtime_file] ++
              str_output,
@@ -1149,25 +1142,27 @@ compileExp :: Imp.Exp -> CompilerM op s CSExp
 compileExp (Imp.ValueExp v) = return $ compilePrimValue v
 
 compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
-  return $ Var $ compileName vname
+  compileVar vname
 
 compileExp (Imp.LeafExp (Imp.SizeOf t) _) =
   return $ (compileTypecast $ IntType Int32) (Integer $ primByteSize t)
 
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
   join $ asks envReadScalar
-    <*> pure src <*> compileExp iexp
+    <*> compileVar src <*> compileExp iexp
     <*> pure restype <*> pure space
 
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) (IntType Int8) _ _) _) = do
-  let src' = compileName src
+  src' <- compileVar src
   iexp' <- compileExp iexp
-  return $ Cast (Primitive $ CSInt Int8T) (Index (Var src') (IdxExp iexp'))
+  return $ Cast (Primitive $ CSInt Int8T) (Index src' (IdxExp iexp'))
 
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt _ _) _) = do
   iexp' <- compileExp iexp
   let bt' = compilePrimType bt
-  return $ simpleCall ("indexArray_" ++ bt') [Var $ compileName src, iexp']
+      iexp'' = BinOp "*" iexp' (sizeOf (compilePrimTypeToAST bt))
+  src' <- compileVar src
+  return $ simpleCall ("indexArray_" ++ bt') [src', iexp'']
 
 compileExp (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike x y
@@ -1234,25 +1229,24 @@ compileCode (Imp.For i it bound body) = do
     [AssignOp "+" (Var i') (Var one)]
 
 
-compileCode (Imp.SetScalar vname exp1) = do
-  let name' = Var $ compileName vname
-  exp1' <- compileExp exp1
-  stm $ Reassign name' exp1'
+compileCode (Imp.SetScalar vname exp1) =
+  stm =<< Reassign <$> compileVar vname <*> compileExp exp1
 
 compileCode (Imp.DeclareMem v space) = declMem v space
 
 compileCode (Imp.DeclareScalar v _ Cert) =
-  stm $ Assign (Var $ compileName v) $ Bool True
+  stm =<< Assign <$> compileVar v <*> pure (Bool True)
 compileCode (Imp.DeclareScalar v _ t) =
-  stm $ AssignTyped t' (Var $ compileName v) Nothing
+  stm =<< AssignTyped t' <$> compileVar v <*> pure Nothing
   where t' = compilePrimTypeToAST t
 
 compileCode (Imp.DeclareArray name (Space space) t vs) =
   join $ asks envStaticArray <*>
   pure name <*> pure space <*> pure t <*> pure vs
 
-compileCode (Imp.DeclareArray name _ t vs) =
-  stms [Assign (Var $ "init_"++name') $
+compileCode (Imp.DeclareArray name _ t vs) = do
+  name' <- compileVar name
+  stms [Assign (Var $ "init_"++compileName name) $
         simpleCall "unwrapArray"
          [
            case vs of Imp.ArrayValues vs' ->
@@ -1261,9 +1255,8 @@ compileCode (Imp.DeclareArray name _ t vs) =
                         CreateArray (compilePrimTypeToAST t) $ Left n
          , simpleCall "sizeof" [Var $ compilePrimType t]
          ]
-       , Assign (Var name') $ Var ("init_"++name')
+       , Assign name' $ Var ("init_"++compileName name)
        ]
-  where name' = compileName name
 
 compileCode (Imp.Comment s code) = do
   code' <- blockScope $ compileCode code
@@ -1282,62 +1275,61 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc,locs)) = do
 
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args
-  let dests' = tupleOrSingle $ fmap Var (map compileName dests)
-      fname' = futharkFun (pretty fname)
+  dests' <- tupleOrSingle <$> mapM compileVar dests
+  let fname' = futharkFun (pretty fname)
       call' = simpleCall fname' args'
   -- If the function returns nothing (is called only for side
   -- effects), take care not to assign to an empty tuple.
   stm $ if null dests
         then Exp call'
         else Reassign dests' call'
-  where compileArg (Imp.MemArg m) = return $ Var $ compileName m
+  where compileArg (Imp.MemArg m) = compileVar m
         compileArg (Imp.ExpArg e) = compileExp e
 
-compileCode (Imp.SetMem dest src DefaultSpace) = do
-  let src' = Var (compileName src)
-  let dest' = Var (compileName dest)
-  stm $ Reassign dest' src'
+compileCode (Imp.SetMem dest src DefaultSpace) =
+  stm =<< Reassign <$> compileVar dest <*> compileVar src
 
 compileCode (Imp.SetMem dest src _) = do
-  let src' = Var (compileName src)
-  let dest' = Var (compileName dest)
-  stm $ Exp $ simpleCall "MemblockSetDevice" [Ref $ Var "Ctx", Ref dest', Ref src', String (compileName src)]
+  src' <- compileVar src
+  dest' <- compileVar dest
+  stm $ Exp $ simpleCall "MemblockSetDevice" [Ref $ Var "Ctx", Ref dest', Ref src', String $ pretty src']
 
 compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
   join $ asks envAllocate
-    <*> pure name
+    <*> compileVar name
     <*> compileExp e
     <*> pure space
 
 compileCode (Imp.Allocate name (Imp.Count e) _) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
-  let name' = Var (compileName name)
-  stm $ Reassign name' allocate'
+  stm =<< Reassign <$> compileVar name <*> pure allocate'
 
 compileCode (Imp.Free name space) = do
-  unRefMem name space
+  name' <- compileVar name
+  unRefMem name' space
   tell $ mempty { accFreedMem = [name] }
 
 compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
-  let dest' = Var (compileName dest)
-  let src' = Var (compileName src)
+  dest' <- compileVar dest
+  src' <- compileVar src
   size' <- compileExp size
-  stm $ Exp $ simpleCall "Buffer.BlockCopy" [src', srcoffset', dest', destoffset',
-                                             Cast (Primitive $ CSInt Int32T) size']
+  stm $ Exp $ simpleCall "Buffer.BlockCopy"
+    [src', srcoffset', dest', destoffset',
+     Cast (Primitive $ CSInt Int32T) size']
 
 compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
   copy <- asks envCopy
   join $ copy
-    <$> pure dest <*> compileExp destoffset <*> pure destspace
-    <*> pure src <*> compileExp srcoffset <*> pure srcspace
+    <$> compileVar dest <*> compileExp destoffset <*> pure destspace
+    <*> compileVar src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size <*> pure (IntType Int64) -- FIXME
 
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $ asks envWriteScalar
-    <*> pure dest
+    <*> compileVar dest
     <*> compileExp idx
     <*> pure elemtype
     <*> pure space
@@ -1346,10 +1338,12 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp
 compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  let dest' = Var $ compileName dest
+  dest' <- compileVar dest
   let elemtype' = compileTypecast elemtype
-  let ctype = elemtype' elemexp'
-  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
+      ctype = elemtype' elemexp'
+      idx'' = BinOp "*" idx' (sizeOf (compilePrimTypeToAST elemtype))
+
+  stm $ Exp $ simpleCall "writeScalarArray" [dest', idx'', ctype]
 
 compileCode Imp.Skip = return ()
 
@@ -1368,11 +1362,12 @@ blockScope' m = do
   releases <- collect $ mapM_ (uncurry unRefMem) new_allocs
   return (x, items <> releases)
 
-unRefMem :: VName -> Space -> CompilerM op s ()
+unRefMem :: CSExp -> Space -> CompilerM op s ()
 unRefMem mem (Space "device") =
-  (stm . Exp) $ simpleCall "MemblockUnrefDevice" [ Ref $ Var "Ctx"
-                                                 , (Ref . Var . compileName) mem
-                                                 , (String . compileName) mem]
+  stm $ Exp $
+  simpleCall "MemblockUnrefDevice" [ Ref $ Var "Ctx"
+                                   , Ref mem
+                                   , String $ pretty mem]
 unRefMem _ DefaultSpace = stm Pass
 unRefMem _ (Space "local") = stm Pass
 unRefMem _ _ = error "The default compiler cannot compile unRefMem for other spaces"
@@ -1384,14 +1379,21 @@ publicName s = "Futhark" ++ s
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
-  modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s}
-  stm $ declMem' (compileName name) space
+  name' <- compileVar name
+  modify $ \s -> s { compDeclaredMem = (name', space) : compDeclaredMem s}
+  stm $ declMem' name' space
 
-declMem' :: String -> Space -> CSStmt
-declMem' name (Space _) =
-  AssignTyped (CustomT "OpenCLMemblock") (Var name) (Just $ simpleCall "EmptyMemblock" [Var "Ctx.EMPTY_MEM_HANDLE"])
+memInitExp :: Space -> Maybe CSExp
+memInitExp (Space _) =
+  Just $ simpleCall "EmptyMemblock" [Var "Ctx.EMPTY_MEM_HANDLE"]
+memInitExp _ =
+  Nothing
+
+declMem' :: CSExp -> Space -> CSStmt
+declMem' name space@(Space _) =
+  AssignTyped (CustomT "OpenCLMemblock") name $ memInitExp space
 declMem' name _ =
-  AssignTyped (Composite $ ArrayT $ Primitive ByteT) (Var name) Nothing
+  AssignTyped (Composite $ ArrayT $ Primitive ByteT) name Nothing
 
 rawMemCSType :: Space -> CSType
 rawMemCSType (Space _) = CustomT "OpenCLMemblock"

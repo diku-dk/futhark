@@ -536,10 +536,10 @@ static int read_is_binary() {
     int8_t bin_version;
     int ret = read_byte(&bin_version);
 
-    if (ret != 0) { panic(1, "binary-input: could not read version.\n"); }
+    if (ret != 0) { futhark_panic(1, "binary-input: could not read version.\n"); }
 
     if (bin_version != BINARY_FORMAT_VERSION) {
-      panic(1, "binary-input: File uses version %i, but I only understand version %i.\n",
+      futhark_panic(1, "binary-input: File uses version %i, but I only understand version %i.\n",
             bin_version, BINARY_FORMAT_VERSION);
     }
 
@@ -553,7 +553,7 @@ static const struct primtype_info_t* read_bin_read_type_enum() {
   char read_binname[4];
 
   int num_matched = scanf("%4c", read_binname);
-  if (num_matched != 1) { panic(1, "binary-input: Couldn't read element type.\n"); }
+  if (num_matched != 1) { futhark_panic(1, "binary-input: Couldn't read element type.\n"); }
 
   const struct primtype_info_t **type = primtypes;
 
@@ -564,23 +564,23 @@ static const struct primtype_info_t* read_bin_read_type_enum() {
       return *type;
     }
   }
-  panic(1, "binary-input: Did not recognize the type '%s'.\n", read_binname);
+  futhark_panic(1, "binary-input: Did not recognize the type '%s'.\n", read_binname);
   return NULL;
 }
 
 static void read_bin_ensure_scalar(const struct primtype_info_t *expected_type) {
   int8_t bin_dims;
   int ret = read_byte(&bin_dims);
-  if (ret != 0) { panic(1, "binary-input: Couldn't get dims.\n"); }
+  if (ret != 0) { futhark_panic(1, "binary-input: Couldn't get dims.\n"); }
 
   if (bin_dims != 0) {
-    panic(1, "binary-input: Expected scalar (0 dimensions), but got array with %i dimensions.\n",
+    futhark_panic(1, "binary-input: Expected scalar (0 dimensions), but got array with %i dimensions.\n",
           bin_dims);
   }
 
   const struct primtype_info_t *bin_type = read_bin_read_type_enum();
   if (bin_type != expected_type) {
-    panic(1, "binary-input: Expected scalar of type %s but got scalar of type %s.\n",
+    futhark_panic(1, "binary-input: Expected scalar of type %s but got scalar of type %s.\n",
           expected_type->type_name,
           bin_type->type_name);
   }
@@ -593,16 +593,16 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
 
   int8_t bin_dims;
   ret = read_byte(&bin_dims);
-  if (ret != 0) { panic(1, "binary-input: Couldn't get dims.\n"); }
+  if (ret != 0) { futhark_panic(1, "binary-input: Couldn't get dims.\n"); }
 
   if (bin_dims != dims) {
-    panic(1, "binary-input: Expected %i dimensions, but got array with %i dimensions.\n",
+    futhark_panic(1, "binary-input: Expected %i dimensions, but got array with %i dimensions.\n",
           dims, bin_dims);
   }
 
   const struct primtype_info_t *bin_primtype = read_bin_read_type_enum();
   if (expected_type != bin_primtype) {
-    panic(1, "binary-input: Expected %iD-array with element type '%s' but got %iD-array with element type '%s'.\n",
+    futhark_panic(1, "binary-input: Expected %iD-array with element type '%s' but got %iD-array with element type '%s'.\n",
           dims, expected_type->type_name, dims, bin_primtype->type_name);
   }
 
@@ -611,7 +611,7 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
     int64_t bin_shape;
     ret = fread(&bin_shape, sizeof(bin_shape), 1, stdin);
     if (ret != 1) {
-      panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
+      futhark_panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
     }
     if (IS_BIG_ENDIAN) {
       flip_bytes(sizeof(bin_shape), (unsigned char*) &bin_shape);
@@ -623,14 +623,14 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   int64_t elem_size = expected_type->size;
   void* tmp = realloc(*data, (size_t)(elem_count * elem_size));
   if (tmp == NULL) {
-    panic(1, "binary-input: Failed to allocate array of size %i.\n",
+    futhark_panic(1, "binary-input: Failed to allocate array of size %i.\n",
           elem_count * elem_size);
   }
   *data = tmp;
 
   int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, stdin);
   if (num_elems_read != elem_count) {
-    panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
+    futhark_panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
           elem_count, num_elems_read);
   }
 
@@ -648,6 +648,17 @@ static int read_array(const struct primtype_info_t *expected_type, void **data, 
     return read_str_array(expected_type->size, (str_reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
   } else {
     return read_bin_array(expected_type, data, shape, dims);
+  }
+}
+
+static int end_of_input() {
+  skipspaces();
+  char token[2];
+  next_token(token, sizeof(token));
+  if (strcmp(token, "") == 0) {
+    return 0;
+  } else {
+    return 1;
   }
 }
 

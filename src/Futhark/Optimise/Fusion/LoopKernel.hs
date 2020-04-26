@@ -6,7 +6,6 @@ module Futhark.Optimise.Fusion.LoopKernel
   , inputs
   , setInputs
   , arrInputs
-  , kernelType
   , transformOutput
   , attemptFusion
   , SOAC
@@ -20,7 +19,7 @@ import Control.Monad
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.List
+import Data.List (find, (\\), tails)
 
 import Futhark.Representation.SOACS hiding (SOAC(..))
 import qualified Futhark.Representation.SOACS as Futhark
@@ -126,9 +125,6 @@ inputs = SOAC.inputs . fsoac
 
 setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
 setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
-
-kernelType :: FusedKer -> [Type]
-kernelType = SOAC.typeOf . fsoac
 
 tryOptimizeSOAC :: Names -> [VName] -> SOAC -> Names -> FusedKer
                 -> TryFusion FusedKer
