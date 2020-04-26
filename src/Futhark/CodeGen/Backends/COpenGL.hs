@@ -257,19 +257,19 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
   local_work_size  <- newVName "local_work_size"
   GC.stm [C.cstm|
     if ($exp:total_elements != 0) {
-      typename size_t $id:global_work_size[3];
-      typename size_t $id:local_work_size[3];
+      typename GLuint $id:global_work_size[3];
+      typename GLuint $id:local_work_size[3];
       if($int:shader_rank == 3) {
-        typename size_t $id:global_work_size[3] = {$inits:shader_dims'};
-        typename size_t $id:local_work_size[3]  = {$inits:workgroup_dims'};
+        typename GLuint $id:global_work_size[3] = {$inits:shader_dims'};
+        typename GLuint $id:local_work_size[3]  = {$inits:workgroup_dims'};
       }
       else if($int:shader_rank == 2) {
-        typename size_t $id:global_work_size[3] = {$inits:shader_dims', 1};
-        typename size_t $id:local_work_size[3]  = {$inits:workgroup_dims', 1};
+        typename GLuint $id:global_work_size[3] = {$inits:shader_dims', 1};
+        typename GLuint $id:local_work_size[3]  = {$inits:workgroup_dims', 1};
       }
       else {
-        typename size_t $id:global_work_size[3] = {$inits:shader_dims', 1, 1};
-        typename size_t $id:local_work_size[3]  = {$inits:workgroup_dims', 1, 1};
+        typename GLuint $id:global_work_size[3] = {$inits:shader_dims', 1, 1};
+        typename GLuint $id:local_work_size[3]  = {$inits:workgroup_dims', 1, 1};
       }
       typename int64_t $id:time_start = 0, $id:time_end = 0;
     if (ctx->debugging) {
