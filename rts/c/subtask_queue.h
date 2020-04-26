@@ -72,7 +72,7 @@ struct subtask_queue {
 
 
 
-static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *subtask_queue)
+static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *subtask_queue, int from_end)
 {
   struct subtask *cur_head = subtask_queue->buffer[subtask_queue->first];
 
@@ -85,9 +85,13 @@ static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *s
     *new_subtask = *cur_head;
 
     // Update ranges on new subtasks
-    new_subtask->end = cur_head->start + cur_head->chunk;
-    cur_head->start += cur_head->chunk;
-
+    if (from_end) {
+      new_subtask->start = cur_head->end - cur_head->chunk;
+      cur_head->end = new_subtask->start;
+    } else {
+      new_subtask->end = cur_head->start + cur_head->chunk;
+      cur_head->start += cur_head->chunk;
+    }
     CHECK_ERR(pthread_mutex_lock(cur_head->mutex), "pthread_mutex_lock");
     (*cur_head->counter)++;
     CHECK_ERR(pthread_cond_broadcast(cur_head->cond), "pthread_cond_signal");
@@ -205,7 +209,7 @@ static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, str
     return -1;
   }
 
-  *subtask = jobqueue_get_subtask_chunk(subtask_queue);
+  *subtask = jobqueue_get_subtask_chunk(subtask_queue, 0);
   if (*subtask == NULL) {
     assert(!"got NULL ptr");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
@@ -255,7 +259,7 @@ static inline int subtask_queue_steal(struct subtask_queue *subtask_queue,
     return -1;
   }
 
-  *subtask = jobqueue_get_subtask_chunk(subtask_queue);
+  *subtask = jobqueue_get_subtask_chunk(subtask_queue, 1);
   if (*subtask == NULL) {
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
     return -1;
