@@ -1,9 +1,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
--- | A sequential representation.
-module Futhark.Representation.Seq
+-- | A representation for multicore CPU parallelism.
+module Futhark.Representation.MC
        ( -- * The Lore definition
-         Seq
+         MC
 
          -- * Simplification
        , simplifyProg
@@ -13,14 +13,20 @@ module Futhark.Representation.Seq
        , module Futhark.Representation.AST.Traversals
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
+       , module Futhark.Representation.Kernels.Kernel
+       , module Futhark.Representation.Kernels.Sizes
+       , module Futhark.Representation.SOACS.SOAC
        )
 where
 
 import Futhark.Pass
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.Kernels.Kernel
+import Futhark.Representation.Kernels.Sizes
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
+import Futhark.Representation.SOACS.SOAC hiding (HistOp(..))
 import Futhark.Binder
 import Futhark.Construct
 import qualified Futhark.TypeCheck as TypeCheck
@@ -28,40 +34,40 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Optimise.Simplify as Simplify
 import Futhark.Optimise.Simplify.Rules
 
-data Seq
+data MC
 
-instance Annotations Seq where
-  type Op Seq = ()
+instance Annotations MC where
+  type Op MC = SegOp () MC
 
-instance Attributes Seq where
+instance Attributes MC where
   expTypesFromPattern = return . expExtTypesFromPattern
 
-instance TypeCheck.CheckableOp Seq where
-  checkOp = pure
+instance TypeCheck.CheckableOp MC where
+  checkOp = typeCheckSegOp (const $ pure ())
 
-instance TypeCheck.Checkable Seq where
+instance TypeCheck.Checkable MC where
 
-instance Bindable Seq where
+instance Bindable MC where
   mkBody = Body ()
   mkExpPat ctx val _ = basicPattern ctx val
   mkExpAttr _ _ = ()
   mkLetNames = simpleMkLetNames
 
-instance BinderOps Seq where
+instance BinderOps MC where
   mkExpAttrB = bindableMkExpAttrB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 
-instance PrettyLore Seq where
-
-instance BinderOps (Engine.Wise Seq) where
+instance BinderOps (Engine.Wise MC) where
   mkExpAttrB = bindableMkExpAttrB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 
-simpleSeq :: Simplify.SimpleOps Seq
-simpleSeq = Simplify.bindableSimpleOps (const $ pure ((), mempty))
+instance PrettyLore MC where
 
-simplifyProg :: Prog Seq -> PassM (Prog Seq)
-simplifyProg = Simplify.simplifyProg simpleSeq standardRules blockers
+simpleMC :: Simplify.SimpleOps MC
+simpleMC = Simplify.bindableSimpleOps simplifySegOp
+
+simplifyProg :: Prog MC -> PassM (Prog MC)
+simplifyProg = Simplify.simplifyProg simpleMC standardRules blockers
   where blockers = Engine.noExtraHoistBlockers

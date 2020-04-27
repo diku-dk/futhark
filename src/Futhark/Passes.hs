@@ -6,6 +6,7 @@ module Futhark.Passes
   , kernelsPipeline
   , sequentialCpuPipeline
   , gpuPipeline
+  , mcPipeline
   , multicorePipeline
   )
 where
@@ -23,7 +24,9 @@ import Futhark.Optimise.Unstream
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
+import qualified Futhark.Pass.ExplicitAllocations.MC as MC
 import Futhark.Pass.ExtractKernels
+import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ResolveAssertions
@@ -31,8 +34,10 @@ import Futhark.Pass.Simplify
 import Futhark.Pipeline
 import Futhark.Representation.KernelsMem (KernelsMem)
 import Futhark.Representation.SeqMem (SeqMem)
+import Futhark.Representation.MCMem (MCMem)
 import Futhark.Representation.Kernels (Kernels)
 import Futhark.Representation.Seq (Seq)
+import Futhark.Representation.MC (MC)
 import Futhark.Representation.SOACS (SOACS)
 
 standardPipeline :: Pipeline SOACS SOACS
@@ -60,7 +65,7 @@ kernelsPipeline =
   passes [ simplifyKernels
          , babysitKernels
          , tileLoops
-         , unstream
+         , unstreamKernels
          , performCSE True
          , simplifyKernels
          , sink
@@ -97,19 +102,22 @@ gpuPipeline =
          , simplifyKernelsMem
          ]
 
-multicorePipeline :: Pipeline SOACS KernelsMem
-multicorePipeline =
+mcPipeline :: Pipeline SOACS MC
+mcPipeline =
   standardPipeline >>>
-  onePass extractKernels >>>
-  passes [ simplifyKernels
-         , unstream
+  onePass extractMulticore >>>
+  passes [ simplifyMC
+         , unstreamMC
          , performCSE True
-         , simplifyKernels
-         , sink
-         , inPlaceLoweringKernels
-         ] >>>
-  onePass Kernels.explicitAllocations >>>
-  passes [ simplifyKernelsMem
+         , simplifyMC
+         , inPlaceLoweringMC
+         ]
+
+multicorePipeline :: Pipeline SOACS MCMem
+multicorePipeline =
+  mcPipeline >>>
+  onePass MC.explicitAllocations >>>
+  passes [ simplifyMCMem
          , performCSE False
-         , simplifyKernelsMem
+         , simplifyMCMem
          ]

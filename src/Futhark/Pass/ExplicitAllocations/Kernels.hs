@@ -11,6 +11,7 @@ import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.Representation.KernelsMem
 import Futhark.Representation.Kernels
 import Futhark.Pass.ExplicitAllocations
+import Futhark.Pass.ExplicitAllocations.SegOp
 
 allocAtLevel :: SegLevel -> AllocM fromlore tlore a -> AllocM fromlore tlore a
 allocAtLevel lvl = local $ \env -> env { allocSpace = space
@@ -19,77 +20,26 @@ allocAtLevel lvl = local $ \env -> env { allocSpace = space
   where space = case lvl of SegThread{} -> DefaultSpace
                             SegGroup{} -> Space "local"
 
-allocInBinOpLambda :: SegLevel -> SegSpace -> Lambda Kernels
-                   -> AllocM Kernels KernelsMem (Lambda KernelsMem)
-allocInBinOpLambda lvl (SegSpace flat _) lam = do
-  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
-                 (unCount (segNumGroups lvl)) (unCount (segGroupSize lvl))
-  let (acc_params, arr_params) =
-        splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
-      index_x = LeafExp flat int32
-      index_y = index_x + primExpFromSubExp int32 num_threads
-  (acc_params', arr_params') <-
-    allocInBinOpParams num_threads index_x index_y acc_params arr_params
-
-  local (\env -> env { envExpHints = inThreadExpHints }) $
-    allocInLambda (acc_params' ++ arr_params')
-    (lambdaBody lam) (lambdaReturnType lam)
-
-allocInBinOpParams :: SubExp
-                   -> PrimExp VName -> PrimExp VName
-                   -> [LParam Kernels]
-                   -> [LParam Kernels]
-                   -> AllocM Kernels KernelsMem ([LParam KernelsMem], [LParam KernelsMem])
-allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc xs ys
-  where alloc x y =
-          case paramType x of
-            Array bt shape u -> do
-              twice_num_threads <-
-                letSubExp "twice_num_threads" $
-                BasicOp $ BinOp (Mul Int32) num_threads $ intConst Int32 2
-              let t = paramType x `arrayOfRow` twice_num_threads
-              mem <- allocForArray t DefaultSpace
-              -- XXX: this iota ixfun is a bit inefficient; leading to uncoalesced access.
-              let base_dims = map (primExpFromSubExp int32) (arrayDims t)
-                  ixfun_base = IxFun.iota base_dims
-                  ixfun_x = IxFun.slice ixfun_base $
-                            fullSliceNum base_dims [DimFix my_id]
-                  ixfun_y = IxFun.slice ixfun_base $
-                            fullSliceNum base_dims [DimFix other_id]
-              return (x { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_x },
-                      y { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_y })
-            Prim bt ->
-              return (x { paramAttr = MemPrim bt },
-                      y { paramAttr = MemPrim bt })
-            Mem space ->
-              return (x { paramAttr = MemMem space },
-                      y { paramAttr = MemMem space })
-
-allocInLambda :: [LParam KernelsMem] -> Body Kernels -> [Type]
-              -> AllocM Kernels KernelsMem (Lambda KernelsMem)
-allocInLambda params body rettype = do
-  body' <- localScope (scopeOfLParams params) $
-           allocInStms (bodyStms body) $ \bnds' ->
-           return $ Body () bnds' $ bodyResult body
-  return $ Lambda params body' rettype
-
-allocInKernelBody :: SegLevel -> KernelBody Kernels
-                  -> AllocM Kernels KernelsMem (KernelBody KernelsMem)
-allocInKernelBody lvl (KernelBody () stms res) =
-  local f $ allocInStms stms $ \stms' -> return $ KernelBody () stms' res
-  where f = case lvl of SegThread{} -> inThread
-                        SegGroup{} -> inGroup
-        inThread env = env { envExpHints = inThreadExpHints }
-        inGroup env = env { envExpHints = inGroupExpHints }
-
 handleSegOp :: SegOp SegLevel Kernels
             -> AllocM Kernels KernelsMem (SegOp SegLevel KernelsMem)
-handleSegOp op = allocAtLevel (segLevel op) $ mapSegOpM mapper op
+handleSegOp op = do
+  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
+                 (unCount (segNumGroups lvl)) (unCount (segGroupSize lvl))
+  allocAtLevel lvl $ mapSegOpM (mapper num_threads) op
   where scope = scopeOfSegSpace $ segSpace op
-        mapper = identitySegOpMapper
-             { mapOnSegOpBody = localScope scope . allocInKernelBody (segLevel op)
-             , mapOnSegOpLambda = allocInBinOpLambda (segLevel op) $ segSpace op
-             }
+        lvl = segLevel op
+        mapper num_threads =
+          identitySegOpMapper
+          { mapOnSegOpBody =
+              localScope scope . local f . allocInKernelBody
+          , mapOnSegOpLambda =
+              local inThread .
+              allocInBinOpLambda num_threads (segSpace op)
+          }
+        f = case segLevel op of SegThread{} -> inThread
+                                SegGroup{} -> inGroup
+        inThread env = env { envExpHints = inThreadExpHints }
+        inGroup env = env { envExpHints = inGroupExpHints }
 
 handleHostOp :: HostOp Kernels (SOAC Kernels)
              -> AllocM Kernels KernelsMem (MemOp (HostOp KernelsMem ()))

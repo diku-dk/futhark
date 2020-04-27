@@ -24,6 +24,7 @@ import qualified Futhark.Representation.SOACS as SOACS
 import qualified Futhark.Representation.Kernels as Kernels
 import qualified Futhark.Representation.Seq as Seq
 import qualified Futhark.Representation.KernelsMem as KernelsMem
+import qualified Futhark.Representation.MCMem as MCMem
 import qualified Futhark.Representation.SeqMem as SeqMem
 import Futhark.Representation.AST (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
@@ -85,6 +86,7 @@ data UntypedPassState = SOACS (Prog SOACS.SOACS)
                       | Kernels (Prog Kernels.Kernels)
                       | Seq (Prog Seq.Seq)
                       | KernelsMem (Prog KernelsMem.KernelsMem)
+                      | MCMem (Prog MCMem.MCMem)
                       | SeqMem (Prog SeqMem.SeqMem)
 
 getSOACSProg :: UntypedPassState -> Maybe (Prog SOACS.SOACS)
@@ -101,6 +103,7 @@ instance Representation UntypedPassState where
   representation (Kernels _) = "Kernels"
   representation (Seq _) = "Seq"
   representation (KernelsMem _) = "KernelsMem"
+  representation (MCMem _) = "MCMem"
   representation (SeqMem _) = "SeqMEm"
 
 instance PP.Pretty UntypedPassState where
@@ -108,6 +111,7 @@ instance PP.Pretty UntypedPassState where
   ppr (Kernels prog) = PP.ppr prog
   ppr (Seq prog) = PP.ppr prog
   ppr (SeqMem prog) = PP.ppr prog
+  ppr (MCMem prog) = PP.ppr prog
   ppr (KernelsMem prog) = PP.ppr prog
 
 newtype UntypedPass = UntypedPass (UntypedPassState
@@ -120,11 +124,13 @@ data AllActions = AllActions
   , actionSeq :: Action Seq.Seq
   , actionKernelsMem :: Action KernelsMem.KernelsMem
   , actionSeqMem :: Action SeqMem.SeqMem
+  , actionMCMem :: Action MCMem.MCMem
   }
 
 data UntypedAction = SOACSAction (Action SOACS.SOACS)
                    | KernelsAction (Action Kernels.Kernels)
                    | KernelsMemAction (Action KernelsMem.KernelsMem)
+                   | MCMemAction (Action MCMem.MCMem)
                    | SeqMemAction (Action SeqMem.SeqMem)
                    | PolyAction AllActions
 
@@ -133,18 +139,20 @@ untypedActionName (SOACSAction a) = actionName a
 untypedActionName (KernelsAction a) = actionName a
 untypedActionName (SeqMemAction a) = actionName a
 untypedActionName (KernelsMemAction a) = actionName a
+untypedActionName (MCMemAction a) = actionName a
 untypedActionName (PolyAction a) = actionName (actionSOACS a)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
   representation (KernelsAction _) = "Kernels"
   representation (KernelsMemAction _) = "KernelsMem"
+  representation (MCMemAction _) = "MCMem"
   representation (SeqMemAction _) = "SeqMem"
   representation PolyAction{} = "<any>"
 
 newConfig :: Config
 newConfig = Config newFutharkConfig (Pipeline []) action False
-  where action = PolyAction $ AllActions printAction printAction printAction printAction printAction
+  where action = PolyAction $ AllActions printAction printAction printAction printAction printAction printAction
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
@@ -222,6 +230,8 @@ simplifyOption short =
           SeqMem <$> runPasses (onePass simplifySeqMem) config prog
         perform (KernelsMem prog) config =
           KernelsMem <$> runPasses (onePass simplifyKernelsMem) config prog
+        perform (MCMem prog) config =
+          MCMem <$> runPasses (onePass simplifyMCMem) config prog
 
         long = [passLongOption pass]
         pass = simplifySOACS
@@ -255,6 +265,8 @@ cseOption short =
           SeqMem <$> runPasses (onePass $ performCSE False) config prog
         perform (KernelsMem prog) config =
           KernelsMem <$> runPasses (onePass $ performCSE False) config prog
+        perform (MCMem prog) config =
+          MCMem <$> runPasses (onePass $ performCSE False) config prog
 
         long = [passLongOption pass]
         pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
@@ -310,19 +322,22 @@ commandLineOptions =
     "Translate program into the imperative IL with kernels and write it on standard output."
   , Option [] ["compile-imperative-multicore"]
     (NoArg $ Right $ \opts ->
-       opts { futharkAction = KernelsMemAction multicoreImpCodeGenAction })
+       opts { futharkAction = MCMemAction multicoreImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
   , Option [] ["range-analysis"]
     (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions rangeAction rangeAction rangeAction rangeAction rangeAction })
+        opts { futharkAction = PolyAction $
+               AllActions rangeAction rangeAction rangeAction rangeAction rangeAction rangeAction })
     "Print the program with range annotations added."
   , Option "p" ["print"]
     (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions printAction printAction printAction printAction printAction })
+        opts { futharkAction = PolyAction $
+               AllActions printAction printAction printAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
   , Option "m" ["metrics"]
     (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions metricsAction metricsAction metricsAction metricsAction metricsAction })
+        opts { futharkAction = PolyAction $
+               AllActions metricsAction metricsAction metricsAction metricsAction metricsAction metricsAction })
     "Print AST metrics of the resulting internal representation on standard output."
   , Option [] ["defunctorise"]
     (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctorise })
@@ -345,7 +360,7 @@ commandLineOptions =
   , kernelsPassOption inPlaceLoweringKernels []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
-  , kernelsPassOption unstream []
+  , kernelsPassOption unstreamKernels []
   , kernelsPassOption sink []
   , typedPassOption soacsProg Kernels extractKernels []
 
@@ -368,7 +383,7 @@ commandLineOptions =
   , pipelineOption getSOACSProg "KernelsMem" SeqMem
     "Run the sequential CPU compilation pipeline"
     sequentialCpuPipeline [] ["cpu"]
-  , pipelineOption getSOACSProg "KernelsMem" KernelsMem
+  , pipelineOption getSOACSProg "MCMem" MCMem
     "Run the multicore compilation pipeline"
     multicorePipeline [] ["multicore"]
   ]
@@ -459,6 +474,8 @@ runPolyPasses config initial_prog = do
         actionProcedure (actionKernelsMem acs) mem_prog
       (SeqMem mem_prog, PolyAction acs) ->
         actionProcedure (actionSeqMem acs) mem_prog
+      (MCMem mem_prog, PolyAction acs) ->
+        actionProcedure (actionMCMem acs) mem_prog
 
       (_, action) ->
         externalErrorS $ "Action " <>

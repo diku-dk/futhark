@@ -19,6 +19,7 @@ import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.KernelsMem (KernelsMem)
 import Futhark.Representation.SeqMem (SeqMem)
+import Futhark.Representation.MCMem (MCMem)
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
@@ -60,7 +61,7 @@ kernelImpCodeGenAction =
          , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenKernels.compileProgOpenCL
          }
 
-multicoreImpCodeGenAction :: Action KernelsMem
+multicoreImpCodeGenAction :: Action MCMem
 multicoreImpCodeGenAction =
   Action { actionName = "Compile to imperative multicore"
          , actionDescription = "Translate program into imperative multicore IL and write it on standard output."

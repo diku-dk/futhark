@@ -41,6 +41,9 @@ module Futhark.Representation.SegOp
   , simplifySegOp
   , HasSegOp(..)
   , segOpRules
+
+    -- * Memory
+  , segOpReturns
   )
 where
 
@@ -70,6 +73,7 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeStmAliases)
+import Futhark.Representation.Mem
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.Range as Range
@@ -1126,3 +1130,22 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) attr (SegMap lvl space kts (Kerne
       where matches (_, _, Returns _ (Var v)) = v == patElemName pe
             matches _ = False
 bottomUpSegOp _ _ _ _ = Skip
+
+--- Memory
+
+kernelBodyReturns :: (Mem lore, HasScope lore m, Monad m) =>
+                     KernelBody lore -> [ExpReturns] -> m [ExpReturns]
+kernelBodyReturns = zipWithM correct . kernelBodyResult
+  where correct (WriteReturns _ arr _) _ = varReturns arr
+        correct _ ret = return ret
+
+segOpReturns :: (Mem lore, Monad m, HasScope lore m) =>
+                SegOp lvl lore -> m [ExpReturns]
+segOpReturns k@(SegMap _ _ _ kbody) =
+  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+segOpReturns k@(SegRed _ _ _ _ kbody) =
+  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+segOpReturns k@(SegScan _ _ _ _ _ kbody) =
+  kernelBodyReturns kbody =<< (extReturns <$> opType k)
+segOpReturns (SegHist _ _ ops _ _) =
+  concat <$> mapM (mapM varReturns . histDest) ops

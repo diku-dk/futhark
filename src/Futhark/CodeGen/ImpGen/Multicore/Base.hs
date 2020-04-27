@@ -15,10 +15,10 @@ import Prelude hiding (quot, rem)
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.KernelsMem
+import Futhark.Representation.MCMem
 
 
-type MulticoreGen = ImpM KernelsMem () Imp.Multicore
+type MulticoreGen = ImpM MCMem () Imp.Multicore
 
 
 toParam :: VName -> TypeBase shape u -> Imp.Param
@@ -27,9 +27,9 @@ toParam name (Mem space) = Imp.MemParam name space
 toParam _     Array{}    = error "Cannot make Array into Imp.Param"
 
 
-compileKBody :: KernelBody KernelsMem
-             -> ([(SubExp, [Imp.Exp])] -> ImpM KernelsMem () Imp.Multicore ())
-             -> ImpM KernelsMem () Imp.Multicore ()
+compileKBody :: KernelBody MCMem
+             -> ([(SubExp, [Imp.Exp])] -> ImpM MCMem () Imp.Multicore ())
+             -> ImpM MCMem () Imp.Multicore ()
 compileKBody kbody red_cont =
   compileStms (freeIn $ kernelBodyResult kbody) (kernelBodyStms kbody) $ do
     let red_res = kernelBodyResult kbody
@@ -38,7 +38,7 @@ compileKBody kbody red_cont =
 
 
 compileThreadResult :: SegSpace
-                    -> PatElem KernelsMem -> KernelResult
+                    -> PatElem MCMem -> KernelResult
                     -> MulticoreGen ()
 compileThreadResult space pe (Returns _ what) = do
   let is = map (Imp.vi32 . fst) $ unSegSpace space

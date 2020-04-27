@@ -28,7 +28,7 @@ module Futhark.CodeGen.Backends.GenericC
 
   -- * Monadic compiler interface
   , CompilerM
-  , CompilerState (compUserState)
+  , CompilerState (compUserState, compNameSrc)
   , getUserState
   , modifyUserState
   , contextContents

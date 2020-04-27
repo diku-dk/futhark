@@ -7,13 +7,13 @@ import Control.Monad
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.KernelsMem
+import Futhark.Representation.MCMem
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 
-compileSegMap :: Pattern KernelsMem
+compileSegMap :: Pattern MCMem
               -> SegSpace
-              -> KernelBody KernelsMem
+              -> KernelBody MCMem
               -> MulticoreGen ()
 compileSegMap pat space (KernelBody _ kstms kres) = do
   emit $ Imp.DebugPrint "SegMap " Nothing
@@ -42,8 +42,7 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
          writeResult _ res =
            error $ "writeResult: cannot handle " ++ pretty res
      zipWithM_ writeResult (patternElements pat) kres
-
-  let freeVariables = namesToList (freeIn body' `namesSubtract` freeIn [segFlat space])
+  let freeVariables = namesToList (freeIn body' `namesSubtract` oneName (segFlat space))
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
   let scheduling = decideScheduling body'

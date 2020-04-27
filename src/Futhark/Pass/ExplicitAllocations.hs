@@ -17,6 +17,7 @@ module Futhark.Pass.ExplicitAllocations
        , ExpHint(..)
        , defaultExpHints
 
+       , Allocable
        , Allocator(..)
        , AllocM
        , AllocEnv(..)
@@ -834,6 +835,9 @@ instance SizeSubst () where
 instance SizeSubst (HostOp lore op) where
   opSizeSubst (Pattern _ [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
     M.singleton (patElemName size) elems_per_thread
+  opSizeSubst _ _ = mempty
+
+instance SizeSubst (SegOp lvl lore) where
   opSizeSubst _ _ = mempty
 
 instance SizeSubst op => SizeSubst (MemOp op) where

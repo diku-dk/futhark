@@ -13,7 +13,7 @@ import Futhark.Util
 
 main :: String -> [String] -> IO ()
 main = compilerMain () []
-       "Compile to mulcitore C" "Generate multicore C code from optimised Futhark program."
+       "Compile to multicore C" "Generate multicore C code from optimised Futhark program."
        multicorePipeline $ \() mode outpath prog -> do
          cprog <- MulticoreC.compileProg prog
          let cpath = outpath `addExtension` "c"

@@ -14,13 +14,13 @@ import Data.FileEmbed
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
-import Futhark.Representation.KernelsMem (Prog, KernelsMem)
+import Futhark.Representation.MCMem (Prog, MCMem)
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog KernelsMem
+compileProg :: MonadFreshNames m => Prog MCMem
             -> m GC.CParts
 compileProg =
   GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
@@ -290,11 +290,13 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   e' <- GC.compileExp e
   granularity <- compileSchedulingVal scheduling
 
-  let ((prebody', body'), _) =
-        GC.runCompilerM operations blankNameSource () $
-        (,)
-        <$> GC.blockScope (GC.compileCode prebody)
-        <*> GC.blockScope (GC.compileCode body)
+  (prebody', body') <- modifyNameSource $ \src ->
+    let (code, s) =
+          GC.runCompilerM operations src () $
+          (,)
+          <$> GC.blockScope (GC.compileCode prebody)
+          <*> GC.blockScope (GC.compileCode body)
+    in (code, GC.compNameSrc s)
 
   fstruct <- multicoreDef "parloop_struct" $ \s ->
      return [C.cedecl|struct $id:s {
