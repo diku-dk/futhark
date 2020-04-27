@@ -204,6 +204,7 @@ library
       Futhark.Representation.KernelsMem
       Futhark.Representation.Primitive
       Futhark.Representation.Ranges
+      Futhark.Representation.SegOp
       Futhark.Representation.Seq
       Futhark.Representation.SeqMem
       Futhark.Representation.SOACS
