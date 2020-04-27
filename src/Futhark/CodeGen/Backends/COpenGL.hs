@@ -221,10 +221,15 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         setShaderArg i (MemKArg v) = do
+          v' <- GC.rawMem v
+          GC.stm [C.cstm|glBindBufferBase(GL_SHADER_STORAGE_BUFFER, $int:i,
+                                          $exp:v');|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         setShaderArg i (SharedMemoryKArg num_bytes) = do
+          num_bytes' <- GC.compileExp $ unCount num_bytes
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
+          --TODO: create `num_bytes` local memory per work group.
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp $ unCount num_bytes
