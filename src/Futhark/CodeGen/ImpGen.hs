@@ -95,11 +95,11 @@ import Data.List (find, sortOn, genericLength)
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
-  (Bytes, Elements,
+  (Count, Bytes, Elements,
    bytes, elements, withElemType)
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.Mem
 import Futhark.Representation.SOACS (SOACS)
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util
@@ -130,7 +130,7 @@ data Operations lore r op = Operations { opsExpCompiler :: ExpCompiler lore r op
 
 -- | An operations set for which the expression compiler always
 -- returns 'CompileExp'.
-defaultOperations :: (ExplicitMemorish lore, FreeIn op) =>
+defaultOperations :: (Mem lore, FreeIn op) =>
                      OpCompiler lore r op -> Operations lore r op
 defaultOperations opc = Operations { opsExpCompiler = defCompileExp
                                    , opsOpCompiler = opc
@@ -235,7 +235,7 @@ instance MonadFreshNames (ImpM lore r op) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
--- Cannot be an ExplicitMemory scope because the index functions have
+-- Cannot be an KernelsMem scope because the index functions have
 -- the wrong leaves (VName instead of Imp.Exp).
 instance HasScope SOACS (ImpM lore r op) where
   askScope = M.map (LetInfo . entryType) <$> gets stateVTable
@@ -309,16 +309,14 @@ hasFunction :: Name -> ImpM lore r op Bool
 hasFunction fname = gets $ \s -> let Imp.Functions fs = stateFunctions s
                                  in isJust $ lookup fname fs
 
-constsVTable :: LetAttr lore ~ LetAttr ExplicitMemory =>
-                Stms lore -> VTable lore
+constsVTable :: Mem lore => Stms lore -> VTable lore
 constsVTable = foldMap stmVtable
   where stmVtable (Let pat _ e) =
-          foldMap (peVtable e) $ M.toList $
-          mconcat $ map scopeOfPatElem $ patternElements pat
-        peVtable e (name, info) =
-          M.singleton name $ memBoundToVarEntry (Just e) $ infoAttr info
+          foldMap (peVtable e) $ patternElements pat
+        peVtable e (PatElem name attr) =
+          M.singleton name $ memBoundToVarEntry (Just e) attr
 
-compileProg :: (ExplicitMemorish lore, FreeIn op, MonadFreshNames m) =>
+compileProg :: (Mem lore, FreeIn op, MonadFreshNames m) =>
                r -> Operations lore r op -> Imp.Space
             -> Prog lore -> m (Imp.Definitions op)
 compileProg r ops space (Prog consts funs) =
@@ -356,7 +354,7 @@ compileConsts used_consts stms = do
         extract s =
           (mempty, s)
 
-compileInParam :: ExplicitMemorish lore =>
+compileInParam :: Mem lore =>
                   FParam lore -> ImpM lore r op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramAttr fparam of
   MemPrim bt ->
@@ -373,7 +371,7 @@ data ArrayDecl = ArrayDecl VName PrimType MemLocation
 fparamSizes :: Typed attr => Param attr -> S.Set VName
 fparamSizes = S.fromList . subExpVars . arrayDims . paramType
 
-compileInParams :: ExplicitMemorish lore =>
+compileInParams :: Mem lore =>
                    [FParam lore] -> [EntryPointType]
                 -> ImpM lore r op ([Imp.Param], [ArrayDecl], [Imp.ExternalValue])
 compileInParams params orig_epts = do
@@ -422,7 +420,7 @@ compileInParams params orig_epts = do
   return (inparams, arrayds, mkExts orig_epts val_params)
   where isArrayDecl x (ArrayDecl y _ _) = x == y
 
-compileOutParams :: ExplicitMemorish lore =>
+compileOutParams :: Mem lore =>
                     [RetType lore] -> [EntryPointType]
                  -> ImpM lore r op ([Imp.ExternalValue], [Imp.Param], Destination)
 compileOutParams orig_rts orig_epts = do
@@ -484,7 +482,7 @@ compileOutParams orig_rts orig_epts = do
         inspectExtSize (Free se) =
           return se
 
-compileFunDef :: ExplicitMemorish lore =>
+compileFunDef :: Mem lore =>
                  FunDef lore
               -> ImpM lore r op ()
 compileFunDef (FunDef entry fname rettype params body) = do
@@ -504,7 +502,7 @@ compileFunDef (FunDef entry fname rettype params body) = do
 
           return (outparams, inparams, results, args)
 
-compileBody :: (ExplicitMemorish lore) => Pattern lore -> Body lore -> ImpM lore r op ()
+compileBody :: (Mem lore) => Pattern lore -> Body lore -> ImpM lore r op ()
 compileBody pat (Body _ bnds ses) = do
   Destination _ dests <- destinationFromPattern pat
   compileStms (freeIn ses) bnds $
@@ -543,7 +541,7 @@ compileStms alive_after_stms all_stms m = do
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
-defCompileStms :: (ExplicitMemorish lore, FreeIn op) =>
+defCompileStms :: (Mem lore, FreeIn op) =>
                   Names -> Stms lore -> ImpM lore r op () -> ImpM lore r op ()
 defCompileStms alive_after_stms all_stms m =
   -- We keep track of any memory blocks produced by the statements,
@@ -580,7 +578,7 @@ compileExp pat e = do
   ec <- asks envExpCompiler
   ec pat e
 
-defCompileExp :: (ExplicitMemorish lore) =>
+defCompileExp :: (Mem lore) =>
                  Pattern lore -> Exp lore -> ImpM lore r op ()
 
 defCompileExp pat (If cond tbranch fbranch _) = do
@@ -635,7 +633,7 @@ defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
 
-defCompileBasicOp :: ExplicitMemorish lore =>
+defCompileBasicOp :: Mem lore =>
                      Pattern lore -> BasicOp lore -> ImpM lore r op ()
 
 defCompileBasicOp (Pattern _ [pe]) (SubExp se) =
@@ -765,7 +763,7 @@ addArrays = mapM_ addArray
 
 -- | Like 'dFParams', but does not create new declarations.
 -- Note: a hack to be used only for functions.
-addFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore r op ()
+addFParams :: Mem lore => [FParam lore] -> ImpM lore r op ()
 addFParams = mapM_ addFParam
   where addFParam fparam =
           addVar (paramName fparam) $
@@ -775,15 +773,15 @@ addFParams = mapM_ addFParam
 addLoopVar :: VName -> IntType -> ImpM lore r op ()
 addLoopVar i it = addVar i $ ScalarVar Nothing $ ScalarEntry $ IntType it
 
-dVars :: ExplicitMemorish lore =>
+dVars :: Mem lore =>
             Maybe (Exp lore) -> [PatElem lore] -> ImpM lore r op ()
 dVars e = mapM_ dVar
   where dVar = dScope e . scopeOfPatElem
 
-dFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore r op ()
+dFParams :: Mem lore => [FParam lore] -> ImpM lore r op ()
 dFParams = dScope Nothing . scopeOfFParams
 
-dLParams :: ExplicitMemorish lore => [LParam lore] -> ImpM lore r op ()
+dLParams :: Mem lore => [LParam lore] -> ImpM lore r op ()
 dLParams = dScope Nothing . scopeOfLParams
 
 dPrimVol_ :: VName -> PrimType -> ImpM lore r op ()
@@ -827,15 +825,17 @@ memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
                            , entryArrayElemType = bt
                            }
 
-infoAttr :: NameInfo ExplicitMemory
+infoAttr :: Mem lore =>
+            NameInfo lore
          -> MemInfo SubExp NoUniqueness MemBind
 infoAttr (LetInfo attr) = attr
 infoAttr (FParamInfo attr) = noUniquenessReturns attr
 infoAttr (LParamInfo attr) = attr
 infoAttr (IndexInfo it) = MemPrim $ IntType it
 
-dInfo :: Maybe (Exp lore) -> VName -> NameInfo ExplicitMemory
-         -> ImpM lore r op ()
+dInfo :: Mem lore =>
+         Maybe (Exp lore) -> VName -> NameInfo lore
+      -> ImpM lore r op ()
 dInfo e name info = do
   let entry = memBoundToVarEntry e $ infoAttr info
   case entry of
@@ -847,7 +847,8 @@ dInfo e name info = do
       return ()
   addVar name entry
 
-dScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore r op ()
+dScope :: Mem lore =>
+          Maybe (Exp lore) -> Scope lore -> ImpM lore r op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
 dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore r op ()
@@ -956,7 +957,7 @@ lookupMemory name = do
     MemVar _ entry -> return entry
     _              -> error $ "Unknown memory block: " ++ pretty name
 
-destinationFromPattern :: ExplicitMemorish lore => Pattern lore -> ImpM lore r op Destination
+destinationFromPattern :: Mem lore => Pattern lore -> ImpM lore r op Destination
 destinationFromPattern pat =
   fmap (Destination (baseTag <$> maybeHead (patternNames pat))) . mapM inspect $
   patternElements pat
@@ -1187,7 +1188,7 @@ copyDWIMFix dest dest_is src src_is =
 -- | @compileAlloc pat size space@ allocates @n@ bytes of memory in @space@,
 -- writing the result to @dest@, which must be a single
 -- 'MemoryDestination',
-compileAlloc :: ExplicitMemorish lore =>
+compileAlloc :: Mem lore =>
                 Pattern lore -> SubExp -> Space
              -> ImpM lore r op ()
 compileAlloc (Pattern [] [mem]) e space = do

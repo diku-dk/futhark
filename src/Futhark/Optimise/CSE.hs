@@ -45,7 +45,7 @@ import Futhark.Representation.Aliases
    Aliases, consumedInStms)
 import qualified Futhark.Representation.Kernels.Kernel as Kernel
 import qualified Futhark.Representation.SOACS.SOAC as SOAC
-import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
+import qualified Futhark.Representation.Mem as Memory
 import Futhark.Transform.Substitute
 import Futhark.Pass
 
@@ -220,9 +220,9 @@ cseInKernelBody (Kernel.KernelBody bodyattr bnds res) = do
   Body _ bnds' _ <- cseInBody (map (const Observe) res) $ Body bodyattr bnds []
   return $ Kernel.KernelBody bodyattr bnds' res
 
-instance CSEInOp op => CSEInOp (ExplicitMemory.MemOp op) where
-  cseInOp o@ExplicitMemory.Alloc{} = return o
-  cseInOp (ExplicitMemory.Inner k) = ExplicitMemory.Inner <$> subCSE (cseInOp k)
+instance CSEInOp op => CSEInOp (Memory.MemOp op) where
+  cseInOp o@Memory.Alloc{} = return o
+  cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 
 instance (Attributes lore,
           CanBeAliased (Op lore),

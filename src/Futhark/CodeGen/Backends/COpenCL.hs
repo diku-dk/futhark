@@ -13,7 +13,8 @@ import qualified Data.Map as M
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
+import Futhark.Representation.KernelsMem
+  hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -21,7 +22,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
 compileProg prog = do
   (Program opencl_code opencl_prelude kernels
     types sizes failures prog') <- ImpGen.compileProg prog

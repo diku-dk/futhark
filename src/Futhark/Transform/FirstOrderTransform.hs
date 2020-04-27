@@ -10,6 +10,7 @@ module Futhark.Transform.FirstOrderTransform
   ( transformFunDef
   , transformStms
 
+  , FirstOrderLore
   , Transformer
   , transformStmRecursively
   , transformLambda
@@ -30,18 +31,22 @@ import Futhark.Tools
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Util (chunks, splitAt3)
 
-transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
-                    LetAttr SOACS ~ LetAttr tolore,
-                    CanBeAliased (Op tolore)) =>
+-- | The constraints that must hold for a lore in order to be the
+-- target of first-order transformation.
+type FirstOrderLore lore =
+  (Bindable lore, BinderOps lore,
+   LetAttr SOACS ~ LetAttr lore,
+   LParamAttr SOACS ~ LParamAttr lore,
+   CanBeAliased (Op lore))
+
+transformFunDef :: (MonadFreshNames m, FirstOrderLore tolore) =>
                    Scope tolore -> FunDef SOACS -> m (AST.FunDef tolore)
 transformFunDef consts_scope (FunDef entry fname rettype params body) = do
   (body',_) <- modifyNameSource $ runState $ runBinderT m consts_scope
   return $ FunDef entry fname rettype params body'
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
-transformStms :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
-                  LetAttr SOACS ~ LetAttr tolore,
-                  CanBeAliased (Op tolore)) =>
+transformStms :: (MonadFreshNames m, FirstOrderLore tolore) =>
                    Stms SOACS -> m (AST.Stms tolore)
 transformStms stms =
   fmap snd $ modifyNameSource $ runState $ runBinderT m mempty
@@ -49,9 +54,8 @@ transformStms stms =
 
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.
-type Transformer m = (MonadBinder m,
+type Transformer m = (MonadBinder m, LocalScope (Lore m) m,
                       Bindable (Lore m), BinderOps (Lore m),
-                      LocalScope (Lore m) m,
                       LParamAttr SOACS ~ LParamAttr (Lore m),
                       CanBeAliased (Op (Lore m)))
 

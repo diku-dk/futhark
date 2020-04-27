@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Futhark.Representation.ExplicitMemory.IndexFunctionTests
+module Futhark.Representation.Mem.IxFunTests
   ( tests
   )
 where
@@ -15,11 +15,11 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Syntax.Core()
 import qualified Futhark.Util.Pretty as PR
 import qualified Futhark.Util.IntegralExp as IE
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFunLMAD
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Alg as IxFunAlg
+import qualified Futhark.Representation.Mem.IxFun as IxFunLMAD
+import qualified Futhark.Representation.Mem.IxFun.Alg as IxFunAlg
 
-import qualified Futhark.Representation.ExplicitMemory.IndexFunctionWrapper as IxFunWrap
-import Futhark.Representation.ExplicitMemory.IndexFunctionWrapper
+import qualified Futhark.Representation.Mem.IxFunWrapper as IxFunWrap
+import Futhark.Representation.Mem.IxFunWrapper
 
 
 instance IE.IntegralExp Int where
@@ -77,7 +77,7 @@ slice3 = [ DimSlice 2 (n `P.div` 3) 3
 
 -- Actual tests.
 tests :: TestTree
-tests = testGroup "IndexFunctionTests"
+tests = testGroup "IxFunTests"
         $ concat
         [ test_iota
         , test_slice_iota

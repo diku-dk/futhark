@@ -6,7 +6,7 @@ module Futhark.CodeGen.Backends.CSOpenCL
 import Control.Monad
 import Data.List (intersperse)
 
-import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory, int32)
+import Futhark.Representation.KernelsMem (Prog, KernelsMem, int32)
 import Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericCSharp as CS
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
@@ -19,7 +19,7 @@ import Futhark.MonadFreshNames
 
 
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory -> m String
+               Maybe String -> Prog KernelsMem -> m String
 compileProg module_name prog = do
   Imp.Program opencl_code opencl_prelude kernel_names types sizes failures prog' <-
     ImpGen.compileProg prog

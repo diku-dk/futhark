@@ -56,6 +56,7 @@ module Futhark.Optimise.Simplify.Engine
        , bindLParams
        , simplifyBody
        , SimplifiedBody
+       , ST.SymbolTable
 
        , hoistStms
        , blockIf
