@@ -4,7 +4,6 @@
 -- requires a giant amount of memory.  Oh well.
 --
 -- ==
--- tags { no_opencl }
 -- compiled input { 300 }
 -- output { [[220i32, 284i32]] }
 

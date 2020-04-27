@@ -344,11 +344,13 @@ unifyWith onDims usage = subunify False mempty
 
           -- Remove any of the intermediate dimensions we added just
           -- for unification purposes.
+          unbound = applySubst f
+            where f d | d `elem` bound = Just $ SizeSubst AnyDim
+                      | otherwise      = Nothing
+
           link ord' v lvl =
-            linkVarToType linkDims usage bcs v lvl . applySubst unbind
-            where unbind d | d `elem` bound = Just $ SizeSubst AnyDim
-                           | otherwise      = Nothing
-                  -- We may have to flip the order of future calls to
+            linkVarToType linkDims usage bcs v lvl . unbound
+            where -- We may have to flip the order of future calls to
                   -- onDims inside linkVarToType.
                   linkDims | ord' = flipUnifyDims onDims
                            | otherwise = onDims
@@ -441,7 +443,8 @@ unifyWith onDims usage = subunify False mempty
         (Scalar (Sum cs),
          Scalar (Sum arg_cs))
           | M.keys cs == M.keys arg_cs ->
-              unifySharedConstructors onDims usage bcs cs arg_cs
+              unifySharedConstructors onDims usage bcs
+              (map unbound <$> cs) (map unbound <$> arg_cs)
           | otherwise -> do
               let missing = filter (`notElem` M.keys arg_cs) (M.keys cs) ++
                             filter (`notElem` M.keys cs) (M.keys arg_cs)
@@ -867,8 +870,8 @@ unifyMostCommon :: MonadUnify m =>
 unifyMostCommon usage t1 t2 = do
   -- We are ignoring the dimensions here, because any mismatches
   -- should be turned into fresh size variables.
-  unify usage (toStruct (anySizes t1))
-              (toStruct (anySizes t2))
+  let allOK _ _ _ _ _ = return ()
+  unifyWith allOK usage noBreadCrumbs (toStruct t1) (toStruct t2)
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
   newDimOnMismatch (srclocOf usage) t1' t2'

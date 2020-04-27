@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Optimise.InPlaceLowering.LowerIntoStm
   ( lowerUpdateKernels
+  , lowerUpdate
   , LowerUpdate
   , DesiredUpdate (..)
   ) where

@@ -21,11 +21,10 @@ import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
 import Futhark.Pipeline
 import qualified Futhark.Representation.SOACS as SOACS
-import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.Kernels as Kernels
-import Futhark.Representation.Kernels (Kernels)
-import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import qualified Futhark.Representation.Seq as Seq
+import qualified Futhark.Representation.KernelsMem as KernelsMem
+import qualified Futhark.Representation.SeqMem as SeqMem
 import Futhark.Representation.AST (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
@@ -46,7 +45,8 @@ import Futhark.Optimise.Unstream
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExpandAllocations
-import Futhark.Pass.ExplicitAllocations
+import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
+import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Passes
 
 -- | What to do with the program after it has been read.
@@ -83,7 +83,9 @@ getFutharkPipeline = toPipeline . futharkPipeline
 
 data UntypedPassState = SOACS (Prog SOACS.SOACS)
                       | Kernels (Prog Kernels.Kernels)
-                      | ExplicitMemory (Prog ExplicitMemory.ExplicitMemory)
+                      | Seq (Prog Seq.Seq)
+                      | KernelsMem (Prog KernelsMem.KernelsMem)
+                      | SeqMem (Prog SeqMem.SeqMem)
 
 getSOACSProg :: UntypedPassState -> Maybe (Prog SOACS.SOACS)
 getSOACSProg (SOACS prog) = Just prog
@@ -97,37 +99,52 @@ class Representation s where
 instance Representation UntypedPassState where
   representation (SOACS _) = "SOACS"
   representation (Kernels _) = "Kernels"
-  representation (ExplicitMemory _) = "ExplicitMemory"
+  representation (Seq _) = "Seq"
+  representation (KernelsMem _) = "KernelsMem"
+  representation (SeqMem _) = "SeqMEm"
 
 instance PP.Pretty UntypedPassState where
   ppr (SOACS prog) = PP.ppr prog
   ppr (Kernels prog) = PP.ppr prog
-  ppr (ExplicitMemory prog) = PP.ppr prog
+  ppr (Seq prog) = PP.ppr prog
+  ppr (SeqMem prog) = PP.ppr prog
+  ppr (KernelsMem prog) = PP.ppr prog
 
 newtype UntypedPass = UntypedPass (UntypedPassState
                                   -> PipelineConfig
                                   -> FutharkM UntypedPassState)
 
-data UntypedAction = SOACSAction (Action SOACS)
-                   | KernelsAction (Action Kernels)
-                   | ExplicitMemoryAction (Action ExplicitMemory)
-                   | PolyAction (Action SOACS) (Action Kernels) (Action ExplicitMemory)
+data AllActions = AllActions
+  { actionSOACS :: Action SOACS.SOACS
+  , actionKernels :: Action Kernels.Kernels
+  , actionSeq :: Action Seq.Seq
+  , actionKernelsMem :: Action KernelsMem.KernelsMem
+  , actionSeqMem :: Action SeqMem.SeqMem
+  }
+
+data UntypedAction = SOACSAction (Action SOACS.SOACS)
+                   | KernelsAction (Action Kernels.Kernels)
+                   | KernelsMemAction (Action KernelsMem.KernelsMem)
+                   | SeqMemAction (Action SeqMem.SeqMem)
+                   | PolyAction AllActions
 
 untypedActionName :: UntypedAction -> String
 untypedActionName (SOACSAction a) = actionName a
 untypedActionName (KernelsAction a) = actionName a
-untypedActionName (ExplicitMemoryAction a) = actionName a
-untypedActionName (PolyAction a _ _) = actionName a
+untypedActionName (SeqMemAction a) = actionName a
+untypedActionName (KernelsMemAction a) = actionName a
+untypedActionName (PolyAction a) = actionName (actionSOACS a)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
   representation (KernelsAction _) = "Kernels"
-  representation (ExplicitMemoryAction _) = "ExplicitMemory"
+  representation (KernelsMemAction _) = "KernelsMem"
+  representation (SeqMemAction _) = "SeqMem"
   representation PolyAction{} = "<any>"
 
 newConfig :: Config
-newConfig = Config newFutharkConfig (Pipeline [])
-            (PolyAction printAction printAction printAction) False
+newConfig = Config newFutharkConfig (Pipeline []) action False
+  where action = PolyAction $ AllActions printAction printAction printAction printAction printAction
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
@@ -142,12 +159,13 @@ passOption desc pass short long =
    cfg { futharkPipeline = Pipeline $ getFutharkPipeline cfg ++ [pass] })
   desc
 
-explicitMemoryProg :: String -> UntypedPassState -> FutharkM (Prog ExplicitMemory.ExplicitMemory)
-explicitMemoryProg _ (ExplicitMemory prog) =
+kernelsMemProg :: String -> UntypedPassState
+               -> FutharkM (Prog KernelsMem.KernelsMem)
+kernelsMemProg _ (KernelsMem prog) =
   return prog
-explicitMemoryProg name rep =
+kernelsMemProg name rep =
   externalErrorS $ "Pass " ++ name ++
-  " expects ExplicitMemory representation, but got " ++ representation rep
+  " expects KernelsMem representation, but got " ++ representation rep
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
@@ -177,17 +195,19 @@ typedPassOption getProg putProg pass short =
 
         long = [passLongOption pass]
 
-soacsPassOption :: Pass SOACS SOACS -> String -> FutharkOption
+soacsPassOption :: Pass SOACS.SOACS SOACS.SOACS -> String -> FutharkOption
 soacsPassOption =
   typedPassOption soacsProg SOACS
 
-kernelsPassOption :: Pass Kernels Kernels -> String -> FutharkOption
+kernelsPassOption :: Pass Kernels.Kernels Kernels.Kernels
+                  -> String -> FutharkOption
 kernelsPassOption =
   typedPassOption kernelsProg Kernels
 
-explicitMemoryPassOption :: Pass ExplicitMemory ExplicitMemory -> String -> FutharkOption
-explicitMemoryPassOption =
-  typedPassOption explicitMemoryProg ExplicitMemory
+kernelsMemPassOption :: Pass KernelsMem.KernelsMem KernelsMem.KernelsMem
+                     -> String -> FutharkOption
+kernelsMemPassOption =
+  typedPassOption kernelsMemProg KernelsMem
 
 simplifyOption :: String -> FutharkOption
 simplifyOption short =
@@ -196,11 +216,31 @@ simplifyOption short =
           SOACS <$> runPasses (onePass simplifySOACS) config prog
         perform (Kernels prog) config =
           Kernels <$> runPasses (onePass simplifyKernels) config prog
-        perform (ExplicitMemory prog) config =
-          ExplicitMemory <$> runPasses (onePass simplifyExplicitMemory) config prog
+        perform (Seq prog) config =
+          Seq <$> runPasses (onePass simplifySeq) config prog
+        perform (SeqMem prog) config =
+          SeqMem <$> runPasses (onePass simplifySeqMem) config prog
+        perform (KernelsMem prog) config =
+          KernelsMem <$> runPasses (onePass simplifyKernelsMem) config prog
 
         long = [passLongOption pass]
         pass = simplifySOACS
+
+allocateOption :: String -> FutharkOption
+allocateOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where perform (Kernels prog) config =
+          KernelsMem <$>
+          runPasses (onePass Kernels.explicitAllocations) config prog
+        perform (Seq prog) config =
+          SeqMem <$>
+          runPasses (onePass Seq.explicitAllocations) config prog
+        perform s _ =
+          externalErrorS $
+          "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+        long = [passLongOption pass]
+        pass = Seq.explicitAllocations
 
 cseOption :: String -> FutharkOption
 cseOption short =
@@ -209,11 +249,15 @@ cseOption short =
           SOACS <$> runPasses (onePass $ performCSE True) config prog
         perform (Kernels prog) config =
           Kernels <$> runPasses (onePass $ performCSE True) config prog
-        perform (ExplicitMemory prog) config =
-          ExplicitMemory <$> runPasses (onePass $ performCSE False) config prog
+        perform (Seq prog) config =
+          Seq <$> runPasses (onePass $ performCSE True) config prog
+        perform (SeqMem prog) config =
+          SeqMem <$> runPasses (onePass $ performCSE False) config prog
+        perform (KernelsMem prog) config =
+          KernelsMem <$> runPasses (onePass $ performCSE False) config prog
 
         long = [passLongOption pass]
-        pass = performCSE True :: Pass SOACS SOACS
+        pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
 pipelineOption :: (UntypedPassState -> Maybe (Prog fromlore))
                -> String
@@ -233,17 +277,9 @@ pipelineOption getprog repdesc repf desc pipeline =
               externalErrorS $ "Expected " ++ repdesc ++ " representation, but got " ++
               representation rep
 
-soacsPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
+soacsPipelineOption :: String -> Pipeline SOACS.SOACS SOACS.SOACS -> String -> [String]
                     -> FutharkOption
 soacsPipelineOption = pipelineOption getSOACSProg "SOACS" SOACS
-
-kernelsPipelineOption :: String -> Pipeline SOACS Kernels -> String -> [String]
-                    -> FutharkOption
-kernelsPipelineOption = pipelineOption getSOACSProg "Kernels" Kernels
-
-explicitMemoryPipelineOption :: String -> Pipeline SOACS ExplicitMemory -> String -> [String]
-                             -> FutharkOption
-explicitMemoryPipelineOption = pipelineOption getSOACSProg "ExplicitMemory" ExplicitMemory
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -266,24 +302,27 @@ commandLineOptions =
 
   , Option [] ["compile-imperative"]
     (NoArg $ Right $ \opts ->
-       opts { futharkAction = ExplicitMemoryAction impCodeGenAction })
+       opts { futharkAction = SeqMemAction impCodeGenAction })
     "Translate program into the imperative IL and write it on standard output."
   , Option [] ["compile-imperative-kernels"]
     (NoArg $ Right $ \opts ->
-       opts { futharkAction = ExplicitMemoryAction kernelImpCodeGenAction })
+       opts { futharkAction = KernelsMemAction kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
   , Option [] ["compile-imperative-multicore"]
     (NoArg $ Right $ \opts ->
-       opts { futharkAction = ExplicitMemoryAction multicoreImpCodeGenAction })
+       opts { futharkAction = KernelsMemAction multicoreImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
   , Option [] ["range-analysis"]
-       (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction rangeAction rangeAction rangeAction })
-       "Print the program with range annotations added."
+    (NoArg $ Right $ \opts ->
+        opts { futharkAction = PolyAction $ AllActions rangeAction rangeAction rangeAction rangeAction rangeAction })
+    "Print the program with range annotations added."
   , Option "p" ["print"]
-    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
+    (NoArg $ Right $ \opts ->
+        opts { futharkAction = PolyAction $ AllActions printAction printAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
   , Option "m" ["metrics"]
-    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction metricsAction metricsAction metricsAction })
+    (NoArg $ Right $ \opts ->
+        opts { futharkAction = PolyAction $ AllActions metricsAction metricsAction metricsAction metricsAction metricsAction })
     "Print AST metrics of the resulting internal representation on standard output."
   , Option [] ["defunctorise"]
     (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctorise })
@@ -300,33 +339,37 @@ commandLineOptions =
   , Option [] ["safe"]
     (NoArg $ Right $ changeFutharkConfig $ \opts -> opts { futharkSafe = True })
     "Ignore 'unsafe'."
-  , typedPassOption soacsProg Kernels firstOrderTransform "f"
+  , typedPassOption soacsProg Seq firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineFunctions []
-  , kernelsPassOption inPlaceLowering []
+  , kernelsPassOption inPlaceLoweringKernels []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
   , kernelsPassOption unstream []
   , kernelsPassOption sink []
   , typedPassOption soacsProg Kernels extractKernels []
 
-  , typedPassOption kernelsProg ExplicitMemory explicitAllocations "a"
+  , allocateOption "a"
 
-  , explicitMemoryPassOption doubleBuffer []
-  , explicitMemoryPassOption expandAllocations []
+  , kernelsMemPassOption doubleBuffer []
+  , kernelsMemPassOption expandAllocations []
 
   , cseOption []
   , simplifyOption "e"
 
   , soacsPipelineOption "Run the default optimised pipeline"
     standardPipeline "s" ["standard"]
-  , kernelsPipelineOption "Run the default optimised kernels pipeline"
+  , pipelineOption getSOACSProg "Kernels" Kernels
+    "Run the default optimised kernels pipeline"
     kernelsPipeline [] ["kernels"]
-  , explicitMemoryPipelineOption "Run the full GPU compilation pipeline"
+  , pipelineOption getSOACSProg "KernelsMem" KernelsMem
+    "Run the full GPU compilation pipeline"
     gpuPipeline [] ["gpu"]
-  , explicitMemoryPipelineOption "Run the sequential CPU compilation pipeline"
+  , pipelineOption getSOACSProg "KernelsMem" SeqMem
+    "Run the sequential CPU compilation pipeline"
     sequentialCpuPipeline [] ["cpu"]
-  , explicitMemoryPipelineOption "Run the multicore compilation pipeline"
+  , pipelineOption getSOACSProg "KernelsMem" KernelsMem
+    "Run the multicore compilation pipeline"
     multicorePipeline [] ["multicore"]
   ]
 
@@ -392,29 +435,36 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config prog
 
-runPolyPasses :: Config -> Prog SOACS -> FutharkM ()
-runPolyPasses config prog = do
-    prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (getFutharkPipeline config)
-    case (prog', futharkAction config) of
-      (SOACS soacs_prog, SOACSAction action) ->
-        actionProcedure action soacs_prog
-      (Kernels kernels_prog, KernelsAction action) ->
-        actionProcedure action kernels_prog
-      (ExplicitMemory mem_prog, ExplicitMemoryAction action) ->
-        actionProcedure action mem_prog
+runPolyPasses :: Config -> Prog SOACS.SOACS -> FutharkM ()
+runPolyPasses config initial_prog = do
+    end_prog <- foldM (runPolyPass pipeline_config) (SOACS initial_prog)
+                (getFutharkPipeline config)
+    case (end_prog, futharkAction config) of
+      (SOACS prog, SOACSAction action) ->
+        actionProcedure action prog
+      (Kernels prog, KernelsAction action) ->
+        actionProcedure action prog
+      (SeqMem prog, SeqMemAction action) ->
+        actionProcedure action prog
+      (KernelsMem prog, KernelsMemAction action) ->
+        actionProcedure action prog
 
-      (SOACS soacs_prog, PolyAction soacs_action _ _) ->
-        actionProcedure soacs_action soacs_prog
-      (Kernels kernels_prog, PolyAction _ kernels_action _) ->
-        actionProcedure kernels_action kernels_prog
-      (ExplicitMemory mem_prog, PolyAction _ _ mem_action) ->
-        actionProcedure mem_action mem_prog
+      (SOACS soacs_prog, PolyAction acs) ->
+        actionProcedure (actionSOACS acs) soacs_prog
+      (Kernels kernels_prog, PolyAction acs) ->
+        actionProcedure (actionKernels acs) kernels_prog
+      (Seq seq_prog, PolyAction acs) ->
+        actionProcedure (actionSeq acs) seq_prog
+      (KernelsMem mem_prog, PolyAction acs) ->
+        actionProcedure (actionKernelsMem acs) mem_prog
+      (SeqMem mem_prog, PolyAction acs) ->
+        actionProcedure (actionSeqMem acs) mem_prog
 
       (_, action) ->
         externalErrorS $ "Action " <>
         untypedActionName action <>
         " expects " ++ representation action ++ " representation, but got " ++
-        representation prog' ++ "."
+        representation end_prog ++ "."
   where pipeline_config =
           PipelineConfig { pipelineVerbose = fst (futharkVerbose $ futharkConfig config) > NotVerbose
                          , pipelineValidate = True

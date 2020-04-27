@@ -3,9 +3,11 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Futhark.Representation.ExplicitMemory.Simplify
-       ( simplifyExplicitMemory
-       , simplifyStms
+module Futhark.Representation.Mem.Simplify
+       ( simplifyProgGeneric
+       , simplifyStmsGeneric
+       , simpleGeneric
+       , SimplifyMemory
        )
 where
 
@@ -16,8 +18,7 @@ import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, PatElem, Lambda, FunDef, FParam, LParam, RetType)
-import Futhark.Representation.ExplicitMemory
-import Futhark.Representation.Kernels.Simplify (simplifyKernelOp)
+import Futhark.Representation.Mem
 import Futhark.Pass.ExplicitAllocations
   (simplifiable, arraySizeInBytesExp)
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -31,17 +32,22 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Lore
 import Futhark.Util
 
-simpleExplicitMemory :: Simplify.SimpleOps ExplicitMemory
-simpleExplicitMemory = simplifiable $ simplifyKernelOp $ const $ return ((), mempty)
+simpleGeneric :: (SimplifyMemory lore, Op lore ~ MemOp inner) =>
+                 Simplify.SimplifyOp lore inner
+              -> Simplify.SimpleOps lore
+simpleGeneric = simplifiable
 
-simplifyExplicitMemory :: Prog ExplicitMemory -> PassM (Prog ExplicitMemory)
-simplifyExplicitMemory =
-  Simplify.simplifyProg simpleExplicitMemory callKernelRules
+simplifyProgGeneric :: (SimplifyMemory lore,
+                        Op lore ~ MemOp inner) =>
+                       Simplify.SimplifyOp lore inner
+                    -> Prog lore -> PassM (Prog lore)
+simplifyProgGeneric onInner =
+  Simplify.simplifyProg (simpleGeneric onInner) callKernelRules
   blockers { Engine.blockHoistBranch = blockAllocs }
   where blockAllocs vtable _ (Let _ _ (Op Alloc{})) =
           not $ ST.simplifyMemory vtable
         -- Do not hoist statements that produce arrays.  This is
-        -- because in the ExplicitMemory representation, multiple
+        -- because in the KernelsMem representation, multiple
         -- arrays can be located in the same memory block, and moving
         -- their creation out of a branch can thus cause memory
         -- corruption.  At this point in the compiler we have probably
@@ -49,12 +55,13 @@ simplifyExplicitMemory =
         blockAllocs _ _ (Let pat _ _) =
           not $ all primType $ patternTypes pat
 
-simplifyStms :: (HasScope ExplicitMemory m, MonadFreshNames m) =>
-                Stms ExplicitMemory -> m (ST.SymbolTable (Wise ExplicitMemory),
-                                          Stms ExplicitMemory)
-simplifyStms stms = do
+simplifyStmsGeneric :: (HasScope lore m, MonadFreshNames m,
+                        SimplifyMemory lore, Op lore ~ MemOp inner) =>
+                       Simplify.SimplifyOp lore inner -> Stms lore
+                    -> m (ST.SymbolTable (Wise lore), Stms lore)
+simplifyStmsGeneric onInner stms = do
   scope <- askScope
-  Simplify.simplifyStms simpleExplicitMemory callKernelRules blockers
+  Simplify.simplifyStms (simpleGeneric onInner) callKernelRules blockers
     scope stms
 
 isResultAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
@@ -64,7 +71,7 @@ isResultAlloc _ _ _ = False
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent array and memory-block sizes.
-getShapeNames :: (ExplicitMemorish lore, Op lore ~ MemOp op) =>
+getShapeNames :: (Mem lore, Op lore ~ MemOp op) =>
                  Stm (Wise lore) -> Names
 getShapeNames stm =
   let ts = map patElemType $ patternElements $ stmPattern stm
@@ -76,7 +83,8 @@ isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isAlloc _ _ (Let _ _ (Op Alloc{})) = True
 isAlloc _ _ _                      = False
 
-blockers :: Simplify.HoistBlockers ExplicitMemory
+blockers :: (Mem lore, Op lore ~ MemOp inner) =>
+            Simplify.HoistBlockers lore
 blockers = Engine.noExtraHoistBlockers {
     Engine.blockHoistPar    = isAlloc
   , Engine.blockHoistSeq    = isResultAlloc
@@ -84,7 +92,17 @@ blockers = Engine.noExtraHoistBlockers {
   , Engine.isAllocation     = isAlloc mempty mempty
   }
 
-callKernelRules :: RuleBook (Wise ExplicitMemory)
+-- | Some constraints that must hold for the simplification rules to work.
+type SimplifyMemory lore =
+  (Simplify.SimplifiableLore lore,
+   ExpAttr lore ~ (),
+   BodyAttr lore ~ (),
+   AllocOp (Op (Wise lore)),
+   CanBeWise (Op lore),
+   BinderOps (Wise lore),
+   Mem lore)
+
+callKernelRules :: SimplifyMemory lore => RuleBook (Wise lore)
 callKernelRules = standardRules <>
                   ruleBook [RuleBasicOp copyCopyToCopy,
                             RuleBasicOp removeIdentityCopy,
@@ -93,7 +111,7 @@ callKernelRules = standardRules <>
 -- | If a branch is returning some existential memory, but the size of
 -- the array is not existential, then we can create a block of the
 -- proper size and always return there.
-unExistentialiseMemory :: TopDownRuleIf (Wise ExplicitMemory)
+unExistentialiseMemory :: SimplifyMemory lore => TopDownRuleIf (Wise lore)
 unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
   | ST.simplifyMemory vtable,
     fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
@@ -105,7 +123,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
         fmap unzip $ forM fixable $ \(arr_pe, oldmem, space) -> do
           size <- letSubExp "size" =<<
                   toExp (arraySizeInBytesExp $ patElemType arr_pe)
-          mem <- letExp "mem" $ Op $ Alloc size space
+          mem <- letExp "mem" $ Op $ allocOp size space
           return ((patElemName arr_pe, mem), (oldmem, mem))
 
       -- Update the branches to contain Copy expressions putting the

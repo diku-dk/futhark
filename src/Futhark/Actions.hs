@@ -17,7 +17,8 @@ import Futhark.Analysis.Alias
 import Futhark.Analysis.Range
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.KernelsMem (KernelsMem)
+import Futhark.Representation.SeqMem (SeqMem)
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
@@ -45,21 +46,21 @@ metricsAction =
          , actionProcedure = liftIO . putStr . show . progMetrics
          }
 
-impCodeGenAction :: Action ExplicitMemory
+impCodeGenAction :: Action SeqMem
 impCodeGenAction =
   Action { actionName = "Compile imperative"
          , actionDescription = "Translate program into imperative IL and write it on standard output."
          , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenSequential.compileProg
          }
 
-kernelImpCodeGenAction :: Action ExplicitMemory
+kernelImpCodeGenAction :: Action KernelsMem
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
          , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenKernels.compileProgOpenCL
          }
 
-multicoreImpCodeGenAction :: Action ExplicitMemory
+multicoreImpCodeGenAction :: Action KernelsMem
 multicoreImpCodeGenAction =
   Action { actionName = "Compile to imperative multicore"
          , actionDescription = "Translate program into imperative multicore IL and write it on standard output."

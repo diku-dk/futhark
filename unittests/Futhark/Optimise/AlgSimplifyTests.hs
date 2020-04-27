@@ -4,7 +4,7 @@ where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Data.List
+import Data.List (sort, mapAccumL)
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST

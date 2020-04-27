@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-  * `reduce_by_index` with `f32`-addition is now approximately 2x
-    faster in the CUDA backend.
+  * Binary operators now act as left-to-right sequence points with
+    respect to size types.
 
 ### Removed
 
 ### Changed
+
+### Fixed
+
+## [0.15.5]
+
+### Added
+
+  * `reduce_by_index` with `f32`-addition is now approximately 2x
+    faster in the CUDA backend.
 
 ### Fixed
 
@@ -34,6 +43,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed loop interchange for permuted sequential loops with more
     than one outer parallel loop (#928).
+
+  * Fixed a type checking bug for branches returning incomplete sum
+    types (#931).
 
 ## [0.15.4]
 

@@ -6,7 +6,7 @@ module Futhark.CodeGen.Backends.PyOpenCL
 import Control.Monad
 import qualified Data.Map as M
 
-import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
+import Futhark.Representation.KernelsMem (Prog, KernelsMem)
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
@@ -18,7 +18,7 @@ import Futhark.MonadFreshNames
 
 --maybe pass the config file rather than multiple arguments
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory ->  m String
+               Maybe String -> Prog KernelsMem -> m String
 compileProg module_name prog = do
   Imp.Program opencl_code opencl_prelude kernels types sizes failures prog' <-
     ImpGen.compileProg prog
