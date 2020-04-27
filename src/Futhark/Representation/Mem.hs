@@ -495,13 +495,11 @@ bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 matchFunctionReturnType :: Mem lore =>
                            [FunReturns] -> Result -> TC.TypeM lore ()
 matchFunctionReturnType rettype result = do
-  TC.matchExtReturnType (fromDecl <$> ts) result
   scope <- askScope
   result_ts <- runReaderT (mapM subExpMemInfo result) $ removeScopeAliases scope
   matchReturnType rettype result result_ts
   mapM_ checkResultSubExp result
-  where ts = map declExtTypeOf rettype
-        checkResultSubExp Constant{} =
+  where checkResultSubExp Constant{} =
           return ()
         checkResultSubExp (Var v) = do
           attr <- varMemInfo v
@@ -698,11 +696,6 @@ extInMemReturn (ReturnsNewBlock _ i extixfn) =
 
 extInIxFn :: ExtIxFun -> S.Set Int
 extInIxFn ixfun = S.fromList $ concatMap (mapMaybe isExt . toList) ixfun
-
-isExt :: Ext a -> Maybe Int
-isExt (Ext i) = Just i
-isExt _ = Nothing
-
 
 varMemInfo :: Mem lore =>
               VName -> TC.TypeM lore (MemInfo SubExp NoUniqueness MemBind)
