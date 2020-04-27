@@ -209,10 +209,11 @@ instance (Attributes lore, Aliased lore,
   cseInOp (Kernel.OtherOp op) = Kernel.OtherOp <$> cseInOp op
   cseInOp x = return x
 
-instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (Kernel.SegOp lore) where
+instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+         CSEInOp (Kernel.SegOp lvl lore) where
   cseInOp = subCSE .
             Kernel.mapSegOpM
-            (Kernel.SegOpMapper return cseInLambda cseInKernelBody return)
+            (Kernel.SegOpMapper return cseInLambda cseInKernelBody return return)
 
 cseInKernelBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                    Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)

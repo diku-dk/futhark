@@ -118,7 +118,8 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
   where f (name, x) = (keyWithEntryPoint fname name, x)
 sizeClassWithEntryPoint _ size_class = size_class
 
-segOpCompiler :: Pattern KernelsMem -> SegOp KernelsMem -> CallKernelGen ()
+segOpCompiler :: Pattern KernelsMem -> SegOp SegLevel KernelsMem
+              -> CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
 segOpCompiler pat (SegRed lvl@SegThread{} space reds _ kbody) =

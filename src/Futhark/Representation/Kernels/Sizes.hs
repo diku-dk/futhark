@@ -11,6 +11,7 @@ import Data.Int (Int32)
 import Data.Traversable
 
 import Futhark.Util.Pretty
+import Futhark.Transform.Substitute
 import Language.Futhark.Core (Name)
 import Futhark.Util.IntegralExp (IntegralExp)
 import Futhark.Representation.AST.Attributes.Names (FreeIn)
@@ -44,7 +45,7 @@ instance Pretty SizeClass where
 
 -- | A wrapper supporting a phantom type for indicating what we are counting.
 newtype Count u e = Count { unCount :: e }
-                deriving (Eq, Ord, Show, Num, IntegralExp, FreeIn, Pretty)
+  deriving (Eq, Ord, Show, Num, IntegralExp, FreeIn, Pretty, Substitute)
 
 instance Functor (Count u) where
   fmap = fmapDefault

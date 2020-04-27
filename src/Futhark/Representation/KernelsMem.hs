@@ -45,7 +45,7 @@ instance Annotations KernelsMem where
   type Op         KernelsMem = MemOp (HostOp KernelsMem ())
 
 segOpReturns :: (Monad m, HasScope KernelsMem m) =>
-                SegOp KernelsMem -> m [ExpReturns]
+                SegOp SegLevel KernelsMem -> m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody =<< (extReturns <$> opType k)
 segOpReturns k@(SegRed _ _ _ _ kbody) =

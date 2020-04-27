@@ -14,6 +14,9 @@ module Futhark.Representation.Kernels.Kernel
   , HostOp(..)
   , typeCheckHostOp
 
+    -- * SegOp refinements
+  , SegLevel(..)
+
     -- * Reexports
   , module Futhark.Representation.Kernels.Sizes
   , module Futhark.Representation.SegOp
@@ -25,10 +28,11 @@ import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((<+>), ppr, commasep, parens, text)
+  ((</>), (<+>), ppr, commasep, parens, text)
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Lore
+import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Representation.Ranges
   (Ranges)
 import Futhark.Representation.AST.Attributes.Ranges
@@ -39,6 +43,52 @@ import Futhark.Representation.SegOp
 import Futhark.Representation.Kernels.Sizes
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
+
+-- | At which level the *body* of a 'SegOp' executes.
+data SegLevel = SegThread { segNumGroups :: Count NumGroups SubExp
+                          , segGroupSize :: Count GroupSize SubExp
+                          , segVirt :: SegVirt }
+              | SegGroup { segNumGroups :: Count NumGroups SubExp
+                         , segGroupSize :: Count GroupSize SubExp
+                         , segVirt :: SegVirt }
+              deriving (Eq, Ord, Show)
+
+instance PP.Pretty SegLevel where
+  ppr lvl =
+    lvl' </>
+    PP.parens (text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi <+>
+               text "groupsize=" <> ppr (segGroupSize lvl) <>
+               case segVirt lvl of
+                 SegNoVirt -> mempty
+                 SegVirt -> PP.semi <+> text "virtualise")
+
+    where lvl' = case lvl of SegThread{} -> "_thread"
+                             SegGroup{} -> "_group"
+
+instance Engine.Simplifiable SegLevel where
+  simplify (SegThread num_groups group_size virt) =
+    SegThread <$> traverse Engine.simplify num_groups <*>
+    traverse Engine.simplify group_size <*> pure virt
+  simplify (SegGroup num_groups group_size virt) =
+    SegGroup <$> traverse Engine.simplify num_groups <*>
+    traverse Engine.simplify group_size <*> pure virt
+
+instance Substitute SegLevel where
+  substituteNames substs (SegThread num_groups group_size virt) =
+    SegThread
+    (substituteNames substs num_groups) (substituteNames substs group_size) virt
+  substituteNames substs (SegGroup num_groups group_size virt) =
+    SegGroup
+    (substituteNames substs num_groups) (substituteNames substs group_size) virt
+
+instance Rename SegLevel where
+  rename = substituteRename
+
+instance FreeIn SegLevel where
+  freeIn' (SegThread num_groups group_size _) =
+    freeIn' num_groups <> freeIn' group_size
+  freeIn' (SegGroup num_groups group_size _) =
+    freeIn' num_groups <> freeIn' group_size
 
 -- | A simple size-level query or computation.
 data SizeOp
@@ -175,7 +225,7 @@ typeCheckSizeOp (CalcNumGroups w _ group_size) = do TC.require [Prim int64] w
 
 -- | A host-level operation; parameterised by what else it can do.
 data HostOp lore op
-  = SegOp (SegOp lore)
+  = SegOp (SegOp SegLevel lore)
     -- ^ A segmented operation.
   | SizeOp SizeOp
   | OtherOp op
@@ -271,6 +321,18 @@ instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (HostOp lore op) where
   opMetrics (OtherOp op) = opMetrics op
   opMetrics (SizeOp op) = opMetrics op
 
+checkSegLevel :: Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
+checkSegLevel Nothing _ =
+  return ()
+checkSegLevel (Just SegThread{}) _ =
+  TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
+checkSegLevel (Just x) y
+  | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ pretty x
+  | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
+      TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
+  | otherwise =
+      return ()
+
 typeCheckHostOp :: TC.Checkable lore =>
                    (SegLevel -> OpWithAliases (Op lore) -> TC.TypeM lore ())
                 -> Maybe SegLevel
@@ -279,6 +341,6 @@ typeCheckHostOp :: TC.Checkable lore =>
                 -> TC.TypeM lore ()
 typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $
-  typeCheckSegOp lvl op
+  typeCheckSegOp (checkSegLevel lvl) op
 typeCheckHostOp _ _ f (OtherOp op) = f op
 typeCheckHostOp _ _ _ (SizeOp op) = typeCheckSizeOp op

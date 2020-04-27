@@ -1,16 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Segmented operations.
 module Futhark.Representation.SegOp
   ( SegOp(..)
-  , SegLevel(..)
   , SegVirt(..)
   , segLevel
   , segSpace
@@ -71,7 +70,6 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeStmAliases)
-import Futhark.Representation.Kernels.Sizes
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.Range as Range
@@ -357,15 +355,6 @@ instance Pretty KernelResult where
 data SegVirt = SegVirt | SegNoVirt
              deriving (Eq, Ord, Show)
 
--- | At which level the *body* of a 'SegOp' executes.
-data SegLevel = SegThread { segNumGroups :: Count NumGroups SubExp
-                          , segGroupSize :: Count GroupSize SubExp
-                          , segVirt :: SegVirt }
-              | SegGroup { segNumGroups :: Count NumGroups SubExp
-                         , segGroupSize :: Count GroupSize SubExp
-                         , segVirt :: SegVirt }
-              deriving (Eq, Ord, Show)
-
 -- | Index space of a 'SegOp'.
 data SegSpace = SegSpace { segFlat :: VName
                          -- ^ Flat physical index corresponding to the
@@ -387,21 +376,22 @@ checkSegSpace :: TC.Checkable lore => SegSpace -> TC.TypeM lore ()
 checkSegSpace (SegSpace _ dims) =
   mapM_ (TC.require [Prim int32] . snd) dims
 
-data SegOp lore = SegMap SegLevel SegSpace [Type] (KernelBody lore)
-                | SegRed SegLevel SegSpace [SegRedOp lore] [Type] (KernelBody lore)
-                  -- ^ The KernelSpace must always have at least two dimensions,
-                  -- implying that the result of a SegRed is always an array.
-                | SegScan SegLevel SegSpace (Lambda lore) [SubExp] [Type] (KernelBody lore)
-                | SegHist SegLevel SegSpace [HistOp lore] [Type] (KernelBody lore)
-                deriving (Eq, Ord, Show)
+data SegOp lvl lore
+  = SegMap lvl SegSpace [Type] (KernelBody lore)
+  | SegRed lvl SegSpace [SegRedOp lore] [Type] (KernelBody lore)
+    -- ^ The KernelSpace must always have at least two dimensions,
+    -- implying that the result of a SegRed is always an array.
+  | SegScan lvl SegSpace (Lambda lore) [SubExp] [Type] (KernelBody lore)
+  | SegHist lvl SegSpace [HistOp lore] [Type] (KernelBody lore)
+  deriving (Eq, Ord, Show)
 
-segLevel :: SegOp lore -> SegLevel
+segLevel :: SegOp lvl lore -> lvl
 segLevel (SegMap lvl _ _ _) = lvl
 segLevel (SegRed lvl _ _ _ _) = lvl
 segLevel (SegScan lvl _ _ _ _ _) = lvl
 segLevel (SegHist lvl _ _ _ _) = lvl
 
-segSpace :: SegOp lore -> SegSpace
+segSpace :: SegOp lvl lore -> SegSpace
 segSpace (SegMap _ lvl _ _) = lvl
 segSpace (SegRed _ lvl _ _ _) = lvl
 segSpace (SegScan _ lvl _ _ _ _) = lvl
@@ -417,7 +407,7 @@ segResultShape _ t (ConcatReturns _ w _ _) =
 segResultShape _ t (TileReturns dims _) =
   t `arrayOfShape` Shape (map fst dims)
 
-segOpType :: SegOp lore -> [Type]
+segOpType :: SegOp lvl lore -> [Type]
 segOpType (SegMap _ space ts kbody) =
   zipWith (segResultShape space) ts $ kernelBodyResult kbody
 segOpType (SegRed _ space reds ts kbody) =
@@ -443,10 +433,11 @@ segOpType (SegHist _ space ops _ _) = do
   where dims = segSpaceDims space
         segment_dims = init dims
 
-instance TypedOp (SegOp lore) where
+instance TypedOp (SegOp lvl lore) where
   opType = pure . staticShapes . segOpType
 
-instance (Attributes lore, Aliased lore) => AliasedOp (SegOp lore) where
+instance (Attributes lore, Aliased lore, ASTConstraints lvl) =>
+         AliasedOp (SegOp lvl lore) where
   opAliases = map (const mempty) . segOpType
 
   consumedInOp (SegMap _ _ _ kbody) =
@@ -458,42 +449,29 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SegOp lore) where
   consumedInOp (SegHist _ _ ops _ kbody) =
     namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
 
-checkSegLevel :: Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
-checkSegLevel Nothing _ =
-  return ()
-checkSegLevel (Just SegThread{}) _ =
-  TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
-checkSegLevel (Just x) y
-  | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ pretty x
-  | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
-      TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
-  | otherwise =
-      return ()
-
-checkSegBasics :: TC.Checkable lore =>
-                  Maybe SegLevel -> SegLevel -> SegSpace -> [Type] -> TC.TypeM lore ()
-checkSegBasics cur_lvl lvl space ts = do
-  checkSegLevel cur_lvl lvl
-  checkSegSpace space
-  mapM_ TC.checkType ts
-
 typeCheckSegOp :: TC.Checkable lore =>
-                  Maybe SegLevel -> SegOp (Aliases lore) -> TC.TypeM lore ()
-typeCheckSegOp cur_lvl (SegMap lvl space ts kbody) =
-  checkScanRed cur_lvl lvl space [] ts kbody
+                  (lvl -> TC.TypeM lore ())
+               -> SegOp lvl (Aliases lore) -> TC.TypeM lore ()
+typeCheckSegOp checkLvl (SegMap lvl space ts kbody) = do
+  checkLvl lvl
+  checkScanRed space [] ts kbody
 
-typeCheckSegOp cur_lvl (SegRed lvl space reds ts body) =
-  checkScanRed cur_lvl lvl space reds' ts body
+typeCheckSegOp checkLvl (SegRed lvl space reds ts body) = do
+  checkLvl lvl
+  checkScanRed space reds' ts body
   where reds' = zip3
                 (map segRedLambda reds)
                 (map segRedNeutral reds)
                 (map segRedShape reds)
 
-typeCheckSegOp cur_lvl (SegScan lvl space scan_op nes ts body) =
-  checkScanRed cur_lvl lvl space [(scan_op, nes, mempty)] ts body
+typeCheckSegOp checkLvl (SegScan lvl space scan_op nes ts body) = do
+  checkLvl lvl
+  checkScanRed space [(scan_op, nes, mempty)] ts body
 
-typeCheckSegOp cur_lvl (SegHist lvl space ops ts kbody) = do
-  checkSegBasics cur_lvl lvl space ts
+typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
+  checkLvl lvl
+  checkSegSpace space
+  mapM_ TC.checkType ts
 
   TC.binding (scopeOfSegSpace space) $ do
     nes_ts <- forM ops $ \(HistOp dest_w rf dests nes shape op) -> do
@@ -532,14 +510,14 @@ typeCheckSegOp cur_lvl (SegHist lvl space ops ts kbody) = do
   where segment_dims = init $ segSpaceDims space
 
 checkScanRed :: TC.Checkable lore =>
-                Maybe SegLevel -> SegLevel
-             -> SegSpace
+                SegSpace
              -> [(Lambda (Aliases lore), [SubExp], Shape)]
              -> [Type]
              -> KernelBody (Aliases lore)
              -> TC.TypeM lore ()
-checkScanRed cur_lvl lvl space ops ts kbody = do
-  checkSegBasics cur_lvl lvl space ts
+checkScanRed space ops ts kbody = do
+  checkSegSpace space
+  mapM_ TC.checkType ts
 
   TC.binding (scopeOfSegSpace space) $ do
     ne_ts <- forM ops $ \(lam, nes, shape) -> do
@@ -567,37 +545,40 @@ checkScanRed cur_lvl lvl space ops ts kbody = do
     checkKernelBody ts kbody
 
 -- | Like 'Mapper', but just for 'SegOp's.
-data SegOpMapper flore tlore m = SegOpMapper {
+data SegOpMapper lvl flore tlore m = SegOpMapper {
     mapOnSegOpSubExp :: SubExp -> m SubExp
   , mapOnSegOpLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnSegOpBody :: KernelBody flore -> m (KernelBody tlore)
   , mapOnSegOpVName :: VName -> m VName
+  , mapOnSegOpLevel :: lvl -> m lvl
   }
 
 -- | A mapper that simply returns the 'SegOp' verbatim.
-identitySegOpMapper :: Monad m => SegOpMapper lore lore m
+identitySegOpMapper :: Monad m => SegOpMapper lvl lore lore m
 identitySegOpMapper = SegOpMapper { mapOnSegOpSubExp = return
                                   , mapOnSegOpLambda = return
                                   , mapOnSegOpBody = return
                                   , mapOnSegOpVName = return
+                                  , mapOnSegOpLevel = return
                                   }
 
 mapOnSegSpace :: Monad f =>
-                 SegOpMapper flore tlore f -> SegSpace -> f SegSpace
+                 SegOpMapper lvl flore tlore f -> SegSpace -> f SegSpace
 mapOnSegSpace tv (SegSpace phys dims) =
   SegSpace phys <$> traverse (traverse $ mapOnSegOpSubExp tv) dims
 
 mapSegOpM :: (Applicative m, Monad m) =>
-              SegOpMapper flore tlore m -> SegOp flore -> m (SegOp tlore)
+             SegOpMapper lvl flore tlore m
+          -> SegOp lvl flore -> m (SegOp lvl tlore)
 mapSegOpM tv (SegMap lvl space ts body) =
   SegMap
-  <$> mapOnSegLevel tv lvl
+  <$> mapOnSegOpLevel tv lvl
   <*> mapOnSegSpace tv space
   <*> mapM (mapOnSegOpType tv) ts
   <*> mapOnSegOpBody tv body
 mapSegOpM tv (SegRed lvl space reds ts lam) =
   SegRed
-  <$> mapOnSegLevel tv lvl
+  <$> mapOnSegOpLevel tv lvl
   <*> mapOnSegSpace tv space
   <*> mapM onSegOp reds
   <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
@@ -609,7 +590,7 @@ mapSegOpM tv (SegRed lvl space reds ts lam) =
           <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
 mapSegOpM tv (SegScan lvl space scan_op nes ts body) =
   SegScan
-  <$> mapOnSegLevel tv lvl
+  <$> mapOnSegOpLevel tv lvl
   <*> mapOnSegSpace tv space
   <*> mapOnSegOpLambda tv scan_op
   <*> mapM (mapOnSegOpSubExp tv) nes
@@ -617,7 +598,7 @@ mapSegOpM tv (SegScan lvl space scan_op nes ts body) =
   <*> mapOnSegOpBody tv body
 mapSegOpM tv (SegHist lvl space ops ts body) =
   SegHist
-  <$> mapOnSegLevel tv lvl
+  <$> mapOnSegOpLevel tv lvl
   <*> mapOnSegSpace tv space
   <*> mapM onHistOp ops
   <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
@@ -630,50 +611,41 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
           <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
           <*> mapOnSegOpLambda tv op
 
-mapOnSegLevel :: Monad m =>
-                 SegOpMapper flore tlore m -> SegLevel -> m SegLevel
-mapOnSegLevel tv (SegThread num_groups group_size virt) =
-  SegThread
-  <$> traverse (mapOnSegOpSubExp tv) num_groups
-  <*> traverse (mapOnSegOpSubExp tv) group_size
-  <*> pure virt
-mapOnSegLevel tv (SegGroup num_groups group_size virt) =
-  SegGroup
-  <$> traverse (mapOnSegOpSubExp tv) num_groups
-  <*> traverse (mapOnSegOpSubExp tv) group_size
-  <*> pure virt
-
 mapOnSegOpType :: Monad m =>
-                  SegOpMapper flore tlore m -> Type -> m Type
+                  SegOpMapper lvl flore tlore m -> Type -> m Type
 mapOnSegOpType _tv (Prim pt) = pure $ Prim pt
 mapOnSegOpType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnSegOpSubExp tv) dims
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
-instance Attributes lore => Substitute (SegOp lore) where
+instance (Attributes lore, Substitute lvl) =>
+         Substitute (SegOp lvl lore) where
   substituteNames subst = runIdentity . mapSegOpM substitute
     where substitute =
             SegOpMapper { mapOnSegOpSubExp = return . substituteNames subst
                         , mapOnSegOpLambda = return . substituteNames subst
                         , mapOnSegOpBody = return . substituteNames subst
                         , mapOnSegOpVName = return . substituteNames subst
+                        , mapOnSegOpLevel = return . substituteNames subst
                         }
 
-instance Attributes lore => Rename (SegOp lore) where
+instance (Attributes lore, ASTConstraints lvl) =>
+         Rename (SegOp lvl lore) where
   rename = mapSegOpM renamer
-    where renamer = SegOpMapper rename rename rename rename
+    where renamer = SegOpMapper rename rename rename rename rename
 
-instance (Attributes lore, FreeIn (LParamAttr lore)) =>
-         FreeIn (SegOp lore) where
+instance (Attributes lore, FreeIn (LParamAttr lore), FreeIn lvl) =>
+         FreeIn (SegOp lvl lore) where
   freeIn' e = flip execState mempty $ mapSegOpM free e
     where walk f x = modify (<>f x) >> return x
           free = SegOpMapper { mapOnSegOpSubExp = walk freeIn'
                              , mapOnSegOpLambda = walk freeIn'
                              , mapOnSegOpBody = walk freeIn'
                              , mapOnSegOpVName = walk freeIn'
+                             , mapOnSegOpLevel = walk freeIn'
                              }
 
-instance OpMetrics (Op lore) => OpMetrics (SegOp lore) where
+instance OpMetrics (Op lore) => OpMetrics (SegOp lvl lore) where
   opMetrics (SegMap _ _ _ body) =
     inside "SegMap" $ kernelBodyMetrics body
   opMetrics (SegRed _ _ reds _ body) =
@@ -690,29 +662,14 @@ instance Pretty SegSpace where
                                                    return $ ppr i <+> "<" <+> ppr d) <+>
                              parens (text "~" <> ppr phys)
 
-instance PP.Pretty SegLevel where
-  ppr SegThread{} = "thread"
-  ppr SegGroup{} = "group"
-
-ppSegLevel :: SegLevel -> PP.Doc
-ppSegLevel lvl =
-  PP.parens $
-  text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi <+>
-  text "groupsize=" <> ppr (segGroupSize lvl) <>
-  case segVirt lvl of
-    SegNoVirt -> mempty
-    SegVirt -> PP.semi <+> text "virtualise"
-
-instance PrettyLore lore => PP.Pretty (SegOp lore) where
+instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
   ppr (SegMap lvl space ts body) =
-    text "segmap_" <> ppr lvl </>
-    ppSegLevel lvl </>
+    text "segmap" <> ppr lvl </>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegRed lvl space reds ts body) =
-    text "segred_" <> ppr lvl </>
-    ppSegLevel lvl </>
+    text "segred" <> ppr lvl </>
     PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp reds)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
@@ -724,16 +681,16 @@ instance PrettyLore lore => PP.Pretty (SegOp lore) where
                                        Noncommutative -> mempty
 
   ppr (SegScan lvl space scan_op nes ts body) =
-    text "segscan_" <> ppr lvl </>
-    ppSegLevel lvl </>
+    text "segscan" <> ppr lvl </>
+    ppr lvl </>
     PP.parens (ppr scan_op <> PP.comma </>
                PP.braces (PP.commasep $ map ppr nes)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
 
   ppr (SegHist lvl space ops ts body) =
-    text "seghist_" <> ppr lvl </>
-    ppSegLevel lvl </>
+    text "seghist" <> ppr lvl </>
+    ppr lvl </>
     PP.parens (PP.braces (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)) </>
     PP.align (ppr space) <+> PP.colon <+> ppTuple' ts <+>
     PP.nestedBlock "{" "}" (ppr body)
@@ -744,42 +701,45 @@ instance PrettyLore lore => PP.Pretty (SegOp lore) where
             ppr shape <> PP.comma </>
             ppr op
 
-instance Attributes inner => RangedOp (SegOp inner) where
+instance (Attributes inner, ASTConstraints lvl) =>
+         RangedOp (SegOp lvl inner) where
   opRanges op = replicate (length $ segOpType op) unknownRange
 
-instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SegOp lore) where
-  type OpWithRanges (SegOp lore) = SegOp (Ranges lore)
+instance (Attributes lore, CanBeRanged (Op lore), ASTConstraints lvl) =>
+         CanBeRanged (SegOp lvl lore) where
+  type OpWithRanges (SegOp lvl lore) = SegOp lvl (Ranges lore)
 
   removeOpRanges = runIdentity . mapSegOpM remove
     where remove = SegOpMapper return (return . removeLambdaRanges)
-                   (return . removeKernelBodyRanges) return
+                   (return . removeKernelBodyRanges) return return
   addOpRanges = Range.runRangeM . mapSegOpM add
     where add = SegOpMapper return Range.analyseLambda
-                addKernelBodyRanges return
+                addKernelBodyRanges return return
 
-instance (Attributes lore,
-          Attributes (Aliases lore),
-          CanBeAliased (Op lore)) => CanBeAliased (SegOp lore) where
-  type OpWithAliases (SegOp lore) = SegOp (Aliases lore)
+instance (Attributes lore, Attributes (Aliases lore),
+          CanBeAliased (Op lore), ASTConstraints lvl) =>
+         CanBeAliased (SegOp lvl lore) where
+  type OpWithAliases (SegOp lvl lore) = SegOp lvl (Aliases lore)
 
   addOpAliases = runIdentity . mapSegOpM alias
     where alias = SegOpMapper return (return . Alias.analyseLambda)
-                  (return . aliasAnalyseKernelBody) return
+                  (return . aliasAnalyseKernelBody) return return
 
   removeOpAliases = runIdentity . mapSegOpM remove
     where remove = SegOpMapper return (return . removeLambdaAliases)
-                   (return . removeKernelBodyAliases) return
+                   (return . removeKernelBodyAliases) return return
 
-instance (CanBeWise (Op lore), Attributes lore) => CanBeWise (SegOp lore) where
-  type OpWithWisdom (SegOp lore) = SegOp (Wise lore)
+instance (CanBeWise (Op lore), Attributes lore, ASTConstraints lvl) =>
+         CanBeWise (SegOp lvl lore) where
+  type OpWithWisdom (SegOp lvl lore) = SegOp lvl (Wise lore)
 
   removeOpWisdom = runIdentity . mapSegOpM remove
     where remove = SegOpMapper return
                    (return . removeLambdaWisdom)
                    (return . removeKernelBodyWisdom)
-                   return
+                   return return
 
-instance Attributes lore => ST.IndexOp (SegOp lore) where
+instance Attributes lore => ST.IndexOp (SegOp lvl lore) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
     Returns ResultMaySimplify se <- maybeNth k $ kernelBodyResult kbody
     guard $ length gtids <= length is
@@ -823,7 +783,8 @@ instance Attributes lore => ST.IndexOp (SegOp lore) where
 
   indexOp _ _ _ _ = Nothing
 
-instance Attributes lore => IsOp (SegOp lore) where
+instance (Attributes lore, ASTConstraints lvl) =>
+         IsOp (SegOp lvl lore) where
   cheapOp _ = False
   safeOp _ = True
 
@@ -834,14 +795,6 @@ instance Engine.Simplifiable SplitOrdering where
     return SplitContiguous
   simplify (SplitStrided stride) =
     SplitStrided <$> Engine.simplify stride
-
-instance Engine.Simplifiable SegLevel where
-  simplify (SegThread num_groups group_size virt) =
-    SegThread <$> traverse Engine.simplify num_groups <*>
-    traverse Engine.simplify group_size <*> pure virt
-  simplify (SegGroup num_groups group_size virt) =
-    SegGroup <$> traverse Engine.simplify num_groups <*>
-    traverse Engine.simplify group_size <*> pure virt
 
 instance Engine.Simplifiable SegSpace where
   simplify (SegSpace phys dims) =
@@ -925,15 +878,17 @@ simplifyRedOrScan space scan_op nes ts kbody = do
         scope_vtable = ST.fromScope scope
 
 simplifySegOp :: (Attributes lore,
-                   Engine.Simplifiable (LetAttr lore),
-                   Engine.Simplifiable (FParamAttr lore),
-                   Engine.Simplifiable (LParamAttr lore),
-                   Engine.Simplifiable (RetType lore),
-                   Engine.Simplifiable (BranchType lore), CanBeWise (Op lore),
-                   ST.IndexOp (OpWithWisdom (Op lore)), BinderOps (Wise lore),
-                   BodyAttr lore ~ ()) =>
-                 SegOp lore
-              -> Engine.SimpleM lore (SegOp (Wise lore), Stms (Wise lore))
+                  Engine.Simplifiable (LetAttr lore),
+                  Engine.Simplifiable (FParamAttr lore),
+                  Engine.Simplifiable (LParamAttr lore),
+                  Engine.Simplifiable (RetType lore),
+                  Engine.Simplifiable (BranchType lore),
+                  Engine.Simplifiable lvl,
+                  CanBeWise (Op lore),
+                  ST.IndexOp (OpWithWisdom (Op lore)), BinderOps (Wise lore),
+                  BodyAttr lore ~ ()) =>
+                 SegOp lvl lore
+              -> Engine.SimpleM lore (SegOp lvl (Wise lore), Stms (Wise lore))
 simplifySegOp (SegMap lvl space ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
@@ -994,17 +949,17 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
 
 -- | Does this lore contain 'SegOp's in its 'Op's?  A lore must be an
 -- instance of this class for the simplification rules to work.
-class HasSegOp lore where
-  asSegOp :: Op lore -> Maybe (SegOp lore)
-  segOp :: SegOp lore -> Op lore
+class HasSegOp lvl lore | lore -> lvl where
+  asSegOp :: Op lore -> Maybe (SegOp lvl lore)
+  segOp :: SegOp lvl lore -> Op lore
 
 -- | Simplification rules for simplifying 'SegOp's.
-segOpRules :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
+segOpRules :: (HasSegOp lvl lore, BinderOps lore, Bindable lore) =>
               RuleBook lore
 segOpRules =
   ruleBook [ RuleOp segOpRuleTopDown ] [ RuleOp segOpRuleBottomUp ]
 
-segOpRuleTopDown :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
+segOpRuleTopDown :: (HasSegOp lvl lore, BinderOps lore, Bindable lore) =>
                     TopDownRuleOp lore
 segOpRuleTopDown vtable pat attr op
   | Just op' <- asSegOp op =
@@ -1012,7 +967,7 @@ segOpRuleTopDown vtable pat attr op
   | otherwise =
       Skip
 
-segOpRuleBottomUp :: (HasSegOp lore, BinderOps lore) =>
+segOpRuleBottomUp :: (HasSegOp lvl lore, BinderOps lore) =>
                      BottomUpRuleOp lore
 segOpRuleBottomUp vtable pat attr op
   | Just op' <- asSegOp op =
@@ -1020,11 +975,11 @@ segOpRuleBottomUp vtable pat attr op
   | otherwise =
       Skip
 
-topDownSegOp :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
+topDownSegOp :: (HasSegOp lvl lore, BinderOps lore, Bindable lore) =>
                 ST.SymbolTable lore
              -> Pattern lore
              -> StmAux (ExpAttr lore)
-             -> SegOp lore
+             -> SegOp lvl lore
              -> Rule lore
 
 -- If a SegOp produces something invariant to the SegOp, turn it
@@ -1098,11 +1053,11 @@ topDownSegOp _ (Pattern [] pes) _ (SegRed lvl space ops ts kbody)
                op1_aux ++ op2_aux)
 topDownSegOp _ _ _ _ = Skip
 
-bottomUpSegOp :: (HasSegOp lore, BinderOps lore) =>
+bottomUpSegOp :: (HasSegOp lvl lore, BinderOps lore) =>
                  (ST.SymbolTable lore, UT.UsageTable)
               -> Pattern lore
               -> StmAux (ExpAttr lore)
-              -> SegOp lore
+              -> SegOp lvl lore
               -> Rule lore
 
 -- Some SegOp results can be moved outside the SegOp, which can

@@ -82,8 +82,8 @@ allocInKernelBody lvl (KernelBody () stms res) =
         inThread env = env { envExpHints = inThreadExpHints }
         inGroup env = env { envExpHints = inGroupExpHints }
 
-handleSegOp :: SegOp Kernels
-            -> AllocM Kernels KernelsMem (SegOp KernelsMem)
+handleSegOp :: SegOp SegLevel Kernels
+            -> AllocM Kernels KernelsMem (SegOp SegLevel KernelsMem)
 handleSegOp op = allocAtLevel (segLevel op) $ mapSegOpM mapper op
   where scope = scopeOfSegSpace $ segSpace op
         mapper = identitySegOpMapper
