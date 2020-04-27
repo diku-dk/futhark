@@ -31,6 +31,7 @@ module Futhark.Representation.AST.Attributes
   , certify
   , expExtTypesFromPattern
 
+  , ASTConstraints
   , IsOp (..)
   , Attributes (..)
   )
@@ -175,13 +176,13 @@ stmCerts = stmAuxCerts . stmAux
 certify :: Certificates -> Stm lore -> Stm lore
 certify cs1 (Let pat (StmAux cs2 attr) e) = Let pat (StmAux (cs2<>cs1) attr) e
 
+-- | A handy shorthand for properties that we usually want to things
+-- we stuff into ASTs.
+type ASTConstraints a =
+  (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a)
+
 -- | A type class for operations.
-class (Eq op, Ord op, Show op,
-       TypedOp op,
-       Rename op,
-       Substitute op,
-       FreeIn op,
-       Pretty op) => IsOp op where
+class (ASTConstraints op, TypedOp op) => IsOp op where
   -- | Like 'safeExp', but for arbitrary ops.
   safeOp :: op -> Bool
   -- | Should we try to hoist this out of branches?

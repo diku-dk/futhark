@@ -418,7 +418,7 @@ mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
              MkSegLevel m
           -> [(VName, SubExp)] -> [KernelInput]
           -> [Type] -> KernelBody Kernels
-          -> m (SegOp Kernels, Stms Kernels)
+          -> m (SegOp SegLevel Kernels, Stms Kernels)
 mapKernel mk_lvl ispace inputs rts (KernelBody () kstms krets) = runBinderT' $ do
   (space, read_input_stms) <- mapKernelSkeleton ispace inputs
 
