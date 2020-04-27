@@ -201,6 +201,7 @@ static void setup_size_opengl(struct opengl_context *ctx) {
                    &max_group_size);
    OPENGL_SUCCEED(glGetError());
 
+   ctx->program           = 0;
    ctx->max_threshold     = 0;
    ctx->max_shared_memory = max_shared_memory;
    ctx->max_num_groups    = max_num_groups;
@@ -363,7 +364,7 @@ static void setup_shader(struct opengl_context *ctx,
 
     // We might use the attach/detach method, instead of deleting and
     // creating entire program objects.
-    if(&ctx->program) {
+    if(ctx->program) {
       glDeleteProgram(ctx->program);
     }
 
@@ -392,6 +393,7 @@ static void setup_shader(struct opengl_context *ctx,
 
     // Delete the compute shader object.
     glDeleteShader(computeShader);
+    OPENGL_SUCCEED(glGetError());
   }
   else {
     if (ctx->cfg.debugging) {
