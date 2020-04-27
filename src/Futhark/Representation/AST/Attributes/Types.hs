@@ -43,6 +43,7 @@ module Futhark.Representation.AST.Attributes.Types
        , toDecl
        , fromDecl
 
+       , isExt
        , extractShapeContext
        , shapeContext
        , hasStaticShape
@@ -325,6 +326,10 @@ fromDecl :: TypeBase shape Uniqueness
 fromDecl (Prim bt) = Prim bt
 fromDecl (Array et shape _) = Array et shape NoUniqueness
 fromDecl (Mem space) = Mem space
+
+isExt :: Ext a -> Maybe Int
+isExt (Ext i) = Just i
+isExt _ = Nothing
 
 -- | Given the existential return type of a function, and the shapes
 -- of the values returned by the function, return the existential
