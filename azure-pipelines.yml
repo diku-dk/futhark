@@ -103,7 +103,7 @@ jobs:
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
       mkdir -p $HOME/.local/bin
-      cabal install --installdir=$HOME/.local/bin --install-method=copy
+      cabal install --installdir=$HOME/.local/bin --install-method=copy --overwrite-policy=always
     displayName: Build and install Futhark compiler
 
   - script: |
