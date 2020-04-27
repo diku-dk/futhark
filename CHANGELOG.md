@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixed some errors regarding constants (#941).
+
+  * Fixed a few missing type checker cases for sum types (#938).
+
 ## [0.15.5]
 
 ### Added
