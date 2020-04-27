@@ -238,20 +238,24 @@ traverseScalarType f g h (TypeVar als u t args) =
   TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
 traverseScalarType f g h (Arrow als v t1 t2) =
   Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
-traverseScalarType f g h (Sum cs) = Sum <$> (traverse . traverse) (traverseType f g h) cs
+traverseScalarType f g h (Sum cs) =
+  Sum <$> (traverse . traverse) (traverseType f g h) cs
 
 traverseType :: Applicative f =>
                 TypeTraverser f TypeBase dim1 als1 dims als2
 traverseType f g h (Array als u et shape) =
-  Array <$> h als <*> pure u <*> traverseScalarType f g pure et <*> traverse g shape
+  Array <$> h als <*> pure u <*>
+  traverseScalarType f g pure et <*> traverse g shape
 traverseType f g h (Scalar t) =
   Scalar <$> traverseScalarType f g h t
 
 traverseTypeArg :: Applicative f =>
                    (TypeName -> f TypeName) -> (dim1 -> f dim2)
                 -> TypeArg dim1 -> f (TypeArg dim2)
-traverseTypeArg _ g (TypeArgDim d loc) = TypeArgDim <$> g d <*> pure loc
-traverseTypeArg f g (TypeArgType t loc) = TypeArgType <$> traverseType f g pure t <*> pure loc
+traverseTypeArg _ g (TypeArgDim d loc) =
+  TypeArgDim <$> g d <*> pure loc
+traverseTypeArg f g (TypeArgType t loc) =
+  TypeArgType <$> traverseType f g pure t <*> pure loc
 
 instance ASTMappable StructType where
   astMap tv = traverseType f (astMap tv) pure
