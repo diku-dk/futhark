@@ -94,15 +94,9 @@ jobs:
   - script: |
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
+      mkdir -p $HOME/.local/bin
       cabal check
       cabal update
-      cabal install --only-dependencies
-    displayName: Build Haskell dependencies
-
-  - script: |
-      set -e
-      export PATH=$HOME/.ghcup/bin:$PATH
-      mkdir -p $HOME/.local/bin
       cabal install --installdir=$HOME/.local/bin --install-method=copy --overwrite-policy=always
     displayName: Build and install Futhark compiler
 
