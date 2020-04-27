@@ -6,7 +6,6 @@ module Futhark.Representation.Seq
          Seq
 
          -- * Simplification
-       , simpleSeq
        , simplifyProg
 
          -- * Module re-exports
