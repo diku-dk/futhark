@@ -2689,6 +2689,7 @@ nothingMustBeUnique loc = check
   where check (Array _ Unique _ _) = bad
         check (Scalar (TypeVar _ Unique _ _)) = bad
         check (Scalar (Record fs)) = mapM_ check fs
+        check (Scalar (Sum fs)) = mapM_ (mapM_ check) fs
         check _ = return ()
         bad = typeError loc mempty "A top-level constant cannot have a unique type."
 
