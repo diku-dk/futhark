@@ -13,4 +13,4 @@ import Futhark.Representation.Seq
 import Futhark.Pass.ExplicitAllocations
 
 explicitAllocations :: Pass Seq SeqMem
-explicitAllocations = explicitAllocationsGeneric undefined defaultExpHints
+explicitAllocations = explicitAllocationsGeneric (pure . Inner) defaultExpHints

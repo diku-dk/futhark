@@ -7,7 +7,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DefaultSignatures #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | A generic transformation for adding memory allocations to a
 -- Futhark program.  Specialised by specific representations in
 -- submodules.
