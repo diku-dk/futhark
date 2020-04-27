@@ -16,7 +16,7 @@ import Prelude hiding (quot)
 
 import Futhark.Error
 import Futhark.MonadFreshNames
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.KernelsMem
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import Futhark.CodeGen.ImpGen hiding (compileProg)
@@ -27,11 +27,11 @@ import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
 
-callKernelOperations :: Operations ExplicitMemory HostEnv Imp.HostOp
+callKernelOperations :: Operations KernelsMem HostEnv Imp.HostOp
 callKernelOperations =
   Operations { opsExpCompiler = expCompiler
              , opsCopyCompiler = callKernelCopy
@@ -53,17 +53,17 @@ openclAtomics, cudaAtomics :: AtomicBinOp
                  ]
         cuda = opencl ++ [(FAdd Float32, Imp.AtomicFAdd Float32)]
 
-compileProg :: MonadFreshNames m => HostEnv -> Prog ExplicitMemory -> m Imp.Program
+compileProg :: MonadFreshNames m => HostEnv -> Prog KernelsMem -> m Imp.Program
 compileProg env prog =
   setDefaultSpace (Imp.Space "device") <$>
   Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
 
 compileProgOpenCL, compileProgCUDA
-  :: MonadFreshNames m => Prog ExplicitMemory -> m Imp.Program
+  :: MonadFreshNames m => Prog KernelsMem -> m Imp.Program
 compileProgOpenCL = compileProg $ HostEnv openclAtomics
 compileProgCUDA = compileProg $ HostEnv cudaAtomics
 
-opCompiler :: Pattern ExplicitMemory -> Op ExplicitMemory
+opCompiler :: Pattern KernelsMem -> Op KernelsMem
            -> CallKernelGen ()
 
 opCompiler dest (Alloc e space) =
@@ -118,7 +118,7 @@ sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
   where f (name, x) = (keyWithEntryPoint fname name, x)
 sizeClassWithEntryPoint _ size_class = size_class
 
-segOpCompiler :: Pattern ExplicitMemory -> SegOp ExplicitMemory -> CallKernelGen ()
+segOpCompiler :: Pattern KernelsMem -> SegOp KernelsMem -> CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
 segOpCompiler pat (SegRed lvl@SegThread{} space reds _ kbody) =
@@ -130,7 +130,7 @@ segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
-expCompiler :: ExpCompiler ExplicitMemory HostEnv Imp.HostOp
+expCompiler :: ExpCompiler KernelsMem HostEnv Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
@@ -150,13 +150,13 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 expCompiler dest e =
   defCompileExp dest e
 
-callKernelCopy :: CopyCompiler ExplicitMemory HostEnv Imp.HostOp
+callKernelCopy :: CopyCompiler KernelsMem HostEnv Imp.HostOp
 callKernelCopy bt
-  destloc@(MemLocation destmem _ destIxFun)
-  srcloc@(MemLocation srcmem srcshape srcIxFun)
+  destloc@(MemLocation destmem _ destIxFun) destslice
+  srcloc@(MemLocation srcmem srcshape srcIxFun) srcslice
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y,
-          src_elems, dest_elems) <- isMapTransposeKernel bt destloc srcloc = do
+          src_elems, dest_elems) <- isMapTransposeKernel bt destloc destslice srcloc srcslice = do
 
       fname <- mapTransposeForType bt
       emit $ Imp.Call [] fname
@@ -167,9 +167,9 @@ callKernelCopy bt
 
   | bt_size <- primByteSize bt,
     Just destoffset <-
-      IxFun.linearWithOffset destIxFun bt_size,
+      IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
     Just srcoffset  <-
-      IxFun.linearWithOffset srcIxFun bt_size = do
+      IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
         let num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
@@ -178,11 +178,11 @@ callKernelCopy bt
           srcmem (bytes srcoffset) srcspace $
           num_elems `Imp.withElemType` bt
 
-  | otherwise = sCopy bt destloc srcloc
+  | otherwise = sCopy bt destloc destslice srcloc srcslice
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
-  fname <- nameFromString . pretty <$> newVName (mapTransposeName bt)
+  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
 
   exists <- hasFunction fname
   unless exists $ emitFunction fname $ mapTransposeFunction bt
@@ -296,20 +296,22 @@ mapTransposeFunction bt =
             v32 mulx, v32 muly, v32 num_arrays,
             block) bt
 
-isMapTransposeKernel :: PrimType -> MemLocation -> MemLocation
+isMapTransposeKernel :: PrimType
+                     -> MemLocation -> Slice Imp.Exp
+                     -> MemLocation -> Slice Imp.Exp
                      -> Maybe (Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
-  (MemLocation _ _ destIxFun)
-  (MemLocation _ _ srcIxFun)
-  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
+  (MemLocation _ _ destIxFun) destslice
+  (MemLocation _ _ srcIxFun) srcslice
+  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun' bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
-    Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
+    Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
       isOk (product destshape) destshape swap r1 r2 dest_offset src_offset
-  | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
+  | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
+    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
     Just (r1, r2, _) <- isMapTranspose perm =
       isOk (product srcshape) srcshape id r1 r2 dest_offset src_offset
@@ -317,6 +319,9 @@ isMapTransposeKernel bt
       Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
+
+        destIxFun' = IxFun.slice destIxFun destslice
+        srcIxFun' = IxFun.slice srcIxFun srcslice
 
         isOk elems shape f r1 r2 dest_offset src_offset = do
           let (num_arrays, size_x, size_y) = getSizes shape f r1 r2

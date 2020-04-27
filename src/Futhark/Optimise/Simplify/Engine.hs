@@ -2,6 +2,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- |
 --
 -- Perform general rule-based simplification based on data dependency
@@ -31,6 +33,7 @@ module Futhark.Optimise.Simplify.Engine
        , HoistBlockers(..)
        , neverBlocks
        , noExtraHoistBlockers
+       , neverHoist
        , BlockPred
        , orIf
        , hasFree
@@ -53,6 +56,7 @@ module Futhark.Optimise.Simplify.Engine
        , bindLParams
        , simplifyBody
        , SimplifiedBody
+       , ST.SymbolTable
 
        , hoistStms
        , blockIf
@@ -92,6 +96,10 @@ data HoistBlockers lore = HoistBlockers
 noExtraHoistBlockers :: HoistBlockers lore
 noExtraHoistBlockers =
   HoistBlockers neverBlocks neverBlocks neverBlocks (const mempty) (const False)
+
+neverHoist :: HoistBlockers lore
+neverHoist =
+  HoistBlockers alwaysBlocks alwaysBlocks alwaysBlocks (const mempty) (const False)
 
 data Env lore = Env { envRules         :: RuleBook (Wise lore)
                     , envHoistBlockers :: HoistBlockers lore
@@ -395,6 +403,9 @@ type BlockPred lore = ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> Bool
 
 neverBlocks :: BlockPred lore
 neverBlocks _ _ _ = False
+
+alwaysBlocks :: BlockPred lore
+alwaysBlocks _ _ _ = True
 
 isFalse :: Bool -> BlockPred lore
 isFalse b _ _ _ = not b

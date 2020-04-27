@@ -7,13 +7,13 @@ import Control.Monad
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.KernelsMem
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 
-compileSegMap :: Pattern ExplicitMemory
+compileSegMap :: Pattern KernelsMem
               -> SegSpace
-              -> KernelBody ExplicitMemory
+              -> KernelBody KernelsMem
               -> MulticoreGen ()
 compileSegMap pat space (KernelBody _ kstms kres) = do
   emit $ Imp.DebugPrint "SegMap " Nothing

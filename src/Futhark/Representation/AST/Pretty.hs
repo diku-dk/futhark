@@ -78,7 +78,7 @@ instance Pretty ExtShape where
 instance Pretty Space where
   ppr DefaultSpace = mempty
   ppr (Space s) = text "@" <> text s
-  ppr (ScalarSpace d t) = text "@" <> brackets (mconcat $ map ppr d) <> ppr t
+  ppr (ScalarSpace d t) = text "@" <> mconcat (map (brackets . ppr) d) <> ppr t
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim et) = ppr et
@@ -218,6 +218,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
     text "else" <+> maybeNest f
     where info' = case ifsort of IfNormal -> mempty
                                  IfFallback -> text "<fallback>"
+                                 IfEquiv -> text "<equiv>"
           maybeNest b | null $ bodyStms b = ppr b
                       | otherwise         = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op

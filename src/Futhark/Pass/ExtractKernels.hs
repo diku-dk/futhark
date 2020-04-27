@@ -317,7 +317,8 @@ kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
   alt_stms <- kernelAlternatives alts_pat default_body alts
   let alt_body = mkBody alt_stms $ map Var $ patternValueNames alts_pat
 
-  letBind_ pat $ If cond alt alt_body $ ifCommon $ patternTypes pat
+  letBind_ pat $ If cond alt alt_body $
+    IfAttr (staticShapes (patternTypes pat)) IfEquiv
 
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 

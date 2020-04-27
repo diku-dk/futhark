@@ -10,17 +10,17 @@ import Prelude hiding (quot, rem)
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.KernelsMem
 import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
 
 -- Compile a SegRed construct
-compileSegRed :: Pattern ExplicitMemory
+compileSegRed :: Pattern KernelsMem
                  -> SegSpace
-                 -> [SegRedOp ExplicitMemory]
-                 -> KernelBody ExplicitMemory
+                 -> [SegRedOp KernelsMem]
+                 -> KernelBody KernelsMem
                  -> MulticoreGen ()
 compileSegRed pat space reds kbody =
   compileSegRed' pat space reds $ \red_cont ->
@@ -34,9 +34,9 @@ compileSegRed pat space reds kbody =
     red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
-compileSegRed' :: Pattern ExplicitMemory
+compileSegRed' :: Pattern KernelsMem
                -> SegSpace
-               -> [SegRedOp ExplicitMemory]
+               -> [SegRedOp KernelsMem]
                -> DoSegBody
                -> MulticoreGen ()
 compileSegRed' pat space reds kbody
@@ -53,7 +53,7 @@ compileSegRed' pat space reds kbody
 -- first-stage reduction, if necessary.  When actually storing group
 -- results, the first index is set to 0.
 groupResultArrays :: Count NumGroups SubExp
-                  -> [SegRedOp ExplicitMemory]
+                  -> [SegRedOp KernelsMem]
                   -> MulticoreGen [[VName]]
 groupResultArrays (Count num_threads) reds =
   forM reds $ \(SegRedOp _ lam _ shape) ->
@@ -67,16 +67,16 @@ groupResultArrays (Count num_threads) reds =
 -- | A SegRedOp with auxiliary information.
 data SegRedOpSlug =
   SegRedOpSlug
-  { slugOp :: SegRedOp ExplicitMemory
+  { slugOp :: SegRedOp KernelsMem
   , slugAccs :: [(VName, [Imp.Exp])]
     -- ^ Places to store accumulator in stage 1 reduction.
   }
 
 
-slugBody :: SegRedOpSlug -> Body ExplicitMemory
+slugBody :: SegRedOpSlug -> Body KernelsMem
 slugBody = lambdaBody . segRedLambda . slugOp
 
-slugParams :: SegRedOpSlug -> [LParam ExplicitMemory]
+slugParams :: SegRedOpSlug -> [LParam KernelsMem]
 slugParams = lambdaParams . segRedLambda . slugOp
 
 slugNeutral :: SegRedOpSlug -> [SubExp]
@@ -85,7 +85,7 @@ slugNeutral = segRedNeutral . slugOp
 slugShape :: SegRedOpSlug -> Shape
 slugShape = segRedShape . slugOp
 
-accParams, nextParams :: SegRedOpSlug -> [LParam ExplicitMemory]
+accParams, nextParams :: SegRedOpSlug -> [LParam KernelsMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
@@ -94,15 +94,15 @@ slugsComm = mconcat . map (segRedComm . slugOp)
 
 
 segRedOpSlug :: Imp.Exp
-             -> (SegRedOp ExplicitMemory, [VName])
+             -> (SegRedOp KernelsMem, [VName])
              -> MulticoreGen SegRedOpSlug
 segRedOpSlug local_tid (op, param_arrs) =
   SegRedOpSlug op <$> mapM (\param_arr -> return (param_arr, [local_tid])) param_arrs
 
 
-nonsegmentedReduction :: Pattern ExplicitMemory
+nonsegmentedReduction :: Pattern KernelsMem
                       -> SegSpace
-                      -> [SegRedOp ExplicitMemory]
+                      -> [SegRedOp KernelsMem]
                       -> DoSegBody
                       -> MulticoreGen ()
 nonsegmentedReduction pat space reds kbody = do
@@ -197,9 +197,9 @@ nonsegmentedReduction pat space reds kbody = do
 -- each of which is done sequentially
 -- Maybe we should select the work of the inner loop
 -- based on n_segments and dimensions etc.
-segmentedReduction :: Pattern ExplicitMemory
+segmentedReduction :: Pattern KernelsMem
                    -> SegSpace
-                   -> [SegRedOp ExplicitMemory]
+                   -> [SegRedOp KernelsMem]
                    -> DoSegBody
                    -> MulticoreGen ()
 segmentedReduction pat space reds kbody = do

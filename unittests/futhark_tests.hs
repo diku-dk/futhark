@@ -4,7 +4,7 @@ import qualified Language.Futhark.SyntaxTests
 import qualified Futhark.BenchTests
 import qualified Futhark.Representation.AST.Syntax.CoreTests
 import qualified Futhark.Representation.AST.AttributesTests
-import qualified Futhark.Representation.ExplicitMemory.IndexFunctionTests
+import qualified Futhark.Representation.Mem.IxFunTests
 import qualified Futhark.Optimise.AlgSimplifyTests
 import qualified Futhark.Pkg.SolveTests
 import qualified Futhark.Representation.PrimitiveTests
@@ -21,7 +21,7 @@ allTests =
   , Futhark.Optimise.AlgSimplifyTests.tests
   , Futhark.Representation.AST.Syntax.CoreTests.tests
   , Futhark.Pkg.SolveTests.tests
-  , Futhark.Representation.ExplicitMemory.IndexFunctionTests.tests
+  , Futhark.Representation.Mem.IxFunTests.tests
   , Futhark.Representation.PrimitiveTests.tests
   , Futhark.Analysis.ScalExpTests.tests
   ]

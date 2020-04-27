@@ -17,7 +17,7 @@ import Futhark.CodeGen.ImpGen.Multicore.SegScan
 import Futhark.CodeGen.ImpGen.Multicore.SegHist
 
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.KernelsMem
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (quotRoundingUp)
 
@@ -57,11 +57,11 @@ computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elem
           (thread_index + 1) * Imp.unCount elements_per_thread
 
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory
+compileProg :: MonadFreshNames m => Prog KernelsMem
             -> m (Imp.Definitions Imp.Multicore)
 compileProg = Futhark.CodeGen.ImpGen.compileProg () ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
-        opCompiler :: OpCompiler ExplicitMemory () Imp.Multicore
+        opCompiler :: OpCompiler KernelsMem () Imp.Multicore
         opCompiler dest (Alloc e space) =
           compileAlloc dest e space
         opCompiler dest (Inner (SegOp op)) =
@@ -82,8 +82,8 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg () ops Imp.DefaultSpace
           return ()
 
 
-compileSegOp :: Pattern ExplicitMemory -> SegOp ExplicitMemory
-             -> ImpM ExplicitMemory () Imp.Multicore ()
+compileSegOp :: Pattern KernelsMem -> SegOp KernelsMem
+             -> ImpM KernelsMem () Imp.Multicore ()
 compileSegOp pat  (SegHist _ space histops _ kbody) =
   compileSegHist pat space histops kbody
 

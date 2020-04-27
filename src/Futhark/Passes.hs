@@ -21,15 +21,18 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Unstream
 import Futhark.Pass.ExpandAllocations
-import Futhark.Pass.ExplicitAllocations
+import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
+import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ResolveAssertions
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.KernelsMem (KernelsMem)
+import Futhark.Representation.SeqMem (SeqMem)
 import Futhark.Representation.Kernels (Kernels)
+import Futhark.Representation.Seq (Seq)
 import Futhark.Representation.SOACS (SOACS)
 
 standardPipeline :: Pipeline SOACS SOACS
@@ -61,42 +64,40 @@ kernelsPipeline =
          , performCSE True
          , simplifyKernels
          , sink
-         , inPlaceLowering
+         , inPlaceLoweringKernels
          ]
 
-sequentialPipeline :: Pipeline SOACS Kernels
+sequentialPipeline :: Pipeline SOACS Seq
 sequentialPipeline =
   standardPipeline >>>
   onePass firstOrderTransform >>>
-  passes [ simplifyKernels
-         , sink
-         , inPlaceLowering
+  passes [ simplifySeq
+         , inPlaceLoweringSeq
          ]
 
-sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
+sequentialCpuPipeline :: Pipeline SOACS SeqMem
 sequentialCpuPipeline =
   sequentialPipeline >>>
-  onePass explicitAllocations >>>
+  onePass Seq.explicitAllocations >>>
   passes [ performCSE False
-         , simplifyExplicitMemory
-         , doubleBuffer
-         , simplifyExplicitMemory
+         , simplifySeqMem
+         , simplifySeqMem
          ]
 
-gpuPipeline :: Pipeline SOACS ExplicitMemory
+gpuPipeline :: Pipeline SOACS KernelsMem
 gpuPipeline =
   kernelsPipeline >>>
-  onePass explicitAllocations >>>
-  passes [ simplifyExplicitMemory
+  onePass Kernels.explicitAllocations >>>
+  passes [ simplifyKernelsMem
          , performCSE False
-         , simplifyExplicitMemory
+         , simplifyKernelsMem
          , doubleBuffer
-         , simplifyExplicitMemory
+         , simplifyKernelsMem
          , expandAllocations
-         , simplifyExplicitMemory
+         , simplifyKernelsMem
          ]
 
-multicorePipeline :: Pipeline SOACS ExplicitMemory
+multicorePipeline :: Pipeline SOACS KernelsMem
 multicorePipeline =
   standardPipeline >>>
   onePass extractKernels >>>
@@ -105,12 +106,10 @@ multicorePipeline =
          , performCSE True
          , simplifyKernels
          , sink
-         , inPlaceLowering
+         , inPlaceLoweringKernels
          ] >>>
-  onePass explicitAllocations >>>
-  passes [ simplifyExplicitMemory
+  onePass Kernels.explicitAllocations >>>
+  passes [ simplifyKernelsMem
          , performCSE False
-         , simplifyExplicitMemory
-         , doubleBuffer
-         , simplifyExplicitMemory
+         , simplifyKernelsMem
          ]

@@ -284,16 +284,12 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
                 putStrLn $ unwords ["Timing failed for candidates",
                                     show middle, "and", show middle']
               return best_e_par
-        (_, []) -> return best_e_par
-        (_, [x]) -> do
+        (_, _) -> do
           when (optVerbose opts > 0) $
-            putStrLn $ unwords ["Trying e_par", show x]
-          candidate <- runner (timeout best_t) x
-          case candidate of
-            Just new_t ->
-              return $ snd $ bestPair [(new_t, x), best]
-            Nothing ->
-              return best_e_par
+            putStrLn $ unwords ["Trying e_pars", show xs]
+          candidates <- catMaybes . zipWith (fmap . flip (,)) xs <$>
+                        mapM (runner $ timeout best_t) xs
+          return $ snd $ bestPair $ best : candidates
 
 --- CLI
 

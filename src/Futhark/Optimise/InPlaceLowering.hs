@@ -63,9 +63,10 @@
 -- FIXME: the implementation is not finished yet.  Specifically, not
 -- all of the above conditions are checked.
 module Futhark.Optimise.InPlaceLowering
-       (
-         inPlaceLowering
-       ) where
+       ( inPlaceLoweringKernels
+       , inPlaceLoweringSeq
+       )
+where
 
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
@@ -73,6 +74,7 @@ import qualified Data.Map.Strict as M
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
 import Futhark.Representation.Kernels
+import Futhark.Representation.Seq (Seq)
 import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.MonadFreshNames
 import Futhark.Binder
@@ -80,28 +82,33 @@ import Futhark.Pass
 import Futhark.Tools (fullSlice)
 
 -- | Apply the in-place lowering optimisation to the given program.
-inPlaceLowering :: Pass Kernels Kernels
-inPlaceLowering =
+inPlaceLoweringKernels :: Pass Kernels Kernels
+inPlaceLoweringKernels = inPlaceLowering onKernelOp lowerUpdateKernels
+
+-- | Apply the in-place lowering optimisation to the given program.
+inPlaceLoweringSeq :: Pass Seq Seq
+inPlaceLoweringSeq = inPlaceLowering pure lowerUpdate
+
+-- | Apply the in-place lowering optimisation to the given program.
+inPlaceLowering :: Constraints lore =>
+                   OnOp lore -> LowerUpdate lore (ForwardingM lore)
+                -> Pass lore lore
+inPlaceLowering onOp lower =
   Pass "In-place lowering" "Lower in-place updates into loops" $
   fmap removeProgAliases .
   intraproceduralTransformationWithConsts optimiseConsts optimiseFunDef .
   aliasAnalysis
+  where optimiseConsts stms =
+          modifyNameSource $ runForwardingM lower onOp $
+          stmsFromList <$> optimiseStms (stmsToList stms) (pure ())
 
-optimiseConsts :: MonadFreshNames m => Stms (Aliases Kernels)
-               -> m (Stms (Aliases Kernels))
-optimiseConsts stms =
-  modifyNameSource $ runForwardingM lowerUpdateKernels onKernelOp $
-  stmsFromList <$> optimiseStms (stmsToList stms) (pure ())
+        optimiseFunDef consts fundec =
+          modifyNameSource $ runForwardingM lower onOp $
+          descend (stmsToList consts) $ bindingFParams (funDefParams fundec) $ do
+          body <- optimiseBody $ funDefBody fundec
+          return $ fundec { funDefBody = body }
 
-optimiseFunDef :: MonadFreshNames m =>
-                  Stms (Aliases Kernels) -> FunDef (Aliases Kernels)
-               -> m (FunDef (Aliases Kernels))
-optimiseFunDef consts fundec =
-  modifyNameSource $ runForwardingM lowerUpdateKernels onKernelOp $
-  descend (stmsToList consts) $ bindingFParams (funDefParams fundec) $ do
-    body <- optimiseBody $ funDefBody fundec
-    return $ fundec { funDefBody = body }
-  where descend [] m = m
+        descend [] m = m
         descend (stm:stms) m = bindingStm stm $ descend stms m
 
 type Constraints lore = (Bindable lore, CanBeAliased (Op lore))
@@ -128,7 +135,7 @@ optimiseStms (bnd:bnds) m = do
     [] -> checkIfForwardableUpdate bnd' bnds'
     updates -> do
       let updateStms = map updateStm updates
-      lower <- asks lowerUpdate
+      lower <- asks topLowerUpdate
       scope <- askScope
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
@@ -163,7 +170,7 @@ optimiseExp (DoLoop ctx val form body) =
   bindingFParams (map fst $ ctx ++ val) $
   DoLoop ctx val form <$> optimiseBody body
 optimiseExp (Op op) = do
-  f <- asks onOp
+  f <- asks topOnOp
   Op <$> f op
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = const optimiseBody
@@ -193,8 +200,8 @@ type OnOp lore = Op (Aliases lore) -> ForwardingM lore (Op (Aliases lore))
 data TopDown lore = TopDown { topDownCounter :: Int
                             , topDownTable :: VTable lore
                             , topDownDepth :: Int
-                            , lowerUpdate :: LowerUpdate lore (ForwardingM lore)
-                            , onOp :: OnOp lore
+                            , topLowerUpdate :: LowerUpdate lore (ForwardingM lore)
+                            , topOnOp :: OnOp lore
                             }
 
 data BottomUp lore = BottomUp { bottomUpSeen :: Names
@@ -235,8 +242,8 @@ runForwardingM f g (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDow
   where emptyTopDown = TopDown { topDownCounter = 0
                                , topDownTable = M.empty
                                , topDownDepth = 0
-                               , lowerUpdate = f
-                               , onOp = g
+                               , topLowerUpdate = f
+                               , topOnOp = g
                                }
 
 bindingParams :: (attr -> NameInfo (Aliases lore))

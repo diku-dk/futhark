@@ -14,13 +14,13 @@ import Data.FileEmbed
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
-import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
+import Futhark.Representation.KernelsMem (Prog, KernelsMem)
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory
+compileProg :: MonadFreshNames m => Prog KernelsMem
             -> m GC.CParts
 compileProg =
   GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
