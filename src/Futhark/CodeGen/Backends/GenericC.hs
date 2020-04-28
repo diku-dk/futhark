@@ -34,6 +34,7 @@ module Futhark.CodeGen.Backends.GenericC
   , contextContents
   , contextFinalInits
   , runCompilerM
+  , inNewFunction
   , blockScope
   , compileFun
   , compileCode
@@ -346,6 +347,17 @@ collect' m = pass $ do
   (x, w) <- listen m
   return ((x, DL.toList $ accItems w),
           const w { accItems = mempty})
+
+-- | Used when we, inside an existing 'CompilerM' action, want to
+-- generate code for a new function.  Use this so that the compiler
+-- understands that previously declared memory doesn't need to be
+-- freed inside this action.
+inNewFunction :: CompilerM op s a -> CompilerM op s a
+inNewFunction m = do
+  old_mem <- gets compDeclaredMem
+  x <- m
+  modify $ \s -> s { compDeclaredMem = old_mem }
+  return x
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }

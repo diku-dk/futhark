@@ -290,13 +290,10 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   e' <- GC.compileExp e
   granularity <- compileSchedulingVal scheduling
 
-  (prebody', body') <- modifyNameSource $ \src ->
-    let (code, s) =
-          GC.runCompilerM operations src () $
-          (,)
-          <$> GC.blockScope (GC.compileCode prebody)
-          <*> GC.blockScope (GC.compileCode body)
-    in (code, GC.compNameSrc s)
+  (prebody', body') <-
+    GC.inNewFunction $ (,)
+    <$> GC.blockScope (GC.compileCode prebody)
+    <*> GC.blockScope (GC.compileCode body)
 
   fstruct <- multicoreDef "parloop_struct" $ \s ->
      return [C.cedecl|struct $id:s {

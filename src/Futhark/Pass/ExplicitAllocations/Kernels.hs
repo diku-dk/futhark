@@ -1,17 +1,25 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Futhark.Pass.ExplicitAllocations.Kernels
        ( explicitAllocations
        , explicitAllocationsInStms
        )
 where
 
+import qualified Data.Map as M
+
 import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.Representation.KernelsMem
 import Futhark.Representation.Kernels
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
+
+instance SizeSubst (HostOp lore op) where
+  opSizeSubst (Pattern _ [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
+    M.singleton (patElemName size) elems_per_thread
+  opSizeSubst _ _ = mempty
 
 allocAtLevel :: SegLevel -> AllocM fromlore tlore a -> AllocM fromlore tlore a
 allocAtLevel lvl = local $ \env -> env { allocSpace = space

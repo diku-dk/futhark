@@ -167,9 +167,9 @@ library
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.Kernels
+      Futhark.Pass.ExplicitAllocations.SegOp
       Futhark.Pass.ExplicitAllocations.Seq
       Futhark.Pass.ExplicitAllocations.MC
-      Futhark.Pass.ExplicitAllocations.SegOp
       Futhark.Pass.ExtractKernels
       Futhark.Pass.ExtractKernels.BlockedKernel
       Futhark.Pass.ExtractKernels.DistributeNests

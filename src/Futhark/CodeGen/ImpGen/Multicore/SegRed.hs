@@ -40,7 +40,7 @@ compileSegRed' :: Pattern MCMem
                -> DoSegBody
                -> MulticoreGen ()
 compileSegRed' pat space reds kbody
-  | [(_, Constant (IntValue (Int32Value 1))), _] <- unSegSpace space =
+  | [_] <- unSegSpace space =
       nonsegmentedReduction pat space reds kbody
   | otherwise =
       segmentedReduction pat space reds kbody
@@ -171,7 +171,7 @@ nonsegmentedReduction pat space reds kbody = do
     forM_ slugs $ \slug ->
       forM_ (zip (patternElements pat) (slugNeutral slug)) $ \(pe, ne) ->
         sLoopNest (slugShape slug) $ \vec_is ->
-          copyDWIMFix (patElemName pe) (0 : vec_is) ne []
+          copyDWIMFix (patElemName pe) vec_is ne []
 
   -- Reduce over intermediate results
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
@@ -186,11 +186,11 @@ nonsegmentedReduction pat space reds kbody = do
           copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
         sComment "load next params" $
           forM_ (zip (nextParams slug) $ patternElements pat) $ \(p, pe) ->
-          copyDWIMFix (paramName p) [] (Var $ patElemName pe) (0 : vec_is)
+          copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
         sComment "red body" $
           compileStms mempty (bodyStms $ slugBody slug) $
             forM_ (zip (patternElements pat) (bodyResult $ slugBody slug)) $
-              \(pe, se') -> copyDWIMFix (patElemName pe) (0 : vec_is) se' []
+              \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
 
 
 -- Each thread reduces over the number of segments

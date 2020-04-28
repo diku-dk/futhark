@@ -7,7 +7,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DefaultSignatures #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | A generic transformation for adding memory allocations to a
 -- Futhark program.  Specialised by specific representations in
 -- submodules.
@@ -21,6 +20,7 @@ module Futhark.Pass.ExplicitAllocations
        , Allocator(..)
        , AllocM
        , AllocEnv(..)
+       , SizeSubst(..)
        , allocInStms
        , allocForArray
 
@@ -50,7 +50,6 @@ import qualified Data.Set as S
 import Data.Maybe
 import Data.List (zip4, partition, sort)
 
-import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplify.Lore
   (mkWiseBody, mkWiseLetStm, removeExpWisdom, removeScopeWisdom)
 import Futhark.MonadFreshNames
@@ -125,9 +124,10 @@ computeSize desc se = do
 type Allocable fromlore tolore =
   (PrettyLore fromlore, PrettyLore tolore,
    Mem tolore,
-   SameScope fromlore Kernels,
-   RetType fromlore ~ RetType Kernels,
-   BranchType fromlore ~ BranchType Kernels,
+   FParamAttr fromlore ~ DeclType,
+   LParamAttr fromlore ~ Type,
+   BranchType fromlore ~ ExtType,
+   RetType fromlore ~ DeclExtType,
    BodyAttr fromlore ~ (),
    BodyAttr tolore ~ (),
    ExpAttr tolore ~ (),
@@ -830,14 +830,6 @@ class SizeSubst op where
   opSizeSubst :: PatternT attr -> op -> ChunkMap
 
 instance SizeSubst () where
-  opSizeSubst _ _ = mempty
-
-instance SizeSubst (HostOp lore op) where
-  opSizeSubst (Pattern _ [size]) (SizeOp (SplitSpace _ _ _ elems_per_thread)) =
-    M.singleton (patElemName size) elems_per_thread
-  opSizeSubst _ _ = mempty
-
-instance SizeSubst (SegOp lvl lore) where
   opSizeSubst _ _ = mempty
 
 instance SizeSubst op => SizeSubst (MemOp op) where
