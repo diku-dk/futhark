@@ -355,6 +355,7 @@ collect' m = pass $ do
 inNewFunction :: CompilerM op s a -> CompilerM op s a
 inNewFunction m = do
   old_mem <- gets compDeclaredMem
+  modify $ \s -> s { compDeclaredMem = mempty }
   x <- m
   modify $ \s -> s { compDeclaredMem = old_mem }
   return x
