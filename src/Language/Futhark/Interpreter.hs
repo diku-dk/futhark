@@ -1367,9 +1367,6 @@ initialCtx =
             insertAt i x (l:ls) = l:insertAt (i-1) x ls
             insertAt _ _ ls = ls
 
-    def "cmp_threshold" = Just $ fun2t $ \_ _ ->
-      return $ ValuePrim $ BoolValue True
-
     def "unzip" = Just $ fun1 $ \x -> do
       let ShapeDim _ (ShapeRecord fs) = valueShape x
           Just [xs_shape, ys_shape] = areTupleFields fs
