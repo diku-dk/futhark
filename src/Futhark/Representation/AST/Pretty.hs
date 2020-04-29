@@ -78,7 +78,7 @@ instance Pretty ExtShape where
 instance Pretty Space where
   ppr DefaultSpace = mempty
   ppr (Space s) = text "@" <> text s
-  ppr (ScalarSpace d t) = text "@" <> brackets (mconcat $ map ppr d) <> ppr t
+  ppr (ScalarSpace d t) = text "@" <> mconcat (map (brackets . ppr) d) <> ppr t
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim et) = ppr et
@@ -160,6 +160,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
                         DoLoop{}           -> True
                         Op{}               -> True
                         If{}               -> True
+                        Apply{}            -> True
                         BasicOp ArrayLit{} -> False
                         BasicOp Assert{}   -> True
                         _                  -> cs /= mempty
@@ -252,21 +253,22 @@ instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
     annot (mapMaybe ppAnnot params) $
     text "fn" <+> ppTuple' rettype <+/>
-    parens (commasep (map ppr params)) <+>
+    align (parens (commasep (map ppr params))) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry name rettype fparams body) =
     annot (mapMaybe ppAnnot fparams) $
-    text fun <+> ppTuple' rettype <+>
-    text (nameToString name) <//>
+    text fun <+> ppTuple' rettype <+/>
+    text (nameToString name) <+>
     apply (map ppr fparams) <+>
     equals <+> nestedBlock "{" "}" (ppr body)
     where fun | isJust entry = "entry"
               | otherwise    = "fun"
 
 instance PrettyLore lore => Pretty (Prog lore) where
-  ppr = stack . punctuate line . map ppr . progFunctions
+  ppr (Prog consts funs) =
+    stack $ punctuate line $ ppr consts : map ppr funs
 
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se

@@ -9,7 +9,7 @@ static inline void cuda_api_succeed(CUresult res, const char *call,
     const char *err_str;
     cuGetErrorString(res, &err_str);
     if (err_str == NULL) { err_str = "Unknown"; }
-    panic(-1, "%s:%d: CUDA call\n  %s\nfailed with error code %d (%s)\n",
+    futhark_panic(-1, "%s:%d: CUDA call\n  %s\nfailed with error code %d (%s)\n",
         file, line, call, res, err_str);
   }
 }
@@ -18,7 +18,7 @@ static inline void nvrtc_api_succeed(nvrtcResult res, const char *call,
                                      const char *file, int line) {
   if (res != NVRTC_SUCCESS) {
     const char *err_str = nvrtcGetErrorString(res);
-    panic(-1, "%s:%d: NVRTC call\n  %s\nfailed with error code %d (%s)\n",
+    futhark_panic(-1, "%s:%d: NVRTC call\n  %s\nfailed with error code %d (%s)\n",
         file, line, call, res, err_str);
   }
 }
@@ -67,7 +67,7 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->load_ptx_from = NULL;
 
   cfg->default_block_size = 256;
-  cfg->default_grid_size = 128;
+  cfg->default_grid_size = 256;
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
 
@@ -231,7 +231,7 @@ static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   }
 
   if (chosen == -1) {
-    panic(-1, "Unsupported compute capability %d.%d\n", major, minor);
+    futhark_panic(-1, "Unsupported compute capability %d.%d\n", major, minor);
   }
 
   if (x[chosen].major != major || x[chosen].minor != minor) {
@@ -458,7 +458,7 @@ static void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], co
   CUDA_SUCCEED(cuInit(0));
 
   if (cuda_device_setup(ctx) != 0) {
-    panic(-1, "No suitable CUDA device found.\n");
+    futhark_panic(-1, "No suitable CUDA device found.\n");
   }
   CUDA_SUCCEED(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
 

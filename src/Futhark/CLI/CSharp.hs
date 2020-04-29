@@ -11,7 +11,6 @@ import System.Environment
 import Futhark.Pipeline
 import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.SequentialCSharp as SequentialCS
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 import Futhark.Util
 
@@ -23,8 +22,7 @@ main = compilerMain () []
            let class_name =
                  case mode of ToLibrary -> Just $ takeBaseName outpath
                               ToExecutable -> Nothing
-           csprog <- either (`internalError` prettyText prog) return =<<
-                     SequentialCS.compileProg class_name prog
+           csprog <- SequentialCS.compileProg class_name prog
 
            let cspath = outpath `addExtension` "cs"
            liftIO $ writeFile cspath csprog

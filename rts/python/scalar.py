@@ -280,6 +280,39 @@ def fpconv_f32_f64(x):
 def fpconv_f64_f32(x):
   return np.float32(x)
 
+def futhark_mul_hi8(a, b):
+  a = np.uint64(np.uint8(a))
+  b = np.uint64(np.uint8(b))
+  return np.int8((a*b) >> np.uint64(8))
+
+def futhark_mul_hi16(a, b):
+  a = np.uint64(np.uint16(a))
+  b = np.uint64(np.uint16(b))
+  return np.int16((a*b) >> np.uint64(16))
+
+def futhark_mul_hi32(a, b):
+  a = np.uint64(np.uint32(a))
+  b = np.uint64(np.uint32(b))
+  return np.int32((a*b) >> np.uint64(32))
+
+# This one is done with arbitrary-precision integers.
+def futhark_mul_hi64(a, b):
+  a = int(np.uint64(a))
+  b = int(np.uint64(b))
+  return np.int64(np.uint64(a*b >> 64))
+
+def futhark_mad_hi8(a, b, c):
+  return futhark_mul_hi8(a,b) + c
+
+def futhark_mad_hi16(a, b, c):
+  return futhark_mul_hi16(a,b) + c
+
+def futhark_mad_hi32(a, b, c):
+  return futhark_mul_hi32(a,b) + c
+
+def futhark_mad_hi64(a, b, c):
+  return futhark_mul_hi64(a,b) + c
+
 def futhark_log64(x):
   return np.float64(np.log(x))
 
@@ -312,6 +345,24 @@ def futhark_asin64(x):
 
 def futhark_atan64(x):
   return np.arctan(x)
+
+def futhark_cosh64(x):
+  return np.cosh(x)
+
+def futhark_sinh64(x):
+  return np.sinh(x)
+
+def futhark_tanh64(x):
+  return np.tanh(x)
+
+def futhark_acosh64(x):
+  return np.arccosh(x)
+
+def futhark_asinh64(x):
+  return np.arcsinh(x)
+
+def futhark_atanh64(x):
+  return np.arctanh(x)
 
 def futhark_atan2_64(x, y):
   return np.arctan2(x, y)
@@ -378,6 +429,24 @@ def futhark_asin32(x):
 def futhark_atan32(x):
   return np.arctan(x)
 
+def futhark_cosh32(x):
+  return np.cosh(x)
+
+def futhark_sinh32(x):
+  return np.sinh(x)
+
+def futhark_tanh32(x):
+  return np.tanh(x)
+
+def futhark_acosh32(x):
+  return np.arccosh(x)
+
+def futhark_asinh32(x):
+  return np.arcsinh(x)
+
+def futhark_atanh32(x):
+  return np.arctanh(x)
+
 def futhark_atan2_32(x, y):
   return np.arctan2(x, y)
 
@@ -415,5 +484,17 @@ def futhark_lerp32(v0, v1, t):
 
 def futhark_lerp64(v0, v1, t):
   return v0 + (v1-v0)*t
+
+def futhark_mad32(a, b, c):
+  return a * b + c
+
+def futhark_mad64(a, b, c):
+  return a * b + c
+
+def futhark_fma32(a, b, c):
+  return a * b + c
+
+def futhark_fma64(a, b, c):
+  return a * b + c
 
 # End of scalar.py.

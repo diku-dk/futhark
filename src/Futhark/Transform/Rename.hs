@@ -22,12 +22,10 @@ module Futhark.Transform.Rename
   , renameStm
   , renameBody
   , renameLambda
-  , renameFun
   , renamePattern
   -- * Renaming annotations
   , RenameM
   , substituteRename
-  , bindingForRename
   , renamingStms
   , Rename (..)
   , Renameable
@@ -57,8 +55,10 @@ runRenamer (RenameM m) src = runReader (runStateT m src) env
 -- invalid program valid.
 renameProg :: (Renameable lore, MonadFreshNames m) =>
               Prog lore -> m (Prog lore)
-renameProg prog = modifyNameSource $
-                  runRenamer $ Prog <$> mapM rename (progFunctions prog)
+renameProg prog = modifyNameSource $ runRenamer $
+  renamingStms (progConsts prog) $ \consts -> do
+  funs <- mapM rename (progFuns prog)
+  return prog { progConsts = consts, progFuns = funs }
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the expression is unaffected, under the assumption that the
@@ -92,14 +92,6 @@ renameBody = modifyNameSource . runRenamer . rename
 renameLambda :: (Renameable lore, MonadFreshNames m) =>
                 Lambda lore -> m (Lambda lore)
 renameLambda = modifyNameSource . runRenamer . rename
-
--- | Rename bound variables such that each is unique.  The semantics
--- of the function is unaffected, under the assumption that the body
--- was correct to begin with.  Any free variables are left untouched.
--- Note in particular that the parameters of the lambda are renamed.
-renameFun :: (Renameable lore, MonadFreshNames m) =>
-             FunDef lore -> m (FunDef lore)
-renameFun = modifyNameSource . runRenamer . rename
 
 -- | Produce an equivalent pattern but with each pattern element given
 -- a new name.
@@ -163,10 +155,6 @@ instance Rename Ident where
     name' <- rename name
     tp' <- rename tp
     return $ Ident name' tp'
-
--- | Create a bunch of new names and bind them for substitution.
-bindingForRename :: [VName] -> RenameM a -> RenameM a
-bindingForRename = bind
 
 bind :: [VName] -> RenameM a -> RenameM a
 bind vars body = do

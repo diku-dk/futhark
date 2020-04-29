@@ -13,7 +13,7 @@ module Futhark.Analysis.HORepresentation.MapNest
   )
 where
 
-import Data.List
+import Data.List (find)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 

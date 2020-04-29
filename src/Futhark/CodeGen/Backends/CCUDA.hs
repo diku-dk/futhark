@@ -8,12 +8,12 @@ module Futhark.CodeGen.Backends.CCUDA
   ) where
 
 import Control.Monad
-import Data.List
+import Data.List (intercalate)
+import Data.Maybe (catMaybes)
 import qualified Language.C.Quote.OpenCL as C
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.ImpCode.OpenCL
@@ -21,18 +21,14 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
 
-import Data.Maybe (catMaybes)
-
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m GC.CParts
 compileProg prog = do
-  res <- ImpGen.compileProg prog
-  case res of
-    Left err -> return $ Left err
-    Right (Program cuda_code cuda_prelude kernel_names _ sizes failures prog') ->
-      let extra = generateBoilerplate cuda_code cuda_prelude
-                                      kernel_names sizes failures
-      in Right <$> GC.compileProg operations extra cuda_includes
-                   [Space "device", DefaultSpace] cliOptions prog'
+  (Program cuda_code cuda_prelude kernel_names _ sizes failures prog') <-
+    ImpGen.compileProg prog
+  let extra = generateBoilerplate cuda_code cuda_prelude
+              kernel_names sizes failures
+  GC.compileProg operations extra cuda_includes
+    [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()
     operations = GC.defaultOperations
@@ -142,10 +138,10 @@ staticCUDAArray name "device" t vs = do
   num_elems <- case vs of
     ArrayValues vs' -> do
       let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
-      GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
+      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
       return $ length vs''
     ArrayZeros n -> do
-      GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
+      GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
       return n
   -- Fake a memory block.
   GC.contextField (pretty name) [C.cty|struct memblock_device|] Nothing

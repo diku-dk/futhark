@@ -5,11 +5,14 @@ module Futhark.CodeGen.SetDefaultSpace
 
 import Futhark.CodeGen.ImpCode
 
--- | Set all uses of 'DefaultSpace' in the given functions to another memory space.
-setDefaultSpace :: Space -> Functions op -> Functions op
-setDefaultSpace space (Functions fundecs) =
-  Functions [ (fname, setFunctionSpace space func)
-            | (fname, func) <- fundecs ]
+-- | Set all uses of 'DefaultSpace' in the given definitions to another
+-- memory space.
+setDefaultSpace :: Space -> Definitions op -> Definitions op
+setDefaultSpace space (Definitions (Constants ps consts) (Functions fundecs)) =
+  Definitions
+  (Constants (map (setParamSpace space) ps) (setBodySpace space consts))
+  (Functions [ (fname, setFunctionSpace space func)
+             | (fname, func) <- fundecs ])
 
 setFunctionSpace :: Space -> Function op -> Function op
 setFunctionSpace space (Function entry outputs inputs body results args) =

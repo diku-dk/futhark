@@ -2,11 +2,8 @@
 -- | Simple C runtime representation.
 module Futhark.CodeGen.Backends.SimpleRepresentation
   ( tupleField
-  , tupleFieldExp
   , funName
   , defaultMemBlockType
-  , intTypeToCType
-  , floatTypeToCType
   , primTypeToCType
   , signedPrimTypeToCType
 
@@ -63,12 +60,6 @@ signedPrimTypeToCType _ t = primTypeToCType t
 tupleField :: Int -> String
 tupleField i = "v" ++ show i
 
--- | @tupleFieldExp e i@ is the expression for accesing field @i@ of
--- tuple @e@.  If @e@ is an lvalue, so will the resulting expression
--- be.
-tupleFieldExp :: C.ToExp a => a -> Int -> C.Exp
-tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
-
 -- | @funName f@ is the name of the C function corresponding to
 -- the Futhark function @f@.
 funName :: Name -> String
@@ -104,9 +95,11 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         taggedI s Int32 = s ++ "32"
         taggedI s Int64 = s ++ "64"
 
-        mkAdd = simpleIntOp "add" [C.cexp|x + y|]
-        mkSub = simpleIntOp "sub" [C.cexp|x - y|]
-        mkMul = simpleIntOp "mul" [C.cexp|x * y|]
+        -- Use unsigned types for add/sub/mul so we can do
+        -- well-defined overflow.
+        mkAdd = simpleUintOp "add" [C.cexp|x + y|]
+        mkSub = simpleUintOp "sub" [C.cexp|x - y|]
+        mkMul = simpleUintOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
@@ -259,6 +252,88 @@ $esc:("#else")
      return c;
    }
 $esc:("#endif")
+
+$esc:("#if defined(__OPENCL_VERSION__)")
+   static typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
+      return mul_hi(a, b);
+   }
+   static typename uint16_t $id:(funName' "mul_hi16") (typename uint16_t a, typename uint16_t b) {
+      return mul_hi(a, b);
+   }
+   static typename uint32_t $id:(funName' "mul_hi32") (typename uint32_t a, typename uint32_t b) {
+      return mul_hi(a, b);
+   }
+   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+      return mul_hi(a, b);
+   }
+$esc:("#elif defined(__CUDA_ARCH__)")
+   static typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
+     typename uint16_t aa = a;
+     typename uint16_t bb = b;
+     return (aa * bb) >> 8;
+   }
+   static typename uint16_t $id:(funName' "mul_hi16") (typename uint16_t a, typename uint16_t b) {
+     typename uint32_t aa = a;
+     typename uint32_t bb = b;
+     return (aa * bb) >> 16;
+   }
+   static typename uint32_t $id:(funName' "mul_hi32") (typename uint32_t a, typename uint32_t b) {
+      return mulhi(a, b);
+   }
+   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+      return mul64hi(a, b);
+   }
+$esc:("#else")
+   static typename uint8_t $id:(funName' "mul_hi8") (typename uint8_t a, typename uint8_t b) {
+     typename uint16_t aa = a;
+     typename uint16_t bb = b;
+     return (aa * bb) >> 8;
+    }
+   static typename uint16_t $id:(funName' "mul_hi16") (typename uint16_t a, typename uint16_t b) {
+     typename uint32_t aa = a;
+     typename uint32_t bb = b;
+     return (aa * bb) >> 16;
+    }
+   static typename uint32_t $id:(funName' "mul_hi32") (typename uint32_t a, typename uint32_t b) {
+     typename uint64_t aa = a;
+     typename uint64_t bb = b;
+     return (aa * bb) >> 32;
+    }
+   static typename uint64_t $id:(funName' "mul_hi64") (typename uint64_t a, typename uint64_t b) {
+     typename __uint128_t aa = a;
+     typename __uint128_t bb = b;
+     return (aa * bb) >> 64;
+    }
+$esc:("#endif")
+
+$esc:("#if defined(__OPENCL_VERSION__)")
+   static typename uint8_t $id:(funName' "mad_hi8") (typename uint8_t a, typename uint8_t b, typename uint8_t c) {
+      return mad_hi(a, b, c);
+   }
+   static typename uint16_t $id:(funName' "mad_hi16") (typename uint16_t a, typename uint16_t b, typename uint16_t c) {
+      return mad_hi(a, b, c);
+   }
+   static typename uint32_t $id:(funName' "mad_hi32") (typename uint32_t a, typename uint32_t b, typename uint32_t c) {
+      return mad_hi(a, b, c);
+   }
+   static typename uint64_t $id:(funName' "mad_hi64") (typename uint64_t a, typename uint64_t b, typename uint64_t c) {
+      return mad_hi(a, b, c);
+   }
+$esc:("#else")
+   static typename uint8_t $id:(funName' "mad_hi8") (typename uint8_t a, typename uint8_t b, typename uint8_t c) {
+     return futrts_mul_hi8(a, b) + c;
+    }
+   static typename uint16_t $id:(funName' "mad_hi16") (typename uint16_t a, typename uint16_t b, typename uint16_t c) {
+     return futrts_mul_hi16(a, b) + c;
+    }
+   static typename uint32_t $id:(funName' "mad_hi32") (typename uint32_t a, typename uint32_t b, typename uint32_t c) {
+     return futrts_mul_hi32(a, b) + c;
+    }
+   static typename uint64_t $id:(funName' "mad_hi64") (typename uint64_t a, typename uint64_t b, typename uint64_t c) {
+     return futrts_mul_hi64(a, b) + c;
+    }
+$esc:("#endif")
+
 
 $esc:("#if defined(__OPENCL_VERSION__)")
    static typename int32_t $id:(funName' "clz8") (typename int8_t x) {
@@ -428,6 +503,30 @@ cFloat32Funs = [C.cunit|
       return atan(x);
     }
 
+    static inline float $id:(funName' "cosh32")(float x) {
+      return cosh(x);
+    }
+
+    static inline float $id:(funName' "sinh32")(float x) {
+      return sinh(x);
+    }
+
+    static inline float $id:(funName' "tanh32")(float x) {
+      return tanh(x);
+    }
+
+    static inline float $id:(funName' "acosh32")(float x) {
+      return acosh(x);
+    }
+
+    static inline float $id:(funName' "asinh32")(float x) {
+      return asinh(x);
+    }
+
+    static inline float $id:(funName' "atanh32")(float x) {
+      return atanh(x);
+    }
+
     static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2(x,y);
     }
@@ -482,6 +581,12 @@ $esc:("#ifdef __OPENCL_VERSION__")
     static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
       return mix(v0, v1, t);
     }
+    static inline float $id:(funName' "mad32")(float a, float b, float c) {
+      return mad(a,b,c);
+    }
+    static inline float $id:(funName' "fma32")(float a, float b, float c) {
+      return fma(a,b,c);
+    }
 $esc:("#else")
     static inline float fmod32(float x, float y) {
       return fmodf(x, y);
@@ -497,6 +602,12 @@ $esc:("#else")
     }
     static inline float $id:(funName' "lerp32")(float v0, float v1, float t) {
       return v0 + (v1-v0)*t;
+    }
+    static inline float $id:(funName' "mad32")(float a, float b, float c) {
+      return a*b+c;
+    }
+    static inline float $id:(funName' "fma32")(float a, float b, float c) {
+      return fmaf(a,b,c);
     }
 $esc:("#endif")
 |]
@@ -547,6 +658,30 @@ cFloat64Funs = [C.cunit|
       return atan(x);
     }
 
+    static inline double $id:(funName' "cosh64")(double x) {
+      return cosh(x);
+    }
+
+    static inline double $id:(funName' "sinh64")(double x) {
+      return sinh(x);
+    }
+
+    static inline double $id:(funName' "tanh64")(double x) {
+      return tanh(x);
+    }
+
+    static inline double $id:(funName' "acosh64")(double x) {
+      return acosh(x);
+    }
+
+    static inline double $id:(funName' "asinh64")(double x) {
+      return asinh(x);
+    }
+
+    static inline double $id:(funName' "atanh64")(double x) {
+      return atanh(x);
+    }
+
     static inline double $id:(funName' "atan2_64")(double x, double y) {
       return atan2(x,y);
     }
@@ -557,6 +692,10 @@ cFloat64Funs = [C.cunit|
 
     static inline double $id:(funName' "lgamma64")(double x) {
       return lgamma(x);
+    }
+
+    static inline double $id:(funName' "fma64")(double a, double b, double c) {
+      return fma(a,b,c);
     }
 
     static inline double $id:(funName' "round64")(double x) {
@@ -597,7 +736,7 @@ cFloat64Funs = [C.cunit|
       return p.t;
     }
 
-    static inline float fmod64(float x, float y) {
+    static inline double fmod64(double x, double y) {
       return fmod(x, y);
     }
 
@@ -605,9 +744,15 @@ $esc:("#ifdef __OPENCL_VERSION__")
     static inline double $id:(funName' "lerp64")(double v0, double v1, double t) {
       return mix(v0, v1, t);
     }
+    static inline double $id:(funName' "mad64")(double a, double b, double c) {
+      return mad(a,b,c);
+    }
 $esc:("#else")
     static inline double $id:(funName' "lerp64")(double v0, double v1, double t) {
       return v0 + (v1-v0)*t;
+    }
+    static inline double $id:(funName' "mad64")(double a, double b, double c) {
+      return a*b+c;
     }
 $esc:("#endif")
 |]

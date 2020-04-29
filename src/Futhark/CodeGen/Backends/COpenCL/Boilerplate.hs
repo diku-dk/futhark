@@ -66,16 +66,16 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
         openClDecls profiling_centres kernels opencl_code opencl_prelude
 
-  GC.earlyDecls top_decls
+  mapM_ GC.earlyDecl top_decls
 
   let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
       size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
       size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
-  GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
-  GC.libDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
-  GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
+  GC.earlyDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
 
   GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(void);|],
@@ -96,7 +96,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
               }|])
 
   let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
-  GC.libDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
+  GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s { struct opencl_config opencl;
@@ -285,9 +285,9 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                          typename cl_int failure_is_an_option;
                        };|])
 
-  mapM_ GC.libDecl later_top_decls
+  mapM_ GC.earlyDecl later_top_decls
 
-  GC.libDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
+  GC.earlyDecl [C.cedecl|static void init_context_early(struct $id:cfg *cfg, struct $id:ctx* ctx) {
                      ctx->opencl.cfg = cfg->opencl;
                      ctx->detail_memory = cfg->opencl.debugging;
                      ctx->debugging = cfg->opencl.debugging;
@@ -312,7 +312,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
       max_failure_args =
         foldl max 0 $ map (errorMsgNumArgs . failureError) failures
 
-  GC.libDecl [C.cedecl|static int init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx, typename cl_program prog) {
+  GC.earlyDecl [C.cedecl|static int init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx, typename cl_program prog) {
                      typename cl_int error;
 
                      typename cl_int no_error = -1;
@@ -335,7 +335,11 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                      $stms:final_inits
                      $stms:set_sizes
 
-                     return 0;
+                     init_constants(ctx);
+                     // Clear the free list of any deallocations that occurred while initialising constants.
+                     OPENCL_SUCCEED_OR_RETURN(opencl_free_all(&ctx->opencl));
+
+                     return futhark_context_sync(ctx);
   }|]
 
   let set_required_types = [ [C.cstm|required_types |= OPENCL_F64; |]
@@ -354,11 +358,8 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
 
                           init_context_early(cfg, ctx);
                           typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types, cfg->build_opts);
-                          if (init_context_late(cfg, ctx, prog) == 0) {
-                            return ctx;
-                          } else {
-                            return NULL;
-                          }
+                          init_context_late(cfg, ctx, prog);
+                          return ctx;
                        }|])
 
   GC.publicDef_ "context_new_with_command_queue" GC.InitDecl $ \s ->
@@ -381,6 +382,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 free_constants(ctx);
                                  free_lock(&ctx->lock);
                                  opencl_tally_profiling_records(&ctx->opencl);
                                  free(ctx->opencl.profiling_records);
@@ -497,14 +499,6 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 
         program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
         openCL_boilerplate = [C.cunit|
-
-          $esc:("#define CL_USE_DEPRECATED_OPENCL_1_2_APIS")
-          $esc:("#define CL_SILENCE_DEPRECATION // For macOS.")
-          $esc:("#ifdef __APPLE__")
-          $esc:("  #include <OpenCL/cl.h>")
-          $esc:("#else")
-          $esc:("  #include <CL/cl.h>")
-          $esc:("#endif")
           $esc:("typedef cl_mem fl_mem_t;")
           $esc:free_list_h
           $esc:openCL_h
@@ -642,10 +636,10 @@ commonOptions =
                 if (equals != NULL) {
                   *equals = 0;
                   if (futhark_context_config_set_size(cfg, name, value) != 0) {
-                    panic(1, "Unknown size: %s\n", name);
+                    futhark_panic(1, "Unknown size: %s\n", name);
                   }
                 } else {
-                  panic(1, "Invalid argument for size option: %s\n", optarg);
+                  futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
                 }}|]
             }
    , Option { optionLongName = "tuning"
@@ -655,7 +649,7 @@ commonOptions =
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                           futhark_context_config_set_size);
                 if (ret != NULL) {
-                  panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
                 }}|]
             }
    ]

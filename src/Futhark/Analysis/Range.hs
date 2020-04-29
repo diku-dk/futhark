@@ -13,7 +13,7 @@ module Futhark.Analysis.Range
 
 import qualified Data.Map.Strict as M
 import Control.Monad.Reader
-import Data.List
+import Data.List (nub)
 
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.Ranges
@@ -25,7 +25,8 @@ import Futhark.Analysis.AlgSimplify as AS
 -- program with embedded range annotations.
 rangeAnalysis :: (Attributes lore, CanBeRanged (Op lore)) =>
                  Prog lore -> Prog (Ranges lore)
-rangeAnalysis = Prog . map analyseFun . progFunctions
+rangeAnalysis (Prog consts funs) =
+  Prog (runRangeM $ mapM analyseStm consts) (map analyseFun funs)
 
 -- Implementation
 

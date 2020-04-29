@@ -8,7 +8,6 @@ import System.Exit
 import Futhark.Pipeline
 import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 import Futhark.Util
 
@@ -16,8 +15,7 @@ main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile sequential C" "Generate sequential C code from optimised Futhark program."
        sequentialCpuPipeline $ \() mode outpath prog -> do
-         cprog <- either (`internalError` prettyText prog) return =<<
-                  SequentialC.compileProg prog
+         cprog <- SequentialC.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
 

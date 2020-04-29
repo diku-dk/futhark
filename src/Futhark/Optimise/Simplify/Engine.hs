@@ -2,6 +2,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- |
 --
 -- Perform general rule-based simplification based on data dependency
@@ -22,7 +24,6 @@ module Futhark.Optimise.Simplify.Engine
        ( -- * Monadic interface
          SimpleM
        , runSimpleM
-       , subSimpleM
        , SimpleOps (..)
        , SimplifyOp
        , bindableSimpleOps
@@ -49,13 +50,13 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyStms
        , simplifyFun
        , simplifyLambda
-       , simplifyLambdaSeq
        , simplifyLambdaNoHoisting
        , simplifyParam
        , bindLParams
        , simplifyBody
        , SimplifiedBody
 
+       , hoistStms
        , blockIf
 
        , module Futhark.Optimise.Simplify.Lore
@@ -65,7 +66,7 @@ import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
-import Data.List
+import Data.List (find, foldl', nub, mapAccumL)
 import Data.Maybe
 
 import Futhark.Representation.AST
@@ -91,7 +92,8 @@ data HoistBlockers lore = HoistBlockers
                           }
 
 noExtraHoistBlockers :: HoistBlockers lore
-noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks neverBlocks (const mempty) (const False)
+noExtraHoistBlockers =
+  HoistBlockers neverBlocks neverBlocks neverBlocks (const mempty) (const False)
 
 data Env lore = Env { envRules         :: RuleBook (Wise lore)
                     , envHoistBlockers :: HoistBlockers lore
@@ -135,7 +137,8 @@ bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS' protectHoistedOp
         protectHoistedOpS' _ _ _ = Nothing
 
 newtype SimpleM lore a =
-  SimpleM (ReaderT (SimpleOps lore, Env lore) (State (VNameSource, Bool, Certificates)) a)
+  SimpleM (ReaderT (SimpleOps lore, Env lore)
+           (State (VNameSource, Bool, Certificates)) a)
   deriving (Applicative, Functor, Monad,
             MonadReader (SimpleOps lore, Env lore),
             MonadState (VNameSource, Bool, Certificates))
@@ -166,16 +169,6 @@ runSimpleM :: SimpleM lore a
 runSimpleM (SimpleM m) simpl env src =
   let (x, (src', b, _)) = runState (runReaderT m (simpl, env)) (src, False, mempty)
   in ((x, b), src')
-
-subSimpleM :: RuleBook (Wise lore)
-           -> HoistBlockers lore
-           -> SimpleM lore a
-           -> SimpleM lore a
-subSimpleM rules blockers =
-  local $ \(ops, env) -> (ops,
-                          env { envRules = rules
-                              , envHoistBlockers = blockers
-                              })
 
 askEngineEnv :: SimpleM lore (Env lore)
 askEngineEnv = asks snd
@@ -219,7 +212,8 @@ bindLParams params =
     foldr ST.insertLParam vtable params
 
 bindArrayLParams :: SimplifiableLore lore =>
-                    [(LParam (Wise lore),Maybe VName)] -> SimpleM lore a -> SimpleM lore a
+                    [(LParam (Wise lore),Maybe VName)] -> SimpleM lore a
+                 -> SimpleM lore a
 bindArrayLParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayLParam) vtable params
@@ -315,7 +309,7 @@ protectIf _ _ _ stm =
 
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem{} =
-  fail "emptyOfType: Cannot hoist non-existential memory."
+  error "emptyOfType: Cannot hoist non-existential memory."
 emptyOfType _ (Prim pt) =
   return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
 emptyOfType ctx_names (Array pt shape _) = do
@@ -361,7 +355,8 @@ hoistStms rules block vtable uses orig_stms = do
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
                 | block vtable' uses' stm ->
-                  return (expandUsage vtable' uses' stm `UT.without` provides stm,
+                  return (expandUsage vtable' uses' stm
+                          `UT.without` provides stm,
                           Left stm : stms)
                 | otherwise ->
                   return (expandUsage vtable' uses' stm, Right stm : stms)
@@ -438,11 +433,6 @@ blockIf block m = do
   (blocked, hoisted) <- hoistStms rules block vtable usages stms
   return ((blocked, x), hoisted)
 
-insertAllStms :: SimplifiableLore lore =>
-                 SimpleM lore (SimplifiedBody lore Result)
-              -> SimpleM lore (Body (Wise lore))
-insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
-
 hasFree :: Attributes lore => Names -> BlockPred lore
 hasFree ks _ _ need = ks `namesIntersect` freeIn need
 
@@ -485,7 +475,9 @@ hoistCommon :: SimplifiableLore lore =>
                SubExp -> IfSort
             -> SimplifiedBody lore Result
             -> SimplifiedBody lore Result
-            -> SimpleM lore (Body (Wise lore), Body (Wise lore), Stms (Wise lore))
+            -> SimpleM lore (Body (Wise lore),
+                             Body (Wise lore),
+                             Stms (Wise lore))
 hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation  . envHoistBlockers
   getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
@@ -513,6 +505,8 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       hoistbl_nms = filterBnds desirableToHoist getArrSz_fun $
                     stmsToList $ stms1<>stms2
 
+      -- No matter what, we always want to hoist constants as much as
+      -- possible.
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp ArrayLit{})) = False
       isNotHoistableBnd _ _ _ (Let _ _ (BasicOp SubExp{})) = False
       isNotHoistableBnd nms _ _ stm = not (hasPatName nms stm)
@@ -748,7 +742,8 @@ class Simplifiable e where
 instance (Simplifiable a, Simplifiable b) => Simplifiable (a, b) where
   simplify (x,y) = (,) <$> simplify x <*> simplify y
 
-instance (Simplifiable a, Simplifiable b, Simplifiable c) => Simplifiable (a, b, c) where
+instance (Simplifiable a, Simplifiable b, Simplifiable c) =>
+         Simplifiable (a, b, c) where
   simplify (x,y,z) = (,,) <$> simplify x <*> simplify y <*> simplify z
 
 -- Convenient for Scatter.
@@ -830,12 +825,6 @@ simplifyLambda lam arrs = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   simplifyLambdaMaybeHoist par_blocker lam arrs
 
-simplifyLambdaSeq :: SimplifiableLore lore =>
-                     Lambda lore
-                  -> [Maybe VName]
-                  -> SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
-simplifyLambdaSeq = simplifyLambdaMaybeHoist neverBlocks
-
 simplifyLambdaNoHoisting :: SimplifiableLore lore =>
                             Lambda lore
                          -> [Maybe VName]
@@ -877,9 +866,18 @@ instance Simplifiable Certificates where
               Just (Var idd', _) -> return [idd']
               _ -> return [idd]
 
-simplifyFun :: SimplifiableLore lore => FunDef lore -> SimpleM lore (FunDef (Wise lore))
+
+insertAllStms :: SimplifiableLore lore =>
+                 SimpleM lore (SimplifiedBody lore Result)
+              -> SimpleM lore (Body (Wise lore))
+insertAllStms = uncurry constructBody . fst <=< blockIf (isFalse False)
+
+
+simplifyFun :: SimplifiableLore lore =>
+               FunDef lore -> SimpleM lore (FunDef (Wise lore))
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
+  params' <- mapM (simplifyParam simplify) params
   let ds = map diet (retTypeValues rettype')
   body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
-  return $ FunDef entry fname rettype' params body'
+  return $ FunDef entry fname rettype' params' body'

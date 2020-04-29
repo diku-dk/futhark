@@ -5,20 +5,22 @@ module Futhark.Internalise.Monad
   , throwError
   , VarSubstitutions
   , InternaliseEnv (..)
-  , ConstParams
   , Closure
-  , FunInfo, ConstInfo
+  , FunInfo
 
   , substitutingVars
-  , addFunction
+  , lookupSubst
+  , addFunDef
 
   , lookupFunction
   , lookupFunction'
   , lookupConst
-  , topLevelSizes
+  , allConsts
 
   , bindFunction
   , bindConstant
+
+  , localConstsScope
 
   , asserting
   , assertingOne
@@ -41,32 +43,22 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
-import qualified Control.Monad.Fail as Fail
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
-type ConstParams = [(Name,VName)]
-
 -- | Extra parameters to pass when calling this function.  This
 -- corresponds to the closure of a locally defined function.
 type Closure = [VName]
 
-type FunInfo = (Name, ConstParams, Closure,
+type FunInfo = (Name, Closure,
                 [VName], [DeclType],
                 [FParam],
                 [(SubExp,Type)] -> Maybe [DeclExtType])
 
 type FunTable = M.Map VName FunInfo
-
-type ConstInfo = (Name, ConstParams,
-                  [(SubExp,Type)] -> Maybe [DeclExtType],
-                  [SubExp] -> InternaliseM (),
-                  Names)
-
-type ConstTable = M.Map VName ConstInfo
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
@@ -81,12 +73,19 @@ data InternaliseEnv = InternaliseEnv {
 data InternaliseState = InternaliseState {
     stateNameSource :: VNameSource
   , stateFunTable :: FunTable
-  , stateConstTable :: ConstTable
-  , stateTopLevelSizes :: Names
+  , stateConstSubsts :: VarSubstitutions
+  , stateConstScope :: Scope SOACS
+  , stateConsts :: Names
   }
 
-newtype InternaliseResult = InternaliseResult [FunDef SOACS]
-  deriving (Semigroup, Monoid)
+data InternaliseResult = InternaliseResult (Stms SOACS) [FunDef SOACS]
+
+instance Semigroup InternaliseResult where
+  InternaliseResult xs1 ys1 <> InternaliseResult xs2 ys2 =
+    InternaliseResult (xs1<>xs2) (ys1<>ys2)
+
+instance Monoid InternaliseResult where
+  mempty = InternaliseResult mempty mempty
 
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                         (RWS
@@ -105,9 +104,6 @@ instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) wh
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
-instance Fail.MonadFail InternaliseM where
-  fail = error . ("InternaliseM: "++)
-
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
   mkExpAttrM pat e = InternaliseM $ mkExpAttrM pat e
@@ -120,12 +116,12 @@ instance MonadBinder InternaliseM where
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> InternaliseM ()
-                -> m [FunDef SOACS]
+                -> m (Stms SOACS, [FunDef SOACS])
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
-  let (_, s, InternaliseResult funs) =
+  let ((_, consts), s, InternaliseResult _ funs) =
         runRWS (runBinderT m mempty) newEnv (newState src)
-  in (funs, stateNameSource s)
+  in ((consts, funs), stateNameSource s)
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
                  , envDoBoundsChecks = True
@@ -134,41 +130,59 @@ runInternaliseM safe (InternaliseM m) =
         newState src =
           InternaliseState { stateNameSource = src
                            , stateFunTable = mempty
-                           , stateConstTable = mempty
-                           , stateTopLevelSizes = mempty
+                           , stateConstSubsts = mempty
+                           , stateConsts = mempty
+                           , stateConstScope = mempty
                            }
 
 substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
 substitutingVars substs = local $ \env -> env { envSubsts = substs <> envSubsts env }
 
+lookupSubst :: VName -> InternaliseM (Maybe [SubExp])
+lookupSubst v = do
+  env_substs <- asks $ M.lookup v . envSubsts
+  const_substs <- gets $ M.lookup v . stateConstSubsts
+  return $ env_substs `mplus` const_substs
+
 -- | Add a function definition to the program being constructed.
-addFunction :: FunDef SOACS -> InternaliseM ()
-addFunction = InternaliseM . lift . tell . InternaliseResult . pure
+addFunDef :: FunDef SOACS -> InternaliseM ()
+addFunDef fd =
+  InternaliseM $ lift $ tell $ InternaliseResult mempty [fd]
 
 lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)
 lookupFunction' fname = gets $ M.lookup fname . stateFunTable
 
 lookupFunction :: VName -> InternaliseM FunInfo
 lookupFunction fname = maybe bad return =<< lookupFunction' fname
-  where bad = fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
+  where bad = error $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
-lookupConst :: VName -> InternaliseM (Maybe ConstInfo)
-lookupConst fname = gets $ M.lookup fname . stateConstTable
+lookupConst :: VName -> InternaliseM (Maybe [SubExp])
+lookupConst fname = gets $ M.lookup fname . stateConstSubsts
 
-bindFunction :: VName -> FunInfo -> InternaliseM ()
-bindFunction fname info =
+allConsts :: InternaliseM Names
+allConsts = gets stateConsts
+
+bindFunction :: VName -> FunDef SOACS -> FunInfo -> InternaliseM ()
+bindFunction fname fd info = do
+  addFunDef fd
   modify $ \s -> s { stateFunTable = M.insert fname info $ stateFunTable s }
 
-bindConstant :: VName -> ConstInfo -> InternaliseM ()
-bindConstant cname info =
-  modify $ \s -> s { stateConstTable = M.insert cname info $ stateConstTable s }
+bindConstant :: VName -> FunDef SOACS -> InternaliseM ()
+bindConstant cname fd = do
+  let stms = bodyStms $ funDefBody fd
+      substs = bodyResult $ funDefBody fd
+      const_names = namesFromList $ M.keys $ scopeOf stms
+  addStms stms
+  modify $ \s ->
+    s { stateConstSubsts = M.insert cname substs $ stateConstSubsts s
+      , stateConstScope = scopeOf stms <> stateConstScope s
+      , stateConsts = const_names <> stateConsts s
+      }
 
--- | Size names implicitly created by existential top-level constant
--- definitions.  These need special treatment because such a thing
--- does not exist in the core language.
-topLevelSizes :: InternaliseM Names
-topLevelSizes = gets $ foldMap sizes . stateConstTable
-  where sizes (_, _, _, _, x) = x
+localConstsScope :: InternaliseM a -> InternaliseM a
+localConstsScope m = do
+  scope <- gets stateConstScope
+  localScope scope m
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
@@ -190,7 +204,7 @@ type DimTable = M.Map VName ExtSize
 
 newtype TypeEnv = TypeEnv { typeEnvDims  :: DimTable }
 
-type TypeState = (Int, ConstParams)
+type TypeState = Int
 
 newtype InternaliseTypeM a =
   InternaliseTypeM (ReaderT TypeEnv (StateT TypeState InternaliseM) a)
@@ -202,12 +216,9 @@ liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
 liftInternaliseM = InternaliseTypeM . lift . lift
 
 runInternaliseTypeM :: InternaliseTypeM a
-                    -> InternaliseM (a, ConstParams)
-runInternaliseTypeM (InternaliseTypeM m) = do
-  let new_env = TypeEnv mempty
-      new_state = (0, mempty)
-  (x, (_, cm)) <- runStateT (runReaderT m new_env) new_state
-  return (x, cm)
+                    -> InternaliseM a
+runInternaliseTypeM (InternaliseTypeM m) =
+  evalStateT (runReaderT m (TypeEnv mempty)) 0
 
 withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
 withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }

@@ -114,6 +114,10 @@ constFoldPrimExp (BinOpExp Sub{} x y)
 constFoldPrimExp (BinOpExp Mul{} x y)
   | oneIshExp x = y
   | oneIshExp y = x
+  | zeroIshExp x, IntType it <- primExpType y =
+      ValueExp $ IntValue $ intValue it (0::Int)
+  | zeroIshExp y, IntType it <- primExpType x =
+      ValueExp $ IntValue $ intValue it (0::Int)
 constFoldPrimExp (BinOpExp SDiv{} x y)
   | oneIshExp y = x
 constFoldPrimExp (BinOpExp SQuot{} x y)
