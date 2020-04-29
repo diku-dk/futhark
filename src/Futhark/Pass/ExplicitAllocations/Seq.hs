@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Futhark.Pass.ExplicitAllocations.Seq
        ( explicitAllocations
        , simplifiable
@@ -13,4 +12,4 @@ import Futhark.Representation.Seq
 import Futhark.Pass.ExplicitAllocations
 
 explicitAllocations :: Pass Seq SeqMem
-explicitAllocations = explicitAllocationsGeneric undefined defaultExpHints
+explicitAllocations = explicitAllocationsGeneric (pure . Inner) defaultExpHints

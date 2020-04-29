@@ -10,7 +10,7 @@ import Prelude hiding (quot, rem)
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.KernelsMem
+import Futhark.Representation.MCMem
 
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
@@ -18,9 +18,9 @@ import Futhark.MonadFreshNames
 
 
 newtype MySegHistSlug = MySegHistSlug
-                       { mySlugOp :: HistOp KernelsMem }
+                       { mySlugOp :: HistOp MCMem }
 
-computeHistoUsage :: HistOp KernelsMem
+computeHistoUsage :: HistOp MCMem
                   -> MulticoreGen MySegHistSlug
 computeHistoUsage op =
   return $ MySegHistSlug op
@@ -72,10 +72,10 @@ prepareIntermediateArrays num_subhistos_per_group =
     writeArray bucket arr val = copyDWIMFix arr bucket val []
 
 
-compileSegHist  :: Pattern KernelsMem
+compileSegHist  :: Pattern MCMem
                 -> SegSpace
-                -> [HistOp KernelsMem]
-                -> KernelBody KernelsMem
+                -> [HistOp MCMem]
+                -> KernelBody MCMem
                 -> MulticoreGen ()
 compileSegHist pat space histops kbody
   | segment_depth <- unSegSpace space,
@@ -85,10 +85,10 @@ compileSegHist pat space histops kbody
       segmentedHist pat space histops kbody
 
 
-segmentedHist :: Pattern KernelsMem
+segmentedHist :: Pattern MCMem
                 -> SegSpace
-                -> [HistOp KernelsMem]
-                -> KernelBody KernelsMem
+                -> [HistOp MCMem]
+                -> KernelBody MCMem
                 -> MulticoreGen ()
 segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
@@ -162,10 +162,10 @@ segmentedHist pat space histops kbody = do
 
 
 
-nonsegmentedHist :: Pattern KernelsMem
+nonsegmentedHist :: Pattern MCMem
                 -> SegSpace
-                -> [HistOp KernelsMem]
-                -> KernelBody KernelsMem
+                -> [HistOp MCMem]
+                -> KernelBody MCMem
                 -> MulticoreGen ()
 nonsegmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
@@ -188,11 +188,11 @@ nonsegmentedHist pat space histops kbody = do
 -- is computed and finally merged through a reduction
 -- across the histogram indicies.
 -- This is expected to be fast if len(histDest) is small
-smallDestHistogram :: Pattern KernelsMem
+smallDestHistogram :: Pattern MCMem
                    -> SegSpace
-                   -> [HistOp KernelsMem]
+                   -> [HistOp MCMem]
                    -> VName
-                   -> KernelBody KernelsMem
+                   -> KernelBody MCMem
                    -> MulticoreGen ()
 smallDestHistogram pat space histops num_threads kbody = do
   emit $ Imp.DebugPrint "smallDestHistogram segHist" Nothing
@@ -331,10 +331,10 @@ smallDestHistogram pat space histops num_threads kbody = do
 -- Takes sequential version and simpley chunks is
 -- Implementation does currently not ensure amotic updates
 -- but just doing it sequentially, single threaded seems faster
-largeDestHistogram :: Pattern KernelsMem
+largeDestHistogram :: Pattern MCMem
                    -> SegSpace
-                   -> [HistOp KernelsMem]
-                   -> KernelBody KernelsMem
+                   -> [HistOp MCMem]
+                   -> KernelBody MCMem
                    -> MulticoreGen ()
 largeDestHistogram pat space histops kbody = do
   emit $ Imp.DebugPrint "largeDestHistogram segHist" Nothing

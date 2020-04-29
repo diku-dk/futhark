@@ -3,57 +3,96 @@
 -- | Sequentialise any remaining SOACs.  It is very important that
 -- this is run *after* any access-pattern-related optimisation,
 -- because this pass will destroy information.
-module Futhark.Optimise.Unstream (unstream) where
+module Futhark.Optimise.Unstream
+  (unstreamKernels, unstreamMC) where
 
 import Control.Monad.State
 import Control.Monad.Reader
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
+import Futhark.Representation.MC
 import Futhark.Pass
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 
-unstream :: Pass Kernels Kernels
-unstream = Pass "unstream" "sequentialise remaining SOACs" $
-           intraproceduralTransformation optimise
+unstreamKernels :: Pass Kernels Kernels
+unstreamKernels = unstream onHostOp
+
+unstreamMC :: Pass MC MC
+unstreamMC = unstream onSegOp
+
+unstream :: Attributes lore => OnOp lore -> Pass lore lore
+unstream onOp = Pass "unstream" "sequentialise remaining SOACs" $
+                intraproceduralTransformation optimise
   where optimise scope stms =
-          modifyNameSource $ runState $ runReaderT (optimiseStms stms) scope
+          modifyNameSource $ runState $ runReaderT (optimiseStms onOp stms) scope
 
-type UnstreamM = ReaderT (Scope Kernels) (State VNameSource)
+type UnstreamM lore = ReaderT (Scope lore) (State VNameSource)
 
-optimiseStms :: Stms Kernels -> UnstreamM (Stms Kernels)
-optimiseStms stms =
+type OnOp lore = Pattern lore -> StmAux (ExpAttr lore) -> Op lore -> UnstreamM lore [Stm lore]
+
+optimiseStms :: Attributes lore =>
+                OnOp lore -> Stms lore -> UnstreamM lore (Stms lore)
+optimiseStms onOp stms =
   localScope (scopeOf stms) $
-  stmsFromList . concat <$> mapM optimiseStm (stmsToList stms)
+  stmsFromList . concat <$> mapM (optimiseStm onOp) (stmsToList stms)
 
-optimiseBody :: Body Kernels -> UnstreamM (Body Kernels)
-optimiseBody (Body () stms res) =
-  Body () <$> optimiseStms stms <*> pure res
+optimiseBody :: Attributes lore =>
+                OnOp lore -> Body lore -> UnstreamM lore (Body lore)
+optimiseBody onOp (Body aux stms res) =
+  Body aux <$> optimiseStms onOp stms <*> pure res
 
-optimiseKernelBody :: KernelBody Kernels -> UnstreamM (KernelBody Kernels)
-optimiseKernelBody (KernelBody () stms res) =
+optimiseKernelBody :: Attributes lore =>
+                      OnOp lore -> KernelBody lore
+                   -> UnstreamM lore (KernelBody lore)
+optimiseKernelBody onOp (KernelBody attr stms res) =
   localScope (scopeOf stms) $
-  KernelBody () <$> (stmsFromList . concat <$> mapM optimiseStm (stmsToList stms)) <*> pure res
+  KernelBody attr <$>
+  (stmsFromList . concat <$> mapM (optimiseStm onOp) (stmsToList stms)) <*>
+  pure res
 
-optimiseLambda :: Lambda Kernels -> UnstreamM (Lambda Kernels)
-optimiseLambda lam = localScope (scopeOfLParams $ lambdaParams lam) $ do
-  body <- optimiseBody $ lambdaBody lam
+optimiseLambda :: Attributes lore =>
+                  OnOp lore -> Lambda lore -> UnstreamM lore (Lambda lore)
+optimiseLambda onOp lam = localScope (scopeOfLParams $ lambdaParams lam) $ do
+  body <- optimiseBody onOp $ lambdaBody lam
   return lam { lambdaBody = body}
 
-optimiseStm :: Stm Kernels -> UnstreamM [Stm Kernels]
+optimiseStm :: Attributes lore =>
+               OnOp lore -> Stm lore -> UnstreamM lore [Stm lore]
 
-optimiseStm (Let pat _ (Op (OtherOp soac))) = do
-  stms <- runBinder_ $ FOT.transformSOAC pat soac
-  fmap concat $ localScope (scopeOf stms) $ mapM optimiseStm $ stmsToList stms
+optimiseStm onOp (Let pat aux (Op op)) =
+  onOp pat aux op
 
-optimiseStm (Let pat aux (Op (SegOp op))) =
-  localScope (scopeOfSegSpace $ segSpace op) $
-  pure <$> (Let pat aux . Op . SegOp <$> mapSegOpM optimise op)
-  where optimise = identitySegOpMapper { mapOnSegOpBody = optimiseKernelBody
-                                       , mapOnSegOpLambda = optimiseLambda
+optimiseStm onOp (Let pat aux e) =
+  pure <$> (Let pat aux <$> mapExpM optimise e)
+  where optimise = identityMapper { mapOnBody = \scope ->
+                                      localScope scope . optimiseBody onOp
+                                  }
+
+
+optimiseSegOp :: Attributes lore =>
+                 OnOp lore -> SegOp lvl lore
+              -> UnstreamM lore (SegOp lvl lore)
+optimiseSegOp onOp op =
+  localScope (scopeOfSegSpace $ segSpace op) $ mapSegOpM optimise op
+  where optimise = identitySegOpMapper { mapOnSegOpBody = optimiseKernelBody onOp
+                                       , mapOnSegOpLambda = optimiseLambda onOp
                                        }
 
-optimiseStm (Let pat aux e) =
-  pure <$> (Let pat aux <$> mapExpM optimise e)
-  where optimise = identityMapper { mapOnBody = \scope -> localScope scope . optimiseBody }
+onSegOp :: OnOp MC
+onSegOp pat aux op =
+  pure <$> (Let pat aux . Op <$> optimiseSegOp onSegOp op)
+
+onHostOp :: OnOp Kernels
+
+onHostOp pat aux (OtherOp soac) = do
+  stms <- runBinder_ $ FOT.transformSOAC pat soac
+  fmap concat $ localScope (scopeOf stms) $
+    mapM (optimiseStm onHostOp) $ stmsToList $
+    certify (stmAuxCerts aux) <$> stms
+
+onHostOp pat aux (SegOp op) =
+  pure <$> (Let pat aux . Op . SegOp <$> optimiseSegOp onHostOp op)
+
+onHostOp pat aux op = return [Let pat aux $ Op op]

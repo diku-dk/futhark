@@ -60,5 +60,6 @@ instance FreeIn MulticoreFunc where
   freeIn' (MulticoreFunc _ prebody body _) = freeIn' prebody <> freeIn' body
 
 instance FreeIn Multicore where
-  freeIn' (ParLoop _ ntask _ e func) = freeIn' ntask <> freeIn' e <> freeIn' func
+  freeIn' (ParLoop _ ntask i e func) =
+    fvBind (oneName i) $ freeIn' ntask <> freeIn' e <> freeIn' func
   freeIn' (MulticoreCall dests _ ) = freeIn' dests

@@ -48,6 +48,7 @@ import qualified Data.Map.Strict as M
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import Futhark.Util (takeLast)
 
 -- | Extra parameters to pass when calling this function.  This
 -- corresponds to the closure of a locally defined function.
@@ -170,7 +171,8 @@ bindFunction fname fd info = do
 bindConstant :: VName -> FunDef SOACS -> InternaliseM ()
 bindConstant cname fd = do
   let stms = bodyStms $ funDefBody fd
-      substs = bodyResult $ funDefBody fd
+      substs = takeLast (length (funDefRetType fd)) $
+               bodyResult $ funDefBody fd
       const_names = namesFromList $ M.keys $ scopeOf stms
   addStms stms
   modify $ \s ->

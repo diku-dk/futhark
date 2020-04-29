@@ -17,8 +17,6 @@ module Futhark.Representation.KernelsMem
   )
   where
 
-import Control.Monad
-
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.MonadFreshNames
 import Futhark.Pass
@@ -43,23 +41,6 @@ instance Annotations KernelsMem where
   type RetType    KernelsMem = RetTypeMem
   type BranchType KernelsMem = BranchTypeMem
   type Op         KernelsMem = MemOp (HostOp KernelsMem ())
-
-segOpReturns :: (Monad m, HasScope KernelsMem m) =>
-                SegOp KernelsMem -> m [ExpReturns]
-segOpReturns k@(SegMap _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
-segOpReturns k@(SegRed _ _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
-segOpReturns k@(SegScan _ _ _ _ _ kbody) =
-  kernelBodyReturns kbody =<< (extReturns <$> opType k)
-segOpReturns (SegHist _ _ ops _ _) =
-  concat <$> mapM (mapM varReturns . histDest) ops
-
-kernelBodyReturns :: (HasScope KernelsMem m, Monad m) =>
-                     KernelBody KernelsMem -> [ExpReturns] -> m [ExpReturns]
-kernelBodyReturns = zipWithM correct . kernelBodyResult
-  where correct (WriteReturns _ arr _) _ = varReturns arr
-        correct _ ret = return ret
 
 instance Attributes KernelsMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern

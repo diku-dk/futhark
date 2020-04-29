@@ -11,13 +11,13 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import qualified Futhark.Representation.Mem.IxFun as IxFun
 
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.KernelsMem
+import Futhark.Representation.MCMem
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 import Futhark.Transform.Rename
 
 
-createTemporaryArrays :: SubExp -> [SubExp] -> Lambda KernelsMem
+createTemporaryArrays :: SubExp -> [SubExp] -> Lambda MCMem
                 -> MulticoreGen [VName]
 createTemporaryArrays num_threads nes scan_op = do
   let (scan_x_params, _scan_y_params) =
@@ -33,11 +33,11 @@ createTemporaryArrays num_threads nes scan_op = do
             shape = Shape [num_threads]
         sAllocArray "scan_arr_p" pt shape DefaultSpace
 
-compileSegScan :: Pattern KernelsMem
+compileSegScan :: Pattern MCMem
                 -> SegSpace
-                -> Lambda KernelsMem
+                -> Lambda MCMem
                 -> [SubExp]
-                -> KernelBody KernelsMem
+                -> KernelBody MCMem
                 -> MulticoreGen ()
 compileSegScan pat space scan_op nes kbody
   | segment_depth <- unSegSpace space,
@@ -47,11 +47,11 @@ compileSegScan pat space scan_op nes kbody
       segmentedScan pat space scan_op nes kbody
 
 
-segmentedScan :: Pattern KernelsMem
+segmentedScan :: Pattern MCMem
                 -> SegSpace
-                -> Lambda KernelsMem
+                -> Lambda MCMem
                 -> [SubExp]
-                -> KernelBody KernelsMem
+                -> KernelBody MCMem
                 -> MulticoreGen ()
 segmentedScan pat space scan_op nes kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
@@ -114,16 +114,16 @@ segmentedScan pat space scan_op nes kbody = do
 -- | A SegScanOp with auxiliary information.
 data SegScanOpSlug =
   SegScanOpSlug
-  { slugOp :: Lambda KernelsMem
+  { slugOp :: Lambda MCMem
   , slugAccs :: [(VName, [Imp.Exp])]
     -- ^ Places to store accumulator in stage 1 reduction.
   }
 
-slugParams :: SegScanOpSlug -> [LParam KernelsMem]
+slugParams :: SegScanOpSlug -> [LParam MCMem]
 slugParams = lambdaParams . slugOp
 
 segScanOpSlug :: Imp.Exp
-             -> Lambda KernelsMem
+             -> Lambda MCMem
              -> [VName]
              -> MulticoreGen SegScanOpSlug
 segScanOpSlug local_tid op param_arrs =
@@ -132,11 +132,11 @@ segScanOpSlug local_tid op param_arrs =
   where mkAcc param_arr = return (param_arr, [local_tid])
 
 
-nonsegmentedScan :: Pattern KernelsMem
+nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
-                 -> Lambda KernelsMem
+                 -> Lambda MCMem
                  -> [SubExp]
-                 -> KernelBody KernelsMem
+                 -> KernelBody MCMem
                  -> MulticoreGen ()
 nonsegmentedScan pat space scan_op nes kbody = do
   emit $ Imp.DebugPrint "nonsegmented segScan " Nothing

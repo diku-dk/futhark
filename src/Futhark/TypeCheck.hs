@@ -32,7 +32,6 @@ module Futhark.TypeCheck
   , checkType
   , checkExtType
   , matchExtPattern
-  , matchExtReturnType
   , matchExtBranchType
   , argType
   , argAliases
@@ -977,6 +976,15 @@ matchExtReturns rettype res ts = do
       (ctx_ts, val_ts) = splitFromEnd (length rettype) ts
 
   unless (length val_res == length rettype) problem
+
+  let num_exts = length $ S.fromList $
+                 concatMap (mapMaybe isExt . arrayExtDims) rettype
+  unless (num_exts == length ctx_res) $
+    bad $ TypeError $
+    "Number of context results does not match number of existentials in the return type.\n" ++
+    "Type:\n  " ++
+    prettyTuple rettype ++
+    "\ncannot match context parameters:\n  " ++ prettyTuple ctx_res
 
   let ctx_vals = zip ctx_res ctx_ts
       instantiateExt i = case maybeNth i ctx_vals of

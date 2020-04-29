@@ -167,7 +167,9 @@ library
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.Kernels
+      Futhark.Pass.ExplicitAllocations.SegOp
       Futhark.Pass.ExplicitAllocations.Seq
+      Futhark.Pass.ExplicitAllocations.MC
       Futhark.Pass.ExtractKernels
       Futhark.Pass.ExtractKernels.BlockedKernel
       Futhark.Pass.ExtractKernels.DistributeNests
@@ -175,6 +177,7 @@ library
       Futhark.Pass.ExtractKernels.Interchange
       Futhark.Pass.ExtractKernels.Intragroup
       Futhark.Pass.ExtractKernels.ISRWIM
+      Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
       Futhark.Pass.ResolveAssertions
@@ -203,6 +206,8 @@ library
       Futhark.Representation.AST.Syntax
       Futhark.Representation.AST.Syntax.Core
       Futhark.Representation.AST.Traversals
+      Futhark.Representation.MC
+      Futhark.Representation.MCMem
       Futhark.Representation.Mem
       Futhark.Representation.Mem.IxFun
       Futhark.Representation.Mem.Simplify
@@ -213,6 +218,7 @@ library
       Futhark.Representation.KernelsMem
       Futhark.Representation.Primitive
       Futhark.Representation.Ranges
+      Futhark.Representation.SegOp
       Futhark.Representation.Seq
       Futhark.Representation.SeqMem
       Futhark.Representation.SOACS
