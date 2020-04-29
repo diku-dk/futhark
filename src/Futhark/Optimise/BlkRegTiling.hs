@@ -50,6 +50,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     -- check that the code fits the pattern having:
     -- some `code1`, followed by one Screma SOAC, followed by some `code2`
     (code1, Just screma_stmt, code2)   <- matchCodeStreamCode kstms,
+
     Let pat_redomap aux_redomap (Op _) <- screma_stmt,
 
     -- checks that the Screma SOAC is actually a redomap and normalizes it
@@ -70,6 +71,8 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     --    is independent; these are recorded in `code2'`
     Just (code2', arr_tab0) <- foldl (processIndirections (namesFromList arrs) res_red_var)
                                      (Just (Seq.empty, M.empty)) code1,
+
+    null code2 && null code2', -- FIXME: remove the need for these assumptions
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
@@ -122,9 +125,13 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
             css <- letExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
             return [css]
 
+          residual   <- letSubExp "residual" $ BasicOp $ BinOp (SRem Int32) common_dim tk
+          full_tiles <- letSubExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
+          thd_res <- forLoop full_tiles cssss $ \kk thd_res_merge -> do
+
           -- outer loop computing this thread's result (loop kk in mmm_kernels)
-          kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
-          thd_res <- forLoop kk_bound cssss $ \kk thd_res_merge -> do
+          -- kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
+          -- thd_res <- forLoop kk_bound cssss $ \kk thd_res_merge -> do
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
             -- copy A from global to shared mem
@@ -132,19 +139,22 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                          ResultNoSimplify (ty, tk) $ \(thd_x, thd_y) -> do
 
               a_shr_init <- scratch "A_shr_init" map_t1 [ry]
-              loop_a_shr <- forLoop ry a_shr_init $ \i a_shr_init' -> do
+              loop_a_shr <- forLoop ry a_shr_init $ \i a_shr_merge -> do
 
-                -- let gtid_y := blockIdx.y * Ty * Ry + i * Ty + threadIdx.y
-                letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp i int32 *
-                                         primExpFromSubExp int32 ty + LeafExp thd_y int32)
+                k_bound <- letSubExp "k_bound" =<< ceilDiv tk tx
+                loop_a_shr' <- forLoop k_bound a_shr_merge $ \k a_shr_merge' -> do
 
-                addStm load_A -- at this point, inp_A contains the slice A[gtid_y, 0:U]
+                  -- let gtid_y := blockIdx.y * Ty * Ry + i * Ty + threadIdx.y
+                  letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp thd_y int32 *
+                                                    LeafExp i int32 * primExpFromSubExp int32 ty)
+                  addStm load_A -- add stm loading A[gtid_y, 0:U]
 
-                a_col_idx <- letExp "a_col" $ BasicOp $ BinOp (Add Int32) (Var kk') (Var thd_x)
-                a_shr <- update "A_shr" a_shr_init' [i]
-                           =<< index "A_elem" inp_A [a_col_idx]
-                return $ resultBody [Var a_shr]
-
+                  -- a_col_idx := kk' + thd_x + k * tx
+                  a_col_idx <- letExp "a_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_x int32 +
+                                                         LeafExp k int32 * primExpFromSubExp int32 tx)
+                  a_shr <- update "A_shr" a_shr_merge' [i] =<< index "A_elem" inp_A [a_col_idx]
+                  return $ resultBody [Var a_shr]
+                return $ resultBody [Var loop_a_shr']
               return [loop_a_shr]
 
             -- copy B from global to shared mem
@@ -152,20 +162,26 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                          ResultNoSimplify (tx, tk) $ \(thd_x, thd_y) -> do
 
               b_shr_init <- scratch "B_shr_init" map_t2 [rx]
-              loop_b_shr <- forLoop rx b_shr_init $ \j b_shr_init' -> do
 
-                -- let gtid_x := blockIdx.x * Tx * Rx + j * Tx + threadIdx.x
-                letBindNames_ [gtid_x] =<< toExp (LeafExp jjj int32 + LeafExp j int32 *
-                                         primExpFromSubExp int32 tx + LeafExp thd_x int32)
+              loop_b_shr <- forLoop rx b_shr_init $ \j b_shr_merge -> do
 
-                addStm load_B -- at this point, inp_B contains the slice B[gtid_x, 0:U]
+                k_bound <- letSubExp "k_bound" =<< ceilDiv tk ty
+                loop_b_shr' <- forLoop k_bound b_shr_merge $ \k b_shr_merge' -> do
 
-                b_col_idx <- letExp "b_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_y int32)
-                b_shr <- update "B_shr" b_shr_init' [j]
-                           =<< index "B_elem" inp_B [b_col_idx]
-                return $ resultBody [Var b_shr]
+                  -- let gtid_x := jjj + j', where j' = thd_x + j * tx
+                  letBindNames_ [gtid_x] =<< toExp (LeafExp jjj int32 + LeafExp thd_x int32 +
+                                                    LeafExp j int32 * primExpFromSubExp int32 tx)
+                  addStm load_B -- add the stm loading B[gtid_x, 0:U].
 
+                  -- let b_col_idx' := kk' + k', where k' = thd_y + k * ty
+                  b_col_idx <- letExp "b_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_y int32 +
+                                                         LeafExp k int32 * primExpFromSubExp int32 ty)
+                                                       
+                  b_shr <- update "B_shr" b_shr_merge' [j] =<< index "B_elem" inp_B [b_col_idx]
+                  return $ resultBody [Var b_shr]
+                return $ resultBody [Var loop_b_shr']
               return [loop_b_shr]
+
 
             -- inner loop updating this thread's accumulator (loop k in mmm_kernels)
             thd_acc <- forLoop tk thd_res_merge $ \k acc_merge -> do
@@ -229,9 +245,18 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
             return $ resultBody [Var thd_acc]
           --------------- END outer kk loop ---------------
 
+          
+          --------------- START epilogue ---------------
+          --
+          final_res <- letExp "thd_res_after_residual" =<<
+                         eIf (toExp $ primExpFromSubExp int32 residual .==. 0)
+                         (resultBodyM [Var thd_res])
+                         (resultBodyM [Var thd_res])
+
+          --------------- END epilogue -----------------
           -- TODO: RegTileReturns still a work in progress.
           return [RegTileReturns [(height_A, ty, ry), (width_B, tx, rx)]
-                                 thd_res]
+                                 final_res]
         --------------- END outer seggroup ---------------
 
 
@@ -240,7 +265,8 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
             kbody' = KernelBody () stms_seggroup ret_seggroup
         return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
 
-      return $ Just (host_stms, new_kernel)
+      -- return $ Just (host_stms, new_kernel)
+      trace (pretty host_stms ++ "\n" ++ pretty new_kernel) $ return $ Just (host_stms, new_kernel)
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
