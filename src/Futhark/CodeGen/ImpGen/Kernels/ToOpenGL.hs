@@ -228,7 +228,9 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("#define float64 double")|]
   , [C.cedecl|$esc:("#define boolean bool")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
-    glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
+    (if uses_float64 then glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
+     else [])
+    where uses_float64 = FloatType Float64 `S.member` ts
 
 nextErrorLabel :: GenericC.CompilerM KernelOp ShaderState String
 nextErrorLabel =
