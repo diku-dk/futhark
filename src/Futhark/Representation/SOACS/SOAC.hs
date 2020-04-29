@@ -102,7 +102,6 @@ data SOAC lore =
     -- 'Lambda'/'SubExp' pair is for scan and its neutral elements.
     -- The second is for the reduction.  The final lambda is for the
     -- map part, and finally comes the input arrays.
-  | CmpThreshold SubExp String
     deriving (Eq, Ord, Show)
 
 data HistOp lore = HistOp { histWidth :: SubExp
@@ -287,7 +286,6 @@ mapSOACM tv (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) =
                mapM (mapOnSOACSubExp tv) red_nes) <*>
    mapOnSOACLambda tv map_lam)
   <*> mapM (mapOnSOACVName tv) arrs
-mapSOACM tv (CmpThreshold what s) = CmpThreshold <$> mapOnSOACSubExp tv what <*> pure s
 
 instance Attributes lore => FreeIn (SOAC lore) where
   freeIn' = flip execState mempty . mapSOACM free
@@ -329,7 +327,6 @@ soacType (Hist _len ops _bucket_fun _imgs) = do
   map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
 soacType (Screma w form _arrs) =
   scremaType w form
-soacType CmpThreshold{} = [Prim Bool]
 
 instance TypedOp (SOAC lore) where
   opType = pure . staticShapes . soacType
@@ -358,7 +355,6 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     namesFromList $ map (\(_, _, a) -> a) as
   consumedInOp (Hist _ ops _ _) =
     namesFromList $ concatMap histDest ops
-  consumedInOp CmpThreshold{} = mempty
 
 mapHistOp :: (Lambda flore -> Lambda tlore)
           -> HistOp flore -> HistOp tlore
@@ -388,13 +384,11 @@ instance (Attributes lore,
                 (Alias.analyseLambda map_lam))
                arrs
     where onRed red = red { redLambda = Alias.analyseLambda $ redLambda red }
-  addOpAliases (CmpThreshold what s) = CmpThreshold what s
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases) return
 
 instance Attributes lore => IsOp (SOAC lore) where
-  safeOp CmpThreshold{} = True
   safeOp _ = False
   cheapOp _ = True
 
@@ -441,7 +435,6 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
                arrs
     where onRed red = red { redLambda = Range.runRangeM $ Range.analyseLambda $
                                         redLambda red }
-  addOpRanges (CmpThreshold what s) = CmpThreshold what s
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -487,7 +480,6 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
   indexOp _ _ _ _ = Nothing
 
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
-typeCheckSOAC (CmpThreshold what _) = TC.require [Prim int32] what
 typeCheckSOAC (Stream size form lam arrexps) = do
   let accexps = getStreamAccums form
   TC.require [Prim int32] size
@@ -657,7 +649,6 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Screma" $ do lambdaMetrics scan_lam
                          mapM_ (lambdaMetrics . redLambda) reds
                          lambdaMetrics map_lam
-  opMetrics CmpThreshold{} = seen "CmpThreshold"
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Stream size form lam arrs) =
@@ -700,7 +691,6 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                 commasep (map ppr arrs))
 
   ppr (Screma w form arrs) = ppScrema w form arrs
-  ppr (CmpThreshold what s) = text "cmpThreshold(" <> ppr what <> comma PP.<+> text (show s) <> text ")"
 
 ppScrema :: (PrettyLore lore, Pretty inp) =>
               SubExp -> ScremaForm lore -> [inp] -> Doc

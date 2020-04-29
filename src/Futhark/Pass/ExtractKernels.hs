@@ -322,12 +322,6 @@ kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
 
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 
-transformStm path (Let pat aux (Op (CmpThreshold what s))) = do
-  ((r, _), stms) <- cmpSizeLe s (Out.SizeThreshold path) [what]
-  runBinder_ $ do
-    addStms stms
-    addStm $ Let pat aux $ BasicOp $ SubExp r
-
 transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb

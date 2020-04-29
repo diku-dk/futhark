@@ -754,11 +754,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                          [Scalar $ Prim $ Signed Int32, arr_a] arr_a),
               ("transpose", IntrinsicPolyFun [tp_a] [arr_2d_a] arr_2d_a),
 
-              ("cmp_threshold", IntrinsicPolyFun []
-                                [Scalar $ Prim $ Signed Int32,
-                                 Array () Nonunique (Prim $ Signed Int32) (rank 1)] $
-                                Scalar $ Prim Bool),
-
                ("scatter", IntrinsicPolyFun [tp_a]
                           [Array () Unique t_a (rank 1),
                            Array () Nonunique (Prim $ Signed Int32) (rank 1),
