@@ -58,8 +58,7 @@ mapType outersize f = [ arrayOf t (Shape [outersize]) NoUniqueness
                       | t <- lambdaReturnType f ]
 
 -- | The type of a primitive operation.
-primOpType :: HasScope t m =>
-              BasicOp lore -> m [Type]
+primOpType :: HasScope lore m => BasicOp -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
 primOpType (Opaque se) =

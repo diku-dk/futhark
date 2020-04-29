@@ -645,8 +645,7 @@ checkBody (Body (_,lore) bnds res) = do
     map (`namesSubtract` bound_here) <$> mapM subExpAliasesM res
   where bound_here = namesFromList $ M.keys $ scopeOf bnds
 
-checkBasicOp :: Checkable lore =>
-               BasicOp (Aliases lore) -> TypeM lore ()
+checkBasicOp :: Checkable lore => BasicOp -> TypeM lore ()
 
 checkBasicOp (SubExp es) =
   void $ checkSubExp es

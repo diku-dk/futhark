@@ -634,7 +634,7 @@ defCompileExp pat (Op op) = do
   opc pat op
 
 defCompileBasicOp :: Mem lore =>
-                     Pattern lore -> BasicOp lore -> ImpM lore r op ()
+                     Pattern lore -> BasicOp -> ImpM lore r op ()
 
 defCompileBasicOp (Pattern _ [pe]) (SubExp se) =
   copyDWIM (patElemName pe) [] se []

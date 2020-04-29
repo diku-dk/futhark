@@ -269,7 +269,7 @@ lookupStm name vtable = asStm =<< lookup name vtable
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore, Certificates)
 lookupExp name vtable = (stmExp &&& stmCerts) <$> lookupStm name vtable
 
-lookupBasicOp :: VName -> SymbolTable lore -> Maybe (BasicOp lore, Certificates)
+lookupBasicOp :: VName -> SymbolTable lore -> Maybe (BasicOp, Certificates)
 lookupBasicOp name vtable = case lookupExp name vtable of
   Just (BasicOp e, cs) -> Just (e, cs)
   _                    -> Nothing

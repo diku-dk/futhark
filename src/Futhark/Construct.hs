@@ -322,7 +322,7 @@ cmpOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
 cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
 
 binLambda :: (MonadBinder m, Bindable (Lore m)) =>
-             (SubExp -> SubExp -> BasicOp (Lore m)) -> PrimType -> PrimType
+             (SubExp -> SubExp -> BasicOp) -> PrimType -> PrimType
           -> m (Lambda (Lore m))
 binLambda bop arg_t ret_t = do
   x   <- newVName "x"

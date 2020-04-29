@@ -165,7 +165,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
                         BasicOp Assert{}   -> True
                         _                  -> cs /= mempty
 
-instance Pretty (BasicOp lore) where
+instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
   ppr (Opaque e) = text "opaque" <> apply [ppr e]
   ppr (ArrayLit [] rt) =
