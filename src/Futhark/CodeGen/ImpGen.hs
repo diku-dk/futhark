@@ -1125,7 +1125,8 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
       error $
       unwords ["copyDWIMDest: prim-typed target", pretty name, "with slice", pretty dest_slice]
 
-    (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
+    (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) -> do
+      when (baseTag name == 6654) (error "fart")
       emit $ Imp.SetScalar name $ Imp.var src pt
 
     (ScalarDestination name, ArrayVar _ arr)
@@ -1134,6 +1135,7 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           (mem, space, i) <-
             fullyIndexArray' (entryArrayLocation arr) src_is
           vol <- asks envVolatility
+          when (baseTag name == 6654) (error "fbrt")
           emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
       | otherwise ->
           error $

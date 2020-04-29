@@ -400,6 +400,7 @@ public struct OpenCLContext {
    public int MaxGroupSize;
    public int MaxNumGroups;
    public int MaxTileSize;
+   public int MaxRegTileSize;
    public int MaxThreshold;
    public int MaxLocalMemory;
    public int MaxBespoke;
@@ -806,6 +807,7 @@ private CLProgramHandle SetupOpenCL(ref FutharkContext ctx,
 
     ctx.OpenCL.MaxGroupSize = MaxGroupSize;
     ctx.OpenCL.MaxTileSize = MaxTileSize; // No limit.
+    ctx.OpenCL.MaxRegTileSize = 0; // No limit.
     ctx.OpenCL.MaxThreshold = ctx.OpenCL.MaxNumGroups; // No limit.
     ctx.OpenCL.MaxLocalMemory = MaxLocalMemory;
     ctx.OpenCL.MaxBespoke = 0; // No limit.
