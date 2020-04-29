@@ -189,8 +189,14 @@ extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
-       , passFunction = fmap Prog . mapM transformFunDef . progFunctions
+       , passFunction = transformProg
        }
+
+transformProg :: Prog SOACS -> PassM (Prog Out.Kernels)
+transformProg (Prog consts funs) = do
+  consts' <- runDistribM $ transformStms mempty $ stmsToList consts
+  funs' <- mapM (transformFunDef $ scopeOf consts') funs
+  return $ Prog consts' funs'
 
 -- In order to generate more stable threshold names, we keep track of
 -- the numbers used for thresholds separately from the ordinary name
@@ -219,9 +225,10 @@ runDistribM (DistribM m) = do
   return x
 
 transformFunDef :: (MonadFreshNames m, MonadLogger m) =>
-                   FunDef SOACS -> m (Out.FunDef Out.Kernels)
-transformFunDef (FunDef entry name rettype params body) = runDistribM $ do
-  body' <- localScope (scopeOfFParams params) $
+                   Scope Out.Kernels -> FunDef SOACS
+                -> m (Out.FunDef Out.Kernels)
+transformFunDef scope (FunDef entry name rettype params body) = runDistribM $ do
+  body' <- localScope (scope <> scopeOfFParams params) $
            transformBody mempty body
   return $ FunDef entry name rettype params body'
 
@@ -351,10 +358,11 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   -- map function.  Such cases will fall through to the
   -- screma-splitting case, and produce an ordinary map and scan.
   -- Hopefully, the scan then triggers the ISWIM case above (otherwise
-  -- we will still crash in code generation).
+  -- we will still crash in code generation).  However, if the map
+  -- lambda is already identity, let's just go ahead here.
   | Just (scan_lam, nes, map_lam) <- isScanomapSOAC form,
-    all primType $ lambdaReturnType scan_lam,
-    not $ lambdaContainsParallelism map_lam = runBinder_ $ do
+    (all primType (lambdaReturnType scan_lam) &&
+     not (lambdaContainsParallelism map_lam)) || isIdentityLambda map_lam = runBinder_ $ do
       let scan_lam' = soacsLambdaToKernels scan_lam
           map_lam' = soacsLambdaToKernels map_lam
       lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
@@ -366,7 +374,7 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
               | otherwise                 = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
       types <- asksScope scopeForSOACs
-      bnds <- fst <$> runBinderT (simplifyStms =<< collectStms_ (certifying cs do_irwim)) types
+      (_, bnds) <- fst <$> runBinderT (simplifyStms =<< collectStms_ (certifying cs do_irwim)) types
       transformStms path $ stmsToList bnds
 
 transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))

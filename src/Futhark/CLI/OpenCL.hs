@@ -10,15 +10,13 @@ import Futhark.Pipeline
 import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import Futhark.Util
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile OpenCL" "Generate OpenCL/C code from optimised Futhark program."
        gpuPipeline $ \() mode outpath prog -> do
-         cprog <- either (`internalError` prettyText prog) return =<<
-                  COpenCL.compileProg prog
+         cprog <- COpenCL.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
              extra_options

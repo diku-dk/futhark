@@ -3,7 +3,7 @@
 module Futhark.CLI.Dev (main) where
 
 import Data.Maybe
-import Data.List
+import Data.List (intersperse)
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
@@ -163,7 +163,7 @@ kernelsProg name rep =
   externalErrorS $
   "Pass " ++ name ++" expects Kernels representation, but got " ++ representation rep
 
-typedPassOption :: (Checkable fromlore, Checkable tolore) =>
+typedPassOption :: Checkable tolore =>
                    (String -> UntypedPassState -> FutharkM (Prog fromlore))
                 -> (Prog tolore -> UntypedPassState)
                 -> Pass fromlore tolore
@@ -298,7 +298,7 @@ commandLineOptions =
     "Ignore 'unsafe'."
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
-  , soacsPassOption inlineAndRemoveDeadFunctions []
+  , soacsPassOption inlineFunctions []
   , kernelsPassOption inPlaceLowering []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []

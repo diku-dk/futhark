@@ -8,10 +8,9 @@ import System.Environment
 import System.Exit
 import System.FilePath
 
-import Futhark.Pipeline
 import Futhark.Passes
+import Futhark.Pipeline
 import qualified Futhark.CodeGen.Backends.CSOpenCL as CSOpenCL
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Compiler.CLI
 import Futhark.Util
 
@@ -24,8 +23,7 @@ main = compilerMain () []
           let class_name =
                 case mode of ToLibrary -> Just $ takeBaseName outpath
                              ToExecutable -> Nothing
-          csprog <- either (`internalError` prettyText prog) return =<<
-                    CSOpenCL.compileProg class_name prog
+          csprog <- CSOpenCL.compileProg class_name prog
 
           let cspath = outpath `addExtension` "cs"
           liftIO $ writeFile cspath csprog

@@ -3,7 +3,6 @@ module Futhark.CodeGen.Backends.SequentialCSharp
      ) where
 
 import Control.Monad
-import Futhark.Error
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
@@ -12,20 +11,20 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST ()
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory -> m (Either InternalError String)
+               Maybe String -> Prog ExplicitMemory -> m String
 compileProg module_name =
   ImpGen.compileProg >=>
-  traverse (CS.compileProg
-             module_name
-             CS.emptyConstructor
-             []
-             []
-             operations
-             ()
-             empty
-             []
-             []
-             [])
+  CS.compileProg
+  module_name
+  CS.emptyConstructor
+  []
+  []
+  operations
+  ()
+  empty
+  []
+  []
+  []
   where operations :: CS.Operations Imp.Sequential ()
         operations = CS.defaultOperations
                      { CS.opsCompiler = const $ return ()

@@ -1,6 +1,6 @@
 -- Anonymous array element type misused.
 -- ==
--- error: Couldn't match
+-- error: Cannot apply "reverse" to "x"
 
 let reverse [n] [m] 't (a: [m][n]t) = a[::-1]
 

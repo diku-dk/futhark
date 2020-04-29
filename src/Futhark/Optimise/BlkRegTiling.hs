@@ -120,10 +120,11 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
           jjj <- letExp "jjj" $ BasicOp $ BinOp (Mul Int32) (Var bid_x) tx_rx
 
           -- initialize register mem with neutral elements
-          [cssss] <- segMap2D "cssss" (segThread grid_size block_size)
+          cssss_list <- segMap2D "cssss" (segThread grid_size block_size)
                        ResultPrivate (ty, tx) $ \(_, _) -> do
             css <- letExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
             return [css]
+          let [cssss] = cssss_list
 
           residual   <- letSubExp "residual" $ BasicOp $ BinOp (SRem Int32) common_dim tk
           full_tiles <- letSubExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
@@ -135,7 +136,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
             -- copy A from global to shared mem
-            [a_shr] <- segMap2D "A_shr" (segThread grid_size block_size)
+            a_shr_list <- segMap2D "A_shr" (segThread grid_size block_size)
                          ResultNoSimplify (ty, tk) $ \(thd_x, thd_y) -> do
 
               a_shr_init <- scratch "A_shr_init" map_t1 [ry]
@@ -156,9 +157,10 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                   return $ resultBody [Var a_shr]
                 return $ resultBody [Var loop_a_shr']
               return [loop_a_shr]
+            let [a_shr] = a_shr_list
 
             -- copy B from global to shared mem
-            [b_shr] <- segMap2D "B_shr" (segThread grid_size block_size)
+            b_shr_list <- segMap2D "B_shr" (segThread grid_size block_size)
                          ResultNoSimplify (tx, tk) $ \(thd_x, thd_y) -> do
 
               b_shr_init <- scratch "B_shr_init" map_t2 [rx]
@@ -181,13 +183,14 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                   return $ resultBody [Var b_shr]
                 return $ resultBody [Var loop_b_shr']
               return [loop_b_shr]
+            let [b_shr] = b_shr_list
 
 
             -- inner loop updating this thread's accumulator (loop k in mmm_kernels)
             thd_acc <- forLoop tk thd_res_merge $ \k acc_merge -> do
 
               -- before the redomap, write from shared to register mem
-              [asss, bsss] <- segMap2D "shr_mem" (segThread grid_size block_size)
+              asss_bsss <- segMap2D "shr_mem" (segThread grid_size block_size)
                                 ResultPrivate (ty, tx) $ \(thd_x, thd_y) -> do
 
                 -- copy from shared mem to register mem
@@ -209,8 +212,10 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                   return $ resultBody [Var bsss]
                 return [asss, bsss]
 
+              let [asss, bsss] = asss_bsss
+
               -- the actual redomap
-              [redomap_res] <- segMap2D "redomap_res" (segThread grid_size block_size)
+              redomap_res <- segMap2D "redomap_res" (segThread grid_size block_size)
                              ResultPrivate (ty, tx) $ \(thd_y, thd_x) -> do
 
                 as <- indexSubArr "as" asss [thd_y, thd_x] [ry]
@@ -239,7 +244,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                 return [css]
 
               -- TODO: where to put code2..? ie. code following the redomap
-              return $ resultBody [Var redomap_res]
+              return $ resultBody $ map Var redomap_res
             --------------- END inner k loop ----------------
 
             return $ resultBody [Var thd_acc]

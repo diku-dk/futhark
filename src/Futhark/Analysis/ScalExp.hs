@@ -12,7 +12,7 @@ module Futhark.Analysis.ScalExp
   )
 where
 
-import Data.List
+import Data.List (find)
 import Data.Maybe
 
 import Futhark.Representation.Primitive hiding (SQuot, SRem, SDiv, SMod, SSignum)

@@ -1,4 +1,5 @@
--- | A re-export of the prettyprinting library, along with a convenience function.
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+-- | A re-export of the prettyprinting library, along with some convenience functions.
 module Futhark.Util.Pretty
        ( module Text.PrettyPrint.Mainland
        , module Text.PrettyPrint.Mainland.Class
@@ -13,11 +14,17 @@ module Futhark.Util.Pretty
        , annot
        , nestedBlock
        , textwrap
+       , shorten
+
+       , color
+       , inRed
+       , inGreen
        )
        where
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as LT
+import System.Console.ANSI
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 import Text.PrettyPrint.Mainland.Class
@@ -72,3 +79,20 @@ nestedBlock :: String -> String -> Doc -> Doc
 nestedBlock pre post body = text pre </>
                             PP.indent 2 body </>
                             text post
+
+-- | Prettyprint on a single line up to at most some appropriate
+-- number of characters, with trailing ... if necessary.  Used for
+-- error messages.
+shorten :: Pretty a => a -> Doc
+shorten a | length s > 70 = text (take 70 s) <> text "..."
+          | otherwise = text s
+  where s = pretty a
+
+color :: [SGR] -> String -> String
+color sgr s = setSGRCode sgr ++ s ++ setSGRCode [Reset]
+
+inRed :: String -> String
+inRed s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]
+
+inGreen :: String -> String
+inGreen s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]

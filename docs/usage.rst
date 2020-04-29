@@ -340,6 +340,11 @@ following function::
 
   struct futhark_context *futhark_context_new(struct futhark_context_config *cfg);
 
+Context creation may fail.  Immediately after
+``futhark_context_new()``, call ``futhark_context_get_error()`` (see
+below), which will return a non-NULL error string if context creation
+failed.
+
 Memory management is entirely manual.  Deallocation functions are
 provided for all types defined in the header file.  Everything
 returned by an entry point must be manually deallocated.

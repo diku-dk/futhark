@@ -24,7 +24,7 @@ mainImports = mainWithOptions () [] "program" $ \args () ->
     [file] -> Just $ do
       (_, prog_imports, _) <- readProgramOrDie file
       liftIO $ putStr $ unlines $ map (++ ".fut")
-        $ filter (\f -> not ("futlib/" `isPrefixOf` f))
+        $ filter (\f -> not ("prelude/" `isPrefixOf` f))
         $ map fst prog_imports
     _ -> Nothing
 

@@ -30,7 +30,6 @@ module Futhark.Representation.AST.Traversals
   , mapExp
   , mapOnType
   , mapOnLoopForm
-  , mapOnExtType
 
   -- * Walking
   , Walker(..)
@@ -153,16 +152,6 @@ mapExpM tv (Op op) =
 
 mapOnShape :: Monad m => Mapper flore tlore m -> Shape -> m Shape
 mapOnShape tv (Shape ds) = Shape <$> mapM (mapOnSubExp tv) ds
-
-mapOnExtType :: Monad m =>
-                Mapper flore tlore m -> TypeBase ExtShape u -> m (TypeBase ExtShape u)
-mapOnExtType tv (Array bt (Shape shape) u) =
-  Array bt <$> (Shape <$> mapM mapOnExtSize shape) <*>
-  return u
-  where mapOnExtSize (Ext x)   = return $ Ext x
-        mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
-mapOnExtType _ (Prim bt) = return $ Prim bt
-mapOnExtType _ (Mem space) = pure $ Mem space
 
 mapOnLoopForm :: Monad m =>
                  Mapper flore tlore m -> LoopForm flore -> m (LoopForm tlore)

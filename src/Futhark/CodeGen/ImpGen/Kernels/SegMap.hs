@@ -29,28 +29,28 @@ compileSegMap pat lvl space kbody = do
   group_size' <- traverse toExp $ segGroupSize lvl
 
   case lvl of
-
-    SegThread{} ->
-      sKernelThread "segmap" num_groups' group_size' (segFlat space) $ \constants -> do
+    SegThread{} -> do
+      emit $ Imp.DebugPrint "\n# SegMap" Nothing
       let virt_num_groups = product dims' `quotRoundingUp` unCount group_size'
-      virtualiseGroups constants (segVirt lvl) virt_num_groups $ \group_id -> do
-        let global_tid = Imp.vi32 group_id * unCount group_size' +
-                         kernelLocalThreadId constants
+      sKernelThread "segmap" num_groups' group_size' (segFlat space) $
+        virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
+        local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
+        let global_tid = Imp.vi32 group_id * unCount group_size' + local_tid
 
         zipWithM_ dPrimV_ is $ unflattenIndex dims' global_tid
 
         sWhen (isActive $ unSegSpace space) $
           compileStms mempty (kernelBodyStms kbody) $
-          zipWithM_ (compileThreadResult space constants) (patternElements pat) $
+          zipWithM_ (compileThreadResult space) (patternElements pat) $
           kernelBodyResult kbody
 
     SegGroup{} ->
-      sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ \constants -> do
+      sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ do
       let virt_num_groups = product dims'
-      virtualiseGroups constants (segVirt lvl) virt_num_groups $ \group_id -> do
+      virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
 
         zipWithM_ dPrimV_ is $ unflattenIndex dims' $ Imp.vi32 group_id
 
         compileStms mempty (kernelBodyStms kbody) $
-          zipWithM_ (compileGroupResult space constants) (patternElements pat) $
+          zipWithM_ (compileGroupResult space) (patternElements pat) $
           kernelBodyResult kbody
