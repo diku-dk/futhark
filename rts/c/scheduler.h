@@ -11,7 +11,7 @@
 #include <windows.h>
 #elif __APPLE__
 #include <sys/sysctl.h>
-// Used for getting cpu usage of threads
+// For getting cpu usage of threads
 #include <mach/mach.h>
 #include <sys/resource.h>
 #else // Linux
@@ -36,12 +36,14 @@ struct scheduler_task {
   void* args;
   long int iterations;
   int granularity;
+  int is_nested;
 };
 
 struct worker {
   pthread_t thread;
   struct subtask_queue q;
   struct scheduler *scheduler;
+  int cur_working;
 
   int tid;                     /* Just a thread id */
   uint64_t time_spent_working; /* Time spent in tasks functions */
@@ -150,6 +152,7 @@ static inline void *futhark_worker(void* arg)
       int64_t start = get_wall_time();
 #endif
 
+      worker->cur_working = 1;
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, worker->tid);
 
 #ifdef MCPROFILE
@@ -204,6 +207,20 @@ static inline void scheduler_set_queue_profiling(struct scheduler *scheduler, in
   }
   return;
 }
+
+
+static inline struct worker* get_own_worker_struct(struct scheduler *scheduler)
+{
+  pthread_t pid = pthread_self();
+  for (int i = 0; i < scheduler->num_threads; i++) {
+    if (pid == scheduler->workers[i].thread)
+    {
+      return &scheduler->workers[i];
+    }
+  }
+  return NULL;
+}
+
 
 static inline int scheduler_dynamic(struct scheduler *scheduler,
                                     struct scheduler_task *task,
@@ -348,6 +365,14 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
     return 0;
   }
 
+  struct worker *worker = get_own_worker_struct(scheduler);
+  if (worker != NULL)
+  {
+    // For now the worker just executes it itself
+    CHECK_ERR(task->fn(task->args, 0, task->iterations, worker->tid), "worker_own_task");
+    *ntask = 1;
+    return 0;
+  }
   start_iter = task->iterations;
   ran_iter = 0;
 
