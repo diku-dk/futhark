@@ -172,7 +172,7 @@ scalExpRange :: SE.ScalExp -> Range
 scalExpRange se =
   (Just $ ScalarBound se, Just $ ScalarBound se)
 
-primOpRanges :: BasicOp lore -> [Range]
+primOpRanges :: BasicOp -> [Range]
 primOpRanges (SubExp se) =
   [rangeOf se]
 
