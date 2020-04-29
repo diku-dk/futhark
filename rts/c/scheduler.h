@@ -36,7 +36,6 @@ struct scheduler_task {
   void* args;
   long int iterations;
   int granularity;
-  int is_nested;
 };
 
 struct worker {
@@ -190,9 +189,10 @@ static inline void *futhark_worker(void* arg)
 
         CHECK_ERR(subtask_queue_enqueue(&worker->q, subtask), "subtask_queue_enqueue");
       }
+      worker->cur_working = 0;
     } else {
-#ifdef MCPROFILE
       output_thread_usage(worker);
+#ifdef MCPROFILE
 #endif
       break;
     }
@@ -241,14 +241,14 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   int iter_pr_subtask = task->iterations / max_num_tasks;
   int remainder = task->iterations % max_num_tasks;
 
-  int nsubtasks = iter_pr_subtask == 0 ? 1 : ((task->iterations - remainder) / iter_pr_subtask);
+  int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
   int shared_counter = nsubtasks;
 
   /* Each subtasks is processed in chunks */
   int chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
 
   int start = 0;
-  int end = iter_pr_subtask + remainder;
+  int end = iter_pr_subtask + (int)(remainder != 0);
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args,
                                             &mutex, &cond, &shared_counter,
@@ -256,9 +256,13 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
     assert(subtask != NULL);
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads].q, subtask),
               "subtask_queue_enqueue");
+#ifdef MCDEBUG
+    fprintf(stderr, "[scheduler_dynamic] pushed %d iterations onto %d's q\n", (end - start), subtask_id%scheduler->num_threads);
+
+#endif
     // Update range params
     start = end;
-    end += iter_pr_subtask;
+    end += iter_pr_subtask + (subtask_id < remainder);
   }
 
   // Join (wait for subtasks to finish)
@@ -289,8 +293,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
 
 /* Performs static scheduling of a task */
 /* Divides the number of iterations into num_threads equal sized chunks */
-/* (with the first thread taking the remaining iterations that does
-   not divide the number of threads) */
+/* Any remainders is divided evenly out among threads  */
 static inline int scheduler_static(struct scheduler *scheduler,
                                    struct scheduler_task *task,
                                    int *ntask)
@@ -309,11 +312,16 @@ static inline int scheduler_static(struct scheduler *scheduler,
   int remainder = task->iterations % scheduler->num_threads;
 
 
-  int nsubtasks = iter_pr_subtask == 0 ? 1 : ((task->iterations - remainder) / iter_pr_subtask);
+  int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
   int shared_counter = nsubtasks;
 
   int start = 0;
-  int end = iter_pr_subtask + remainder;
+  int end = iter_pr_subtask + (int)(remainder != 0);
+
+#ifdef MCDEBUG
+  fprintf(stderr, "[scheduler_static] nsubtasks %d - remainder %d - iter_pr_subtask %d", nsubtasks, remainder, iter_pr_subtask);
+#endif
+
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args,
                                             &mutex, &cond, &shared_counter,
@@ -321,9 +329,15 @@ static inline int scheduler_static(struct scheduler *scheduler,
     assert(subtask != NULL);
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask),
               "subtask_queue_enqueue");
+#ifdef MCDEBUG
+    fprintf(stderr, "[scheduler_static] iter_pr_subtask %d - exp %d\n", iter_pr_subtask, subtask_id < remainder);
+    fprintf(stderr, "[scheduler_static] pushed start %d - end %d iterations onto %d's q\n", start, end, subtask_id%scheduler->num_threads);
+#endif
+
     // Update range params
     start = end;
-    end += iter_pr_subtask;
+    end += iter_pr_subtask + (subtask_id < remainder);
+
   }
 
   // Join (wait for subtasks to finish)
@@ -343,6 +357,83 @@ static inline int scheduler_static(struct scheduler *scheduler,
 
   return scheduler_error;
 
+}
+
+
+static inline int delegate_work(struct scheduler *scheduler,
+                                struct scheduler_task* task,
+                                int *ntask,
+                                struct worker* calling_worker)
+{
+  int free_workers = 1; // The calling worker is also "free"
+  for (int i = 0; i < scheduler->num_threads; i++) {
+    if (i == calling_worker->tid) continue;
+    // Lets just hope this doesn't change during execution
+    if (scheduler->workers[i].cur_working == 1) {
+      free_workers++;
+    }
+  }
+
+
+  pthread_mutex_t mutex;
+  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
+  pthread_cond_t cond;
+  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
+
+  int iter_pr_subtask = task->iterations / free_workers;
+  int remainder = task->iterations % free_workers;
+
+  int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
+  int shared_counter = 1;
+
+  int start = 0;
+  int end = iter_pr_subtask + remainder;
+
+#ifdef MCDEBUG
+  fprintf(stderr, "thread %d creating new work\n", calling_worker->tid);
+  fprintf(stderr, "free worker %d\n", free_workers);
+  fprintf(stderr, "nsubtasks %d\n", nsubtasks);
+#endif
+
+  for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
+    if (scheduler->workers[subtask_id].cur_working == 1 || (calling_worker->tid == subtask_id)) continue;
+    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
+    shared_counter++;
+    CHECK_ERR(pthread_cond_broadcast(&cond), "pthread_cond_broadcast");
+    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
+
+    struct subtask *subtask = setup_subtask(task->fn, task->args,
+                                            &mutex, &cond, &shared_counter,
+                                            start, end, 0);
+    assert(subtask != NULL);
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask),
+              "subtask_queue_enqueue");
+#ifdef MCDEBUG
+    fprintf(stderr, " tid %d pushed onto queue %d\n", calling_worker->tid, subtask_id);
+#endif
+    // Update range params
+    start = end;
+    end += iter_pr_subtask;
+  }
+
+  // Let calling worker do the remaining work
+  CHECK_ERR(task->fn(task->args, start, task->iterations, calling_worker->tid), "executing");
+
+  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
+  shared_counter--;
+  CHECK_ERR(pthread_cond_broadcast(&cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
+
+  // Join (wait for subtasks to finish)
+  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
+  while (shared_counter != 0) {
+    fprintf(stderr, "tid %d -  shared counter %d\n", calling_worker->tid, shared_counter);
+    CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
+  }
+
+  if (ntask != NULL)
+    *ntask = scheduler->num_threads;
+  return 0;
 }
 
 static inline int scheduler_do_task(struct scheduler *scheduler,
@@ -368,13 +459,14 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   struct worker *worker = get_own_worker_struct(scheduler);
   if (worker != NULL)
   {
-    // For now the worker just executes it itself
-    CHECK_ERR(task->fn(task->args, 0, task->iterations, worker->tid), "worker_own_task");
-    *ntask = 1;
+    CHECK_ERR(delegate_work(scheduler, task, ntask, worker), "delegate_work");
     return 0;
   }
+
+#ifdef MCPROFILE
   start_iter = task->iterations;
   ran_iter = 0;
+#endif
 
   /* Run task directly if below some threshold */
   /* if (task->iterations < 1000) { */

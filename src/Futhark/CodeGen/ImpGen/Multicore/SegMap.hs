@@ -45,7 +45,7 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   let freeVariables = namesToList (freeIn body' `namesSubtract` oneName (segFlat space))
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
-  let scheduling = decideScheduling body'
+      scheduling = decideScheduling body'
 
   emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks (segFlat space) (product ns')
                              (Imp.MulticoreFunc freeParams mempty body' num_tasks)

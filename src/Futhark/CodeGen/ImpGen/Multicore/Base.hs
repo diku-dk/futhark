@@ -16,6 +16,7 @@ import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.MCMem
+import Futhark.Representation.SegOp
 
 
 type MulticoreGen = ImpM MCMem () Imp.Multicore

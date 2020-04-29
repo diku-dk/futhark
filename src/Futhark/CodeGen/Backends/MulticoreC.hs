@@ -112,6 +112,7 @@ compileProg =
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    cur_worker->tid = i;
                    cur_worker->time_spent_working = 0;
+                   cur_worker->cur_working = 0;
                    cur_worker->scheduler = &ctx->scheduler;
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 32),
                              "failed to init jobqueue for worker %d\n", i);
