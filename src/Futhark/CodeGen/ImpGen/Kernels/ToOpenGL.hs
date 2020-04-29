@@ -129,7 +129,7 @@ onShader shader = do
 
       const_defs = mapMaybe constDef $ kernelUses shader
 
--- We do not account for safety within shaders.
+      -- We do not account for safety within shaders.
       safety = SafetyNone
 
       --FIXME:
@@ -139,11 +139,11 @@ onShader shader = do
                     map (\(i, k, u) -> case u of
                                        AScalarUse ->
                                          "layout(location = " ++ show i ++
-                                         ") " ++ "uniform " ++ pretty k
+                                         ") uniform " ++ pretty k ++ "\n"
                                        AMemoryUse ->
                                          "layout(std430, binding = " ++
-                                         show i ++ ") " ++ "buffer SSBO" ++ show i
-                                         ++ "\n{\n  "  ++ pretty k ++ "\n};"
+                                         show i ++ ") buffer SSBO" ++ show i
+                                         ++ "\n{\n  "  ++ pretty k ++ "\n};\n"
                                        _ ->
                                          ""
                         ) $ zip3 [(0::Int)..] use_params uses
@@ -163,10 +163,11 @@ onShader shader = do
                  $id:name();
                 }|]
 
+      shader_code = cLayoutQuals ++ shader_fun ++ shader_main
+
   modify $ \s -> s
     { glShaders   =
-           M.insert name (safety, (cLayoutQuals ++ shader_fun ++ shader_main)
-                         ) $ glShaders s
+           M.insert name (safety, shader_code) $ glShaders s
     , glUsedTypes = typesInShader shader <> glUsedTypes s
     }
 
