@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- | A representation for multicore CPU parallelism.
 module Futhark.Representation.MC
        ( -- * The Lore definition
@@ -13,16 +14,14 @@ module Futhark.Representation.MC
        , module Futhark.Representation.AST.Traversals
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
-       , module Futhark.Representation.Kernels.Kernel
-       , module Futhark.Representation.Kernels.Sizes
+       , module Futhark.Representation.SegOp
        , module Futhark.Representation.SOACS.SOAC
        )
 where
 
 import Futhark.Pass
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.Kernels.Kernel
-import Futhark.Representation.Kernels.Sizes
+import Futhark.Representation.SegOp
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -69,5 +68,14 @@ simpleMC :: Simplify.SimpleOps MC
 simpleMC = Simplify.bindableSimpleOps simplifySegOp
 
 simplifyProg :: Prog MC -> PassM (Prog MC)
-simplifyProg = Simplify.simplifyProg simpleMC standardRules blockers
+simplifyProg = Simplify.simplifyProg simpleMC rules blockers
   where blockers = Engine.noExtraHoistBlockers
+        rules = standardRules <> segOpRules
+
+instance HasSegOp () MC where
+  asSegOp = Just
+  segOp = id
+
+instance HasSegOp () (Engine.Wise MC) where
+  asSegOp = Just
+  segOp = id

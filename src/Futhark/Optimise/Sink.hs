@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- | "Sinking" is conceptually the opposite of hoisting.  The idea is
 -- to take code that looks like this:
 --
@@ -42,9 +43,10 @@
 -- because we do anything kernel-specific here, but simply because
 -- more explicit indexing is going on after SOACs are gone.
 
-module Futhark.Optimise.Sink (sink) where
+module Futhark.Optimise.Sink (sinkKernels, sinkMC) where
 
 import Control.Monad.State
+import Data.Bifunctor
 import Data.List (foldl')
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -55,19 +57,26 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Representation.Aliases
 import Futhark.Representation.Ranges
 import Futhark.Representation.Kernels
+import Futhark.Representation.MC
 import Futhark.Pass
 
 -- We do not care about ranges, but in order to use ST.SymbolTable
 -- (which is a convenient way to handle aliases), we need range information.
-type SinkLore = Ranges (Aliases Kernels)
-type SymbolTable = ST.SymbolTable SinkLore
-type Sinking = M.Map VName (Stm SinkLore)
+type SymbolTable lore = ST.SymbolTable lore
+type Sinking lore = M.Map VName (Stm lore)
 type Sunk = S.Set VName
+type Sinker lore a = SymbolTable lore -> Sinking lore -> a -> (a, Sunk)
+type Constraints lore = (Attributes lore,
+                         Aliased lore,
+                         ST.IndexOp (Op lore),
+                         RangesOf (BodyAttr lore),
+                         RangeOf (LetAttr lore),
+                         RangedOp (Op lore))
 
 -- | Given a statement, compute how often each of its free variables
 -- are used.  Not accurate: what we care about are only 1, and greater
 -- than 1.
-multiplicity :: Stm SinkLore -> M.Map VName Int
+multiplicity :: Constraints lore => Stm lore -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
     If cond tbranch fbranch _ ->
@@ -77,10 +86,11 @@ multiplicity stm =
     _ -> free stm 1
   where free x k = M.fromList $ zip (namesToList $ freeIn x) $ repeat k
 
-optimiseBranch :: SymbolTable -> Sinking -> Body SinkLore
-               -> (Body SinkLore, Sunk)
-optimiseBranch vtable sinking (Body attr stms res) =
-  let (stms', stms_sunk) = optimiseStms vtable sinking' stms $ freeIn res
+optimiseBranch :: Constraints lore =>
+                  Sinker lore (Op lore)
+               -> Sinker lore (Body lore)
+optimiseBranch onOp vtable sinking (Body attr stms res) =
+  let (stms', stms_sunk) = optimiseStms onOp vtable sinking' stms $ freeIn res
   in (Body attr (sunk_stms <> stms') res,
       sunk <> stms_sunk)
   where free_in_stms = freeIn stms <> freeIn res
@@ -91,9 +101,12 @@ optimiseBranch vtable sinking (Body attr stms res) =
           all (`ST.available` vtable) (namesToList (freeIn stm))
         sunk = S.fromList $ concatMap (patternNames . stmPattern) sunk_stms
 
-optimiseStms :: SymbolTable -> Sinking -> Stms SinkLore -> Names
-             -> (Stms SinkLore, Sunk)
-optimiseStms init_vtable init_sinking all_stms free_in_res =
+optimiseStms :: Constraints lore =>
+                Sinker lore (Op lore)
+             -> SymbolTable lore -> Sinking lore
+             -> Stms lore -> Names
+             -> (Stms lore, Sunk)
+optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
   let (all_stms', sunk) =
         optimiseStms' init_vtable init_sinking $ stmsToList all_stms
   in (stmsFromList all_stms', sunk)
@@ -116,17 +129,16 @@ optimiseStms init_vtable init_sinking all_stms free_in_res =
              else (stm : stms', sunk)
 
       | If cond tbranch fbranch ret <- stmExp stm =
-          let (tbranch', tsunk) = optimiseBranch vtable sinking tbranch
-              (fbranch', fsunk) = optimiseBranch vtable sinking fbranch
+          let (tbranch', tsunk) = optimiseBranch onOp vtable sinking tbranch
+              (fbranch', fsunk) = optimiseBranch onOp vtable sinking fbranch
               (stms', sunk) = optimiseStms' vtable' sinking stms
           in (stm { stmExp = If cond tbranch' fbranch' ret } : stms',
               tsunk <> fsunk <> sunk)
 
-      | Op (SegOp op) <- stmExp stm =
-          let scope = scopeOfSegSpace $ segSpace op
+      | Op op <- stmExp stm =
+          let (op', op_sunk) = onOp vtable sinking op
               (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-              (op', op_sunk) = runState (mapSegOpM (opMapper scope) op) mempty
-          in (stm { stmExp = Op (SegOp op') } : stms',
+          in (stm { stmExp = Op op' } : stms',
               stms_sunk <> op_sunk)
 
       | otherwise =
@@ -140,50 +152,78 @@ optimiseStms init_vtable init_sinking all_stms free_in_res =
               identityMapper
               { mapOnBody = \scope body -> do
                   let (body', sunk) =
-                        optimiseBody (ST.fromScope scope <> vtable) sinking body
+                        optimiseBody onOp (ST.fromScope scope <> vtable)
+                        sinking body
                   modify (<>sunk)
                   return body'
               }
 
-            opMapper scope =
-              identitySegOpMapper
-              { mapOnSegOpLambda = \lam -> do
-                  let (body, sunk) =
-                        optimiseBody op_vtable sinking $
-                        lambdaBody lam
-                  modify (<>sunk)
-                  return lam { lambdaBody = body }
-
-              , mapOnSegOpBody = \body -> do
-                  let (body', sunk) =
-                        optimiseKernelBody op_vtable sinking body
-                  modify (<>sunk)
-                  return body'
-              }
-              where op_vtable = ST.fromScope scope <> vtable
-
-optimiseBody :: SymbolTable -> Sinking -> Body SinkLore
-             -> (Body SinkLore, Sunk)
-optimiseBody vtable sinking (Body attr stms res) =
-  let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
+optimiseBody :: Constraints lore =>
+                Sinker lore (Op lore)
+             -> Sinker lore (Body lore)
+optimiseBody onOp vtable sinking (Body attr stms res) =
+  let (stms', sunk) = optimiseStms onOp vtable sinking stms $ freeIn res
   in (Body attr stms' res, sunk)
 
-optimiseKernelBody :: SymbolTable -> Sinking -> KernelBody SinkLore
-                   -> (KernelBody SinkLore, Sunk)
-optimiseKernelBody vtable sinking (KernelBody attr stms res) =
-  let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
+optimiseKernelBody :: Constraints lore =>
+                      Sinker lore (Op lore)
+                   -> Sinker lore (KernelBody lore)
+optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
+  let (stms', sunk) = optimiseStms onOp vtable sinking stms $ freeIn res
   in (KernelBody attr stms' res, sunk)
 
-sink :: Pass Kernels Kernels
-sink = Pass "sink" "move memory loads closer to their uses" $
-       fmap (removeProgAliases . removeProgRanges) .
-       intraproceduralTransformationWithConsts onConsts onFun .
-       Range.rangeAnalysis . Alias.aliasAnalysis
+optimiseSegOp :: Constraints lore =>
+                 Sinker lore (Op lore) -> Sinker lore (SegOp lvl lore)
+optimiseSegOp onOp vtable sinking op =
+  let scope = scopeOfSegSpace $ segSpace op
+  in runState (mapSegOpM (opMapper scope) op) mempty
+  where opMapper scope =
+          identitySegOpMapper
+          { mapOnSegOpLambda = \lam -> do
+              let (body, sunk) =
+                    optimiseBody onOp op_vtable sinking $
+                    lambdaBody lam
+              modify (<>sunk)
+              return lam { lambdaBody = body }
+
+          , mapOnSegOpBody = \body -> do
+              let (body', sunk) =
+                    optimiseKernelBody onOp op_vtable sinking body
+              modify (<>sunk)
+              return body'
+          }
+          where op_vtable = ST.fromScope scope <> vtable
+
+type SinkLore lore = Ranges (Aliases lore)
+
+sink :: (Attributes lore,
+         CanBeAliased (Op lore),
+         CanBeRanged (OpWithAliases (Op lore)),
+         AliasedOp (OpWithRanges (OpWithAliases (Op lore))),
+         ST.IndexOp (OpWithRanges (OpWithAliases (Op lore)))) =>
+        Sinker (SinkLore lore) (Op (SinkLore lore)) -> Pass lore lore
+sink onOp =
+  Pass "sink" "move memory loads closer to their uses" $
+  fmap (removeProgAliases . removeProgRanges) .
+  intraproceduralTransformationWithConsts onConsts onFun .
+  Range.rangeAnalysis . Alias.aliasAnalysis
   where onFun _ fd = do
           let vtable = ST.insertFParams (funDefParams fd) mempty
-              (body, _) = optimiseBody vtable mempty $ funDefBody fd
+              (body, _) = optimiseBody onOp vtable mempty $ funDefBody fd
           return fd { funDefBody = body }
 
         onConsts consts =
-          pure $ fst $ optimiseStms mempty mempty consts $
+          pure $ fst $ optimiseStms onOp mempty mempty consts $
           namesFromList $ M.keys $ scopeOf consts
+
+sinkKernels :: Pass Kernels Kernels
+sinkKernels = sink onHostOp
+  where onHostOp :: Sinker (SinkLore Kernels) (Op (SinkLore Kernels))
+        onHostOp vtable sinking (SegOp op) =
+          first SegOp $ optimiseSegOp onHostOp vtable sinking op
+        onHostOp _ _ op = (op, mempty)
+
+sinkMC :: Pass MC MC
+sinkMC = sink onSegOp
+  where onSegOp :: Sinker (SinkLore MC) (Op (SinkLore MC))
+        onSegOp = optimiseSegOp onSegOp

@@ -361,7 +361,7 @@ commandLineOptions =
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
   , kernelsPassOption unstreamKernels []
-  , kernelsPassOption sink []
+  , kernelsPassOption sinkKernels []
   , typedPassOption soacsProg Kernels extractKernels []
 
   , allocateOption "a"

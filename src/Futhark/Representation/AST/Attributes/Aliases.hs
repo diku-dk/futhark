@@ -39,7 +39,7 @@ subExpAliases :: SubExp -> Names
 subExpAliases Constant{} = mempty
 subExpAliases (Var v)    = vnameAliases v
 
-primOpAliases :: BasicOp lore -> [Names]
+primOpAliases :: BasicOp -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
 primOpAliases (Opaque se) = [subExpAliases se]
 primOpAliases (ArrayLit _ _) = [mempty]

@@ -65,9 +65,9 @@ builtInFunctions = M.fromList $ map namify $ M.toList primFuns
   where namify (k,(paramts,ret,_)) = (nameFromString k, (ret, paramts))
 
 -- | If the expression is a 'BasicOp', return that 'BasicOp', otherwise 'Nothing'.
-asBasicOp :: Exp lore -> Maybe (BasicOp lore)
+asBasicOp :: Exp lore -> Maybe BasicOp
 asBasicOp (BasicOp op) = Just op
-asBasicOp _           = Nothing
+asBasicOp _            = Nothing
 
 -- | An expression is safe if it is always well-defined (assuming that
 -- any required certificates have been checked) in any context.  For
