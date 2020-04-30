@@ -255,23 +255,30 @@ benchmarkCode :: String -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name code = do
   addBenchmarkFields name
   return [C.citems|
-     typename int64_t $id:start, $id:end;
+     $esc:start_ifdef;
+     typename int64_t $id:start;
      if (ctx->profiling) {
        $id:start = get_wall_time();
      }
+     $esc:stop_ifdef;
      $items:code
+
+     $esc:start_ifdef;
      if (ctx->profiling) {
-       $id:end = get_wall_time();
+       typename int64_t $id:end = get_wall_time();
        typename uint64_t elapsed = $id:end - $id:start;
        CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
        ctx->$id:(functionRuns name)++;
        ctx->$id:(functionRuntime name) += elapsed;
        CHECK_ERR(pthread_mutex_unlock(&ctx->profile_mutex), "pthread_mutex_unlock");
-     }|]
+     }
+     $esc:stop_ifdef;
+     |]
 
   where start = name ++ "_start"
         end = name ++ "_end"
-
+        start_ifdef = pretty [C.cunit|$esc:("#ifdef MCPROFILE")|]
+        stop_ifdef = pretty [C.cunit|$esc:("#endif")|]
 
 multicoreName :: String -> GC.CompilerM op s String
 multicoreName s = do
