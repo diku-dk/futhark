@@ -94,9 +94,6 @@ transformSOAC :: Transformer m =>
               -> SOAC (Lore m)
               -> m ()
 
-transformSOAC pat CmpThreshold{} =
-  letBind_ pat $ BasicOp $ SubExp $ constant False -- close enough
-
 transformSOAC pat (Screma w form@(ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) = do
   -- Start by combining all the reduction parts into a single operator
   let (Reduce _ red_lam red_nes) = singleReduce reds

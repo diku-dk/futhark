@@ -109,7 +109,7 @@ data Rule lore = Simplify (RuleM lore ()) -- ^ Give it a shot.
 
 type RuleGeneric lore a = a -> Stm lore -> Rule lore
 type RuleBasicOp lore a = (a -> Pattern lore -> StmAux (ExpAttr lore) ->
-                           BasicOp lore -> Rule lore)
+                           BasicOp -> Rule lore)
 type RuleIf lore a = a -> Pattern lore -> StmAux (ExpAttr lore) ->
                      (SubExp, BodyT lore, BodyT lore,
                       IfAttr (BranchType lore)) ->
