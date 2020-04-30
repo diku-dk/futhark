@@ -4,7 +4,7 @@
 #define _SCHEDULER_H_
 
 #define MULTICORE
-/* #define MCDEBUG */
+#define MCDEBUG
 #define MCPROFILE
 
 #ifdef _WIN32
@@ -262,7 +262,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
 #endif
     // Update range params
     start = end;
-    end += iter_pr_subtask + (subtask_id < remainder);
+    end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
   // Join (wait for subtasks to finish)
@@ -331,12 +331,12 @@ static inline int scheduler_static(struct scheduler *scheduler,
               "subtask_queue_enqueue");
 #ifdef MCDEBUG
     fprintf(stderr, "[scheduler_static] iter_pr_subtask %d - exp %d\n", iter_pr_subtask, subtask_id < remainder);
-    fprintf(stderr, "[scheduler_static] pushed start %d - end %d iterations onto %d's q\n", start, end, subtask_id%scheduler->num_threads);
+    fprintf(stderr, "[scheduler_static] pushed start %d - end %d (%d) iterations onto %d's q\n", start, end, end-start, subtask_id%scheduler->num_threads);
 #endif
 
     // Update range params
     start = end;
-    end += iter_pr_subtask + (subtask_id < remainder);
+    end += iter_pr_subtask + ((subtask_id + 1) < remainder);
 
   }
 
@@ -347,7 +347,6 @@ static inline int scheduler_static(struct scheduler *scheduler,
   }
 
   if (ntask != NULL) {
-
     *ntask = nsubtasks;
   }
 
