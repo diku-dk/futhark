@@ -226,10 +226,21 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
                                           $exp:v');|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
+        -- FIXME: This creates global memory storage, in contrast
+        --        to its purpose; to create local memory per work group.
+        -- FIXME: Deallocate after dispatching.
         setShaderArg i (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp $ unCount num_bytes
+          ssbo       <- newVName "ssbo"
+          GC.libDecl [C.cedecl|typename GLuint $id:ssbo;|]
+          GC.stm [C.cstm|glCreateBuffers(1, &$id:ssbo);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
-          --TODO: create `num_bytes` local memory per work group.
+          GC.stm [C.cstm|glNamedBufferData($id:ssbo, $exp:num_bytes',
+                                           NULL, GL_DYNAMIC_DRAW);|]
+          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
+          GC.stm [C.cstm|glBindBufferBase(GL_SHADER_STORAGE_BUFFER, $int:i,
+                                          $id:ssbo);|]
+          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp $ unCount num_bytes
