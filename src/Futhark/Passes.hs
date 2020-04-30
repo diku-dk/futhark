@@ -68,7 +68,7 @@ kernelsPipeline =
          , unstreamKernels
          , performCSE True
          , simplifyKernels
-         , sink
+         , sinkKernels
          , inPlaceLoweringKernels
          ]
 
@@ -110,6 +110,7 @@ mcPipeline =
          , unstreamMC
          , performCSE True
          , simplifyMC
+         , sinkMC
          , inPlaceLoweringMC
          ]
 
