@@ -25,7 +25,8 @@ import Futhark.Representation.KernelsMem
 import qualified Futhark.Representation.Kernels as Kernels
 import Futhark.Representation.Kernels.Simplify as Kernels
 import qualified Futhark.Representation.Mem.IxFun as IxFun
-import Futhark.Pass.ExtractKernels.BlockedKernel (segThread, nonSegRed)
+import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)
+import Futhark.Pass.ExtractKernels.ToKernels (segThread)
 import Futhark.Pass.ExplicitAllocations.Kernels (explicitAllocationsInStms)
 import Futhark.Transform.Rename (renameStm)
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)

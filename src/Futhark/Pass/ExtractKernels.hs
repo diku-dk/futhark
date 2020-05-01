@@ -180,6 +180,8 @@ import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.Intragroup
+import Futhark.Pass.ExtractKernels.StreamKernel
+import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Util
 import Futhark.Util.Log
 
@@ -447,7 +449,8 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
               red_pat = Pattern [] red_pat_elems
 
           ((num_threads, red_results), stms) <-
-            streamMap (map (baseString . patElemName) red_pat_elems) concat_pat_elems w
+            streamMap segThreadCapped
+            (map (baseString . patElemName) red_pat_elems) concat_pat_elems w
             Noncommutative fold_fun' nes arrs
 
           reduce_soac <- reduceSOAC [Reduce comm' red_fun nes]
@@ -461,7 +464,8 @@ transformStm path (Let pat aux@(StmAux cs _) (Op (Stream w (Parallel o comm red_
           let red_fun_sequential = soacsLambdaToKernels red_fun
               fold_fun_sequential = soacsLambdaToKernels fold_fun
           fmap (certify cs) <$>
-            streamRed pat w comm' red_fun_sequential fold_fun_sequential nes arrs
+            streamRed segThreadCapped
+            pat w comm' red_fun_sequential fold_fun_sequential nes arrs
 
     outerParallelBody path' =
       renameBody =<<

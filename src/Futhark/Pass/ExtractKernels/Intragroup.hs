@@ -24,6 +24,7 @@ import Futhark.Tools
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
+import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Util (chunks)
 import Futhark.Util.Log
 
