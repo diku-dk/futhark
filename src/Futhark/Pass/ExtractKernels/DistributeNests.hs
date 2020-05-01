@@ -57,8 +57,9 @@ import Futhark.Transform.Rename
 import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
-import Futhark.Pass.ExtractKernels.BlockedKernel hiding (segThread)
+import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.Interchange
+import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Util
 import Futhark.Util.Log
 
@@ -74,7 +75,7 @@ data DistEnv m =
           , distScope :: Scope Out.Kernels
           , distOnTopLevelStms :: Stms SOACS -> DistNestT m (Stms Out.Kernels)
           , distOnInnerMap :: MapLoop -> DistAcc -> DistNestT m DistAcc
-          , distSegLevel :: MkSegLevel m
+          , distSegLevel :: MkSegLevel SegLevel Out.Kernels m
           }
 
 data DistAcc =
@@ -199,7 +200,7 @@ inNesting :: Monad m =>
              KernelNest -> DistNestT m a -> DistNestT m a
 inNesting (outer, nests) = local $ \env ->
   env { distNest = (inner, nests')
-      , distScope =  mconcat (map scopeOf $ outer : nests) <> distScope env
+      , distScope =  foldMap scopeOfLoopNesting (outer : nests) <> distScope env
       }
   where (inner, nests') =
           case reverse nests of
@@ -574,7 +575,7 @@ distribute :: MonadFreshNames m => DistAcc -> DistNestT m DistAcc
 distribute acc =
   fromMaybe acc <$> distributeIfPossible acc
 
-mkSegLevel :: MonadFreshNames m => DistNestT m (MkSegLevel (DistNestT m))
+mkSegLevel :: MonadFreshNames m => DistNestT m (MkSegLevel SegLevel Out.Kernels (DistNestT m))
 mkSegLevel = do
   mk_lvl <- asks distSegLevel
   return $ \w desc r -> do
