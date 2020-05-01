@@ -116,7 +116,7 @@ compileProg =
                    cur_worker->scheduler = &ctx->scheduler;
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 32),
                              "failed to init jobqueue for worker %d\n", i);
-                   CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &futhark_worker,
+                   CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
                                             cur_worker),
                              "Failed to create worker %d\n", i);
                  }

@@ -140,6 +140,7 @@ static inline int query_a_subtask(struct scheduler* scheduler,
 }
 
 static inline void *futhark_worker(void* arg)
+static inline void *scheduler_worker(void* arg)
 {
   struct worker *worker = (struct worker*) arg;
   struct subtask *subtask;
