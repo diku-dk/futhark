@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
 
 import Control.Monad.Reader
@@ -11,9 +12,19 @@ import qualified Futhark.Representation.MC as MC
 import Futhark.Representation.SOACS
   hiding (Body, Exp, Lambda, LParam, Pattern, Stm)
 import qualified Futhark.Representation.SOACS as SOACS
+import Futhark.Pass.ExtractKernels.Distribution
+import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Util (chunks, takeLast)
+import Futhark.Util.Log
 
-type ExtractM = ReaderT (Scope MC) (State VNameSource)
+newtype ExtractM a = ExtractM (ReaderT (Scope MC) (State VNameSource) a)
+  deriving (Functor, Applicative, Monad,
+            HasScope MC, LocalScope MC,
+            MonadFreshNames)
+
+-- XXX: throwing away the log here...
+instance MonadLogger ExtractM where
+  addLog _ = pure ()
 
 indexArray :: VName -> LParam SOACS -> VName -> Stm MC
 indexArray i (Param p t) arr =
@@ -88,22 +99,39 @@ transformFunDef (FunDef entry name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $ transformBody body
   return $ FunDef entry name rettype params body'
 
-transformProg :: Prog SOACS -> PassM (Prog MC)
-transformProg (Prog consts funs) =
-  modifyNameSource $ runState (runReaderT m mempty)
-  where m = do
-          consts' <- transformStms consts
-          funs' <- inScopeOf consts' $ mapM transformFunDef funs
-          return $ Prog consts' funs'
+transformMap :: MapLoop -> ExtractM (Stms MC)
+transformMap (MapLoop pat cs w lam arrs) = do
+  scope <- askScope
+  let loopnest =
+        MapNesting pat cs w $ zip (lambdaParams lam) arrs
+      runExtract (ExtractM m) =
+        modifyNameSource $ runState (runReaderT m mempty)
+      env = DistEnv
+            { distNest = singleNesting (Nesting mempty loopnest)
+            , distScope = scopeOfPattern pat <>
+                          castScope (scopeOf lam) <>
+                          scope
+            , distOnInnerMap = distributeMap
+            , distOnTopLevelStms = lift . transformStms
+            , distSegLevel = \_ _ _ -> pure ()
+            , distOnSOACSStms = runExtract . transformStm
+            , distOnSOACSLambda = runExtract . transformLambda
+            }
+      acc = DistAcc { distTargets =
+                        singleTarget (pat, bodyResult $ lambdaBody lam)
+                    , distStms =
+                        mempty
+                    }
+
+  -- XXX: we are throwing away the Log here.
+  runDistNestT env $
+    distributeMapBodyStms acc $ bodyStms $ lambdaBody lam
 
 transformSOAC :: Pattern SOACS -> SOAC SOACS -> ExtractM (Stms MC)
 
 transformSOAC pat (Screma w form arrs)
-  | Just map_lam <- isMapSOAC form = do
-      (gtid, space) <- mkSegSpace w
-      kbody <- mapLambdaToKernelBody gtid map_lam arrs
-      return $ oneStm $ Let pat (defAux ()) $ Op $
-        SegMap () space (lambdaReturnType map_lam) kbody
+  | Just lam <- isMapSOAC form =
+      transformMap $ MapLoop pat mempty w lam arrs
 
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       (gtid, space) <- mkSegSpace w
@@ -159,6 +187,14 @@ transformSOAC pat (Stream w form lam arrs) = do
     flip runBinderT_ soacs_scope $
     sequentialStreamWholeArray pat w (getStreamAccums form) lam arrs
   transformStms stream_stms
+
+transformProg :: Prog SOACS -> PassM (Prog MC)
+transformProg (Prog consts funs) =
+  modifyNameSource $ runState (runReaderT m mempty)
+  where ExtractM m = do
+          consts' <- transformStms consts
+          funs' <- inScopeOf consts' $ mapM transformFunDef funs
+          return $ Prog consts' funs'
 
 extractMulticore :: Pass SOACS MC
 extractMulticore =
