@@ -174,7 +174,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
   return (num_threads, space, ts, kbody)
 
 streamRed :: (MonadFreshNames m, HasScope Kernels m) =>
-             MkSegLevel SegLevel Kernels m
+             MkSegLevel Kernels m
           -> Pattern Kernels
           -> SubExp
           -> Commutativity
@@ -201,7 +201,7 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBinderT'_ $ do
 
 -- Similar to streamRed, but without the last reduction.
 streamMap :: (MonadFreshNames m, HasScope Kernels m) =>
-              MkSegLevel SegLevel Kernels m
+              MkSegLevel Kernels m
           -> [String] -> [PatElem Kernels] -> SubExp
            -> Commutativity -> Lambda Kernels -> [SubExp] -> [VName]
            -> m ((SubExp, [VName]), Stms Kernels)
@@ -224,7 +224,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
 -- array.
-segThreadCapped :: MonadFreshNames m => MkSegLevel SegLevel Kernels m
+segThreadCapped :: MonadFreshNames m => MkSegLevel Kernels m
 segThreadCapped ws desc r = do
   w64 <- letSubExp "nest_size" =<<
          foldBinOp (Mul Int64) (intConst Int64 1) =<<

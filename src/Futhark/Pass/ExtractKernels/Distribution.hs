@@ -107,10 +107,10 @@ popInnerTarget (Targets t ts) =
     x:xs -> Just (t, Targets x $ reverse xs)
     []   -> Nothing
 
-targetScope :: DistLore lvl lore => Target -> Scope lore
+targetScope :: DistLore lore => Target -> Scope lore
 targetScope = scopeOfPattern . fst
 
-targetsScope :: DistLore lvl lore => Targets -> Scope lore
+targetsScope :: DistLore lore => Targets -> Scope lore
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting { loopNestingPattern :: PatternT Type
@@ -120,7 +120,7 @@ data LoopNesting = MapNesting { loopNestingPattern :: PatternT Type
                               }
                  deriving (Show)
 
-scopeOfLoopNesting :: DistLore lvl lore => LoopNesting -> Scope lore
+scopeOfLoopNesting :: DistLore lore => LoopNesting -> Scope lore
 scopeOfLoopNesting = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
@@ -229,8 +229,8 @@ boundInKernelNests = map (namesFromList .
 kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
-constructKernel :: (DistLore lvl lore, MonadFreshNames m, LocalScope lore m) =>
-                   MkSegLevel lvl lore m -> KernelNest -> Body lore
+constructKernel :: (DistLore lore, MonadFreshNames m, LocalScope lore m) =>
+                   MkSegLevel lore m -> KernelNest -> Body lore
                 -> m (Stm lore, Stms lore)
 constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
@@ -482,9 +482,9 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
         removeIdentityMappingGeneral bound_in_nesting pat res
   in (pat', res', identity_map, expand_target)
 
-tryDistribute :: (DistLore lvl lore, MonadFreshNames m,
+tryDistribute :: (DistLore lore, MonadFreshNames m,
                   LocalScope lore m, MonadLogger m) =>
-                 MkSegLevel lvl lore m -> Nestings -> Targets -> Stms lore
+                 MkSegLevel lore m -> Nestings -> Targets -> Stms lore
               -> m (Maybe (Targets, Stms lore))
 tryDistribute _ _ targets stms | null stms =
   -- No point in distributing an empty kernel.
