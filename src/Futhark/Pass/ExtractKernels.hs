@@ -602,10 +602,9 @@ onMap path (MapLoop pat cs w lam arrs) = do
   if not incrementalFlattening then exploitInnerParallelism path
     else do
 
-    let exploitOuterParallelism path' = do
-          let lam' = soacsLambdaToKernels lam
-          runDistNestT (env path') $ distribute $
-            addStmsToKernel (bodyStms $ lambdaBody lam') acc
+    let exploitOuterParallelism path' =
+          runDistNestT (env path') $ distribute =<<
+          addStmsToKernel (bodyStms $ lambdaBody lam) acc
 
     onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat lam
     where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
@@ -677,7 +676,7 @@ onInnerMap :: KernelPath -> MapLoop -> DistAcc Out.Kernels
            -> DistNestT DistribM (DistAcc Out.Kernels)
 onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
-      addStmToKernel (mapLoopStm maploop) acc
+      addStmsToKernel (oneStm (mapLoopStm maploop)) acc
   | not incrementalFlattening =
       distributeMap maploop acc
   | otherwise =
