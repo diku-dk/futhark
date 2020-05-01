@@ -189,7 +189,6 @@ static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, str
 // subtask_queue contains zero elements.  Returns non-zero on error.  If
 // subtask_queue_destroy() has been called (possibly after the call to
 // subtask_queue_pop() blocked), this function will return -1.
-const int SUBTASK_MAX_TRIES = 10;
 static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, struct subtask **subtask)
 {
   assert(subtask_queue != NULL);
@@ -202,20 +201,17 @@ static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, str
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Wait until the subtask_queue contains an element.
   int tries = 0;
-  while (subtask_queue->num_used == 0 && !subtask_queue->dead && tries < SUBTASK_MAX_TRIES) {
+  while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
     tries++;
     CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
   }
 
-  if (subtask_queue->num_used == 0 && tries == SUBTASK_MAX_TRIES) {
-    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
-    return 0;
-  }
 
   if (subtask_queue->dead) {
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
     return -1;
   }
+
 
   *subtask = jobqueue_get_subtask_chunk(subtask_queue, 0);
   if (*subtask == NULL) {
@@ -240,7 +236,7 @@ static inline int subtask_queue_dequeue(struct subtask_queue *subtask_queue, str
 /* TODO: Do I need to acquire locks here? */
 static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 {
-  return subtask_queue->num_used == 0;
+  return ((volatile int)subtask_queue->num_used) == 0 && !subtask_queue->dead;
 }
 
 

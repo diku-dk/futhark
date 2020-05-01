@@ -4,7 +4,7 @@
 #define _SCHEDULER_H_
 
 #define MULTICORE
-#define MCDEBUG
+/* #define MCDEBUG */
 #define MCPROFILE
 
 #ifdef _WIN32
@@ -19,7 +19,7 @@
 #include <sys/resource.h>
 #endif
 
-#ifdef MCPROFILE
+#ifdef MCDEBUG
 static long int ran_iter, start_iter = 0;
 #endif
 
@@ -145,16 +145,12 @@ static inline void *scheduler_worker(void* arg)
   struct subtask *subtask = NULL;
   while(1) {
     if (subtask_queue_dequeue(&worker->q, &subtask) == 0) {
-      if (subtask == NULL) goto steal;
       assert(subtask->fn != NULL);
       assert(subtask->args != NULL);
 #ifdef MCPROFILE
       int64_t start = get_wall_time();
 #endif
-
-      worker->cur_working = 1;
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, worker->tid);
-
 #ifdef MCPROFILE
       int64_t end = get_wall_time();
       worker->time_spent_working += end - start;
@@ -176,7 +172,6 @@ static inline void *scheduler_worker(void* arg)
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
       subtask = NULL;
-steal:
       if (subtask_queue_is_empty(&worker->q)) {
         // try to steal some work as we have nothing better to do anyway
         CHECK_ERR(query_a_subtask(worker->scheduler, worker->tid, &subtask), "query_a_subtask");
@@ -184,21 +179,21 @@ steal:
           continue;
         }
         // else we take the work and put into our own queue
-#ifdef MCDEBUG
-
-        fprintf(stderr, "stole work start: %d - end %d\n", subtask->start, subtask->end);
-#endif
-
         CHECK_ERR(subtask_queue_enqueue(&worker->q, subtask), "subtask_queue_enqueue");
-      }
-      worker->cur_working = 0;
-    } else {
-      output_thread_usage(worker);
-#ifdef MCPROFILE
+#ifdef MCDEBUG
+        fprintf(stderr, "[scheduler_worker] tid %d stole work start: %d - end %d\n", worker->tid, subtask->start, subtask->end);
 #endif
+
+      }
+
+    } else {
+
       break;
     }
   }
+  output_thread_usage(worker);
+#ifdef MCPROFILE
+#endif
   return NULL;
 }
 
@@ -215,8 +210,7 @@ static inline struct worker* get_own_worker_struct(struct scheduler *scheduler)
 {
   pthread_t pid = pthread_self();
   for (int i = 0; i < scheduler->num_threads; i++) {
-    if (pid == scheduler->workers[i].thread)
-    {
+    if (pid == scheduler->workers[i].thread) {
       return &scheduler->workers[i];
     }
   }
@@ -229,7 +223,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
                                     int *ntask)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "Performing dynamic scheduling\n");
+  fprintf(stderr, "[scheduler_dynamic] Performing dynamic scheduling\n");
 #endif
 
   pthread_mutex_t mutex;
@@ -280,10 +274,6 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
     *ntask = scheduler->num_threads;
   }
 
-#ifdef MCDEBUG
-  assert(ran_iter == start_iter);
-#endif
-
 #ifdef MCPROFILE
   scheduler_set_queue_profiling(scheduler, 0);
 #endif
@@ -332,8 +322,10 @@ static inline int scheduler_static(struct scheduler *scheduler,
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask),
               "subtask_queue_enqueue");
 #ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_static] iter_pr_subtask %d - exp %d\n", iter_pr_subtask, subtask_id < remainder);
-    fprintf(stderr, "[scheduler_static] pushed start %d - end %d (%d) iterations onto %d's q\n", start, end, end-start, subtask_id%scheduler->num_threads);
+    fprintf(stderr, "[scheduler_static] iter_pr_subtask %d - exp %d\n",
+            iter_pr_subtask, subtask_id < remainder);
+    fprintf(stderr, "[scheduler_static] pushed start %d - end %d (%d) iterations onto %d's q\n",
+            start, end, end-start, subtask_id%scheduler->num_threads);
 #endif
 
     // Update range params
@@ -357,7 +349,6 @@ static inline int scheduler_static(struct scheduler *scheduler,
 #endif
 
   return scheduler_error;
-
 }
 
 
@@ -366,19 +357,53 @@ static inline int delegate_work(struct scheduler *scheduler,
                                 int *ntask,
                                 struct worker* calling_worker)
 {
-  int free_workers = 1; // The calling worker is also "free"
-  for (int i = 0; i < scheduler->num_threads; i++) {
-    if (i == calling_worker->tid) continue;
-    // Lets just hope this doesn't change during execution
-    if (scheduler->workers[i].cur_working == 0) {
-      free_workers++;
-    }
-  }
+
 #ifdef MCDEBUG
-  fprintf(stderr, "[delegate_work] free worker %d\n", free_workers);
+  fprintf(stderr, "[delegate_work] tid %d\n", calling_worker->tid);
+  /* fprintf(stderr, "[delegate_work] granularity %d\n", task->granularity); */
+  fprintf(stderr, "[delegate_work] iterations %ld\n", task->iterations);
 #endif
 
   CHECK_ERR(task->fn(task->args, 0, task->iterations, calling_worker->tid), task->name);
+  *ntask = scheduler->num_threads;
+  return 0;
+
+  pthread_mutex_t mutex;
+  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
+  pthread_cond_t cond;
+  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
+
+  int shared_counter = 1;
+
+
+  struct subtask *subtask = setup_subtask(task->fn, task->args,
+                                          &mutex, &cond, &shared_counter,
+                                          0, task->iterations, task->iterations / 10);
+  CHECK_ERR(subtask_queue_enqueue(&calling_worker->q, subtask), "subtask_queue_enqueue");
+
+  while(1) {
+    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
+    /* fprintf(stderr, "tid %d shared counter %d\n", calling_worker->tid, shared_counter); */
+    if (shared_counter == 0) break;
+    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
+
+    subtask = NULL;
+    if (subtask_queue_dequeue(&calling_worker->q, &subtask) == 0) {
+      if (subtask == NULL) continue;
+      // Do work
+      assert(subtask->fn != NULL);
+      assert(subtask->args != NULL);
+      int err = subtask->fn(subtask->args, subtask->start, subtask->end, calling_worker->tid);
+      if (err != 0) {
+        return err;
+      }
+      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+      (*subtask->counter)--;
+      CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
+      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+      free(subtask);
+    }
+  }
 
   *ntask = scheduler->num_threads;
   return 0;
@@ -410,7 +435,7 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
     return 0;
   }
 
-#ifdef MCPROFILE
+#ifdef MCDEBUG
   start_iter = task->iterations;
   ran_iter = 0;
 #endif
