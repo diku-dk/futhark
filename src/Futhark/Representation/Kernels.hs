@@ -1,6 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 -- | A representation with flat parallelism via GPU-oriented kernels.
 module Futhark.Representation.Kernels
        ( -- * The Lore definition
@@ -54,7 +53,8 @@ instance BinderOps Kernels where
 
 instance PrettyLore Kernels where
 
-instance HasSegOp SegLevel Kernels where
+instance HasSegOp Kernels where
+  type SegOpLevel Kernels = SegLevel
   asSegOp (SegOp op) = Just op
   asSegOp _ = Nothing
   segOp = SegOp

@@ -75,7 +75,7 @@ data DistEnv m =
           , distScope :: Scope Kernels
           , distOnTopLevelStms :: Stms SOACS -> DistNestT m (Stms Kernels)
           , distOnInnerMap :: MapLoop -> DistAcc -> DistNestT m DistAcc
-          , distSegLevel :: MkSegLevel SegLevel Kernels m
+          , distSegLevel :: MkSegLevel Kernels m
           }
 
 data DistAcc =
@@ -575,7 +575,7 @@ distribute :: MonadFreshNames m => DistAcc -> DistNestT m DistAcc
 distribute acc =
   fromMaybe acc <$> distributeIfPossible acc
 
-mkSegLevel :: MonadFreshNames m => DistNestT m (MkSegLevel SegLevel Kernels (DistNestT m))
+mkSegLevel :: MonadFreshNames m => DistNestT m (MkSegLevel Kernels (DistNestT m))
 mkSegLevel = do
   mk_lvl <- asks distSegLevel
   return $ \w desc r -> do

@@ -73,7 +73,8 @@ instance BinderOps (Wise Kernels) where
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 
-instance HasSegOp SegLevel (Wise Kernels) where
+instance HasSegOp (Wise Kernels) where
+  type SegOpLevel (Wise Kernels) = SegLevel
   asSegOp (SegOp op) = Just op
   asSegOp _ = Nothing
   segOp = SegOp
