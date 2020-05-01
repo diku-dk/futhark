@@ -149,6 +149,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
   tid' <- toExp $ Var tid
 
   num_threads <- getNumThreads
+  num_threads' <- toExp $ Var num_threads
 
   stage_one_red_res <- createTemporaryArrays (Var num_threads) nes scan_op
 
@@ -159,8 +160,9 @@ nonsegmentedScan pat space scan_op nes kbody = do
 
   slug <- segScanOpSlug tid' scan_op stage_one_red_res
 
-  prebody <- collect $ do
-    emit $ Imp.DebugPrint "nonsegmented segScan stage 1" Nothing
+  -- TODO fix this (scan2.fut fails)
+  sFor "i" num_threads' $ \i -> do
+    tid <-- i
     sComment "neutral-initialise the acc used by this thread" $
       forM_ (zip (slugAccs slug) nes) $ \((acc, acc_is), ne) ->
         copyDWIMFix acc acc_is ne []
@@ -187,7 +189,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
           forM_ (zip (slugAccs slug) $ bodyResult $ lambdaBody scan_op) $ \((acc, acc_is), se) ->
             copyDWIMFix acc acc_is se []
 
-  let freeVariables = namesToList $ freeIn (prebody <> reduce_body) `namesSubtract`
+  let freeVariables = namesToList $ freeIn reduce_body `namesSubtract`
                                   namesFromList (tid : [segFlat space])
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
@@ -196,7 +198,7 @@ nonsegmentedScan pat space scan_op nes kbody = do
   ntasks' <- toExp $ Var ntasks
 
   emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
-                              (Imp.MulticoreFunc freeParams prebody reduce_body tid)
+                              (Imp.MulticoreFunc freeParams mempty reduce_body tid)
 
   -- |
   -- Begin stage two of scan
