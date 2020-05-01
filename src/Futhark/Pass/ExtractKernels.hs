@@ -384,7 +384,8 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
           (red_lam', nes', shape) <- determineReduceOp red_lam nes
           let comm' | commutativeLambda red_lam' = Commutative
                     | otherwise = comm
-          return $ SegRedOp comm' red_lam' nes' shape
+              red_lam'' = soacsLambdaToKernels red_lam'
+          return $ SegRedOp comm' red_lam'' nes' shape
         let map_lam_sequential = soacsLambdaToKernels map_lam
         lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
         addStms =<<
@@ -525,7 +526,8 @@ transformStm _ (Let orig_pat (StmAux cs _) (Op (Hist w ops bucket_fun imgs))) = 
   -- subhistograms as well.
   runBinder_ $ do
     lvl <- segThreadCapped [w] "seghist" $ NoRecommendation SegNoVirt
-    addStms =<< histKernel lvl orig_pat [] [] cs w ops bfun' imgs
+    addStms =<< histKernel onLambda lvl orig_pat [] [] cs w ops bfun' imgs
+  where onLambda = pure . soacsLambdaToKernels
 
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
@@ -577,7 +579,8 @@ worthSequentialising lam = interesting $ lambdaBody lam
         interesting' _ = False
 
 
-onTopLevelStms :: KernelPath -> Stms SOACS -> DistNestT DistribM KernelsStms
+onTopLevelStms :: KernelPath -> Stms SOACS
+               -> DistNestT Out.Kernels DistribM KernelsStms
 onTopLevelStms path stms = do
   scope <- askScope
   lift $ localScope scope $ transformStms path $ stmsToList stms
@@ -594,6 +597,8 @@ onMap path (MapLoop pat cs w lam arrs) = do
                   , distOnInnerMap = onInnerMap path'
                   , distOnTopLevelStms = onTopLevelStms path'
                   , distSegLevel = segThreadCapped
+                  , distOnSOACSStms = pure . oneStm . soacsStmToKernels
+                  , distOnSOACSLambda = pure . soacsLambdaToKernels
                   }
       exploitInnerParallelism path' =
         runDistNestT (env path') $
@@ -602,9 +607,10 @@ onMap path (MapLoop pat cs w lam arrs) = do
   if not incrementalFlattening then exploitInnerParallelism path
     else do
 
-    let exploitOuterParallelism path' =
-          runDistNestT (env path') $ distribute =<<
-          addStmsToKernel (bodyStms $ lambdaBody lam) acc
+    let exploitOuterParallelism path' = do
+          let lam' = soacsLambdaToKernels lam
+          runDistNestT (env path') $ distribute $
+            addStmsToAcc (bodyStms $ lambdaBody lam') acc
 
     onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat lam
     where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
@@ -673,10 +679,10 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
         kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
 
 onInnerMap :: KernelPath -> MapLoop -> DistAcc Out.Kernels
-           -> DistNestT DistribM (DistAcc Out.Kernels)
+           -> DistNestT Out.Kernels DistribM (DistAcc Out.Kernels)
 onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
-      addStmsToKernel (oneStm (mapLoopStm maploop)) acc
+      addStmToAcc (mapLoopStm maploop) acc
   | not incrementalFlattening =
       distributeMap maploop acc
   | otherwise =
