@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- | A representation with flat parallelism via GPU-oriented kernels.
 module Futhark.Representation.Kernels
        ( -- * The Lore definition
@@ -25,10 +26,6 @@ import Futhark.Representation.SOACS.SOAC hiding (HistOp(..))
 import Futhark.Binder
 import Futhark.Construct
 import qualified Futhark.TypeCheck as TypeCheck
-
--- This module could be written much nicer if Haskell had functors
--- like Standard ML.  Instead, we have to abuse the namespace/module
--- system.
 
 data Kernels
 
@@ -56,3 +53,8 @@ instance BinderOps Kernels where
   mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Kernels where
+
+instance HasSegOp SegLevel Kernels where
+  asSegOp (SegOp op) = Just op
+  asSegOp _ = Nothing
+  segOp = SegOp
