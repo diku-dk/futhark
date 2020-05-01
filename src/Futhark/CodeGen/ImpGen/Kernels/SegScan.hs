@@ -65,6 +65,10 @@ compileSegScan  (Pattern _ pes)
     copyDWIMFix g_dyn_id [0] (intConst Int32 0) []
     (global_id, _, _) <- fullyIndexArray g_dyn_id [0]
 
+    available_local_mem <- dPrim "available_local_mem" int32
+    sOp $ Imp.GetSizeMax available_local_mem Imp.SizeLocalMemory
+
+    -- Spawn the kernel --------------------------------------------------------
     -- sKernelThread :: String
                 -- -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
                 -- -> VName
@@ -72,11 +76,29 @@ compileSegScan  (Pattern _ pes)
                 -- -> CallKernelGen ()
     sKernelThread "my_scan" (Imp.Count num_groups_impexp) group_size' (segFlat space) $ \constants -> do
 
+      -- TODO: calc eLEMS_PER_THREAD
+      let alm = Imp.var available_local_mem int32
+      div2 <- dPrim "div2" int32
+      div2 <-- Imp.BinOpExp (SDiv Int32) alm 2
+      eLEMS_PER_THREAD <- dPrim "eLEMS_PER_THREAD" int32
+      eLEMS_PER_THREAD <-- 3
+      let eLEMS_PER_THREAD_var = Imp.var eLEMS_PER_THREAD int32
+
       let ltid = kernelLocalThreadId constants
       let waveSize = kernelWaveSize constants
 
+      -- Local memory allocation
+      let (xp, _yp) = splitAt (length nes) $ lambdaParams scan_op
+      let (Count gsz) = group_size
+      exchange <- forM xp $ \p -> do
+            let pt = elemType $ paramType p
+                shape = Shape [gsz]
+            sAllocArray "exchange" pt shape $ Space "local"
+      -- TODO: reuse exchange.
       block_id <- sAllocArray "block_id" int32 (Shape [intConst Int32 1]) (Space "local")
+      -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn (head exchange) $ IxFun.iota [1]
 
+      -- Get dynamic block id
       sWhen (ltid .==. 0) $ do
         reg_dyn_id <- dPrimV "reg_dyn_id" 0
         sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd reg_dyn_id global_id 0 1
@@ -84,42 +106,60 @@ compileSegScan  (Pattern _ pes)
         copyDWIMFix block_id [0] (Var reg_dyn_id) []
 
       sOp Imp.LocalBarrier
+
       wG_ID <- dPrim "wG_ID" int32
       copyDWIMFix wG_ID [] (Var block_id) [0]
+      let wG_ID_var = Imp.var wG_ID int32
+
+      -- Read coalesced input data to registers
+      -- Apply map function
+      -- Write results to output
+      -- chunk <- forM xp $ \para -> do
+      --       let pt = elemType $ paramType para
+      --       dPrim "chunk" pt
+
+      chunk <- forM xp $ \para -> do
+            let pt = elemType $ paramType para
+                shape = Shape [Var eLEMS_PER_THREAD]
+            sAllocArray "chunk" pt shape $ Space "private"
+
+      sComment "Coalesced read, apply map, write result and write to reg" $ do
+        block_offset <- dPrim "block_offset" int32
+        block_offset <-- wG_ID_var * kernelGroupSize constants * eLEMS_PER_THREAD_var
+        let block_offset_var = Imp.var block_offset int32
+        sFor "i" eLEMS_PER_THREAD_var $ \i -> do
+          -- let dgtid = Imp.vi32 wG_ID * unCount group_size' + ltid -- old
+          let dgtid = block_offset_var + i * unCount group_size' + ltid
+          -- TODO: I don't think this hack works with segmented arrays.
+          dPrimV_ gtid dgtid
+
+          let inrange = compileStms mempty (kernelBodyStms kbody) $ do
+                let (input_elm, map_res) = splitAt (length nes) $ kernelBodyResult kbody
+                forM_ (zip exchange input_elm) $ \(arr, input) ->
+                  copyDWIMFix arr [ltid] (kernelResultSubExp input) []
+                forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
+                  copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
+                  (kernelResultSubExp se) []
+
+          let padding = forM_ (zip exchange nes) $ \(arr, neutral) ->
+                        copyDWIMFix arr [ltid] neutral []
+
+          sIf (dgtid.<. arraysize)
+              inrange
+              padding
+
+        sOp Imp.LocalBarrier
+        loc_offset <- dPrim "loc_offset" int32
+        loc_offset <-- ltid * eLEMS_PER_THREAD_var
+        let loc_offset_var = Imp.var loc_offset int32
+        sFor "i" eLEMS_PER_THREAD_var $ \i -> do
+          forM_ (zip chunk exchange) $ \(ch, ex) ->
+                copyDWIMFix ch [i] (Var ex) [loc_offset_var+i]
+
+        sOp Imp.LocalBarrier
 
 
-    -- This is what I would like to use: type from input array
-      -- let (input_elm, []) = splitAt (length nes) $ kernelBodyResult kbody
-      -- let (Count gsz) = group_size
-      -- arr_ts <- mapM lookupType input_elm
-      -- loc_arr <- forM input_elm $ \p -> do
-      --       let pt = subExpType $ kernelResultSubExp p
-      --           shape = Shape $ [gsz]
-      --       sAllocArray "my_array" pt shape $ Space "local"
 
-      let (xp, _yp) = splitAt (length nes) $ lambdaParams scan_op
-      let (Count gsz) = group_size
-      exchange <- forM xp $ \p -> do
-            let pt = elemType $ paramType p
-                shape = Shape [gsz]
-            sAllocArray "exchange" pt shape $ Space "local"
-
-      let inrange = compileStms mempty (kernelBodyStms kbody) $ do
-            let (input_elm, map_res) = splitAt (length nes) $ kernelBodyResult kbody
-            forM_ (zip exchange input_elm) $ \(arr, input) ->
-              copyDWIMFix arr [ltid] (kernelResultSubExp input) []
-            forM_ (zip (drop (length nes) pes) map_res) $ \(pe, se) ->
-              copyDWIMFix (patElemName pe) (map (`Imp.var` int32) gtids)
-              (kernelResultSubExp se) []
-
-      let padding = forM_ (zip exchange nes) $ \(arr, neutral) ->
-                    copyDWIMFix arr [ltid] neutral []
-
-      let dgtid = Imp.vi32 wG_ID * unCount group_size' + ltid
-      dPrimV_ gtid dgtid
-      sIf (dgtid.<. arraysize)
-          inrange
-          padding
 
       ress <- forM nes $ \ne -> do
                 ne' <- toExp ne
@@ -161,12 +201,6 @@ compileSegScan  (Pattern _ pes)
         p1 <-- p1Var * 2
 
 
-      -- get in the chunk
-      chunk <- forM xp $ \para -> do
-            let pt = elemType $ paramType para
-            dPrim "chunk" pt
-      forM_ (zip chunk exchange) $ \(ch, ex) ->
-            copyDWIMFix ch [] (Var ex) [ltid]
 
 
       -- int32_t prev_ind = (tid == 0) ? (get_local_size(0) - 1) : (tid - 1);
@@ -417,7 +451,7 @@ compileSegScan  (Pattern _ pes)
         forM_ (zip exchange (bodyResult $ lambdaBody scan_op_renamed)) $ \(e, sr) ->
           copyDWIMFix e [ltid] sr []
 
-
+      let dgtid = Imp.vi32 wG_ID * unCount group_size' + ltid
       sWhen (dgtid .<. arraysize) $
         forM_ (zip pes exchange) $ \(dest, arr) ->
           copyDWIMFix (patElemName dest) [dgtid] (Var arr) [ltid]

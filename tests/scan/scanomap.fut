@@ -2,7 +2,7 @@
 -- random input { [524288]i32 } auto output
 
 let main (input:[]i32) =
-    let arr = map (+2) input
+    let arr = map (*2) input
     let arr' = scan (+) 0 arr
     in (arr, arr')
 
