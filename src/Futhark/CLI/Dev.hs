@@ -463,6 +463,8 @@ runPolyPasses config initial_prog = do
         actionProcedure action prog
       (KernelsMem prog, KernelsMemAction action) ->
         actionProcedure action prog
+      (MCMem prog, MCMemAction action) ->
+        actionProcedure action prog
 
       (SOACS soacs_prog, PolyAction acs) ->
         actionProcedure (actionSOACS acs) soacs_prog
