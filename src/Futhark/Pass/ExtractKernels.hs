@@ -234,6 +234,8 @@ transformFunDef scope (FunDef entry name rettype params body) = runDistribM $ do
            transformBody mempty body
   return $ FunDef entry name rettype params body'
 
+type KernelsStms = Stms Out.Kernels
+
 transformBody :: KernelPath -> Body -> DistribM (Out.Body Out.Kernels)
 transformBody path body = do bnds <- transformStms path $ stmsToList $ bodyStms body
                              return $ mkBody bnds $ bodyResult body
@@ -671,7 +673,8 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
       ((outer_suff_stms<>intra_suff_stms)<>) <$>
         kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
 
-onInnerMap :: KernelPath -> MapLoop -> DistAcc -> DistNestT DistribM DistAcc
+onInnerMap :: KernelPath -> MapLoop -> DistAcc Out.Kernels
+           -> DistNestT DistribM (DistAcc Out.Kernels)
 onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
       addStmToKernel (mapLoopStm maploop) acc
@@ -681,7 +684,7 @@ onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
       distributeSingleStm acc (mapLoopStm maploop) >>= \case
       Just (post_kernels, res, nest, acc')
         | Just (perm, _pat_unused) <- permutationAndMissing pat res -> do
-            addKernels post_kernels
+            addPostStms post_kernels
             multiVersion perm nest acc'
       _ -> distributeMap maploop acc
 
@@ -733,5 +736,5 @@ onInnerMap path maploop@(MapLoop pat cs w lam arrs) acc
           exploitInnerParallelism
           outer_pat lam'
 
-      addKernel stms
+      postStm stms
       return acc'
