@@ -27,7 +27,6 @@ module Futhark.Pass.ExtractKernels.DistributeNests
   , distributeSingleStm
   , distributeMapBodyStms
   , addStmsToKernel
-  , addStmToKernel
   , permutationAndMissing
   , addPostStms
   , postStm
@@ -102,14 +101,13 @@ instance Monoid (PostStms lore) where
 typeEnvFromDistAcc :: DistLore lore => DistAcc lore -> Scope lore
 typeEnvFromDistAcc = scopeOfPattern . fst . outerTarget . distTargets
 
-addStmsToKernel :: Stms lore -> DistAcc lore -> DistAcc lore
-addStmsToKernel stms acc =
-  acc { distStms = stms <> distStms acc }
+addStmsToKernel :: Monad m => Stms SOACS -> DistAcc Kernels -> m (DistAcc Kernels)
+addStmsToKernel stms acc = do
+  let stms' = fmap soacsStmToKernels stms
+  return acc { distStms = stms' <> distStms acc }
 
 addStmToKernel :: Monad m => Stm SOACS -> DistAcc Kernels -> m (DistAcc Kernels)
-addStmToKernel stm acc = do
-  let stm' = soacsStmToKernels stm
-  return acc { distStms = oneStm stm' <> distStms acc }
+addStmToKernel = addStmsToKernel . oneStm
 
 newtype DistNestT m a = DistNestT (ReaderT (DistEnv Kernels m) (WriterT (DistRes Kernels) m) a)
   deriving (Functor, Applicative, Monad,
@@ -233,7 +231,7 @@ leavingNesting (MapLoop _ cs w lam arrs) acc =
                                  }
                let stms = oneStm $ Let pat (StmAux cs ()) $ Op $
                           OtherOp $ Screma w (mapSOAC lam') used_arrs
-               return $ addStmsToKernel stms acc' { distStms = mempty }
+               return $ acc' { distStms = stms }
 
 distributeMapBodyStms :: MonadFreshNames m => DistAcc Kernels -> Stms SOACS -> DistNestT m (DistAcc Kernels)
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
