@@ -72,10 +72,12 @@ simplifyProg = Simplify.simplifyProg simpleMC rules blockers
   where blockers = Engine.noExtraHoistBlockers
         rules = standardRules <> segOpRules
 
-instance HasSegOp () MC where
+instance HasSegOp MC where
+  type SegOpLevel MC = ()
   asSegOp = Just
   segOp = id
 
-instance HasSegOp () (Engine.Wise MC) where
+instance HasSegOp (Engine.Wise MC) where
+  type SegOpLevel (Engine.Wise MC) = ()
   asSegOp = Just
   segOp = id

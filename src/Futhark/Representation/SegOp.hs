@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -953,17 +952,18 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
 
 -- | Does this lore contain 'SegOp's in its 'Op's?  A lore must be an
 -- instance of this class for the simplification rules to work.
-class HasSegOp lvl lore | lore -> lvl where
-  asSegOp :: Op lore -> Maybe (SegOp lvl lore)
-  segOp :: SegOp lvl lore -> Op lore
+class HasSegOp lore where
+  type SegOpLevel lore
+  asSegOp :: Op lore -> Maybe (SegOp (SegOpLevel lore) lore)
+  segOp :: SegOp (SegOpLevel lore) lore -> Op lore
 
 -- | Simplification rules for simplifying 'SegOp's.
-segOpRules :: (HasSegOp lvl lore, BinderOps lore, Bindable lore) =>
+segOpRules :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
               RuleBook lore
 segOpRules =
   ruleBook [ RuleOp segOpRuleTopDown ] [ RuleOp segOpRuleBottomUp ]
 
-segOpRuleTopDown :: (HasSegOp lvl lore, BinderOps lore, Bindable lore) =>
+segOpRuleTopDown :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
                     TopDownRuleOp lore
 segOpRuleTopDown vtable pat attr op
   | Just op' <- asSegOp op =
@@ -971,7 +971,7 @@ segOpRuleTopDown vtable pat attr op
   | otherwise =
       Skip
 
-segOpRuleBottomUp :: (HasSegOp lvl lore, BinderOps lore) =>
+segOpRuleBottomUp :: (HasSegOp lore, BinderOps lore) =>
                      BottomUpRuleOp lore
 segOpRuleBottomUp vtable pat attr op
   | Just op' <- asSegOp op =
@@ -979,11 +979,11 @@ segOpRuleBottomUp vtable pat attr op
   | otherwise =
       Skip
 
-topDownSegOp :: (HasSegOp lvl lore, BinderOps lore, Bindable lore) =>
+topDownSegOp :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
                 ST.SymbolTable lore
              -> Pattern lore
              -> StmAux (ExpAttr lore)
-             -> SegOp lvl lore
+             -> SegOp (SegOpLevel lore) lore
              -> Rule lore
 
 -- If a SegOp produces something invariant to the SegOp, turn it
@@ -1057,11 +1057,11 @@ topDownSegOp _ (Pattern [] pes) _ (SegRed lvl space ops ts kbody)
                op1_aux ++ op2_aux)
 topDownSegOp _ _ _ _ = Skip
 
-bottomUpSegOp :: (HasSegOp lvl lore, BinderOps lore) =>
+bottomUpSegOp :: (HasSegOp lore, BinderOps lore) =>
                  (ST.SymbolTable lore, UT.UsageTable)
               -> Pattern lore
               -> StmAux (ExpAttr lore)
-              -> SegOp lvl lore
+              -> SegOp (SegOpLevel lore) lore
               -> Rule lore
 
 -- Some SegOp results can be moved outside the SegOp, which can
