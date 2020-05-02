@@ -8,7 +8,7 @@ module Futhark.Util.Table
 import Data.List (intercalate, transpose)
 import System.Console.ANSI
 
-import Futhark.Util.Pretty (color)
+import Futhark.Util.Console (color)
 
 data RowTemplate = RowTemplate [Int] Int deriving (Show)
 
