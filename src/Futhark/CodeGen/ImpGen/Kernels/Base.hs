@@ -1357,7 +1357,7 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
   -- Compute output array slice for the register tile belonging to
   -- this thread.
   let regTileSliceDim (group_tile, group_tile_i) (reg_tile, reg_tile_i) = do
-        tile_dim_start <- dPrimVE "tile_dim_start" $ group_tile_i*group_tile+reg_tile_i*reg_tile
+        tile_dim_start <- dPrimVE "tile_dim_start" $ group_tile*group_tile_i+reg_tile*reg_tile_i
         return $ DimSlice tile_dim_start reg_tile 1
   reg_tile_slices <- zipWithM regTileSliceDim
                      (zip group_tiles' group_tile_is) (zip reg_tiles' reg_tile_is)

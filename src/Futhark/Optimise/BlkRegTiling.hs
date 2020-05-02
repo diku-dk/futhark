@@ -252,16 +252,18 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
           
           --------------- START epilogue ---------------
-          --
-          final_res <- letExp "thd_res_after_residual" =<<
-                         eIf (toExp $ primExpFromSubExp int32 residual .==. 0)
-                         (resultBodyM [Var thd_res])
-                         (resultBodyM [Var thd_res])
+          -- TODO: should we guard the epilogue with an if statement?
+
+          -- final_res <- letExp "thd_res_after_residual" =<<
+          --                eIf (toExp $ primExpFromSubExp int32 residual .==. 0)
+          --                (resultBodyM [Var thd_res])
+          --                (resultBodyM [Var thd_res])
 
           --------------- END epilogue -----------------
           -- TODO: RegTileReturns still a work in progress.
           return [RegTileReturns [(height_A, ty, ry), (width_B, tx, rx)]
-                                 final_res]
+                                 thd_res]
+                                 -- final_res]
         --------------- END outer seggroup ---------------
 
 
@@ -371,7 +373,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                          lam_params
             lam_res : _ = bodyResult lam_body
 
-mmmTiling2D _ = do trace "nej" $ return Nothing
+mmmTiling2D _ = do return Nothing
 
 ---------------
 --- HELPERS ---
