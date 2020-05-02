@@ -24,6 +24,7 @@ import Futhark.Tools
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
+import Futhark.Pass.ExtractKernels.ToKernels
 import Futhark.Util (chunks)
 import Futhark.Util.Log
 
@@ -180,6 +181,10 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                         , distSegLevel = \minw _ _ -> do
                             lift $ parallelMin minw
                             return lvl
+                        , distOnSOACSStms =
+                            pure . oneStm . soacsStmToKernels
+                        , distOnSOACSLambda =
+                            pure . soacsLambdaToKernels
                         }
           acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                         , distStms = mempty
@@ -209,7 +214,8 @@ intraGroupStm lvl stm@(Let pat aux e) = do
     Op (Hist w ops bucket_fun arrs) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
         (op', nes', shape) <- determineReduceOp op nes
-        return $ Out.HistOp num_bins rf dests nes' shape op'
+        let op'' = soacsLambdaToKernels op'
+        return $ Out.HistOp num_bins rf dests nes' shape op''
 
       let bucket_fun' = soacsLambdaToKernels bucket_fun
       certifying (stmAuxCerts aux) $

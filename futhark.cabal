@@ -177,6 +177,8 @@ library
       Futhark.Pass.ExtractKernels.Interchange
       Futhark.Pass.ExtractKernels.Intragroup
       Futhark.Pass.ExtractKernels.ISRWIM
+      Futhark.Pass.ExtractKernels.StreamKernel
+      Futhark.Pass.ExtractKernels.ToKernels
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
