@@ -140,7 +140,6 @@ library
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.LoopKernel
-      Futhark.Optimise.Fusion.TryFusion
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.InPlaceLowering
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
