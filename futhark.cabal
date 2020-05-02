@@ -308,7 +308,7 @@ executable futhark
   main-is: src/futhark.hs
   other-modules:
       Paths_futhark
-  ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg"
+  ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg -H1G -A4M"
   build-depends:
       base
     , futhark

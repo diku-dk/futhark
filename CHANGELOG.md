@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark bench` now has more colourful and hopefully readable
     output.
 
+  * The compiler is now about 30% faster for most nontrivial programs.
+    This is due to parallelising the inlining stage, and tweaking the
+    default configuration of the Haskell RTS.
+
 ### Removed
 
 ### Changed
