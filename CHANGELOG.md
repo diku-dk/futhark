@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Binary operators now act as left-to-right sequence points with
     respect to size types.
 
+  * `futhark bench` now has more colourful and hopefully readable
+    output.
+
 ### Removed
 
 ### Changed
