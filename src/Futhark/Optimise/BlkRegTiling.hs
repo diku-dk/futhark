@@ -14,7 +14,7 @@
 --       also the "thread-in-space" return of the kernel.
 --   Test code can be found in "tests/mmm/sgemm.fut".
 module Futhark.Optimise.BlkRegTiling
-       ( mmmTiling2D )
+       ( mm_BlkRegTiling )
        where
 import Control.Monad.State
 import Control.Monad.Reader
@@ -35,11 +35,13 @@ import Futhark.Representation.AST.Attributes.Names
 import Debug.Trace
 import Futhark.Util.Pretty
 
+
+
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
 
-mmmTiling2D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
-mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
+mm_BlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
+mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
   | KernelBody () kstms kres <- old_kbody,
 
     -- build the variance table, that records, for
@@ -72,7 +74,7 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     Just (code2', arr_tab0) <- foldl (processIndirections (namesFromList arrs) res_red_var)
                                      (Just (Seq.empty, M.empty)) code1,
 
-    null code2 && null code2', -- FIXME: remove the need for these assumptions
+    -- null code2 && null code2', -- FIXME: remove the need for these assumptions
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
@@ -373,7 +375,9 @@ mmmTiling2D stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                          lam_params
             lam_res : _ = bodyResult lam_body
 
-mmmTiling2D _ = do return Nothing
+mm_BlkRegTiling _ = do
+  traceM "nej"
+  return Nothing
 
 ---------------
 --- HELPERS ---
