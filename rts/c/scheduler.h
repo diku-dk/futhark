@@ -5,7 +5,7 @@
 
 #define MULTICORE
 /* #define MCDEBUG */
-#define MCPROFILE
+/* #define MCPROFILE */
 
 #ifdef _WIN32
 #include <windows.h>
@@ -24,33 +24,10 @@ static long int ran_iter, start_iter = 0;
 #endif
 
 static int scheduler_error = 0;
-struct scheduler {
-  struct worker *workers;
-  int num_threads;
-};
-
-/* A task for the scheduler to execute */
-struct scheduler_task {
-  const char* name;
-  task_fn fn;
-  void* args;
-  long int iterations;
-  int granularity;
-};
-
-struct worker {
-  pthread_t thread;
-  struct subtask_queue q;
-  struct scheduler *scheduler;
-  int cur_working;
-
-  int tid;                     /* Just a thread id */
-  uint64_t time_spent_working; /* Time spent in tasks functions */
-};
 
 /* A wrapper for getting rusage on Linux and MacOS */
 /* TODO maybe figure out this for windows */
-int getrusage_thread(struct rusage *rusage)
+static inline int getrusage_thread(struct rusage *rusage)
 {
   int err = -1;
 #ifdef __APPLE__
@@ -78,7 +55,7 @@ int getrusage_thread(struct rusage *rusage)
     return err;
 }
 
-void output_thread_usage(struct worker *worker)
+static inline void output_thread_usage(struct worker *worker)
 {
   struct rusage usage;
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
@@ -118,33 +95,12 @@ static int num_processors()
 #endif
 }
 
-
-
-/* Ask for a random subtask from another worker */
-const int MAX_NUM_TRIES = 10;
-static inline int query_a_subtask(struct scheduler* scheduler,
-                                  int tid,
-                                  struct subtask** subtask)
-{
-  assert(scheduler != NULL);
-  int num_tries = 0;
-  while (*subtask == NULL && num_tries < MAX_NUM_TRIES) {
-    int worker_idx = rand() % scheduler->num_threads;
-    if (worker_idx == tid) continue;
-    struct subtask_queue *rand_queue = &scheduler->workers[worker_idx].q;
-    assert(rand_queue != NULL);
-    CHECK_ERR(subtask_queue_steal(rand_queue, subtask), "subtask_queue_steal");
-    num_tries++;
-  }
-  return 0;
-}
-
 static inline void *scheduler_worker(void* arg)
 {
   struct worker *worker = (struct worker*) arg;
   struct subtask *subtask = NULL;
   while(1) {
-    if (subtask_queue_dequeue(&worker->q, &subtask) == 0) {
+    if (subtask_queue_dequeue(worker, &subtask) == 0) {
       assert(subtask->fn != NULL);
       assert(subtask->args != NULL);
 #ifdef MCPROFILE
@@ -172,28 +128,14 @@ static inline void *scheduler_worker(void* arg)
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
       subtask = NULL;
-      if (subtask_queue_is_empty(&worker->q)) {
-        // try to steal some work as we have nothing better to do anyway
-        CHECK_ERR(query_a_subtask(worker->scheduler, worker->tid, &subtask), "query_a_subtask");
-        if (subtask == NULL) { // We didn't find any work here so just go back to waiting
-          continue;
-        }
-        // else we take the work and put into our own queue
-        CHECK_ERR(subtask_queue_enqueue(&worker->q, subtask), "subtask_queue_enqueue");
-#ifdef MCDEBUG
-        fprintf(stderr, "[scheduler_worker] tid %d stole work start: %d - end %d\n", worker->tid, subtask->start, subtask->end);
-#endif
-
-      }
-
     } else {
-
+#ifdef MCPROFILE
+      output_thread_usage(worker);
+#endif
       break;
     }
   }
-  output_thread_usage(worker);
-#ifdef MCPROFILE
-#endif
+
   return NULL;
 }
 
@@ -202,7 +144,6 @@ static inline void scheduler_set_queue_profiling(struct scheduler *scheduler, in
   for (int i = 0; i < scheduler->num_threads; i++) {
     scheduler->workers[i].q.profile = val;
   }
-  return;
 }
 
 
@@ -250,7 +191,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks);
     assert(subtask != NULL);
-    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads].q, subtask),
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads], subtask),
               "subtask_queue_enqueue");
 #ifdef MCDEBUG
     fprintf(stderr, "[scheduler_dynamic] pushed %d iterations onto %d's q\n", (end - start), subtask_id%scheduler->num_threads);
@@ -319,7 +260,7 @@ static inline int scheduler_static(struct scheduler *scheduler,
                                             &mutex, &cond, &shared_counter,
                                             start, end, 0);
     assert(subtask != NULL);
-    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id].q, subtask),
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id], subtask),
               "subtask_queue_enqueue");
 #ifdef MCDEBUG
     fprintf(stderr, "[scheduler_static] iter_pr_subtask %d - exp %d\n",
@@ -378,8 +319,8 @@ static inline int delegate_work(struct scheduler *scheduler,
 
   struct subtask *subtask = setup_subtask(task->fn, task->args,
                                           &mutex, &cond, &shared_counter,
-                                          0, task->iterations, task->iterations / 10);
-  CHECK_ERR(subtask_queue_enqueue(&calling_worker->q, subtask), "subtask_queue_enqueue");
+                                          0, task->iterations, task->granularity);
+  CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
 
   while(1) {
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
@@ -388,7 +329,7 @@ static inline int delegate_work(struct scheduler *scheduler,
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
 
     subtask = NULL;
-    if (subtask_queue_dequeue(&calling_worker->q, &subtask) == 0) {
+    if (subtask_queue_dequeue(calling_worker, &subtask) == 0) {
       if (subtask == NULL) continue;
       // Do work
       assert(subtask->fn != NULL);
@@ -429,8 +370,7 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   }
 
   struct worker *worker = get_own_worker_struct(scheduler);
-  if (worker != NULL)
-  {
+  if (worker != NULL) {
     CHECK_ERR(delegate_work(scheduler, task, ntask, worker), "delegate_work");
     return 0;
   }
