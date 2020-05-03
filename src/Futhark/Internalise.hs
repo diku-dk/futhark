@@ -1503,11 +1503,6 @@ isOverloadedFunction qname args loc = do
       letTupExp' desc $ I.Op $
         I.Screma w (I.mapSOAC lam') arr'
 
-    handleSOACs [TupLit [lam, arr] _] "filter" = Just $ \_desc -> do
-      arrs <- internaliseExpToVars "filter_input" arr
-      lam' <- internalisePartitionLambda internaliseLambda 1 lam $ map I.Var arrs
-      uncurry (++) <$> partitionWithSOACS 1 lam' arrs
-
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
       k' <- fromIntegral <$> isInt32 k
       Just $ \_desc -> do
