@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     This is due to parallelising the inlining stage, and tweaking the
     default configuration of the Haskell RTS.
 
+  * `futhark dataset` is now about 8-10x faster.
+
 ### Removed
 
 ### Changed
