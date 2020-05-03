@@ -1800,14 +1800,13 @@ partitionWithSOACS k lam arrs = do
            I.If is_empty empty_body nonempty_body $
            ifCommon $ replicate k $ I.Prim int32
 
-  -- Compute total size of all partitions.
-  sum_of_partition_sizes <- letSubExp "sum_of_partition_sizes" =<<
-                            foldBinOp (Add Int32) (constant (0::Int32)) (map I.Var sizes)
+  -- The total size of all partitions must necessarily be equal to the
+  -- size of the input array.
 
   -- Create scratch arrays for the result.
   blanks <- forM arr_ts $ \arr_t ->
     letExp "partition_dest" $ I.BasicOp $
-    Scratch (elemType arr_t) (sum_of_partition_sizes : drop 1 (I.arrayDims arr_t))
+    Scratch (elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
   write_lam <- do
@@ -1826,7 +1825,7 @@ partitionWithSOACS k lam arrs = do
                     }
   results <- letTupExp "partition_res" $ I.Op $ I.Scatter w
              write_lam (classes : all_offsets ++ arrs) $
-             zip3 (repeat sum_of_partition_sizes) (repeat 1) blanks
+             zip3 (repeat w) (repeat 1) blanks
   sizes' <- letSubExp "partition_sizes" $ I.BasicOp $
             I.ArrayLit (map I.Var sizes) $ I.Prim int32
   return (map I.Var results, [sizes'])
