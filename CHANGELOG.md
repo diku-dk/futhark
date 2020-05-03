@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.16.0]
+## [0.15.6]
 
 ### Added
 
@@ -20,10 +20,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     default configuration of the Haskell RTS.
 
   * `futhark dataset` is now about 8-10x faster.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
