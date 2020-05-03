@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed a few missing type checker cases for sum types (#938).
 
+  * Fix OOB write in CUDA backend runtime code (#950).
+
 ## [0.15.5]
 
 ### Added
