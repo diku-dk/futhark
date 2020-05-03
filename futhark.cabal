@@ -284,9 +284,9 @@ library
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
     , parser-combinators >=1.0.0
+    , pcg-random >= 0.1
     , process >=1.4.3.0
     , process-extras >=0.7.2
-    , random
     , regex-tdfa >=1.2
     , srcloc >=0.4
     , template-haskell >=2.11.1
