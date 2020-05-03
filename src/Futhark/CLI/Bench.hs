@@ -158,8 +158,8 @@ reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / fromIntegral (length runtimes)
       rsd = stddevp runtimes / mean runtimes :: Double
-  putStrLn $ printf "%10.0fμs (RSD: %.2f; min: %.0fμs; max: %.0fμs)"
-    avg rsd (minimum runtimes) (maximum runtimes)
+  putStrLn $ printf "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
+    avg rsd ((minimum runtimes / avg - 1) * 100) ((maximum runtimes / avg - 1) * 100)
 
 runOptions :: BenchOptions -> RunOptions
 runOptions opts = RunOptions { runRunner = optRunner opts
