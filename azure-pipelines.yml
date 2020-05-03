@@ -55,8 +55,22 @@ jobs:
 
   - bash: |
       export PATH=`cygpath $ProgramData`/chocolatey/lib/ghc/tools/ghc-$(GHC_VERSION)/bin:$PATH
-      cabal install -j1 --install-method=copy --overwrite-policy=always
+      cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.
     displayName: Build Futhark compiler
+
+  - task: ArchiveFiles@2
+    inputs:
+      rootFolderOrFile: 'futhark.exe'
+      archiveType: 'zip'
+      archiveFile: 'futhark-nightly-windows-x86_64.zip'
+      replaceExistingArchive: true
+
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: '.'
+      contents: 'futhark-nightly-windows-x86_64.zip'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
 
 - job: build_linux
 
