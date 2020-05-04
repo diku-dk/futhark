@@ -159,10 +159,6 @@ data AllocEnv fromlore tolore  =
            , envExpHints :: Exp tolore -> AllocM fromlore tolore [ExpHint]
            }
 
-boundDims :: ChunkMap -> AllocEnv fromlore tolore
-          -> AllocEnv fromlore tolore
-boundDims m env = env { chunkMap = m <> chunkMap env }
-
 -- | Monad for adding allocations to an entire program.
 newtype AllocM fromlore tolore a =
   AllocM (BinderT tolore (ReaderT (AllocEnv fromlore tolore) (State VNameSource)) a)
@@ -195,6 +191,8 @@ instance (Allocable fromlore tolore) =>
     f e
   askDefaultSpace = asks allocSpace
 
+  askConsts = asks envConsts
+
 runAllocM :: MonadFreshNames m =>
              (Op fromlore -> AllocM fromlore tolore (Op tolore))
           -> (Exp tolore -> AllocM fromlore tolore [ExpHint])
@@ -224,6 +222,7 @@ instance Mem lore => Allocator lore (PatAllocM lore) where
   addAllocStm = tell . pure
   dimAllocationSize = return
   askDefaultSpace = return DefaultSpace
+  askConsts = pure mempty
 
 runPatAllocM :: MonadFreshNames m =>
                 PatAllocM lore a -> Scope lore
