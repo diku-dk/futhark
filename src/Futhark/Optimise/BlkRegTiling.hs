@@ -87,20 +87,25 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
       let inp_A  : inp_B  : _ = arrs
       let map_t1 : map_t2 : _ = map (elemType . paramAttr) (lambdaParams map_lam)
       let red_ne : _ = red_nes
+      red_t <- subExpType red_ne
 
       ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBinder $ do -- host code
 
-        tk_name    <- nameFromString . pretty <$> newVName "Tk"
-        tx_name    <- nameFromString . pretty <$> newVName "Tx"
-        ty_name    <- nameFromString . pretty <$> newVName "Ty"
-        rx_name    <- nameFromString . pretty <$> newVName "Rx"
-        ry_name    <- nameFromString . pretty <$> newVName "Ry"
-        -- TODO: ...
+        -- tk_name    <- nameFromString . pretty <$> newVName "Tk"
+        -- tx_name    <- nameFromString . pretty <$> newVName "Tx"
+        -- ty_name    <- nameFromString . pretty <$> newVName "Ty"
+        -- rx_name    <- nameFromString . pretty <$> newVName "Rx"
+        -- ry_name    <- nameFromString . pretty <$> newVName "Ry"
+        -- tk         <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
+        -- tx         <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+        -- ty         <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
+        -- rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeRegTile
+        -- ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeRegTile
         ty         <- letSubExp "Ty" $ BasicOp $ SubExp $ intConst Int32 16
-        tk         <- letSubExp "Tk" $ BasicOp $ SubExp $ intConst Int32 32
-        tx         <- letSubExp "Tx" $ BasicOp $ SubExp $ intConst Int32 32
-        ry         <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 8
+        tk         <- letSubExp "Tk" $ BasicOp $ SubExp $ intConst Int32 16
+        tx         <- letSubExp "Tx" $ BasicOp $ SubExp $ intConst Int32 16
+        ry         <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 4
         rx         <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 4
 
         tx_rx      <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx
@@ -109,21 +114,29 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         gridDim_x  <- letSubExp "gridDim_x"  =<< ceilDiv width_B  tx_rx
         gridDim_y  <- letSubExp "gridDim_y"  =<< ceilDiv height_A ty_ry
         grid_size  <- letSubExp "grid_size"  $ BasicOp $ BinOp (Mul Int32) gridDim_x gridDim_y
-        block_size <- letSubExp "block_size" $ BasicOp $ BinOp (Mul Int32) ty tx
+        group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
 
-        bid_x      <- newVName "bid_x"
-        bid_y      <- newVName "bid_y"
-        bid_flat   <- newVName "bid_flat"
+        gid_x      <- newVName "gid_x"
+        gid_y      <- newVName "gid_y"
+        gid_flat   <- newVName "gid_flat"
 
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBinder $ do
-          iii <- letExp "iii" $ BasicOp $ BinOp (Mul Int32) (Var bid_y) ty_ry
-          jjj <- letExp "jjj" $ BasicOp $ BinOp (Mul Int32) (Var bid_x) tx_rx
+          iii <- letExp "iii" $ BasicOp $ BinOp (Mul Int32) (Var gid_y) ty_ry
+          jjj <- letExp "jjj" $ BasicOp $ BinOp (Mul Int32) (Var gid_x) tx_rx
 
           -- initialize register mem with neutral elements
-          cssss_list <- segMap2D "cssss" (segThread grid_size block_size)
-                       ResultPrivate (ty, tx) $ \(_, _) -> do
-            return =<< letTupExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
+          cssss_list <- segMap2D "cssss" (segThread grid_size group_size)
+                       ResultPrivate (ty, tx) $ \(_,_) -> do
+
+            css_init <- scratch "css_init" (elemType red_t) [ry, rx]
+            css <- forLoop ry css_init $ \i css_merge -> do
+              css' <- forLoop rx css_merge $ \j css_merge' -> do
+                css'' <- update' "css" css_merge' [i, j] red_ne
+                return $ resultBody [Var css'']
+              return $ resultBody [Var css']
+
+            return [css] -- =<< letTupExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
           let [cssss] = cssss_list
 
           residual   <- letSubExp "residual" $ BasicOp $ BinOp (SRem Int32) common_dim tk
@@ -133,13 +146,13 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
             -- copy A from global to shared mem
-            a_shr_list <- segMap2D "A_shr" (segThread grid_size block_size)
-                         ResultNoSimplify (ty, tk) $ \(thd_x, thd_y) -> do
+            k_bound <- letSubExp "k_bound" =<< ceilDiv tk tx
+            a_shr_list <- segMap2D "A_shr" (segThread grid_size group_size)
+                            ResultNoSimplify (ty, tx) $ \(thd_y, thd_x) -> do
 
-              a_shr_init <- scratch "A_shr_init" map_t1 [ry]
+              a_shr_init <- scratch "A_shr_init" map_t1 [k_bound, ry]
               loop_a_shr <- forLoop ry a_shr_init $ \i a_shr_merge -> do
 
-                k_bound <- letSubExp "k_bound" =<< ceilDiv tk tx
                 loop_a_shr' <- forLoop k_bound a_shr_merge $ \k a_shr_merge' -> do
 
                   -- let gtid_y := blockIdx.y * Ty * Ry + i * Ty + threadIdx.y
@@ -150,22 +163,21 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                   -- a_col_idx := kk' + thd_x + k * tx
                   a_col_idx <- letExp "a_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_x int32 +
                                                          LeafExp k int32 * primExpFromSubExp int32 tx)
-                  a_shr <- update "A_shr" a_shr_merge' [i] =<< index "A_elem" inp_A [a_col_idx]
+                  a_shr <- update "A_shr" a_shr_merge' [k, i] =<< index "A_elem" inp_A [a_col_idx]
                   return $ resultBody [Var a_shr]
                 return $ resultBody [Var loop_a_shr']
               return [loop_a_shr]
             let [a_shr] = a_shr_list
 
             -- copy B from global to shared mem
-            b_shr_list <- segMap2D "B_shr" (segThread grid_size block_size)
-                         ResultNoSimplify (tx, tk) $ \(thd_x, thd_y) -> do
+            k_bound' <- letSubExp "k_bound'" =<< ceilDiv tk ty
+            b_shr_list <- segMap2D "B_shr" (segThread grid_size group_size)
+                            ResultNoSimplify (ty, tx) $ \(thd_y, thd_x) -> do
 
-              b_shr_init <- scratch "B_shr_init" map_t2 [rx]
-
+              b_shr_init <- scratch "B_shr_init" map_t2 [rx, k_bound']
               loop_b_shr <- forLoop rx b_shr_init $ \j b_shr_merge -> do
 
-                k_bound <- letSubExp "k_bound" =<< ceilDiv tk ty
-                loop_b_shr' <- forLoop k_bound b_shr_merge $ \k b_shr_merge' -> do
+                loop_b_shr' <- forLoop k_bound' b_shr_merge $ \k b_shr_merge' -> do
 
                   -- let gtid_x := jjj + j', where j' = thd_x + j * tx
                   letBindNames_ [gtid_x] =<< toExp (LeafExp jjj int32 + LeafExp thd_x int32 +
@@ -176,7 +188,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                   b_col_idx <- letExp "b_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_y int32 +
                                                          LeafExp k int32 * primExpFromSubExp int32 ty)
                                                        
-                  b_shr <- update "B_shr" b_shr_merge' [j] =<< index "B_elem" inp_B [b_col_idx]
+                  b_shr <- update "B_shr" b_shr_merge' [j, k] =<< index "B_elem" inp_B [b_col_idx]
                   return $ resultBody [Var b_shr]
                 return $ resultBody [Var loop_b_shr']
               return [loop_b_shr]
@@ -187,8 +199,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
             thd_acc <- forLoop tk thd_res_merge $ \k acc_merge -> do
 
               -- before the redomap, write from shared to register mem
-              asss_bsss <- segMap2D "shr_mem" (segThread grid_size block_size)
-                                ResultPrivate (ty, tx) $ \(thd_x, thd_y) -> do
+              reg_mem <- segMap2D "reg_mem" (segThread grid_size group_size)
+                                ResultPrivate (ty, tx) $ \(thd_y, thd_x) -> do
 
                 -- copy from shared mem to register mem
                 asss_init <- scratch "asss_init" map_t1 [ry]
@@ -199,20 +211,20 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                 -- TODO: are these dimensions correct or should anything be rearranged?
                 asss <- forLoop ry asss_init $ \i asss_merge -> do
                   asss <- update "asss" asss_merge [i] =<<
-                    index "A_shr_elem" a_shr [thd_y, thd_x, i] -- TODO: this indexing correct?
+                    index "A_shr_elem" a_shr [thd_y, thd_x, i, k] -- TODO: this indexing correct?
                   return $ resultBody [Var asss]
 
                 -- TODO: similarly for B_shr?
                 bsss <- forLoop rx bsss_init $ \j bsss_merge -> do
                   bsss <- update "bsss" bsss_merge [j] =<<
-                    index "B_shr_elem" b_shr [thd_y, thd_x, j] -- TODO: this indexing correct?
+                    index "B_shr_elem" b_shr [thd_y, thd_x, k, j] -- TODO: this indexing correct?
                   return $ resultBody [Var bsss]
                 return [asss, bsss]
 
-              let [asss, bsss] = asss_bsss
+              let [asss, bsss] = reg_mem
 
               -- the actual redomap
-              redomap_res <- segMap2D "redomap_res" (segThread grid_size block_size)
+              redomap_res <- segMap2D "redomap_res" (segThread grid_size group_size)
                              ResultPrivate (ty, tx) $ \(thd_y, thd_x) -> do
 
                 as <- indexSubArr "as" asss [thd_y, thd_x] [ry]
@@ -264,8 +276,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         --------------- END outer seggroup ---------------
 
 
-        let level' = SegGroup (Count grid_size) (Count block_size) SegNoVirt
-            space' = SegSpace bid_flat [(bid_y, gridDim_y), (bid_x, gridDim_x)]
+        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+            space' = SegSpace gid_flat [(gid_y, gridDim_y), (gid_x, gridDim_x)]
             kbody' = KernelBody () stms_seggroup ret_seggroup
         return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
 
@@ -303,8 +315,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         ceilDiv x y = eDivRoundingUp Int32 (eSubExp x) (eSubExp y)
 
         segThread :: SubExp -> SubExp -> SegLevel
-        segThread grid_size block_size =
-          SegThread (Count grid_size) (Count block_size) SegNoVirt
+        segThread grid_size group_size =
+          SegThread (Count grid_size) (Count group_size) SegNoVirt
 
         scratch :: MonadBinder m => String -> PrimType -> [SubExp] -> m VName
         scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
@@ -326,6 +338,10 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         update :: MonadBinder m => String -> VName -> [VName] -> VName -> m VName -- SubExp
         update se_desc arr indices new_elem =
           letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) (Var new_elem)
+
+        update' :: MonadBinder m => String -> VName -> [VName] -> SubExp -> m VName -- SubExp
+        update' se_desc arr indices new_elem =
+          letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) new_elem
 
         forLoop :: SubExp
                 -> VName
@@ -444,8 +460,8 @@ varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
 varianceInStms = foldl varianceInStm
 
 -- variantToOuterDim :: VarianceTable -> VName -> VName -> Bool
--- variantToOuterDim variance bid_outer nm =
---   bid_outer == nm || (nameIn bid_outer $ M.findWithDefault mempty nm variance)
+-- variantToOuterDim variance gid_outer nm =
+--   gid_outer == nm || (nameIn gid_outer $ M.findWithDefault mempty nm variance)
 
 -- just in case you need the Screma being treated differently than
 -- by default; previously Cosmin had to enhance it when dealing with stream.
@@ -486,14 +502,14 @@ segMap2D :: String           -- desc
          -> ((VName, VName)  -- f
              -> Binder Kernels [VName])
          -> Binder Kernels [VName]
-segMap2D desc lvl manifest (dim_x, dim_y) f = do
+segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ltid_x    <- newVName "ltid_x"
   ltid_y    <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
+  let segspace = SegSpace ltid_flat [(ltid_y, dim_y), (ltid_x, dim_x)]
 
   ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_x, ltid_y)
+    res <- f (ltid_y, ltid_x)
     ts  <- mapM lookupType res
     return (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms $ map Var res
