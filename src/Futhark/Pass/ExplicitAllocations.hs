@@ -853,6 +853,9 @@ instance SizeSubst op => SizeSubst (MemOp op) where
   opSizeSubst pat (Inner op) = opSizeSubst pat op
   opSizeSubst _ _ = mempty
 
+  opIsConst (Inner op) = opIsConst op
+  opIsConst _ = False
+
 sizeSubst :: SizeSubst (Op lore) => Stm lore -> ChunkMap
 sizeSubst (Let pat _ (Op op)) = opSizeSubst pat op
 sizeSubst _ = mempty

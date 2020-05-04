@@ -24,7 +24,7 @@ instance SizeSubst (HostOp lore op) where
 
   opIsConst (SizeOp GetSize{}) = True
   opIsConst (SizeOp GetSizeMax{}) = True
-  opIsConst _ = True
+  opIsConst _ = False
 
 instance SizeSubst (SegOp lvl lore) where
   opSizeSubst _ _ = mempty
