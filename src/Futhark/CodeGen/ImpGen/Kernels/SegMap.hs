@@ -8,17 +8,17 @@ import Control.Monad.Except
 
 import Prelude hiding (quot, rem)
 
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.KernelsMem
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.Util.IntegralExp (quotRoundingUp)
 
 -- | Compile 'SegMap' instance code.
-compileSegMap :: Pattern ExplicitMemory
+compileSegMap :: Pattern KernelsMem
               -> SegLevel
               -> SegSpace
-              -> KernelBody ExplicitMemory
+              -> KernelBody KernelsMem
               -> CallKernelGen ()
 
 compileSegMap pat lvl space kbody = do

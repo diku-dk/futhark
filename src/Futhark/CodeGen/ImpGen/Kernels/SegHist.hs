@@ -48,8 +48,8 @@ import Data.List (foldl', genericLength, zip4, zip6)
 import Prelude hiding (quot, rem)
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.ExplicitMemory
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Representation.KernelsMem
+import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations()
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
@@ -67,13 +67,13 @@ data SubhistosInfo = SubhistosInfo { subhistosArray :: VName
                                    }
 
 data SegHistSlug = SegHistSlug
-                   { slugOp :: HistOp ExplicitMemory
+                   { slugOp :: HistOp KernelsMem
                    , slugNumSubhistos :: VName
                    , slugSubhistos :: [SubhistosInfo]
-                   , slugAtomicUpdate :: AtomicUpdate ExplicitMemory KernelEnv
+                   , slugAtomicUpdate :: AtomicUpdate KernelsMem KernelEnv
                    }
 
-histoSpaceUsage :: HistOp ExplicitMemory
+histoSpaceUsage :: HistOp KernelsMem
                 -> Imp.Count Imp.Bytes Imp.Exp
 histoSpaceUsage op =
   sum $
@@ -86,7 +86,7 @@ histoSpaceUsage op =
 -- segmented and unsegmented,, and compute some other auxiliary
 -- information.
 computeHistoUsage :: SegSpace
-                  -> HistOp ExplicitMemory
+                  -> HistOp KernelsMem
                   -> CallKernelGen (Imp.Count Imp.Bytes Imp.Exp,
                                     Imp.Count Imp.Bytes Imp.Exp,
                                     SegHistSlug)
@@ -178,7 +178,7 @@ prepareAtomicUpdateGlobal l dests slug =
 -- multiple times.
 data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 
-bodyPassage :: KernelBody ExplicitMemory -> Passage
+bodyPassage :: KernelBody KernelsMem -> Passage
 bodyPassage kbody
   | mempty == consumedInKernelBody (aliasAnalyseKernelBody kbody) =
       MayBeMultiPass
@@ -343,12 +343,12 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
       return (l', do_op')
 
-histKernelGlobalPass :: [PatElem ExplicitMemory]
+histKernelGlobalPass :: [PatElem KernelsMem]
                      -> Count NumGroups Imp.Exp
                      -> Count GroupSize Imp.Exp
                      -> SegSpace
                      -> [SegHistSlug]
-                     -> KernelBody ExplicitMemory
+                     -> KernelBody KernelsMem
                      -> [[Imp.Exp] -> InKernelGen ()]
                      -> Imp.Exp -> Imp.Exp
                      -> CallKernelGen ()
@@ -425,11 +425,11 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                 do_op (bucket_is ++ is)
 
 
-histKernelGlobal :: [PatElem ExplicitMemory]
+histKernelGlobal :: [PatElem KernelsMem]
                  -> Count NumGroups SubExp -> Count GroupSize SubExp
                  -> SegSpace
                  -> [SegHistSlug]
-                 -> KernelBody ExplicitMemory
+                 -> KernelBody KernelsMem
                  -> CallKernelGen ()
 histKernelGlobal map_pes num_groups group_size space slugs kbody = do
   num_groups' <- traverse toExp num_groups
@@ -511,11 +511,11 @@ prepareIntermediateArraysLocal num_subhistos_per_group groups_per_segment space 
       return (glob_subhistos, init_local_subhistos)
 
 histKernelLocalPass :: VName -> Count NumGroups Imp.Exp
-                    -> [PatElem ExplicitMemory]
+                    -> [PatElem KernelsMem]
                     -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
                     -> SegSpace
                     -> [SegHistSlug]
-                    -> KernelBody ExplicitMemory
+                    -> KernelBody KernelsMem
                     -> InitLocalHistograms -> Imp.Exp -> Imp.Exp
                     -> CallKernelGen ()
 histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_groups group_size space slugs kbody
@@ -705,12 +705,12 @@ histKernelLocalPass num_subhistos_per_group_var groups_per_segment map_pes num_g
               copyDWIMFix global_dest global_is (Var $ paramName xp) []
 
 histKernelLocal :: VName -> Count NumGroups Imp.Exp
-                -> [PatElem ExplicitMemory]
+                -> [PatElem KernelsMem]
                 -> Count NumGroups SubExp -> Count GroupSize SubExp
                 -> SegSpace
                 -> Imp.Exp
                 -> [SegHistSlug]
-                -> KernelBody ExplicitMemory
+                -> KernelBody KernelsMem
                 -> CallKernelGen ()
 histKernelLocal num_subhistos_per_group_var groups_per_segment map_pes num_groups group_size space hist_S slugs kbody = do
   num_groups' <- traverse toExp num_groups
@@ -736,12 +736,12 @@ slugMaxLocalMemPasses slug =
     AtomicCAS _  -> 4
     AtomicLocking _ -> 6
 
-localMemoryCase :: [PatElem ExplicitMemory]
+localMemoryCase :: [PatElem KernelsMem]
                 -> Imp.Exp
                 -> SegSpace
                 -> Imp.Exp -> Imp.Exp -> Imp.Exp -> Imp.Exp
                 -> [SegHistSlug]
-                -> KernelBody ExplicitMemory
+                -> KernelBody KernelsMem
                 -> CallKernelGen (Imp.Exp, CallKernelGen ())
 localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = do
   let space_sizes = segSpaceDims space
@@ -870,11 +870,11 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 -- figuring out whether to use a local or global memory strategy, as
 -- well as collapsing the subhistograms produced (which are always in
 -- global memory, but their number may vary).
-compileSegHist :: Pattern ExplicitMemory
+compileSegHist :: Pattern KernelsMem
                -> Count NumGroups SubExp -> Count GroupSize SubExp
                -> SegSpace
-               -> [HistOp ExplicitMemory]
-               -> KernelBody ExplicitMemory
+               -> [HistOp KernelsMem]
+               -> KernelBody KernelsMem
                -> CallKernelGen ()
 compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
   num_groups' <- traverse toExp num_groups

@@ -3,7 +3,8 @@ module Futhark.CodeGen.Backends.SequentialCSharp
      ) where
 
 import Control.Monad
-import Futhark.Representation.ExplicitMemory
+
+import Futhark.Representation.SeqMem
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericCSharp as CS
@@ -11,7 +12,7 @@ import Futhark.CodeGen.Backends.GenericCSharp.AST ()
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory -> m String
+               Maybe String -> Prog SeqMem -> m String
 compileProg module_name =
   ImpGen.compileProg >=>
   CS.compileProg

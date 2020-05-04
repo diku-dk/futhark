@@ -1,6 +1,6 @@
 -- | Perform index function operations in both algebraic and LMAD
 -- representations.
-module Futhark.Representation.ExplicitMemory.IndexFunctionWrapper
+module Futhark.Representation.Mem.IxFunWrapper
   ( IxFun
   , iota
   , permute
@@ -16,8 +16,8 @@ import Prelude hiding (repeat)
 
 import Futhark.Util.IntegralExp
 import Futhark.Representation.AST.Syntax (ShapeChange, Slice)
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as I
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Alg as IA
+import qualified Futhark.Representation.Mem.IxFun as I
+import qualified Futhark.Representation.Mem.IxFun.Alg as IA
 
 
 type Shape num = [num]

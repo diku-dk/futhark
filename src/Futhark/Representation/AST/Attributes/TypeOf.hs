@@ -13,7 +13,7 @@
 --
 -- Some representations may have more specialised facilities enabling
 -- even more information - for example,
--- "Futhark.Representation.ExplicitMemory" exposes functionality for
+-- "Futhark.Representation.Mem" exposes functionality for
 -- also obtaining information about the storage location of results.
 module Futhark.Representation.AST.Attributes.TypeOf
        (
@@ -58,8 +58,7 @@ mapType outersize f = [ arrayOf t (Shape [outersize]) NoUniqueness
                       | t <- lambdaReturnType f ]
 
 -- | The type of a primitive operation.
-primOpType :: HasScope t m =>
-              BasicOp lore -> m [Type]
+primOpType :: HasScope lore m => BasicOp -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
 primOpType (Opaque se) =

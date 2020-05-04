@@ -435,7 +435,7 @@ substTypesAny lookupSubst ot = case ot of
   Scalar (Arrow als v t1 t2) ->
     Scalar $ Arrow als v (substTypesAny lookupSubst t1) (substTypesAny lookupSubst t2)
   Scalar (Sum ts) ->
-    Scalar $ Sum $ (fmap . fmap) (substTypesAny lookupSubst) ts
+    Scalar $ Sum $ fmap (fmap $ substTypesAny lookupSubst) ts
 
   where subsTypeArg (TypeArgType t loc) =
           TypeArgType (substTypesAny lookupSubst' t) loc

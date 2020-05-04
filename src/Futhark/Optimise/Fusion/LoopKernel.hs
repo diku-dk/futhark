@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer(..)
   , newKernel
@@ -16,6 +17,8 @@ module Futhark.Optimise.Fusion.LoopKernel
 import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
+import Control.Monad.Reader
+import Control.Monad.State
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -29,10 +32,28 @@ import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
-import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
 import Futhark.Util (splitAt3)
+
+newtype TryFusion a = TryFusion (ReaderT (Scope SOACS)
+                                 (StateT VNameSource Maybe)
+                                 a)
+  deriving (Functor, Applicative, Alternative, Monad, MonadFail,
+            MonadFreshNames,
+            HasScope SOACS,
+            LocalScope SOACS)
+
+tryFusion :: MonadFreshNames m =>
+             TryFusion a -> Scope SOACS -> m (Maybe a)
+tryFusion (TryFusion m) types = modifyNameSource $ \src ->
+  case runStateT (runReaderT m types) src of
+    Just (x, src') -> (Just x, src')
+    Nothing        -> (Nothing, src)
+
+liftMaybe :: Maybe a -> TryFusion a
+liftMaybe Nothing = fail "Nothing"
+liftMaybe (Just x) = return x
 
 type SOAC = SOAC.SOAC SOACS
 type MapNest = MapNest.MapNest SOACS

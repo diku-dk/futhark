@@ -13,6 +13,7 @@ module Futhark.Optimise.Simplify
   , Engine.SimplifyOp
   , Engine.bindableSimpleOps
   , Engine.noExtraHoistBlockers
+  , Engine.neverHoist
   , Engine.SimplifiableLore
   , Engine.HoistBlockers
   , RuleBook

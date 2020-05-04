@@ -26,10 +26,6 @@ import Futhark.Binder
 import Futhark.Construct
 import qualified Futhark.TypeCheck as TypeCheck
 
--- This module could be written much nicer if Haskell had functors
--- like Standard ML.  Instead, we have to abuse the namespace/module
--- system.
-
 data Kernels
 
 instance Annotations Kernels where
@@ -56,3 +52,9 @@ instance BinderOps Kernels where
   mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Kernels where
+
+instance HasSegOp Kernels where
+  type SegOpLevel Kernels = SegLevel
+  asSegOp (SegOp op) = Just op
+  asSegOp _ = Nothing
+  segOp = SegOp
