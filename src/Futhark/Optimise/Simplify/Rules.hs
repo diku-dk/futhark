@@ -227,7 +227,7 @@ type TypeLookup = SubExp -> Maybe Type
 
 -- | A simple rule is a top-down rule that can be expressed as a pure
 -- function.
-type SimpleRule lore = VarLookup lore -> TypeLookup -> BasicOp lore -> Maybe (BasicOp lore, Certificates)
+type SimpleRule lore = VarLookup lore -> TypeLookup -> BasicOp -> Maybe (BasicOp, Certificates)
 
 simpleRules :: [SimpleRule lore]
 simpleRules = [ simplifyBinOp
@@ -521,10 +521,10 @@ simplifyBinOp defOf _ (BinOp (SMax it) e1 e2)
 
 simplifyBinOp _ _ _ = Nothing
 
-constRes :: PrimValue -> Maybe (BasicOp lore, Certificates)
+constRes :: PrimValue -> Maybe (BasicOp, Certificates)
 constRes = Just . (,mempty) . SubExp . Constant
 
-subExpRes :: SubExp -> Maybe (BasicOp lore, Certificates)
+subExpRes :: SubExp -> Maybe (BasicOp, Certificates)
 subExpRes = Just . (,mempty) . SubExp
 
 simplifyUnOp :: SimpleRule lore

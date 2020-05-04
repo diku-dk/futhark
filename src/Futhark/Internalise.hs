@@ -17,7 +17,6 @@ import qualified Data.Set as S
 import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
 import Data.Loc
-import Data.Char (chr)
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
@@ -1504,11 +1503,6 @@ isOverloadedFunction qname args loc = do
       letTupExp' desc $ I.Op $
         I.Screma w (I.mapSOAC lam') arr'
 
-    handleSOACs [TupLit [lam, arr] _] "filter" = Just $ \_desc -> do
-      arrs <- internaliseExpToVars "filter_input" arr
-      lam' <- internalisePartitionLambda internaliseLambda 1 lam $ map I.Var arrs
-      uncurry (++) <$> partitionWithSOACS 1 lam' arrs
-
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
       k' <- fromIntegral <$> isInt32 k
       Just $ \_desc -> do
@@ -1559,14 +1553,6 @@ isOverloadedFunction qname args loc = do
       mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
 
     handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF a si v
-
-    handleRest [E.TupLit [e, E.ArrayLit vs _ _] _] "cmp_threshold" = do
-      s <- mapM isCharLit vs
-      Just $ \desc -> do
-        x <- internaliseExp1 "threshold_x" e
-        pure <$> letSubExp desc (Op $ CmpThreshold x s)
-      where isCharLit (Literal (SignedValue iv) _) = Just $ chr $ fromIntegral $ intToInt64 iv
-            isCharLit _                            = Nothing
 
     handleRest [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "unflatten_arr" arr
@@ -1814,14 +1800,13 @@ partitionWithSOACS k lam arrs = do
            I.If is_empty empty_body nonempty_body $
            ifCommon $ replicate k $ I.Prim int32
 
-  -- Compute total size of all partitions.
-  sum_of_partition_sizes <- letSubExp "sum_of_partition_sizes" =<<
-                            foldBinOp (Add Int32) (constant (0::Int32)) (map I.Var sizes)
+  -- The total size of all partitions must necessarily be equal to the
+  -- size of the input array.
 
   -- Create scratch arrays for the result.
   blanks <- forM arr_ts $ \arr_t ->
     letExp "partition_dest" $ I.BasicOp $
-    Scratch (elemType arr_t) (sum_of_partition_sizes : drop 1 (I.arrayDims arr_t))
+    Scratch (elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
   write_lam <- do
@@ -1840,7 +1825,7 @@ partitionWithSOACS k lam arrs = do
                     }
   results <- letTupExp "partition_res" $ I.Op $ I.Scatter w
              write_lam (classes : all_offsets ++ arrs) $
-             zip3 (repeat sum_of_partition_sizes) (repeat 1) blanks
+             zip3 (repeat w) (repeat 1) blanks
   sizes' <- letSubExp "partition_sizes" $ I.BasicOp $
             I.ArrayLit (map I.Var sizes) $ I.Prim int32
   return (map I.Var results, [sizes'])

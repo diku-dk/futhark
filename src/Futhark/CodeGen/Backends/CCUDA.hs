@@ -14,14 +14,15 @@ import qualified Language.C.Quote.OpenCL as C
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
-import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
+import Futhark.Representation.KernelsMem
+  hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
 compileProg prog = do
   (Program cuda_code cuda_prelude kernel_names _ sizes failures prog') <-
     ImpGen.compileProg prog

@@ -15,6 +15,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.15.6]
+
+### Added
+
+  * Binary operators now act as left-to-right sequence points with
+    respect to size types.
+
+  * `futhark bench` now has more colourful and hopefully readable
+    output.
+
+  * The compiler is now about 30% faster for most nontrivial programs.
+    This is due to parallelising the inlining stage, and tweaking the
+    default configuration of the Haskell RTS.
+
+  * `futhark dataset` is now about 8-10x faster.
+
+### Fixed
+
+  * Fixed some errors regarding constants (#941).
+
+  * Fixed a few missing type checker cases for sum types (#938).
+
+  * Fix OOB write in CUDA backend runtime code (#950).
+
 ## [0.15.5]
 
 ### Added

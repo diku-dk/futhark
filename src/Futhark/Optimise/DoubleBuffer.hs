@@ -35,14 +35,13 @@ import           Data.List (find)
 import           Futhark.Construct
 import           Futhark.Representation.AST
 import           Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import           Futhark.Representation.ExplicitMemory
-                 hiding (Prog, Body, Stm, Pattern, PatElem,
-                         BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
+import           Futhark.Pass.ExplicitAllocations.Kernels ()
+import qualified Futhark.Representation.Mem.IxFun as IxFun
+import           Futhark.Representation.KernelsMem
 import           Futhark.Pass
 import           Futhark.Util (maybeHead)
 
-doubleBuffer :: Pass ExplicitMemory ExplicitMemory
+doubleBuffer :: Pass KernelsMem KernelsMem
 doubleBuffer =
   Pass { passName = "Double buffer"
        , passDescription = "Perform double buffering for merge parameters of sequential loops."
@@ -56,7 +55,7 @@ doubleBuffer =
         env = Env mempty doNotTouchLoop
         doNotTouchLoop ctx val body = return (mempty, ctx, val, body)
 
-data Env = Env { envScope :: Scope ExplicitMemory
+data Env = Env { envScope :: Scope KernelsMem
                , envOptimiseLoop :: OptimiseLoop
                }
 
@@ -64,25 +63,25 @@ newtype DoubleBufferM a =
   DoubleBufferM { runDoubleBufferM :: ReaderT Env (State VNameSource) a }
   deriving (Functor, Applicative, Monad, MonadReader Env, MonadFreshNames)
 
-instance HasScope ExplicitMemory DoubleBufferM where
+instance HasScope KernelsMem DoubleBufferM where
   askScope = asks envScope
 
-instance LocalScope ExplicitMemory DoubleBufferM where
+instance LocalScope KernelsMem DoubleBufferM where
   localScope scope = local $ \env -> env { envScope = envScope env <> scope }
 
-optimiseBody :: Body ExplicitMemory -> DoubleBufferM (Body ExplicitMemory)
+optimiseBody :: Body KernelsMem -> DoubleBufferM (Body KernelsMem)
 optimiseBody body = do
   bnds' <- optimiseStms $ stmsToList $ bodyStms body
   return $ body { bodyStms = stmsFromList bnds' }
 
-optimiseStms :: [Stm ExplicitMemory] -> DoubleBufferM [Stm ExplicitMemory]
+optimiseStms :: [Stm KernelsMem] -> DoubleBufferM [Stm KernelsMem]
 optimiseStms [] = return []
 optimiseStms (e:es) = do
   e_es <- optimiseStm e
   es' <- localScope (castScope $ scopeOf e_es) $ optimiseStms es
   return $ e_es ++ es'
 
-optimiseStm :: Stm ExplicitMemory -> DoubleBufferM [Stm ExplicitMemory]
+optimiseStm :: Stm KernelsMem -> DoubleBufferM [Stm KernelsMem]
 optimiseStm (Let pat aux (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOf form <> scopeOfFParams (map fst $ ctx++val)) $
            optimiseBody body
@@ -92,12 +91,12 @@ optimiseStm (Let pat aux (DoLoop ctx val form body)) = do
 optimiseStm (Let pat aux e) =
   pure . Let pat aux <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = \_ x ->
-                                      optimiseBody x :: DoubleBufferM (Body ExplicitMemory)
+                                      optimiseBody x :: DoubleBufferM (Body KernelsMem)
                                   , mapOnOp = optimiseOp
                                   }
 
-optimiseOp :: Op ExplicitMemory
-           -> DoubleBufferM (Op ExplicitMemory)
+optimiseOp :: Op KernelsMem
+           -> DoubleBufferM (Op KernelsMem)
 optimiseOp (Inner (SegOp op)) =
   local inSegOp $ Inner . SegOp <$> mapSegOpM mapper op
   where mapper = identitySegOpMapper
@@ -107,23 +106,23 @@ optimiseOp (Inner (SegOp op)) =
         inSegOp env = env { envOptimiseLoop = optimiseLoop }
 optimiseOp op = return op
 
-optimiseKernelBody :: KernelBody ExplicitMemory
-                   -> DoubleBufferM (KernelBody ExplicitMemory)
+optimiseKernelBody :: KernelBody KernelsMem
+                   -> DoubleBufferM (KernelBody KernelsMem)
 optimiseKernelBody kbody = do
   stms' <- optimiseStms $ stmsToList $ kernelBodyStms kbody
   return $ kbody { kernelBodyStms = stmsFromList stms' }
 
-optimiseLambda :: Lambda ExplicitMemory -> DoubleBufferM (Lambda ExplicitMemory)
+optimiseLambda :: Lambda KernelsMem -> DoubleBufferM (Lambda KernelsMem)
 optimiseLambda lam = do
   body <- localScope (castScope $ scopeOf lam) $ optimiseBody $ lambdaBody lam
   return lam { lambdaBody = body }
 
 type OptimiseLoop =
-  [(FParam ExplicitMemory, SubExp)] -> [(FParam ExplicitMemory, SubExp)] -> Body ExplicitMemory
-  -> DoubleBufferM ([Stm ExplicitMemory],
-                    [(FParam ExplicitMemory, SubExp)],
-                    [(FParam ExplicitMemory, SubExp)],
-                    Body ExplicitMemory)
+  [(FParam KernelsMem, SubExp)] -> [(FParam KernelsMem, SubExp)] -> Body KernelsMem
+  -> DoubleBufferM ([Stm KernelsMem],
+                    [(FParam KernelsMem, SubExp)],
+                    [(FParam KernelsMem, SubExp)],
+                    Body KernelsMem)
 
 optimiseLoop :: OptimiseLoop
 optimiseLoop ctx val body = do
@@ -152,8 +151,8 @@ data DoubleBuffer = BufferAlloc VName (PrimExp VName) Space Bool
                     deriving (Show)
 
 doubleBufferMergeParams :: MonadFreshNames m =>
-                           [(FParam ExplicitMemory, SubExp)]
-                        -> [FParam ExplicitMemory] -> Names
+                           [(FParam KernelsMem, SubExp)]
+                        -> [FParam KernelsMem] -> Names
                         -> m [DoubleBuffer]
 doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
   evalStateT (mapM buffer val_params) M.empty
@@ -202,8 +201,8 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
                     return NoBuffer
           _ -> return NoBuffer
 
-allocStms :: [(FParam ExplicitMemory, SubExp)] -> [DoubleBuffer]
-          -> DoubleBufferM ([(FParam ExplicitMemory, SubExp)], [Stm ExplicitMemory])
+allocStms :: [(FParam KernelsMem, SubExp)] -> [DoubleBuffer]
+          -> DoubleBufferM ([(FParam KernelsMem, SubExp)], [Stm KernelsMem])
 allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           stms <- lift $ runBinder_ $ do
@@ -231,8 +230,8 @@ allocStms merge = runWriterT . zipWithM allocation merge
         allocation (f, se) _ =
           return (f, se)
 
-doubleBufferResult :: [FParam ExplicitMemory] -> [DoubleBuffer]
-                   -> Body ExplicitMemory -> Body ExplicitMemory
+doubleBufferResult :: [FParam KernelsMem] -> [DoubleBuffer]
+                   -> Body KernelsMem -> Body KernelsMem
 doubleBufferResult valparams buffered (Body () bnds res) =
   let (ctx_res, val_res) = splitAt (length res - length valparams) res
       (copybnds,val_res') =

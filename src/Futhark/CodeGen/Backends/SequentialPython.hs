@@ -4,7 +4,7 @@ module Futhark.CodeGen.Backends.SequentialPython
 
 import Control.Monad
 
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.SeqMem
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericPython as GenericPython
@@ -13,7 +13,7 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory -> m String
+               Maybe String -> Prog SeqMem -> m String
 compileProg module_name =
   ImpGen.compileProg >=>
   GenericPython.compileProg
