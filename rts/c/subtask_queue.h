@@ -277,9 +277,9 @@ static inline int query_a_subtask(struct scheduler* scheduler,
   while (subtask == NULL && num_tries < MAX_NUM_TRIES) {
     int worker_idx = rand() % scheduler->num_threads;
     if (worker_idx == tid) continue;
-    struct subtask_queue *rand_queue = &scheduler->workers[worker_idx];
-    assert(rand_queue != NULL);
-    int err = subtask_queue_steal(rand_queue, &subtask);
+    struct worker *rand_worker = &scheduler->workers[worker_idx];
+    assert(rand_worker != NULL);
+    int err = subtask_queue_steal(rand_worker, &subtask);
     if (err == 0) { /* we found some work */
       break;
     } else if (err == 1) { /* Queue was not ready or no work found */
@@ -320,7 +320,13 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
     int retval = query_a_subtask(worker->scheduler, worker->tid, worker);
     CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_unlock");
     if (retval == 1) { // we didn't find anything so go back to sleep
-      CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
+      struct timespec ts;
+      CHECK_ERR(clock_getres(CLOCK_REALTIME, &ts), "clock_getres");
+      ts.tv_nsec += 50000; // wait for 50 ms (ish)
+      int err = pthread_cond_timedwait(&subtask_queue->cond, &subtask_queue->mutex, &ts);
+      if (err != 0 && err != ETIMEDOUT) {
+        assert(!"pthread_cond_timedwait failed \n");
+      }
     } else {
       CHECK_ERR(retval, "steal_a_subtask");
     }
