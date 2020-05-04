@@ -96,13 +96,12 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         ty_name    <- nameFromString . pretty <$> newVName "Ty"
         rx_name    <- nameFromString . pretty <$> newVName "Rx"
         ry_name    <- nameFromString . pretty <$> newVName "Ry"
-        tk         <- letSubExp "Tk" $ Op $ SizeOp $ GetSize ty_name SizeTile
-        tx         <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tk_name SizeTile
-        ty         <- letSubExp "Ty" $ Op $ SizeOp $ GetSize tx_name SizeTile
-        rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeRegTile
-        ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeRegTile
-        -- rx         <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 1
-        -- ry         <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 1
+        -- TODO: ...
+        ty         <- letSubExp "Ty" $ BasicOp $ SubExp $ intConst Int32 16
+        tk         <- letSubExp "Tk" $ BasicOp $ SubExp $ intConst Int32 32
+        tx         <- letSubExp "Tx" $ BasicOp $ SubExp $ intConst Int32 32
+        ry         <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 8
+        rx         <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 4
 
         tx_rx      <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx
         ty_ry      <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32) ty ry
@@ -124,17 +123,13 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
           -- initialize register mem with neutral elements
           cssss_list <- segMap2D "cssss" (segThread grid_size block_size)
                        ResultPrivate (ty, tx) $ \(_, _) -> do
-            css <- letExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
-            return [css]
+            return =<< letTupExp "css" $ BasicOp $ Replicate (Shape [ry, rx]) red_ne
           let [cssss] = cssss_list
 
           residual   <- letSubExp "residual" $ BasicOp $ BinOp (SRem Int32) common_dim tk
           full_tiles <- letSubExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
           thd_res <- forLoop full_tiles cssss $ \kk thd_res_merge -> do
 
-          -- outer loop computing this thread's result (loop kk in mmm_kernels)
-          -- kk_bound <- letSubExp "kk_bound" =<< ceilDiv common_dim tk
-          -- thd_res <- forLoop kk_bound cssss $ \kk thd_res_merge -> do
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
             -- copy A from global to shared mem
@@ -148,7 +143,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                 loop_a_shr' <- forLoop k_bound a_shr_merge $ \k a_shr_merge' -> do
 
                   -- let gtid_y := blockIdx.y * Ty * Ry + i * Ty + threadIdx.y
-                  letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp thd_y int32 *
+                  letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp thd_y int32 +
                                                     LeafExp i int32 * primExpFromSubExp int32 ty)
                   addStm load_A -- add stm loading A[gtid_y, 0:U]
 
