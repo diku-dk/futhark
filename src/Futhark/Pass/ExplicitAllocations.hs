@@ -104,6 +104,9 @@ class (MonadFreshNames m, HasScope lore m, Mem lore) =>
   dimAllocationSize size =
     return size
 
+  -- | Get those names that are known to be constants at run-time.
+  askConsts :: m (S.Set VName)
+
   expHints :: Exp lore -> m [ExpHint]
   expHints = defaultExpHints
 
@@ -149,13 +152,12 @@ data AllocEnv fromlore tolore  =
              -- ^ When allocating memory, put it in this memory space.
              -- This is primarily used to ensure that group-wide
              -- statements store their results in local memory.
+           , envConsts :: S.Set VName
+             -- ^ The set of names that are known to be constants at
+             -- kernel compile time.
            , allocInOp :: Op fromlore -> AllocM fromlore tolore (Op tolore)
            , envExpHints :: Exp tolore -> AllocM fromlore tolore [ExpHint]
            }
-
-boundDims :: ChunkMap -> AllocEnv fromlore tolore
-          -> AllocEnv fromlore tolore
-boundDims m env = env { chunkMap = m <> chunkMap env }
 
 -- | Monad for adding allocations to an entire program.
 newtype AllocM fromlore tolore a =
@@ -189,13 +191,21 @@ instance (Allocable fromlore tolore) =>
     f e
   askDefaultSpace = asks allocSpace
 
+  askConsts = asks envConsts
+
 runAllocM :: MonadFreshNames m =>
              (Op fromlore -> AllocM fromlore tolore (Op tolore))
           -> (Exp tolore -> AllocM fromlore tolore [ExpHint])
           -> AllocM fromlore tolore a -> m a
 runAllocM handleOp hints (AllocM m) =
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBinderT m mempty) env
-  where env = AllocEnv mempty False DefaultSpace handleOp hints
+  where env = AllocEnv { chunkMap = mempty
+                       , aggressiveReuse = False
+                       , allocSpace = DefaultSpace
+                       , envConsts = mempty
+                       , allocInOp = handleOp
+                       , envExpHints = hints
+                       }
 
 -- | Monad for adding allocations to a single pattern.
 newtype PatAllocM lore a = PatAllocM (RWS
@@ -212,6 +222,7 @@ instance Mem lore => Allocator lore (PatAllocM lore) where
   addAllocStm = tell . pure
   dimAllocationSize = return
   askDefaultSpace = return DefaultSpace
+  askConsts = pure mempty
 
 runPatAllocM :: MonadFreshNames m =>
                 PatAllocM lore a -> Scope lore
@@ -604,17 +615,21 @@ ensureDirect space_ok (Var v) = do
 allocInStms :: (Allocable fromlore tolore) =>
                Stms fromlore -> (Stms tolore -> AllocM fromlore tolore a)
             -> AllocM fromlore tolore a
-allocInStms origbnds m = allocInStms' (stmsToList origbnds) mempty
-  where allocInStms' [] bnds' =
-          m bnds'
-        allocInStms' (x:xs) bnds' = do
-          allocbnds <- allocInStm' x
-          localScope (scopeOf allocbnds) $
-            local (boundDims $ mconcat $ map sizeSubst $ stmsToList allocbnds) $
-            allocInStms' xs (bnds'<>allocbnds)
+allocInStms origstms m = allocInStms' (stmsToList origstms) mempty
+  where allocInStms' [] stms' =
+          m stms'
+        allocInStms' (x:xs) stms' = do
+          allocstms <- allocInStm' x
+          localScope (scopeOf allocstms) $ do
+            let stms_substs = foldMap sizeSubst allocstms
+                stms_consts = foldMap stmConsts allocstms
+                f env = env { chunkMap = stms_substs <> chunkMap env
+                            , envConsts = stms_consts <> envConsts env
+                            }
+            local f $ allocInStms' xs (stms'<>allocstms)
         allocInStm' bnd = do
-          ((),bnds') <- collectStms $ certifying (stmCerts bnd) $ allocInStm bnd
-          return bnds'
+          ((),stms') <- collectStms $ certifying (stmCerts bnd) $ allocInStm bnd
+          return stms'
 
 allocInStm :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
               Stm fromlore -> AllocM fromlore tolore ()
@@ -828,6 +843,8 @@ allocInLoopForm (ForLoop i it n loopvars) =
 
 class SizeSubst op where
   opSizeSubst :: PatternT attr -> op -> ChunkMap
+  opIsConst :: op -> Bool
+  opIsConst = const False
 
 instance SizeSubst () where
   opSizeSubst _ _ = mempty
@@ -839,6 +856,11 @@ instance SizeSubst op => SizeSubst (MemOp op) where
 sizeSubst :: SizeSubst (Op lore) => Stm lore -> ChunkMap
 sizeSubst (Let pat _ (Op op)) = opSizeSubst pat op
 sizeSubst _ = mempty
+
+stmConsts :: SizeSubst (Op lore) => Stm lore -> S.Set VName
+stmConsts (Let pat _ (Op op))
+  | opIsConst op = S.fromList $ patternNames pat
+stmConsts _ = mempty
 
 mkLetNamesB' :: (Op (Lore m) ~ MemOp inner,
                  MonadBinder m, ExpAttr (Lore m) ~ (),
