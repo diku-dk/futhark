@@ -854,7 +854,7 @@ internaliseArg desc (arg, argdim) = do
 generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
-  cmp <- letSubExp "matches" =<< foldBinOp I.LogAnd (constant True) cmps
+  cmp <- letSubExp "matches" =<< eAll cmps
   return (cmp, pertinent)
   where
     -- Literals are always primitive values.
@@ -944,7 +944,7 @@ internaliseSlice :: SrcLoc
 internaliseSlice loc dims idxs = do
  (idxs', oks, parts) <- unzip3 <$> zipWithM internaliseDimIndex dims idxs
  c <- assertingOne $ do
-   ok <- letSubExp "index_ok" =<< foldBinOp I.LogAnd (constant True) oks
+   ok <- letSubExp "index_ok" =<< eAll oks
    let msg = errorMsg $ ["Index ["] ++ intercalate [", "] parts ++
              ["] out of bounds for array of shape ["] ++
              intersperse "][" (map ErrorInt32 $ take (length idxs) dims) ++ ["]."]
@@ -1000,14 +1000,13 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
   i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
   forwards_ok <- letSubExp "forwards_ok" =<<
-                 foldBinOp I.LogAnd zero_lte_i
-                 [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
+                 eAll [zero_lte_i, zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
 
   negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
   j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
   backwards_ok <- letSubExp "backwards_ok" =<<
-                  foldBinOp I.LogAnd negone_lte_j
-                  [negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
+                  eAll
+                  [negone_lte_j, negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
 
   slice_ok <- letSubExp "slice_ok" $ I.If backwards
               (resultBody [backwards_ok])
@@ -1441,7 +1440,7 @@ isOverloadedFunction qname args loc = do
           xe' <- internaliseExp "x" xe
           ye' <- internaliseExp "y" ye
           rs <- zipWithM (doComparison desc) xe' ye'
-          cmp_f desc =<< letSubExp "eq" =<< foldBinOp I.LogAnd (constant True) rs
+          cmp_f desc =<< letSubExp "eq" =<< eAll rs
         where isEqlOp "!=" = Just $ \desc eq ->
                 letTupExp' desc $ I.BasicOp $ I.UnOp I.Not eq
               isEqlOp "==" = Just $ \_ eq ->
@@ -1458,8 +1457,7 @@ isOverloadedFunction qname args loc = do
                         y_dims = I.arrayDims y_t
                     dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
                       letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) x_dim y_dim
-                    shapes_match <- letSubExp "shapes_match" =<<
-                                    foldBinOp I.LogAnd (constant True) dims_match
+                    shapes_match <- letSubExp "shapes_match" =<< eAll dims_match
                     compare_elems_body <- runBodyBinder $ do
                       -- Flatten both x and y.
                       x_num_elems <- letSubExp "x_num_elems" =<<

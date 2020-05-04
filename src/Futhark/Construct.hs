@@ -25,6 +25,7 @@ module Futhark.Construct
   , eRoundToMultipleOf
   , eSliceArray
   , eBlank
+  , eAll
 
   , eOutOfBounds
   , eWriteArray
@@ -307,6 +308,11 @@ foldBinOp _ ne [] =
   return $ BasicOp $ SubExp ne
 foldBinOp bop ne (e:es) =
   eBinOp bop (pure $ BasicOp $ SubExp e) (foldBinOp bop ne es)
+
+-- | True if all operands are true.
+eAll :: MonadBinder m => [SubExp] -> m (Exp (Lore m))
+eAll [] = pure $ BasicOp $ SubExp $ constant True
+eAll (x:xs) = foldBinOp LogAnd x xs
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
