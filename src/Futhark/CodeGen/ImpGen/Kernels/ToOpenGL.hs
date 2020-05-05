@@ -183,7 +183,7 @@ onShader shader = do
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|uint $id:param|],
-                  [C.citem|volatile int *$id:mem = &shared_mem[$id:param];|])
+                  [C.citem|int $id:mem = shared_mem[$id:param];|])
 
 useAsParam :: KernelUse -> Maybe (C.BlockItem, ParamUse)
 useAsParam (ScalarUse name bt) =
@@ -230,7 +230,9 @@ genOpenGlPrelude ts =
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     (if uses_float64 then glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
      else [])
+    ++ [C.cunit|$esc:(glsl_extras)|]
     where uses_float64 = FloatType Float64 `S.member` ts
+          glsl_extras  = "buffer Block {\n  volatile shared int shared_mem[];\n};"
 
 nextErrorLabel :: GenericC.CompilerM KernelOp ShaderState String
 nextErrorLabel =
@@ -301,7 +303,7 @@ inShaderOperations body =
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.modifyUserState $ \s ->
             s { shaderLocalMemory = (name', size) : shaderLocalMemory s }
-          GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
+          GenericC.stm [C.cstm|$id:name = $id:name';|]
         shaderOps (ErrorSync f) = do
           label   <- nextErrorLabel
           pending <- shaderSyncPending <$> GenericC.getUserState
