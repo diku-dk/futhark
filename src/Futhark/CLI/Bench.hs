@@ -25,6 +25,7 @@ import Text.Regex.TDFA
 import Futhark.Bench
 import Futhark.Test
 import Futhark.Util (pmapIO)
+import Futhark.Util.Console
 import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
@@ -65,6 +66,8 @@ runBenchmarks opts paths = do
     partitionEithers <$> pmapIO (optConcurrency opts) (compileBenchmark opts') benchmarks
 
   when (anyFailedToCompile skipped_benchmarks) exitFailure
+
+  putStrLn $ "Reporting average runtime of " ++ show (optRuns opts) ++ " runs for each dataset."
 
   results <- concat <$> mapM (runBenchmark opts)
              (sortBy (comparing fst) compiled_benchmarks)
@@ -120,7 +123,7 @@ compileBenchmark opts (program, spec) =
 
         case res of
           Left (err, errstr) -> do
-            putStrLn err
+            putStrLn $ inRed err
             maybe (return ()) SBS.putStrLn errstr
             return $ Left FailedToCompile
           Right () ->
@@ -135,7 +138,7 @@ runBenchmark opts (program, cases) = mapM forInputOutputs $ filter relevant case
   where forInputOutputs (InputOutputs entry_name runs) = do
           (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
 
-          putStr $ "Results for " ++ program' ++ tuning_desc ++ ":\n"
+          putStr $ inBold $ "\nResults for " ++ program' ++ tuning_desc ++ ":\n"
           let opts' = opts { optExtraOptions =
                                optExtraOptions opts ++ tuning_opts }
           BenchResult program' . catMaybes <$>
@@ -154,9 +157,9 @@ reportResult [] =
 reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / fromIntegral (length runtimes)
-      rel_dev = stddevp runtimes / mean runtimes :: Double
-  putStrLn $ printf "%10.2f" avg ++ "μs (avg. of " ++ show (length runtimes) ++
-    " runs; RSD: " ++ printf "%.2f" rel_dev ++ ")"
+      rsd = stddevp runtimes / mean runtimes :: Double
+  putStrLn $ printf "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
+    avg rsd ((minimum runtimes / avg - 1) * 100) ((maximum runtimes / avg - 1) * 100)
 
 runOptions :: BenchOptions -> RunOptions
 runOptions opts = RunOptions { runRunner = optRunner opts
@@ -176,7 +179,7 @@ runBenchmarkCase opts _ _ _ (TestRun tags _ _ _ _)
 runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
-  putStr $ "dataset " ++ dataset_desc ++ ": " ++
+  putStr $ dataset_desc ++ ": " ++
     replicate (pad_to - length dataset_desc) ' '
   hFlush stdout
 
@@ -184,7 +187,7 @@ runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds ex
          (testRunReferenceOutput program entry tr)
   case res of
     Left err -> do
-      liftIO $ putStrLn $ T.unpack err
+      liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
       reportResult runtimes
@@ -195,12 +198,12 @@ commandLineOptions = [
     Option "r" ["runs"]
     (ReqArg (\n ->
               case reads n of
-                [(n', "")] | n' >= 0 ->
+                [(n', "")] | n' > 0 ->
                   Right $ \config ->
                   config { optRuns = n'
                          }
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not a non-negative integer.")
+                  Left $ error $ "'" ++ n ++ "' is not a positive integer.")
      "RUNS")
     "Run each test case this many times."
   , Option [] ["backend"]

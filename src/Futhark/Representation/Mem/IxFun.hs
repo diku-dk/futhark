@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 -- | This module contains a representation for the index function based on
 -- linear-memory accessor descriptors; see Zhu, Hoeflinger and David work.
-module Futhark.Representation.ExplicitMemory.IndexFunction
+module Futhark.Representation.Mem.IxFun
        ( IxFun(..)
        , index
        , iota
@@ -817,13 +817,13 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
                 ) ([], m) (zip l1 l2)
 leastGeneralGeneralization _ _ = Nothing
 
--- | When comparing index functions as part of the type check in ExplicitMemory,
+-- | When comparing index functions as part of the type check in KernelsMem,
 -- we may run into problems caused by the simplifier. As index functions can be
 -- generalized over if-then-else expressions, the simplifier might hoist some of
 -- the code from inside the if-then-else (computing the offset of an array, for
 -- instance), but now the type checker cannot verify that the generalized index
 -- function is valid, because some of the existentials are computed somewhere
--- else. To Work around this, we've had to relax the ExplicitMemory type-checker
+-- else. To Work around this, we've had to relax the KernelsMem type-checker
 -- a bit, specifically, we've introduced this function to verify whether two
 -- index functions are "close enough" that we can assume that they match. We use
 -- this instead of `ixfun1 == ixfun2` and hope that it's good enough.

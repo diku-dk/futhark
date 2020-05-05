@@ -113,14 +113,15 @@ particular moment in time.  They are provided for users who wish to
 use the most recent code, but are unable to compile Futhark
 themselves.
 
-At the moment, we build such snapshots only for a single operating
-system:
+We build such binary snapshots for the following operating systems:
 
-Linux (x86_64)
+**Linux (x86_64)**
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
-In time, we hope to make snapshots available for more platforms, but
-we are limited by system availability.
+**Windows (x86_64)**
+  `futhark-nightly-windows-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-windows-x86_64.zip>`_
+
+  You will still likely need to make a C compiler (such as GCC) available on your own.
 
 .. _`Haskell tool stack`: http://docs.haskellstack.org/
 .. _`installing Stack`: http://docs.haskellstack.org/#how-to-install

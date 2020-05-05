@@ -141,8 +141,8 @@ static int cuda_device_setup(struct cuda_context *ctx) {
     cc_major = device_query(dev, COMPUTE_CAPABILITY_MAJOR);
     cc_minor = device_query(dev, COMPUTE_CAPABILITY_MINOR);
 
-    CUDA_SUCCEED(cuDeviceGetName(name, sizeof(name)/sizeof(name[0]) - 1, dev));
-    name[sizeof(name)/sizeof(name[0])] = 0;
+    CUDA_SUCCEED(cuDeviceGetName(name, sizeof(name) - 1, dev));
+    name[sizeof(name) - 1] = 0;
 
     if (ctx->cfg.debugging) {
       fprintf(stderr, "Device #%d: name=\"%s\", compute capability=%d.%d\n",

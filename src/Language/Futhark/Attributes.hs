@@ -148,7 +148,7 @@ nestedDims t =
             Scalar Prim{} ->
               mempty
             Scalar (Sum cs) ->
-              nub $ foldMap (concatMap nestedDims) cs
+              nub $ foldMap (foldMap nestedDims) cs
             Scalar (Arrow _ v t1 t2) ->
               filter (notV v) $ nestedDims t1 <> nestedDims t2
             Scalar (TypeVar _ _ _ targs) ->
@@ -402,6 +402,10 @@ matchDims onDims t1 t2 =
     (Scalar (Record f1), Scalar (Record f2)) ->
       Scalar . Record <$>
       traverse (uncurry (matchDims onDims)) (M.intersectionWith (,) f1 f2)
+    (Scalar (Sum cs1), Scalar (Sum cs2)) ->
+      Scalar . Sum <$>
+      traverse (traverse (uncurry (matchDims onDims)))
+      (M.intersectionWith zip cs1 cs2)
     (Scalar (Arrow als1 p1 a1 b1), Scalar (Arrow als2 _p2 a2 b2)) ->
       Scalar <$>
       (Arrow (als1 <> als2) p1 <$> matchDims onDims a1 a2 <*> matchDims onDims b1 b2)
@@ -749,11 +753,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
               ("rotate", IntrinsicPolyFun [tp_a]
                          [Scalar $ Prim $ Signed Int32, arr_a] arr_a),
               ("transpose", IntrinsicPolyFun [tp_a] [arr_2d_a] arr_2d_a),
-
-              ("cmp_threshold", IntrinsicPolyFun []
-                                [Scalar $ Prim $ Signed Int32,
-                                 Array () Nonunique (Prim $ Signed Int32) (rank 1)] $
-                                Scalar $ Prim Bool),
 
                ("scatter", IntrinsicPolyFun [tp_a]
                           [Array () Unique t_a (rank 1),

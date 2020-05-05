@@ -11,14 +11,14 @@ import Data.List ()
 import Prelude hiding (quot, rem)
 
 import Futhark.Transform.Rename
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.KernelsMem
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
-makeLocalArrays :: Count GroupSize SubExp -> SubExp -> [SubExp] -> Lambda ExplicitMemory
+makeLocalArrays :: Count GroupSize SubExp -> SubExp -> [SubExp] -> Lambda KernelsMem
                 -> InKernelGen [VName]
 makeLocalArrays (Count group_size) num_threads nes scan_op = do
   let (scan_x_params, _scan_y_params) =
@@ -42,17 +42,17 @@ localArrayIndex constants t =
   then kernelLocalThreadId constants
   else kernelGlobalThreadId constants
 
-barrierFor :: Lambda ExplicitMemory -> (Bool, Imp.Fence, InKernelGen ())
+barrierFor :: Lambda KernelsMem -> (Bool, Imp.Fence, InKernelGen ())
 barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
   where array_scan = not $ all primType $ lambdaReturnType scan_op
         fence | array_scan = Imp.FenceGlobal
               | otherwise = Imp.FenceLocal
 
 -- | Produce partially scanned intervals; one per workgroup.
-scanStage1 :: Pattern ExplicitMemory
+scanStage1 :: Pattern KernelsMem
            -> Count NumGroups SubExp -> Count GroupSize SubExp -> SegSpace
-           -> Lambda ExplicitMemory -> [SubExp]
-           -> KernelBody ExplicitMemory
+           -> Lambda KernelsMem -> [SubExp]
+           -> KernelBody KernelsMem
            -> CallKernelGen (VName, Imp.Exp, CrossesSegment)
 scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
   num_groups' <- traverse toExp num_groups
@@ -171,9 +171,9 @@ scanStage1 (Pattern _ pes) num_groups group_size space scan_op nes kbody = do
 
   where (array_scan, fence, barrier) = barrierFor scan_op
 
-scanStage2 :: Pattern ExplicitMemory
+scanStage2 :: Pattern KernelsMem
            -> VName -> Imp.Exp -> Count NumGroups SubExp -> CrossesSegment -> SegSpace
-           -> Lambda ExplicitMemory -> [SubExp]
+           -> Lambda KernelsMem -> [SubExp]
            -> CallKernelGen ()
 scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crossesSegment space scan_op nes = do
   -- Our group size is the number of groups for the stage 1 kernel.
@@ -220,10 +220,10 @@ scanStage2 (Pattern _ pes) stage1_num_threads elems_per_group num_groups crosses
 
   where (_, _, barrier) = barrierFor scan_op
 
-scanStage3 :: Pattern ExplicitMemory
+scanStage3 :: Pattern KernelsMem
            -> Count NumGroups SubExp -> Count GroupSize SubExp
            -> Imp.Exp -> CrossesSegment -> SegSpace
-           -> Lambda ExplicitMemory -> [SubExp]
+           -> Lambda KernelsMem -> [SubExp]
            -> CallKernelGen ()
 scanStage3 (Pattern _ pes) num_groups group_size elems_per_group crossesSegment space scan_op nes = do
   num_groups' <- traverse toExp num_groups
@@ -279,10 +279,10 @@ scanStage3 (Pattern _ pes) num_groups group_size elems_per_group crossesSegment 
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
-compileSegScan :: Pattern ExplicitMemory
+compileSegScan :: Pattern KernelsMem
                -> SegLevel -> SegSpace
-               -> Lambda ExplicitMemory -> [SubExp]
-               -> KernelBody ExplicitMemory
+               -> Lambda KernelsMem -> [SubExp]
+               -> KernelBody KernelsMem
                -> CallKernelGen ()
 compileSegScan pat lvl space scan_op nes kbody = do
   emit $ Imp.DebugPrint "\n# SegScan" Nothing

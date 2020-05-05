@@ -1,6 +1,6 @@
 -- | A simple index operation representation.  Every operation corresponds to a
 -- constructor.
-module Futhark.Representation.ExplicitMemory.IndexFunction.Alg
+module Futhark.Representation.Mem.IxFun.Alg
   ( IxFun(..)
   , iota
   , offsetIndex

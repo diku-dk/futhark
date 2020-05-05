@@ -76,6 +76,7 @@ import Language.Futhark.Warnings
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 import Futhark.Util.Pretty hiding (space)
+import Futhark.Util.Console
 
 -- | A note with extra information regarding a type error.
 newtype Note = Note Doc

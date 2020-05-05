@@ -8,7 +8,6 @@ module Futhark.Representation.SOACS
        , Body
        , Stm
        , Pattern
-       , BasicOp
        , Exp
        , Lambda
        , FParam
@@ -25,13 +24,12 @@ module Futhark.Representation.SOACS
        , AST.BodyT(Body)
        , AST.PatternT(Pattern)
        , AST.PatElemT(PatElem)
-       , AST.ExpT(BasicOp)
        )
 where
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (BasicOp, Exp, Body, Stm,
+  hiding (Exp, Body, Stm,
           Pattern, Lambda, FParam, LParam, RetType, PatElem)
 import Futhark.Representation.SOACS.SOAC
 import Futhark.Representation.AST.Attributes
@@ -54,7 +52,6 @@ instance Annotations SOACS where
 instance Attributes SOACS where
   expTypesFromPattern = return . expExtTypesFromPattern
 
-type BasicOp = AST.BasicOp SOACS
 type Exp = AST.Exp SOACS
 type Body = AST.Body SOACS
 type Stm = AST.Stm SOACS

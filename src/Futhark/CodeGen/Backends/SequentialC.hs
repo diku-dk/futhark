@@ -13,13 +13,13 @@ import Control.Monad
 
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.SeqMem
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog SeqMem -> m GC.CParts
 compileProg =
   GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
   ImpGen.compileProg

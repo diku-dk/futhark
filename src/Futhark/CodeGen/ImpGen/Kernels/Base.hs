@@ -42,8 +42,8 @@ import Prelude hiding (quot, rem)
 import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Representation.ExplicitMemory
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Representation.KernelsMem
+import qualified Futhark.Representation.Mem.IxFun as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
@@ -57,8 +57,8 @@ data KernelEnv = KernelEnv
   , kernelConstants :: KernelConstants
   }
 
-type CallKernelGen = ImpM ExplicitMemory HostEnv Imp.HostOp
-type InKernelGen = ImpM ExplicitMemory KernelEnv Imp.KernelOp
+type CallKernelGen = ImpM KernelsMem HostEnv Imp.HostOp
+type InKernelGen = ImpM KernelsMem KernelEnv Imp.KernelOp
 
 data KernelConstants = KernelConstants
                        { kernelGlobalThreadId :: Imp.Exp
@@ -78,11 +78,11 @@ keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
   nameFromString $ maybe "" ((++".") . nameToString) fname ++ nameToString key
 
-allocLocal :: AllocCompiler ExplicitMemory r Imp.KernelOp
+allocLocal :: AllocCompiler KernelsMem r Imp.KernelOp
 allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
 
-kernelAlloc :: Pattern ExplicitMemory
+kernelAlloc :: Pattern KernelsMem
             -> SubExp -> Space
             -> InKernelGen ()
 kernelAlloc (Pattern _ [_]) _ ScalarSpace{} =
@@ -98,7 +98,7 @@ kernelAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
 splitSpace :: (ToExp w, ToExp i, ToExp elems_per_thread) =>
-              Pattern ExplicitMemory -> SplitOrdering -> w -> i -> elems_per_thread
+              Pattern KernelsMem -> SplitOrdering -> w -> i -> elems_per_thread
            -> ImpM lore r op ()
 splitSpace (Pattern [] [size]) o w i elems_per_thread = do
   num_elements <- Imp.elements <$> toExp w
@@ -108,7 +108,7 @@ splitSpace (Pattern [] [size]) o w i elems_per_thread = do
 splitSpace pat _ _ _ _ =
   error $ "Invalid target for splitSpace: " ++ pretty pat
 
-compileThreadExp :: ExpCompiler ExplicitMemory KernelEnv Imp.KernelOp
+compileThreadExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
@@ -151,7 +151,7 @@ groupCoverSpace :: [Imp.Exp]
 groupCoverSpace ds f =
   groupLoop (product ds) $ f . unflattenIndex ds
 
-compileGroupExp :: ExpCompiler ExplicitMemory KernelEnv Imp.KernelOp
+compileGroupExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
 -- The static arrays stuff does not work inside kernels.
 compileGroupExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
@@ -192,7 +192,7 @@ compileGroupSpace lvl space = do
 
 -- Construct the necessary lock arrays for an intra-group histogram.
 prepareIntraGroupSegHist :: Count GroupSize SubExp
-                         -> [HistOp ExplicitMemory]
+                         -> [HistOp KernelsMem]
                          -> InKernelGen [[Imp.Exp] -> InKernelGen ()]
 prepareIntraGroupSegHist group_size =
   fmap snd . mapAccumLM onOp Nothing
@@ -229,7 +229,7 @@ prepareIntraGroupSegHist group_size =
 
           return (Just l', f l' (Space "local") local_subhistos)
 
-compileGroupOp :: OpCompiler ExplicitMemory KernelEnv Imp.KernelOp
+compileGroupOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
 
 compileGroupOp pat (Alloc size space) =
   kernelAlloc pat size space
@@ -306,18 +306,32 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       -- Segmented intra-group reductions are turned into (regular)
       -- segmented scans.  It is possible that this can be done
       -- better, but at least this approach is simple.
+
+      -- groupScan operates on flattened arrays.  This does not
+      -- involve copying anything; merely playing with the index
+      -- function.
+      dims_flat <- dPrimV "dims_flat" $ product dims'
+      let flatten arr = do
+            ArrayEntry arr_loc pt <- lookupArray arr
+            let flat_shape = Shape $ Var dims_flat :
+                             drop (length ltids) (memLocationShape arr_loc)
+            sArray "red_arr_flat" pt flat_shape $
+              ArrayIn (memLocationName arr_loc) $
+              IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims flat_shape
+
       let segment_size = last dims'
           crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
-      forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
+      forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
+        tmps_flat <- mapM flatten tmps
         groupScan (Just crossesSegment) (product dims') (product dims')
-        (segRedLambda op) tmps
+          (segRedLambda op) tmps_flat
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      let segment_is = map Imp.vi32 $ init ltids
       forM_ (zip red_pes tmp_arrs) $ \(pe, arr) ->
-        copyDWIMFix (patElemName pe) segment_is (Var arr) (segment_is ++ [last dims'-1])
+        copyDWIM (patElemName pe) [] (Var arr)
+        (map (unitSlice 0) (init dims') ++ [DimFix $ last dims'-1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
@@ -366,7 +380,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
 compileGroupOp pat _ =
   compilerBugS $ "compileGroupOp: cannot compile rhs of binding " ++ pretty pat
 
-compileThreadOp :: OpCompiler ExplicitMemory KernelEnv Imp.KernelOp
+compileThreadOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
   kernelAlloc pat size space
 compileThreadOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
@@ -413,8 +427,8 @@ type AtomicBinOp =
 
 -- | 'atomicUpdate', but where it is explicitly visible whether a
 -- locking strategy is necessary.
-atomicUpdateLocking :: AtomicBinOp -> Lambda ExplicitMemory
-                    -> AtomicUpdate ExplicitMemory KernelEnv
+atomicUpdateLocking :: AtomicBinOp -> Lambda KernelsMem
+                    -> AtomicUpdate KernelsMem KernelEnv
 
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- splitOp lam,
@@ -607,7 +621,7 @@ readsFromSet free =
           Nothing | bt == Cert -> return Nothing
                   | otherwise  -> return $ Just $ Imp.ScalarUse var bt
 
-isConstExp :: VTable ExplicitMemory -> Imp.Exp
+isConstExp :: VTable KernelsMem -> Imp.Exp
            -> ImpM lore r op (Maybe Imp.KernelConstExp)
 isConstExp vtable size = do
   fname <- askFunction
@@ -713,7 +727,7 @@ makeAllMemoryGlobal =
           entry
 
 groupReduce :: Imp.Exp
-            -> Lambda ExplicitMemory
+            -> Lambda KernelsMem
             -> [VName]
             -> InKernelGen ()
 groupReduce w lam arrs = do
@@ -722,7 +736,7 @@ groupReduce w lam arrs = do
 
 groupReduceWithOffset :: VName
                       -> Imp.Exp
-                      -> Lambda ExplicitMemory
+                      -> Lambda KernelsMem
                       -> [VName]
                       -> InKernelGen ()
 groupReduceWithOffset offset w lam arrs = do
@@ -809,7 +823,7 @@ groupReduceWithOffset offset w lam arrs = do
 groupScan :: Maybe (Imp.Exp -> Imp.Exp -> Imp.Exp)
           -> Imp.Exp
           -> Imp.Exp
-          -> Lambda ExplicitMemory
+          -> Lambda KernelsMem
           -> [VName]
           -> InKernelGen ()
 groupScan seg_flag arrs_full_size w lam arrs = do
@@ -946,7 +960,7 @@ inBlockScan :: KernelConstants
             -> Imp.Exp
             -> [VName]
             -> InKernelGen ()
-            -> Lambda ExplicitMemory
+            -> Lambda KernelsMem
             -> InKernelGen ()
 inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
   skip_threads <- dPrim "skip_threads" int32
@@ -961,7 +975,8 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
         copyDWIM (paramName x) [] (Var (paramName y)) []
 
   -- Set initial y values
-  sWhen active $ do
+  sComment "read input for in-block scan" $
+    sWhen active $ do
     zipWithM_ readInitial y_params arrs
     -- Since the final result is expected to be in x_params, we may
     -- need to copy it there for the first thread in the block.
@@ -1101,7 +1116,7 @@ sKernelGroup :: String
 sKernelGroup = sKernel groupOperations kernelGroupId
 
 sKernelFailureTolerant :: Bool
-                       -> Operations ExplicitMemory KernelEnv Imp.KernelOp
+                       -> Operations KernelsMem KernelEnv Imp.KernelOp
                        -> KernelConstants
                        -> Name
                        -> InKernelGen ()
@@ -1119,7 +1134,7 @@ sKernelFailureTolerant tol ops constants name m = do
     , Imp.kernelFailureTolerant = tol
     }
 
-sKernel :: Operations ExplicitMemory KernelEnv Imp.KernelOp
+sKernel :: Operations KernelsMem KernelEnv Imp.KernelOp
         -> (KernelConstants -> Imp.Exp)
         -> String
         -> Count NumGroups Imp.Exp
@@ -1135,7 +1150,7 @@ sKernel ops flatf name num_groups group_size v f = do
     dPrimV_ v $ flatf constants
     f
 
-copyInGroup :: CopyCompiler ExplicitMemory KernelEnv Imp.KernelOp
+copyInGroup :: CopyCompiler KernelsMem KernelEnv Imp.KernelOp
 copyInGroup pt destloc destslice srcloc srcslice = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocationName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocationName srcloc)
@@ -1156,7 +1171,7 @@ copyInGroup pt destloc destslice srcloc srcslice = do
       destloc (map DimFix $ fixSlice destslice is)
       srcloc (map DimFix $ fixSlice srcslice is)
 
-threadOperations, groupOperations :: Operations ExplicitMemory KernelEnv Imp.KernelOp
+threadOperations, groupOperations :: Operations KernelsMem KernelEnv Imp.KernelOp
 threadOperations =
   (defaultOperations compileThreadOp)
   { opsCopyCompiler = copyElementWise
@@ -1265,7 +1280,7 @@ sIota arr n x s et = do
         Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
         Imp.ConvOpExp (SExt Int32 et) gtid * s + x
 
-sCopy :: CopyCompiler ExplicitMemory HostEnv Imp.HostOp
+sCopy :: CopyCompiler KernelsMem HostEnv Imp.HostOp
 sCopy bt
   destloc@(MemLocation destmem _ _) destslice
   srcloc@(MemLocation srcmem _ _) srcslice
@@ -1297,7 +1312,7 @@ sCopy bt
       Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
 compileGroupResult :: SegSpace
-                   -> PatElem ExplicitMemory -> KernelResult
+                   -> PatElem KernelsMem -> KernelResult
                    -> InKernelGen ()
 
 compileGroupResult _ pe (TileReturns [(w,per_group_elems)] what) = do
@@ -1388,7 +1403,7 @@ compileGroupResult _ _ ConcatReturns{} =
   compilerLimitationS "compileGroupResult: ConcatReturns not handled yet."
 
 compileThreadResult :: SegSpace
-                    -> PatElem ExplicitMemory -> KernelResult
+                    -> PatElem KernelsMem -> KernelResult
                     -> InKernelGen ()
 
 compileThreadResult _ _ RegTileReturns{} =
