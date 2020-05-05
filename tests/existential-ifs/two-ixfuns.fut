@@ -1,3 +1,7 @@
+-- ==
+-- random input { [1000]i32 }
+-- auto output
+-- structure gpu { Copy 0 }
 let main [n] (xs: [n]i32): i32 =
   let xs' = if n > 10
             then let ys = rotate 4 xs

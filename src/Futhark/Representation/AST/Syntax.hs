@@ -182,7 +182,7 @@ type ShapeChange d = [DimChange d]
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
-data BasicOp lore
+data BasicOp
   = SubExp SubExp
     -- ^ A variable or constant.
 
@@ -273,7 +273,7 @@ data BasicOp lore
 -- a lore-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple 'BasicOp'.
 data ExpT lore
-  = BasicOp (BasicOp lore)
+  = BasicOp BasicOp
     -- ^ A simple (non-recursive) operation.
 
   | Apply  Name [(SubExp, Diet)] [RetType lore] (Safety, SrcLoc, [SrcLoc])
@@ -319,6 +319,11 @@ data IfSort = IfNormal -- ^ An ordinary branch.
                          -- evaluated.  the compiler is permitted to
                          -- optimise away the branch if the true case
                          -- contains only safe statements.
+            | IfEquiv -- ^ Both of these branches are semantically
+                      -- equivalent, and it is fine to eliminate one
+                      -- if it turns out to have problems
+                      -- (e.g. contain things we cannot generate code
+                      -- for).
             deriving (Eq, Show, Ord)
 
 -- | A type alias for namespace control.

@@ -29,7 +29,8 @@ import Text.Regex.TDFA
 import Futhark.Analysis.Metrics
 import Futhark.Test
 import Futhark.Util.Options
-import Futhark.Util.Pretty (prettyText, inRed)
+import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Console
 import Futhark.Util.Table
 
 --- Test execution

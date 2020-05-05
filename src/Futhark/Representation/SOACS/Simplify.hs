@@ -87,9 +87,6 @@ simplifyConsts =
 
 simplifySOAC :: Simplify.SimplifiableLore lore =>
                 Simplify.SimplifyOp lore (SOAC lore)
-simplifySOAC (CmpThreshold what s) = do
-  what' <- Engine.simplify what
-  return (CmpThreshold what' s, mempty)
 simplifySOAC (Stream outerdim form lam arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form

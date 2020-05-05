@@ -103,7 +103,7 @@ expMetrics (Apply fname _ _ _) =
 expMetrics (Op op) =
   opMetrics op
 
-primOpMetrics :: BasicOp lore -> MetricsM ()
+primOpMetrics :: BasicOp -> MetricsM ()
 primOpMetrics (SubExp _) = seen "SubExp"
 primOpMetrics (Opaque _) = seen "Opaque"
 primOpMetrics ArrayLit{} = seen "ArrayLit"

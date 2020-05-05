@@ -15,8 +15,7 @@ trigger:
 
 variables:
   System.Debug: true
-  GHC_VERSION: "8.10.1"
-  CABAL_VERSION: "3.0.0.0"
+  GHC_VERSION: "8.8.2"
 
 pool:
   vmImage: ubuntu-18.04
@@ -27,10 +26,6 @@ jobs:
     vmImage: windows-2019
 
   timeoutInMinutes: 120
-
-  variables:
-    CABAL_DIR: ""
-    CABAL_STORE_DIR: "C:\\sd"
 
   steps:
 
@@ -45,16 +40,37 @@ jobs:
       choco install -y ghc --version=$(GHC_VERSION)
     displayName: Install GHC
 
-  - bash: |
-      choco install -y cabal
-    displayName: Install cabal
+  - task: Cache@2
+    inputs:
+      key: 'cabal | "$(Agent.OS)" | azure-pipelines.yml | "$(GHC_VERSION)" | futhark.cabal'
+      restoreKeys: |
+        cabal | "$(Agent.OS)"
+      path: "$(APPDATA)\\cabal"
+    displayName: Cache cabal packages
 
   - bash: |
       export PATH=`cygpath $ProgramData`/chocolatey/lib/ghc/tools/ghc-$(GHC_VERSION)/bin:$PATH
-      echo $PATH
       cabal update
-      cabal install -j1
+    displayName: Install cabal dependencies
+
+  - bash: |
+      export PATH=`cygpath $ProgramData`/chocolatey/lib/ghc/tools/ghc-$(GHC_VERSION)/bin:$PATH
+      cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.
     displayName: Build Futhark compiler
+
+  - task: ArchiveFiles@2
+    inputs:
+      rootFolderOrFile: 'futhark.exe'
+      archiveType: 'zip'
+      archiveFile: 'futhark-nightly-windows-x86_64.zip'
+      replaceExistingArchive: true
+
+  - task: CopyFilesOverSSH@0
+    inputs:
+      sshEndpoint: 'futhark-lang.org'
+      sourceFolder: '.'
+      contents: 'futhark-nightly-windows-x86_64.zip'
+      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
 
 - job: build_linux
 
@@ -81,19 +97,21 @@ jobs:
       ~/.ghcup/bin/ghcup install-cabal
     displayName: Install GHC and cabal
 
-  - script: |
-      set -e
-      export PATH=$HOME/.ghcup/bin:$PATH
-      cabal check
-      cabal update
-      cabal install --only-dependencies
-    displayName: Build Haskell dependencies
+  - task: Cache@2
+    inputs:
+      key: 'cabal | "$(Agent.OS)" | azure-pipelines.yml | "$(GHC_VERSION)" | futhark.cabal'
+      restoreKeys: |
+        cabal | "$(Agent.OS)"
+      path: "/home/vsts/.cabal"
+    displayName: Cache cabal packages
 
   - script: |
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
       mkdir -p $HOME/.local/bin
-      cabal install --installdir=$HOME/.local/bin --install-method=copy
+      cabal check
+      cabal update
+      cabal install --installdir=$HOME/.local/bin --install-method=copy --overwrite-policy=always
     displayName: Build and install Futhark compiler
 
   - script: |
