@@ -543,7 +543,7 @@ soacToStream soac = do
                    map paramName strm_inpids
       -- 2. let outerszm1id = chunksize - 1
           outszm1bnd = mkLet [] [outszm1id] $ BasicOp $
-                       BinOp (Sub Int32)
+                       BinOp (Sub Int32 OverflowUndef)
                        (Futhark.Var $ paramName chunk_param)
                        (constant (1::Int32))
       -- 3. let lasteel_ids = ...

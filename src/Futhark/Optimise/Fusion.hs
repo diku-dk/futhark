@@ -594,12 +594,12 @@ fusionGatherStms fres (Let (Pattern [] pes) bndtp
       forM_ (zip loop_params chunked_params) $ \(p,a_p) ->
         letBindNames_ [paramName p] $ BasicOp $ Index (paramName a_p) $
         fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
-      letBindNames_ [i] $ BasicOp $ BinOp (Add it) (Futhark.Var offset) (Futhark.Var j)
+      letBindNames_ [i] $ BasicOp $ BinOp (Add it OverflowUndef) (Futhark.Var offset) (Futhark.Var j)
       return body
     eBody [pure $
            DoLoop [] merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
            pure $
-           BasicOp $ BinOp (Add Int32) (Futhark.Var offset) (Futhark.Var chunk_size)]
+           BasicOp $ BinOp (Add Int32 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)]
   let lam = Lambda { lambdaParams = lam_params
                    , lambdaBody = lam_body
                    , lambdaReturnType = map paramType $ acc_params ++ [offset_param]

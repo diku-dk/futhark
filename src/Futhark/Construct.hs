@@ -212,7 +212,7 @@ eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
 eDivRoundingUp :: MonadBinder m =>
                   IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
 eDivRoundingUp t x y =
-  eBinOp (SQuot t) (eBinOp (Add t) x (eBinOp (Sub t) y (eSubExp one))) y
+  eBinOp (SQuot t) (eBinOp (Add t OverflowWrap) x (eBinOp (Sub t OverflowWrap) y (eSubExp one))) y
   where one = intConst t 1
 
 eRoundToMultipleOf :: MonadBinder m =>
@@ -220,8 +220,8 @@ eRoundToMultipleOf :: MonadBinder m =>
 eRoundToMultipleOf t x d =
   ePlus x (eMod (eMinus d (eMod x d)) d)
   where eMod = eBinOp (SMod t)
-        eMinus = eBinOp (Sub t)
-        ePlus = eBinOp (Add t)
+        eMinus = eBinOp (Sub t OverflowWrap)
+        ePlus = eBinOp (Add t OverflowWrap)
 
 -- | Construct an 'Index' expressions that slices an array with unit stride.
 eSliceArray :: MonadBinder m =>

@@ -397,7 +397,8 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
 
   (step, step_zero) <- case maybe_second' of
     Just second' -> do
-      subtracted_step <- letSubExp "subtracted_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
+      subtracted_step <- letSubExp "subtracted_step" $
+        I.BasicOp $ I.BinOp (I.Sub it I.OverflowWrap) second' start'
       step_zero <- letSubExp "step_zero" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
       return (subtracted_step, step_zero)
     Nothing ->
@@ -416,13 +417,13 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
       step_wrong_dir <- letSubExp "step_wrong_dir" $
                         I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign one
       distance <- letSubExp "distance" $
-                  I.BasicOp $ I.BinOp (Sub it) start' end'
+                  I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) start' end'
       distance_i32 <- asIntZ Int32 distance
       return (distance_i32, step_wrong_dir, bounds_invalid_downwards)
     UpToExclusive{} -> do
       step_wrong_dir <- letSubExp "step_wrong_dir" $
                         I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
-      distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (Sub it) end' start'
+      distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
       distance_i32 <- asIntZ Int32 distance
       return (distance_i32, step_wrong_dir, bounds_invalid_upwards)
     ToInclusive{} -> do
@@ -430,10 +431,10 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
                    I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
       distance_downwards_exclusive <-
         letSubExp "distance_downwards_exclusive" $
-        I.BasicOp $ I.BinOp (Sub it) start' end'
+        I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) start' end'
       distance_upwards_exclusive <-
         letSubExp "distance_upwards_exclusive" $
-        I.BasicOp $ I.BinOp (Sub it) end' start'
+        I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
 
       bounds_invalid <- letSubExp "bounds_invalid" $
                         I.If downwards
@@ -447,7 +448,7 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
                             ifCommon [I.Prim $ IntType it]
       distance_exclusive_i32 <- asIntZ Int32 distance_exclusive
       distance <- letSubExp "distance" $
-                  I.BasicOp $ I.BinOp (Add Int32)
+                  I.BasicOp $ I.BinOp (Add Int32 I.OverflowWrap)
                   distance_exclusive_i32 (intConst Int32 1)
       return (distance, constant False, bounds_invalid)
 
@@ -464,7 +465,7 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
 
   step_i32 <- asIntS Int32 step
   pos_step <- letSubExp "pos_step" $
-              I.BasicOp $ I.BinOp (Mul Int32) step_i32 step_sign_i32
+              I.BasicOp $ I.BinOp (Mul Int32 I.OverflowWrap) step_i32 step_sign_i32
 
   num_elems <- certifying cs $
                letSubExp "num_elems" =<<
@@ -492,7 +493,7 @@ internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
   case et of I.Prim (I.IntType t) ->
-               letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
+               letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t I.OverflowWrap) (I.intConst t 0) e'
              I.Prim (I.FloatType t) ->
                letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
              _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
@@ -965,7 +966,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   s' <- maybe (return one) (fmap fst . internaliseDimExp "s") s
   s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
   backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) s_sign negone
-  w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int32) w one
+  w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int32 I.OverflowWrap) w one
   let i_def = letSubExp "i_def" $ I.If backwards
               (resultBody [w_minus_1])
               (resultBody [zero]) $ ifCommon [I.Prim int32]
@@ -974,11 +975,12 @@ internaliseDimIndex w (E.DimSlice i j s) = do
               (resultBody [w]) $ ifCommon [I.Prim int32]
   i' <- maybe i_def (fmap fst . internaliseDimExp "i") i
   j' <- maybe j_def (fmap fst . internaliseDimExp "j") j
-  j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32) j' i'
+  j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32 I.OverflowWrap) j' i'
   -- Something like a division-rounding-up, but accomodating negative
   -- operands.
   let divRounding x y =
-        eBinOp (SQuot Int32) (eBinOp (Add Int32) x (eBinOp (Sub Int32) y (eSignum $ toExp s'))) y
+        eBinOp (SQuot Int32) (eBinOp (Add Int32 I.OverflowWrap) x
+                              (eBinOp (Sub Int32 I.OverflowWrap) y (eSignum $ toExp s'))) y
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
 
   -- Bounds checks depend on whether we are slicing forwards or
@@ -987,9 +989,9 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   -- i+n*s && i+(n-1)*s < w'.  We only check if the slice is nonempty.
   empty_slice <- letSubExp "empty_slice" $ I.BasicOp $ I.CmpOp (CmpEq int32) n zero
 
-  m <- letSubExp "m" $ I.BasicOp $ I.BinOp (Sub Int32) n one
-  m_t_s <- letSubExp "m_t_s" $ I.BasicOp $ I.BinOp (Mul Int32) m s'
-  i_p_m_t_s <- letSubExp "i_p_m_t_s" $ I.BasicOp $ I.BinOp (Add Int32) i' m_t_s
+  m <- letSubExp "m" $ I.BasicOp $ I.BinOp (Sub Int32 I.OverflowWrap) n one
+  m_t_s <- letSubExp "m_t_s" $ I.BasicOp $ I.BinOp (Mul Int32 I.OverflowWrap) m s'
+  i_p_m_t_s <- letSubExp "i_p_m_t_s" $ I.BasicOp $ I.BinOp (Add Int32 I.OverflowWrap) i' m_t_s
   zero_leq_i_p_m_t_s <- letSubExp "zero_leq_i_p_m_t_s" $
                         I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i_p_m_t_s
   i_p_m_t_s_leq_w <- letSubExp "i_p_m_t_s_leq_w" $
@@ -1225,21 +1227,21 @@ internaliseBinOp :: SrcLoc -> String
                  -> E.PrimType
                  -> InternaliseM [I.SubExp]
 internaliseBinOp _ desc E.Plus x y (E.Signed t) _ =
-  simpleBinOp desc (I.Add t) x y
+  simpleBinOp desc (I.Add t I.OverflowWrap) x y
 internaliseBinOp _ desc E.Plus x y (E.Unsigned t) _ =
-  simpleBinOp desc (I.Add t) x y
+  simpleBinOp desc (I.Add t I.OverflowWrap) x y
 internaliseBinOp _ desc E.Plus x y (E.FloatType t) _ =
   simpleBinOp desc (I.FAdd t) x y
 internaliseBinOp _ desc E.Minus x y (E.Signed t) _ =
-  simpleBinOp desc (I.Sub t) x y
+  simpleBinOp desc (I.Sub t I.OverflowWrap) x y
 internaliseBinOp _ desc E.Minus x y (E.Unsigned t) _ =
-  simpleBinOp desc (I.Sub t) x y
+  simpleBinOp desc (I.Sub t I.OverflowWrap) x y
 internaliseBinOp _ desc E.Minus x y (E.FloatType t) _ =
   simpleBinOp desc (I.FSub t) x y
 internaliseBinOp _ desc E.Times x y (E.Signed t) _ =
-  simpleBinOp desc (I.Mul t) x y
+  simpleBinOp desc (I.Mul t I.OverflowWrap) x y
 internaliseBinOp _ desc E.Times x y (E.Unsigned t) _ =
-  simpleBinOp desc (I.Mul t) x y
+  simpleBinOp desc (I.Mul t I.OverflowWrap) x y
 internaliseBinOp _ desc E.Times x y (E.FloatType t) _ =
   simpleBinOp desc (I.FMul t) x y
 internaliseBinOp loc desc E.Divide x y (E.Signed t) _ =
@@ -1461,7 +1463,7 @@ isOverloadedFunction qname args loc = do
                     compare_elems_body <- runBodyBinder $ do
                       -- Flatten both x and y.
                       x_num_elems <- letSubExp "x_num_elems" =<<
-                                     foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
+                                     foldBinOp (I.Mul Int32 I.OverflowUndef) (constant (1::Int32)) x_dims
                       x' <- letExp "x" $ I.BasicOp $ I.SubExp x
                       y' <- letExp "x" $ I.BasicOp $ I.SubExp y
                       x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] x'
@@ -1561,7 +1563,7 @@ isOverloadedFunction qname args loc = do
       old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
       dim_ok <- assertingOne $ letExp "dim_ok" =<<
                 eAssert (eCmpOp (I.CmpEq I.int32)
-                         (eBinOp (I.Mul Int32) (eSubExp n') (eSubExp m'))
+                         (eBinOp (I.Mul Int32 I.OverflowUndef) (eSubExp n') (eSubExp m'))
                          (eSubExp old_dim))
                 "new shape has different number of elements than old shape" loc
       certifying dim_ok $ forM arrs $ \arr' -> do
@@ -1575,7 +1577,7 @@ isOverloadedFunction qname args loc = do
         arr_t <- lookupType arr'
         let n = arraySize 0 arr_t
             m = arraySize 1 arr_t
-        k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int32) n m
+        k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int32 I.OverflowUndef) n m
         letSubExp desc $ I.BasicOp $
           I.Reshape (reshapeOuter [DimNew k] 2 $ I.arrayShape arr_t) arr'
 
@@ -1584,7 +1586,7 @@ isOverloadedFunction qname args loc = do
       ys <- internaliseExpToVars "concat_y" y
       outer_size <- arraysSize 0 <$> mapM lookupType xs
       let sumdims xsize ysize = letSubExp "conc_tmp" $ I.BasicOp $
-                                I.BinOp (I.Add I.Int32) xsize ysize
+                                I.BinOp (I.Add I.Int32 I.OverflowUndef) xsize ysize
       ressize <- foldM sumdims outer_size =<<
                  mapM (fmap (arraysSize 0) . mapM lookupType) [ys]
 
@@ -1775,7 +1777,7 @@ partitionWithSOACS k lam arrs = do
   add_lam_body <- runBodyBinder $
                   localScope (scopeOfLParams $ add_lam_x_params++add_lam_y_params) $
     fmap resultBody $ forM (zip add_lam_x_params add_lam_y_params) $ \(x,y) ->
-      letSubExp "z" $ I.BasicOp $ I.BinOp (I.Add Int32)
+      letSubExp "z" $ I.BasicOp $ I.BinOp (I.Add Int32 I.OverflowUndef)
       (I.Var $ I.paramName x) (I.Var $ I.paramName y)
   let add_lam = I.Lambda { I.lambdaBody = add_lam_body
                          , I.lambdaParams = add_lam_x_params ++ add_lam_y_params
@@ -1789,7 +1791,7 @@ partitionWithSOACS k lam arrs = do
   -- We have the offsets for each of the partitions, but we also need
   -- the total sizes, which are the last elements in the offests.  We
   -- just have to be careful in case the array is empty.
-  last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int32) w $ constant (1::Int32)
+  last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int32 OverflowUndef) w $ constant (1::Int32)
   nonempty_body <- runBodyBinder $ fmap resultBody $ forM all_offsets $ \offset_array ->
     letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array [I.DimFix last_index]
   let empty_body = resultBody $ replicate k $ constant (0::Int32)
@@ -1839,7 +1841,7 @@ partitionWithSOACS k lam arrs = do
       is_this_one <- letSubExp "is_this_one" $ I.BasicOp $ I.CmpOp (CmpEq int32) c (constant i)
       next_one <- mkOffsetLambdaBody sizes c (i+1) ps
       this_one <- letSubExp "this_offset" =<<
-                  foldBinOp (Add Int32) (constant (-1::Int32))
+                  foldBinOp (Add Int32 OverflowUndef) (constant (-1::Int32))
                   (I.Var (I.paramName p) : take i sizes)
       letSubExp "total_res" $ I.If is_this_one
         (resultBody [this_one]) (resultBody [next_one]) $ ifCommon [I.Prim int32]

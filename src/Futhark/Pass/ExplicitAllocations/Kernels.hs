@@ -39,7 +39,7 @@ allocAtLevel lvl = local $ \env -> env { allocSpace = space
 handleSegOp :: SegOp SegLevel Kernels
             -> AllocM Kernels KernelsMem (SegOp SegLevel KernelsMem)
 handleSegOp op = do
-  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
+  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32 OverflowUndef)
                  (unCount (segNumGroups lvl)) (unCount (segGroupSize lvl))
   allocAtLevel lvl $ mapSegOpM (mapper num_threads) op
   where scope = scopeOfSegSpace $ segSpace op
