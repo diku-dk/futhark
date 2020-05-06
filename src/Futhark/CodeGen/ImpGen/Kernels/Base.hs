@@ -169,10 +169,8 @@ compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIMFix (patElemName dest) [i'] (Var x) []
   sOp $ Imp.Barrier Imp.FenceLocal
-compileGroupExp dest e = do
+compileGroupExp dest e =
   defCompileExp dest e
-  when (any ((>0) . arrayRank) (patternTypes dest)) $
-    sOp $ Imp.Barrier Imp.FenceLocal
 
 sanityCheckLevel :: SegLevel -> InKernelGen ()
 sanityCheckLevel SegThread{} = return ()
@@ -1171,10 +1169,11 @@ copyInGroup pt destloc destslice srcloc srcslice = do
       copyElementWise pt destloc destslice' srcloc srcslice'
 
     _ ->
-      groupCoverSpace (sliceDims destslice) $ \is ->
+      groupCoverSpace (sliceDims destslice) $ \is -> do
       copyElementWise pt
-      destloc (map DimFix $ fixSlice destslice is)
-      srcloc (map DimFix $ fixSlice srcslice is)
+        destloc (map DimFix $ fixSlice destslice is)
+        srcloc (map DimFix $ fixSlice srcslice is)
+      sOp $ Imp.Barrier Imp.FenceLocal
 
 threadOperations, groupOperations :: Operations KernelsMem KernelEnv Imp.KernelOp
 threadOperations =
