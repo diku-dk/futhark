@@ -74,6 +74,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
     Just (code2', arr_tab0) <- foldl (processIndirections (namesFromList arrs) res_red_var)
                                      (Just (Seq.empty, M.empty)) code1,
 
+    -- null code2 && null code2', -- FIXME: remove the need for these assumptions
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
@@ -101,6 +102,11 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         ty         <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
         rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeRegTile
         ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeRegTile
+        -- ty         <- letSubExp "Ty" $ BasicOp $ SubExp $ intConst Int32 16
+        -- tk         <- letSubExp "Tk" $ BasicOp $ SubExp $ intConst Int32 16
+        -- tx         <- letSubExp "Tx" $ BasicOp $ SubExp $ intConst Int32 16
+        -- ry         <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 4
+        -- rx         <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 4
 
         tx_rx      <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx
         ty_ry      <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32) ty ry
@@ -126,7 +132,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
             css_init <- scratch "css_init" (elemType red_t) [ry, rx]
             css <- forLoop ry css_init $ \i css_merge -> do
               css' <- forLoop rx css_merge $ \j css_merge' -> do
-                css'' <- updateSE "css" css_merge' [i, j] red_ne
+                css'' <- update' "css" css_merge' [i, j] red_ne
                 return $ resultBody [Var css'']
               return $ resultBody [Var css']
 
@@ -135,101 +141,59 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
 
           residual   <- letSubExp "residual" $ BasicOp $ BinOp (SRem Int32) common_dim tk
           full_tiles <- letSubExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
-
-          len_A_shr <- letExp "len_A_shr" =<<
-            toExp $ primExpFromSubExp int32 ty *
-                    primExpFromSubExp int32 ry *
-                    primExpFromSubExp int32 tk
-          len_B_shr <- letExp "len_B_shr" =<<
-            toExp $ primExpFromSubExp int32 tk *
-                    primExpFromSubExp int32 tx *
-                    primExpFromSubExp int32 rx
-          tk_div_tx <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
-          tk_div_ty <- letSubExp "tk_div_ty" =<< ceilDiv tk ty
-
           thd_res <- forLoop full_tiles cssss $ \kk thd_res_merge -> do
 
             kk' <- letExp "kk'" $ BasicOp $ BinOp (Mul Int32) (Var kk) tk
 
-            -- Cosmin: copy A from global to shared memory
-            a_shr_init <- scratch "A_shr" map_t1 [Var len_A_shr]
-            a_shr <- forLoop ry a_shr_init $ \i a_shr_merge -> do
-              loop_a_shr' <- forLoop tk_div_tx a_shr_merge $ \k0 a_shr_merge' -> do
-                -- segScatter desc arr_size updt_arr lvl f
-                loop_a_shr'' <- segScatter "A_glb2shr" (Var len_A_shr) a_shr_merge'
-                                  (segThread grid_size group_size) $ \lid -> do
-                    lid_y <- letExp "lid_y" =<< toExp $
-                                BinOpExp (SQuot Int32) (LeafExp lid int32) 
-                                         (primExpFromSubExp int32 tx)
-                    lid_x <- letExp "lid_x" =<< toExp $
-                                BinOpExp (SRem  Int32) (LeafExp lid int32) 
-                                         (primExpFromSubExp int32 tx)
-                    k <- letExp "k" =<< toExp $ LeafExp k0 int32 * primExpFromSubExp int32 tx + LeafExp lid_x int32
+            -- copy A from global to shared mem
+            k_bound <- letSubExp "k_bound" =<< ceilDiv tk tx
+            a_shr_list <- segMap2D "A_shr" (segThread grid_size group_size)
+                            ResultNoSimplify (ty, tx) $ \(thd_y, thd_x) -> do
 
-                    loc_i <- letExp "loc_i" =<< toExp $ LeafExp i int32 * primExpFromSubExp int32 ty + LeafExp lid_y int32
-                    letBindNames_ [gtid_y]  =<< toExp $ LeafExp iii int32 + LeafExp loc_i int32
-                    glb_k <- letExp "glb_k" =<< toExp $ LeafExp kk' int32 + LeafExp k int32
+              a_shr_init <- scratch "A_shr_init" map_t1 [k_bound, ry]
+              loop_a_shr <- forLoop ry a_shr_init $ \i a_shr_merge -> do
 
-                    glb_v <- letExp "glb_v" =<< 
-                             eIf (toExp $
-                                 --( CmpOpExp (CmpSlt Int32) (LeafExp gtid_y int32) (primExpFromSubExp int32 height_A) ) )
-                                    LeafExp gtid_y int32 .<. primExpFromSubExp int32 height_A .&&.
-                                    LeafExp glb_k  int32 .<. primExpFromSubExp int32 common_dim)
-                                 (do addStm load_A
-                                     res <- index "A_elem" inp_A [glb_k]
-                                     resultBodyM [Var res])
-                                 (eBody $ map eBlank [Prim map_t1])
-                    shr_ind <- letExp "shr_ind" =<< 
-                             eIf (toExp $ (LeafExp k int32) .<. (primExpFromSubExp int32 tk) )
-                                 (do res <- letExp "loc_fi" =<< toExp (
-                                            (LeafExp loc_i int32) * (primExpFromSubExp int32 tk) + 
-                                            (LeafExp k int32) )
-                                     resultBodyM [Var res])
-                                 (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
-                    return (Var glb_v, Var shr_ind)
-                let [a_shr''] = loop_a_shr''
-                return $ resultBody [Var a_shr'']
-              return $ resultBody [Var loop_a_shr']
-            --
-            -- Cosmin: copy B from global to shared memory
-            b_shr_init <- scratch "B_shr" map_t2 [Var len_B_shr]
-            b_shr <- forLoop tk_div_ty b_shr_init $ \k0 b_shr_merge -> do
-              loop_b_shr' <- forLoop rx b_shr_merge $ \j b_shr_merge' -> do
-                -- segScatter desc arr_size updt_arr lvl f
-                loop_b_shr'' <- segScatter "B_glb2shr" (Var len_B_shr) b_shr_merge'
-                        (segThread grid_size group_size) $ \lid -> do
-                    lid_y <- letExp "lid_y" =<< toExp (
-                                BinOpExp (SQuot Int32) (LeafExp lid int32)
-                                         (primExpFromSubExp int32 tx)    )
-                    lid_x <- letExp "lid_x" =<< toExp (
-                                BinOpExp (SRem  Int32) (LeafExp lid int32) 
-                                         (primExpFromSubExp int32 tx)    )
-                    k <- letExp "k" =<< toExp (
-                         (LeafExp k0 int32) * (primExpFromSubExp int32 ty) + (LeafExp lid_y int32) )
+                loop_a_shr' <- forLoop k_bound a_shr_merge $ \k a_shr_merge' -> do
 
-                    loc_j <- letExp "loc_j" =<< toExp (
-                         (LeafExp j int32) * (primExpFromSubExp int32 tx) + (LeafExp lid_x int32) )
-                    letBindNames_ [gtid_x] =<< toExp ( (LeafExp jjj int32) + (LeafExp loc_j int32) )
-                    glb_k <- letExp "glb_k" =<< toExp ( (LeafExp kk' int32) + (LeafExp k int32) )
+                  -- let gtid_y := blockIdx.y * Ty * Ry + i * Ty + threadIdx.y
+                  letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp thd_y int32 +
+                                                    LeafExp i int32 * primExpFromSubExp int32 ty)
+                  addStm load_A -- add stm loading A[gtid_y, 0:U]
 
-                    glb_v <- letExp "glb_v" =<< 
-                             eIf (toExp $
-                                    LeafExp gtid_x int32 .<. primExpFromSubExp int32 width_B .&&.
-                                    LeafExp glb_k  int32 .<. primExpFromSubExp int32 common_dim)
-                                 (do addStm load_B
-                                     res <- index "B_elem" inp_B [glb_k]
-                                     resultBodyM [Var res])
-                                 (eBody $ map eBlank [Prim map_t1])
-                    shr_ind <- letExp "shr_ind" =<< 
-                             eIf (toExp $ LeafExp k int32 .<. primExpFromSubExp int32 tk)
-                                 (do res <- letExp "loc_fi" =<< toExp (
-                                              LeafExp k int32 * primExpFromSubExp int32 tx_rx + LeafExp loc_j int32)
-                                     resultBodyM [Var res])
-                                 (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
-                    return (Var glb_v, Var shr_ind)
-                let [b_shr''] = loop_b_shr''
-                return $ resultBody [Var b_shr'']
-              return $ resultBody [Var loop_b_shr']
+                  -- a_col_idx := kk' + thd_x + k * tx
+                  a_col_idx <- letExp "a_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_x int32 +
+                                                         LeafExp k int32 * primExpFromSubExp int32 tx)
+                  a_shr <- update "A_shr" a_shr_merge' [k, i] =<< index "A_elem" inp_A [a_col_idx]
+                  return $ resultBody [Var a_shr]
+                return $ resultBody [Var loop_a_shr']
+              return [loop_a_shr]
+            let [a_shr] = a_shr_list
+
+            -- copy B from global to shared mem
+            k_bound' <- letSubExp "k_bound'" =<< ceilDiv tk ty
+            b_shr_list <- segMap2D "B_shr" (segThread grid_size group_size)
+                            ResultNoSimplify (ty, tx) $ \(thd_y, thd_x) -> do
+
+              b_shr_init <- scratch "B_shr_init" map_t2 [rx, k_bound']
+              loop_b_shr <- forLoop rx b_shr_init $ \j b_shr_merge -> do
+
+                loop_b_shr' <- forLoop k_bound' b_shr_merge $ \k b_shr_merge' -> do
+
+                  -- let gtid_x := jjj + j', where j' = thd_x + j * tx
+                  letBindNames_ [gtid_x] =<< toExp (LeafExp jjj int32 + LeafExp thd_x int32 +
+                                                    LeafExp j int32 * primExpFromSubExp int32 tx)
+                  addStm load_B -- add the stm loading B[gtid_x, 0:U].
+
+                  -- let b_col_idx' := kk' + k', where k' = thd_y + k * ty
+                  b_col_idx <- letExp "b_col" =<< toExp (LeafExp kk' int32 + LeafExp thd_y int32 +
+                                                         LeafExp k int32 * primExpFromSubExp int32 ty)
+                                                       
+                  b_shr <- update "B_shr" b_shr_merge' [j, k] =<< index "B_elem" inp_B [b_col_idx]
+                  return $ resultBody [Var b_shr]
+                return $ resultBody [Var loop_b_shr']
+              return [loop_b_shr]
+            let [b_shr] = b_shr_list
+
 
             -- inner loop updating this thread's accumulator (loop k in mmm_kernels)
             thd_acc <- forLoop tk thd_res_merge $ \k acc_merge -> do
@@ -246,22 +210,14 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                 -- here:           A_shr has dims [Tk][Ty][Ry] and is indexed A_shr[thd_x][thd_y][i]
                 -- TODO: are these dimensions correct or should anything be rearranged?
                 asss <- forLoop ry asss_init $ \i asss_merge -> do
-                  -- COSMIN re-wrote this
-                  a_loc_ind <- letExp "a_loc_ind" =<< toExp $
-                                    (LeafExp thd_y int32 * primExpFromSubExp int32 ry + LeafExp i int32) *
-                                    (primExpFromSubExp int32 tk) + (LeafExp k int32)
-                  asss <- update "asss" asss_merge [i] =<< index "A_shr_elem" a_shr [a_loc_ind]
+                  asss <- update "asss" asss_merge [i] =<<
+                    index "A_shr_elem" a_shr [thd_y, thd_x, i, k] -- TODO: this indexing correct?
                   return $ resultBody [Var asss]
 
                 -- TODO: similarly for B_shr?
                 bsss <- forLoop rx bsss_init $ \j bsss_merge -> do
-                  -- COSMIN re-wrote this
-                  b_loc_ind <- letExp "b_loc_ind" =<< toExp (
-                                    (LeafExp k int32) * (primExpFromSubExp int32 tx_rx) +
-                                    (LeafExp thd_x int32) * (primExpFromSubExp int32 rx) +
-                                    (LeafExp j int32)
-                                )
-                  bsss <- update "bsss" bsss_merge [j] =<< index "B_shr_elem" b_shr [b_loc_ind]
+                  bsss <- update "bsss" bsss_merge [j] =<<
+                    index "B_shr_elem" b_shr [thd_y, thd_x, k, j] -- TODO: this indexing correct?
                   return $ resultBody [Var bsss]
                 return [asss, bsss]
 
@@ -305,11 +261,14 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
 
           
           --------------- START epilogue ---------------
-          -- TODO: build the epilogue.
           -- TODO: should we guard the epilogue with an if statement?
 
+          -- final_res <- letExp "thd_res_after_residual" =<<
+          --                eIf (toExp $ primExpFromSubExp int32 residual .==. 0)
+          --                (resultBodyM [Var thd_res])
+          --                (resultBodyM [Var thd_res])
           --------------- END epilogue -----------------
-          -- TODO: RegTileReturns still a work in progress (?)
+          -- TODO: RegTileReturns still a work in progress.
           return [RegTileReturns [(height_A, ty, ry), (width_B, tx, rx)]
                                  thd_res]
                                  -- final_res]
@@ -379,8 +338,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         update se_desc arr indices new_elem =
           letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) (Var new_elem)
 
-        updateSE :: MonadBinder m => String -> VName -> [VName] -> SubExp -> m VName -- SubExp
-        updateSE se_desc arr indices new_elem =
+        update' :: MonadBinder m => String -> VName -> [VName] -> SubExp -> m VName -- SubExp
+        update' se_desc arr indices new_elem =
           letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) new_elem
 
         forLoop :: SubExp
@@ -556,60 +515,3 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
 
   letTupExp desc $ Op $ SegOp $
     SegMap lvl segspace ts $ KernelBody () stms' $ map (Returns manifest) res'
-
-
-{--
-segMap1D :: String
-         -> SegLevel -> ResultManifest
-         -> (VName -> Binder Kernels [SubExp])
-         -> Binder Kernels [VName]
-segMap1D desc lvl manifest f = do
-  ltid <- newVName "ltid"
-  ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid, unCount $ segGroupSize lvl)]
-
-  ((ts, res), stms) <- runBinder $ do
-    res <- f ltid
-    ts <- mapM subExpType res
-    return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
-
-  letTupExp desc $ Op $ SegOp $
-    SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
-
-
-segScatter "A_glb2shr"
-                        (segThread grid_size group_size) group_size $ \lid
-
-WriteReturns
-                    [SubExp] -- Size of array.  Must match number of dims.
-                    VName -- Which array
-                    [([SubExp], SubExp)] 
-
---}
-
-segScatter  :: String   -- desc  
-            -> SubExp
-            -> VName 
-            -> SegLevel -- lvl
-            -> (VName -> Binder Kernels (SubExp,SubExp)) -- f
-            -> Binder Kernels [VName]
-segScatter desc arr_size updt_arr lvl f = do
-  ltid <- newVName "ltid"
-  ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid, unCount $ segGroupSize lvl)]
-
-  ((t_v, res_v, res_i), kstms) <- runBinder $ do
-    (res_v, res_i) <- f ltid
-    t_v <- subExpType res_v
-    return (t_v, res_v, res_i)
-
-  Body _ kstms' res' <- renameBody $ mkBody kstms [res_i, res_v]
-  let [res_i', res_v'] = res'
-  let krets' = WriteReturns [arr_size] updt_arr [ ([res_i'], res_v') ]
-  let body = KernelBody () kstms' [krets']
-  --body <- renameBody $ mkBody kstms' krets
-  letTupExp desc $ Op $ SegOp $ SegMap lvl space [t_v] $ body
-
-
-
