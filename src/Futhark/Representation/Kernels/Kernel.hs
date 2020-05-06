@@ -60,6 +60,7 @@ instance PP.Pretty SegLevel where
                text "groupsize=" <> ppr (segGroupSize lvl) <>
                case segVirt lvl of
                  SegNoVirt -> mempty
+                 SegNoVirtFull -> PP.semi <+> text "full"
                  SegVirt -> PP.semi <+> text "virtualise")
 
     where lvl' = case lvl of SegThread{} -> "_thread"
