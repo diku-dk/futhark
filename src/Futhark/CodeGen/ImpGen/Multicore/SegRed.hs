@@ -147,8 +147,6 @@ nonsegmentedReduction pat space reds kbody = do
           sComment "load next params" $
             forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
               copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-          forM_ (zip (slugParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-              copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
           sComment "red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
                 forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
