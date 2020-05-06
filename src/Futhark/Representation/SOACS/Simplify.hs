@@ -122,19 +122,23 @@ simplifySOAC (Hist w ops bfun imgs) = do
   (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun $ map Just imgs
   return (Hist w' ops' bfun' imgs', mconcat hoisted <> bfun_hoisted)
 
-simplifySOAC (Screma w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) = do
-  (scan_lam', scan_lam_hoisted) <-
-    Engine.simplifyLambda scan_lam $ replicate (length scan_nes) Nothing
+simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
+  (scans', scans_hoisted) <- fmap unzip $ forM scans $ \(Scan lam nes) -> do
+    (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length nes) Nothing
+    nes' <- Engine.simplify nes
+    return (Scan lam' nes', hoisted)
+
   (reds', reds_hoisted) <- fmap unzip $ forM reds $ \(Reduce comm lam nes) -> do
     (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length nes) Nothing
     nes' <- Engine.simplify nes
     return (Reduce comm lam' nes', hoisted)
+
   (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam $ map Just arrs
+
   (,) <$> (Screma <$> Engine.simplify w <*>
-           (ScremaForm <$> ((,) scan_lam' <$> Engine.simplify scan_nes) <*>
-             pure reds' <*> pure map_lam') <*>
+           (ScremaForm <$> pure scans' <*> pure reds' <*> pure map_lam') <*>
             Engine.simplify arrs) <*>
-    pure (scan_lam_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
+    pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
 instance BinderOps (Wise SOACS) where
   mkExpAttrB = bindableMkExpAttrB
@@ -545,7 +549,7 @@ simplifyClosedFormReduce _ _ _ _ = Skip
 -- For now we just remove singleton SOACs.
 simplifyKnownIterationSOAC :: TopDownRuleOp (Wise SOACS)
 simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
-                                    (ScremaForm (scan_lam, scan_nes) reds map_lam)
+                                    (ScremaForm scans reds map_lam)
                                     arrs)
   | oneIsh k = Simplify $ do
       zipWithM_ bindMapParam (lambdaParams map_lam) arrs
@@ -559,6 +563,7 @@ simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
       zipWithM_ bindArrayResult map_pes map_res
 
         where (Reduce _ red_lam red_nes) = singleReduce reds
+              (Scan scan_lam scan_nes) = singleScan scans
               (scan_pes, red_pes, map_pes) = splitAt3 (length scan_nes) (length red_nes) $
                                              patternElements pat
               bindMapParam p a = do

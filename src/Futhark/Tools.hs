@@ -88,23 +88,25 @@ splitScanOrRedomap patelems w map_lam accs = do
 -- code for them.  In essense, what happens is the opposite of
 -- horisontal fusion.
 dissectScrema :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
-                    Bindable (Lore m)) =>
-                   Pattern (Lore m) -> SubExp -> ScremaForm (Lore m) -> [VName]
-                -> m ()
-dissectScrema pat w (ScremaForm (scan_lam, scan_nes) reds map_lam) arrs = do
+                  Bindable (Lore m)) =>
+                 Pattern (Lore m) -> SubExp -> ScremaForm (Lore m) -> [VName]
+              -> m ()
+dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
   let num_reds = redResults reds
+      num_scans = scanResults scans
       (scan_res, red_res, map_res) =
-        splitAt3 (length scan_nes) num_reds $ patternNames pat
+        splitAt3 num_scans num_reds $ patternNames pat
+
   -- First we perform the Map, then we perform the Reduce, and finally
   -- the Scan.
-  to_scan <- replicateM (length scan_nes) $ newVName "to_scan"
+  to_scan <- replicateM num_scans $ newVName "to_scan"
   to_red <- replicateM num_reds $ newVName "to_red"
   letBindNames_ (to_scan <> to_red <> map_res) $ Op $ Screma w (mapSOAC map_lam) arrs
 
   reduce <- reduceSOAC reds
   letBindNames_ red_res $ Op $ Screma w reduce to_red
 
-  scan <- scanSOAC scan_lam scan_nes
+  scan <- scanSOAC scans
   letBindNames_ scan_res $ Op $ Screma w scan to_scan
 
 sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>

@@ -194,11 +194,12 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
 
     Op (Screma w form arrs)
-      | Just (scanfun, nes, mapfun) <- isScanomapSOAC form -> do
+      | Just (scans, mapfun) <- isScanomapSOAC form,
+        Scan scanfun nes <- singleScan scans -> do
       let scanfun' = soacsLambdaToKernels scanfun
           mapfun' = soacsLambdaToKernels mapfun
       certifying (stmAuxCerts aux) $
-        addStms =<< segScan lvl' pat w scanfun' mapfun' nes arrs [] []
+        addStms =<< segScan lvl' pat w scanfun' nes mapfun' arrs [] []
       parallelMin [w]
 
     Op (Screma w form arrs)

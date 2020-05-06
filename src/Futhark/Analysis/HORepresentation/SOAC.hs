@@ -511,7 +511,8 @@ soacToStream soac = do
       -- map(f,a) creates a stream with NO accumulators
       return (Stream w (Parallel Disorder Commutative empty_lam []) strmlam inps, [])
 
-      | Just (scan_lam, nes, _) <- Futhark.isScanomapSOAC form -> do
+      | Just (scans, _) <- Futhark.isScanomapSOAC form,
+        Futhark.Scan scan_lam nes <- Futhark.singleScan scans -> do
       -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
       -- 1. let (scan0_ids,map_resids)   = scanomap(scan_lam, nes, map_lam, a_ch)
       -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
@@ -538,7 +539,7 @@ soacToStream soac = do
       outszm1id  <- newIdent "szm1" $ Prim int32
       -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
       let insbnd = mkLet [] (scan0_ids++map_resids) $ Op $
-                   Futhark.Screma chvar (Futhark.scanomapSOAC scan_lam nes lam') $
+                   Futhark.Screma chvar (Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam') $
                    map paramName strm_inpids
       -- 2. let outerszm1id = chunksize - 1
           outszm1bnd = mkLet [] [outszm1id] $ BasicOp $

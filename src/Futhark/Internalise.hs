@@ -1526,7 +1526,7 @@ isOverloadedFunction qname args loc = do
     handleSOACs [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
       where reduce w scan_lam nes arrs =
-              I.Screma w <$> I.scanSOAC scan_lam nes <*> pure arrs
+              I.Screma w <$> I.scanSOAC [Scan scan_lam nes] <*> pure arrs
 
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
       internaliseStreamRed desc InOrder Noncommutative op f arr
@@ -1783,7 +1783,7 @@ partitionWithSOACS k lam arrs = do
                          }
       nes = replicate (length increments) $ constant (0::Int32)
 
-  scan <- I.scanSOAC add_lam nes
+  scan <- I.scanSOAC [I.Scan add_lam nes]
   all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w scan increments
 
   -- We have the offsets for each of the partitions, but we also need
