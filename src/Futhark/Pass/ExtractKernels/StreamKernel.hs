@@ -37,7 +37,7 @@ numberOfGroups desc w64 group_size = do
   max_num_groups_key <- nameFromString . pretty <$> newVName (desc ++ "_num_groups")
   num_groups <- letSubExp "num_groups" $
                 Op $ SizeOp $ CalcNumGroups w64 max_num_groups_key group_size
-  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32) num_groups group_size
+  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) num_groups group_size
   return (num_groups, num_threads)
 
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -62,7 +62,7 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
   letBindNames_ [chunk_size] $ Op $ SizeOp $ SplitSpace ordering w i elems_per_i
   case ordering of
     SplitContiguous     -> do
-      offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int32) i elems_per_i
+      offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) i elems_per_i
       zipWithM_ (contiguousSlice offset) split_bound arrs
     SplitStrided stride -> zipWithM_ (stridedSlice stride) split_bound arrs
   where contiguousSlice offset slice_name arr = do
@@ -227,7 +227,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
 segThreadCapped :: MonadFreshNames m => MkSegLevel Kernels m
 segThreadCapped ws desc r = do
   w64 <- letSubExp "nest_size" =<<
-         foldBinOp (Mul Int64) (intConst Int64 1) =<<
+         foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) =<<
          mapM (asIntS Int64) ws
   group_size <- getSize (desc ++ "_group_size") SizeGroup
 

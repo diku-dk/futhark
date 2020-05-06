@@ -662,7 +662,7 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
               eDivRoundingUp Int32 (eSubExp kdim) (eSubExp group_size)
 
       num_groups <- letSubExp "computed_num_groups" =<<
-                    foldBinOp (Mul Int32) ldim (map snd dims_on_top)
+                    foldBinOp (Mul Int32 OverflowUndef) ldim (map snd dims_on_top)
 
       return (SegGroup (Count num_groups) (Count group_size) SegNoVirt,
               SegSpace gid_flat $ dims_on_top ++ [(gid, ldim)])
@@ -868,7 +868,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
 
   tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
-  group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) tile_size tile_size
+  group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) tile_size tile_size
 
   num_groups_x <- letSubExp "num_groups_x" =<<
                   eDivRoundingUp Int32 (eSubExp kdim_x) (eSubExp tile_size)
@@ -876,7 +876,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
                   eDivRoundingUp Int32 (eSubExp kdim_y) (eSubExp tile_size)
 
   num_groups <- letSubExp "num_groups_top" =<<
-                foldBinOp (Mul Int32) num_groups_x
+                foldBinOp (Mul Int32 OverflowUndef) num_groups_x
                 (num_groups_y : map snd dims_on_top)
 
   gid_flat <- newVName "gid_flat"

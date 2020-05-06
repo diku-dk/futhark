@@ -907,7 +907,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
     -- segment_size*nesting_size.
     total_num_elements <-
       letSubExp "total_num_elements" =<<
-      foldBinOp (Mul Int32) segment_size (map snd ispace)
+      foldBinOp (Mul Int32 OverflowUndef) segment_size (map snd ispace)
 
     let flatten arr = do
           arr_shape <- arrayShape <$> lookupType arr

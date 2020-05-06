@@ -300,7 +300,7 @@ cmpSizeLe desc size_class to_what = do
   let size_key = nameFromString $ desc ++ "_" ++ show x
   runBinder $ do
     to_what' <- letSubExp "comparatee" =<<
-                foldBinOp (Mul Int32) (intConst Int32 1) to_what
+                foldBinOp (Mul Int32 OverflowUndef) (intConst Int32 1) to_what
     cmp_res <- letSubExp desc $ Op $ SizeOp $ CmpSizeLe size_key size_class to_what'
     return (cmp_res, size_key)
 
