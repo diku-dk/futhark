@@ -60,8 +60,7 @@ groupResultArrays num_threads reds =
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
         full_shape = Shape [num_threads] <> shape <> arrayShape t
-        perm = [1..shapeRank full_shape-1] ++ [0]
-    sAllocArrayPerm "group_res_arr" pt full_shape DefaultSpace perm
+    sAllocArray "group_res_arr" pt full_shape DefaultSpace
 
 
 -- | A SegRedOp with auxiliary information.
