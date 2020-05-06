@@ -229,6 +229,11 @@ prepareIntraGroupSegHist group_size =
 
           return (Just l', f l' (Space "local") local_subhistos)
 
+whenActive :: SegLevel -> SegSpace -> InKernelGen () -> InKernelGen ()
+whenActive lvl space m
+  | SegNoVirtFull <- segVirt lvl = m
+  | otherwise = sWhen (isActive $ unSegSpace space) m
+
 compileGroupOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
 
 compileGroupOp pat (Alloc size space) =
@@ -240,7 +245,7 @@ compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   void $ compileGroupSpace lvl space
 
-  sWhen (isActive $ unSegSpace space) $ localOps threadOperations $
+  whenActive lvl space $ localOps threadOperations $
     compileStms mempty (kernelBodyStms body) $
     zipWithM_ (compileThreadResult space) (patternElements pat) $
     kernelBodyResult body
@@ -252,7 +257,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
   let (ltids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
 
-  sWhen (isActive $ unSegSpace space) $
+  whenActive lvl space $
     compileStms mempty (kernelBodyStms body) $
     forM_ (zip (patternNames pat) $ kernelBodyResult body) $ \(dest, res) ->
     copyDWIMFix dest
@@ -280,7 +285,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segRedLambda) ops
   let tmps_for_ops = chunks (map (length . segRedNeutral) ops) tmp_arrs
 
-  sWhen (isActive $ unSegSpace space) $
+  whenActive lvl space $
     compileStms mempty (kernelBodyStms body) $ do
     let (red_res, map_res) =
           splitAt (segRedResults ops) $ kernelBodyResult body
@@ -351,7 +356,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   -- Ensure that all locks have been initialised.
   sOp $ Imp.Barrier Imp.FenceLocal
 
-  sWhen (isActive $ unSegSpace space) $
+  whenActive lvl space $
     compileStms mempty (kernelBodyStms kbody) $ do
     let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
         (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
@@ -1085,9 +1090,6 @@ virtualiseGroups :: SegVirt
                  -> Imp.Exp
                  -> (VName -> InKernelGen ())
                  -> InKernelGen ()
-virtualiseGroups SegNoVirt _ m = do
-  gid <- kernelGroupIdVar . kernelConstants <$> askEnv
-  m gid
 virtualiseGroups SegVirt required_groups m = do
   constants <- kernelConstants <$> askEnv
   phys_group_id <- dPrim "phys_group_id" int32
@@ -1100,6 +1102,9 @@ virtualiseGroups SegVirt required_groups m = do
     -- Make sure the virtual group is actually done before we let
     -- another virtual group have its way with it.
     sOp $ Imp.Barrier Imp.FenceGlobal
+virtualiseGroups _ _ m = do
+  gid <- kernelGroupIdVar . kernelConstants <$> askEnv
+  m gid
 
 sKernelThread :: String
               -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
