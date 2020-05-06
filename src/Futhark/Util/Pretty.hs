@@ -15,16 +15,11 @@ module Futhark.Util.Pretty
        , nestedBlock
        , textwrap
        , shorten
-
-       , color
-       , inRed
-       , inGreen
        )
        where
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as LT
-import System.Console.ANSI
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 import Text.PrettyPrint.Mainland.Class
@@ -87,12 +82,3 @@ shorten :: Pretty a => a -> Doc
 shorten a | length s > 70 = text (take 70 s) <> text "..."
           | otherwise = text s
   where s = pretty a
-
-color :: [SGR] -> String -> String
-color sgr s = setSGRCode sgr ++ s ++ setSGRCode [Reset]
-
-inRed :: String -> String
-inRed s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]
-
-inGreen :: String -> String
-inGreen s = setSGRCode [SetColor Foreground Vivid Red] ++ s ++ setSGRCode [Reset]

@@ -149,7 +149,6 @@ library
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.LoopKernel
-      Futhark.Optimise.Fusion.TryFusion
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.InPlaceLowering
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
@@ -235,6 +234,7 @@ library
       Futhark.Transform.Substitute
       Futhark.TypeCheck
       Futhark.Util
+      Futhark.Util.Console
       Futhark.Util.IntegralExp
       Futhark.Util.Log
       Futhark.Util.Options
@@ -296,10 +296,9 @@ library
     , mtl >=2.2.1
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
-    , parser-combinators >=1.0.0
+    , pcg-random >= 0.1
     , process >=1.4.3.0
     , process-extras >=0.7.2
-    , random
     , regex-tdfa >=1.2
     , srcloc >=0.4
     , template-haskell >=2.11.1
@@ -321,7 +320,7 @@ executable futhark
   main-is: src/futhark.hs
   other-modules:
       Paths_futhark
-  ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg"
+  ghc-options: -Wall -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -threaded -rtsopts "-with-rtsopts=-N -qg -H1G -A4M"
   build-depends:
       base
     , futhark

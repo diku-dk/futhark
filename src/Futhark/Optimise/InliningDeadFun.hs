@@ -8,11 +8,13 @@ module Futhark.Optimise.InliningDeadFun
   where
 
 import Control.Monad.Identity
+import Control.Monad.State
 import Data.List (partition)
 import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Control.Parallel.Strategies
 
 import Futhark.Representation.SOACS
 import Futhark.Representation.SOACS.Simplify
@@ -26,6 +28,13 @@ import Futhark.Transform.Rename
 import Futhark.Analysis.CallGraph
 import Futhark.Binder
 import Futhark.Pass
+
+parMapM :: MonadFreshNames m => (a -> State VNameSource b) -> [a] -> m [b]
+parMapM f as =
+  modifyNameSource $ \src ->
+  let f' a = runState (f a) src
+      (bs, srcs) = unzip $ parMap rpar f' as
+  in (bs, mconcat srcs)
 
 aggInlineFunctions :: MonadFreshNames m =>
                       CallGraph
@@ -86,7 +95,7 @@ aggInlineFunctions cg =
 
             let onFun = simplifyFun' <=<
                         inlineInFunDef (fdmap to_be_inlined')
-            to_inline_in' <- mapM onFun to_inline_in
+            to_inline_in' <- parMapM onFun to_inline_in
             fmap (not_actually_inlined<>) <$>
               recurse (i+1)
               (vtable', consts', not_to_inline_in <> to_inline_in')

@@ -185,7 +185,7 @@ memoryRequirements :: SegLevel -> SegSpace
                    -> ExpandM (RebaseMap, Stms KernelsMem)
 memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
   ((num_threads, num_threads64), num_threads_stms) <- runBinder $ do
-    num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
+    num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32 OverflowUndef)
                    (unCount $ segNumGroups lvl) (unCount $ segGroupSize lvl)
     num_threads64 <- letSubExp "num_threads64" $ BasicOp $ ConvOp (SExt Int32 Int64) num_threads
     return (num_threads, num_threads64)
@@ -299,7 +299,7 @@ expandedInvariantAllocations (num_threads64, Count num_groups, Count group_size)
               allocpat = Pattern [] [PatElem mem $ MemMem space]
           return (stmsFromList
                   [Let sizepat (defAux ()) $
-                    BasicOp $ BinOp (Mul Int64) num_threads64 per_thread_size,
+                    BasicOp $ BinOp (Mul Int64 OverflowUndef) num_threads64 per_thread_size,
                    Let allocpat (defAux ()) $
                     Op $ Alloc (Var total_size) space],
                   M.singleton mem newBase)
@@ -621,7 +621,7 @@ sliceKernelSizes num_threads sizes space kstms = do
            (newIdent "max_per_thread" $ Prim int64)
 
     w <- letSubExp "size_slice_w" =<<
-         foldBinOp (Mul Int32) (intConst Int32 1) (segSpaceDims space)
+         foldBinOp (Mul Int32 OverflowUndef) (intConst Int32 1) (segSpaceDims space)
 
     thread_space_iota <- letExp "thread_space_iota" $ BasicOp $
                          Iota w (intConst Int32 0) (intConst Int32 1) Int32
@@ -634,7 +634,7 @@ sliceKernelSizes num_threads sizes space kstms = do
 
     size_sums <- forM (patternNames pat) $ \threads_max ->
       letExp "size_sum" $
-      BasicOp $ BinOp (Mul Int64) (Var threads_max) num_threads_64
+      BasicOp $ BinOp (Mul Int64 OverflowUndef) (Var threads_max) num_threads_64
 
     return (patternNames pat, size_sums)
 

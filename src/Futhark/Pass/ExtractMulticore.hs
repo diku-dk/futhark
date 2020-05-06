@@ -140,7 +140,8 @@ transformSOAC pat (Screma w form arrs)
       return $ oneStm $ Let pat (defAux ()) $ Op $
         SegRed () space reds' (lambdaReturnType map_lam) kbody
 
-  | Just (lam, nes, map_lam) <- isScanomapSOAC form = do
+  | Just (scans, map_lam) <- isScanomapSOAC form,
+    Scan lam nes <- singleScan scans = do
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody gtid map_lam arrs
       lam' <- transformLambda lam

@@ -8,7 +8,6 @@ module Futhark.Representation.SeqMem
 
   -- * Simplification
   , simplifyProg
-  , simplifyStms
   , simpleSeqMem
 
     -- * Module re-exports
@@ -18,7 +17,6 @@ module Futhark.Representation.SeqMem
   where
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
@@ -79,13 +77,6 @@ instance BinderOps (Engine.Wise SeqMem) where
 simplifyProg :: Prog SeqMem -> PassM (Prog SeqMem)
 simplifyProg =
   simplifyProgGeneric $ const $ return ((), mempty)
-
-simplifyStms :: (HasScope SeqMem m, MonadFreshNames m) =>
-                 Stms SeqMem
-             -> m (Engine.SymbolTable (Engine.Wise SeqMem),
-                   Stms SeqMem)
-simplifyStms =
-  simplifyStmsGeneric $ const $ return ((), mempty)
 
 simpleSeqMem :: Engine.SimpleOps SeqMem
 simpleSeqMem =

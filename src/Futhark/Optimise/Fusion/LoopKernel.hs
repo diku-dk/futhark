@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer(..)
   , newKernel
@@ -16,6 +17,8 @@ module Futhark.Optimise.Fusion.LoopKernel
 import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
+import Control.Monad.Reader
+import Control.Monad.State
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -29,10 +32,28 @@ import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
-import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
 import Futhark.Util (splitAt3)
+
+newtype TryFusion a = TryFusion (ReaderT (Scope SOACS)
+                                 (StateT VNameSource Maybe)
+                                 a)
+  deriving (Functor, Applicative, Alternative, Monad, MonadFail,
+            MonadFreshNames,
+            HasScope SOACS,
+            LocalScope SOACS)
+
+tryFusion :: MonadFreshNames m =>
+             TryFusion a -> Scope SOACS -> m (Maybe a)
+tryFusion (TryFusion m) types = modifyNameSource $ \src ->
+  case runStateT (runReaderT m types) src of
+    Just (x, src') -> (Just x, src')
+    Nothing        -> (Nothing, src)
+
+liftMaybe :: Maybe a -> TryFusion a
+liftMaybe Nothing = fail "Nothing"
+liftMaybe (Just x) = return x
 
 type SOAC = SOAC.SOAC SOACS
 type MapNest = MapNest.MapNest SOACS
@@ -262,12 +283,14 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
   case (soac_c, soac_p) of
     _ | SOAC.width soac_p /= SOAC.width soac_c -> fail "SOAC widths must match."
 
-    (SOAC.Screma _ (ScremaForm (scan_lam_c, scan_nes_c) reds_c _) _,
-     SOAC.Screma _ (ScremaForm (scan_lam_p, scan_nes_p) reds_p _) _)
-      | mapFusionOK (drop (length scan_nes_p+Futhark.redResults reds_p) outVars) ker
+    (SOAC.Screma _ (ScremaForm scans_c reds_c _) _,
+     SOAC.Screma _ (ScremaForm scans_p reds_p _) _)
+      | mapFusionOK (drop (Futhark.scanResults scans_p+Futhark.redResults reds_p) outVars) ker
         || horizFuse -> do
       let red_nes_p = concatMap redNeutral reds_p
           red_nes_c = concatMap redNeutral reds_c
+          scan_nes_p = concatMap scanNeutral scans_p
+          scan_nes_c = concatMap scanNeutral scans_c
           (res_lam', new_inp) = fuseRedomap unfus_set outVars
                                             lam_p scan_nes_p red_nes_p inp_p_arr
                                             outPairs
@@ -277,11 +300,10 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
           (soac_c_scanout, soac_c_redout, soac_c_mapout) =
             splitAt3 (length scan_nes_c) (length red_nes_c) $ outNames ker
           unfus_arrs  = returned_outvars \\ (soac_p_scanout++soac_p_redout)
-          scan_lam'   = mergeReduceOps scan_lam_p scan_lam_c
       success (soac_p_scanout ++ soac_c_scanout ++
                soac_p_redout ++ soac_c_redout ++
                soac_c_mapout ++ unfus_arrs) $
-        SOAC.Screma w (ScremaForm (scan_lam', scan_nes_p++scan_nes_c) (reds_p ++ reds_c) res_lam')
+        SOAC.Screma w (ScremaForm (scans_p ++ scans_c) (reds_p ++ reds_c) res_lam')
         new_inp
 
     ------------------
@@ -528,7 +550,7 @@ optimizations = [iswim]
 iswim :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
       -> TryFusion (SOAC, SOAC.ArrayTransforms)
 iswim _ (SOAC.Screma w form arrs) ots
-  | Just (scan_fun, nes) <- Futhark.isScanSOAC form,
+  | Just [Futhark.Scan scan_fun nes] <- Futhark.isScanSOAC form,
     Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun,
     Just nes_names <- mapM subExpVar nes = do
 
@@ -548,18 +570,18 @@ iswim _ (SOAC.Screma w form arrs) ots
           nes' = map Var $ take (length map_nes) $ map paramName map_params
           arrs' = drop (length map_nes) $ map paramName map_params
 
-      id_map_lam <- mkIdentityLambda $ lambdaReturnType scan_fun'
+      scan_form <- scanSOAC [Futhark.Scan scan_fun' nes']
 
       let map_body = mkBody (oneStm $
                               Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                              Op $ Futhark.Screma w (ScremaForm (scan_fun', nes') [] id_map_lam) arrs') $
+                              Op $ Futhark.Screma w scan_form arrs') $
                             map Var $ patternNames map_pat
           map_fun' = Lambda map_params map_body map_rettype
           perm = case lambdaReturnType map_fun of
                    []  -> []
                    t:_ -> 1 : 0 : [2..arrayRank t]
 
-      return (SOAC.Screma map_w (ScremaForm (nilFn, mempty) [] map_fun') map_arrs',
+      return (SOAC.Screma map_w (ScremaForm [] [] map_fun') map_arrs',
               ots SOAC.|> SOAC.Rearrange map_cs perm)
 
 iswim _ _ _ =

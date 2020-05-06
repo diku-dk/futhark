@@ -9,6 +9,7 @@ module Futhark.Pass.ExplicitAllocations.Kernels
 where
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.Representation.KernelsMem
@@ -21,6 +22,10 @@ instance SizeSubst (HostOp lore op) where
     M.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
 
+  opIsConst (SizeOp GetSize{}) = True
+  opIsConst (SizeOp GetSizeMax{}) = True
+  opIsConst _ = False
+
 allocAtLevel :: SegLevel -> AllocM fromlore tlore a -> AllocM fromlore tlore a
 allocAtLevel lvl = local $ \env -> env { allocSpace = space
                                        , aggressiveReuse = True
@@ -31,7 +36,7 @@ allocAtLevel lvl = local $ \env -> env { allocSpace = space
 handleSegOp :: SegOp SegLevel Kernels
             -> AllocM Kernels KernelsMem (SegOp SegLevel KernelsMem)
 handleSegOp op = do
-  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
+  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32 OverflowUndef)
                  (unCount (segNumGroups lvl)) (unCount (segGroupSize lvl))
   allocAtLevel lvl $ mapSegOpM (mapper num_threads) op
   where scope = scopeOfSegSpace $ segSpace op
@@ -138,19 +143,20 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint
 
 inThreadExpHints :: Allocator KernelsMem m => Exp KernelsMem -> m [ExpHint]
-inThreadExpHints e =
-  mapM maybePrivate =<< expExtType e
-  where maybePrivate t
+inThreadExpHints e = do
+  consts <- askConsts
+  mapM (maybePrivate consts) =<< expExtType e
+  where maybePrivate consts t
           | Just (Array pt shape _) <- hasStaticShape t,
-            all semiStatic $ shapeDims shape = do
+            all (semiStatic consts) $ shapeDims shape = do
               let ixfun = IxFun.iota $ map (primExpFromSubExp int32) $
                           shapeDims shape
               return $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
           | otherwise =
               return NoHint
 
-        semiStatic Constant{} = True
-        semiStatic _ = False
+        semiStatic _ Constant{} = True
+        semiStatic consts (Var v) = v `S.member` consts
 
 explicitAllocations :: Pass Kernels KernelsMem
 explicitAllocations = explicitAllocationsGeneric handleHostOp kernelExpHints

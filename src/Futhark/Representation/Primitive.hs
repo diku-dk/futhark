@@ -22,6 +22,7 @@ module Futhark.Representation.Primitive
        , blankPrimValue
 
          -- * Operations
+       , Overflow (..)
        , UnOp (..), allUnOps
        , BinOp (..), allBinOps
        , ConvOp (..), allConvOps
@@ -274,16 +275,33 @@ data UnOp = Not -- ^ E.g., @! True == False@.
           | USignum IntType -- ^ Unsigned sign function: @usignum(2)@ = 1.
              deriving (Eq, Ord, Show)
 
+-- | What to do in case of arithmetic overflow.  Futhark's semantics
+-- are that overflow does wraparound, but for generated code (like
+-- address arithmetic), it can be beneficial for overflow to be
+-- undefined behaviour, as it allows better optimisation of things
+-- such as GPU kernels.
+--
+-- Note that all values of this type are considered equal for 'Eq' and
+-- 'Ord'.
+data Overflow = OverflowWrap | OverflowUndef
+              deriving (Show)
+
+instance Eq Overflow where
+  _ == _ = True
+
+instance Ord Overflow where
+  _ `compare` _ = EQ
+
 -- | Binary operators.  These correspond closely to the binary operators in
 -- LLVM.  Most are parametrised by their expected input and output
 -- types.
-data BinOp = Add IntType -- ^ Integer addition.
+data BinOp = Add IntType Overflow -- ^ Integer addition.
            | FAdd FloatType -- ^ Floating-point addition.
 
-           | Sub IntType -- ^ Integer subtraction.
+           | Sub IntType Overflow -- ^ Integer subtraction.
            | FSub FloatType -- ^ Floating-point subtraction.
 
-           | Mul IntType -- ^ Integer multiplication.
+           | Mul IntType Overflow -- ^ Integer multiplication.
            | FMul FloatType -- ^ Floating-point multiplication.
 
            | UDiv IntType
@@ -398,11 +416,11 @@ allUnOps = Not :
 
 -- | A list of all binary operators for all types.
 allBinOps :: [BinOp]
-allBinOps = concat [ map Add allIntTypes
+allBinOps = concat [ map (`Add` OverflowWrap) allIntTypes
                    , map FAdd allFloatTypes
-                   , map Sub allIntTypes
+                   , map (`Sub` OverflowWrap) allIntTypes
                    , map FSub allFloatTypes
-                   , map Mul allIntTypes
+                   , map (`Mul` OverflowWrap) allIntTypes
                    , map FMul allFloatTypes
                    , map UDiv allIntTypes
                    , map SDiv allIntTypes
@@ -761,9 +779,9 @@ floatToDouble (Float64Value v) = v
 
 -- | The result type of a binary operator.
 binOpType :: BinOp -> PrimType
-binOpType (Add t)   = IntType t
-binOpType (Sub t)   = IntType t
-binOpType (Mul t)   = IntType t
+binOpType (Add t _) = IntType t
+binOpType (Sub t _) = IntType t
+binOpType (Mul t _) = IntType t
 binOpType (SDiv t)  = IntType t
 binOpType (SMod t)  = IntType t
 binOpType (SQuot t) = IntType t
@@ -1123,11 +1141,14 @@ commutativeBinOp _ = False
 -- Prettyprinting instances
 
 instance Pretty BinOp where
-  ppr (Add t)   = taggedI "add" t
+  ppr (Add t OverflowWrap)  = taggedI "add" t
+  ppr (Add t OverflowUndef) = taggedI "add_nw" t
+  ppr (Sub t OverflowWrap)  = taggedI "sub" t
+  ppr (Sub t OverflowUndef) = taggedI "sub_nw" t
+  ppr (Mul t OverflowWrap)  = taggedI "mul" t
+  ppr (Mul t OverflowUndef) = taggedI "mul_nw" t
   ppr (FAdd t)  = taggedF "fadd" t
-  ppr (Sub t)   = taggedI "sub" t
   ppr (FSub t)  = taggedF "fsub" t
-  ppr (Mul t)   = taggedI "mul" t
   ppr (FMul t)  = taggedF "fmul" t
   ppr (UDiv t)  = taggedI "udiv" t
   ppr (UMod t)  = taggedI "umod" t

@@ -1225,9 +1225,9 @@ initialCtx =
                              , (getU, putU, P.doUnOp $ P.Complement Int64)
                              , (getB, putB, P.doUnOp P.Not) ]
 
-    def "+" = arithOp P.Add P.FAdd
-    def "-" = arithOp P.Sub P.FSub
-    def "*" = arithOp P.Mul P.FMul
+    def "+" = arithOp (`P.Add` P.OverflowWrap) P.FAdd
+    def "-" = arithOp (`P.Sub` P.OverflowWrap) P.FSub
+    def "*" = arithOp (`P.Mul` P.OverflowWrap) P.FMul
     def "**" = arithOp P.Pow P.FPow
     def "/" = Just $ bopDef $ sintOp P.SDiv ++ uintOp P.UDiv ++ floatOp P.FDiv
     def "%" = Just $ bopDef $ sintOp P.SMod ++ uintOp P.UMod ++ floatOp P.FMod
