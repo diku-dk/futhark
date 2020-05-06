@@ -280,8 +280,17 @@ data UnOp = Not -- ^ E.g., @! True == False@.
 -- address arithmetic), it can be beneficial for overflow to be
 -- undefined behaviour, as it allows better optimisation of things
 -- such as GPU kernels.
+--
+-- Note that all values of this type are considered equal for 'Eq' and
+-- 'Ord'.
 data Overflow = OverflowWrap | OverflowUndef
-              deriving (Eq, Ord, Show)
+              deriving (Show)
+
+instance Eq Overflow where
+  _ == _ = True
+
+instance Ord Overflow where
+  _ `compare` _ = EQ
 
 -- | Binary operators.  These correspond closely to the binary operators in
 -- LLVM.  Most are parametrised by their expected input and output
