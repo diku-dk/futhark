@@ -94,9 +94,10 @@ transformSOAC :: Transformer m =>
               -> SOAC (Lore m)
               -> m ()
 
-transformSOAC pat (Screma w form@(ScremaForm (scan_lam, scan_nes) reds map_lam) arrs) = do
+transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
   -- Start by combining all the reduction parts into a single operator
-  let (Reduce _ red_lam red_nes) = singleReduce reds
+  let Reduce _ red_lam red_nes = singleReduce reds
+      Scan scan_lam scan_nes = singleScan scans
       (scan_arr_ts, _red_ts, map_arr_ts) =
         splitAt3 (length scan_nes) (length red_nes) $ scremaType w form
   scan_arrs <- resultArray scan_arr_ts

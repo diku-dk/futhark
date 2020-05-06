@@ -362,7 +362,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Hist w ops lam as))) acc =
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
 maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
-  | Just (lam, nes, map_lam) <- isScanomapSOAC form =
+  | Just (scans, map_lam) <- isScanomapSOAC form,
+    Scan lam nes <- singleScan scans =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -827,7 +828,7 @@ segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
     \pat ispace inps nes' _ _ -> do
     lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
     addStms =<< traverse renameStm =<<
-      segScan lvl pat segment_size lam map_lam nes' arrs ispace inps
+      segScan lvl pat segment_size lam nes' map_lam arrs ispace inps
 
 regularSegmentedRedomapKernel :: (MonadFreshNames m, DistLore lore) =>
                                  KernelNest
