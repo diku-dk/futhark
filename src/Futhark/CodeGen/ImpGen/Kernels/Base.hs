@@ -23,6 +23,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
   , groupLoop
   , kernelLoop
   , groupCoverSpace
+  , precomputeSegOpIDs
 
   , atomicUpdateLocking
   , AtomicBinOp
@@ -35,6 +36,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
 import Control.Monad.Except
 import Data.Maybe
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.List (elemIndex, find, nub, zip4)
 
 import Prelude hiding (quot, rem)
@@ -60,19 +62,47 @@ data KernelEnv = KernelEnv
 type CallKernelGen = ImpM KernelsMem HostEnv Imp.HostOp
 type InKernelGen = ImpM KernelsMem KernelEnv Imp.KernelOp
 
-data KernelConstants = KernelConstants
-                       { kernelGlobalThreadId :: Imp.Exp
-                       , kernelLocalThreadId :: Imp.Exp
-                       , kernelGroupId :: Imp.Exp
-                       , kernelGlobalThreadIdVar :: VName
-                       , kernelLocalThreadIdVar :: VName
-                       , kernelGroupIdVar :: VName
-                       , kernelNumGroups :: Imp.Exp
-                       , kernelGroupSize :: Imp.Exp
-                       , kernelNumThreads :: Imp.Exp
-                       , kernelWaveSize :: Imp.Exp
-                       , kernelThreadActive :: Imp.Exp
-                       }
+data KernelConstants =
+  KernelConstants
+  { kernelGlobalThreadId :: Imp.Exp
+  , kernelLocalThreadId :: Imp.Exp
+  , kernelGroupId :: Imp.Exp
+  , kernelGlobalThreadIdVar :: VName
+  , kernelLocalThreadIdVar :: VName
+  , kernelGroupIdVar :: VName
+  , kernelNumGroups :: Imp.Exp
+  , kernelGroupSize :: Imp.Exp
+  , kernelNumThreads :: Imp.Exp
+  , kernelWaveSize :: Imp.Exp
+  , kernelThreadActive :: Imp.Exp
+  , kernelLocalIdMap :: M.Map [SubExp] [Imp.Exp]
+    -- ^ A mapping from dimensions of nested SegOps to already
+    -- computed local thread IDs.
+  }
+
+segOpSizes :: Stms KernelsMem -> S.Set [SubExp]
+segOpSizes = onStms
+  where onStms = foldMap (onExp . stmExp)
+        onExp (Op (Inner (SegOp op))) =
+          S.singleton $ map snd $ unSegSpace $ segSpace op
+        onExp (If _ tbranch fbranch _) =
+          onStms (bodyStms tbranch) <> onStms (bodyStms fbranch)
+        onExp (DoLoop _ _ _ body) =
+          onStms (bodyStms body)
+        onExp _ = mempty
+
+precomputeSegOpIDs :: Stms KernelsMem -> InKernelGen a -> InKernelGen a
+precomputeSegOpIDs stms m = do
+  ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+  new_ids <- M.fromList <$> mapM (mkMap ltid) (S.toList (segOpSizes stms))
+  let f env = env { kernelConstants =
+                      (kernelConstants env) { kernelLocalIdMap = new_ids }
+                  }
+  localEnv f m
+  where mkMap ltid dims = do
+          dims' <- mapM toExp dims
+          ids' <- mapM (dPrimVE "ltid_pre") $ unflattenIndex dims' ltid
+          return (dims, ids')
 
 keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
@@ -169,25 +199,27 @@ compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s _)) = do
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIMFix (patElemName dest) [i'] (Var x) []
   sOp $ Imp.Barrier Imp.FenceLocal
-compileGroupExp dest e = do
+compileGroupExp dest e =
   defCompileExp dest e
-  when (any ((>0) . arrayRank) (patternTypes dest)) $
-    sOp $ Imp.Barrier Imp.FenceLocal
 
 sanityCheckLevel :: SegLevel -> InKernelGen ()
 sanityCheckLevel SegThread{} = return ()
 sanityCheckLevel SegGroup{} =
   error "compileGroupOp: unexpected group-level SegOp."
 
+localThreadIDs :: [SubExp] -> InKernelGen [Imp.Exp]
+localThreadIDs dims = do
+  ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+  dims' <- mapM toExp dims
+  fromMaybe (unflattenIndex dims' ltid) .
+    M.lookup dims . kernelLocalIdMap . kernelConstants <$> askEnv
+
 compileGroupSpace :: SegLevel -> SegSpace -> InKernelGen ()
 compileGroupSpace lvl space = do
   sanityCheckLevel lvl
-
   let (ltids, dims) = unzip $ unSegSpace space
-  dims' <- mapM toExp dims
+  zipWithM_ dPrimV_ ltids =<< localThreadIDs dims
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-  zipWithM_ dPrimV_ ltids $ unflattenIndex dims' ltid
-
   dPrimV_ (segFlat space) ltid
 
 -- Construct the necessary lock arrays for an intra-group histogram.
@@ -229,6 +261,11 @@ prepareIntraGroupSegHist group_size =
 
           return (Just l', f l' (Space "local") local_subhistos)
 
+whenActive :: SegLevel -> SegSpace -> InKernelGen () -> InKernelGen ()
+whenActive lvl space m
+  | SegNoVirtFull <- segVirt lvl = m
+  | otherwise = sWhen (isActive $ unSegSpace space) m
+
 compileGroupOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
 
 compileGroupOp pat (Alloc size space) =
@@ -240,7 +277,7 @@ compileGroupOp pat (Inner (SizeOp (SplitSpace o w i elems_per_thread))) =
 compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   void $ compileGroupSpace lvl space
 
-  sWhen (isActive $ unSegSpace space) $ localOps threadOperations $
+  whenActive lvl space $ localOps threadOperations $
     compileStms mempty (kernelBodyStms body) $
     zipWithM_ (compileThreadResult space) (patternElements pat) $
     kernelBodyResult body
@@ -252,7 +289,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
   let (ltids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
 
-  sWhen (isActive $ unSegSpace space) $
+  whenActive lvl space $
     compileStms mempty (kernelBodyStms body) $
     forM_ (zip (patternNames pat) $ kernelBodyResult body) $ \(dest, res) ->
     copyDWIMFix dest
@@ -280,7 +317,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segRedLambda) ops
   let tmps_for_ops = chunks (map (length . segRedNeutral) ops) tmp_arrs
 
-  sWhen (isActive $ unSegSpace space) $
+  whenActive lvl space $
     compileStms mempty (kernelBodyStms body) $ do
     let (red_res, map_res) =
           splitAt (segRedResults ops) $ kernelBodyResult body
@@ -351,7 +388,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   -- Ensure that all locks have been initialised.
   sOp $ Imp.Barrier Imp.FenceLocal
 
-  sWhen (isActive $ unSegSpace space) $
+  whenActive lvl space $
     compileStms mempty (kernelBodyStms kbody) $ do
     let (red_res, map_res) = splitAt num_red_res $ kernelBodyResult kbody
         (red_is, red_vs) = splitAt (length ops) $ map kernelResultSubExp red_res
@@ -688,6 +725,7 @@ kernelInitialisationSimple (Count num_groups) (Count group_size) = do
         num_groups group_size (group_size*num_groups)
         (Imp.var wave_size int32)
         true
+        mempty
 
   let set_constants = do
         dPrim_ global_tid int32
@@ -1070,7 +1108,8 @@ simpleKernelConstants kernel_size desc = do
           (Imp.var thread_gtid int32) (Imp.var thread_ltid int32) (Imp.var group_id int32)
           thread_gtid thread_ltid group_id
           num_groups group_size (group_size*num_groups) 0
-          (Imp.var thread_gtid int32 .<. kernel_size),
+          (Imp.var thread_gtid int32 .<. kernel_size)
+          mempty,
 
           set_constants)
 
@@ -1085,9 +1124,6 @@ virtualiseGroups :: SegVirt
                  -> Imp.Exp
                  -> (VName -> InKernelGen ())
                  -> InKernelGen ()
-virtualiseGroups SegNoVirt _ m = do
-  gid <- kernelGroupIdVar . kernelConstants <$> askEnv
-  m gid
 virtualiseGroups SegVirt required_groups m = do
   constants <- kernelConstants <$> askEnv
   phys_group_id <- dPrim "phys_group_id" int32
@@ -1100,6 +1136,9 @@ virtualiseGroups SegVirt required_groups m = do
     -- Make sure the virtual group is actually done before we let
     -- another virtual group have its way with it.
     sOp $ Imp.Barrier Imp.FenceGlobal
+virtualiseGroups _ _ m = do
+  gid <- kernelGroupIdVar . kernelConstants <$> askEnv
+  m gid
 
 sKernelThread :: String
               -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
@@ -1166,10 +1205,11 @@ copyInGroup pt destloc destslice srcloc srcslice = do
       copyElementWise pt destloc destslice' srcloc srcslice'
 
     _ ->
-      groupCoverSpace (sliceDims destslice) $ \is ->
+      groupCoverSpace (sliceDims destslice) $ \is -> do
       copyElementWise pt
-      destloc (map DimFix $ fixSlice destslice is)
-      srcloc (map DimFix $ fixSlice srcslice is)
+        destloc (map DimFix $ fixSlice destslice is)
+        srcloc (map DimFix $ fixSlice srcslice is)
+      sOp $ Imp.Barrier Imp.FenceLocal
 
 threadOperations, groupOperations :: Operations KernelsMem KernelEnv Imp.KernelOp
 threadOperations =
@@ -1334,11 +1374,10 @@ compileGroupResult _ pe (TileReturns [(w,per_group_elems)] what) = do
       sWhen (j .<. n) $ copyDWIMFix (patElemName pe) [j + offset] (Var what) [j]
 
 compileGroupResult space pe (TileReturns dims what) = do
-  constants <- kernelConstants <$> askEnv
   let gids = map fst $ unSegSpace space
       out_tile_sizes = map (toExp' int32 . snd) dims
-      local_is = unflattenIndex out_tile_sizes $ kernelLocalThreadId constants
       group_is = zipWith (*) (map Imp.vi32 gids) out_tile_sizes
+  local_is <- localThreadIDs $ map snd dims
   is_for_thread <- mapM (dPrimV "thread_out_index") $ zipWith (+) group_is local_is
 
   sWhen (isActive $ zip is_for_thread $ map fst dims) $

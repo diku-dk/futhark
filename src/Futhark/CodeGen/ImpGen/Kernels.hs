@@ -42,7 +42,7 @@ callKernelOperations =
 
 openclAtomics, cudaAtomics :: AtomicBinOp
 (openclAtomics, cudaAtomics) = (flip lookup opencl, flip lookup cuda)
-  where opencl = [ (Add Int32, Imp.AtomicAdd Int32)
+  where opencl = [ (Add Int32 OverflowUndef, Imp.AtomicAdd Int32)
                  , (SMax Int32, Imp.AtomicSMax Int32)
                  , (SMin Int32, Imp.AtomicSMin Int32)
                  , (UMax Int32, Imp.AtomicUMax Int32)

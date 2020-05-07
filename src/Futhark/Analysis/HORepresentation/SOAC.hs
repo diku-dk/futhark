@@ -464,20 +464,12 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: (Op lore ~ Futhark.SOAC lore, Bindable lore,
-            HasScope lore m, MonadFreshNames m) =>
+fromExp :: (Op lore ~ Futhark.SOAC lore, HasScope lore m) =>
            Exp lore -> m (Either NotSOAC (SOAC lore))
-
-fromExp (BasicOp (Copy arr)) = do
-  arr_t <- lookupType arr
-  p <- Param <$> newVName "copy_p" <*> pure (rowType arr_t)
-  let lam = Lambda [p] (mkBody mempty [Futhark.Var $ paramName p]) [rowType arr_t]
-  Right . Screma (arraySize 0 arr_t) (Futhark.mapSOAC lam) . pure <$> varInput arr
 fromExp (Op (Futhark.Stream w form lam as)) =
   Right . Stream w form lam <$> traverse varInput as
-fromExp (Op (Futhark.Scatter len lam ivs as)) = do
-  ivs' <- traverse varInput ivs
-  return $ Right $ Scatter len lam ivs' as
+fromExp (Op (Futhark.Scatter len lam ivs as)) =
+  Right <$> (Scatter len lam <$> traverse varInput ivs <*> pure as)
 fromExp (Op (Futhark.Screma w form arrs)) =
   Right . Screma w form <$> traverse varInput arrs
 fromExp (Op (Futhark.Hist w ops lam arrs)) =
@@ -519,7 +511,8 @@ soacToStream soac = do
       -- map(f,a) creates a stream with NO accumulators
       return (Stream w (Parallel Disorder Commutative empty_lam []) strmlam inps, [])
 
-      | Just (scan_lam, nes, _) <- Futhark.isScanomapSOAC form -> do
+      | Just (scans, _) <- Futhark.isScanomapSOAC form,
+        Futhark.Scan scan_lam nes <- Futhark.singleScan scans -> do
       -- scanomap(scan_lam,nes,map_lam,a) => is translated in strem's body to:
       -- 1. let (scan0_ids,map_resids)   = scanomap(scan_lam, nes, map_lam, a_ch)
       -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
@@ -546,11 +539,11 @@ soacToStream soac = do
       outszm1id  <- newIdent "szm1" $ Prim int32
       -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
       let insbnd = mkLet [] (scan0_ids++map_resids) $ Op $
-                   Futhark.Screma chvar (Futhark.scanomapSOAC scan_lam nes lam') $
+                   Futhark.Screma chvar (Futhark.scanomapSOAC [Futhark.Scan scan_lam nes] lam') $
                    map paramName strm_inpids
       -- 2. let outerszm1id = chunksize - 1
           outszm1bnd = mkLet [] [outszm1id] $ BasicOp $
-                       BinOp (Sub Int32)
+                       BinOp (Sub Int32 OverflowUndef)
                        (Futhark.Var $ paramName chunk_param)
                        (constant (1::Int32))
       -- 3. let lasteel_ids = ...

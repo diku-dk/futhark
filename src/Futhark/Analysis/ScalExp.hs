@@ -214,7 +214,7 @@ toScalExp look (BasicOp (CmpOp (CmpEq t) x y))
       SLogAnd x' y' `SLogOr` SLogAnd (SNot x') (SNot y')
     _ ->
       RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
-toScalExp look (BasicOp (BinOp (Sub t) (Constant x) y))
+toScalExp look (BasicOp (BinOp (Sub t _) (Constant x) y))
   | typeIsOK $ IntType t, zeroIsh x =
   Just . SNeg <$> subExpToScalExp' look y
 toScalExp look (BasicOp (UnOp AST.Not e)) =
@@ -277,9 +277,9 @@ binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
 binOpScalExp bop = fmap snd . find ((==bop) . fst) $
                    concatMap intOps allIntTypes ++
                    [ (LogAnd, SLogAnd), (LogOr, SLogOr) ]
-  where intOps t = [ (Add t, SPlus)
-                   , (Sub t, SMinus)
-                   , (Mul t, STimes)
+  where intOps t = [ (Add t OverflowWrap, SPlus)
+                   , (Sub t OverflowWrap, SMinus)
+                   , (Mul t OverflowWrap, STimes)
                    , (AST.SDiv t, SDiv)
                    , (AST.Pow t, SPow)
                    , (AST.SMax t, \x y -> MaxMin False [x,y])

@@ -14,15 +14,30 @@ private static short add16(short x, short y){ return (short) ((ushort) x + (usho
 private static int add32(int x, int y){ return (int) ((uint) x + (uint) y);}
 private static long add64(long x, long y){ return (long) ((ulong) x + (ulong) y);}
 
+private static sbyte add_nw8(sbyte x, sbyte y){ return (sbyte) ((byte) x + (byte) y);}
+private static short add_nw16(short x, short y){ return (short) ((ushort) x + (ushort) y);}
+private static int add_nw32(int x, int y){ return (int) ((uint) x + (uint) y);}
+private static long add_nw64(long x, long y){ return (long) ((ulong) x + (ulong) y);}
+
 private static sbyte sub8(sbyte x, sbyte y){ return (sbyte) ((byte) x - (byte) y);}
 private static short sub16(short x, short y){ return (short) ((ushort) x - (ushort) y);}
 private static int sub32(int x, int y){ return (int) ((uint) x - (uint) y);}
 private static long sub64(long x, long y){ return (long) ((ulong) x - (ulong) y);}
 
+private static sbyte sub_nw8(sbyte x, sbyte y){ return (sbyte) ((byte) x - (byte) y);}
+private static short sub_nw16(short x, short y){ return (short) ((ushort) x - (ushort) y);}
+private static int sub_nw32(int x, int y){ return (int) ((uint) x - (uint) y);}
+private static long sub_nw64(long x, long y){ return (long) ((ulong) x - (ulong) y);}
+
 private static sbyte mul8(sbyte x, sbyte y){ return (sbyte) ((byte) x * (byte) y);}
 private static short mul16(short x, short y){ return (short) ((ushort) x * (ushort) y);}
 private static int mul32(int x, int y){ return (int) ((uint) x * (uint) y);}
 private static long mul64(long x, long y){ return (long) ((ulong) x * (ulong) y);}
+
+private static sbyte mul_nw8(sbyte x, sbyte y){ return (sbyte) ((byte) x * (byte) y);}
+private static short mul_nw16(short x, short y){ return (short) ((ushort) x * (ushort) y);}
+private static int mul_nw32(int x, int y){ return (int) ((uint) x * (uint) y);}
+private static long mul_nw64(long x, long y){ return (long) ((ulong) x * (ulong) y);}
 
 private static sbyte or8(sbyte x, sbyte y){ return (sbyte) (x | y); }
 private static short or16(short x, short y){ return (short) (x | y); }
