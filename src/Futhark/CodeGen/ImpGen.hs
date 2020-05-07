@@ -1130,7 +1130,8 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
       emit $ Imp.SetScalar name $ Imp.var src pt
 
     (ScalarDestination name, ArrayVar _ arr)
-      | Just src_is <- mapM dimFix src_slice -> do
+      | Just src_is <- mapM dimFix src_slice,
+        length src_slice == length (entryArrayShape arr) -> do
           let bt = entryArrayElemType arr
           (mem, space, i) <-
             fullyIndexArray' (entryArrayLocation arr) src_is
