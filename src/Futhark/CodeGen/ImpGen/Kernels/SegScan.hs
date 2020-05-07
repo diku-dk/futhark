@@ -107,6 +107,24 @@ readToScanValues is pes scan
   | otherwise =
       return ()
 
+readCarries :: Imp.Exp -> [Imp.Exp] -> [Imp.Exp]
+            -> [PatElem KernelsMem]
+            -> SegBinOp KernelsMem
+            -> InKernelGen ()
+readCarries chunk_offset dims' vec_is pes scan
+  | shapeRank (segBinOpShape scan) > 0 = do
+      ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+      -- We may have to reload the carries from the output of the
+      -- previous chunk.
+      sIf (chunk_offset .>. 0 .&&. ltid .==. 0)
+        (do let is = unflattenIndex dims' $ chunk_offset - 1
+            forM_ (zip (xParams scan) pes) $ \(p, pe) ->
+              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (is++vec_is))
+        (forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
+            copyDWIMFix (paramName p) [] ne [])
+  | otherwise =
+      return ()
+
 -- | Produce partially scanned intervals; one per workgroup.
 scanStage1 :: Pattern KernelsMem
            -> Count NumGroups SubExp -> Count GroupSize SubExp -> SegSpace
@@ -149,7 +167,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
       flat_idx <- dPrimV "flat_idx" $
                   Imp.var chunk_offset int32 + kernelLocalThreadId constants
       -- Construct segment indices.
-      zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ Imp.var flat_idx int32
+      zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ Imp.vi32 flat_idx
 
       let per_scan_pes = segBinOpChunks scans all_pes
 
@@ -183,9 +201,10 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
         sLoopNest vec_shape $ \vec_is -> do
           sComment "maybe restore some to-scan values to parameters, or read neutral" $
             sIf in_bounds
-            (readToScanValues (map Imp.vi32 gtids++vec_is) pes scan) $
-            forM_ (zip (yParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
-            copyDWIMFix (paramName p) [] ne []
+            (do readToScanValues (map Imp.vi32 gtids++vec_is) pes scan
+                readCarries (Imp.vi32 chunk_offset) dims' vec_is pes scan)
+            (forM_ (zip (yParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
+                copyDWIMFix (paramName p) [] ne [])
 
           sComment "combine with carry and write to local memory" $
             compileStms mempty (bodyStms $ lambdaBody scan_op) $
