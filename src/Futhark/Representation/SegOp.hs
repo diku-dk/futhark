@@ -548,8 +548,7 @@ checkScanRed space ops ts kbody = do
       nes' <- mapM TC.checkArg nes
 
       -- Operator type must match the type of neutral elements.
-      let stripVecDims = stripArray $ shapeRank shape
-      TC.checkLambda lam $ map (TC.noArgAliases . first stripVecDims) $ nes' ++ nes'
+      TC.checkLambda lam $ map TC.noArgAliases $ nes' ++ nes'
       let nes_t = map TC.argType nes'
 
       unless (lambdaReturnType lam == nes_t) $
