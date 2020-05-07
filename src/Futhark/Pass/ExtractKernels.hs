@@ -353,6 +353,17 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
       types <- asksScope scopeForSOACs
       transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
 
+  | Just (scans, map_lam) <- isScanomapSOAC form = runBinder_ $ do
+      scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
+          (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+          let scan_lam'' = soacsLambdaToKernels scan_lam'
+          return $ SegBinOp Noncommutative scan_lam'' nes' shape
+      let map_lam_sequential = soacsLambdaToKernels map_lam
+      lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
+      addStms =<<
+        (fmap (certify cs) <$>
+         segScan lvl res_pat w scan_ops map_lam_sequential arrs [] [])
+
   -- We are only willing to generate code for scanomaps that do not
   -- involve array accumulators, and do not have parallelism in their
   -- map function.  Such cases will fall through to the
@@ -361,13 +372,16 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   -- we will still crash in code generation).  However, if the map
   -- lambda is already identity, let's just go ahead here.
   | Just (scans, map_lam) <- isScanomapSOAC form,
-    Scan scan_lam nes <- singleScan scans,
-    (all primType (lambdaReturnType scan_lam) &&
+    (all primType (concatMap (lambdaReturnType . scanLambda) scans) &&
      not (lambdaContainsParallelism map_lam)) || isIdentityLambda map_lam = runBinder_ $ do
-      let scan_lam' = soacsLambdaToKernels scan_lam
-          map_lam' = soacsLambdaToKernels map_lam
+
+      scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
+        let scan_lam' = soacsLambdaToKernels scan_lam
+        return $ SegBinOp Noncommutative scan_lam' nes mempty
+
+      let map_lam' = soacsLambdaToKernels map_lam
       lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-      addStms =<< segScan lvl res_pat w scan_lam' nes map_lam' arrs [] []
+      addStms =<< segScan lvl res_pat w scan_ops map_lam' arrs [] []
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
@@ -387,7 +401,7 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
           let comm' | commutativeLambda red_lam' = Commutative
                     | otherwise = comm
               red_lam'' = soacsLambdaToKernels red_lam'
-          return $ SegRedOp comm' red_lam'' nes' shape
+          return $ SegBinOp comm' red_lam'' nes' shape
         let map_lam_sequential = soacsLambdaToKernels map_lam
         lvl <- segThreadCapped [w] "segred" $ NoRecommendation SegNoVirt
         addStms =<<

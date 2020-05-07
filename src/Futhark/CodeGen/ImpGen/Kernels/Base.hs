@@ -284,7 +284,7 @@ compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
-compileGroupOp pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
+compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   compileGroupSpace lvl space
   let (ltids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
@@ -300,27 +300,30 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
 
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
-  groupScan (Just crossesSegment) (product dims') (product dims') scan_op $
-    patternNames pat
+
+  forM_ scans $ \scan -> do
+    let scan_op = segBinOpLambda scan
+    groupScan (Just crossesSegment) (product dims') (product dims') scan_op $
+      patternNames pat
 
 compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   compileGroupSpace lvl space
 
   let (ltids, dims) = unzip $ unSegSpace space
       (red_pes, map_pes) =
-        splitAt (segRedResults ops) $ patternElements pat
+        splitAt (segBinOpResults ops) $ patternElements pat
 
   dims' <- mapM toExp dims
 
   let mkTempArr t =
         sAllocArray "red_arr" (elemType t) (Shape dims <> arrayShape t) $ Space "local"
-  tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segRedLambda) ops
-  let tmps_for_ops = chunks (map (length . segRedNeutral) ops) tmp_arrs
+  tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
+  let tmps_for_ops = chunks (map (length . segBinOpNeutral) ops) tmp_arrs
 
   whenActive lvl space $
     compileStms mempty (kernelBodyStms body) $ do
     let (red_res, map_res) =
-          splitAt (segRedResults ops) $ kernelBodyResult body
+          splitAt (segBinOpResults ops) $ kernelBodyResult body
     forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
       copyDWIMFix dest (map (`Imp.var` int32) ltids) (kernelResultSubExp res) []
     zipWithM_ (compileThreadResult space) map_pes map_res
@@ -332,7 +335,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
     -- handle directly with a group-level reduction.
     [dim'] -> do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
-        groupReduce dim' (segRedLambda op) tmps
+        groupReduce dim' (segBinOpLambda op) tmps
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -362,7 +365,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
         tmps_flat <- mapM flatten tmps
         groupScan (Just crossesSegment) (product dims') (product dims')
-          (segRedLambda op) tmps_flat
+          (segBinOpLambda op) tmps_flat
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 

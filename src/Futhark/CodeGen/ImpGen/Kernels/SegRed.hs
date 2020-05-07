@@ -75,16 +75,16 @@ type DoSegBody = ([(SubExp, [Imp.Exp])] -> InKernelGen ()) -> InKernelGen ()
 -- various kernels.
 compileSegRed :: Pattern KernelsMem
               -> SegLevel -> SegSpace
-              -> [SegRedOp KernelsMem]
+              -> [SegBinOp KernelsMem]
               -> KernelBody KernelsMem
               -> CallKernelGen ()
 compileSegRed pat lvl space reds body =
   compileSegRed' pat lvl space reds $ \red_cont ->
   compileStms mempty (kernelBodyStms body) $ do
-  let (red_res, map_res) = splitAt (segRedResults reds) $ kernelBodyResult body
+  let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult body
 
   sComment "save map-out results" $ do
-    let map_arrs = drop (segRedResults reds) $ patternElements pat
+    let map_arrs = drop (segBinOpResults reds) $ patternElements pat
     zipWithM_ (compileThreadResult space) map_arrs map_res
 
   red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
@@ -92,7 +92,7 @@ compileSegRed pat lvl space reds body =
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' :: Pattern KernelsMem
                -> SegLevel -> SegSpace
-               -> [SegRedOp KernelsMem]
+               -> [SegBinOp KernelsMem]
                -> DoSegBody
                -> CallKernelGen ()
 compileSegRed' pat lvl space reds body
@@ -118,9 +118,9 @@ compileSegRed' pat lvl space reds body
 -- performed.  This policy is baked into how the allocations are done
 -- in ExplicitAllocations.
 intermediateArrays :: Count GroupSize SubExp -> SubExp
-                   -> SegRedOp KernelsMem
+                   -> SegBinOp KernelsMem
                    -> InKernelGen [VName]
-intermediateArrays (Count group_size) num_threads (SegRedOp _ red_op nes _) = do
+intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
   let red_op_params = lambdaParams red_op
       (red_acc_params, _) = splitAt (length nes) red_op_params
   forM red_acc_params $ \p ->
@@ -141,10 +141,10 @@ intermediateArrays (Count group_size) num_threads (SegRedOp _ red_op nes _) = do
 -- first-stage reduction, if necessary.  When actually storing group
 -- results, the first index is set to 0.
 groupResultArrays :: Count NumGroups SubExp -> Count GroupSize SubExp
-                  -> [SegRedOp KernelsMem]
+                  -> [SegBinOp KernelsMem]
                   -> CallKernelGen [[VName]]
 groupResultArrays (Count virt_num_groups) (Count group_size) reds =
-  forM reds $ \(SegRedOp _ lam _ shape) ->
+  forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
         full_shape = Shape [group_size, virt_num_groups] <> shape <> arrayShape t
@@ -155,7 +155,7 @@ groupResultArrays (Count virt_num_groups) (Count group_size) reds =
 
 nonsegmentedReduction :: Pattern KernelsMem
                       -> Count NumGroups SubExp -> Count GroupSize SubExp -> SegSpace
-                      -> [SegRedOp KernelsMem]
+                      -> [SegBinOp KernelsMem]
                       -> DoSegBody
                       -> CallKernelGen ()
 nonsegmentedReduction segred_pat num_groups group_size space reds body = do
@@ -190,18 +190,20 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
     let num_elements = Imp.elements w
     let elems_per_thread = num_elements `quotRoundingUp` Imp.elements (kernelNumThreads constants)
 
-    slugs <- mapM (segRedOpSlug (kernelLocalThreadId constants) (kernelGroupId constants)) $
+    slugs <- mapM (segBinOpSlug
+                   (kernelLocalThreadId constants)
+                   (kernelGroupId constants)) $
              zip3 reds reds_arrs reds_group_res_arrs
     reds_op_renamed <-
       reductionStageOne constants (zip gtids dims') num_elements
       global_tid elems_per_thread num_threads
       slugs body
 
-    let segred_pes = chunks (map (length . segRedNeutral) reds) $
+    let segred_pes = chunks (map (length . segBinOpNeutral) reds) $
                      patternElements segred_pat
     forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes
            slugs reds_op_renamed [0..]) $
-      \(SegRedOp _ red_op nes _,
+      \(SegBinOp _ red_op nes _,
         red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
       let red_acc_params = take (length nes) $ lambdaParams red_op
       reductionStageTwo constants pes (kernelGroupId constants) 0 [0] 0
@@ -212,7 +214,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
 smallSegmentsReduction :: Pattern KernelsMem
                        -> Count NumGroups SubExp -> Count GroupSize SubExp
                        -> SegSpace
-                       -> [SegRedOp KernelsMem]
+                       -> [SegBinOp KernelsMem]
                        -> DoSegBody
                        -> CallKernelGen ()
 smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds body = do
@@ -258,7 +260,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       dPrimV_ (last gtids) index_within_segment
 
       let out_of_bounds =
-            forM_ (zip reds reds_arrs) $ \(SegRedOp _ _ nes _, red_arrs) ->
+            forM_ (zip reds reds_arrs) $ \(SegBinOp _ _ nes _, red_arrs) ->
             forM_ (zip red_arrs nes) $ \(arr, ne) ->
             copyDWIMFix arr [ltid] ne []
 
@@ -279,7 +281,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       let crossesSegment from to = (to-from) .>. (to `rem` segment_size)
       sWhen (segment_size .>. 0) $
         sComment "perform segmented scan to imitate reduction" $
-        forM_ (zip reds reds_arrs) $ \(SegRedOp _ red_op _ _, red_arrs) ->
+        forM_ (zip reds reds_arrs) $ \(SegBinOp _ red_op _ _, red_arrs) ->
         groupScan (Just crossesSegment) (Imp.vi32 num_threads)
         (segment_size*segments_per_group) red_op red_arrs
 
@@ -302,7 +304,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
 largeSegmentsReduction :: Pattern KernelsMem
                        -> Count NumGroups SubExp -> Count GroupSize SubExp
                        -> SegSpace
-                       -> [SegRedOp KernelsMem]
+                       -> [SegBinOp KernelsMem]
                        -> DoSegBody
                        -> CallKernelGen ()
 largeSegmentsReduction segred_pat num_groups group_size space reds body = do
@@ -374,20 +376,20 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
       dPrim_ (last gtids) int32
       num_elements <- Imp.elements <$> toExp w
 
-      slugs <- mapM (segRedOpSlug local_tid group_id) $
+      slugs <- mapM (segBinOpSlug local_tid group_id) $
                zip3 reds reds_arrs reds_group_res_arrs
       reds_op_renamed <-
         reductionStageOne constants (zip gtids dims') num_elements
         global_tid elems_per_thread threads_per_segment
         slugs body
 
-      let segred_pes = chunks (map (length . segRedNeutral) reds) $
+      let segred_pes = chunks (map (length . segBinOpNeutral) reds) $
                        patternElements segred_pat
 
           multiple_groups_per_segment =
             forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes
                    slugs reds_op_renamed [0..]) $
-            \(SegRedOp _ red_op nes _, red_arrs, group_res_arrs, pes,
+            \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes,
               slug, red_op_renamed, i) -> do
               let red_acc_params = take (length nes) $ lambdaParams red_op
               reductionStageTwo constants pes
@@ -418,10 +420,10 @@ groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint g
         segment_size `quotRoundingUp` (unCount group_size * groups_per_segment)
   in (groups_per_segment, Imp.elements elements_per_thread)
 
--- | A SegRedOp with auxiliary information.
-data SegRedOpSlug =
-  SegRedOpSlug
-  { slugOp :: SegRedOp KernelsMem
+-- | A SegBinOp with auxiliary information.
+data SegBinOpSlug =
+  SegBinOpSlug
+  { slugOp :: SegBinOp KernelsMem
   , slugArrs :: [VName]
     -- ^ The arrays used for computing the intra-group reduction
     -- (either local or global memory).
@@ -429,32 +431,32 @@ data SegRedOpSlug =
     -- ^ Places to store accumulator in stage 1 reduction.
   }
 
-slugBody :: SegRedOpSlug -> Body KernelsMem
-slugBody = lambdaBody . segRedLambda . slugOp
+slugBody :: SegBinOpSlug -> Body KernelsMem
+slugBody = lambdaBody . segBinOpLambda . slugOp
 
-slugParams :: SegRedOpSlug -> [LParam KernelsMem]
-slugParams = lambdaParams . segRedLambda . slugOp
+slugParams :: SegBinOpSlug -> [LParam KernelsMem]
+slugParams = lambdaParams . segBinOpLambda . slugOp
 
-slugNeutral :: SegRedOpSlug -> [SubExp]
-slugNeutral = segRedNeutral . slugOp
+slugNeutral :: SegBinOpSlug -> [SubExp]
+slugNeutral = segBinOpNeutral . slugOp
 
-slugShape :: SegRedOpSlug -> Shape
-slugShape = segRedShape . slugOp
+slugShape :: SegBinOpSlug -> Shape
+slugShape = segBinOpShape . slugOp
 
-slugsComm :: [SegRedOpSlug] -> Commutativity
-slugsComm = mconcat . map (segRedComm . slugOp)
+slugsComm :: [SegBinOpSlug] -> Commutativity
+slugsComm = mconcat . map (segBinOpComm . slugOp)
 
-accParams, nextParams :: SegRedOpSlug -> [LParam KernelsMem]
+accParams, nextParams :: SegBinOpSlug -> [LParam KernelsMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
-segRedOpSlug :: Imp.Exp -> Imp.Exp -> (SegRedOp KernelsMem, [VName], [VName]) -> InKernelGen SegRedOpSlug
-segRedOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
-  SegRedOpSlug op group_res_arrs <$>
-  zipWithM mkAcc (lambdaParams (segRedLambda op)) param_arrs
+segBinOpSlug :: Imp.Exp -> Imp.Exp -> (SegBinOp KernelsMem, [VName], [VName]) -> InKernelGen SegBinOpSlug
+segBinOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
+  SegBinOpSlug op group_res_arrs <$>
+  zipWithM mkAcc (lambdaParams (segBinOpLambda op)) param_arrs
   where mkAcc p param_arr
           | Prim t <- paramType p,
-            shapeRank (segRedShape op) == 0 = do
+            shapeRank (segBinOpShape op) == 0 = do
               acc <- dPrim (baseString (paramName p) <> "_acc") t
               return (acc, [])
           | otherwise =
@@ -466,7 +468,7 @@ reductionStageZero :: KernelConstants
                    -> Imp.Exp
                    -> Imp.Count Imp.Elements Imp.Exp
                    -> VName
-                   -> [SegRedOpSlug]
+                   -> [SegBinOpSlug]
                    -> DoSegBody
                    -> InKernelGen ([Lambda KernelsMem], InKernelGen ())
 reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
@@ -489,7 +491,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
     sLoopNest (slugShape slug) $ \vec_is ->
     copyDWIMFix acc (acc_is++vec_is) ne []
 
-  slugs_op_renamed <- mapM (renameLambda . segRedLambda . slugOp) slugs
+  slugs_op_renamed <- mapM (renameLambda . segBinOpLambda . slugOp) slugs
 
   let doTheReduction =
         forM_ (zip slugs_op_renamed slugs) $ \(slug_op_renamed, slug) ->
@@ -576,7 +578,7 @@ reductionStageOne :: KernelConstants
                   -> Imp.Exp
                   -> Imp.Count Imp.Elements Imp.Exp
                   -> VName
-                  -> [SegRedOpSlug]
+                  -> [SegBinOpSlug]
                   -> DoSegBody
                   -> InKernelGen [Lambda KernelsMem]
 reductionStageOne constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
@@ -599,7 +601,7 @@ reductionStageTwo :: KernelConstants
                   -> [Imp.Exp]
                   -> Imp.Exp
                   -> Imp.Exp
-                  -> SegRedOpSlug
+                  -> SegBinOpSlug
                   -> [LParam KernelsMem]
                   -> Lambda KernelsMem -> [SubExp]
                   -> Imp.Exp -> VName -> Imp.Exp -> VName -> [VName] -> [VName]

@@ -826,9 +826,10 @@ segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
   isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
     \pat ispace inps nes' _ _ -> do
+    let scan_op = SegBinOp Noncommutative lam nes' mempty
     lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
     addStms =<< traverse renameStm =<<
-      segScan lvl pat segment_size lam nes' map_lam arrs ispace inps
+      segScan lvl pat segment_size [scan_op] map_lam arrs ispace inps
 
 regularSegmentedRedomapKernel :: (MonadFreshNames m, DistLore lore) =>
                                  KernelNest
@@ -841,7 +842,7 @@ regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
   mk_lvl <- asks distSegLevel
   isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
     \pat ispace inps nes' _ _ -> do
-      let red_op = SegRedOp comm lam nes' mempty
+      let red_op = SegBinOp comm lam nes' mempty
       lvl <- mk_lvl (segment_size : map snd ispace) "segred" $ NoRecommendation SegNoVirt
       addStms =<< traverse renameStm =<<
         segRed lvl pat segment_size [red_op] map_lam arrs ispace inps

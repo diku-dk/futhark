@@ -72,7 +72,7 @@ module Futhark.CodeGen.ImpGen
   , sIf, sWhen, sUnless
   , sOp
   , sDeclareMem, sAlloc, sAlloc_
-  , sArray, sAllocArray, sAllocArrayPerm, sStaticArray
+  , sArray, sArrayInMem, sAllocArray, sAllocArrayPerm, sStaticArray
   , sWrite, sUpdate
   , sLoopNest
   , (<--)
@@ -1275,6 +1275,12 @@ sArray name bt shape membind = do
   name' <- newVName name
   dArray name' bt shape membind
   return name'
+
+-- | Declare an array in row-major order in the given memory block.
+sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM lore r op VName
+sArrayInMem name pt shape mem =
+  sArray name pt shape $ ArrayIn mem $
+  IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore r op VName

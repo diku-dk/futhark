@@ -111,15 +111,17 @@ transformExp (Op (Inner (SegOp (SegMap lvl space ts kbody)))) = do
 
 transformExp (Op (Inner (SegOp (SegRed lvl space reds ts kbody)))) = do
   (alloc_stms, (lams, kbody')) <-
-    transformScanRed lvl space (map segRedLambda reds) kbody
-  let reds' = zipWith (\red lam -> red { segRedLambda = lam }) reds lams
+    transformScanRed lvl space (map segBinOpLambda reds) kbody
+  let reds' = zipWith (\red lam -> red { segBinOpLambda = lam }) reds lams
   return (alloc_stms,
           Op $ Inner $ SegOp $ SegRed lvl space reds' ts kbody')
 
-transformExp (Op (Inner (SegOp (SegScan lvl space scan_op nes ts kbody)))) = do
-  (alloc_stms, (scan_op', kbody')) <- transformScanRed lvl space [scan_op] kbody
+transformExp (Op (Inner (SegOp (SegScan lvl space scans ts kbody)))) = do
+  (alloc_stms, (lams, kbody')) <-
+    transformScanRed lvl space (map segBinOpLambda scans) kbody
+  let scans' = zipWith (\red lam -> red { segBinOpLambda = lam }) scans lams
   return (alloc_stms,
-          Op $ Inner $ SegOp $ SegScan lvl space (head scan_op') nes ts kbody')
+          Op $ Inner $ SegOp $ SegScan lvl space scans' ts kbody')
 
 transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
   (alloc_stms, (lams', kbody')) <- transformScanRed lvl space lams kbody
@@ -625,7 +627,7 @@ sliceKernelSizes num_threads sizes space kstms = do
 
     thread_space_iota <- letExp "thread_space_iota" $ BasicOp $
                          Iota w (intConst Int32 0) (intConst Int32 1) Int32
-    let red_op = SegRedOp Commutative max_lam
+    let red_op = SegBinOp Commutative max_lam
                  (replicate num_sizes $ intConst Int64 0) mempty
     lvl <- segThread "segred"
 

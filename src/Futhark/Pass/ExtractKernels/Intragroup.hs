@@ -199,7 +199,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       let scanfun' = soacsLambdaToKernels scanfun
           mapfun' = soacsLambdaToKernels mapfun
       certifying (stmAuxCerts aux) $
-        addStms =<< segScan lvl' pat w scanfun' nes mapfun' arrs [] []
+        addStms =<< segScan lvl' pat w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
       parallelMin [w]
 
     Op (Screma w form arrs)
@@ -208,7 +208,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       let red_lam' = soacsLambdaToKernels red_lam
           map_lam' = soacsLambdaToKernels map_lam
       certifying (stmAuxCerts aux) $
-        addStms =<< segRed lvl' pat w [SegRedOp comm red_lam' nes mempty] map_lam' arrs [] []
+        addStms =<< segRed lvl' pat w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
       parallelMin [w]
 
 
