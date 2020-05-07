@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- | Randomly generate Futhark input files containing values of a
 -- specified type and shape.
 module Futhark.CLI.Dataset (main) where
@@ -16,7 +18,7 @@ import Data.Vector.Generic (freeze)
 import System.Console.GetOpt
 import System.Exit
 import System.IO
-import System.Random
+import System.Random.PCG (initialize, Variate, uniformR)
 
 import Language.Futhark.Syntax hiding
   (Value, ValueType, PrimValue(..), IntValue(..), FloatValue(..))
@@ -41,7 +43,8 @@ main = mainWithOptions initialDataOptions commandLineOptions "options..." f
                     Binary -> mapM_ (BS.putStr . Bin.encode) vs
                     Type -> mapM_ (putStrLn . pretty . valueType) vs
           | otherwise =
-              Just $ zipWithM_ ($) (optOrders config) $ map mkStdGen [optSeed config..]
+              Just $ zipWithM_ ($) (optOrders config)
+              [fromIntegral (optSeed config)..]
         f _ _ =
           Nothing
 
@@ -53,12 +56,12 @@ data OutputFormat = Text
 data DataOptions = DataOptions
                    { optSeed :: Int
                    , optRange :: RandomConfiguration
-                   , optOrders :: [StdGen -> IO ()]
+                   , optOrders :: [Word64 -> IO ()]
                    , format :: OutputFormat
                    }
 
 initialDataOptions :: DataOptions
-initialDataOptions = DataOptions 0 initialRandomConfiguration [] Text
+initialDataOptions = DataOptions 1 initialRandomConfiguration [] Text
 
 commandLineOptions :: [FunOptDescr DataOptions]
 commandLineOptions = [
@@ -128,14 +131,15 @@ setRangeOption tname set =
   "Range of " ++ tname ++ " values."
   where name = tname ++ "-bounds"
 
-tryMakeGenerator :: String -> Either String (RandomConfiguration -> OutputFormat -> StdGen  -> IO ())
+tryMakeGenerator :: String
+                 -> Either String (RandomConfiguration -> OutputFormat -> Word64  -> IO ())
 tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
       return $ \_ fmt _ -> mapM_ (putValue fmt) vs
   | otherwise = do
   t' <- toValueType =<< either (Left . show) Right (parseType name (T.pack t))
-  return $ \conf fmt stdgen -> do
-    let (v, _) = randomValue conf t' stdgen
+  return $ \conf fmt seed -> do
+    let v = randomValue conf t' seed
     putValue fmt v
   where name = "option " ++ t
         putValue Text = putStrLn . pretty
@@ -207,8 +211,8 @@ initialRandomConfiguration = RandomConfiguration
   (minBound, maxBound) (minBound, maxBound) (minBound, maxBound) (minBound, maxBound)
   (0.0, 1.0) (0.0, 1.0)
 
-randomValue :: RandomConfiguration -> ValueType -> StdGen -> (Value, StdGen)
-randomValue conf (ValueType ds t) stdgen =
+randomValue :: RandomConfiguration -> ValueType -> Word64 -> Value
+randomValue conf (ValueType ds t) seed =
   case t of
     Signed Int8  -> gen  i8Range Int8Value
     Signed Int16 -> gen i16Range Int16Value
@@ -221,25 +225,25 @@ randomValue conf (ValueType ds t) stdgen =
     FloatType Float32 -> gen f32Range Float32Value
     FloatType Float64 -> gen f64Range Float64Value
     Bool -> gen (const (False,True)) BoolValue
-  where gen range final = randomVector (range conf) final ds stdgen
+  where gen range final = randomVector (range conf) final ds seed
 
-randomVector :: (UMVec.Unbox v, Random v) =>
+randomVector :: (UMVec.Unbox v, Variate v) =>
                 Range v
              -> (UVec.Vector Int -> UVec.Vector v -> Value)
-             -> [Int] -> StdGen
-             -> (Value, StdGen)
-randomVector range final ds stdgen = runST $ do
+             -> [Int] -> Word64
+             -> Value
+randomVector range final ds seed = runST $ do
   -- USe some nice impure computation where we can preallocate a
   -- vector of the desired size, populate it via the random number
   -- generator, and then finally reutrn a frozen binary vector.
   arr <- UMVec.new n
-  let fill stdgen' i
+  g <- initialize 6364136223846793006 seed
+  let fill i
         | i < n = do
-            let (v, stdgen'') = randomR range stdgen'
+            v <- uniformR range g
             UMVec.write arr i v
-            fill stdgen'' $! i+1
-        | otherwise = do
-            arr' <- final (UVec.fromList ds) <$> freeze arr
-            return (arr', stdgen')
-  fill stdgen 0
+            fill $! i+1
+        | otherwise =
+            final (UVec.fromList ds) <$> freeze arr
+  fill 0
   where n = product ds

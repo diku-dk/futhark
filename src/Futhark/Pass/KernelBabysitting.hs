@@ -94,7 +94,7 @@ transformKernelBody expmap lvl space kbody = do
   let thread_gids = map fst $ unSegSpace space
       thread_local = namesFromList $ segFlat space : thread_gids
       free_ker_vars = freeIn kbody `namesSubtract` getKerVariantIds space
-  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32)
+  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32 OverflowUndef)
                  (unCount $ segNumGroups lvl) (unCount $ segGroupSize lvl)
   evalStateT (traverseKernelBodyArrayIndexes
               free_ker_vars
@@ -426,7 +426,7 @@ paddedScanReduceInput :: MonadBinder m =>
 paddedScanReduceInput w stride = do
   w_padded <- letSubExp "padded_size" =<<
               eRoundToMultipleOf Int32 (eSubExp w) (eSubExp stride)
-  padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int32) w_padded w
+  padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int32 OverflowUndef) w_padded w
   return (w_padded, padding)
 
 --- Computing variance.

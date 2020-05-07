@@ -42,7 +42,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             Array bt shape u -> do
               twice_num_threads <-
                 letSubExp "twice_num_threads" $
-                BasicOp $ BinOp (Mul Int32) num_threads $ intConst Int32 2
+                BasicOp $ BinOp (Mul Int32 OverflowUndef) num_threads $ intConst Int32 2
               let t = paramType x `arrayOfRow` twice_num_threads
               mem <- allocForArray t DefaultSpace
               -- XXX: this iota ixfun is a bit inefficient; leading to

@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- | This module defines an efficient value representation as well as
 -- parsing and comparison functions.  This is because the standard
 -- Futhark parser is not able to cope with large values (like arrays
