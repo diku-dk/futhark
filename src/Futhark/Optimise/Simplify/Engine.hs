@@ -793,6 +793,9 @@ simplifyParam :: (attr -> SimpleM lore attr) -> Param attr -> SimpleM lore (Para
 simplifyParam simplifyAttribute (Param name attr) =
   Param name <$> simplifyAttribute attr
 
+instance Simplifiable () where
+  simplify = pure
+
 instance Simplifiable VName where
   simplify v = do
     se <- ST.lookupSubExp v <$> askVtable
