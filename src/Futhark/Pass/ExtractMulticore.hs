@@ -43,9 +43,17 @@ mapLambdaToKernelBody i lam arrs = do
   Body () stms res <- mapLambdaToBody i lam arrs
   return $ KernelBody () stms $ map (Returns ResultMaySimplify) res
 
-reduceToSegRedOp :: Reduce SOACS -> ExtractM (SegRedOp MC)
-reduceToSegRedOp (Reduce comm lam nes) =
-  SegRedOp comm <$> transformLambda lam <*> pure nes <*> pure mempty
+reduceToSegBinOp :: Reduce SOACS -> ExtractM (Stms MC, SegBinOp MC)
+reduceToSegBinOp (Reduce comm lam nes) = do
+  ((lam', nes', shape), stms) <- runBinder $ determineReduceOp lam nes
+  lam'' <- transformLambda lam'
+  return (stms, SegBinOp comm lam'' nes' shape)
+
+scanToSegBinOp :: Scan SOACS -> ExtractM (Stms MC, SegBinOp MC)
+scanToSegBinOp (Scan lam nes) = do
+  ((lam', nes', shape), stms) <- runBinder $ determineReduceOp lam nes
+  lam'' <- transformLambda lam'
+  return (stms, SegBinOp Noncommutative lam'' nes' shape)
 
 mkSegSpace :: MonadFreshNames m => SubExp -> m (VName, SegSpace)
 mkSegSpace w = do
@@ -136,17 +144,18 @@ transformSOAC pat (Screma w form arrs)
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody gtid map_lam arrs
-      reds' <- mapM reduceToSegRedOp reds
-      return $ oneStm $ Let pat (defAux ()) $ Op $
-        SegRed () space reds' (lambdaReturnType map_lam) kbody
+      (reds_stms, reds') <- unzip <$> mapM reduceToSegBinOp reds
+      return $ mconcat reds_stms <>
+        oneStm (Let pat (defAux ()) $ Op $
+                SegRed () space reds' (lambdaReturnType map_lam) kbody)
 
-  | Just (scans, map_lam) <- isScanomapSOAC form,
-    Scan lam nes <- singleScan scans = do
+  | Just (scans, map_lam) <- isScanomapSOAC form = do
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody gtid map_lam arrs
-      lam' <- transformLambda lam
-      return $ oneStm $ Let pat (defAux ()) $ Op $
-        SegScan () space lam' nes (lambdaReturnType map_lam) kbody
+      (scans_stms, scans') <- unzip <$> mapM scanToSegBinOp scans
+      return $ mconcat scans_stms <>
+        oneStm (Let pat (defAux ()) $ Op $
+                SegScan () space scans' (lambdaReturnType map_lam) kbody)
 
   | otherwise = do
       -- This screma is too complicated for us to immediately do

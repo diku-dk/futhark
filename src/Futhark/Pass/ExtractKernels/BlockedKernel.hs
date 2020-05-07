@@ -72,7 +72,7 @@ segRed :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
           SegOpLevel lore
        -> Pattern lore
        -> SubExp -- segment size
-       -> [SegRedOp lore]
+       -> [SegBinOp lore]
        -> Lambda lore
        -> [VName]
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
@@ -87,15 +87,15 @@ segScan :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
            SegOpLevel lore
         -> Pattern lore
         -> SubExp -- segment size
-        -> Lambda lore -> [SubExp]
-        -> Lambda lore -> [VName]
+        -> [SegBinOp lore] -> Lambda lore
+        -> [VName]
         -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this scan
         -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
         -> m (Stms lore)
-segScan lvl pat w scan_lam nes map_lam arrs ispace inps = runBinder_ $ do
+segScan lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
   (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
   letBind_ pat $ Op $ segOp $
-    SegScan lvl kspace scan_lam nes (lambdaReturnType map_lam) kbody
+    SegScan lvl kspace ops (lambdaReturnType map_lam) kbody
 
 segMap :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
           SegOpLevel lore
@@ -136,7 +136,7 @@ nonSegRed :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
              SegOpLevel lore
           -> Pattern lore
           -> SubExp
-          -> [SegRedOp lore]
+          -> [SegBinOp lore]
           -> Lambda lore
           -> [VName]
           -> m (Stms lore)

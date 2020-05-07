@@ -195,7 +195,7 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBinderT'_ $ do
 
   lvl <- mk_lvl [w] "stream_red" $ NoRecommendation SegNoVirt
   letBind_ pat' $ Op $ SegOp $ SegRed lvl kspace
-    [SegRedOp comm red_lam nes mempty] ts kbody
+    [SegBinOp comm red_lam nes mempty] ts kbody
 
   read_dummy
 

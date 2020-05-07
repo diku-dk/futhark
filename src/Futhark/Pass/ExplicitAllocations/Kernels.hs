@@ -77,7 +77,7 @@ kernelExpHints (Op (Inner (SegOp (SegMap lvl@SegThread{} space ts body)))) =
 
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@SegThread{} space reds ts body)))) =
   (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint lvl space) (drop num_reds ts) map_res
-  where num_reds = segRedResults reds
+  where num_reds = segBinOpResults reds
         (red_res, map_res) = splitAt num_reds $ kernelBodyResult body
 
 kernelExpHints e =

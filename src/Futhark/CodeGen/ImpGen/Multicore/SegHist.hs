@@ -316,7 +316,7 @@ smallDestHistogram pat space histops num_threads kbody = do
             [(bucket_id, num_buckets)] ++
             [(subhistogram_id, Var num_histos)]
 
-      let segred_op = SegRedOp Commutative (histOp op) (histNeutral op) (histShape op)
+      let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) (histShape op)
       compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont -> do
         red_cont $ flip map hists $ \subhisto ->
               (Var subhisto, map Imp.vi32 $
