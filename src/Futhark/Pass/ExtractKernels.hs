@@ -300,7 +300,7 @@ cmpSizeLe desc size_class to_what = do
   let size_key = nameFromString $ desc ++ "_" ++ show x
   runBinder $ do
     to_what' <- letSubExp "comparatee" =<<
-                foldBinOp (Mul Int32) (intConst Int32 1) to_what
+                foldBinOp (Mul Int32 OverflowUndef) (intConst Int32 1) to_what
     cmp_res <- letSubExp desc $ Op $ SizeOp $ CmpSizeLe size_key size_class to_what'
     return (cmp_res, size_key)
 
@@ -347,7 +347,8 @@ transformStm path (Let pat (StmAux cs _) (Op (Screma w form arrs)))
       onMap path $ MapLoop pat cs w lam arrs
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
-  | Just (scan_lam, nes) <- isScanSOAC form,
+  | Just scans <- isScanSOAC form,
+    Scan scan_lam nes <- singleScan scans,
     Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       transformStms path =<< (stmsToList . snd <$> runBinderT (certifying cs do_iswim) types)
@@ -359,13 +360,14 @@ transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   -- Hopefully, the scan then triggers the ISWIM case above (otherwise
   -- we will still crash in code generation).  However, if the map
   -- lambda is already identity, let's just go ahead here.
-  | Just (scan_lam, nes, map_lam) <- isScanomapSOAC form,
+  | Just (scans, map_lam) <- isScanomapSOAC form,
+    Scan scan_lam nes <- singleScan scans,
     (all primType (lambdaReturnType scan_lam) &&
      not (lambdaContainsParallelism map_lam)) || isIdentityLambda map_lam = runBinder_ $ do
       let scan_lam' = soacsLambdaToKernels scan_lam
           map_lam' = soacsLambdaToKernels map_lam
       lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-      addStms =<< segScan lvl res_pat w scan_lam' map_lam' nes arrs [] []
+      addStms =<< segScan lvl res_pat w scan_lam' nes map_lam' arrs [] []
 
 transformStm path (Let res_pat (StmAux cs _) (Op (Screma w form arrs)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,

@@ -43,7 +43,7 @@ iswim res_pat w scan_fun scan_input
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
           (nes', scan_arrs) = unzip scan_input'
 
-      scan_soac <- scanSOAC scan_fun' nes'
+      scan_soac <- scanSOAC [Scan scan_fun' nes']
       let map_body = mkBody (oneStm $ Let (setPatternOuterDimTo w map_pat) (defAux ()) $
                              Op $ Screma w scan_soac scan_arrs) $
                             map Var $ patternNames map_pat
@@ -54,7 +54,7 @@ iswim res_pat w scan_fun scan_input
                   patternValueIdents res_pat
 
       addStm $ Let res_pat' (StmAux map_cs ()) $ Op $ Screma map_w
-        (ScremaForm (nilFn, mempty) [] map_fun') map_arrs'
+        (mapSOAC map_fun') map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do

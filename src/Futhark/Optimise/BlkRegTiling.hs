@@ -108,8 +108,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         -- rx         <- letSubExp "Rx" $ BasicOp $ SubExp $ intConst Int32 4
         -- ry         <- letSubExp "Ry" $ BasicOp $ SubExp $ intConst Int32 4
 
-        tx_rx      <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32) tx rx
-        ty_ry      <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32) ty ry
+        tx_rx      <- letSubExp "TxRx" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) tx rx
+        ty_ry      <- letSubExp "TyRy" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) ty ry
         tk_div_tx  <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
         tk_div_ty  <- letSubExp "tk_div_ty" =<< ceilDiv tk ty
 
@@ -123,8 +123,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
 
         gridDim_x  <- letSubExp "gridDim_x"  =<< ceilDiv width_B  tx_rx
         gridDim_y  <- letSubExp "gridDim_y"  =<< ceilDiv height_A ty_ry
-        grid_size  <- letSubExp "grid_size"  $ BasicOp $ BinOp (Mul Int32) gridDim_x gridDim_y
-        group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) ty tx
+        grid_size  <- letSubExp "grid_size"  $ BasicOp $ BinOp (Mul Int32 OverflowUndef) gridDim_x gridDim_y
+        group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) ty tx
 
         gid_x      <- newVName "gid_x"
         gid_y      <- newVName "gid_y"
@@ -132,8 +132,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
 
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBinder $ do
-          iii <- letExp "iii" $ BasicOp $ BinOp (Mul Int32) (Var gid_y) ty_ry
-          jjj <- letExp "jjj" $ BasicOp $ BinOp (Mul Int32) (Var gid_x) tx_rx
+          iii <- letExp "iii" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) (Var gid_y) ty_ry
+          jjj <- letExp "jjj" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) (Var gid_x) tx_rx
 
           -- initialize register mem with neutral elements
           cssss_list <- segMap2D "cssss" (segThread grid_size group_size)
@@ -152,7 +152,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
           full_tiles <- letSubExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
           thd_res <- forLoop full_tiles cssss $ \kk0 thd_res_merge -> do
 
-            kk <- letExp "kk" $ BasicOp $ BinOp (Mul Int32) (Var kk0) tk
+            kk <- letExp "kk" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) (Var kk0) tk
 
             -- Cosmin: copy A from global to shared memory
             a_loc_init <- scratch "A_loc" map_t1 [len_A_loc]
@@ -357,7 +357,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
 
         segThread :: SubExp -> SubExp -> SegLevel
         segThread grid_size group_size =
-          SegThread (Count grid_size) (Count group_size) SegNoVirt
+          SegThread (Count grid_size) (Count group_size) SegNoVirtFull
 
         scratch :: MonadBinder m => String -> PrimType -> [SubExp] -> m VName
         scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
