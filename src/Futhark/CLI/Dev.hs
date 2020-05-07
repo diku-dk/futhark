@@ -48,6 +48,7 @@ import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Passes
+import Futhark.Util.Log
 
 -- | What to do with the program after it has been read.
 data FutharkPipeline = PrettyPrint
@@ -432,6 +433,7 @@ runPolyPasses :: Config -> Prog SOACS.SOACS -> FutharkM ()
 runPolyPasses config initial_prog = do
     end_prog <- foldM (runPolyPass pipeline_config) (SOACS initial_prog)
                 (getFutharkPipeline config)
+    logMsg $ "Running action " ++ untypedActionName (futharkAction config)
     case (end_prog, futharkAction config) of
       (SOACS prog, SOACSAction action) ->
         actionProcedure action prog
@@ -458,6 +460,7 @@ runPolyPasses config initial_prog = do
         untypedActionName action <>
         " expects " ++ representation action ++ " representation, but got " ++
         representation end_prog ++ "."
+    logMsg ("Done." :: String)
   where pipeline_config =
           PipelineConfig { pipelineVerbose = fst (futharkVerbose $ futharkConfig config) > NotVerbose
                          , pipelineValidate = True
