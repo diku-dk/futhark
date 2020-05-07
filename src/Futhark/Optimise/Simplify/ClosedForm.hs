@@ -127,11 +127,11 @@ checkResults pat size untouchable knownBnds params body accs = do
           case bop of
               LogAnd ->
                 letBindNames_ [p] $ BasicOp $ BinOp LogAnd this el
-              Add t | Just properly_typed_size <- properIntSize t -> do
-                        size' <- properly_typed_size
-                        letBindNames_ [p] =<<
-                          eBinOp (Add t) (eSubExp this)
-                          (pure $ BasicOp $ BinOp (Mul t) el size')
+              Add t w | Just properly_typed_size <- properIntSize t -> do
+                          size' <- properly_typed_size
+                          letBindNames_ [p] =<<
+                            eBinOp (Add t w) (eSubExp this)
+                            (pure $ BasicOp $ BinOp (Mul t w) el size')
               FAdd t | Just properly_typed_size <- properFloatSize t -> do
                         size' <- properly_typed_size
                         letBindNames_ [p] =<<

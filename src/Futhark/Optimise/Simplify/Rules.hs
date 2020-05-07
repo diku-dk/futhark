@@ -646,14 +646,14 @@ simplifyIndexing vtable seType idd inds consuming =
                           primExpFromSubExp (IntType to_it) s *
                           primExpFromSubExp (IntType to_it) i_offset'
             i_stride'' <- letSubExp "iota_offset" $
-                          BasicOp $ BinOp (Mul Int32) s i_stride'
+                          BasicOp $ BinOp (Mul Int32 OverflowWrap) s i_stride'
             fmap (SubExpResult cs) $ letSubExp "slice_iota" $
               BasicOp $ Iota i_n i_offset'' i_stride'' to_it
 
     Just (Rotate offsets a, cs) -> Just $ do
       dims <- arrayDims <$> lookupType a
       let adjustI i o d = do
-            i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int32) i o
+            i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int32 OverflowWrap) i o
             letSubExp "rot_i" (BasicOp $ BinOp (SMod Int32) i_p_o d)
           adjust (DimFix i, o, d) =
             DimFix <$> adjustI i o d
@@ -719,7 +719,7 @@ simplifyIndexing vtable seType idd inds consuming =
       xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
 
       let add n m = do
-            added <- letSubExp "index_concat_add" $ BasicOp $ BinOp (Add Int32) n m
+            added <- letSubExp "index_concat_add" $ BasicOp $ BinOp (Add Int32 OverflowWrap) n m
             return (added, n)
       (_, starts) <- mapAccumLM add x_len xs_lens
       let xs_and_starts = reverse $ zip xs starts
@@ -729,7 +729,7 @@ simplifyIndexing vtable seType idd inds consuming =
           mkBranch ((x', start):xs_and_starts') = do
             cmp <- letSubExp "index_concat_cmp" $ BasicOp $ CmpOp (CmpSle Int32) start i
             (thisres, thisbnds) <- collectStms $ do
-              i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int32) i start
+              i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int32 OverflowWrap) i start
               letSubExp "index_concat" $ BasicOp $ Index x' $ ibef ++ DimFix i' : iaft
             thisbody <- mkBodyM thisbnds [thisres]
             (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
@@ -776,12 +776,12 @@ sliceSlice :: MonadBinder m =>
               [DimIndex SubExp] -> [DimIndex SubExp] -> m [DimIndex SubExp]
 sliceSlice (DimFix j:js') is' = (DimFix j:) <$> sliceSlice js' is'
 sliceSlice (DimSlice j _ s:js') (DimFix i:is') = do
-  i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32) i s
-  j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32) j i_t_s
+  i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32 OverflowWrap) i s
+  j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32 OverflowWrap) j i_t_s
   (DimFix j_p_i_t_s:) <$> sliceSlice js' is'
 sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
-  s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32) s0 i
-  j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32) j s0_t_i
+  s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32 OverflowWrap) s0 i
+  j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32 OverflowWrap) j s0_t_i
   (DimSlice j_p_s0_t_i n s1:) <$> sliceSlice js' is'
 sliceSlice _ _ = return []
 
@@ -1203,7 +1203,7 @@ ruleBasicOp vtable pat (StmAux cs _) (Rotate offsets v)
   | Just (BasicOp (Rearrange perm v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rotate offsets2 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do
       let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
-          addOffsets x y = letSubExp "summed_offset" $ BasicOp $ BinOp (Add Int32) x y
+          addOffsets x y = letSubExp "summed_offset" $ BasicOp $ BinOp (Add Int32 OverflowWrap) x y
       offsets' <- zipWithM addOffsets offsets offsets2'
       rotate_rearrange <-
         certifying cs $ letExp "rotate_rearrange" $ BasicOp $ Rearrange perm v3
@@ -1216,7 +1216,7 @@ ruleBasicOp vtable pat (StmAux cs _) (Rotate offsets1 v)
       offsets <- zipWithM add offsets1 offsets2
       certifying (cs<>v_cs) $
         letBind_ pat $ BasicOp $ Rotate offsets v2
-        where add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int32) x y
+        where add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int32 OverflowWrap) x y
 
 -- If we see an Update with a scalar where the value to be written is
 -- the result of indexing some other array, then we convert it into an

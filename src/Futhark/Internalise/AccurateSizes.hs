@@ -114,7 +114,7 @@ ensureShapeVar asserting msg loc t name v
       else do
         certs <- asserting $ do
           matches <- zipWithM checkDim newdims olddims
-          all_match <- letSubExp "match" =<< foldBinOp LogAnd (constant True) matches
+          all_match <- letSubExp "match" =<< eAll matches
           Certificates . pure <$> letExp "empty_or_match_cert"
             (BasicOp $ Assert all_match msg (loc, []))
         certifying certs $ letExp name $ shapeCoerce newdims v

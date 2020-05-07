@@ -1778,12 +1778,15 @@ compilePrimExp f (ConvOpExp conv x) = do
 compilePrimExp f (BinOpExp bop x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y
-  -- Note that integer addition, subtraction, and multiplication are
-  -- not handled by explicit operators, but rather by functions.  This
-  -- is because we want to implicitly convert them to unsigned
-  -- numbers, so we can do overflow without invoking undefined
-  -- behaviour.
+  -- Note that integer addition, subtraction, and multiplication with
+  -- OverflowWrap are not handled by explicit operators, but rather by
+  -- functions.  This is because we want to implicitly convert them to
+  -- unsigned numbers, so we can do overflow without invoking
+  -- undefined behaviour.
   return $ case bop of
+             Add _ OverflowUndef -> [C.cexp|$exp:x' + $exp:y'|]
+             Sub _ OverflowUndef -> [C.cexp|$exp:x' - $exp:y'|]
+             Mul _ OverflowUndef -> [C.cexp|$exp:x' * $exp:y'|]
              FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]
              FSub{} -> [C.cexp|$exp:x' - $exp:y'|]
              FMul{} -> [C.cexp|$exp:x' * $exp:y'|]
@@ -2015,11 +2018,19 @@ compileFunBody output_ptrs outputs code = do
           stm [C.cstm|*$exp:p = $id:name;|]
 
 declareAndSet :: Code op -> Maybe (VName, Volatility, PrimType, Exp, Code op)
-declareAndSet (DeclareScalar name vol t :>>: (SetScalar dest e :>>: c))
-  | name == dest = Just (name, vol, t, e, c)
-declareAndSet ((DeclareScalar name vol t :>>: SetScalar dest e) :>>: c)
-  | name == dest = Just (name, vol, t, e, c)
-declareAndSet _ = Nothing
+declareAndSet code = do
+  (DeclareScalar name vol t, code') <- nextCode code
+  (SetScalar dest e, code'') <- nextCode code'
+  guard $ name == dest
+  Just (name, vol, t, e, code'')
+
+nextCode :: Code op -> Maybe (Code op, Code op)
+nextCode (x :>>: y)
+  | Just (x_a, x_b) <- nextCode x =
+      Just (x_a, x_b <> y)
+  | otherwise =
+      Just (x, y)
+nextCode _ = Nothing
 
 assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)
 assignmentOperator Add{}  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]

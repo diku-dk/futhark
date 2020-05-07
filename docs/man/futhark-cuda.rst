@@ -119,10 +119,11 @@ The following additional options are accepted.
 
   Print all sizes that can be set with ``-size`` or ``--tuning``.
 
---size=NAME=INT
+--size=ASSIGNMENT
 
-  Set a configurable run-time parameter to the given value.  Use
-  ``--print-sizes`` to see which are available.
+  Set a configurable run-time parameter to the given
+  value. ``ASSIGNMENT`` must be of the form ``NAME=INT`` Use
+  ``--print-sizes`` to see which names are available.
 
 --tuning=FILE
 

@@ -47,7 +47,8 @@ compileSegMap pat lvl space kbody = do
     SegGroup{} ->
       sKernelGroup "segmap_intragroup" num_groups' group_size' (segFlat space) $ do
       let virt_num_groups = product dims'
-      virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
+      precomputeSegOpIDs (kernelBodyStms kbody) $
+        virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
 
         zipWithM_ dPrimV_ is $ unflattenIndex dims' $ Imp.vi32 group_id
 

@@ -667,7 +667,7 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
               eDivRoundingUp Int32 (eSubExp kdim) (eSubExp group_size)
 
       num_groups <- letSubExp "computed_num_groups" =<<
-                    foldBinOp (Mul Int32) ldim (map snd dims_on_top)
+                    foldBinOp (Mul Int32 OverflowUndef) ldim (map snd dims_on_top)
 
       return (SegGroup (Count num_groups) (Count group_size) SegNoVirt,
               SegSpace gid_flat $ dims_on_top ++ [(gid, ldim)])
@@ -750,7 +750,7 @@ readTile2D :: (SubExp, SubExp) -> (VName, VName) -> (VName, VName) -> SubExp
            -> [(VName, [Int])]
            -> Binder Kernels [VName]
 readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups group_size kind privstms tile_id arrs_and_perms =
-  segMap2D "full_tile" (SegThread num_groups group_size SegNoVirt)
+  segMap2D "full_tile" (SegThread num_groups group_size SegNoVirtFull)
   ResultNoSimplify (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
     i <- letSubExp "i" =<<
          toExp (primExpFromSubExp int32 tile_id *
@@ -804,7 +804,7 @@ processTile2D
   -- Might be truncated in case of a partial tile.
   actual_tile_size <- arraysSize 0 <$> mapM (lookupType . fst) tiles_and_perms
 
-  segMap2D "acc" (SegThread num_groups group_size SegNoVirt)
+  segMap2D "acc" (SegThread num_groups group_size SegNoVirtFull)
     ResultPrivate (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
     reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
 
@@ -873,7 +873,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
 
   tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
-  group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32) tile_size tile_size
+  group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) tile_size tile_size
 
   num_groups_x <- letSubExp "num_groups_x" =<<
                   eDivRoundingUp Int32 (eSubExp kdim_x) (eSubExp tile_size)
@@ -881,11 +881,11 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
                   eDivRoundingUp Int32 (eSubExp kdim_y) (eSubExp tile_size)
 
   num_groups <- letSubExp "num_groups_top" =<<
-                foldBinOp (Mul Int32) num_groups_x
+                foldBinOp (Mul Int32 OverflowUndef) num_groups_x
                 (num_groups_y : map snd dims_on_top)
 
   gid_flat <- newVName "gid_flat"
-  let lvl = SegGroup (Count num_groups) (Count group_size) SegNoVirt
+  let lvl = SegGroup (Count num_groups) (Count group_size) SegNoVirtFull
       space = SegSpace gid_flat $
               dims_on_top ++ [(gid_x, num_groups_x), (gid_y, num_groups_y)]
 

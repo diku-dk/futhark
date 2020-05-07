@@ -292,7 +292,5 @@ compileSegScan pat lvl space scan_op nes kbody = do
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just elems_per_group
 
-  scan_op' <- renameLambda scan_op
-  scan_op'' <- renameLambda scan_op
-  scanStage2 pat stage1_num_threads elems_per_group (segNumGroups lvl) crossesSegment space scan_op' nes
-  scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scan_op'' nes
+  scanStage2 pat stage1_num_threads elems_per_group (segNumGroups lvl) crossesSegment space scan_op nes
+  scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scan_op nes

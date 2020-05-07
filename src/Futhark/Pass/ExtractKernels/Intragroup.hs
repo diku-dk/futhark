@@ -49,7 +49,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   (num_groups, w_stms) <- lift $ runBinder $
     letSubExp "intra_num_groups" =<<
-    foldBinOp (Mul Int32) (intConst Int32 1) (map snd ispace)
+    foldBinOp (Mul Int32 OverflowUndef) (intConst Int32 1) (map snd ispace)
 
   let body = lambdaBody lam
 
@@ -68,9 +68,9 @@ intraGroupParallelise knest lam = runMaybeT $ do
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
     let foldBinOp' _    []    = eSubExp $ intConst Int32 0
         foldBinOp' bop (x:xs) = foldBinOp bop x xs
-    ws_min <- mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int32)) $
+    ws_min <- mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int32 OverflowUndef)) $
               filter (not . null) wss_min
-    ws_avail <- mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int32)) $
+    ws_avail <- mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int32 OverflowUndef)) $
                 filter (not . null) wss_avail
 
     -- The amount of parallelism available *in the worst case* is
@@ -194,11 +194,12 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
 
     Op (Screma w form arrs)
-      | Just (scanfun, nes, mapfun) <- isScanomapSOAC form -> do
+      | Just (scans, mapfun) <- isScanomapSOAC form,
+        Scan scanfun nes <- singleScan scans -> do
       let scanfun' = soacsLambdaToKernels scanfun
           mapfun' = soacsLambdaToKernels mapfun
       certifying (stmAuxCerts aux) $
-        addStms =<< segScan lvl' pat w scanfun' mapfun' nes arrs [] []
+        addStms =<< segScan lvl' pat w scanfun' nes mapfun' arrs [] []
       parallelMin [w]
 
     Op (Screma w form arrs)
