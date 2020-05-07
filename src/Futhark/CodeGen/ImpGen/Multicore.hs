@@ -30,8 +30,8 @@ compileSegOp :: Pattern MCMem -> SegOp () MCMem
 compileSegOp pat  (SegHist _ space histops _ kbody) =
   compileSegHist pat space histops kbody
 
-compileSegOp pat (SegScan _ space op nes _ kbody) =
-  compileSegScan pat space op nes kbody
+compileSegOp pat (SegScan _ space scans _ kbody) =
+  compileSegScan pat space scans kbody
 
 compileSegOp pat (SegRed _ space reds _ kbody) =
   compileSegRed pat space reds kbody

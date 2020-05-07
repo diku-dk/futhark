@@ -35,25 +35,23 @@ createTemporaryArrays num_threads nes scan_op = do
 
 compileSegScan :: Pattern MCMem
                 -> SegSpace
-                -> Lambda MCMem
-                -> [SubExp]
+                -> [SegBinOp MCMem]
                 -> KernelBody MCMem
                 -> MulticoreGen ()
-compileSegScan pat space scan_op nes kbody
+compileSegScan pat space scans kbody
   | segment_depth <- unSegSpace space,
     length segment_depth == 1 =
-      nonsegmentedScan pat space scan_op nes kbody
+      nonsegmentedScan pat space scans kbody
   | otherwise =
-      segmentedScan pat space scan_op nes kbody
+      segmentedScan pat space scans kbody
 
 
 segmentedScan :: Pattern MCMem
-                -> SegSpace
-                -> Lambda MCMem
-                -> [SubExp]
-                -> KernelBody MCMem
-                -> MulticoreGen ()
-segmentedScan pat space scan_op nes kbody = do
+              -> SegSpace
+              -> [SegBinOp MCMem]
+              -> KernelBody MCMem
+              -> MulticoreGen ()
+segmentedScan pat space [SegBinOp _ scan_op nes _] kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   sUnpauseProfiling
 
@@ -134,11 +132,10 @@ segScanOpSlug local_tid op param_arrs =
 
 nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
-                 -> Lambda MCMem
-                 -> [SubExp]
+                 -> [SegBinOp MCMem]
                  -> KernelBody MCMem
                  -> MulticoreGen ()
-nonsegmentedScan pat space scan_op nes kbody = do
+nonsegmentedScan pat space [SegBinOp _ scan_op nes _] kbody = do
   emit $ Imp.DebugPrint "nonsegmented segScan " Nothing
   sUnpauseProfiling
 

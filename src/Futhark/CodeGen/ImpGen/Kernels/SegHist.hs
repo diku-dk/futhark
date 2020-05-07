@@ -974,7 +974,7 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
               zip vector_ids (shapeDims $ histShape op) ++
               [(subhistogram_id, Var num_histos)]
 
-        let segred_op = SegRedOp Commutative (histOp op) (histNeutral op) mempty
+        let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) mempty
         compileSegRed' (Pattern [] red_pes) lvl segred_space [segred_op] $ \red_cont ->
           red_cont $ flip map subhistos $ \subhisto ->
             (Var subhisto, map Imp.vi32 $
