@@ -9,11 +9,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Faster index calculations for very tight GPU kernels (such as the
+    ones corresponding to 2D tiling).
+
+  * `scan` with vectorised operators (e.g. `map2 (+)`) is now faster
+    in some cases.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+  * Fixed some cases of missing fusion (#953).
 
 ## [0.15.6]
 
