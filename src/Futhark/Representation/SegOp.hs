@@ -389,8 +389,14 @@ instance Pretty KernelResult where
 -- overhead.  This only really matters for fairly trivial but very
 -- wide @map@ kernels where each thread performs constant-time work on
 -- scalars.
-data SegVirt = SegVirt | SegNoVirt
-             deriving (Eq, Ord, Show)
+data SegVirt
+  = SegVirt
+  | SegNoVirt
+  | SegNoVirtFull
+    -- ^ Not only do we not need virtualisation, but we _guarantee_
+    -- that all physical threads participate in the work.  This can
+    -- save some checks in code generation.
+  deriving (Eq, Ord, Show)
 
 -- | Index space of a 'SegOp'.
 data SegSpace = SegSpace { segFlat :: VName

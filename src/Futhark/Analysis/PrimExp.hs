@@ -29,6 +29,9 @@ import           Futhark.Util.Pretty
 -- | A primitive expression parametrised over the representation of
 -- free variables.  Note that the 'Functor', 'Traversable', and 'Num'
 -- instances perform automatic (but simple) constant folding.
+--
+-- Note also that the 'Num' instance assumes 'OverflowUndef'
+-- semantics!
 data PrimExp v = LeafExp v PrimType
                | ValueExp PrimValue
                | BinOpExp BinOp (PrimExp v) (PrimExp v)
@@ -153,13 +156,16 @@ constFoldPrimExp e = e
 -- expressions to constants so that the above works.  However, it is
 -- still a bit of a hack.
 instance Pretty v => Num (PrimExp v) where
-  x + y | Just z <- msum [asIntOp Add x y, asFloatOp FAdd x y] = constFoldPrimExp z
+  x + y | Just z <- msum [asIntOp (`Add` OverflowUndef) x y,
+                          asFloatOp FAdd x y] = constFoldPrimExp z
         | otherwise = numBad "+" (x,y)
 
-  x - y | Just z <- msum [asIntOp Sub x y, asFloatOp FSub x y] = constFoldPrimExp z
+  x - y | Just z <- msum [asIntOp (`Sub` OverflowUndef) x y,
+                          asFloatOp FSub x y] = constFoldPrimExp z
         | otherwise = numBad "-" (x,y)
 
-  x * y | Just z <- msum [asIntOp Mul x y, asFloatOp FMul x y] = constFoldPrimExp z
+  x * y | Just z <- msum [asIntOp (`Mul` OverflowUndef) x y,
+                          asFloatOp FMul x y] = constFoldPrimExp z
         | otherwise = numBad "*" (x,y)
 
   abs x | IntType t <- primExpType x = UnOpExp (Abs t) x

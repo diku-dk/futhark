@@ -176,11 +176,11 @@ primOpRanges :: BasicOp -> [Range]
 primOpRanges (SubExp se) =
   [rangeOf se]
 
-primOpRanges (BinOp (Add t) x y) =
+primOpRanges (BinOp (Add t _) x y) =
   [scalExpRange $ SE.SPlus (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
-primOpRanges (BinOp (Sub t) x y) =
+primOpRanges (BinOp (Sub t _) x y) =
   [scalExpRange $ SE.SMinus (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
-primOpRanges (BinOp (Mul t) x y) =
+primOpRanges (BinOp (Mul t _) x y) =
   [scalExpRange $ SE.STimes (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
 primOpRanges (BinOp (SDiv t) x y) =
   [scalExpRange $ SE.SDiv (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
