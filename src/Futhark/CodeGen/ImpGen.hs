@@ -1,6 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, FlexibleInstances, MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
@@ -81,13 +83,12 @@ module Futhark.CodeGen.ImpGen
   )
   where
 
-import Control.Monad.RWS    hiding (mapM, forM)
-import Control.Monad.State  hiding (mapM, forM, State)
-import Control.Monad.Writer hiding (mapM, forM)
+import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad.Writer
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
-import Data.Traversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
@@ -217,19 +218,21 @@ newEnv r ops ds =
 -- | The symbol table used during compilation.
 type VTable lore = M.Map VName (VarEntry lore)
 
-data State lore r op = State { stateVTable :: VTable lore
-                           , stateFunctions :: Imp.Functions op
-                           , stateNameSource :: VNameSource
-                           }
+data ImpState lore r op =
+  ImpState { stateVTable :: VTable lore
+           , stateFunctions :: Imp.Functions op
+           , stateCode :: Imp.Code op
+           , stateNameSource :: VNameSource
+           }
 
-newState :: VNameSource -> State lore r op
-newState = State mempty mempty
+newState :: VNameSource -> ImpState lore r op
+newState = ImpState mempty mempty mempty
 
-newtype ImpM lore r op a = ImpM (RWS (Env lore r op) (Imp.Code op) (State lore r op) a)
+newtype ImpM lore r op a =
+  ImpM (ReaderT (Env lore r op) (State (ImpState lore r op)) a)
   deriving (Functor, Applicative, Monad,
-            MonadState (State lore r op),
-            MonadReader (Env lore r op),
-            MonadWriter (Imp.Code op))
+            MonadState (ImpState lore r op),
+            MonadReader (Env lore r op))
 
 instance MonadFreshNames (ImpM lore r op) where
   getNameSource = gets stateNameSource
@@ -250,9 +253,9 @@ instance HasScope SOACS (ImpM lore r op) where
             Prim $ entryScalarType scalarEntry
 
 runImpM :: ImpM lore r op a
-        -> r -> Operations lore r op -> Imp.Space -> State lore r op
-        -> (a, State lore r op, Imp.Code op)
-runImpM (ImpM m) r ops space = runRWS m $ newEnv r ops space
+        -> r -> Operations lore r op -> Imp.Space -> ImpState lore r op
+        -> (a, ImpState lore r op)
+runImpM (ImpM m) r ops space = runState (runReaderT m $ newEnv r ops space)
 
 subImpM_ :: r' -> Operations lore r' op' -> ImpM lore r' op' a
          -> ImpM lore r op (Imp.Code op')
@@ -263,30 +266,37 @@ subImpM :: r' -> Operations lore r' op' -> ImpM lore r' op' a
 subImpM r ops (ImpM m) = do
   env <- ask
   s <- get
-  let (x, s', code) =
-        runRWS m env { envExpCompiler = opsExpCompiler ops
-                     , envStmsCompiler = opsStmsCompiler ops
-                     , envCopyCompiler = opsCopyCompiler ops
-                     , envOpCompiler = opsOpCompiler ops
-                     , envAllocCompilers = opsAllocCompilers ops
-                     , envEnv = r
-                     }
-                 s { stateVTable = stateVTable s
-                   , stateFunctions = mempty }
-  putNameSource $ stateNameSource s'
-  return (x, code)
+
+  let env' = env { envExpCompiler = opsExpCompiler ops
+                 , envStmsCompiler = opsStmsCompiler ops
+                 , envCopyCompiler = opsCopyCompiler ops
+                 , envOpCompiler = opsOpCompiler ops
+                 , envAllocCompilers = opsAllocCompilers ops
+                 , envEnv = r
+                 }
+      s' = ImpState { stateVTable = stateVTable s
+                    , stateFunctions = mempty
+                    , stateCode = mempty
+                    , stateNameSource = stateNameSource s
+                    }
+      (x, s'') = runState (runReaderT m env') s'
+
+  putNameSource $ stateNameSource s''
+  return (x, stateCode s'')
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
 collect :: ImpM lore r op () -> ImpM lore r op (Imp.Code op)
-collect m = pass $ do
-  ((), code) <- listen m
-  return (code, const mempty)
+collect = fmap snd . collect'
 
 collect' :: ImpM lore r op a -> ImpM lore r op (a, Imp.Code op)
-collect' m = pass $ do
-  (x, code) <- listen m
-  return ((x, code), const mempty)
+collect' m = do
+  prev_code <- gets stateCode
+  modify $ \s -> s { stateCode = mempty }
+  x <- m
+  new_code <- gets stateCode
+  modify $ \s -> s { stateCode = prev_code }
+  return (x, new_code)
 
 -- | Execute a code generation action, wrapping the generated code
 -- within a 'Imp.Comment' with the given description.
@@ -296,7 +306,7 @@ comment desc m = do code <- collect m
 
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM lore r op ()
-emit = tell
+emit code = modify $ \s -> s { stateCode = stateCode s <> code }
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM lore r op ()
@@ -321,7 +331,7 @@ compileProg :: (Mem lore, FreeIn op, MonadFreshNames m) =>
             -> Prog lore -> m (Imp.Definitions op)
 compileProg r ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-  let (consts', s', _) =
+  let (consts', s') =
         runImpM compile r ops space
         (newState src) { stateVTable = constsVTable consts }
   in (Imp.Definitions consts' (stateFunctions s'),
