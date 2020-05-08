@@ -22,7 +22,10 @@ module Futhark.Util.IntegralExp
        where
 
 import Data.Int
+import Prelude
 
+-- | A twist on the 'Integral' type class that is more friendly to
+-- symbolic representations.
 class Num e => IntegralExp e where
   quot :: e -> e -> e
   rem :: e -> e -> e
@@ -69,7 +72,7 @@ instance Integral a => IntegralExp (Wrapped a) where
   fromInt32 = fromInteger . toInteger
   fromInt64 = fromInteger . toInteger
 
--- | Like 'quot', but rounds up.
+-- | Like 'Prelude.quot', but rounds up.
 quotRoundingUp :: IntegralExp num => num -> num -> num
 quotRoundingUp x y =
   (x + y - 1) `Futhark.Util.IntegralExp.quot` y

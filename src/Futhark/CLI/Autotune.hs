@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+-- | @futhark autotune@
 module Futhark.CLI.Autotune (main) where
 
 import Control.Monad
@@ -358,6 +359,7 @@ commandLineOptions = [
     "Enable logging.  Pass multiple times for more."
    ]
 
+-- | Run @futhark autotune@
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialAutotuneOptions commandLineOptions
        "options... program" $

@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+-- | @futhark run@
 module Futhark.CLI.Run (main) where
 
 import Control.Monad.Free.Church
@@ -30,6 +31,7 @@ import Futhark.Util (toPOSIX)
 
 import qualified Language.Futhark.Interpreter as I
 
+-- | Run @futhark run@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options... program" run
   where run [prog] config = Just $ interpret config prog

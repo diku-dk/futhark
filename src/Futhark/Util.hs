@@ -56,7 +56,7 @@ import System.Exit
 import qualified System.FilePath.Posix as Posix
 import qualified System.FilePath as Native
 
--- | Like 'mapAccumL', but monadic.
+-- | Like 'Data.Traversable.mapAccumL', but monadic.
 mapAccumLM :: Monad m =>
               (acc -> x -> m (acc, y)) -> acc -> [x] -> m (acc, [y])
 mapAccumLM _ acc [] = return (acc, [])
@@ -238,6 +238,8 @@ fork f x = do cell <- newEmptyMVar
                                  putMVar cell result
               return cell
 
+-- | Run various 'IO' actions concurrently, possibly with a bound on
+-- the number of threads.
 pmapIO :: Maybe Int -> (a -> IO b) -> [a] -> IO [b]
 pmapIO concurrency f elems = go elems []
   where

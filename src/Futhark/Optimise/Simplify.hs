@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 module Futhark.Optimise.Simplify
   ( simplifyProg
   , simplifySomething

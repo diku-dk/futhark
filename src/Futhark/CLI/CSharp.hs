@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | @futhark csharp@
 module Futhark.CLI.CSharp (main) where
 
 import Control.Monad.IO.Class
@@ -14,6 +15,7 @@ import qualified Futhark.CodeGen.Backends.SequentialCSharp as SequentialCS
 import Futhark.Compiler.CLI
 import Futhark.Util
 
+-- | Run @futhark csharp@
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile sequential C#" "Generate sequential C# code from optimised Futhark program."
