@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 module Futhark.Compiler
        (
          runPipelineOnProgram
