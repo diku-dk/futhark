@@ -12,6 +12,7 @@ import qualified Futhark.Representation.MC as MC
 import Futhark.Representation.SOACS
   hiding (Body, Exp, Lambda, LParam, Pattern, Stm)
 import qualified Futhark.Representation.SOACS as SOACS
+import qualified Futhark.Representation.SOACS.Simplify as SOACS
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Util (chunks, takeLast)
@@ -135,6 +136,36 @@ transformMap (MapLoop pat cs w lam arrs) = do
   runDistNestT env $
     distributeMapBodyStms acc $ bodyStms $ lambdaBody lam
 
+-- Sets the chunk size to one.
+unstreamLambda :: [SubExp] -> Lambda SOACS -> ExtractM (Lambda SOACS)
+unstreamLambda nes lam = do
+  let (chunk_param, acc_params, slice_params) =
+        partitionChunkedFoldParameters (length nes) (lambdaParams lam)
+
+  inp_params <- forM slice_params $ \(Param p t) ->
+    newParam (baseString p) (rowType t)
+
+  body <- runBodyBinder $ localScope (scopeOfLParams inp_params) $ do
+    letBindNames_ [paramName chunk_param] $
+      BasicOp $ SubExp $ intConst Int32 1
+
+    forM_ (zip acc_params nes) $ \(p, ne) ->
+      letBindNames_ [paramName p] $ BasicOp $ SubExp ne
+
+    forM_ (zip slice_params inp_params) $ \(slice, v) ->
+      letBindNames_ [paramName slice] $
+      BasicOp $ ArrayLit [Var $ paramName v] (paramType v)
+
+    pure $ lambdaBody lam
+
+  let lam' = Lambda { lambdaReturnType = lambdaReturnType lam
+                    , lambdaParams = inp_params
+                    , lambdaBody = body
+                    }
+
+  soacs_scope <- castScope <$> askScope
+  runReaderT (SOACS.simplifyLambda lam' []) soacs_scope
+
 transformSOAC :: Pattern SOACS -> SOAC SOACS -> ExtractM (Stms MC)
 
 transformSOAC pat (Screma w form arrs)
@@ -189,6 +220,16 @@ transformSOAC pat (Hist w ops lam arrs) = do
 
   return $ oneStm $ Let pat (defAux ()) $ Op $
     SegHist () space ops' (lambdaReturnType lam) kbody
+
+transformSOAC pat (Stream w (Parallel _ comm red_lam red_nes) fold_lam arrs)
+  | not $ null red_nes = do
+  (gtid, space) <- mkSegSpace w
+  map_lam <- unstreamLambda red_nes fold_lam
+  kbody <- mapLambdaToKernelBody gtid map_lam arrs
+  (red_stms, red) <- reduceToSegBinOp $ Reduce comm red_lam red_nes
+  return $ red_stms <>
+    oneStm (Let pat (defAux ()) $ Op $
+            SegRed () space [red] (lambdaReturnType map_lam) kbody)
 
 transformSOAC pat (Stream w form lam arrs) = do
   -- Just remove the stream and transform the resulting stms.

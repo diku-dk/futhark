@@ -258,6 +258,8 @@ segmentedReduction pat space reds kbody = do
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
+  let (body_allocs, fbody') = extractAllocations fbody
+
   emit $ Imp.Op $ Imp.ParLoop (decideScheduling fbody)
                                ntask n_segments (product $ init ns')
-                              (Imp.MulticoreFunc freeParams mempty fbody tid)
+                              (Imp.MulticoreFunc freeParams body_allocs fbody' tid)

@@ -1,6 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
  ( toParam
  , compileKBody
+ , extractAllocations
  , compileThreadResult
  , MulticoreGen
  , getNumThreads
@@ -11,13 +12,12 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  where
 
 import Data.List
+import Data.Bifunctor
 import Prelude hiding (quot, rem)
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.MCMem
-import Futhark.Representation.SegOp
-
 
 type MulticoreGen = ImpM MCMem () Imp.Multicore
 
@@ -85,3 +85,42 @@ decideScheduling code  =
 sUnpauseProfiling :: MulticoreGen ()
 sUnpauseProfiling =
   emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+
+-- | Try to extract invariant allocations.  If we assume that the
+-- given 'Code' is the body of a 'SegOp', then it is always safe to
+-- move the allocations to the prebody.
+extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
+extractAllocations segop_code = f segop_code
+  where declared = Imp.declaredIn segop_code
+        f (Imp.DeclareMem name space) =
+          -- Hoisting declarations out is always safe.
+          (Imp.DeclareMem name space, mempty)
+        f (Imp.Allocate name size space)
+          | not $ freeIn size `namesIntersect` declared =
+              (Imp.Allocate name size space, mempty)
+        f (x Imp.:>>: y) = f x <> f y
+        f (Imp.While cond body) =
+          second (Imp.While cond) (f body)
+        f (Imp.For i it bound body) =
+          second (Imp.For i it bound) (f body)
+        f (Imp.Comment s code) =
+          second (Imp.Comment s) (f code)
+        f Imp.Free{} =
+          mempty
+        f (Imp.If cond tcode fcode) =
+          let (ta, tcode') = f tcode
+              (fa, fcode') = f fcode
+          in (ta <> fa, Imp.If cond tcode' fcode')
+        f (Imp.Op (Imp.ParLoop sched ntask i e
+                   (Imp.MulticoreFunc free prebody body n))) =
+          let (body_allocs, body') = extractAllocations body
+              (free_allocs, here_allocs) = f body_allocs
+              free' = filter (not .
+                              (`nameIn` Imp.declaredIn body_allocs) .
+                              Imp.paramName) free
+          in (free_allocs,
+              here_allocs <>
+              Imp.Op (Imp.ParLoop sched ntask i e $
+                      Imp.MulticoreFunc free' prebody body' n))
+        f code =
+          (mempty, code)

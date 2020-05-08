@@ -38,6 +38,8 @@ module Futhark.CodeGen.ImpCode
   , errorMsgArgTypes
   , ArrayContents(..)
 
+  , declaredIn
+
     -- * Typed enumerations
   , Bytes
   , Elements
