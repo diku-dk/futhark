@@ -2,6 +2,10 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Compile a 'KernelsMem' program to imperative code with kernels.
+-- This is mostly (but not entirely) the same process no matter if we
+-- are targeting OpenCL or CUDA.  The important distinctions (the host
+-- level code) are introduced later.
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProgOpenCL
   , compileProgCUDA

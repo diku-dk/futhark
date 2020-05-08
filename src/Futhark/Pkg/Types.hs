@@ -66,7 +66,7 @@ pkgPathFilePath = joinPath . Posix.splitPath . T.unpack
 
 -- | Versions of the form (0,0,0)-timestamp+hash are treated
 -- specially, as a reference to the commit identified uniquely with
--- 'hash' (typically the Git commit ID).  This function detects such
+-- @hash@ (typically the Git commit ID).  This function detects such
 -- versions.
 isCommitVersion :: SemVer -> Maybe T.Text
 isCommitVersion (SemVer 0 0 0 [_] [[Str s]]) = Just s
@@ -271,9 +271,11 @@ pPkgManifest = do
                 blankLine = some spaceChar >> pure Nothing
 
 
+-- | Parse a text as a 'PkgManifest'.  The 'FilePath' is used for any error messages.
 parsePkgManifest :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text Void) PkgManifest
 parsePkgManifest = parse pPkgManifest
 
+-- | Read contents of file and pass it to 'parsePkgManifest'.
 parsePkgManifestFromFile :: FilePath -> IO PkgManifest
 parsePkgManifestFromFile f = do
   s <- T.readFile f

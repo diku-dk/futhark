@@ -3,6 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+-- | @futhark repl@
 module Futhark.CLI.REPL (main) where
 
 import Control.Monad.Free.Church
@@ -48,6 +49,7 @@ banner = unlines [
   "|   |   \\ |   |   | \\  \\"
   ]
 
+-- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options..." run
   where run []     _      = Just repl

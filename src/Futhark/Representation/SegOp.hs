@@ -103,6 +103,7 @@ instance Rename SplitOrdering where
   rename (SplitStrided stride) =
     SplitStrided <$> rename stride
 
+-- | An operator for 'SegHist'.
 data HistOp lore =
   HistOp { histWidth :: SubExp
          , histRaceFactor :: SubExp
@@ -126,6 +127,7 @@ histType op = map ((`arrayOfRow` histWidth op) .
                         (`arrayOfShape` histShape op)) $
                    lambdaReturnType $ histOp op
 
+-- | An operator for 'SegScan' and 'SegRed'.
 data SegBinOp lore =
   SegBinOp { segBinOpComm :: Commutativity
            , segBinOpLambda :: Lambda lore
@@ -174,6 +176,8 @@ data ResultManifest
     -- kept in registers.
   deriving (Eq, Show, Ord)
 
+-- | A 'KernelBody' does not return an ordinary 'Result'.  Instead, it
+-- returns a list of these.
 data KernelResult = Returns ResultManifest SubExp
                     -- ^ Each "worker" in the kernel returns this.
                     -- Whether this is a result-per-thread or a
@@ -195,6 +199,7 @@ data KernelResult = Returns ResultManifest SubExp
                     -- result to be written per physical thread.
                   deriving (Eq, Show, Ord)
 
+-- | Get the root 'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (Returns _ se) = se
 kernelResultSubExp (WriteReturns _ arr _) = Var arr
@@ -246,6 +251,7 @@ instance Attributes lore => Rename (KernelBody lore) where
 instance Rename KernelResult where
   rename = substituteRename
 
+-- | Perform alias analysis on a 'KernelBody'.
 aliasAnalyseKernelBody :: (Attributes lore,
                            CanBeAliased (Op lore)) =>
                           KernelBody lore
@@ -381,9 +387,12 @@ data SegSpace = SegSpace { segFlat :: VName
               deriving (Eq, Ord, Show)
 
 
+-- | The sizes spanned by the indexes of the 'SegSpace'.
 segSpaceDims :: SegSpace -> [SubExp]
 segSpaceDims (SegSpace _ space) = map snd space
 
+-- | A 'Scope' containing all the identifiers brought into scope by
+-- this 'SegSpace'.
 scopeOfSegSpace :: SegSpace -> Scope lore
 scopeOfSegSpace (SegSpace phys space) =
   M.fromList $ zip (phys : map fst space) $ repeat $ IndexInfo Int32
@@ -392,6 +401,16 @@ checkSegSpace :: TC.Checkable lore => SegSpace -> TC.TypeM lore ()
 checkSegSpace (SegSpace _ dims) =
   mapM_ (TC.require [Prim int32] . snd) dims
 
+-- | A 'SegOp' is semantically a perfectly nested stack of maps, on
+-- top of some bottommost computation (scalar computation, reduction,
+-- scan, or histogram).  The 'SegSpace' encodes the original map
+-- structure.
+--
+-- All 'SegOps' are parameterised by the representation of their body,
+-- as well as a *level*.  The *level* is a representation-specific bit
+-- of information.  For example, in GPU backends, it is used to
+-- indicate whether the 'SegOp' is expected to run at the thread-level
+-- or the group-level.
 data SegOp lvl lore
   = SegMap lvl SegSpace [Type] (KernelBody lore)
   | SegRed lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
@@ -401,12 +420,14 @@ data SegOp lvl lore
   | SegHist lvl SegSpace [HistOp lore] [Type] (KernelBody lore)
   deriving (Eq, Ord, Show)
 
+-- | The level of a 'SegOp'.
 segLevel :: SegOp lvl lore -> lvl
 segLevel (SegMap lvl _ _ _) = lvl
 segLevel (SegRed lvl _ _ _ _) = lvl
 segLevel (SegScan lvl _ _ _ _) = lvl
 segLevel (SegHist lvl _ _ _ _) = lvl
 
+-- | The space of a 'SegOp'.
 segSpace :: SegOp lvl lore -> SegSpace
 segSpace (SegMap _ lvl _ _) = lvl
 segSpace (SegRed _ lvl _ _ _) = lvl
@@ -423,6 +444,7 @@ segResultShape _ t (ConcatReturns _ w _ _) =
 segResultShape _ t (TileReturns dims _) =
   t `arrayOfShape` Shape (map fst dims)
 
+-- | The return type of a 'SegOp'.
 segOpType :: SegOp lvl lore -> [Type]
 segOpType (SegMap _ space ts kbody) =
   zipWith (segResultShape space) ts $ kernelBodyResult kbody
@@ -468,6 +490,7 @@ instance (Attributes lore, Aliased lore, ASTConstraints lvl) =>
   consumedInOp (SegHist _ _ ops _ kbody) =
     namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
 
+-- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp :: TC.Checkable lore =>
                   (lvl -> TC.TypeM lore ())
                -> SegOp lvl (Aliases lore) -> TC.TypeM lore ()
@@ -1137,6 +1160,7 @@ kernelBodyReturns = zipWithM correct . kernelBodyResult
   where correct (WriteReturns _ arr _) _ = varReturns arr
         correct _ ret = return ret
 
+-- | Like 'segOpType', but for memory representations.
 segOpReturns :: (Mem lore, Monad m, HasScope lore m) =>
                 SegOp lvl lore -> m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =

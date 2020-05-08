@@ -1,8 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
--- | Simple tool for benchmarking Futhark programs.  Use the @--json@
--- flag for machine-readable output.
+-- | @futhark bench@
 module Futhark.CLI.Bench ( main ) where
 
 import Control.Monad
@@ -287,6 +286,7 @@ commandLineOptions = [
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000
 
+-- | Run @futhark bench@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   Just $ runBenchmarks config progs

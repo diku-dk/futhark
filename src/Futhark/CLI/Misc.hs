@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
--- Various small subcommands that are too simple to deserve their own file.
+-- | Various small subcommands that are too simple to deserve their own file.
 module Futhark.CLI.Misc
   ( mainImports
   , mainDataget
@@ -18,6 +18,7 @@ import Futhark.Compiler
 import Futhark.Util.Options
 import Futhark.Test
 
+-- | @futhark imports@
 mainImports :: String -> [String] -> IO ()
 mainImports = mainWithOptions () [] "program" $ \args () ->
   case args of
@@ -28,6 +29,7 @@ mainImports = mainWithOptions () [] "program" $ \args () ->
         $ map fst prog_imports
     _ -> Nothing
 
+-- | @futhark dataget@
 mainDataget :: String -> [String] -> IO ()
 mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
   case args of

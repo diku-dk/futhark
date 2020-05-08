@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings, FlexibleContexts, LambdaCase #-}
--- | This program is a convenience utility for running the Futhark
--- test suite, and its test programs.
+-- | @futhark test@
 module Futhark.CLI.Test (main) where
 
 import Control.Applicative.Lift (runErrors, failure, Errors, Lift(..))
@@ -596,6 +595,7 @@ commandLineOptions = [
     "Number of tests to run concurrently."
   ]
 
+-- | Run @futhark test@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
   Just $ runTests config progs

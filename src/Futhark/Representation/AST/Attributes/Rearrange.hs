@@ -1,3 +1,5 @@
+-- | A rearrangement is a generalisation of transposition, where the
+-- dimensions are arbitrarily permuted.
 module Futhark.Representation.AST.Attributes.Rearrange
        ( rearrangeShape
        , rearrangeInverse

@@ -558,6 +558,8 @@ typeOf (Match _ cs (Info t, _) _) =
   unscopeType (foldMap unscopeSet cs) t
   where unscopeSet (CasePat p _ _) = S.map identName $ patternIdents p
 
+-- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
+-- @ts@ as parameters and returns @ret@.
 foldFunType :: Monoid as => [TypeBase dim as] -> TypeBase dim as -> TypeBase dim as
 foldFunType ps ret = foldr arrow ret ps
   where arrow t1 t2 = Scalar $ Arrow mempty Unnamed t1 t2

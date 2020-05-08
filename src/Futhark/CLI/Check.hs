@@ -1,3 +1,4 @@
+-- | @futhark check@
 module Futhark.CLI.Check (main) where
 
 import Control.Monad
@@ -18,6 +19,7 @@ options = [Option "w" []
            (NoArg $ Right $ \cfg -> cfg { checkWarn = False })
            "Disable all warnings."]
 
+-- | Run @futhark check@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions newCheckConfig options "program" $ \args cfg ->
   case args of

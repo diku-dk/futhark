@@ -19,6 +19,7 @@ import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.MonadFreshNames
 
+-- | Compile the program to sequential C.
 compileProg :: MonadFreshNames m => Prog SeqMem -> m GC.CParts
 compileProg =
   GC.compileProg operations generateContext "" [DefaultSpace] [] <=<

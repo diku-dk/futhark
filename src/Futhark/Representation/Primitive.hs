@@ -190,6 +190,7 @@ intValue Int16 = Int16Value . fromIntegral
 intValue Int32 = Int32Value . fromIntegral
 intValue Int64 = Int64Value . fromIntegral
 
+-- | The type of an integer value.
 intValueType :: IntValue -> IntType
 intValueType Int8Value{}  = Int8
 intValueType Int16Value{} = Int16
@@ -226,6 +227,7 @@ floatValue :: Real num => FloatType -> num -> FloatValue
 floatValue Float32 = Float32Value . fromRational . toRational
 floatValue Float64 = Float64Value . fromRational . toRational
 
+-- | The type of a floating-point value.
 floatValueType :: FloatValue -> FloatType
 floatValueType Float32Value{} = Float32
 floatValueType Float64Value{} = Float64
@@ -471,6 +473,8 @@ allConvOps = concat [ ZExt <$> allIntTypes <*> allIntTypes
                     , BToI <$> allIntTypes
                     ]
 
+-- | Apply an 'UnOp' to an operand.  Returns 'Nothing' if the
+-- application is mistyped.
 doUnOp :: UnOp -> PrimValue -> Maybe PrimValue
 doUnOp Not (BoolValue b)         = Just $ BoolValue $ not b
 doUnOp Complement{} (IntValue v) = Just $ IntValue $ doComplement v
@@ -500,6 +504,9 @@ doSSignum v = intValue (intValueType v) $ signum $ intToInt64 v
 doUSignum :: IntValue -> IntValue
 doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
 
+-- | Apply a 'BinOp' to an operand.  Returns 'Nothing' if the
+-- application is mistyped, or outside the domain (e.g. division by
+-- zero).
 doBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
 doBinOp Add{}    = doIntBinOp doAdd
 doBinOp FAdd{}   = doFloatBinOp (+) (+)
@@ -660,6 +667,8 @@ doPow v1 v2
   | negativeIshInt v2 = Nothing
   | otherwise         = Just $ intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
 
+-- | Apply a 'ConvOp' to an operand.  Returns 'Nothing' if the
+-- application is mistyped.
 doConvOp :: ConvOp -> PrimValue -> Maybe PrimValue
 doConvOp (ZExt _ to) (IntValue v)     = Just $ IntValue $ doZExt v to
 doConvOp (SExt _ to) (IntValue v)     = Just $ IntValue $ doSExt v to
@@ -715,6 +724,8 @@ doUIToFP v t = floatValue t $ intToWord64 v
 doSIToFP :: IntValue -> FloatType -> FloatValue
 doSIToFP v t = floatValue t $ intToInt64 v
 
+-- | Apply a 'CmpOp' to an operand.  Returns 'Nothing' if the
+-- application is mistyped.
 doCmpOp :: CmpOp -> PrimValue -> PrimValue -> Maybe Bool
 doCmpOp CmpEq{} v1 v2                            = Just $ doCmpEq v1 v2
 doCmpOp CmpUlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpUlt v1 v2
@@ -1198,6 +1209,8 @@ instance Pretty UnOp where
   ppr (USignum t)    = taggedI "usignum" t
   ppr (Complement t) = taggedI "complement" t
 
+-- | The human-readable name for a 'ConvOp'.  This is used to expose
+-- the 'ConvOp' in the @intrinsics@ module of a Futhark program.
 convOpFun :: ConvOp -> String
 convOpFun ZExt{}   = "zext"
 convOpFun SExt{}   = "sext"
@@ -1206,8 +1219,8 @@ convOpFun FPToUI{} = "fptoui"
 convOpFun FPToSI{} = "fptosi"
 convOpFun UIToFP{} = "uitofp"
 convOpFun SIToFP{} = "sitofp"
-convOpFun IToB{} = "itob"
-convOpFun BToI{} = "btoi"
+convOpFun IToB{}   = "itob"
+convOpFun BToI{}   = "btoi"
 
 taggedI :: String -> IntType -> Doc
 taggedI s Int8  = text $ s ++ "8"
