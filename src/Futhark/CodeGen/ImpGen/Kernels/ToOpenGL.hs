@@ -115,6 +115,7 @@ onShader shader = do
 
       (use_params, uses) = unzip $ mapMaybe useAsParam $ kernelUses shader
 
+      -- FIXME: None of this might be necessary
       (local_memory_args, local_memory_params, local_memory_init) =
         unzip3 $
         flip evalState (blankNameSource :: VNameSource) $
@@ -231,9 +232,7 @@ genOpenGlPrelude ts =
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     (if uses_float64 then glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
      else [])
-    ++ [C.cunit|$esc:(glsl_extras)|]
     where uses_float64 = FloatType Float64 `S.member` ts
-          glsl_extras  = "buffer Block {\n  volatile shared int shared_mem[];\n};"
 
 nextErrorLabel :: GenericC.CompilerM KernelOp ShaderState String
 nextErrorLabel =
@@ -304,7 +303,6 @@ inShaderOperations body =
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.modifyUserState $ \s ->
             s { shaderLocalMemory = (name', size) : shaderLocalMemory s }
-          GenericC.stm [C.cstm|$id:name = $id:name';|]
         shaderOps (ErrorSync f) = do
           label   <- nextErrorLabel
           pending <- shaderSyncPending <$> GenericC.getUserState
