@@ -170,12 +170,16 @@ nonsegmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   sUnpauseProfiling
 
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  dPrimV_ (segFlat space) 0
   -- variable for how many subhistograms to allocate
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
-  segment_size <- toExp $ last $ segSpaceDims space
+  hist_width <- toExp $ histWidth $ head histops
   -- TODO we should find a proper condition
-  let use_small_dest_histogram = segment_size .<. num_threads'
+  let use_small_dest_histogram = (num_threads' * hist_width) .<=. product ns'
   sIf use_small_dest_histogram
      (smallDestHistogram pat space histops num_threads kbody)
      (largeDestHistogram pat space histops kbody)
@@ -216,7 +220,6 @@ smallDestHistogram pat space histops num_threads kbody = do
   thread_id <- dPrim "thread_id" $ IntType Int32
   tid_exp <- toExp $ Var thread_id
 
-  dPrimV_ (segFlat space) 0
 
 
   -- Actually allocate subhistograms
@@ -316,7 +319,7 @@ smallDestHistogram pat space histops num_threads kbody = do
             [(subhistogram_id, Var num_histos)]
 
       let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) (histShape op)
-      compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont -> do
+      compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont ->
         red_cont $ flip map hists $ \subhisto ->
               (Var subhisto, map Imp.vi32 $
                 map fst segment_dims ++ [subhistogram_id, bucket_id])
@@ -345,7 +348,6 @@ largeDestHistogram pat space histops kbody = do
       (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
 
-  dPrimV_ (segFlat space) 0
   emit $ Imp.DebugPrint "largeDestHistogram segHist body" Nothing
   -- body' <- collect $ do
   sFor "i" (product ns') $ \i -> do
