@@ -111,15 +111,15 @@ transformFunDef (FunDef entry name rettype params body) = do
 transformMap :: MapLoop -> ExtractM (Stms MC)
 transformMap (MapLoop pat cs w lam arrs) = do
   scope <- askScope
-  let loopnest =
+  let inner_scope =
+        scopeOfPattern pat <> castScope (scopeOf lam) <> scope
+      loopnest =
         MapNesting pat cs w $ zip (lambdaParams lam) arrs
       runExtract (ExtractM m) =
-        modifyNameSource $ runState (runReaderT m mempty)
+        modifyNameSource $ runState (runReaderT m inner_scope)
       env = DistEnv
             { distNest = singleNesting (Nesting mempty loopnest)
-            , distScope = scopeOfPattern pat <>
-                          castScope (scopeOf lam) <>
-                          scope
+            , distScope = inner_scope
             , distOnInnerMap = distributeMap
             , distOnTopLevelStms = lift . transformStms
             , distSegLevel = \_ _ _ -> pure ()
