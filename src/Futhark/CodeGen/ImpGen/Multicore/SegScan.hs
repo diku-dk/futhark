@@ -133,6 +133,8 @@ segScanOpSlug :: Imp.Exp
 segScanOpSlug local_tid (op, param_arrs) =
   SegScanOpSlug op <$> mapM (\param_arr -> return (param_arr, [local_tid])) param_arrs
 
+-- TODO: this does not seem to work when the neutral element is not the actual neutral element
+-- e.g. tests/soacs/scan-with-map.fut fails
 nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
                  -> [SegBinOp MCMem]
