@@ -15,6 +15,8 @@ module Futhark.Representation.SOACS.Simplify
        , simplifySOAC
 
        , soacRules
+
+       , SOACS
        )
 where
 

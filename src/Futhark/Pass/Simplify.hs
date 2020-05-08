@@ -9,11 +9,9 @@ module Futhark.Pass.Simplify
   )
   where
 
-import qualified Futhark.Representation.SOACS as R
-import qualified Futhark.Representation.SOACS.Simplify as R
-import qualified Futhark.Representation.Kernels as R
-import qualified Futhark.Representation.Kernels.Simplify as R
-import qualified Futhark.Representation.Seq as R
+import qualified Futhark.Representation.SOACS.Simplify as SOACS
+import qualified Futhark.Representation.Kernels.Simplify as Kernels
+import qualified Futhark.Representation.Seq as Seq
 import qualified Futhark.Representation.KernelsMem as KernelsMem
 import qualified Futhark.Representation.SeqMem as SeqMem
 
@@ -24,14 +22,14 @@ simplify :: (Prog lore -> PassM (Prog lore))
          -> Pass lore lore
 simplify = Pass "simplify" "Perform simple enabling optimisations."
 
-simplifySOACS :: Pass R.SOACS R.SOACS
-simplifySOACS = simplify R.simplifySOACS
+simplifySOACS :: Pass SOACS.SOACS SOACS.SOACS
+simplifySOACS = simplify SOACS.simplifySOACS
 
-simplifyKernels :: Pass R.Kernels R.Kernels
-simplifyKernels = simplify R.simplifyKernels
+simplifyKernels :: Pass Kernels.Kernels Kernels.Kernels
+simplifyKernels = simplify Kernels.simplifyKernels
 
-simplifySeq :: Pass R.Seq R.Seq
-simplifySeq = simplify R.simplifyProg
+simplifySeq :: Pass Seq.Seq Seq.Seq
+simplifySeq = simplify Seq.simplifyProg
 
 simplifyKernelsMem :: Pass KernelsMem.KernelsMem KernelsMem.KernelsMem
 simplifyKernelsMem = simplify KernelsMem.simplifyProg
