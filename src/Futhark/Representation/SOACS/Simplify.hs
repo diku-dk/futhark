@@ -577,6 +577,27 @@ simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
                 BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
               bindResult pe se =
                 letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
+
+simplifyKnownIterationSOAC _ pat _ (Stream (Constant k) form fold_lam arrs)
+  | oneIsh k = Simplify $ do
+      let nes = getStreamAccums form
+          (chunk_param, acc_params, slice_params) =
+            partitionChunkedFoldParameters (length nes) (lambdaParams fold_lam)
+
+      letBindNames_ [paramName chunk_param] $
+        BasicOp $ SubExp $ intConst Int32 1
+
+      forM_ (zip acc_params nes) $ \(p, ne) ->
+        letBindNames_ [paramName p] $ BasicOp $ SubExp ne
+
+      forM_ (zip slice_params arrs) $ \(p, arr) ->
+        letBindNames_ [paramName p] $ BasicOp $ SubExp $ Var arr
+
+      res <- bodyBind $ lambdaBody fold_lam
+
+      forM_ (zip (patternNames pat) res) $ \(v, se) ->
+        letBindNames_ [v] $ BasicOp $ SubExp se
+
 simplifyKnownIterationSOAC _ _ _ _ = Skip
 
 data ArrayOp = ArrayIndexing Certificates VName (Slice SubExp)
