@@ -22,7 +22,6 @@ import Futhark.Tools
 import Futhark.Pass
 import Futhark.Representation.AST
 import Futhark.Representation.KernelsMem
-import qualified Futhark.Representation.Kernels as Kernels
 import Futhark.Representation.Kernels.Simplify as Kernels
 import qualified Futhark.Representation.Mem.IxFun as IxFun
 import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)

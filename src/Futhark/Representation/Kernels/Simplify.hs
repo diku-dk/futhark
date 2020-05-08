@@ -8,6 +8,8 @@ module Futhark.Representation.Kernels.Simplify
        ( simplifyKernels
        , simplifyLambda
 
+       , Kernels
+
        -- * Building blocks
        , simplifyKernelOp
        )

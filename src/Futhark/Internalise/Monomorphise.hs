@@ -721,8 +721,6 @@ transformTypeBind (TypeBind name l tparams tydecl _ _) = do
       tbinding = TypeAbbr l tparams tp
   return mempty { envTypeBindings = M.singleton name tbinding }
 
--- | Monomorphise a list of top-level declarations. A module-free input program
--- is expected, so only value declarations and type declaration are accepted.
 transformDecs :: [Dec] -> MonoM ()
 transformDecs [] = return ()
 transformDecs (ValDec valbind : ds) = do
@@ -737,6 +735,8 @@ transformDecs (dec : _) =
   error $ "The monomorphization module expects a module-free " ++
   "input program, but received: " ++ pretty dec
 
+-- | Monomorphise a list of top-level declarations. A module-free input program
+-- is expected, so only value declarations and type declaration are accepted.
 transformProg :: MonadFreshNames m => [Dec] -> m [ValBind]
 transformProg decs =
   fmap (toList . fmap snd . snd) $ modifyNameSource $ \namesrc ->

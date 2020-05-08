@@ -294,11 +294,6 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   e' <- GC.compileExp e
   granularity <- compileSchedulingVal scheduling
 
-  (prebody', body') <-
-    GC.inNewFunction $ (,)
-    <$> GC.blockScope (GC.compileCode prebody)
-    <*> GC.blockScope (GC.compileCode body)
-
   fstruct <- multicoreDef "parloop_struct" $ \s ->
      return [C.cedecl|struct $id:s {
                         struct futhark_context *ctx;
@@ -306,12 +301,17 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
                       };|]
 
   ftask <- multicoreDef "parloop" $ \s -> do
-    fbody <- benchmarkCode s [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)
-                                       int $id:i = start;
-                                       $items:prebody'
-                                       for (; $id:i < end; $id:i++) {
-                                           $items:body'
-                                       };|]
+
+    fbody <- benchmarkCode s <=< GC.inNewFunction $ GC.blockScope $ do
+      mapM_ GC.item
+        [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
+
+      GC.compileCode prebody
+      body' <- GC.blockScope $ GC.compileCode body
+      GC.stm [C.cstm|for (int $id:i = start; $id:i < end; $id:i++) {
+                       $items:body'
+                     }|]
+
     return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
