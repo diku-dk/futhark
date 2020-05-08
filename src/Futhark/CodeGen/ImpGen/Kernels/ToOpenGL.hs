@@ -183,7 +183,7 @@ onShader shader = do
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|uint $id:param|],
-                  [C.citem|int $id:mem = shared_mem[$id:param];|])
+                  [C.citem|typename shared_int $id:mem[];|])
 
 useAsParam :: KernelUse -> Maybe (C.BlockItem, ParamUse)
 useAsParam (ScalarUse name bt) =
@@ -227,6 +227,7 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("#define float32 float")|]
   , [C.cedecl|$esc:("#define float64 double")|]
   , [C.cedecl|$esc:("#define boolean bool")|]
+  , [C.cedecl|$esc:("#define shared_int shared int")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     (if uses_float64 then glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
      else [])

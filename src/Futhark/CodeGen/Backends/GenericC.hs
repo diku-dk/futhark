@@ -624,6 +624,12 @@ declMem name space = do
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
+declMemShader :: VName -> Space -> CompilerM op s ()
+declMemShader name space = do
+  decl [C.cdecl|typename shared_int $id:name[];|]
+  resetMem name space
+  modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
+
 resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 resetMem mem space = do
   refcount <- fatMemory space
@@ -1918,6 +1924,9 @@ compileCode _ (Write dest (Count idx) elemtype (Space space) vol elemexp) =
     <*> pure space
     <*> pure vol
     <*> compileExp elemexp
+
+compileCode TargetShader (DeclareMem name space) =
+  declMemShader name space
 
 compileCode _ (DeclareMem name space) =
   declMem name space
