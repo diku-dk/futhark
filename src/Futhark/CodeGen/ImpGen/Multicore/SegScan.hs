@@ -8,134 +8,161 @@ import Data.List
 import Prelude hiding (quot, rem)
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.Util (chunks)
 
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.MCMem
 import Futhark.CodeGen.ImpGen.Multicore.Base
-
+import Futhark.Util (takeLast)
 import Futhark.Transform.Rename
 
 
-createTemporaryArrays :: SubExp -> [SubExp] -> Lambda MCMem
-                -> MulticoreGen [VName]
-createTemporaryArrays num_threads nes scan_op = do
-  let (scan_x_params, _scan_y_params) =
-        splitAt (length nes) $ lambdaParams scan_op
-  forM scan_x_params $ \p ->
-    case paramAttr p of
-      MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [num_threads] <> shape
-        sArray "scan_arr_mem" pt shape' $
-          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
-      _ -> do
-        let pt = elemType $ paramType p
-            shape = Shape [num_threads]
-        sAllocArray "scan_arr_p" pt shape DefaultSpace
+type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
 
+groupResultArrays :: SubExp
+                  -> [SegBinOp MCMem]
+                  -> MulticoreGen [[VName]]
+groupResultArrays num_threads reds =
+  forM reds $ \(SegBinOp _ lam _ shape) ->
+    forM (lambdaReturnType lam) $ \t -> do
+    let pt = elemType t
+        full_shape = Shape [num_threads] <> shape <> arrayShape t
+    sAllocArray "group_res_arr" pt full_shape DefaultSpace
+
+
+
+-- -- Compile a SegScan construct
+-- compileSegScan :: Pattern MCMem
+--                  -> SegSpace
+--                  -> [SegBinOp MCMem]
+--                  -> KernelBody MCMem
+--                  -> MulticoreGen ()
+-- compileSegScan pat space reds kbody =
+--   compileSegScan' pat space reds $ \red_cont ->
+--     compileStms mempty (kernelBodyStms kbody) $ do
+--     let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult kbody
+
+--     sComment "save map-out results" $ do
+--       let map_arrs = drop (segBinOpResults reds) $ patternElements pat
+--       zipWithM_ (compileThreadResult space) map_arrs map_res
+
+--     red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+
+-- | Like 'compileSegScan', but where the body is a monadic action.
 compileSegScan :: Pattern MCMem
                 -> SegSpace
                 -> [SegBinOp MCMem]
                 -> KernelBody MCMem
                 -> MulticoreGen ()
-compileSegScan pat space scans kbody
-  | segment_depth <- unSegSpace space,
-    length segment_depth == 1 =
-      nonsegmentedScan pat space scans kbody
+compileSegScan pat space reds kbody
+  | [_] <- unSegSpace space =
+      nonsegmentedScan pat space reds kbody
   | otherwise =
-      segmentedScan pat space scans kbody
+    error "not support segmentedscan"
+      -- segmentedScan pat space reds kbody
 
 
-segmentedScan :: Pattern MCMem
-              -> SegSpace
-              -> [SegBinOp MCMem]
-              -> KernelBody MCMem
-              -> MulticoreGen ()
-segmentedScan pat space [SegBinOp _ scan_op nes _] kbody = do
-  emit $ Imp.DebugPrint "segmented segScan" Nothing
-  sUnpauseProfiling
+-- segmentedScan :: Pattern MCMem
+--               -> SegSpace
+--               -> [SegBinOp MCMem]
+--               -> DoSegBody
+--               -> MulticoreGen ()
+-- segmentedScan pat space [SegBinOp _ scan_op nes _] kbody = do
+--   emit $ Imp.DebugPrint "segmented segScan" Nothing
+--   sUnpauseProfiling
 
-  let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
+--   let (is, ns) = unzip $ unSegSpace space
+--   ns' <- mapM toExp ns
 
-  tid <- dPrim "tid" $ IntType Int32
+--   tid <- dPrim "tid" $ IntType Int32
 
-  let (scan_x_params, scan_y_params) =
-        splitAt (length nes) $ lambdaParams scan_op
+--   let (scan_x_params, scan_y_params) =
+--         splitAt (length nes) $ lambdaParams scan_op
 
-
-  -- iteration variable
-  n_segments <- dPrim "segment_iter" $ IntType Int32
-  n_segments' <- toExp $ Var n_segments
-
-
-  fbody <- collect $ do
-    emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
-    dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
-    forM_ (zip scan_x_params nes) $ \(p, ne) ->
-      copyDWIMFix (paramName p) [] ne []
-
-    let inner_bound = last ns'
-    sFor "i" inner_bound $ \i -> do
-      dPrimV_ (segFlat space) (n_segments' * inner_bound + i)
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-      compileStms mempty (kernelBodyStms kbody) $ do
-        let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
-        sComment "write to-scan values to parameters" $
-          forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-          copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
-        sComment "write mapped values results to global memory" $
-          forM_ (zip (drop (length nes) $ patternElements pat) map_res) $ \(pe, se) ->
-          copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is)
-          (kernelResultSubExp se) []
-
-      sComment "combine with carry and write to local memory" $
-        compileStms mempty (bodyStms $ lambdaBody scan_op) $
-        forM_ (zip3 scan_x_params (patternElements pat) (bodyResult $ lambdaBody scan_op)) $ \(p, pe, se) -> do
-          copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is)  se []
-          copyDWIMFix (paramName p) [] se []
+--   -- iteration variable
+--   n_segments <- dPrim "segment_iter" $ IntType Int32
+--   n_segments' <- toExp $ Var n_segments
 
 
-  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                  namesFromList (tid : [n_segments])
+--   fbody <- collect $ do
+--     emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
+--     dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
+--     forM_ (zip scan_x_params nes) $ \(p, ne) ->
+--       copyDWIMFix (paramName p) [] ne []
 
-  ts <- mapM lookupType freeVariables
-  let params = zipWith toParam freeVariables ts
+--     let inner_bound = last ns'
+--     sFor "i" inner_bound $ \i -> do
+--       dPrimV_ (segFlat space) (n_segments' * inner_bound + i)
+--       zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+--       kbody $ \all_red_res -> do
+--         let (scan_res, map_res) = splitAt (length nes) $ all_red_res
+--         sComment "write to-scan values to parameters" $
+--           forM_ (zip scan_y_params scan_res) $ \(p, se) ->
+--           copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
+--         sComment "write mapped values results to global memory" $
+--           forM_ (zip (drop (length nes) $ patternElements pat) map_res) $ \(pe, se) ->
+--           copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is) (kernelResultSubExp se) []
 
-  ntask <- dPrim "num_tasks" $ IntType Int32
+--         sComment "combine with carry and write to local memory" $
+--           compileStms mempty (bodyStms $ lambdaBody scan_op) $
+--           forM_ (zip3 scan_x_params (patternElements pat) (bodyResult $ lambdaBody scan_op)) $ \(p, pe, se) -> do
+--             copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is)  se []
+--             copyDWIMFix (paramName p) [] se []
 
-  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntask n_segments (product $ init ns')
-                              (Imp.MulticoreFunc params mempty fbody tid)
 
+--   let freeVariables = namesToList $ freeIn fbody `namesSubtract`
+--                                   namesFromList (tid : [n_segments])
 
+--   ts <- mapM lookupType freeVariables
+--   let params = zipWith toParam freeVariables ts
+
+--   ntask <- dPrim "num_tasks" $ IntType Int32
+
+--   emit $ Imp.Op $ Imp.ParLoop Imp.Static ntask n_segments (product $ init ns')
+--                               (Imp.MulticoreFunc params mempty fbody tid)
+
+-- segmentedScan _ _ _ _ =
+--   error "segmentedScan error"
 
 -- | A SegScanOp with auxiliary information.
 data SegScanOpSlug =
   SegScanOpSlug
-  { slugOp :: Lambda MCMem
+  { slugOp :: SegBinOp MCMem
   , slugAccs :: [(VName, [Imp.Exp])]
     -- ^ Places to store accumulator in stage 1 reduction.
   }
 
+slugBody :: SegScanOpSlug -> Body MCMem
+slugBody = lambdaBody . segBinOpLambda . slugOp
+
 slugParams :: SegScanOpSlug -> [LParam MCMem]
-slugParams = lambdaParams . slugOp
+slugParams = lambdaParams . segBinOpLambda . slugOp
+
+slugNeutral :: SegScanOpSlug -> [SubExp]
+slugNeutral = segBinOpNeutral . slugOp
+
+slugShape :: SegScanOpSlug -> Shape
+slugShape = segBinOpShape . slugOp
+
+accParams, nextParams :: SegScanOpSlug -> [LParam MCMem]
+accParams slug = take (length (slugNeutral slug)) $ slugParams slug
+nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
+
+slugsComm :: [SegScanOpSlug] -> Commutativity
+slugsComm = mconcat . map (segBinOpComm . slugOp)
 
 segScanOpSlug :: Imp.Exp
-             -> Lambda MCMem
-             -> [VName]
+             -> (SegBinOp MCMem, [VName])
              -> MulticoreGen SegScanOpSlug
-segScanOpSlug local_tid op param_arrs =
-  SegScanOpSlug op <$>
-  mapM mkAcc param_arrs
-  where mkAcc param_arr = return (param_arr, [local_tid])
-
+segScanOpSlug local_tid (op, param_arrs) =
+  SegScanOpSlug op <$> mapM (\param_arr -> return (param_arr, [local_tid])) param_arrs
 
 nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
                  -> [SegBinOp MCMem]
                  -> KernelBody MCMem
                  -> MulticoreGen ()
-nonsegmentedScan pat space [SegBinOp _ scan_op nes _] kbody = do
+nonsegmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segScan " Nothing
   sUnpauseProfiling
 
@@ -148,43 +175,52 @@ nonsegmentedScan pat space [SegBinOp _ scan_op nes _] kbody = do
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
 
-  stage_one_red_res <- createTemporaryArrays (Var num_threads) nes scan_op
-
-  let (scan_x_params, scan_y_params) =
-        splitAt (length nes) $ lambdaParams scan_op
+  -- stage_one_red_res <- createTemporaryArrays (Var num_threads) nes scan_op shape
+  stage_one_red_arrs <- groupResultArrays (Var num_threads) scan_ops
 
   dPrimV_ (segFlat space) 0
 
-  slug <- segScanOpSlug tid' scan_op stage_one_red_res
+  slugs_stage_one <- mapM (segScanOpSlug tid') $ zip scan_ops stage_one_red_arrs
 
-  -- TODO fix this (scan2.fut fails)
   sFor "i" num_threads' $ \i -> do
     tid <-- i
-    sComment "neutral-initialise the acc used by this thread" $
-      forM_ (zip (slugAccs slug) nes) $ \((acc, acc_is), ne) ->
-        copyDWIMFix acc acc_is ne []
+    sComment "SegScan - neutral-initialise the acc used by tid" $
+      forM_ slugs_stage_one $ \slug ->
+        forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
+          sLoopNest (slugShape slug) $ \vec_is ->
+            copyDWIMFix acc (acc_is++vec_is) ne []
 
+  -- TODO handle this later
+  -- sComment "write mapped values results to global memory" $
+  --  forM_ (zip (drop (length nes) $ patternElements pat) map_res) $ \(pe, se) ->
+  --      copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is) (kernelResultSubExp se) []
 
   reduce_body <- collect $
-    sComment "reduce body" $ do
+    sComment "reduce (scan) body" $ do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-      dScope Nothing $ scopeOfLParams $ slugParams slug
+      let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
 
+      forM_ scan_ops $ \scan ->
+        dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
       compileStms mempty (kernelBodyStms kbody) $ do
-        let (scan_res, map_res) = splitAt (length nes) $ kernelBodyResult kbody
-        sComment "write mapped values results to global memory" $
-         forM_ (zip (drop (length nes) $ patternElements pat) map_res) $ \(pe, se) ->
-           copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is) (kernelResultSubExp se) []
+        sComment "write mapped values results to memory" $
+              forM_ (zip (takeLast (length map_res) $ patternValueElements pat) map_res) $ \(pe, se) ->
+              copyDWIMFix (patElemName pe) (map Imp.vi32 is)
+              (kernelResultSubExp se) []
 
-        -- Load new value
-        forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-          copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
-        -- Load reduce accumulator
-        forM_ (zip scan_x_params $ slugAccs slug) $ \(p, (acc, acc_is)) ->
-          copyDWIMFix (paramName p) [] (Var acc) acc_is
-        compileStms mempty (bodyStms $ lambdaBody scan_op) $
-          forM_ (zip (slugAccs slug) $ bodyResult $ lambdaBody scan_op) $ \((acc, acc_is), se) ->
-            copyDWIMFix acc acc_is se []
+        forM_ slugs_stage_one $ \slug ->
+          sLoopNest (slugShape slug) $ \vec_is -> do
+
+            forM_ (zip (accParams slug) (slugAccs slug) ) $ \(p, (acc, acc_is)) ->
+              copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
+
+            forM_ (zip (nextParams slug) all_scan_res) $ \(p, se) ->
+              copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+
+            compileStms mempty (bodyStms $ slugBody slug) $
+                forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
+                \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
+
 
   let freeVariables = namesToList $ freeIn reduce_body `namesSubtract`
                                   namesFromList (tid : [segFlat space])
@@ -199,53 +235,101 @@ nonsegmentedScan pat space [SegBinOp _ scan_op nes _] kbody = do
 
   -- |
   -- Begin stage two of scan
-  scan_op' <- renameLambda scan_op
-  let (scan_x_params', scan_y_params') =
-        splitAt (length nes) $ lambdaParams scan_op'
 
-  stage_two_red_res <- createTemporaryArrays (Var ntasks) nes scan_op'
+  stage_two_red_arrs <- groupResultArrays (Var num_threads) scan_ops
+  slugs_stage_two <- mapM (segScanOpSlug tid') $ zip scan_ops stage_two_red_arrs
 
+  emit $ Imp.DebugPrint "nonsegmented segScan stage 2" Nothing
   -- Set neutral element value
-  forM_ (zip stage_two_red_res nes) $ \(stage_two_res, ne) ->
-       copyDWIMFix stage_two_res [0] ne []
+  forM_ slugs_stage_two $ \slug ->
+    forM_ (zip (slugAccs slug) $ slugNeutral slug) $ \((acc, _), ne) ->
+      sLoopNest (slugShape slug) $ \vec_is ->
+         copyDWIMFix acc (0 : vec_is) ne []
 
   -- Let master thread accumulate "neutral elements" for each segment
   -- This is essentially a exclusive scan
-  emit $ Imp.DebugPrint "nonsegmented segScan stage 2" Nothing
-  sWhen (ntasks' .>. 0) $
+  sWhen (ntasks' .>. 0) $ do
+    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs_stage_two
     sFor "i" (ntasks'-1) $ \i -> do
-      dScope Nothing $ scopeOfLParams $ lambdaParams scan_op'
-      forM_ (zip scan_x_params' stage_two_red_res) $ \(p, se) ->
-        copyDWIMFix (paramName p) [] (Var se) [i]
-      forM_ (zip scan_y_params' stage_one_red_res) $ \(p, se) ->
-        copyDWIMFix (paramName p) [] (Var se) [i]
-      compileStms mempty (bodyStms $ lambdaBody scan_op') $
-        forM_ (zip stage_two_red_res $ bodyResult $ lambdaBody scan_op') $ \(arr, se) ->
-          copyDWIMFix arr [i+1] se []
+      tid <-- i
+      forM_ (zip slugs_stage_two slugs_stage_one) $ \(slug2, slug1) ->
+        sLoopNest (slugShape slug1) $ \vec_is -> do
+        -- Load next params
+        sComment "load next params" $
+          forM_ (zip (nextParams slug2) (slugAccs slug2)) $ \(p, (acc, acc_is)) ->
+            copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
+        sComment "load acc params" $
+          forM_ (zip (accParams slug2) (slugAccs slug1)) $ \(p, (acc, acc_is)) ->
+          copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
 
-  prebody' <- collect $ do
-    emit $ Imp.DebugPrint "nonsegmented segScan stage 3" Nothing
-    dScope Nothing $ scopeOfLParams $ lambdaParams scan_op'
-    forM_ (zip scan_x_params' stage_two_red_res) $ \(p, ne) ->
-       copyDWIMFix (paramName p) [] (Var ne) [tid']
+        compileStms mempty (bodyStms $ slugBody slug1) $
+          forM_ (zip (slugAccs slug2) (bodyResult $ slugBody slug1)) $ \((acc, acc_is), se) ->
+            copyDWIMFix acc (i+1 : tail acc_is ++ vec_is) se []
+
+  let per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
+
+  -- Do first iteration here
+  scan_pre_body <- collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+    forM_ scan_ops $ \scan ->
+      dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
+
+    compileStms mempty (kernelBodyStms kbody) $ do
+      forM_ (zip per_scan_pes slugs_stage_two) $ \(pes, slug) -> do
+        let (scan_x_params, scan_y_params) = splitAt (length $ slugNeutral slug) $ slugParams slug
+        sLoopNest (slugShape slug) $ \vec_is -> do
+          sComment "Load x params" $ do -- next value
+            let scan_res = take (length $ slugNeutral slug) $ kernelBodyResult kbody
+            forM_ (zip scan_x_params scan_res) $ \(p, se) ->
+              copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+          sComment "Load y params" $
+            forM_ (zip scan_y_params (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+                copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
+
+          compileBody' scan_x_params (slugBody slug)
+
+          forM_ (zip pes scan_x_params) $ \(pe, p) ->
+            copyDWIMFix (patElemName pe) (map Imp.vi32 is++vec_is) (Var $ paramName p) []
+
+      iter <- toExp $ Var $ segFlat space
+      segFlat space <-- iter + 1
 
   scan_body <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let scan_res = take (length nes) $ kernelBodyResult kbody
-      forM_ (zip scan_y_params' scan_res) $ \(p, se) ->
-         copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
-      compileStms mempty (bodyStms $ lambdaBody scan_op') $
-       forM_ (zip3 scan_x_params' (patternElements pat) $ bodyResult $ lambdaBody scan_op')
-       $ \(p, pe, se) -> do
-         copyDWIMFix (paramName p) [] se []
-         copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+    sComment "scan body" $ do
+      forM_ scan_ops $ \scan ->
+        dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
 
-  let freeVariables' = namesToList (freeIn (prebody' <> scan_body) `namesSubtract`
+      compileStms mempty (kernelBodyStms kbody) $
+        forM_ (zip per_scan_pes slugs_stage_two) $ \(pes, slug) -> do
+          let (scan_x_params, scan_y_params) = splitAt (length $ slugNeutral slug) $ slugParams slug
+          sLoopNest (slugShape slug) $ \vec_is -> do
+            sComment "Load x params" $ do -- next value
+              let scan_res = take (length $ slugNeutral slug) $ kernelBodyResult kbody
+              forM_ (zip scan_x_params scan_res) $ \(p, se) ->
+                copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+
+            test_idx  <- dPrimV "carry_in_flat_idx" $ product (map Imp.vi32 is) - 1
+            test_idx' <- toExp $ Var test_idx
+
+            sComment "Load y params" $
+              forM_ (zip scan_y_params pes) $ \(p, pe) ->
+                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (test_idx' : vec_is)
+
+            compileBody' scan_x_params (slugBody slug)
+
+            forM_ (zip pes scan_x_params) $ \(pe, p) ->
+              copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) (Var $ paramName p) []
+
+  let freeVariables' = namesToList (freeIn (scan_pre_body <> scan_body) `namesSubtract`
                      namesFromList [tid, segFlat space])
 
   ts' <- mapM lookupType freeVariables'
   let freeParams' = zipWith toParam freeVariables' ts'
 
+
+  emit $ Imp.DebugPrint "nonsegmented segScan stage 3" Nothing
   emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
-                             (Imp.MulticoreFunc freeParams' prebody' scan_body tid)
+                             (Imp.MulticoreFunc freeParams' scan_pre_body scan_body tid)
+
+  emit $ Imp.DebugPrint "nonsegmentedScan End" Nothing
