@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
 
 import Control.Monad.Reader
@@ -111,15 +112,14 @@ transformFunDef (FunDef entry name rettype params body) = do
 transformMap :: MapLoop -> ExtractM (Stms MC)
 transformMap (MapLoop pat cs w lam arrs) = do
   scope <- askScope
-  let inner_scope =
-        scopeOfPattern pat <> castScope (scopeOf lam) <> scope
-      loopnest =
+  let loopnest =
         MapNesting pat cs w $ zip (lambdaParams lam) arrs
-      runExtract (ExtractM m) =
-        modifyNameSource $ runState (runReaderT m inner_scope)
+      runExtract (ExtractM m) = do
+        local_scope <- castScope <$> askScope
+        modifyNameSource $ runState (runReaderT m local_scope)
       env = DistEnv
             { distNest = singleNesting (Nesting mempty loopnest)
-            , distScope = inner_scope
+            , distScope = scopeOfPattern pat <> castScope (scopeOf lam) <> scope
             , distOnInnerMap = distributeMap
             , distOnTopLevelStms = lift . transformStms
             , distSegLevel = \_ _ _ -> pure ()
