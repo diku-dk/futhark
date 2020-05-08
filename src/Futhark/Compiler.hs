@@ -36,6 +36,10 @@ import Futhark.Compiler.Program
 import Futhark.Util.Log
 import Futhark.Util.Pretty (prettyText)
 
+-- | The compiler configuration.  This only contains options related
+-- to core compiler functionality, such as reading the initial program
+-- and running passes.  Options related to code generation are handled
+-- elsewhere.
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: (Verbosity, Maybe FilePath)
                      , futharkWarn :: Bool -- ^ Warn if True.
@@ -43,6 +47,7 @@ data FutharkConfig = FutharkConfig
                      , futharkSafe :: Bool -- ^ If True, ignore @unsafe@.
                      }
 
+-- | The default compiler configuration.
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = (NotVerbose, Nothing)
                                  , futharkWarn = True
@@ -50,6 +55,9 @@ newFutharkConfig = FutharkConfig { futharkVerbose = (NotVerbose, Nothing)
                                  , futharkSafe = False
                                  }
 
+-- | Print a compiler error to stdout.  The 'FutharkConfig' controls
+-- to which degree auxiliary information (e.g. the failing program) is
+-- also printed.
 dumpError :: FutharkConfig -> CompilerError -> IO ()
 dumpError config err =
   case err of
@@ -71,6 +79,8 @@ dumpError config err =
             maybe (T.hPutStr stderr) T.writeFile
             (snd (futharkVerbose config)) $ info <> "\n"
 
+-- | Read a program from the given 'FilePath', run the given
+-- 'Pipeline', and finish up with the given 'Action'.
 runCompilerOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS lore
                      -> Action lore
@@ -92,6 +102,8 @@ runCompilerOnProgram config pipeline action file = do
           when ((>NotVerbose) . fst $ futharkVerbose config) $
             logMsg ("Done." :: String)
 
+-- | Read a program from the given 'FilePath', run the given
+-- 'Pipeline', and return it.
 runPipelineOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS tolore
                      -> FilePath

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | @futhark py@
 module Futhark.CLI.Python (main) where
 
 import Control.Monad.IO.Class
@@ -9,6 +10,7 @@ import Futhark.Passes
 import qualified Futhark.CodeGen.Backends.SequentialPython as SequentialPy
 import Futhark.Compiler.CLI
 
+-- | Run @futhark py@
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile sequential Python" "Generate sequential Python code from optimised Futhark program."
