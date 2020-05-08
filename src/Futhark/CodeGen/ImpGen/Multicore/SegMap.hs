@@ -47,5 +47,7 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   let freeParams = zipWith toParam freeVariables ts
       scheduling = decideScheduling body'
 
+  let (body_allocs, body'') = extractAllocations body'
+
   emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks (segFlat space) (product ns')
-                             (Imp.MulticoreFunc freeParams mempty body' num_tasks)
+                             (Imp.MulticoreFunc freeParams body_allocs body'' num_tasks)

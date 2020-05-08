@@ -57,7 +57,8 @@ instance Pretty Multicore where
 
 
 instance FreeIn MulticoreFunc where
-  freeIn' (MulticoreFunc _ prebody body _) = freeIn' prebody <> freeIn' body
+  freeIn' (MulticoreFunc _ prebody body _) =
+    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
 
 instance FreeIn Multicore where
   freeIn' (ParLoop _ ntask i e func) =

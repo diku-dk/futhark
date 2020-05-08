@@ -1,5 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
+-- | Implementation of the Futhark module system (at least most of it;
+-- some is scattered elsewhere in the type checker).
 module Language.Futhark.TypeChecker.Modules
   ( matchMTys
   , newNamesForMTy
@@ -67,9 +69,10 @@ allNamesInMTy :: MTy -> S.Set VName
 allNamesInMTy (MTy abs mod) =
   S.fromList (map qualLeaf $ M.keys abs) <> allNamesInMod mod
 
+-- | Create unique renames for the module type.  This is used for
+-- e.g. generative functor application.
 newNamesForMTy :: MTy -> TypeM (MTy, M.Map VName VName)
 newNamesForMTy orig_mty = do
-  -- Create unique renames for the module type.
   pairs <- forM (S.toList $ allNamesInMTy orig_mty) $ \v -> do
     v' <- newName v
     return (v, v')
@@ -327,7 +330,7 @@ ppTypeAbbr _ name (l, ps, t) =
   spread (map ppr ps) <+> equals <+/>
   nest 2 (align (ppr t))
 
--- Return new renamed/abstracted env, as well as a mapping from
+-- | Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for
 -- functor application.  The first env is the module env, and the
 -- second the env it must match.
@@ -487,6 +490,7 @@ matchMTys orig_mty orig_mty_sig =
       "val" <+> pprName v <+> spread (map ppr tps) <+> colon </>
       indent 2 (align (ppr t))
 
+-- | Apply a parametric module to an argument.
 applyFunctor :: SrcLoc -> FunSig -> MTy
              -> TypeM (MTy,
                        M.Map VName VName,

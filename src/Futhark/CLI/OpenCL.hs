@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | @futhark opencl@
 module Futhark.CLI.OpenCL (main) where
 
 import Control.Monad.IO.Class
@@ -12,6 +13,7 @@ import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import Futhark.Util
 import Futhark.Compiler.CLI
 
+-- | Run @futhark opencl@
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile OpenCL" "Generate OpenCL/C code from optimised Futhark program."

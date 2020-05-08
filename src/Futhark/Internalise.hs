@@ -2,6 +2,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -321,7 +323,10 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       arr_t_ext <- internaliseReturnType $ E.toStruct arr_t
       es' <- mapM (internaliseExp "arr_elem") es
 
-      let typeFromElements =
+      rowtypes <-
+        case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
+          Just ts -> pure ts
+          Nothing ->
             -- XXX: the monomorphiser may create single-element array
             -- literals with an unknown row type.  In those cases we
             -- need to look at the types of the actual elements.
@@ -330,10 +335,6 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
             case es' of
               [] -> error $ "internaliseExp ArrayLit: existential type: " ++ pretty arr_t
               e':_ -> mapM subExpType e'
-
-      rowtypes <-
-        maybe typeFromElements pure $
-        mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext
 
       let arraylit ks rt = do
             ks' <- mapM (ensureShape asserting
