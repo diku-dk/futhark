@@ -113,14 +113,18 @@ extractAllocations segop_code = f segop_code
           in (ta <> fa, Imp.If cond tcode' fcode')
         f (Imp.Op (Imp.ParLoop sched ntask i e
                    (Imp.MulticoreFunc free prebody body n))) =
+          -- We can't not extract allocations all the way out
+          -- a task, since it might contain (multiple) nested SegOp.
+          -- then threads might share the same mem struct
+          -- See segredomap/ez6.fut for example
+          -- ( I think my reasoning is OK? )
           let (body_allocs, body') = extractAllocations body
-              (free_allocs, here_allocs) = f body_allocs
-              free' = filter (not .
-                              (`nameIn` Imp.declaredIn body_allocs) .
-                              Imp.paramName) free
-          in (free_allocs,
-              here_allocs <>
+              -- (free_allocs, here_allocs) = f body_allocs
+              -- free' = filter (not .
+              --                 (`nameIn` Imp.declaredIn body_allocs) .
+              --                 Imp.paramName) free
+          in (mempty,
               Imp.Op (Imp.ParLoop sched ntask i e $
-                      Imp.MulticoreFunc free' prebody body' n))
+                      Imp.MulticoreFunc free (body_allocs <> prebody) body' n))
         f code =
           (mempty, code)
