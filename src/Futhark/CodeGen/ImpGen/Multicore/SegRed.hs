@@ -205,6 +205,7 @@ segmentedReduction pat space reds kbody = do
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
+  let inner_bound = last ns'
 
   tid <- dPrim "tid" $ IntType Int32
 
@@ -214,19 +215,20 @@ segmentedReduction pat space reds kbody = do
   -- Perform sequential reduce on inner most dimension
   fbody <- collect $ do
     emit $ Imp.DebugPrint "segmented segBinOp stage 1" Nothing
+    dPrimV_ (segFlat space) (n_segments' * inner_bound)
+    space' <- toExp $ Var $ segFlat space
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     sComment "neutral-initialise the accumulators" $
       forM_ reds $ \red->
         forM_ (zip (patternElements pat) (segBinOpNeutral red)) $ \(pe, ne) ->
           sLoopNest (segBinOpShape red) $ \vec_is ->
-            copyDWIMFix (patElemName pe) (n_segments' : vec_is) ne []
-
+            copyDWIMFix (patElemName pe) (map (`Imp.var` int32) (init is) ++ vec_is) ne []
 
     sComment "function main body" $ do
-      let inner_bound = last ns'
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
-      sFor "i" inner_bound $ \i -> do
-        dPrimV_ (segFlat space) (n_segments' * inner_bound + i)
-        zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+      sFor "i" inner_bound $ \_i -> do
+
+        forM_ (zip is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space) $ uncurry (<--)
         kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res
           forM_ (zip reds red_res') $ \(red, res') ->
@@ -235,7 +237,7 @@ segmentedReduction pat space reds kbody = do
             sComment "load acuum " $ do
               let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
               forM_ (zip acc_params (patternElements pat)) $ \(p, pe) ->
-                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (n_segments' : vec_is)
+                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map (`Imp.var` int32) (init is) ++ vec_is)
 
             sComment "load new val" $ do
               let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
@@ -247,8 +249,8 @@ segmentedReduction pat space reds kbody = do
               compileStms mempty (bodyStms lbody) $
                 sComment "write back to res" $
                 forM_ (zip (patternElements pat) (bodyResult lbody)) $
-                  \(pe, se') -> copyDWIMFix (patElemName pe) (n_segments' : vec_is) se' []
-
+                  \(pe, se') -> copyDWIMFix (patElemName pe) (map (`Imp.var` int32) (init is) ++ vec_is) se' []
+        segFlat space <-- space' + 1
 
   let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                     namesFromList (tid : [n_segments])
