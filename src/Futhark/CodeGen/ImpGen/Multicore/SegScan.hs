@@ -167,11 +167,13 @@ nonsegmentedScan pat space scan_ops kbody = do
         forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
           sLoopNest (slugShape slug) $ \vec_is ->
             copyDWIMFix acc (acc_is++vec_is) ne []
+  let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
+      per_scan_res           = segBinOpChunks scan_ops all_scan_res
 
   reduce_body <- collect $
     sComment "reduce (scan) body" $ do
       zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
-      let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
+
 
       forM_ scan_ops $ \scan ->
         dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
@@ -181,13 +183,13 @@ nonsegmentedScan pat space scan_ops kbody = do
               copyDWIMFix (patElemName pe) (map Imp.vi32 is)
               (kernelResultSubExp se) []
 
-        forM_ slugs_stage_one $ \slug ->
+        forM_ (zip slugs_stage_one per_scan_res) $ \(slug, scan_res) ->
           sLoopNest (slugShape slug) $ \vec_is -> do
 
             forM_ (zip (accParams slug) (slugAccs slug) ) $ \(p, (acc, acc_is)) ->
               copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
 
-            forM_ (zip (nextParams slug) all_scan_res) $ \(p, se) ->
+            forM_ (zip (nextParams slug) scan_res) $ \(p, se) ->
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
             compileStms mempty (bodyStms $ slugBody slug) $
@@ -248,11 +250,10 @@ nonsegmentedScan pat space scan_ops kbody = do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
 
     compileStms mempty (kernelBodyStms kbody) $ do
-      forM_ (zip per_scan_pes slugs_stage_two) $ \(pes, slug) -> do
+      forM_ (zip3 per_scan_res per_scan_pes slugs_stage_two) $ \(scan_res, pes, slug) -> do
         let (scan_x_params, scan_y_params) = splitAt (length $ slugNeutral slug) $ slugParams slug
         sLoopNest (slugShape slug) $ \vec_is -> do
-          sComment "Load x params" $ do -- next value
-            let scan_res = take (length $ slugNeutral slug) $ kernelBodyResult kbody
+          sComment "Load x params" $  -- next value
             forM_ (zip scan_x_params scan_res) $ \(p, se) ->
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
           sComment "Load y params" $
@@ -274,11 +275,10 @@ nonsegmentedScan pat space scan_ops kbody = do
         dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan
 
       compileStms mempty (kernelBodyStms kbody) $
-        forM_ (zip per_scan_pes slugs_stage_two) $ \(pes, slug) -> do
+        forM_ (zip3 per_scan_res per_scan_pes slugs_stage_two) $ \(scan_res, pes, slug) -> do
           let (scan_x_params, scan_y_params) = splitAt (length $ slugNeutral slug) $ slugParams slug
           sLoopNest (slugShape slug) $ \vec_is -> do
-            sComment "Load x params" $ do -- next value
-              let scan_res = take (length $ slugNeutral slug) $ kernelBodyResult kbody
+            sComment "Load x params" $  -- next value
               forM_ (zip scan_x_params scan_res) $ \(p, se) ->
                 copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
