@@ -221,7 +221,7 @@ staticOpenCLArray name "device" t vs = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   num_elems <- case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
+      let vs'' = [[C.cinit|$exp:v|] | v <- map (GC.compilePrimValue GC.TargetHost) vs']
       GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
       return $ length vs''
     ArrayZeros n -> do
@@ -256,7 +256,7 @@ callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
-  x' <- GC.compileExp GC.TargetKernel x
+  x' <- GC.compileExp GC.TargetHost x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
   GC.stm [C.cstm|if (ctx->logging) {
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
@@ -277,8 +277,8 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
     |]
 
   zipWithM_ setKernelArg [numFailureParams safety..] args
-  num_workgroups' <- mapM (GC.compileExp GC.TargetShader) num_workgroups
-  workgroup_size' <- mapM (GC.compileExp GC.TargetShader) workgroup_size
+  num_workgroups' <- mapM (GC.compileExp GC.TargetHost) num_workgroups
+  workgroup_size' <- mapM (GC.compileExp GC.TargetHost) workgroup_size
   local_bytes <- foldM localBytes [C.cexp|0|] args
 
   launchKernel name num_workgroups' workgroup_size' local_bytes
@@ -287,7 +287,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
 
   where setKernelArg i (ValueKArg e bt) = do
-          v <- GC.compileExpToName GC.TargetKernel "kernel_arg" bt e
+          v <- GC.compileExpToName GC.TargetHost "kernel_arg" bt e
           GC.stm [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i,
                                                     sizeof($id:v), &$id:v));
@@ -301,14 +301,14 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
           |]
 
         setKernelArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp GC.TargetKernel $ unCount num_bytes
+          num_bytes' <- GC.compileExp GC.TargetHost $ unCount num_bytes
           GC.stm [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i,
                                                     $exp:num_bytes', NULL));
             |]
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp GC.TargetKernel $ unCount num_bytes
+          num_bytes' <- GC.compileExp GC.TargetHost $ unCount num_bytes
           return [C.cexp|$exp:cur + $exp:num_bytes'|]
         localBytes cur _ = return cur
 

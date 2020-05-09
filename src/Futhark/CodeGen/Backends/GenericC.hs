@@ -1601,21 +1601,21 @@ compileFun target (fname, Function _ outputs inputs body _ _) = do
           p_name <- newVName $ baseString name ++ "_p"
           return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
-compilePrimValue :: PrimValue -> C.Exp
+compilePrimValue :: BackendTarget -> PrimValue -> C.Exp
 
-compilePrimValue (IntValue (Int8Value k)) = [C.cexp|$int:k|]
-compilePrimValue (IntValue (Int16Value k)) = [C.cexp|$int:k|]
-compilePrimValue (IntValue (Int32Value k)) = [C.cexp|$int:k|]
-compilePrimValue (IntValue (Int64Value k)) = [C.cexp|$int:k|]
+compilePrimValue _ (IntValue (Int8Value k))  = [C.cexp|$int:k|]
+compilePrimValue _ (IntValue (Int16Value k)) = [C.cexp|$int:k|]
+compilePrimValue _ (IntValue (Int32Value k)) = [C.cexp|$int:k|]
+compilePrimValue _ (IntValue (Int64Value k)) = [C.cexp|$int:k|]
 
-compilePrimValue (FloatValue (Float64Value x))
+compilePrimValue _ (FloatValue (Float64Value x))
   | isInfinite x =
       if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
   | isNaN x =
       [C.cexp|NAN|]
   | otherwise =
       [C.cexp|$double:x|]
-compilePrimValue (FloatValue (Float32Value x))
+compilePrimValue _ (FloatValue (Float32Value x))
   | isInfinite x =
       if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
   | isNaN x =
@@ -1623,12 +1623,14 @@ compilePrimValue (FloatValue (Float32Value x))
   | otherwise =
       [C.cexp|$float:x|]
 
-compilePrimValue (BoolValue b) =
-  [C.cexp|$int:b'|]
+compilePrimValue target (BoolValue b) =
+  case target of
+    TargetShader -> [C.cexp|boolean($int:b')|]
+    _            -> [C.cexp|$int:b'|]
   where b' :: Int
         b' = if b then 1 else 0
 
-compilePrimValue Checked =
+compilePrimValue _ Checked =
   [C.cexp|0|]
 
 derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
@@ -1698,8 +1700,8 @@ compileExp target = compilePrimExp target compileLeaf
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: BackendTarget -> Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
 
-compilePrimExp _ _ (ValueExp val) =
-  return $ compilePrimValue val
+compilePrimExp target _ (ValueExp val) =
+  return $ compilePrimValue target val
 
 compilePrimExp _ f (LeafExp v _) =
   f v
@@ -1948,12 +1950,12 @@ compileCode _ (DeclareArray name ScalarSpace{} _ _) =
 compileCode TargetShader (DeclareArray name DefaultSpace t vs) =
   undefined
 
-compileCode _ (DeclareArray name DefaultSpace t vs) = do
+compileCode target (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = primTypeToCType t
   case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs']
+      let vs'' = [[C.cinit|$exp:(compilePrimValue target v)|] | v <- vs']
       libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
     ArrayZeros n ->
       libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]

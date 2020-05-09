@@ -140,7 +140,7 @@ staticCUDAArray name "device" t vs = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   num_elems <- case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- map GC.compilePrimValue vs']
+      let vs'' = [[C.cinit|$exp:v|] | v <- map (GC.compilePrimValue GC.TargetHost) vs']
       GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs'')] = {$inits:vs''};|]
       return $ length vs''
     ArrayZeros n -> do
@@ -173,7 +173,7 @@ callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
-  x' <- GC.compileExp GC.TargetKernel x
+  x' <- GC.compileExp GC.TargetHost x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
@@ -198,8 +198,8 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
            GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
         ) shared_args
 
-  (grid_x, grid_y, grid_z)    <- mkDims <$> mapM (GC.compileExp GC.TargetKernel) num_blocks
-  (block_x, block_y, block_z) <- mkDims <$> mapM (GC.compileExp GC.TargetKernel) block_size
+  (grid_x, grid_y, grid_z)    <- mkDims <$> mapM (GC.compileExp GC.TargetHost) num_blocks
+  (block_x, block_y, block_z) <- mkDims <$> mapM (GC.compileExp GC.TargetHost) block_size
   let perm_args
         | length num_blocks == 3 = [ [C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|] ]
         | otherwise = []
@@ -269,14 +269,14 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
     expAnd a b       = [C.cexp|$exp:a && $exp:b|]
     expsNotZero      = foldl expAnd [C.cexp|1|] . map expNotZero
     mkArgs (ValueKArg e t) =
-      (,Nothing) <$> GC.compileExpToName GC.TargetKernel "kernel_arg" t e
+      (,Nothing) <$> GC.compileExpToName GC.TargetHost "kernel_arg" t e
     mkArgs (MemKArg v) = do
       v'  <- GC.rawMem v
       arg <- newVName "kernel_arg"
       GC.decl [C.cdecl|typename CUdeviceptr $id:arg = $exp:v';|]
       return (arg, Nothing)
     mkArgs (SharedMemoryKArg (Count c)) = do
-      num_bytes <- GC.compileExp GC.TargetKernel c
+      num_bytes <- GC.compileExp GC.TargetHost c
       size      <- newVName "shared_size"
       offset    <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
