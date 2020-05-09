@@ -198,7 +198,8 @@ useAsParam ConstUse{} =
   Nothing
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
-compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
+compilePrimExp e = runIdentity $ GenericC.compilePrimExp
+                                   GenericC.TargetShader compileKernelConst e
   where compileKernelConst (SizeConst key) =
           return [C.cexp|$id:(zEncodeString (pretty key))|]
 
@@ -322,8 +323,8 @@ inShaderOperations body =
           return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
         doAtomic s old arr ind val op ty = do
-          ind' <- GenericC.compileExp $ unCount ind
-          val' <- GenericC.compileExp val
+          ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
+          val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s ty
           GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
 
@@ -352,15 +353,15 @@ inShaderOperations body =
           doAtomic s old arr ind val "atomic_xor" [C.cty|uint|]
 
         atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
-          ind' <- GenericC.compileExp $ unCount ind
-          cmp' <- GenericC.compileExp cmp
-          val' <- GenericC.compileExp val
+          ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
+          cmp' <- GenericC.compileExp GenericC.TargetShader cmp
+          val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s [C.cty|int|]
           GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
 
         atomicOps s (AtomicXchg old arr ind val) = do
-          ind' <- GenericC.compileExp $ unCount ind
-          val' <- GenericC.compileExp val
+          ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
+          val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s [C.cty|int|]
           GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
 

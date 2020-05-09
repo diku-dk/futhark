@@ -195,7 +195,7 @@ callShader :: GC.OpCompiler OpenGL ()
 callShader (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
 callShader (CmpSizeLe v key x) = do
-  x' <- GC.compileExp x
+  x' <- GC.compileExp GC.TargetShader x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
   GC.stm [C.cstm|if (ctx->logging) {
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
@@ -211,12 +211,12 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
     OPENGL_SUCCEED(glGetError());
     |]
   zipWithM_ setShaderArg [(0::Int)..] args
-  num_workgroups' <- mapM GC.compileExp num_workgroups
-  workgroup_size' <- mapM GC.compileExp workgroup_size
+  num_workgroups' <- mapM (GC.compileExp GC.TargetShader) num_workgroups
+  workgroup_size' <- mapM (GC.compileExp GC.TargetShader) workgroup_size
   local_bytes     <- foldM localBytes [C.cexp|0|] args
   launchShader name num_workgroups' workgroup_size' local_bytes
   where setShaderArg i (ValueKArg e bt) = do
-          v <- GC.compileExpToName "shader_arg" bt e
+          v <- GC.compileExpToName GC.TargetShader "shader_arg" bt e
           GC.stm [C.cstm|glUniform1i($int:i, &$id:v);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
@@ -230,7 +230,7 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
         --        to its purpose; to create local memory per work group.
         -- FIXME: Deallocate after dispatching.
         setShaderArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ unCount num_bytes
+          num_bytes' <- GC.compileExp GC.TargetShader $ unCount num_bytes
           ssbo       <- newVName "ssbo"
           GC.libDecl [C.cedecl|typename GLuint $id:ssbo;|]
           GC.stm [C.cstm|glCreateBuffers(1, &$id:ssbo);|]
@@ -243,7 +243,7 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ unCount num_bytes
+          num_bytes' <- GC.compileExp GC.TargetShader $ unCount num_bytes
           return [C.cexp|$exp:cur + $exp:num_bytes'|]
         localBytes cur _ = return cur
 

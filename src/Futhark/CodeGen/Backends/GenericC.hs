@@ -132,11 +132,12 @@ data HeaderSection = ArrayDecl String
                    | InitDecl
                    deriving (Eq, Ord)
 
--- | The target backend when generating GPU code.
+-- | The target backend when generating code.
 data BackendTarget = TargetKernel
                    | TargetShader
                    | TargetHost
                    | TargetSeqC
+                   | TargetGeneric
                    deriving (Eq)
 
 -- | A substitute expression compiler, tried before the main
@@ -198,11 +199,11 @@ data Operations op s =
                -- pointers.
              }
 
-defError :: ErrorCompiler op s
-defError (ErrorMsg parts) stacktrace = do
+defError :: BackendTarget -> ErrorCompiler op s
+defError target (ErrorMsg parts) stacktrace = do
   free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
   let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
-      onPart (ErrorInt32 x)  = ("%d",) <$> compileExp x
+      onPart (ErrorInt32 x)  = ("%d",) <$> compileExp target x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
   stm [C.cstm|{ ctx->error = msgprintf($string:formatstr, $args:formatargs,
@@ -224,7 +225,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
                                , opsFatMemory = True
-                               , opsError = defError
+                               , opsError = defError TargetGeneric
                                }
   where defWriteScalar _ _ _ _ _ =
           error "Cannot write to non-default memory space because I am dumb"
@@ -624,6 +625,7 @@ declMem name space = do
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
+-- FIXME: This needs to be able to handle other types than `int`.
 declMemShader :: VName -> Space -> CompilerM op s ()
 declMemShader name space = do
   decl [C.cdecl|typename shared_int $id:name[];|]
@@ -1659,34 +1661,34 @@ readScalarShader ::  ReadScalar op s
 readScalarShader dest i elemtype space vol =
   return [C.cexp|$exp:dest[$exp:i]|]
 
-compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
-compileExpToName _ _ (LeafExp (ScalarVar v) _) =
+compileExpToName :: BackendTarget -> String -> PrimType -> Exp -> CompilerM op s VName
+compileExpToName _ _ _ (LeafExp (ScalarVar v) _) =
   return v
-compileExpToName desc t e = do
+compileExpToName target desc t e = do
   desc' <- newVName desc
-  e' <- compileExp e
+  e' <- compileExp target e
   decl [C.cdecl|$ty:(primTypeToCType t) $id:desc' = $e';|]
   return desc'
 
-compileExp :: Exp -> CompilerM op s C.Exp
+compileExp :: BackendTarget -> Exp -> CompilerM op s C.Exp
 
-compileExp = compilePrimExp compileLeaf
+compileExp target = compilePrimExp target compileLeaf
   where compileLeaf (ScalarVar src) =
           return [C.cexp|$id:src|]
 
         compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
           src' <- rawMem src
           derefPointer src'
-            <$> compileExp iexp
+            <$> compileExp target iexp
             <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType restype)*|]
 
         compileLeaf (Index src (Count iexp) restype (Space space) vol) =
           join $ asks envReadScalar
-          <*> rawMem src <*> compileExp iexp
+          <*> rawMem src <*> compileExp target iexp
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (Index src (Count iexp) _ ScalarSpace{} _) = do
-          iexp' <- compileExp iexp
+          iexp' <- compileExp target iexp
           return [C.cexp|$id:src[$exp:iexp']|]
 
         compileLeaf (SizeOf t) =
@@ -1694,45 +1696,45 @@ compileExp = compilePrimExp compileLeaf
           where t' = primTypeToCType t
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
-compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
+compilePrimExp :: BackendTarget -> Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
 
-compilePrimExp _ (ValueExp val) =
+compilePrimExp _ _ (ValueExp val) =
   return $ compilePrimValue val
 
-compilePrimExp f (LeafExp v _) =
+compilePrimExp _ f (LeafExp v _) =
   f v
 
-compilePrimExp f (UnOpExp Complement{} x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (UnOpExp Complement{} x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|~$exp:x'|]
 
-compilePrimExp f (UnOpExp Not{} x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (UnOpExp Not{} x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|!$exp:x'|]
 
-compilePrimExp f (UnOpExp Abs{} x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (UnOpExp Abs{} x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|abs($exp:x')|]
 
-compilePrimExp f (UnOpExp (FAbs Float32) x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (UnOpExp (FAbs Float32) x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|(float)fabs($exp:x')|]
 
-compilePrimExp f (UnOpExp (FAbs Float64) x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (UnOpExp (FAbs Float64) x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|fabs($exp:x')|]
 
-compilePrimExp f (UnOpExp SSignum{} x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (UnOpExp SSignum{} x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
 
-compilePrimExp f (UnOpExp USignum{} x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (UnOpExp USignum{} x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
 
-compilePrimExp f (CmpOpExp cmp x y) = do
-  x' <- compilePrimExp f x
-  y' <- compilePrimExp f y
+compilePrimExp target f (CmpOpExp cmp x y) = do
+  x' <- compilePrimExp target f x
+  y' <- compilePrimExp target f y
   return $ case cmp of
     CmpEq{}  -> [C.cexp|$exp:x' == $exp:y'|]
 
@@ -1744,13 +1746,13 @@ compilePrimExp f (CmpOpExp cmp x y) = do
 
     _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
 
-compilePrimExp f (ConvOpExp conv x) = do
-  x' <- compilePrimExp f x
+compilePrimExp target f (ConvOpExp conv x) = do
+  x' <- compilePrimExp target f x
   return [C.cexp|$id:(pretty conv)($exp:x')|]
 
-compilePrimExp f (BinOpExp bop x y) = do
-  x' <- compilePrimExp f x
-  y' <- compilePrimExp f y
+compilePrimExp target f (BinOpExp bop x y) = do
+  x' <- compilePrimExp target f x
+  y' <- compilePrimExp target f y
   -- Note that integer addition, subtraction, and multiplication are
   -- not handled by explicit operators, but rather by functions.  This
   -- is because we want to implicitly convert them to unsigned
@@ -1769,8 +1771,8 @@ compilePrimExp f (BinOpExp bop x y) = do
              LogOr{}  -> [C.cexp|$exp:x' || $exp:y'|]
              _        -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
 
-compilePrimExp f (FunExp h args _) = do
-  args' <- mapM (compilePrimExp f) args
+compilePrimExp target f (FunExp h args _) = do
+  args' <- mapM (compilePrimExp target f) args
   return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
 compileCode :: BackendTarget -> Code op -> CompilerM op s ()
@@ -1787,8 +1789,8 @@ compileCode target (Comment s code) = do
               { $items:items }
              |]
 
-compileCode _ (DebugPrint s (Just e)) = do
-  e' <- compileExp e
+compileCode target (DebugPrint s (Just e)) = do
+  e' <- compileExp target e
   stm [C.cstm|if (ctx->debugging) {
           fprintf(stderr, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
        }|]
@@ -1806,7 +1808,7 @@ compileCode _ (DebugPrint s Nothing) =
 compileCode target c
   | Just (name, vol, t, e, c') <- declareAndSet c = do
     let ct = primTypeToCType t
-    e' <- compileExp e
+    e' <- compileExp target e
     case target of
       TargetShader ->
         item [C.citem|$ty:ct $id:name = $exp:e';|]
@@ -1816,8 +1818,8 @@ compileCode target c
 
 compileCode target (c1 :>>: c2) = compileCode target c1 >> compileCode target c2
 
-compileCode _ (Assert e msg (loc, locs)) = do
-  e' <- compileExp e
+compileCode target (Assert e msg (loc, locs)) = do
+  e' <- compileExp target e
   err <- collect $ join $
          asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
   stm [C.cstm|if (!$exp:e') { $items:err }|]
@@ -1828,8 +1830,8 @@ compileCode _ (Allocate _ _ ScalarSpace{}) =
   -- translated to an actual array.
   return ()
 
-compileCode _ (Allocate name (Count e) space) = do
-  size <- compileExp e
+compileCode target (Allocate name (Count e) space) = do
+  size <- compileExp target e
   allocMem name size space [C.cstm|return 1;|]
 
 compileCode _ (Free name space) =
@@ -1838,14 +1840,14 @@ compileCode _ (Free name space) =
 compileCode target (For i it bound body) = do
   let i'  = C.toIdent i
       it' = primTypeToCType $ IntType it
-  bound'  <- compileExp bound
+  bound'  <- compileExp target bound
   body'   <- blockScope $ compileCode target body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 
 compileCode target (While cond body) = do
-  cond' <- compileExp cond
+  cond' <- compileExp target cond
   body' <- blockScope $ compileCode target body
   case target of
     TargetShader ->
@@ -1858,7 +1860,7 @@ compileCode target (While cond body) = do
               }|]
 
 compileCode target (If cond tbranch fbranch) = do
-  cond'    <- compileExp cond
+  cond'    <- compileExp target cond
   tbranch' <- blockScope $ compileCode target tbranch
   fbranch' <- blockScope $ compileCode target fbranch
   case target of
@@ -1880,50 +1882,50 @@ compileCode target (If cond tbranch fbranch) = do
         _ ->
           [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
-compileCode _ (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset)
+compileCode target (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset)
                DefaultSpace (Count size)) = do
-  destoffset' <- compileExp destoffset
-  srcoffset'  <- compileExp srcoffset
-  size'       <- compileExp size
+  destoffset' <- compileExp target destoffset
+  srcoffset'  <- compileExp target srcoffset
+  size'       <- compileExp target size
   dest'       <- rawMem dest
   src'        <- rawMem src
   stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
                       $exp:src' + $exp:srcoffset',
                       $exp:size');|]
 
-compileCode _ (Copy dest (Count destoffset) destspace src (Count srcoffset)
+compileCode target (Copy dest (Count destoffset) destspace src (Count srcoffset)
                srcspace (Count size)) = do
   copy <- asks envCopy
   join $ copy
-    <$> rawMem dest <*> compileExp destoffset <*> pure destspace
-    <*> rawMem src  <*> compileExp srcoffset  <*> pure srcspace
-    <*> compileExp size
+    <$> rawMem dest <*> compileExp target destoffset <*> pure destspace
+    <*> rawMem src  <*> compileExp target srcoffset  <*> pure srcspace
+    <*> compileExp target size
 
 -- FIXME:
 compileCode TargetShader (Write dest (Count idx) elemtype DefaultSpace vol elemexp) =
   undefined
 
-compileCode _ (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
+compileCode target (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
-           <$> compileExp idx
+           <$> compileExp target idx
            <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType elemtype)*|]
-  elemexp' <- compileExp elemexp
+  elemexp' <- compileExp target elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
-compileCode _ (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
-  idx' <- compileExp idx
-  elemexp' <- compileExp elemexp
+compileCode target (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
+  idx' <- compileExp target idx
+  elemexp' <- compileExp target elemexp
   stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 
-compileCode _ (Write dest (Count idx) elemtype (Space space) vol elemexp) =
+compileCode target (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
-    <*> compileExp idx
+    <*> compileExp target idx
     <*> pure (primTypeToCType elemtype)
     <*> pure space
     <*> pure vol
-    <*> compileExp elemexp
+    <*> compileExp target elemexp
 
 compileCode TargetShader (DeclareMem name space) =
   declMemShader name space
@@ -1968,13 +1970,13 @@ compileCode _ (DeclareArray name (Space space) t vs) =
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.
-compileCode _ (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
+compileCode target (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
   | dest == x, Just f <- assignmentOperator op = do
-      y' <- compileExp y
+      y' <- compileExp target y
       stm [C.cstm|$exp:(f dest y');|]
 
-compileCode _ (SetScalar dest src) = do
-  src' <- compileExp src
+compileCode target (SetScalar dest src) = do
+  src' <- compileExp target src
   stm [C.cstm|$id:dest = $exp:src';|]
 
 compileCode _ (SetMem dest src space) =
@@ -1984,7 +1986,7 @@ compileCode _ (SetMem dest src space) =
 compileCode TargetShader (Call dests fname args) =
   undefined
 
-compileCode _ (Call dests fname args) = do
+compileCode target (Call dests fname args) = do
   args' <- mapM compileArg args
   let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
       args'' | isBuiltInFunction fname = args'
@@ -1997,7 +1999,7 @@ compileCode _ (Call dests fname args) = do
       item [C.citem|int $id:ret = $id:(funName fname)($args:args'');|]
       stm [C.cstm|assert($id:ret == 0);|]
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
-        compileArg (ExpArg e) = compileExp e
+        compileArg (ExpArg e) = compileExp target e
 
 blockScope :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 blockScope = fmap snd . blockScope'

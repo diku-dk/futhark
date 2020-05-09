@@ -173,7 +173,7 @@ callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
-  x' <- GC.compileExp x
+  x' <- GC.compileExp GC.TargetKernel x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
@@ -198,8 +198,8 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
            GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
         ) shared_args
 
-  (grid_x, grid_y, grid_z)    <- mkDims <$> mapM GC.compileExp num_blocks
-  (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
+  (grid_x, grid_y, grid_z)    <- mkDims <$> mapM (GC.compileExp GC.TargetKernel) num_blocks
+  (block_x, block_y, block_z) <- mkDims <$> mapM (GC.compileExp GC.TargetKernel) block_size
   let perm_args
         | length num_blocks == 3 = [ [C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|] ]
         | otherwise = []
@@ -269,14 +269,14 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
     expAnd a b       = [C.cexp|$exp:a && $exp:b|]
     expsNotZero      = foldl expAnd [C.cexp|1|] . map expNotZero
     mkArgs (ValueKArg e t) =
-      (,Nothing) <$> GC.compileExpToName "kernel_arg" t e
+      (,Nothing) <$> GC.compileExpToName GC.TargetKernel "kernel_arg" t e
     mkArgs (MemKArg v) = do
       v'  <- GC.rawMem v
       arg <- newVName "kernel_arg"
       GC.decl [C.cdecl|typename CUdeviceptr $id:arg = $exp:v';|]
       return (arg, Nothing)
     mkArgs (SharedMemoryKArg (Count c)) = do
-      num_bytes <- GC.compileExp c
+      num_bytes <- GC.compileExp GC.TargetKernel c
       size      <- newVName "shared_size"
       offset    <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]

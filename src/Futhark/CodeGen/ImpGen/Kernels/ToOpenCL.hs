@@ -442,7 +442,8 @@ extern volatile __shared__ char shared_mem[];
 |]
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
-compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
+compilePrimExp e = runIdentity $ GenericC.compilePrimExp
+                                   GenericC.TargetKernel compileKernelConst e
   where compileKernelConst (SizeConst key) =
           return [C.cexp|$id:(zEncodeString (pretty key))|]
 
@@ -533,8 +534,8 @@ inKernelOperations body =
           return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
         doAtomic s old arr ind val op ty = do
-          ind' <- GenericC.compileExp $ unCount ind
-          val' <- GenericC.compileExp val
+          ind' <- GenericC.compileExp GenericC.TargetKernel $ unCount ind
+          val' <- GenericC.compileExp GenericC.TargetKernel val
           cast <- atomicCast s ty
           GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
 
@@ -563,15 +564,15 @@ inKernelOperations body =
           doAtomic s old arr ind val "atomic_xor" [C.cty|unsigned int|]
 
         atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
-          ind' <- GenericC.compileExp $ unCount ind
-          cmp' <- GenericC.compileExp cmp
-          val' <- GenericC.compileExp val
+          ind' <- GenericC.compileExp GenericC.TargetKernel $ unCount ind
+          cmp' <- GenericC.compileExp GenericC.TargetKernel cmp
+          val' <- GenericC.compileExp GenericC.TargetKernel val
           cast <- atomicCast s [C.cty|int|]
           GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
 
         atomicOps s (AtomicXchg old arr ind val) = do
-          ind' <- GenericC.compileExp $ unCount ind
-          val' <- GenericC.compileExp val
+          ind' <- GenericC.compileExp GenericC.TargetKernel $ unCount ind
+          val' <- GenericC.compileExp GenericC.TargetKernel val
           cast <- atomicCast s [C.cty|int|]
           GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
 
@@ -608,7 +609,7 @@ inKernelOperations body =
           let setArgs _ [] = return []
               setArgs i (ErrorString{} : parts') = setArgs i parts'
               setArgs i (ErrorInt32 x : parts')  = do
-                x'   <- GenericC.compileExp x
+                x'   <- GenericC.compileExp GenericC.TargetKernel x
                 stms <- setArgs (i+1) parts'
                 return $ [C.cstm|global_failure_args[$int:i] = $exp:x';|] : stms
           argstms <- setArgs (0::Int) parts

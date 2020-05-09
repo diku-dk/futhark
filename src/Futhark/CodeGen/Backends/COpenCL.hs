@@ -256,7 +256,7 @@ callKernel :: GC.OpCompiler OpenCL ()
 callKernel (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
 callKernel (CmpSizeLe v key x) = do
-  x' <- GC.compileExp x
+  x' <- GC.compileExp GC.TargetKernel x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
   GC.stm [C.cstm|if (ctx->logging) {
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
@@ -277,8 +277,8 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
     |]
 
   zipWithM_ setKernelArg [numFailureParams safety..] args
-  num_workgroups' <- mapM GC.compileExp num_workgroups
-  workgroup_size' <- mapM GC.compileExp workgroup_size
+  num_workgroups' <- mapM (GC.compileExp GC.TargetShader) num_workgroups
+  workgroup_size' <- mapM (GC.compileExp GC.TargetShader) workgroup_size
   local_bytes <- foldM localBytes [C.cexp|0|] args
 
   launchKernel name num_workgroups' workgroup_size' local_bytes
@@ -287,7 +287,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
 
   where setKernelArg i (ValueKArg e bt) = do
-          v <- GC.compileExpToName "kernel_arg" bt e
+          v <- GC.compileExpToName GC.TargetKernel "kernel_arg" bt e
           GC.stm [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i,
                                                     sizeof($id:v), &$id:v));
@@ -301,14 +301,14 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
           |]
 
         setKernelArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ unCount num_bytes
+          num_bytes' <- GC.compileExp GC.TargetKernel $ unCount num_bytes
           GC.stm [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i,
                                                     $exp:num_bytes', NULL));
             |]
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ unCount num_bytes
+          num_bytes' <- GC.compileExp GC.TargetKernel $ unCount num_bytes
           return [C.cexp|$exp:cur + $exp:num_bytes'|]
         localBytes cur _ = return cur
 
