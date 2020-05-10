@@ -217,7 +217,7 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
   launchShader name num_workgroups' workgroup_size' local_bytes
   where setShaderArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName GC.TargetHost "shader_arg" bt e
-          GC.stm [C.cstm|glUniform1i($int:i, &$id:v);|]
+          GC.stm [C.cstm|glUniform1i($int:i, $id:v);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         setShaderArg i (MemKArg v) = do
