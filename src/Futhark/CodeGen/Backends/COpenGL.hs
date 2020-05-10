@@ -210,6 +210,7 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
     GC.stm [C.cstm|
     OPENGL_SUCCEED(glGetError());
     |]
+  GC.stm [C.cstm|glUseProgram(ctx->opengl.program);|]
   zipWithM_ setShaderArg [(0::Int)..] args
   num_workgroups' <- mapM (GC.compileExp GC.TargetHost) num_workgroups
   workgroup_size' <- mapM (GC.compileExp GC.TargetHost) workgroup_size
@@ -280,7 +281,6 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
       fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
       $id:time_start = get_wall_time();
     }
-    glUseProgram(ctx->opengl.program);
     OPENGL_SUCCEED(glGetError());
     glDispatchComputeGroupSizeARB($id:global_work_size[0], $id:global_work_size[1],
                                   $id:global_work_size[2], $id:local_work_size[0],
