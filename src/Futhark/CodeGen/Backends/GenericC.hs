@@ -1903,7 +1903,7 @@ compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   err <- collect $ join $
          asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
-  stm [C.cstm|if (!$exp:e') { $items:err; err = 1; goto cleanup; }|]
+  stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
 compileCode (Allocate _ _ ScalarSpace{}) =
