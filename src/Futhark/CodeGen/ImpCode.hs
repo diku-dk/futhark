@@ -39,6 +39,7 @@ module Futhark.CodeGen.ImpCode
   , ArrayContents(..)
 
   , declaredIn
+  , lexicalMemoryUsage
 
     -- * Typed enumerations
   , Bytes
@@ -52,12 +53,14 @@ module Futhark.CodeGen.ImpCode
   , module Futhark.Representation.Primitive
   , module Futhark.Analysis.PrimExp
   , module Futhark.Representation.Kernels.Sizes
+  , module Futhark.Representation.AST.Attributes.Names
   )
   where
 
 import Data.List (intersperse)
 import Data.Loc
 import Data.Traversable
+import qualified Data.Map as M
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
@@ -212,6 +215,35 @@ instance Semigroup (Code a) where
 
 instance Monoid (Code a) where
   mempty = Skip
+
+-- | Find those memory blocks that are used only lexically.  That is,
+-- are not used as the source or target of a 'SetMem', or are the
+-- result of the function.  This is interesting because such memory
+-- blocks do not need reference counting, but can be managed in a
+-- purely stack-like fashion.
+--
+-- We do not look inside any 'Op's.  We assume that no 'Op' is going
+-- to 'SetMem' a memory block declared outside it.
+lexicalMemoryUsage :: Function a -> M.Map VName Space
+lexicalMemoryUsage func =
+  M.filterWithKey (const . not . (`nameIn` nonlexical)) $
+  declared $ functionBody func
+  where nonlexical =
+          set (functionBody func) <>
+          namesFromList (map paramName (functionOutput func))
+
+        go f (x :>>: y) = f x <> f y
+        go f (If _ x y) = f x <> f y
+        go f (For _ _ _ x) = f x
+        go f (While _ x) = f x
+        go f (Comment _ x) = f x
+        go _ _ = mempty
+
+        declared (DeclareMem mem space) = M.singleton mem space
+        declared x = go declared x
+
+        set (SetMem x y _) = namesFromList [x,y]
+        set x = go set x
 
 data ExpLeaf = ScalarVar VName
              | SizeOf PrimType

@@ -35,6 +35,7 @@ module Futhark.CodeGen.Backends.GenericC
   , contextFinalInits
   , runCompilerM
   , inNewFunction
+  , cachingMemory
   , blockScope
   , compileFun
   , compileCode
@@ -70,6 +71,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
+import Data.Bifunctor (first)
 import Data.Bits (xor, shiftR)
 import Data.Char (ord, isDigit, isAlphaNum)
 import qualified Data.Map.Strict as M
@@ -236,8 +238,16 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           error "The default compiler cannot compile extended operations"
 
 
-newtype CompilerEnv op s = CompilerEnv
-  { envOperations :: Operations op s }
+data CompilerEnv op s = CompilerEnv
+  { envOperations :: Operations op s
+  , envCachedMem :: M.Map C.Exp VName
+    -- ^ Mapping memory blocks to sizes.  These memory blocks are CPU
+    -- memory that we know are used in particularly simple ways (no
+    -- reference counting necessary).  To cut down on allocator
+    -- pressure, we keep these allocations around for a long time, and
+    -- record their sizes so we can reuse them if possible (and
+    -- realloc() when needed).
+  }
 
 newtype CompilerAcc op s = CompilerAcc {
     accItems :: DL.DList C.BlockItem
@@ -276,9 +286,6 @@ envStaticArray = opsStaticArray . envOperations
 
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
-
-newCompilerEnv :: Operations op s -> CompilerEnv op s
-newCompilerEnv ops = CompilerEnv { envOperations = ops }
 
 tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 tupleDefinitions = map (snd . snd) . compTypeStructs
@@ -325,7 +332,7 @@ runCompilerM :: Operations op s -> VNameSource -> s
              -> CompilerM op s a
              -> (a, CompilerState s)
 runCompilerM ops src userstate (CompilerM m) =
-  let (x, s, _) = runRWS m (newCompilerEnv ops) (newCompilerState src userstate)
+  let (x, s, _) = runRWS m (CompilerEnv ops mempty) (newCompilerState src userstate)
   in (x, s)
 
 getUserState :: CompilerM op s s
@@ -352,13 +359,16 @@ collect' m = pass $ do
 -- generate code for a new function.  Use this so that the compiler
 -- understands that previously declared memory doesn't need to be
 -- freed inside this action.
-inNewFunction :: CompilerM op s a -> CompilerM op s a
-inNewFunction m = do
+inNewFunction :: Bool -> CompilerM op s a -> CompilerM op s a
+inNewFunction keep_cached m = do
   old_mem <- gets compDeclaredMem
   modify $ \s -> s { compDeclaredMem = mempty }
-  x <- m
+  x <- local noCached m
   modify $ \s -> s { compDeclaredMem = old_mem }
   return x
+  where noCached env
+          | keep_cached = env
+          | otherwise = env { envCachedMem = mempty }
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
@@ -366,6 +376,9 @@ item x = tell $ mempty { accItems = DL.singleton x }
 fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace{} = return False
 fatMemory _ = asks envFatMemory
+
+cacheMem :: C.ToExp a => a -> CompilerM op s (Maybe VName)
+cacheMem a = asks $ M.lookup (C.toExp a noLoc) . envCachedMem
 
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeString . nameToString
@@ -460,10 +473,11 @@ contextType = do
   name <- publicName "context"
   return [C.cty|struct $id:name|]
 
-memToCType :: Space -> CompilerM op s C.Type
-memToCType space = do
+memToCType :: VName -> Space -> CompilerM op s C.Type
+memToCType v space = do
   refcount <- fatMemory space
-  if refcount
+  cached <- isJust <$> cacheMem v
+  if refcount && not cached
      then return $ fatMemType space
      else rawMemCType space
 
@@ -495,12 +509,30 @@ fatMemUnRef :: Space -> String
 fatMemUnRef (Space sid) = "memblock_unref_" ++ sid
 fatMemUnRef _ = "memblock_unref"
 
-rawMem :: C.ToExp a => a -> CompilerM op s C.Exp
-rawMem v = rawMem' <$> asks envFatMemory <*> pure v
+rawMem :: VName -> CompilerM op s C.Exp
+rawMem v = rawMem' <$> fat <*> pure v
+  where fat = (&&) <$> asks envFatMemory <*> (isNothing <$> cacheMem v)
 
 rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True  e = [C.cexp|$exp:e.mem|]
 rawMem' False e = [C.cexp|$exp:e|]
+
+allocRawMem :: (C.ToExp a, C.ToExp b, C.ToExp c) =>
+               a -> b -> Space -> c -> CompilerM op s ()
+allocRawMem dest size space desc = case space of
+  Space sid ->
+    join $ asks envAllocate <*> pure [C.cexp|$exp:dest|] <*>
+    pure [C.cexp|$exp:size|] <*> pure [C.cexp|$exp:desc|] <*> pure sid
+  _ ->
+    stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
+
+freeRawMem :: (C.ToExp a, C.ToExp b) =>
+              a -> Space -> b -> CompilerM op s ()
+freeRawMem mem space desc =
+  case space of
+    Space sid -> do free_mem <- asks envDeallocate
+                    free_mem [C.cexp|$exp:mem|] [C.cexp|$exp:desc|] sid
+    _ -> item [C.citem|free($exp:mem);|]
 
 defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem)
 defineMemorySpace space = do
@@ -517,10 +549,7 @@ defineMemorySpace space = do
   -- Unreferencing a memory block consists of decreasing its reference
   -- count and freeing the corresponding memory if the count reaches
   -- zero.
-  free <- case space of
-    Space sid -> do free_mem <- asks envDeallocate
-                    collect $ free_mem [C.cexp|block->mem|] [C.cexp|block->desc|] sid
-    _ -> return [[C.citem|free(block->mem);|]]
+  free <- collect $ freeRawMem [C.cexp|block->mem|] space [C.cexp|desc|]
   ctx_ty <- contextType
   let unrefdef = [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
@@ -545,12 +574,7 @@ defineMemorySpace space = do
 
   -- When allocating a memory block we initialise the reference count to 1.
   alloc <- collect $
-    case space of
-      Space sid ->
-        join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
-        pure [C.cexp|size|] <*> pure [C.cexp|desc|] <*> pure sid
-      _ ->
-        stm [C.cstm|block->mem = (char*) malloc(size);|]
+           allocRawMem [C.cexp|block->mem|] [C.cexp|size|] space [C.cexp|desc|]
   let allocdef = [C.cedecl|static int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
     futhark_panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
@@ -595,8 +619,12 @@ defineMemorySpace space = do
   let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
   return (structdef,
           [unrefdef, allocdef, setdef],
-          [C.citem|fprintf(stderr, $string:peakmsg,
-                           (long long) ctx->$id:peakname);|])
+          -- Do not report memory usage for DefaultSpace (CPU memory),
+          -- because it would not be accurate anyway.  This whole
+          -- tracking probably needs to be rethought.
+          if space == DefaultSpace
+          then [C.citem|{}|]
+          else [C.citem|fprintf(stderr, $string:peakmsg, (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
           Space sid    -> ("peak_mem_usage_" ++ sid,
@@ -610,16 +638,21 @@ defineMemorySpace space = do
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
-  ty <- memToCType space
-  decl [C.cdecl|$ty:ty $id:name;|]
-  resetMem name space
-  modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
+  cached <- isJust <$> cacheMem name
+  unless cached $ do
+    ty <- memToCType name space
+    decl [C.cdecl|$ty:ty $id:name;|]
+    resetMem name space
+    modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
 resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 resetMem mem space = do
   refcount <- fatMemory space
-  when refcount $
-    stm [C.cstm|$exp:mem.references = NULL;|]
+  cached <- isJust <$> cacheMem mem
+  if cached
+    then stm [C.cstm|$exp:mem = NULL;|]
+    else when refcount $
+         stm [C.cstm|$exp:mem.references = NULL;|]
 
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
@@ -635,29 +668,25 @@ setMem dest src space = do
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
   refcount <- fatMemory space
+  cached <- isJust <$> cacheMem mem
   let mem_s = pretty $ C.toExp mem noLoc
-  when refcount $
+  when (refcount && not cached) $
     stm [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
-               return 1;
-             }|]
+                  return 1;
+                }|]
 
 allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> C.Stm -> CompilerM op s ()
-allocMem name size space on_failure = do
+allocMem mem size space on_failure = do
   refcount <- fatMemory space
-  let name_s = pretty $ C.toExp name noLoc
+  let mem_s = pretty $ C.toExp mem noLoc
   if refcount
-    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
-                                                 $string:name_s)) {
+    then stm [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:mem, $exp:size,
+                                                 $string:mem_s)) {
                        $stm:on_failure
                      }|]
-    else alloc name
-  where alloc dest = case space of
-          Space sid ->
-            join $ asks envAllocate <*> rawMem name <*>
-            pure [C.cexp|$exp:size|] <*> pure [C.cexp|desc|] <*> pure sid
-          _ ->
-            stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
+    else do freeRawMem mem space mem_s
+            allocRawMem mem size space [C.cexp|desc|]
 
 primTypeInfo :: PrimType -> Signedness -> C.Exp
 primTypeInfo (IntType it) t = case (it, t) of
@@ -733,7 +762,6 @@ arrayLibraryFunctions space pt signed shape = do
       arr_size_array = cproduct [ [C.cexp|arr->shape[$int:i]|] | i <- [0..rank-1] ]
   copy <- asks envCopy
 
-  arr_raw_mem <- rawMem [C.cexp|arr->mem|]
   memty <- rawMemCType space
 
   let prepare_new = do
@@ -746,13 +774,13 @@ arrayLibraryFunctions space pt signed shape = do
 
   new_body <- collect $ do
     prepare_new
-    copy arr_raw_mem [C.cexp|0|] space
+    copy [C.cexp|arr->mem.mem|] [C.cexp|0|] space
          [C.cexp|data|] [C.cexp|0|] DefaultSpace
          [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
 
   new_raw_body <- collect $ do
     prepare_new
-    copy arr_raw_mem [C.cexp|0|] space
+    copy [C.cexp|arr->mem.mem|] [C.cexp|0|] space
          [C.cexp|data|] [C.cexp|offset|] space
          [C.cexp|((size_t)$exp:arr_size) * sizeof($ty:pt')|]
 
@@ -760,7 +788,7 @@ arrayLibraryFunctions space pt signed shape = do
 
   values_body <- collect $
     copy [C.cexp|data|] [C.cexp|0|] DefaultSpace
-         arr_raw_mem [C.cexp|0|] space
+         [C.cexp|arr->mem.mem|] [C.cexp|0|] space
          [C.cexp|((size_t)$exp:arr_size_array) * sizeof($ty:pt')|]
 
   ctx_ty <- contextType
@@ -815,7 +843,7 @@ arrayLibraryFunctions space pt signed shape = do
 
           $ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
             (void)ctx;
-            return $exp:arr_raw_mem;
+            return arr->mem.mem;
           }
 
           typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
@@ -860,14 +888,14 @@ opaqueLibraryFunctions desc vds = do
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
-valueDescToCType (ArrayValue _ space pt signed shape) = do
+valueDescToCType (ArrayValue mem space pt signed shape) = do
   let pt' = signedPrimTypeToCType signed pt
       rank = length shape
   exists <- gets $ lookup (pt',rank) . compArrayStructs
   case exists of
     Just (cty, _) -> return cty
     Nothing -> do
-      memty <- memToCType space
+      memty <- memToCType mem space
       name <- publicName $ arrayName pt signed rank
       let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
           stype = [C.cty|struct $id:name|]
@@ -1584,10 +1612,12 @@ compileConstants (Constants ps init_consts) = do
                     mapM_ resetMemConst ps
                     compileCode init_consts
   libDecl [C.cedecl|int init_constants($ty:ctx_ty *ctx) {
+      int err = 0;
       $items:defs
       $items:init_consts'
       $items:undefs
-      return 0;
+      cleanup:
+      return err;
     }|]
 
   free_consts <- collect $ mapM_ freeConst ps
@@ -1602,7 +1632,7 @@ compileConstants (Constants ps init_consts) = do
           let ctp = primTypeToCType bt
           return [C.csdecl|$ty:ctp $id:name;|]
         constParamField (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           return [C.csdecl|$ty:ty $id:name;|]
 
         constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
@@ -1620,28 +1650,67 @@ compileConstants (Constants ps init_consts) = do
           let ctp = primTypeToCType bt
           return [C.citem|$ty:ctp $id:name = ctx->constants.$id:name;|]
         getConst (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           return [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
 
+cachingMemory :: M.Map VName Space
+              -> ([C.BlockItem] -> [C.Stm] -> CompilerM op s a)
+              -> CompilerM op s a
+cachingMemory lexical f = do
+  -- We only consider lexical 'DefaultSpace' memory blocks to be
+  -- cached.  This is not a deep technical restriction, but merely a
+  -- heuristic based on GPU memory usually involving larger
+  -- allocations, that do not suffer from the overhead of reference
+  -- counting.
+  let cached = M.keys $ M.filter (==DefaultSpace) lexical
+
+  cached' <- forM cached $ \mem -> do
+    size <- newVName $ pretty mem <> "_cached_size"
+    return (mem, size)
+
+  let lexMem env =
+        env { envCachedMem =
+                M.fromList (map (first (`C.toExp` noLoc)) cached')
+                <> envCachedMem env
+            }
+
+      declCached (mem, size) =
+        [[C.citem|size_t $id:size = 0;|],
+         [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]]
+
+      freeCached (mem, _) =
+        [C.cstm|free($id:mem);|]
+
+  local lexMem $ f (concatMap declCached cached') (map freeCached cached')
+
 compileFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants (fname, Function _ outputs inputs body _ _) = do
+compileFun get_constants (fname, func@(Function _ outputs inputs body _ _)) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
-  body' <- blockScope $ compileFunBody out_ptrs outputs body
-  ctx_ty <- contextType
-  return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
-                                                   $params:outparams, $params:inparams);|],
-          [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
-                                                 $params:outparams, $params:inparams) {
-             $items:get_constants
-             $items:body'
-             return 0;
-}|])
+
+  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
+    body' <- blockScope $ compileFunBody out_ptrs outputs body
+
+    ctx_ty <- contextType
+    return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                     $params:outparams, $params:inparams);|],
+            [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                   $params:outparams, $params:inparams) {
+               int err = 0;
+               $items:decl_cached
+               $items:get_constants
+               $items:body'
+              cleanup:
+               {}
+               $stms:free_cached
+               return err;
+  }|])
+
   where compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
         compileInput (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           return [C.cparam|$ty:ty $id:name|]
 
         compileOutput (ScalarParam name bt) = do
@@ -1649,7 +1718,7 @@ compileFun get_constants (fname, Function _ outputs inputs body _ _) = do
           p_name <- newVName $ "out_" ++ baseString name
           return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
         compileOutput (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           p_name <- newVName $ baseString name ++ "_p"
           return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
@@ -1875,10 +1944,19 @@ compileCode (Allocate _ _ ScalarSpace{}) =
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
-  allocMem name size space [C.cstm|return 1;|]
+  cached <- cacheMem name
+  case cached of
+    Just cur_size ->
+      stm [C.cstm|if ($exp:cur_size < $exp:size) {
+                    $exp:name = realloc($exp:name, $exp:size);
+                    $exp:cur_size = $exp:size;
+                  }|]
+    _ ->
+      allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
 
-compileCode (Free name space) =
-  unRefMem name space
+compileCode (Free name space) = do
+  cached <- isJust <$> cacheMem name
+  unless cached $ unRefMem name space
 
 compileCode (For i it bound body) = do
   let i' = C.toIdent i
@@ -2000,7 +2078,7 @@ compileCode (Call dests fname args) = do
     [dest] | isBuiltInFunction fname ->
       stm [C.cstm|$id:dest = $id:(funName fname)($args:args'');|]
     _ ->
-      item [C.citem|if ($id:(funName fname)($args:args'') != 0) { return 1; }|]
+      item [C.citem|if ($id:(funName fname)($args:args'') != 0) { err = 1; goto cleanup; }|]
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
         compileArg (ExpArg e) = compileExp e
 
