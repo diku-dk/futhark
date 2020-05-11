@@ -8,11 +8,13 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , getNumThreads'
  , decideScheduling
  , sUnpauseProfiling
+ , groupResultArrays
  )
  where
 
 import Data.List
 import Data.Bifunctor
+import Control.Monad
 import Prelude hiding (quot, rem)
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
@@ -52,6 +54,18 @@ compileThreadResult _ _ WriteReturns{} =
 
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
+
+-- | Arrays for storing group results.
+--
+groupResultArrays :: SubExp
+                  -> [SegBinOp MCMem]
+                  -> MulticoreGen [[VName]]
+groupResultArrays num_threads reds =
+  forM reds $ \(SegBinOp _ lam _ shape) ->
+    forM (lambdaReturnType lam) $ \t -> do
+    let pt = elemType t
+        full_shape = Shape [num_threads] <> shape <> arrayShape t
+    sAllocArray "group_res_arr" pt full_shape DefaultSpace
 
 
 getNumThreads' :: VName -> MulticoreGen ()

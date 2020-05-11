@@ -46,23 +46,6 @@ compileSegRed' pat space reds kbody
       segmentedReduction pat space reds kbody
 
 
--- | Arrays for storing group results.
---
--- The group-result arrays have an extra dimension (of size groupsize)
--- because they are also used for keeping vectorised accumulators for
--- first-stage reduction, if necessary.  When actually storing group
--- results, the first index is set to 0.
-groupResultArrays :: SubExp
-                  -> [SegBinOp MCMem]
-                  -> MulticoreGen [[VName]]
-groupResultArrays num_threads reds =
-  forM reds $ \(SegBinOp _ lam _ shape) ->
-    forM (lambdaReturnType lam) $ \t -> do
-    let pt = elemType t
-        full_shape = Shape [num_threads] <> shape <> arrayShape t
-    sAllocArray "group_res_arr" pt full_shape DefaultSpace
-
-
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug =
   SegBinOpSlug
