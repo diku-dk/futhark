@@ -121,7 +121,9 @@ transformMap (MapLoop pat cs w lam arrs) = do
             { distNest = singleNesting (Nesting mempty loopnest)
             , distScope = scopeOfPattern pat <> castScope (scopeOf lam) <> scope
             , distOnInnerMap = distributeMap
-            , distOnTopLevelStms = lift . transformStms
+            , distOnTopLevelStms = \m -> do
+                local_scope <- askScope
+                lift $ localScope local_scope $ transformStms m
             , distSegLevel = \_ _ _ -> pure ()
             , distOnSOACSStms = runExtract . transformStm
             , distOnSOACSLambda = runExtract . transformLambda
@@ -156,9 +158,18 @@ unstreamLambda nes lam = do
       letBindNames_ [paramName slice] $
       BasicOp $ ArrayLit [Var $ paramName v] (paramType v)
 
-    pure $ lambdaBody lam
+    (red_res, map_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
 
-  let lam' = Lambda { lambdaReturnType = lambdaReturnType lam
+    map_res' <- forM map_res $ \se -> do
+      v <- letExp "map_res" $ BasicOp $ SubExp se
+      v_t <- lookupType v
+      letSubExp "chunk" $ BasicOp $ Index v $
+        fullSlice v_t [DimFix $ intConst Int32 0]
+
+    pure $ resultBody $ red_res <> map_res'
+
+  let (red_ts, map_ts) = splitAt (length nes) $ lambdaReturnType lam
+      lam' = Lambda { lambdaReturnType = red_ts ++ map rowType map_ts
                     , lambdaParams = inp_params
                     , lambdaBody = body
                     }
