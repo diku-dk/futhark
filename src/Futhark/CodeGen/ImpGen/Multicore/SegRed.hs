@@ -137,7 +137,7 @@ nonsegmentedReduction pat space reds kbody = do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
     kbody $ \all_red_res -> do
-      let all_red_res' = chunks (map (length . slugNeutral) slugs) all_red_res
+      let all_red_res' = segBinOpChunks reds all_red_res
       forM_ (zip all_red_res' slugs) $ \(red_res, slug) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
           sComment "load acc params" $
