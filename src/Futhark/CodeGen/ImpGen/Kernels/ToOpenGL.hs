@@ -292,6 +292,8 @@ inShaderOperations body =
         shaderOps (GetGlobalSize v i) =
           GenericC.stm [C.cstm|$id:v = int32_t(gl_NumWorkGroups[$int:i]);|]
         shaderOps (GetLockstepWidth v) =
+          -- FIXME: Should vary between vendor. 64 for AMD and 32 for Nvidia,
+          --        otherwise 1.
           GenericC.stm [C.cstm|$id:v = 1;|]
         shaderOps (Barrier f) = do
           GenericC.stm [C.cstm|barrier();|]
@@ -319,7 +321,7 @@ inShaderOperations body =
         atomicCast s t = do
           let volatile = [C.ctyquals|volatile|]
           quals <- case s of Space sid    -> pointerQuals sid
-                             _            -> pointerQuals "uniform"
+                             _            -> pointerQuals "volatile"
           return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
         doAtomic s old arr ind val op ty = do
@@ -329,41 +331,41 @@ inShaderOperations body =
           GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
 
         atomicOps s (AtomicAdd old arr ind val) =
-          doAtomic s old arr ind val "atomic_add" [C.cty|int|]
+          doAtomic s old arr ind val "atomicAdd" [C.cty|int|]
 
         atomicOps s (AtomicSMax old arr ind val) =
-          doAtomic s old arr ind val "atomic_max" [C.cty|int|]
+          doAtomic s old arr ind val "atomicMax" [C.cty|int|]
 
         atomicOps s (AtomicSMin old arr ind val) =
-          doAtomic s old arr ind val "atomic_min" [C.cty|int|]
+          doAtomic s old arr ind val "atomicMin" [C.cty|int|]
 
         atomicOps s (AtomicUMax old arr ind val) =
-          doAtomic s old arr ind val "atomic_max" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicMax" [C.cty|uint|]
 
         atomicOps s (AtomicUMin old arr ind val) =
-          doAtomic s old arr ind val "atomic_min" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicMin" [C.cty|uint|]
 
         atomicOps s (AtomicAnd old arr ind val) =
-          doAtomic s old arr ind val "atomic_and" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicAnd" [C.cty|uint|]
 
         atomicOps s (AtomicOr old arr ind val) =
-          doAtomic s old arr ind val "atomic_or" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicOr" [C.cty|uint|]
 
         atomicOps s (AtomicXor old arr ind val) =
-          doAtomic s old arr ind val "atomic_xor" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicXor" [C.cty|uint|]
 
         atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
           ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
           cmp' <- GenericC.compileExp GenericC.TargetShader cmp
           val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomic_cmpxchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomicCompSwap(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
 
         atomicOps s (AtomicXchg old arr ind val) = do
           ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
           val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomic_xchg(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomicExchange(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
 
         cannotAllocate :: GenericC.Allocate KernelOp ShaderState
         cannotAllocate _ =
