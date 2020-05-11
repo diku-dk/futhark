@@ -34,6 +34,7 @@ module Futhark.CodeGen.Backends.GenericC
   , contextContents
   , contextFinalInits
   , runCompilerM
+  , cachingMemory
   , blockScope
   , compileFun
   , compileCode
@@ -455,10 +456,11 @@ contextType = do
   name <- publicName "context"
   return [C.cty|struct $id:name|]
 
-memToCType :: Space -> CompilerM op s C.Type
-memToCType space = do
+memToCType :: VName -> Space -> CompilerM op s C.Type
+memToCType v space = do
   refcount <- fatMemory space
-  if refcount
+  cached <- isJust <$> cacheMem v
+  if refcount && not cached
      then return $ fatMemType space
      else rawMemCType space
 
@@ -621,7 +623,7 @@ declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
   cached <- isJust <$> cacheMem name
   unless cached $ do
-    ty <- memToCType space
+    ty <- memToCType name space
     decl [C.cdecl|$ty:ty $id:name;|]
     resetMem name space
     modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
@@ -869,14 +871,14 @@ opaqueLibraryFunctions desc vds = do
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
   return $ signedPrimTypeToCType signed pt
-valueDescToCType (ArrayValue _ space pt signed shape) = do
+valueDescToCType (ArrayValue mem space pt signed shape) = do
   let pt' = signedPrimTypeToCType signed pt
       rank = length shape
   exists <- gets $ lookup (pt',rank) . compArrayStructs
   case exists of
     Just (cty, _) -> return cty
     Nothing -> do
-      memty <- memToCType space
+      memty <- memToCType mem space
       name <- publicName $ arrayName pt signed rank
       let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
           stype = [C.cty|struct $id:name|]
@@ -1608,7 +1610,7 @@ compileConstants (Constants ps init_consts) = do
           let ctp = primTypeToCType bt
           return [C.csdecl|$ty:ctp $id:name;|]
         constParamField (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           return [C.csdecl|$ty:ty $id:name;|]
 
         constMacro p = ([C.citem|$escstm:def|], [C.citem|$escstm:undef|])
@@ -1626,20 +1628,19 @@ compileConstants (Constants ps init_consts) = do
           let ctp = primTypeToCType bt
           return [C.citem|$ty:ctp $id:name = ctx->constants.$id:name;|]
         getConst (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           return [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
 
-compileFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants (fname, func@(Function _ outputs inputs body _ _)) = do
-  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
-  inparams <- mapM compileInput inputs
-
+cachingMemory :: M.Map VName Space
+              -> ([C.BlockItem] -> [C.Stm] -> CompilerM op s a)
+              -> CompilerM op s a
+cachingMemory lexical f = do
   -- We only consider lexical 'DefaultSpace' memory blocks to be
   -- cached.  This is not a deep technical restriction, but merely a
   -- heuristic based on GPU memory usually involving larger
   -- allocations, that do not suffer from the overhead of reference
   -- counting.
-  let cached = M.keys $ M.filter (==DefaultSpace) $ lexicalMemoryUsage func
+  let cached = M.keys $ M.filter (==DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do
     size <- newVName $ pretty mem <> "_cached_size"
@@ -1647,7 +1648,8 @@ compileFun get_constants (fname, func@(Function _ outputs inputs body _ _)) = do
 
   let lexMem env =
         env { envCachedMem =
-                M.fromList $ map (first (`C.toExp` noLoc)) cached'
+                M.fromList (map (first (`C.toExp` noLoc)) cached')
+                <> envCachedMem env
             }
 
       declCached (mem, size) =
@@ -1655,31 +1657,38 @@ compileFun get_constants (fname, func@(Function _ outputs inputs body _ _)) = do
          [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]]
 
       freeCached (mem, _) =
-        [C.citem|free($id:mem);|]
+        [C.cstm|free($id:mem);|]
 
-  body' <- local lexMem $ blockScope $ do
-             mapM_ item $ concatMap declCached cached'
-             compileFunBody out_ptrs outputs body
+  local lexMem $ f (concatMap declCached cached') (map freeCached cached')
 
-  ctx_ty <- contextType
-  return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
-                                                   $params:outparams, $params:inparams);|],
-          [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
-                                                 $params:outparams, $params:inparams) {
-             int err = 0;
-             $items:get_constants
-             $items:body'
-            cleanup:
-             {}
-             $items:(map freeCached cached')
-             return err;
-}|])
+compileFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
+compileFun get_constants (fname, func@(Function _ outputs inputs body _ _)) = do
+  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
+  inparams <- mapM compileInput inputs
+
+  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
+    body' <- blockScope $ compileFunBody out_ptrs outputs body
+
+    ctx_ty <- contextType
+    return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                     $params:outparams, $params:inparams);|],
+            [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
+                                                   $params:outparams, $params:inparams) {
+               int err = 0;
+               $items:decl_cached
+               $items:get_constants
+               $items:body'
+              cleanup:
+               {}
+               $stms:free_cached
+               return err;
+  }|])
 
   where compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
         compileInput (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           return [C.cparam|$ty:ty $id:name|]
 
         compileOutput (ScalarParam name bt) = do
@@ -1687,7 +1696,7 @@ compileFun get_constants (fname, func@(Function _ outputs inputs body _ _)) = do
           p_name <- newVName $ "out_" ++ baseString name
           return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
         compileOutput (MemParam name space) = do
-          ty <- memToCType space
+          ty <- memToCType name space
           p_name <- newVName $ baseString name ++ "_p"
           return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
