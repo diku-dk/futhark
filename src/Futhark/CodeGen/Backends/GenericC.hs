@@ -628,7 +628,10 @@ declMem name space = do
 -- FIXME: This needs to be able to handle other types than `int`.
 declMemShader :: VName -> Space -> CompilerM op s ()
 declMemShader name space = do
-  decl [C.cdecl|typename shared_int $id:name[];|]
+  case space of
+    ScalarSpace{} -> decl [C.cdecl|int $id:name[];|]
+                     -- FIXME: Determine the array size without hardcoding.
+    _             -> decl [C.cdecl|typename shared_int $id:name[256];|]
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
