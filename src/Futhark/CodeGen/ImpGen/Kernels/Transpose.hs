@@ -10,7 +10,6 @@ import Prelude hiding (quot, rem)
 
 import Futhark.CodeGen.ImpCode.Kernels
 import Futhark.Representation.AST.Attributes.Types
-import Futhark.Representation.AST.Attributes.Names (freeIn, namesToList)
 import Futhark.Util.IntegralExp (IntegralExp, quot, rem, quotRoundingUp)
 
 -- | Which form of transposition to generate code for.
