@@ -13,7 +13,6 @@ module Futhark.CodeGen.ImpCode.Multicore
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.Representation.AST.Attributes.Names
 import Futhark.Util.Pretty
 
 -- | An imperative program.
@@ -39,7 +38,6 @@ type Granularity = Int32
 -- This could carry more information
 data Scheduling = Dynamic Granularity
                 | Static
-
 
 instance Pretty MulticoreFunc where
   ppr (MulticoreFunc params prebody body _ ) =

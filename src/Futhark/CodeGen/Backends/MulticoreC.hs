@@ -214,7 +214,7 @@ compileSchedulingVal (Dynamic granularity) =  return [C.cexp|$exp:granularity|]
 
 paramToCType :: Param -> GC.CompilerM op s C.Type
 paramToCType (ScalarParam _ pt) = pure $ GC.primTypeToCType pt
-paramToCType (MemParam _ space') = GC.memToCType space'
+paramToCType (MemParam name space') = GC.memToCType name space'
 
 functionRuntime :: String -> String
 functionRuntime = (++"_total_runtime")
@@ -294,6 +294,9 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   e' <- GC.compileExp e
   granularity <- compileSchedulingVal scheduling
 
+  let lexical = lexicalMemoryUsage $
+                Function False [] params body [] []
+
   fstruct <- multicoreDef "parloop_struct" $ \s ->
      return [C.cedecl|struct $id:s {
                         struct futhark_context *ctx;
@@ -302,22 +305,28 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
 
   ftask <- multicoreDef "parloop" $ \s -> do
 
-    fbody <- benchmarkCode s <=< GC.inNewFunction $ GC.blockScope $ do
+    fbody <- benchmarkCode s <=<
+             GC.inNewFunction True $ GC.cachingMemory lexical $
+             \decl_cached free_cached -> GC.blockScope $ do
       mapM_ GC.item
         [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
 
       GC.decl [C.cdecl|int $id:i = start;|]
       GC.compileCode prebody
       body' <- GC.blockScope $ GC.compileCode body
+      mapM_ GC.item decl_cached
       GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
                        $items:body'
                      }|]
+      GC.stm [C.cstm|cleanup: {}|]
+      mapM_ GC.stm free_cached
 
     return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
+                       int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
                        $items:fbody
-                       return 0;
+                       return err;
                      }|]
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
