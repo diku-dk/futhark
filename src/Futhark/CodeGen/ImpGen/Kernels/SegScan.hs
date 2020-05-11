@@ -198,6 +198,9 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
         let rets = lambdaReturnType scan_op
             scan_x_params = xParams scan
             (array_scan, fence, barrier) = barrierFor scan_op
+
+        when array_scan barrier
+
         sLoopNest vec_shape $ \vec_is -> do
           sComment "maybe restore some to-scan values to parameters, or read neutral" $
             sIf in_bounds

@@ -19,8 +19,8 @@ import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, PatElem, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.Representation.Mem
-import Futhark.Pass.ExplicitAllocations
-  (simplifiable, arraySizeInBytesExp)
+import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.Pass.ExplicitAllocations (simplifiable)
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Optimise.Simplify.Engine as Engine
@@ -120,9 +120,8 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
       -- Create non-existential memory blocks big enough to hold the
       -- arrays.
       (arr_to_mem, oldmem_to_mem) <-
-        fmap unzip $ forM fixable $ \(arr_pe, oldmem, space) -> do
-          size <- letSubExp "size" =<<
-                  toExp (arraySizeInBytesExp $ patElemType arr_pe)
+        fmap unzip $ forM fixable $ \(arr_pe, mem_size, oldmem, space) -> do
+          size <- letSubExp "size" =<< toExp mem_size
           mem <- letExp "mem" $ Op $ allocOp size space
           return ((patElemName arr_pe, mem), (oldmem, mem))
 
@@ -155,7 +154,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
         inContext = (`elem` patternContextNames pat)
 
         hasConcretisableMemory fixable pat_elem
-          | (_, MemArray _ shape _ (ArrayIn mem _)) <- patElemAttr pat_elem,
+          | (_, MemArray pt shape _ (ArrayIn mem ixfun)) <- patElemAttr pat_elem,
             Just (j, Mem space) <-
               fmap patElemType <$> find ((mem==) . patElemName . snd)
                                         (zip [(0::Int)..] $ patternElements pat),
@@ -164,7 +163,10 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
             mem `onlyUsedIn` patElemName pat_elem,
             all knownSize (shapeDims shape),
             fse /= tse =
-              (pat_elem, mem, space) : fixable
+              let mem_size =
+                    ConvOpExp (SExt Int32 Int64) $
+                    product $ primByteSize pt : IxFun.base ixfun
+              in (pat_elem, mem_size, mem, space) : fixable
           | otherwise =
               fixable
 unExistentialiseMemory _ _ _ _ = Skip
