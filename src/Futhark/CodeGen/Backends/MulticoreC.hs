@@ -351,10 +351,11 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
       mapM_ GC.item
         [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
 
+      mapM_ GC.item decl_cached
+
       GC.decl [C.cdecl|int $id:i = start;|]
       GC.compileCode prebody
       body' <- GC.blockScope $ GC.compileCode body
-      mapM_ GC.item decl_cached
       GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
                        $items:body'
                      }|]
