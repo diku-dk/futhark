@@ -11,6 +11,7 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.MCMem
+import Futhark.Transform.Rename
 
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
@@ -160,6 +161,11 @@ segmentedHist pat space histops kbody = do
                               (Imp.MulticoreFunc params mempty fbody tid)
 
 
+renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
+renameHistOpLambda hist_ops =
+  forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
+    lam' <- renameLambda lam
+    return $ HistOp w rf dest neutral shape lam'
 
 nonsegmentedHist :: Pattern MCMem
                 -> SegSpace
@@ -180,9 +186,11 @@ nonsegmentedHist pat space histops kbody = do
   hist_width <- toExp $ histWidth $ head histops
   -- TODO we should find a proper condition
   let use_small_dest_histogram = (num_threads' * hist_width) .<=. product ns'
+  histops' <- renameHistOpLambda histops
+
   sIf use_small_dest_histogram
      (smallDestHistogram pat space histops num_threads kbody)
-     (largeDestHistogram pat space histops kbody)
+     (largeDestHistogram pat space histops' kbody)
 
 -- Generates num_threads sub histograms of the size
 -- of the destination histogram
@@ -219,8 +227,6 @@ smallDestHistogram pat space histops num_threads kbody = do
 
   thread_id <- dPrim "thread_id" $ IntType Int32
   tid_exp <- toExp $ Var thread_id
-
-
 
   -- Actually allocate subhistograms
   histograms <- forM (zip init_histograms hist_H_chks) $
