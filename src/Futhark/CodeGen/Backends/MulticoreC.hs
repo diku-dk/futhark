@@ -311,7 +311,7 @@ benchmarkCode name tid code = do
         end = name ++ "_end"
         -- This case should be mutex protected
         updateFields Nothing    = [C.citems|ctx->$id:(functionRuns name)++;
-                                            ctx->$id:(functionRuntime name) += elapsed;
+                                            ctx->$id:(functionRuntime name) += elapsed;|]
         updateFields (Just tid') = [C.citems|ctx->$id:(functionRuns name)[$id:tid']++;
                                             ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;|]
 
