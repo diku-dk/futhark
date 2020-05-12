@@ -18,12 +18,13 @@ import Futhark.Representation.MCMem (Prog, MCMem)
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog MCMem
             -> m GC.CParts
 compileProg =
-  GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
+  GC.compileProg operations generateContext "" [DefaultSpace] cliOptions <=<
   ImpGen.compileProg
   where generateContext = do
 
@@ -37,7 +38,7 @@ compileProg =
 
           cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:s;|],
-             [C.cedecl|struct $id:s { int debugging; };|])
+             [C.cedecl|struct $id:s { int debugging; int profiling; };|])
 
           GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:cfg* $id:s(void);|],
@@ -47,6 +48,7 @@ compileProg =
                                    return NULL;
                                  }
                                  cfg->debugging = 0;
+                                 cfg->profiling = 0;
                                  return cfg;
                                }|])
 
@@ -60,6 +62,12 @@ compileProg =
              ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
               [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
                           cfg->debugging = detail;
+                        }|])
+
+          GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
+             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+              [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
+                          cfg->profiling = flag;
                         }|])
 
           GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
@@ -78,6 +86,7 @@ compileProg =
                           int detail_memory;
                           int debugging;
                           int profiling;
+                          int profiling_paused;
                           typename lock_t lock;
                           char *error;
                           int total_runs;
@@ -98,6 +107,8 @@ compileProg =
                  srand(time(0));
                  ctx->detail_memory = cfg->debugging;
                  ctx->debugging = cfg->debugging;
+                 ctx->profiling = cfg->profiling;
+                 ctx->profiling_paused = 0;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
                  $stms:init_fields
@@ -156,14 +167,13 @@ compileProg =
           GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         // ctx->profiling = 0;
-                         (void)ctx;
+                         ctx->profiling_paused = 1;
                        }|])
 
           GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         ctx->profiling = 1;
+                         ctx->profiling_paused = 0;
                        }|])
 
           GC.publicDef_ "context_get_num_threads" GC.InitDecl $ \s ->
@@ -171,6 +181,16 @@ compileProg =
              [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                         return ctx->scheduler.num_threads;
                        }|])
+
+
+cliOptions :: [Option]
+cliOptions =
+  [ Option { optionLongName = "profile"
+           , optionShortName = Just 'P'
+           , optionArgument = NoArgument
+           , optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+           }
+  ]
 
 operations :: GC.Operations Multicore ()
 operations = GC.defaultOperations
@@ -256,12 +276,12 @@ benchmarkCode name code = do
   addBenchmarkFields name
   return [C.citems|
      typename int64_t $id:start;
-     if (ctx->profiling) {
+     if (ctx->profiling && !ctx->profiling_paused) {
        $id:start = get_wall_time();
      }
      $items:code
 
-     if (ctx->profiling) {
+     if (ctx->profiling && !ctx->profiling_paused) {
        typename int64_t $id:end = get_wall_time();
        typename uint64_t elapsed = $id:end - $id:start;
        CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
