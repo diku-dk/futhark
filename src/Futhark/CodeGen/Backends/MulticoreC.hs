@@ -111,10 +111,10 @@ compileProg =
                  ctx->profiling_paused = 0;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
-                 $stms:init_fields
-
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
+
+                 $stms:init_fields
 
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
@@ -243,37 +243,56 @@ functionRuns :: String -> String
 functionRuns = (++"_runs")
 
 
-multiCoreReport :: [String] -> [C.BlockItem]
+multiCoreReport :: [(String, Bool)] -> [C.BlockItem]
 multiCoreReport names = report_kernels
-  where longest_name = foldl max 0 $ map length names
+  where longest_name = foldl max 0 $ map (length . fst) names
         report_kernels = concatMap reportKernel names
-        format_string name =
+        format_string name True =
           let padding = replicate (longest_name - length name) ' '
-          in unwords [name ++ padding,
-                      "ran %5d times; avg: %8ldus; total: %8ldus\n"]
-        reportKernel name =
+          in unwords ["tid %2d -", name ++ padding, "ran %7d times; avg: %9ldus; total: %8ldus\n"]
+        format_string name False =
+          let padding = replicate (longest_name - length name) ' '
+          in unwords ["        ", name ++ padding, "ran %7d times; avg: %9ldus; total: %9ldus\n"]
+        reportKernel (name, is_array) =
           let runs = functionRuns name
               total_runtime = functionRuntime name
-          in [[C.citem|
-               fprintf(stderr,
-                       $string:(format_string name),
+          in if is_array then
+                   [[C.citem|
+                     for (int i = 0; i < ctx->scheduler.num_threads; i++) {
+                       fprintf(stderr,
+                         $string:(format_string name is_array),
+                         i,
+                         ctx->$id:runs[i],
+                         (long int) ctx->$id:total_runtime[i] / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1),
+                         (long int) ctx->$id:total_runtime[i]);
+                     }
+                   |]]
+
+
+             else [[C.citem|
+                    fprintf(stderr,
+                       $string:(format_string name is_array),
                        ctx->$id:runs,
                        (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
                        (long int) ctx->$id:total_runtime);
-              |],
-              [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
-              [C.citem|ctx->total_runs += ctx->$id:runs;|]]
+                   |],
+                   [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
+                   [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
 
-addBenchmarkFields :: String -> GC.CompilerM op s ()
-addBenchmarkFields name = do
+addBenchmarkFields :: String -> Maybe VName -> GC.CompilerM op s ()
+addBenchmarkFields name (Just _) = do
+  GC.contextField (functionRuntime name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
+  GC.contextField (functionRuns name) [C.cty|int*|] $ Just [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
+addBenchmarkFields name Nothing = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
 
 
-benchmarkCode :: String -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
-benchmarkCode name code = do
-  addBenchmarkFields name
+
+benchmarkCode :: String -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
+benchmarkCode name tid code = do
+  addBenchmarkFields name tid
   return [C.citems|
      typename int64_t $id:start;
      if (ctx->profiling && !ctx->profiling_paused) {
@@ -284,17 +303,18 @@ benchmarkCode name code = do
      if (ctx->profiling && !ctx->profiling_paused) {
        typename int64_t $id:end = get_wall_time();
        typename uint64_t elapsed = $id:end - $id:start;
-       CHECK_ERR(pthread_mutex_lock(&ctx->profile_mutex), "pthread_mutex_lock");
-       ctx->$id:(functionRuns name)++;
-       ctx->$id:(functionRuntime name) += elapsed;
-       CHECK_ERR(pthread_mutex_unlock(&ctx->profile_mutex), "pthread_mutex_unlock");
+       $items:(updateFields tid)
      }
      |]
 
   where start = name ++ "_start"
         end = name ++ "_end"
-        -- start_ifdef = pretty [C.cunit|$esc:("#ifdef MCPROFILE")|]
-        -- stop_ifdef = pretty [C.cunit|$esc:("#endif")|]
+        -- This case should be mutex protected
+        updateFields Nothing    = [C.citems|ctx->$id:(functionRuns name)++;
+                                            ctx->$id:(functionRuntime name) += elapsed;
+        updateFields (Just tid') = [C.citems|ctx->$id:(functionRuns name)[$id:tid']++;
+                                            ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;|]
+
 
 multicoreName :: String -> GC.CompilerM op s String
 multicoreName s = do
@@ -325,7 +345,7 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
 
   ftask <- multicoreDef "parloop" $ \s -> do
 
-    fbody <- benchmarkCode s <=<
+    fbody <- benchmarkCode s (Just tid) <=<
              GC.inNewFunction True $ GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do
       mapM_ GC.item
@@ -362,13 +382,13 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
 
   let ftask_err = ftask ++ "_err"
-  code' <- benchmarkCode ftask_name [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
+  code' <- benchmarkCode ftask_name Nothing [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
                                               if ($id:ftask_err != 0) {
                                                 futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                                               }|]
 
   mapM_ GC.item code'
-  mapM_ GC.profileReport $ multiCoreReport [ftask_name, ftask]
+  mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_name] [True, False]
 
 
 compileOp (MulticoreCall [] f) =
