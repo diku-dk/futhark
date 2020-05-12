@@ -159,15 +159,22 @@ static void shader_succeed(int ret,
   }
 }
 
-static int shader_link_succeed(GLuint shader) {
+static int shader_link_succeed(GLuint program) {
   GLint success;
-  GLchar infoLog[2048];
 
-  glGetProgramiv(shader, GL_LINK_STATUS, &success);
+  glGetProgramiv(program, GL_LINK_STATUS, &success);
 
   if (!success) {
-    glGetProgramInfoLog(shader, 2048, NULL, infoLog);
-    printf("PROGRAM_LINKING_ERROR: \n%s\n", infoLog);
+    GLint maxLen;
+    glGetProgramiv(program, GL_INFO_LOG_LENGTH, &maxLen);
+
+    GLchar infoLog[maxLen];
+    glGetProgramInfoLog(program, maxLen, &maxLen, infoLog);
+    printf("PROGRAM_LINKING_ERROR:\n%s\n", infoLog);
+
+    // The program is futile at this point.
+    glDeleteProgram(program);
+
     return 1;
   }
   return 0;
@@ -175,13 +182,19 @@ static int shader_link_succeed(GLuint shader) {
 
 static int shader_compile_succeed(GLuint shader) {
   GLint success;
-  GLchar infoLog[2048];
 
   glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
 
   if (!success) {
-    glGetShaderInfoLog(shader, 2048, NULL, infoLog);
-    printf("SHADER_COMPILATION_ERROR: \n%s\n", infoLog);
+    GLint maxLen;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &maxLen);
+
+    GLchar infoLog[maxLen];
+    glGetShaderInfoLog(shader, maxLen, &maxLen, infoLog);
+    printf("SHADER_COMPILATION_ERROR:\n%s\n", infoLog);
+
+    glDeleteShader(shader); // Avoid leaking the shader.
+
     return 1;
   }
   return 0;
