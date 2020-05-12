@@ -16,7 +16,7 @@ let amicable((n: i32, nd: i32), (m: i32, md: i32)): bool =
 let getPair [upper] (divs: [upper](i32, i32)) (flat_i: i32): ((i32,i32), (i32,i32)) =
   let i = flat_i / upper
   let j = flat_i % upper
-  in unsafe (divs[i], divs[j])
+  in (divs[i], divs[j])
 
 let main(upper: i32): [][2]i32 =
   let range = map (1+) (iota upper)
