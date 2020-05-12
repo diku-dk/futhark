@@ -14,7 +14,7 @@ let main(n: i32): [n]bool =
     let js = map (*i+1) (iota n)
     let flips = map (\j ->
                        if j < n
-                       then unsafe !is_open[j]
+                       then !is_open[j]
                        else true -- Doesn't matter.
                     ) js
     in scatter is_open js flips
