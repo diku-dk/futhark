@@ -52,8 +52,6 @@ accParams, nextParams :: SegScanOpSlug -> [LParam MCMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
-slugsComm :: [SegScanOpSlug] -> Commutativity
-slugsComm = mconcat . map (segBinOpComm . slugOp)
 
 segScanOpSlug :: Imp.Exp
              -> (SegBinOp MCMem, [VName])
@@ -134,7 +132,6 @@ nonsegmentedScan pat space scan_ops kbody = do
 
   -- |
   -- Begin stage two of scan
-
   stage_two_red_arrs <- groupResultArrays (Var num_threads) scan_ops
   slugs_stage_two <- mapM (segScanOpSlug tid') $ zip scan_ops stage_two_red_arrs
 
@@ -202,12 +199,12 @@ nonsegmentedScan pat space scan_ops kbody = do
               forM_ (zip scan_x_params scan_res) $ \(p, se) ->
                 copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
 
-            test_idx  <- dPrimV "carry_in_flat_idx" $ product (map Imp.vi32 is) - 1
-            test_idx' <- toExp $ Var test_idx
+            prev_idx  <- dPrimV "prev_flat_idx" $ product (map Imp.vi32 is) - 1
+            prev_idx' <- toExp $ Var prev_idx
 
             sComment "Load y params" $
               forM_ (zip scan_y_params pes) $ \(p, pe) ->
-                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (test_idx' : vec_is)
+                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (prev_idx' : vec_is)
 
             compileStms mempty (bodyStms $ slugBody slug) $
               forM_ (zip pes $ bodyResult $ slugBody slug) $ \(pe, se) ->
@@ -262,10 +259,10 @@ segmentedScan pat space scan_ops kbody = do
           let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody
           sComment "write to-scan values to parameters" $
             forM_ (zip scan_y_params scan_res) $ \(p, se) ->
-            copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
+              copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
           sComment "write mapped values results to global memory" $
             forM_ (zip (drop (length $ segBinOpNeutral scan_op) $ patternElements pat) map_res) $ \(pe, se) ->
-            copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is) (kernelResultSubExp se) []
+              copyDWIMFix (patElemName pe) (map (`Imp.var` int32) is) (kernelResultSubExp se) []
 
           sComment "combine with carry and write to local memory" $
             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
@@ -279,8 +276,9 @@ segmentedScan pat space scan_ops kbody = do
 
   ts <- mapM lookupType freeVariables
   let params = zipWith toParam freeVariables ts
+  let sched = decideScheduling fbody
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop Imp.Static ntask n_segments (product $ init ns')
+  emit $ Imp.Op $ Imp.ParLoop sched ntask n_segments (product $ init ns')
                               (Imp.MulticoreFunc params mempty fbody tid)
