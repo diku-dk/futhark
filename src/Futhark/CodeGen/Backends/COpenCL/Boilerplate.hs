@@ -224,6 +224,12 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                          cfg->opencl.default_tile_size_changed = 1;
                        }|])
 
+  GC.publicDef_ "context_config_set_default_reg_tile_size" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->opencl.default_reg_tile_size = size;
+                       }|])
+
   GC.publicDef_ "context_config_set_default_threshold" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
@@ -608,6 +614,11 @@ commonOptions =
             , optionShortName = Nothing
             , optionArgument = RequiredArgument "INT"
             , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+            }
+   , Option { optionLongName = "default-reg-tile-size"
+            , optionShortName = Nothing
+            , optionArgument = RequiredArgument "INT"
+            , optionAction = [C.cstm|futhark_context_config_set_default_reg_tile_size(cfg, atoi(optarg));|]
             }
    , Option { optionLongName = "default-threshold"
             , optionShortName = Nothing
