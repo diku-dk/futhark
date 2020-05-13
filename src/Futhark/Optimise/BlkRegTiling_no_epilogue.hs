@@ -176,14 +176,14 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                                      res <- index "A_elem" inp_A [a_col_idx]
                                      resultBodyM [Var res])
                                  (eBody $ map eBlank [Prim map_t1])
-                    loc_ind <- letSubExp "loc_ind" =<< toExp (LeafExp k int32 +
-                                 LeafExp i int32 * primFromSe tk)
-                    -- loc_ind <- letSubExp "loc_ind" =<<
-                    --          eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
-                    --              (do res <- letExp "loc_fi" =<< toExp (LeafExp k int32 +
-                    --                         LeafExp i int32 * primFromSe tk)
-                    --                  resultBodyM [Var res])
-                    --              (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
+                    -- loc_ind <- letSubExp "loc_ind" =<< toExp (LeafExp k int32 +
+                    --              LeafExp i int32 * primFromSe tk)
+                    loc_ind <- letSubExp "loc_ind" =<<
+                             eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
+                                 (do res <- letExp "loc_fi" =<< toExp (LeafExp k int32 +
+                                            LeafExp i int32 * primFromSe tk)
+                                     resultBodyM [Var res])
+                                 (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
                     return (glb_v, loc_ind)
                 let [a_loc'] = scatter_a_loc
                 return $ resultBody [Var a_loc']
@@ -217,14 +217,15 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                                      res <- index "B_elem" inp_B [b_row_idx]
                                      resultBodyM [Var res])
                                  (eBody $ map eBlank [Prim map_t2])
-                  loc_ind <- letSubExp "loc_ind" =<< toExp (LeafExp j int32 + 
-                               LeafExp k int32 * primFromSe tx_rx)
-                  -- loc_ind <- letSubExp "loc_ind" =<<
-                           -- eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
-                           --     (do res <- letExp "loc_fi" =<< toExp (LeafExp j int32 +
-                           --                  LeafExp k int32 * primFromSe tx_rx)
-                           --         resultBodyM [Var res])
-                           --     (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
+
+                  -- loc_ind <- letSubExp "loc_ind" =<< toExp (LeafExp j int32 +
+                               -- LeafExp k int32 * primFromSe tx_rx)
+                  loc_ind <- letSubExp "loc_ind" =<<
+                           eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
+                               (do res <- letExp "loc_fi" =<< toExp (LeafExp j int32 +
+                                            LeafExp k int32 * primFromSe tx_rx)
+                                   resultBodyM [Var res])
+                               (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
                   return (glb_v, loc_ind)
                 let [b_loc'] = scatter_b_loc
                 return $ resultBody [Var b_loc']
@@ -310,7 +311,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
 
       -- return $ Just (host_stms, new_kernel)
-      trace (pretty host_stms ++ "\n" ++ pretty new_kernel) $ return $ Just (host_stms, new_kernel)
+      -- trace (pretty host_stms ++ "\n" ++ pretty new_kernel) $ return $ Just (host_stms, new_kernel)
+      trace "NO EPILOGUE" $ return $ Just (host_stms, new_kernel)
 
   where -- | There are two supported cases here:
         --   1. the statement is a slice that produces one of the
