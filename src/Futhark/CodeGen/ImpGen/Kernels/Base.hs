@@ -1387,34 +1387,28 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
   constants <- kernelConstants <$> askEnv
 
   let gids = map fst $ unSegSpace space
-      (dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
-      dims' = map (toExp' int32) dims
+      (_dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
       group_tiles' = map (toExp' int32) group_tiles
       reg_tiles' = map (toExp' int32) reg_tiles
 
-  -- How many register tiles along each group dimension?  The product
-  -- of these should be the group size.
-  reg_tiles_per_group_dim <-
-    mapM (dPrimVE "reg_tiles_per_group_dim") $
-    zipWith quotRoundingUp dims' reg_tiles'
-
-  -- Which tile is this group responsible for?
-  group_tile_is <-
-    mapM (dPrimVE "group_tile_i") $ zipWith (*) (map Imp.vi32 gids) group_tiles'
+  -- Which group tile is this group responsible for?
+  let group_tile_is = map Imp.vi32 gids
 
   -- Within the group tile, which register tile is this thread
   -- responsible for?
   reg_tile_is <-
     mapM (dPrimVE "reg_tile_i") $
-    unflattenIndex reg_tiles_per_group_dim $ kernelLocalThreadId constants
+    unflattenIndex group_tiles' $ kernelLocalThreadId constants
 
   -- Compute output array slice for the register tile belonging to
   -- this thread.
   let regTileSliceDim (group_tile, group_tile_i) (reg_tile, reg_tile_i) = do
-        tile_dim_start <- dPrimVE "tile_dim_start" $ group_tile*group_tile_i+reg_tile*reg_tile_i
+        tile_dim_start <- dPrimVE "tile_dim_start" $
+                          (group_tile*reg_tile)*group_tile_i+reg_tile*reg_tile_i
         return $ DimSlice tile_dim_start reg_tile 1
-  reg_tile_slices <- zipWithM regTileSliceDim
-                     (zip group_tiles' group_tile_is) (zip reg_tiles' reg_tile_is)
+  reg_tile_slices <-
+    zipWithM regTileSliceDim
+    (zip group_tiles' group_tile_is) (zip reg_tiles' reg_tile_is)
 
   localOps threadOperations $
     copyDWIM (patElemName pe) reg_tile_slices (Var what) (map DimFix reg_tile_is)
