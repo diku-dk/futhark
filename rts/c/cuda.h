@@ -420,28 +420,29 @@ static void cuda_module_setup(struct cuda_context *ctx,
                               const char *extra_opts[]) {
   char *ptx = NULL, *src = NULL;
 
-  if (ctx->cfg.load_ptx_from == NULL && ctx->cfg.load_program_from == NULL) {
+  if (ctx->cfg.load_program_from == NULL) {
     src = concat_fragments(src_fragments);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
-  } else if (ctx->cfg.load_ptx_from == NULL) {
-    load_string_from_file(ctx->cfg.load_program_from, &src, NULL);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   } else {
+    load_string_from_file(ctx->cfg.load_program_from, &src, NULL);
+  }
+
+  if (ctx->cfg.load_ptx_from) {
     if (ctx->cfg.load_program_from != NULL) {
       fprintf(stderr,
-              "WARNING: Loading PTX from %s instead of C code from %s\n",
+              "WARNING: Using PTX from %s instead of C code from %s\n",
               ctx->cfg.load_ptx_from, ctx->cfg.load_program_from);
     }
-
     load_string_from_file(ctx->cfg.load_ptx_from, &ptx, NULL);
   }
 
   if (ctx->cfg.dump_program_to != NULL) {
-    if (src == NULL) {
-      src = concat_fragments(src_fragments);
-    }
     dump_string_to_file(ctx->cfg.dump_program_to, src);
   }
+
+  if (ptx == NULL) {
+    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
+  }
+
   if (ctx->cfg.dump_ptx_to != NULL) {
     dump_string_to_file(ctx->cfg.dump_ptx_to, ptx);
   }
