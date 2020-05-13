@@ -43,7 +43,6 @@ struct opencl_config {
 
   int default_group_size_changed;
   int default_tile_size_changed;
-  int default_reg_tile_size_changed;
 
   int num_sizes;
   const char **size_names;
@@ -81,7 +80,6 @@ static void opencl_config_init(struct opencl_config *cfg,
 
   cfg->default_group_size_changed = 0;
   cfg->default_tile_size_changed = 0;
-  cfg->default_reg_tile_size_changed = 0;
 
   cfg->num_sizes = num_sizes;
   cfg->size_names = size_names;
