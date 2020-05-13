@@ -163,13 +163,16 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
           | Just (update, mergename, mergeattr) <- relatedUpdate summary = do
             source <- newVName "modified_source"
             let source_t = snd $ updateType update
-                elmident = Ident (updateValue update) $ rowType source_t
+                elmident = Ident
+                           (updateValue update)
+                           (source_t `setArrayDims` sliceDims (updateIndices update))
             tell ([mkLet [] [Ident source source_t] $ BasicOp $ Update
                    (updateSource update)
                    (fullSlice source_t $ updateIndices update) $
                    snd $ mergeParam summary],
                   [mkLet [] [elmident] $ BasicOp $ Index
-                   (updateName update) (fullSlice (typeOf $ updateType update) $ updateIndices update)])
+                   (updateName update)
+                   (fullSlice source_t $ updateIndices update)])
             return $ Right (Param
                             mergename
                             (toDecl (typeOf mergeattr) Unique),
