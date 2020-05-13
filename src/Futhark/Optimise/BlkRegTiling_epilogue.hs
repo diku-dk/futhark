@@ -35,6 +35,8 @@ import Futhark.Representation.AST.Attributes.Names
 import Debug.Trace
 import Futhark.Util.Pretty
 
+
+
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
 
@@ -144,6 +146,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
           prologue_res <- forLoop full_tiles [cssss] $ \kk0 [thd_res_merge] -> do
 
             kk <- letExp "kk" =<< toExp (LeafExp kk0 int32 * primFromSe tk)
+            kkLoopBody <- 
 
             -- Cosmin: copy A from global to shared memory
 
@@ -584,17 +587,6 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                          lam_params
             lam_res : _ = bodyResult lam_body
 
-
-kkLoopBody :: 
-kkLoopBody group_tiles reg_tiles =
-kkLoopBody kk [a_loc_init, b_loc_init]
-  [a_loc_outer_dim, a_loc_inner_dim] [b_loc_outer_dim, b_loc_inner_dim]
-  [a_loc_sz, b_loc_sz] 
-                             
-
-  let [a_loc_init, b_loc_init] = loc_mem_inits
-
-  
 mm_BlkRegTiling _ = do
   traceM "nej"
   return Nothing
