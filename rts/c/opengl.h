@@ -404,6 +404,9 @@ static void setup_shader(struct opengl_context *ctx,
     glLinkProgram(ctx->program);
     SHADER_SUCCEED(shader_link_succeed(ctx->program));
 
+    // Detach shader after a successful link.
+    glDetachShader(ctx->program, computeShader);
+
     // Delete the compute shader object.
     glDeleteShader(computeShader);
     OPENGL_SUCCEED(glGetError());
