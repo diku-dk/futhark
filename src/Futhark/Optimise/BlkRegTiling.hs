@@ -175,25 +175,23 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                                      res <- index "A_elem" inp_A [a_col_idx]
                                      resultBodyM [Var res])
                                  (eBody $ map eBlank [Prim map_t1])
-                    loc_ind <- letSubExp "loc_ind" =<< toExp (LeafExp k int32 +
-                                 LeafExp i int32 * primFromSe tk)
-                    -- loc_ind <- letSubExp "loc_ind" =<<
-                    --          eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
-                    --              (do res <- letExp "loc_fi" =<< toExp (LeafExp k int32 +
-                    --                         LeafExp i int32 * primFromSe tk)
-                    --                  resultBodyM [Var res])
-                    --              (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
-                    return (glb_v, loc_ind)
+                    -- a_loc_ind <- letSubExp "a_loc_ind" =<< toExp (LeafExp k int32 +
+                    --              LeafExp i int32 * primFromSe tk)
+                    a_loc_ind <- letSubExp "a_loc_ind" =<<
+                             eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
+                                 (do res <- letExp "loc_fi" =<< toExp (LeafExp k int32 +
+                                            LeafExp i int32 * primFromSe tk)
+                                     resultBodyM [Var res])
+                                 (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
+                    return (glb_v, a_loc_ind)
                 let [a_loc'] = scatter_a_loc
                 return $ resultBody [Var a_loc']
               return $ resultBody [Var loop_a_loc]
 
             -- Cosmin: copy B from global to shared memory
             b_loc_init <- scratch "B_loc" map_t2 [b_loc_sz]
-            -- ===============================
             b_loc <- forLoop tk_div_ty b_loc_init $ \k0 b_loc_merge -> do
               loop_b_loc <- forLoop rx b_loc_merge $ \j0 b_loc_merge' -> do
-                -- segScatter desc arr_size updt_arr lvl f
                 scatter_b_loc <- segScatter "B_glb2loc" b_loc_sz b_loc_merge'
                       (segThread grid_size group_size) $ \lid -> do
 
@@ -216,15 +214,16 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                                      res <- index "B_elem" inp_B [b_row_idx]
                                      resultBodyM [Var res])
                                  (eBody $ map eBlank [Prim map_t2])
-                  loc_ind <- letSubExp "loc_ind" =<< toExp (LeafExp j int32 + 
-                               LeafExp k int32 * primFromSe tx_rx)
-                  -- loc_ind <- letSubExp "loc_ind" =<<
-                           -- eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
-                           --     (do res <- letExp "loc_fi" =<< toExp (LeafExp j int32 +
-                           --                  LeafExp k int32 * primFromSe tx_rx)
-                           --         resultBodyM [Var res])
-                           --     (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
-                  return (glb_v, loc_ind)
+
+                  -- b_loc_ind <- letSubExp "b_loc_ind" =<< toExp (LeafExp j int32 +
+                  --              LeafExp k int32 * primFromSe tx_rx)
+                  b_loc_ind <- letSubExp "b_loc_ind" =<<
+                           eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
+                               (do res <- letExp "loc_fi" =<< toExp (LeafExp j int32 +
+                                            LeafExp k int32 * primFromSe tx_rx)
+                                   resultBodyM [Var res])
+                               (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
+                  return (glb_v, b_loc_ind)
                 let [b_loc'] = scatter_b_loc
                 return $ resultBody [Var b_loc']
               return $ resultBody [Var loop_b_loc]
@@ -306,8 +305,8 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
             t0 <- letSubExp "t0" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
             kk <- letExp "kk" =<< toExp (primFromSe t0 * primFromSe tk)
 
-            -- Cosmin: copy A from global to local memory
             a_loc_init <- scratch "A_loc" map_t1 [a_loc_sz]
+            -- Cosmin: copy A from global to local memory
             a_loc <- forLoop ry a_loc_init $ \i0 a_loc_merge -> do
               loop_a_loc <- forLoop tk_div_tx a_loc_merge $ \k0 a_loc_merge' -> do
                 -- segScatter desc arr_size updt_arr lvl f
@@ -329,7 +328,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                     glb_v <- letSubExp "glb_v" =<<
                              eIf (toExp $
                                     LeafExp gtid_y int32 .<. primFromSe height_A .&&.
-                                    LeafExp a_col_idx int32  .<. primFromSe common_dim)
+                                    LeafExp a_col_idx int32 .<. primFromSe common_dim)
                                  (do addStm load_A
                                      res <- index "A_elem" inp_A [a_col_idx]
                                      resultBodyM [Var res])
@@ -345,11 +344,10 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                 return $ resultBody [Var a_loc']
               return $ resultBody [Var loop_a_loc]
 
-            -- Cosmin: copy B from global to shared memory
             b_loc_init <- scratch "B_loc" map_t2 [b_loc_sz]
+            -- Cosmin: copy B from global to shared memory
             b_loc <- forLoop tk_div_ty b_loc_init $ \k0 b_loc_merge -> do
               loop_b_loc <- forLoop rx b_loc_merge $ \j0 b_loc_merge' -> do
-                -- segScatter desc arr_size updt_arr lvl f
                 scatter_b_loc <- segScatter "B_glb2loc" b_loc_sz b_loc_merge'
                       (segThread grid_size group_size) $ \lid -> do
 
