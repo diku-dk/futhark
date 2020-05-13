@@ -130,8 +130,7 @@ optimiseStms [] m = m >> return []
 optimiseStms (bnd:bnds) m = do
   (bnds', bup) <- tapBottomUp $ bindingStm bnd $ optimiseStms bnds m
   bnd' <- optimiseInStm bnd
-  case filter ((`elem` boundHere) . updateValue) $
-       forwardThese bup of
+  case filter ((`elem` boundHere) . updateValue) $ forwardThese bup of
     [] -> checkIfForwardableUpdate bnd' bnds'
     updates -> do
       let updateStms = map updateStm updates
@@ -151,9 +150,8 @@ optimiseStms (bnd:bnds) m = do
 
         checkIfForwardableUpdate bnd'@(Let (Pattern [] [PatElem v attr])
                                        (StmAux cs _) e) bnds'
-            | BasicOp (Update src (DimFix i:slice) (Var ve)) <- e,
-              slice == drop 1 (fullSlice (typeOf attr) [DimFix i]) = do
-                forwarded <- maybeForward ve v attr cs src i
+            | BasicOp (Update src slice (Var ve)) <- e = do
+                forwarded <- maybeForward ve v attr cs src slice
                 return $ if forwarded
                          then bnds'
                          else bnd' : bnds'
@@ -217,6 +215,7 @@ instance Monoid (BottomUp lore) where
 
 updateStm :: Constraints lore => DesiredUpdate (LetAttr (Aliases lore)) -> Stm (Aliases lore)
 updateStm fwd =
+  certify (updateCertificates fwd) $
   mkLet [] [Ident (updateName fwd) $ typeOf $ updateType fwd] $
   BasicOp $ Update (updateSource fwd)
   (fullSlice (typeOf $ updateType fwd) $ updateIndices fwd) $
@@ -293,10 +292,10 @@ bindingNumber name = do
 deepen :: ForwardingM lore a -> ForwardingM lore a
 deepen = local $ \env -> env { topDownDepth = topDownDepth env + 1 }
 
-areAvailableBefore :: [SubExp] -> VName -> ForwardingM lore Bool
-areAvailableBefore ses point = do
+areAvailableBefore :: Names -> VName -> ForwardingM lore Bool
+areAvailableBefore names point = do
   pointN <- bindingNumber point
-  nameNs <- mapM bindingNumber $ subExpVars ses
+  nameNs <- mapM bindingNumber $ namesToList names
   return $ all (< pointN) nameNs
 
 isInCurrentBody :: VName -> ForwardingM lore Bool
@@ -327,20 +326,20 @@ tapBottomUp m = do (x,bup) <- listen m
 
 maybeForward :: Constraints lore =>
                 VName
-             -> VName -> LetAttr (Aliases lore) -> Certificates -> VName -> SubExp
+             -> VName -> LetAttr (Aliases lore)
+             -> Certificates -> VName -> Slice SubExp
              -> ForwardingM lore Bool
-maybeForward v dest_nm dest_attr cs src i = do
+maybeForward v dest_nm dest_attr cs src slice = do
   -- Checks condition (2)
-  available <- [i,Var src] `areAvailableBefore` v
-  -- ...subcondition, the certificates must also.
-  certs_available <- map Var (namesToList $ freeIn cs) `areAvailableBefore` v
+  available <- (freeIn src <> freeIn slice <> freeIn cs)
+               `areAvailableBefore` v
   -- Check condition (3)
   samebody <- isInCurrentBody v
   -- Check condition (6)
   optimisable <- isOptimisable v
   not_prim <- not . primType <$> lookupType v
-  if available && certs_available && samebody && optimisable && not_prim then do
-    let fwd = DesiredUpdate dest_nm dest_attr cs src [DimFix i] v
+  if available && samebody && optimisable && not_prim then do
+    let fwd = DesiredUpdate dest_nm dest_attr cs src slice v
     tell mempty { forwardThese = [fwd] }
     return True
     else return False

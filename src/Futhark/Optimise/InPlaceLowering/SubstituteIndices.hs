@@ -86,7 +86,8 @@ substituteIndicesInExp substs e = do
                     return $ update v v (mempty,
                                          row_copy,
                                          src2attr `setType`
-                                         stripArray (length is2) (typeOf src2attr),
+                                         (typeOf src2attr `setArrayDims`
+                                          sliceDims is2),
                                          []) substs'
               consumingSubst substs' _ =
                 return substs'
@@ -96,8 +97,10 @@ substituteIndicesInSubExp :: MonadBinder m =>
                              IndexSubstitutions (LetAttr (Lore m))
                           -> SubExp
                           -> m SubExp
-substituteIndicesInSubExp substs (Var v) = Var <$> substituteIndicesInVar substs v
-substituteIndicesInSubExp _      se      = return se
+substituteIndicesInSubExp substs (Var v) =
+  Var <$> substituteIndicesInVar substs v
+substituteIndicesInSubExp _ se =
+  return se
 
 substituteIndicesInVar :: MonadBinder m =>
                           IndexSubstitutions (LetAttr (Lore m))
@@ -105,7 +108,8 @@ substituteIndicesInVar :: MonadBinder m =>
                        -> m VName
 substituteIndicesInVar substs v
   | Just (cs2, src2, _, []) <- lookup v substs =
-    certifying cs2 $ letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
+    certifying cs2 $
+    letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
   | Just (cs2, src2, src2_attr, is2) <- lookup v substs =
     certifying cs2 $
     letExp "idx" $ BasicOp $ Index src2 $ fullSlice (typeOf src2_attr) is2
@@ -116,13 +120,12 @@ substituteIndicesInBody :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m)) 
                            IndexSubstitutions (LetAttr (Lore m))
                         -> Body (Lore m)
                         -> m (Body (Lore m))
-substituteIndicesInBody substs body = do
-  (substs', bnds') <- inScopeOf bnds $
-    collectStms $ substituteIndicesInStms substs bnds
-  (ses, ses_bnds) <- inScopeOf bnds' $
-    collectStms $ mapM (substituteIndicesInSubExp substs') $ bodyResult body
-  mkBodyM (bnds'<>ses_bnds) ses
-  where bnds = bodyStms body
+substituteIndicesInBody substs (Body _ stms res) = do
+  (substs', stms') <- inScopeOf stms $
+    collectStms $ substituteIndicesInStms substs stms
+  (res', res_stms) <- inScopeOf stms' $
+    collectStms $ mapM (substituteIndicesInSubExp substs') res
+  mkBodyM (stms'<>res_stms) res'
 
 update :: VName -> VName -> IndexSubstitution attr -> IndexSubstitutions attr
        -> IndexSubstitutions attr
