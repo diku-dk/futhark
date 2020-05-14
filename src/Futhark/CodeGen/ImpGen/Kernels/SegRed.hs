@@ -316,13 +316,14 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
   num_groups' <- traverse toExp num_groups
   group_size' <- traverse toExp group_size
 
-  let (groups_per_segment, elems_per_thread) =
-        groupsPerSegmentAndElementsPerThread segment_size num_segments
-        num_groups' group_size'
-  virt_num_groups <- dPrimV "vit_num_groups" $
-    groups_per_segment * num_segments
+  (groups_per_segment, elems_per_thread) <-
+    groupsPerSegmentAndElementsPerThread segment_size num_segments
+    num_groups' group_size'
+  virt_num_groups <- dPrimV "virt_num_groups" $
+                     groups_per_segment * num_segments
 
-  num_threads <- dPrimV "num_threads" $ unCount num_groups' * unCount group_size'
+  num_threads <- dPrimV "num_threads" $
+                 unCount num_groups' * unCount group_size'
 
   threads_per_segment <- dPrimV "thread_per_segment" $
     groups_per_segment * unCount group_size'
@@ -363,14 +364,18 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
     -- duty; we put an outer loop to accomplish this.
     virtualiseGroups SegVirt (Imp.vi32 virt_num_groups) $ \group_id_var -> do
       let segment_gtids = init gtids
+          w = last dims
           group_id = Imp.vi32 group_id_var
-          flat_segment_id = group_id `quot` groups_per_segment
           local_tid = kernelLocalThreadId constants
 
-          global_tid = (group_id * unCount group_size' + local_tid)
-                       `rem` (unCount group_size' * groups_per_segment)
-          w = last dims
-          first_group_for_segment = flat_segment_id * groups_per_segment
+      flat_segment_id <- dPrimVE "flat_segment_id" $
+                         group_id `quot` groups_per_segment
+
+      global_tid <- dPrimVE "global_tid" $
+                    (group_id * unCount group_size' + local_tid)
+                    `rem` (unCount group_size' * groups_per_segment)
+
+      let first_group_for_segment = flat_segment_id * groups_per_segment
 
       zipWithM_ dPrimV_ segment_gtids $ unflattenIndex (init dims') flat_segment_id
       dPrim_ (last gtids) int32
@@ -412,13 +417,15 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
 -- per segment.
 groupsPerSegmentAndElementsPerThread :: Imp.Exp -> Imp.Exp
                                      -> Count NumGroups Imp.Exp -> Count GroupSize Imp.Exp
-                                     -> (Imp.Exp, Imp.Count Imp.Elements Imp.Exp)
-groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size =
-  let groups_per_segment =
-        unCount num_groups_hint `quotRoundingUp` BinOpExp (SMax Int32) 1 num_segments
-      elements_per_thread =
-        segment_size `quotRoundingUp` (unCount group_size * groups_per_segment)
-  in (groups_per_segment, Imp.elements elements_per_thread)
+                                     -> CallKernelGen (Imp.Exp, Imp.Count Imp.Elements Imp.Exp)
+groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size = do
+  groups_per_segment <-
+    dPrimVE "groups_per_segment" $
+    unCount num_groups_hint `quotRoundingUp` BinOpExp (SMax Int32) 1 num_segments
+  elements_per_thread <-
+    dPrimVE "elements_per_thread" $
+    segment_size `quotRoundingUp` (unCount group_size * groups_per_segment)
+  return (groups_per_segment, Imp.elements elements_per_thread)
 
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug =
