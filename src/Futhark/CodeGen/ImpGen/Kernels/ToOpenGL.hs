@@ -193,6 +193,7 @@ useAsParam (ScalarUse name bt) =
         _    -> GenericC.primTypeToCType bt
   in Just ([C.citem|$ty:ctp $id:name;|], AScalarUse)
 useAsParam (MemoryUse name) =
+-- FIXME: Make the array type generic
   Just ([C.citem|typename int32_t $id:name[];|], AMemoryUse)
 useAsParam ConstUse{} =
   Nothing
@@ -230,6 +231,12 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("#define float64 double")|]
   , [C.cedecl|$esc:("#define boolean bool")|]
   , [C.cedecl|$esc:("#define shared_int shared int")|]
+  , [C.cedecl|$esc:("#define shared_float shared float")|]
+  , [C.cedecl|$esc:("#define shared_double shared double")|]
+  , [C.cedecl|$esc:("#define shared_bool shared bool")|]
+  , [C.cedecl|$esc:("#define shared_uint shared uint")|]
+  , [C.cedecl|$esc:("#define shared_int64_t shared int64_t")|]
+  , [C.cedecl|$esc:("#define shared_uint64_t shared uint64_t")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     (if uses_float64 then glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
      else [])
@@ -316,6 +323,7 @@ inShaderOperations body =
           GenericC.stm [C.cstm|groupMemoryBarrier();|] -- intentional
           GenericC.modifyUserState $ \s -> s { shaderHasBarriers = True }
           incErrorLabel
+        -- FIXME: Atomic operations need to adopt GLSL.
         shaderOps (Atomic space aop) = atomicOps space aop
 
         atomicCast s t = do
@@ -384,7 +392,7 @@ inShaderOperations body =
           error "Cannot create static array in shader."
 
         shaderMemoryType space = do
-          return [C.cty|$ty:defaultMemBlockType|]
+          return [C.cty|$ty:defaultMemBlockTypeGLSL|]
 
         shaderWriteScalar =
           GenericC.writeScalarShader
