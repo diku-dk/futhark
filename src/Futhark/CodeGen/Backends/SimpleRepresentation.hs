@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   ( tupleField
   , funName
   , defaultMemBlockType
+  , defaultMemBlockTypeGLSL
   , primTypeToCType
   , signedPrimTypeToCType
 
@@ -75,6 +76,10 @@ funName' = funName . nameFromString
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
 defaultMemBlockType = [C.cty|char*|]
+
+-- | The type of memory blocks in the default memory space in GLSL.
+defaultMemBlockTypeGLSL :: C.Type
+defaultMemBlockTypeGLSL = [C.cty|int|]
 
 cIntOps :: [C.Definition]
 cIntOps = concatMap (`map` [minBound..maxBound]) ops
