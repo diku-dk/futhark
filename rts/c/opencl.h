@@ -950,4 +950,14 @@ static int opencl_free_all(struct opencl_context *ctx) {
   return CL_SUCCESS;
 }
 
+// Free everything that belongs to 'ctx', but do not free 'ctx'
+// itself.
+static void teardown_opencl(struct opencl_context *ctx) {
+  (void)opencl_tally_profiling_records(ctx);
+  free(ctx->profiling_records);
+  (void)opencl_free_all(ctx);
+  (void)clReleaseCommandQueue(ctx->queue);
+  (void)clReleaseContext(ctx->ctx);
+}
+
 // End of opencl.h.

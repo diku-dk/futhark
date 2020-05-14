@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed some cases of missing fusion (#953).
 
+  * Context deinitialisation is now more complete, and should not leak
+    memory (or at least not nearly as much, if any).  This makes it
+    viable to repeatedly create and free Futhark contexts in the same
+    process (although this can still be quite slow).
+
 ## [0.15.6]
 
 ### Added

@@ -339,6 +339,9 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                      // Clear the free list of any deallocations that occurred while initialising constants.
                      OPENCL_SUCCEED_OR_RETURN(opencl_free_all(&ctx->opencl));
 
+                     // The program will be properly freed after all the kernels have also been freed.
+                     OPENCL_SUCCEED_OR_RETURN(clReleaseProgram(prog));
+
                      return futhark_context_sync(ctx);
   }|]
 
@@ -384,8 +387,8 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  free_constants(ctx);
                                  free_lock(&ctx->lock);
-                                 opencl_tally_profiling_records(&ctx->opencl);
-                                 free(ctx->opencl.profiling_records);
+                                 $stms:(map releaseKernel (M.toList kernels))
+                                 teardown_opencl(&ctx->opencl);
                                  free(ctx);
                                }|])
 
@@ -525,6 +528,9 @@ loadKernel (name, safety) = [C.cstm|{
                      SafetyNone -> []
                      SafetyCheap -> [set_global_failure]
                      SafetyFull -> [set_global_failure, set_global_failure_args]
+
+releaseKernel :: (KernelName, Safety) -> C.Stm
+releaseKernel (name, _) = [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseKernel(ctx->$id:name));|]
 
 kernelRuntime :: String -> String
 kernelRuntime = (++"_total_runtime")
