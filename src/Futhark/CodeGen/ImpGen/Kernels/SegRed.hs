@@ -325,7 +325,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
   num_threads <- dPrimV "num_threads" $
                  unCount num_groups' * unCount group_size'
 
-  threads_per_segment <- dPrimV "thread_per_segment" $
+  threads_per_segment <- dPrimV "threads_per_segment" $
     groups_per_segment * unCount group_size'
 
   emit $ Imp.DebugPrint "\n# SegRed-large" Nothing
