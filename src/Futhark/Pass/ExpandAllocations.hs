@@ -29,6 +29,8 @@ import Futhark.Pass.ExtractKernels.ToKernels (segThread)
 import Futhark.Pass.ExplicitAllocations.Kernels (explicitAllocationsInStms)
 import Futhark.Transform.Rename (renameStm)
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)
+import Futhark.Optimise.Simplify.Lore (addScopeWisdom)
+import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Util.IntegralExp
 import Futhark.Util (mapAccumLM)
 
@@ -54,7 +56,7 @@ transformFunDef :: Scope KernelsMem -> FunDef KernelsMem
 transformFunDef scope fundec = do
   body' <- modifyNameSource $ limitationOnLeft . runStateT (runReaderT m mempty)
   copyPropagateInFun simpleKernelsMem
-    mempty fundec { funDefBody = body' }
+    (ST.fromScope (addScopeWisdom scope)) fundec { funDefBody = body' }
   where m = localScope scope $ inScopeOf fundec $
             transformBody $ funDefBody fundec
 
