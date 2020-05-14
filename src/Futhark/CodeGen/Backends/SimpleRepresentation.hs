@@ -1058,7 +1058,7 @@ glFloatConvOps :: [C.Definition]
   )
   where taggedF s Float32 = s
         taggedF s Float64 = s ++ "64"
-        convOp  s from to = s ++ pretty from ++ pretty to
+        convOp  s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
         mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe] ++
                 map (mkFPConvIF "sitofp") [minBound..maxBound] ++
