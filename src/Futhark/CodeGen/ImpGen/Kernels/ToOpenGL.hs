@@ -326,11 +326,7 @@ inShaderOperations body =
         -- FIXME: Atomic operations need to adopt GLSL.
         shaderOps (Atomic space aop) = atomicOps space aop
 
-        atomicCast s t = do
-          let volatile = [C.ctyquals|volatile|]
-          quals <- case s of Space sid    -> pointerQuals sid
-                             _            -> pointerQuals "volatile"
-          return [C.cty|$tyquals:(volatile++quals) $ty:t|]
+        atomicCast s t = return [C.cty|$ty:t|]
 
         doAtomic s old arr ind val op ty = do
           ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
