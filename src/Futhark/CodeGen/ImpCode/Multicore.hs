@@ -29,7 +29,7 @@ data MulticoreFunc = MulticoreFunc [Param] Code Code VName
 
 -- | A parallel operation.
 data Multicore = ParLoop Scheduling VName VName Imp.Exp MulticoreFunc
-               | MulticoreCall [VName] String  -- This needs to be fixed
+               | MulticoreCall (Maybe VName) String  -- This needs to be fixed
 
 type Granularity = Int32
 

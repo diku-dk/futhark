@@ -70,7 +70,7 @@ groupResultArrays num_threads reds =
 
 getNumThreads' :: VName -> MulticoreGen ()
 getNumThreads' dest =
-  emit $ Imp.Op $ Imp.MulticoreCall [dest] "futhark_context_get_num_threads"
+  emit $ Imp.Op $ Imp.MulticoreCall (Just dest) "futhark_context_get_num_threads"
 
 getNumThreads :: MulticoreGen VName
 getNumThreads = do
@@ -98,7 +98,7 @@ decideScheduling code  =
 
 sUnpauseProfiling :: MulticoreGen ()
 sUnpauseProfiling =
-  emit $ Imp.Op $ Imp.MulticoreCall [] "futhark_context_unpause_profiling"
+  emit $ Imp.Op $ Imp.MulticoreCall Nothing "futhark_context_unpause_profiling"
 
 -- | Try to extract invariant allocations.  If we assume that the
 -- given 'Code' is the body of a 'SegOp', then it is always safe to

@@ -402,12 +402,8 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_name] [True, False]
 
 
-compileOp (MulticoreCall [] f) =
+compileOp (MulticoreCall Nothing f) =
   GC.stm [C.cstm|$id:f(ctx);|]
 
-compileOp (MulticoreCall [retval] f) =
+compileOp (MulticoreCall (Just retval) f) =
   GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
-
-compileOp (MulticoreCall _ f) =
-  error $ "Can't handle multiple retval for MulticoreCall to function " ++ f
-  -- GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
