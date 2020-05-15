@@ -247,7 +247,6 @@ segmentedScan pat space scan_ops kbody = do
   tid <- dPrim "tid" $ IntType Int32
 
   flat_idx <- dPrim "iter" int32
-  flat_idx' <- toExp $ Var flat_idx
 
   -- iteration variable
   n_segments <- dPrim "segment_iter" $ IntType Int32
