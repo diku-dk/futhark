@@ -789,7 +789,7 @@ arrayLibraryFunctions space pt signed shape = do
   headerDecl (ArrayDecl name)
     [C.cedecl|$ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   headerDecl (ArrayDecl name)
-    [C.cedecl|typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
+    [C.cedecl|const typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
 
   return [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
@@ -829,7 +829,7 @@ arrayLibraryFunctions space pt signed shape = do
             return arr->mem.mem;
           }
 
-          typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
+          const typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
             (void)ctx;
             return arr->shape;
           }
