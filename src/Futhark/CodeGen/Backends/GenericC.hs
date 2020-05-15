@@ -607,7 +607,7 @@ defineMemorySpace space = do
           -- tracking probably needs to be rethought.
           if space == DefaultSpace
           then [C.citem|{}|]
-          else [C.citem|fprintf(stderr, $string:peakmsg, (long long) ctx->$id:peakname);|])
+          else [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
           Space sid    -> ("peak_mem_usage_" ++ sid,
@@ -1487,7 +1487,9 @@ int main(int argc, char** argv) {
       fclose(runtime_file);
     }
 
-    futhark_debugging_report(ctx);
+    char *report = futhark_debugging_report(ctx);
+    fputs(report, stderr);
+    free(report);
   }
 
   futhark_context_free(ctx);
@@ -1548,14 +1550,17 @@ $edecls:entry_point_decls
           profilereport <- gets $ DL.toList . compProfileItems
 
           ctx_ty <- contextType
-          headerDecl MiscDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx);|]
-          libDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx) {
+          headerDecl MiscDecl [C.cedecl|char* futhark_debugging_report($ty:ctx_ty *ctx);|]
+          libDecl [C.cedecl|char* futhark_debugging_report($ty:ctx_ty *ctx) {
+                      struct str_builder builder;
+                      str_builder_init(&builder);
                       if (ctx->detail_memory || ctx->profiling) {
                         $items:memreport
                       }
                       if (ctx->profiling) {
                         $items:profilereport
                       }
+                      return builder.str;
                     }|]
 
           return (prototypes, definitions, entry_points)

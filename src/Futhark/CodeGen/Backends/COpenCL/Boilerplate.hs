@@ -550,20 +550,18 @@ openClReport names = report_kernels ++ [report_total]
           let runs = kernelRuns name
               total_runtime = kernelRuntime name
           in [[C.citem|
-               fprintf(stderr,
-                       $string:(format_string name),
-                       ctx->$id:runs,
-                       (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
-                       (long int) ctx->$id:total_runtime);
+               str_builder(&builder,
+                           $string:(format_string name),
+                           ctx->$id:runs,
+                           (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
+                           (long int) ctx->$id:total_runtime);
               |],
               [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
         report_total = [C.citem|
-                          if (ctx->profiling) {
-                            fprintf(stderr, "%d operations with cumulative runtime: %6ldus\n",
-                                    ctx->total_runs, ctx->total_runtime);
-                          }
+                          str_builder(&builder, "%d operations with cumulative runtime: %6ldus\n",
+                                      ctx->total_runs, ctx->total_runtime);
                         |]
 
 sizeHeuristicsCode :: SizeHeuristic -> C.Stm
