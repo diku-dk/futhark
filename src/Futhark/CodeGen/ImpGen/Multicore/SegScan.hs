@@ -94,8 +94,8 @@ nonsegmentedScan pat space scan_ops kbody = do
             forM_ (zip pes (bodyResult $ lamBody scan_op)) $
               \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
 
-    iter' <- toExp $ Var $ segFlat space
-    segFlat space <-- iter' + 1
+    flat_idx' <- toExp $ Var $ segFlat space
+    segFlat space <-- flat_idx' + 1
 
   stage_1_body <- collect $ do
     forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space) $ uncurry (<--)
@@ -145,9 +145,6 @@ nonsegmentedScan pat space scan_ops kbody = do
     forM_ (zip (yParams scan_op) $ segBinOpNeutral scan_op) $ \(p, ne) ->
       copyDWIMFix (paramName p) [] ne []
 
-  index <- dPrimV "index" 0
-  index' <- toExp $ Var index
-
   offset <- dPrimV "offset" 0
   offset' <- toExp $ Var offset
 
@@ -157,11 +154,11 @@ nonsegmentedScan pat space scan_ops kbody = do
     forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
       copyDWIMFix acc' vec_is ne []
 
+  flat_idx' <- toExp $ Var (segFlat space)
   sFor "i" (ntasks'-1) $ \i -> do
      offset <-- iter_pr_subtask
      sWhen (i .<. remainder) (offset <-- offset' + 1)
-     index <-- offset' + index'
-     segFlat space <-- index'
+     segFlat space <-- flat_idx' + offset'
      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
 
      compileStms mempty (kernelBodyStms kbody) $
@@ -174,11 +171,11 @@ nonsegmentedScan pat space scan_ops kbody = do
 
          sComment "Read next values" $
            forM_ (zip (yParams scan_op) pes) $ \(p, pe) ->
-             copyDWIMFix (paramName p) [] (Var $ patElemName pe) ((index'-1) : vec_is)
+             copyDWIMFix (paramName p) [] (Var $ patElemName pe) ((flat_idx'-1) : vec_is)
 
          compileStms mempty (bodyStms $ lamBody scan_op) $
             forM_ (zip3 acc pes (bodyResult $ lamBody scan_op)) $
-              \(acc', pe, se) -> do copyDWIMFix (patElemName pe) ((index'-1) : vec_is) se []
+              \(acc', pe, se) -> do copyDWIMFix (patElemName pe) ((flat_idx'-1) : vec_is) se []
                                     copyDWIMFix acc' vec_is se []
 
   -- Stage 3 : Finally each thread partially scans a chunk of the input
@@ -189,18 +186,18 @@ nonsegmentedScan pat space scan_ops kbody = do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
     -- Read carry in
-    iter' <- toExp $ Var $ segFlat space
+    flat_idx'' <- toExp $ Var $ segFlat space
     let read_carry_in = forM_ (zip3 scan_ops accs' per_scan_pes) $ \(scan_op, acc, pes) ->
                           sLoopNest (segBinOpShape scan_op) $ \vec_is ->
                             forM_ (zip acc pes) $ \(acc', pe) ->
-                              copyDWIMFix acc' (tid' : vec_is) (Var $ patElemName pe) (iter' - 1 : vec_is)
+                              copyDWIMFix acc' (tid' : vec_is) (Var $ patElemName pe) (flat_idx'' - 1 : vec_is)
 
         read_neutral = forM_ (zip scan_ops accs') $ \(scan_op, acc) ->
                          sLoopNest (segBinOpShape scan_op) $ \vec_is ->
                            forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
                              copyDWIMFix acc' (tid' : vec_is) ne []
 
-    sIf (iter' .==. 0) read_neutral read_carry_in
+    sIf (flat_idx' .==. 0) read_neutral read_carry_in
 
   stage_3_body <- collect $ do
     forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space) $ uncurry (<--)
