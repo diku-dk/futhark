@@ -51,7 +51,7 @@ configuration may be used for multiple concurrent contexts.
 
    With a nonzero flag, enable the capture of profiling information.
    This should not significantly impact program performance.  Use
-   :c:func:`futhark_debugging_report()` to retrieve captured
+   :c:func:`futhark_context_report()` to retrieve captured
    information, the details of which are backend-specific.
 
 .. c:function:: void futhark_context_config_set_logging(struct futhark_context_config *cfg, int flag)
@@ -90,11 +90,27 @@ Context
    Temporarily suspend the collection of profiling information.  Has
    no effect if profiling was not enabled in the configuration.
 
-
 .. c:function:: void futhark_context_unpause_profiling(struct futhark_context *ctx)
 
    Resume the collection of profiling information.  Has no effect if
    profiling was not enabled in the configuration.
+
+.. c:function:: char *futhark_context_get_error(struct futhark_context *ctx)
+
+   A human-readable string describing the last error, if any.  It is
+   the caller's responsibility to ``free()`` the returned string.  Any
+   subsequent call to the function returns ``NULL``, until a new error
+   occurs.
+
+.. c:function:: char *futhark_context_report(struct futhark_context *ctx)
+
+   Produce a human-readable C string with debug and profiling
+   information collected during program runtime.  It is the caller's
+   responsibility to free the returned string.  It is likely to only
+   contain interesting information if
+   ``futhark_context_config_set_debugging()`` or
+   ``futhark_context_config_set_profiling()`` has been called
+   previously.
 
 Values
 ------
@@ -173,27 +189,6 @@ Results in the following C function:
    Asynchronously call the entry point with the given arguments.  Make
    sure to call :c:func:`futhark_context_sync` before using the value
    of ``out0``.
-
-
-Miscellaneous
--------------
-
-.. c:function:: char *futhark_context_get_error(struct futhark_context *ctx)
-
-   A human-readable string describing the last error, if any.  It is
-   the caller's responsibility to ``free()`` the returned string.  Any
-   subsequent call to the function returns ``NULL``, until a new error
-   occurs.
-
-.. c:function:: char *futhark_debugging_report(struct futhark_context *ctx)
-
-   Produce a human-readable C string with debug and profiling
-   information collected during program runtime.  It is the caller's
-   responsibility to free the returned string.  It is likely to only
-   contain interesting information if
-   ``futhark_context_config_set_debugging()`` or
-   ``futhark_context_config_set_profiling()`` has been called
-   previously.
 
 GPU
 ---

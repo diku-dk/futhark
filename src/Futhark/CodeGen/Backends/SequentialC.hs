@@ -75,6 +75,7 @@ compileProg =
                           int profiling;
                           typename lock_t lock;
                           char *error;
+                          int profiling_paused;
                           $sdecls:fields
                         };|])
 
@@ -109,25 +110,6 @@ compileProg =
                                  (void)ctx;
                                  return 0;
                                }|])
-          GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
-            ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
-                                 char* error = ctx->error;
-                                 ctx->error = NULL;
-                                 return error;
-                               }|])
-
-          GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-            ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         (void)ctx;
-                       }|])
-
-          GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
-            ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         (void)ctx;
-                       }|])
 
 copySequentialMemory :: GC.Copy Imp.Sequential ()
 copySequentialMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =

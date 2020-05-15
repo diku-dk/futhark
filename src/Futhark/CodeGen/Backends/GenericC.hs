@@ -1487,7 +1487,7 @@ int main(int argc, char** argv) {
       fclose(runtime_file);
     }
 
-    char *report = futhark_debugging_report(ctx);
+    char *report = futhark_context_report(ctx);
     fputs(report, stderr);
     free(report);
   }
@@ -1545,23 +1545,12 @@ $edecls:entry_point_decls
           mapM_ earlyDecl memstructs
           entry_points <-
             mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
-          extra
-          mapM_ earlyDecl $ concat memfuns
-          profilereport <- gets $ DL.toList . compProfileItems
 
-          ctx_ty <- contextType
-          headerDecl MiscDecl [C.cedecl|char* futhark_debugging_report($ty:ctx_ty *ctx);|]
-          libDecl [C.cedecl|char* futhark_debugging_report($ty:ctx_ty *ctx) {
-                      struct str_builder builder;
-                      str_builder_init(&builder);
-                      if (ctx->detail_memory || ctx->profiling) {
-                        $items:memreport
-                      }
-                      if (ctx->profiling) {
-                        $items:profilereport
-                      }
-                      return builder.str;
-                    }|]
+          extra
+
+          mapM_ earlyDecl $ concat memfuns
+
+          commonLibFuns memreport
 
           return (prototypes, definitions, entry_points)
 
@@ -1578,6 +1567,45 @@ $edecls:entry_point_decls
       timing_h = $(embedStringFile "rts/c/timing.h")
       lock_h   = $(embedStringFile "rts/c/lock.h")
       tuning_h = $(embedStringFile "rts/c/tuning.h")
+
+commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
+commonLibFuns memreport = do
+  ctx <- contextType
+  profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "context_report" MiscDecl $ \s ->
+    ([C.cedecl|char* $id:s($ty:ctx *ctx);|],
+     [C.cedecl|char* $id:s($ty:ctx *ctx) {
+                 struct str_builder builder;
+                 str_builder_init(&builder);
+                 if (ctx->detail_memory || ctx->profiling) {
+                   $items:memreport
+                 }
+                 if (ctx->profiling) {
+                   $items:profilereport
+                 }
+                 return builder.str;
+               }|])
+
+  publicDef_ "context_get_error" MiscDecl $ \s ->
+    ([C.cedecl|char* $id:s($ty:ctx* ctx);|],
+     [C.cedecl|char* $id:s($ty:ctx* ctx) {
+                         char* error = ctx->error;
+                         ctx->error = NULL;
+                         return error;
+                       }|])
+
+  publicDef_ "context_pause_profiling" MiscDecl $ \s ->
+    ([C.cedecl|void $id:s($ty:ctx* ctx);|],
+     [C.cedecl|void $id:s($ty:ctx* ctx) {
+                 ctx->profiling_paused = 1;
+               }|])
+
+  publicDef_ "context_unpause_profiling" MiscDecl $ \s ->
+    ([C.cedecl|void $id:s($ty:ctx* ctx);|],
+     [C.cedecl|void $id:s($ty:ctx* ctx) {
+                 ctx->profiling_paused = 0;
+               }|])
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
