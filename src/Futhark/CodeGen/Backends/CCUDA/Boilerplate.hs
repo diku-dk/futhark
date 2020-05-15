@@ -305,7 +305,7 @@ generateContextFuns cfg kernels sizes failures = do
                                  free(ctx);
                                }|])
 
-  GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                  CUDA_SUCCEED(cuCtxSynchronize());
@@ -332,6 +332,14 @@ generateContextFuns cfg kernels sizes failures = do
                  }
                  return 0;
                }|])
+
+
+  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
+    ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+                         return 0;
+                       }|])
 
   where
     loadKernel (name, _) =

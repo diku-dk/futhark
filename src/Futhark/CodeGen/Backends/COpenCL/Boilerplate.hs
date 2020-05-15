@@ -392,7 +392,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                                  free(ctx);
                                }|])
 
-  GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                  // Check for any delayed error.
@@ -425,7 +425,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                  return 0;
                }|])
 
-  GC.publicDef_ "context_clear_caches" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                          ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
