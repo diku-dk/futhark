@@ -253,6 +253,22 @@ allocateOption short =
         long = [passLongOption pass]
         pass = Seq.explicitAllocations
 
+iplOption :: String -> FutharkOption
+iplOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where perform (Kernels prog) config =
+          Kernels <$>
+          runPasses (onePass inPlaceLoweringKernels) config prog
+        perform (Seq prog) config =
+          Seq <$>
+          runPasses (onePass inPlaceLoweringSeq) config prog
+        perform s _ =
+          externalErrorS $
+          "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+        long = [passLongOption pass]
+        pass = inPlaceLoweringSeq
+
 cseOption :: String -> FutharkOption
 cseOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
@@ -358,13 +374,13 @@ commandLineOptions =
   , typedPassOption soacsProg Seq firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineFunctions []
-  , kernelsPassOption inPlaceLoweringKernels []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
   , kernelsPassOption unstreamKernels []
   , kernelsPassOption sinkKernels []
   , typedPassOption soacsProg Kernels extractKernels []
 
+  , iplOption []
   , allocateOption "a"
 
   , kernelsMemPassOption doubleBuffer []

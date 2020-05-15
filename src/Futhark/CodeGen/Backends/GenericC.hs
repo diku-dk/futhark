@@ -1419,8 +1419,9 @@ $esc:("#include <stdint.h>")
 // side effects), we want to avoid that.
 $esc:("#undef NDEBUG")
 $esc:("#include <assert.h>")
+$esc:("#include <stdarg.h>")
 
-$esc:futhark_panic_h
+$esc:util_h
 
 $esc:timing_h
 |]
@@ -1589,7 +1590,7 @@ $edecls:entry_point_decls
       builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
                 cFloat32Funs ++ cFloat64Funs
 
-      futhark_panic_h  = $(embedStringFile "rts/c/panic.h")
+      util_h  = $(embedStringFile "rts/c/util.h")
       values_h = $(embedStringFile "rts/c/values.h")
       timing_h = $(embedStringFile "rts/c/timing.h")
       lock_h   = $(embedStringFile "rts/c/lock.h")

@@ -64,27 +64,50 @@ lowerUpdate _ _ _ =
 
 lowerUpdateKernels :: MonadFreshNames m => LowerUpdate Kernels m
 lowerUpdateKernels _
-  (Let (Pattern [] [PatElem v v_attr]) aux (Op (SegOp (SegMap lvl space ts kbody))))
-  [update@(DesiredUpdate bindee_nm bindee_attr cs _src is val)]
-  | v == val = do
-    kbody' <- lowerUpdateIntoKernel update space kbody
-    let is' = fullSlice (typeOf bindee_attr) is
-    Just $ return [certify (stmAuxCerts aux <> cs) $
-                    mkLet [] [Ident bindee_nm $ typeOf bindee_attr] $
-                    Op $ SegOp $ SegMap lvl space ts kbody',
-                   mkLet [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
+  (Let pat aux (Op (SegOp (SegMap lvl space ts kbody)))) updates
+  | all ((`elem` patternNames pat) . updateValue) updates = do
+      (pat', kbody', poststms) <-
+        lowerUpdatesIntoSegMap pat updates space kbody
+      let cs = stmAuxCerts aux <> foldMap updateCertificates updates
+      Just $ return $
+        certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
+        stmsToList poststms
 lowerUpdateKernels scope stm updates = lowerUpdate scope stm updates
 
-lowerUpdateIntoKernel :: DesiredUpdate (LetAttr (Aliases Kernels))
-                      -> SegSpace -> KernelBody (Aliases Kernels)
-                      -> Maybe (KernelBody (Aliases Kernels))
-lowerUpdateIntoKernel update kspace kbody = do
-  [Returns _ se] <- Just $ kernelBodyResult kbody
-  is' <- mapM dimFix is
-  let ret = WriteReturns (arrayDims $ snd bindee_attr) src [(is'++map Var gtids, se)]
-  return kbody { kernelBodyResult = [ret] }
-  where DesiredUpdate _bindee_nm bindee_attr _cs src is _val = update
-        gtids = map fst $ unSegSpace kspace
+lowerUpdatesIntoSegMap :: Pattern (Aliases Kernels)
+                       -> [DesiredUpdate (LetAttr (Aliases Kernels))]
+                       -> SegSpace
+                       -> KernelBody (Aliases Kernels)
+                       -> Maybe (Pattern (Aliases Kernels),
+                                 KernelBody (Aliases Kernels),
+                                 Stms (Aliases Kernels))
+lowerUpdatesIntoSegMap pat updates kspace kbody = do
+  -- The updates are all-or-nothing.  Being more liberal would require
+  -- changes to the in-place-lowering pass itself.
+  (pes, krets, poststms) <-
+    unzip3 <$> zipWithM onRet (patternElements pat) (kernelBodyResult kbody)
+  return (Pattern [] pes,
+          kbody { kernelBodyResult = krets },
+          mconcat poststms)
+
+  where (gtids, dims) = unzip $ unSegSpace kspace
+
+        onRet (PatElem v v_attr) (Returns _ se)
+          | Just (DesiredUpdate bindee_nm bindee_attr _cs src is _val) <-
+              find ((==v) . updateValue) updates = do
+
+              guard $ sliceDims is == dims
+
+              let ret = WriteReturns (arrayDims $ snd bindee_attr) src
+                        [(map Var gtids, se)]
+
+              return (PatElem bindee_nm bindee_attr,
+                      ret,
+                      oneStm $ mkLet [] [Ident v $ typeOf v_attr] $
+                      BasicOp $ Index bindee_nm is)
+
+        onRet pe ret =
+          return (pe, ret, mempty)
 
 lowerUpdateIntoLoop :: (Bindable lore, BinderOps lore,
                         Aliased lore, LetAttr lore ~ (als, Type),
@@ -163,13 +186,16 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
           | Just (update, mergename, mergeattr) <- relatedUpdate summary = do
             source <- newVName "modified_source"
             let source_t = snd $ updateType update
-                elmident = Ident (updateValue update) $ rowType source_t
+                elmident = Ident
+                           (updateValue update)
+                           (source_t `setArrayDims` sliceDims (updateIndices update))
             tell ([mkLet [] [Ident source source_t] $ BasicOp $ Update
                    (updateSource update)
                    (fullSlice source_t $ updateIndices update) $
                    snd $ mergeParam summary],
                   [mkLet [] [elmident] $ BasicOp $ Index
-                   (updateName update) (fullSlice (typeOf $ updateType update) $ updateIndices update)])
+                   (updateName update)
+                   (fullSlice source_t $ updateIndices update)])
             return $ Right (Param
                             mergename
                             (toDecl (typeOf mergeattr) Unique),
