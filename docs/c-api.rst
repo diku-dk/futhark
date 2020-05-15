@@ -3,13 +3,14 @@
 C API Reference
 ===============
 
-A Futhark program compiled to a C library with the ``--library``
-command line option exposes the following API.  A Futhark program
-``futlib.fut`` produces two files: ``futlib.c`` and ``futlib.h``.
+A Futhark program ``futlib.fut`` compiled to a C library with the
+``--library`` command line option produces two files: ``futlib.c`` and
+``futlib.h``.  The API provided in the ``.h`` file is documented in
+the following.
 
-Basic usage of the API revolves around creating a *configuration
-object*, which can then be used to obtain a *context object*, which
-must be passed whenever entry points are called.
+Usaging the API revolves around creating a *configuration object*,
+which can then be used to obtain a *context object*, which must be
+passed whenever entry points are called.
 
 Most functions that can fail return an integer: 0 on success and a
 non-zero value on error.  Others return a ``NULL`` pointer.  Use
