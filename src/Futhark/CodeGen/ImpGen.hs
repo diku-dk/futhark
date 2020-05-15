@@ -1026,9 +1026,9 @@ defaultCopy bt dest destslice src srcslice
   | otherwise =
       copyElementWise bt dest destslice src srcslice
   where bt_size = primByteSize bt
-        num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
+        num_elems = Imp.elements $ product $ sliceDims srcslice
         MemLocation destmem _ destIxFun = dest
-        MemLocation srcmem srcshape srcIxFun = src
+        MemLocation srcmem _ srcIxFun = src
         isScalarSpace ScalarSpace{} = True
         isScalarSpace _ = False
 
