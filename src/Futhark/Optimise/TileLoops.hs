@@ -39,6 +39,7 @@ optimiseBody :: Body Kernels -> TileM (Body Kernels)
 optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
   Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
 
+
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
   blkRegTiling_res <- mm_BlkRegTiling stm

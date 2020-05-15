@@ -1387,7 +1387,7 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
   constants <- kernelConstants <$> askEnv
 
   let gids = map fst $ unSegSpace space
-      (_dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
+      (dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
       group_tiles' = map (toExp' int32) group_tiles
       reg_tiles' = map (toExp' int32) reg_tiles
 
@@ -1399,18 +1399,23 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
   reg_tile_is <-
     mapM (dPrimVE "reg_tile_i") $
     unflattenIndex group_tiles' $ kernelLocalThreadId constants
+  reg_tile_is' <-
+    mapM (dPrimV "reg_tile_i") $
+    unflattenIndex group_tiles' $ kernelLocalThreadId constants
 
   -- Compute output array slice for the register tile belonging to
   -- this thread.
   let regTileSliceDim (group_tile, group_tile_i) (reg_tile, reg_tile_i) = do
         tile_dim_start <- dPrimVE "tile_dim_start" $
-                          (group_tile*reg_tile)*group_tile_i+reg_tile*reg_tile_i
+                          reg_tile * (group_tile*group_tile_i + reg_tile_i)
         return $ DimSlice tile_dim_start reg_tile 1
   reg_tile_slices <-
     zipWithM regTileSliceDim
     (zip group_tiles' group_tile_is) (zip reg_tiles' reg_tile_is)
 
-  localOps threadOperations $
+  -- TODO: add missing bounds check !
+  localOps threadOperations $ -- TODO: simply putting an sWhen isActive
+                              --       here does not work. troels pls
     copyDWIM (patElemName pe) reg_tile_slices (Var what) (map DimFix reg_tile_is)
 
 compileGroupResult space pe (Returns _ what) = do
