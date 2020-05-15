@@ -240,6 +240,7 @@ generateContextFuns cfg kernels sizes failures = do
                          int detail_memory;
                          int debugging;
                          int profiling;
+                         int profiling_paused;
                          typename lock_t lock;
                          char *error;
                          $sdecls:fields
@@ -330,25 +331,6 @@ generateContextFuns cfg kernels sizes failures = do
                    }
                  }
                  return 0;
-               }|])
-
-  GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
-    ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
-                         return ctx->error;
-                       }|])
-
-
-  GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 (void)ctx;
-               }|])
-
-  GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 (void)ctx;
                }|])
 
   where

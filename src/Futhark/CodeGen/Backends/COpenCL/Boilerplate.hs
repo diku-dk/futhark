@@ -425,26 +425,6 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                  return 0;
                }|])
 
-  GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
-    ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
-                         char* error = ctx->error;
-                         ctx->error = NULL;
-                         return error;
-                       }|])
-
-  GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 ctx->profiling_paused = 1;
-               }|])
-
-  GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 ctx->profiling_paused = 0;
-               }|])
-
   GC.publicDef_ "context_clear_caches" GC.InitDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {

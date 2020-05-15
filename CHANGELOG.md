@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `scan` with vectorised operators (e.g. `map2 (+)`) is now faster
     in some cases.
 
+  * The C API has now been documented and stabilized, including
+    obtaining profiling information (although this is still
+    unstructured).
+
 ### Removed
 
 ### Changed
