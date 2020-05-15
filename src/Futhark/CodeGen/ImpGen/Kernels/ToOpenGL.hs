@@ -317,7 +317,6 @@ inShaderOperations body =
           GenericC.stm [C.cstm|groupMemoryBarrier();|] -- intentional
           GenericC.modifyUserState $ \s -> s { shaderHasBarriers = True }
           incErrorLabel
-        -- FIXME: Atomic operations need to adopt GLSL.
         shaderOps (Atomic space aop) = atomicOps space aop
 
         atomicCast s t = return [C.cty|$ty:t|]
@@ -326,7 +325,9 @@ inShaderOperations body =
           ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
           val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s ty
-          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = $id:op($esc:(pretty cast)
+                                                ($id:arr[$exp:ind']),
+                                                $esc:(pretty ty)($exp:val'));|]
 
         atomicOps s (AtomicAdd old arr ind val) =
           doAtomic s old arr ind val "atomicAdd" [C.cty|int|]
@@ -357,13 +358,17 @@ inShaderOperations body =
           cmp' <- GenericC.compileExp GenericC.TargetShader cmp
           val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomicCompSwap(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomicCompSwap($esc:(pretty cast)
+                                                        ($id:arr[$exp:ind']),
+                                                        $exp:cmp', $exp:val');|]
 
         atomicOps s (AtomicXchg old arr ind val) = do
           ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
           val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = atomicExchange(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+          GenericC.stm [C.cstm|$id:old = atomicExchange($esc:(pretty cast)
+                                                        ($id:arr[$exp:ind']),
+                                                        $exp:val');|]
 
         cannotAllocate :: GenericC.Allocate KernelOp ShaderState
         cannotAllocate _ =
