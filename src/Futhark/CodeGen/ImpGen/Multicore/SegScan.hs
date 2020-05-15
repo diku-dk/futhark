@@ -46,8 +46,6 @@ yParams scan =
 lamBody :: SegBinOp MCMem -> Body MCMem
 lamBody = lambdaBody . segBinOpLambda
 
--- TODO: this does not seem to work when the neutral element is not the actual neutral element
--- e.g. tests/soacs/scan-with-map.fut fails
 nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
                  -> [SegBinOp MCMem]
@@ -208,7 +206,6 @@ nonsegmentedScan pat space scan_ops kbody = do
     forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space) $ uncurry (<--)
     sComment "stage 3 scan body" $
       compileStms mempty (kernelBodyStms kbody) $
-
         forM_ (zip4 per_scan_pes scan_ops per_scan_res accs') $ \(pes, scan_op, scan_res, acc) ->
           sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
 
@@ -226,8 +223,8 @@ nonsegmentedScan pat space scan_ops kbody = do
                 copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
                 copyDWIMFix acc' (tid' : vec_is) se []
 
-  let freeVariables' = namesToList $ freeIn (stage_3_prebody <> stage_1_body) `namesSubtract`
-                      namesFromList (tid : [segFlat space])
+  let freeVariables' = namesToList $ freeIn (stage_3_prebody <> stage_3_body) `namesSubtract`
+                       namesFromList (tid : [segFlat space])
 
   ts' <- mapM lookupType freeVariables'
   let freeParams' = zipWith toParam freeVariables' ts'
