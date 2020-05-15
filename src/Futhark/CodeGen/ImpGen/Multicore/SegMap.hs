@@ -19,13 +19,19 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   emit $ Imp.DebugPrint "SegMap " Nothing
   sUnpauseProfiling
 
+  flat_idx <- dPrim "iter" int32
+
+  tid <- dPrim "tid" int32
+  tid' <- toExp $ Var tid
+
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
   num_tasks <- dPrim "ntask" $ IntType Int32
 
   body' <- collect $ do
    emit $ Imp.DebugPrint "SegMap fbody" Nothing
-   zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space
+   dPrimV_ (segFlat space) tid'
+   zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
    compileStms (freeIn kres) kstms $ do
      let writeResult pe (Returns _ se) =
            copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
@@ -42,12 +48,12 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
          writeResult _ res =
            error $ "writeResult: cannot handle " ++ pretty res
      zipWithM_ writeResult (patternElements pat) kres
-  let freeVariables = namesToList (freeIn body' `namesSubtract` oneName (segFlat space))
+  let freeVariables = namesToList (freeIn body' `namesSubtract` namesFromList [tid, flat_idx])
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
       scheduling = decideScheduling body'
 
   let (body_allocs, body'') = extractAllocations body'
 
-  emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks (segFlat space) (product ns')
-                             (Imp.MulticoreFunc freeParams body_allocs body'' num_tasks)
+  emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks flat_idx (product ns')
+                             (Imp.MulticoreFunc freeParams body_allocs body'' tid)
