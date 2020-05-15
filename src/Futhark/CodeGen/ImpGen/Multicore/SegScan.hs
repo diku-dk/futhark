@@ -52,7 +52,7 @@ nonsegmentedScan :: Pattern MCMem
                  -> KernelBody MCMem
                  -> MulticoreGen ()
 nonsegmentedScan pat space scan_ops kbody = do
-  emit $ Imp.DebugPrint "nonsegmented segScan " Nothing
+  emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
   sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
@@ -135,6 +135,7 @@ nonsegmentedScan pat space scan_ops kbody = do
   emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
                               (Imp.MulticoreFunc freeParams stage_1_prebody stage_1_body tid)
 
+  emit $ Imp.DebugPrint "nonsegmentedScan stage 2" Nothing
   -- |
   -- Begin stage two of scan
   let iter_pr_subtask = product ns' `quot` num_threads'
@@ -197,7 +198,7 @@ nonsegmentedScan pat space scan_ops kbody = do
                            forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
                              copyDWIMFix acc' (tid' : vec_is) ne []
 
-    sIf (flat_idx' .==. 0) read_neutral read_carry_in
+    sIf (flat_idx'' .==. 0) read_neutral read_carry_in
 
   stage_3_body <- collect $ do
     forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 $ segFlat space) $ uncurry (<--)
@@ -228,8 +229,6 @@ nonsegmentedScan pat space scan_ops kbody = do
 
   emit $ Imp.Op $ Imp.ParLoop Imp.Static ntasks (segFlat space) (product ns')
                               (Imp.MulticoreFunc freeParams' stage_3_prebody stage_3_body tid)
-
-
 
   emit $ Imp.DebugPrint "nonsegmentedScan End" Nothing
 
