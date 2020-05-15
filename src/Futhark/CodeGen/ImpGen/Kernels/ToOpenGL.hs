@@ -266,12 +266,6 @@ hasCommunication = any communicates
         communicates Barrier{}   = True
         communicates _           = False
 
-pointerQuals ::  Monad m => String -> m [C.TypeQual]
-pointerQuals "const"     = return [C.ctyquals|const|]
-pointerQuals "volatile"  = return [C.ctyquals|volatile|]
-pointerQuals "restrict"  = return [C.ctyquals|restrict|]
-pointerQuals s           = error $ "'" ++ s ++ "' is not an OpenGL type qualifier."
-
 inShaderOperations :: ImpKernels.KernelCode -> GenericC.Operations KernelOp ShaderState
 inShaderOperations body =
   GenericC.Operations
