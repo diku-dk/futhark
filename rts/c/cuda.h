@@ -387,63 +387,36 @@ static void cuda_size_setup(struct cuda_context *ctx)
   }
 }
 
-static void dump_string_to_file(const char *file, const char *buf) {
-  FILE *f = fopen(file, "w");
-  assert(f != NULL);
-  assert(fputs(buf, f) != EOF);
-  assert(fclose(f) == 0);
-}
-
-static void load_string_from_file(const char *file, char **obuf, size_t *olen) {
-  char *buf;
-  size_t len;
-  FILE *f = fopen(file, "r");
-
-  assert(f != NULL);
-  assert(fseek(f, 0, SEEK_END) == 0);
-  len = ftell(f);
-  assert(fseek(f, 0, SEEK_SET) == 0);
-
-  buf = (char*) malloc(len + 1);
-  assert(fread(buf, 1, len, f) == len);
-  buf[len] = 0;
-  *obuf = buf;
-  if (olen != NULL) {
-    *olen = len;
-  }
-
-  assert(fclose(f) == 0);
-}
-
 static void cuda_module_setup(struct cuda_context *ctx,
                               const char *src_fragments[],
                               const char *extra_opts[]) {
   char *ptx = NULL, *src = NULL;
 
-  if (ctx->cfg.load_ptx_from == NULL && ctx->cfg.load_program_from == NULL) {
+  if (ctx->cfg.load_program_from == NULL) {
     src = concat_fragments(src_fragments);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
-  } else if (ctx->cfg.load_ptx_from == NULL) {
-    load_string_from_file(ctx->cfg.load_program_from, &src, NULL);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   } else {
+    src = slurp_file(ctx->cfg.load_program_from, NULL);
+  }
+
+  if (ctx->cfg.load_ptx_from) {
     if (ctx->cfg.load_program_from != NULL) {
       fprintf(stderr,
-              "WARNING: Loading PTX from %s instead of C code from %s\n",
+              "WARNING: Using PTX from %s instead of C code from %s\n",
               ctx->cfg.load_ptx_from, ctx->cfg.load_program_from);
     }
-
-    load_string_from_file(ctx->cfg.load_ptx_from, &ptx, NULL);
+    ptx = slurp_file(ctx->cfg.load_ptx_from, NULL);
   }
 
   if (ctx->cfg.dump_program_to != NULL) {
-    if (src == NULL) {
-      src = concat_fragments(src_fragments);
-    }
-    dump_string_to_file(ctx->cfg.dump_program_to, src);
+    dump_file(ctx->cfg.dump_program_to, src, strlen(src));
   }
+
+  if (ptx == NULL) {
+    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
+  }
+
   if (ctx->cfg.dump_ptx_to != NULL) {
-    dump_string_to_file(ctx->cfg.dump_ptx_to, ptx);
+    dump_file(ctx->cfg.dump_ptx_to, ptx, strlen(ptx));
   }
 
   CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));

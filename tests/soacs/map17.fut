@@ -9,6 +9,7 @@
 --  [[[0.000000]], [[0.674490]]]
 -- }
 -- output { [[[0.000000]], [[0.674490]]] }
+-- structure cpu { Update 2 }
 
 let doInPlaceUpdate [num_dates]
                    (bb_inds: [3][num_dates]i32)

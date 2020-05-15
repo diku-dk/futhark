@@ -140,30 +140,6 @@ static char *strclone(const char *str) {
   return copy;
 }
 
-// Read a file into a NUL-terminated string; returns NULL on error.
-static char* slurp_file(const char *filename, size_t *size) {
-  char *s;
-  FILE *f = fopen(filename, "rb"); // To avoid Windows messing with linebreaks.
-  if (f == NULL) return NULL;
-  fseek(f, 0, SEEK_END);
-  size_t src_size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  s = (char*) malloc(src_size + 1);
-  if (fread(s, 1, src_size, f) != src_size) {
-    free(s);
-    s = NULL;
-  } else {
-    s[src_size] = '\0';
-  }
-  fclose(f);
-
-  if (size) {
-    *size = src_size;
-  }
-
-  return s;
-}
-
 static const char* opencl_error_string(cl_int err)
 {
     switch (err) {
@@ -647,10 +623,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       if (ctx->cfg.debugging) {
         fprintf(stderr, "Dumping OpenCL source to %s...\n", ctx->cfg.dump_program_to);
       }
-      FILE *f = fopen(ctx->cfg.dump_program_to, "w");
-      assert(f != NULL);
-      fputs(fut_opencl_src, f);
-      fclose(f);
+
+      dump_file(ctx->cfg.dump_program_to, fut_opencl_src, strlen(fut_opencl_src));
     }
 
     if (ctx->cfg.debugging) {
@@ -728,10 +702,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARIES,
                                           sizeof(unsigned char*), binaries, NULL));
 
-    FILE *f = fopen(ctx->cfg.dump_binary_to, "w");
-    assert(f != NULL);
-    fwrite(binary, sizeof(char), binary_size, f);
-    fclose(f);
+    dump_file(ctx->cfg.dump_binary_to, binary, binary_size);
   }
 
   return prog;
@@ -948,6 +919,16 @@ static int opencl_free_all(struct opencl_context *ctx) {
   }
 
   return CL_SUCCESS;
+}
+
+// Free everything that belongs to 'ctx', but do not free 'ctx'
+// itself.
+static void teardown_opencl(struct opencl_context *ctx) {
+  (void)opencl_tally_profiling_records(ctx);
+  free(ctx->profiling_records);
+  (void)opencl_free_all(ctx);
+  (void)clReleaseCommandQueue(ctx->queue);
+  (void)clReleaseContext(ctx->ctx);
 }
 
 // End of opencl.h.

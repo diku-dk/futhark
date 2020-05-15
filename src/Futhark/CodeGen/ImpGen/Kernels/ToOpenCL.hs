@@ -482,7 +482,7 @@ inKernelOperations body =
   where has_communication = hasCommunication body
 
         fence FenceLocal = [C.cexp|CLK_LOCAL_MEM_FENCE|]
-        fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE|]
+        fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE|]
 
         kernelOps :: GenericC.OpCompiler KernelOp KernelState
         kernelOps (GetGroupId v i) =
