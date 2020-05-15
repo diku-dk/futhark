@@ -208,33 +208,43 @@ closureStructField :: VName -> Name
 closureStructField v =
   nameFromString "free_" <> nameFromString (pretty v)
 
-compileStructFields :: [VName] -> [C.Type] -> [C.FieldGroup]
+compileStructFields :: [VName] -> [(C.Type, Bool)] -> [C.FieldGroup]
 compileStructFields = zipWith field
   where
-    field name ty =
+    field name (ty, True) =
+      [C.csdecl|$ty:ty $id:(closureStructField name);|]
+    field name (ty, False) =
       [C.csdecl|$ty:ty *$id:(closureStructField name);|]
 
 compileSetStructValues :: C.ToIdent a =>
-                          a -> [VName] -> [C.Stm]
-compileSetStructValues struct = map field
+                          a -> [VName] -> [(C.Type, Bool)] -> [C.Stm]
+compileSetStructValues struct names types = zipWith field names types
   where
-    field name =
+    field name (_, True) =
+      [C.cstm|$id:struct.$id:(closureStructField name)=$id:name;|]
+    field name (_, False) =
       [C.cstm|$id:struct.$id:(closureStructField name)=&$id:name;|]
 
+
 compileGetStructVals :: C.ToIdent a =>
-                        a -> [VName] -> [C.Type] -> [C.InitGroup]
+                        a -> [VName] -> [(C.Type, Bool)] -> [C.InitGroup]
 compileGetStructVals struct = zipWith field
   where
-    field name ty =
+    field name (ty, True) =
+      [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureStructField name);|]
+    field name (ty, False) =
       [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureStructField name);|]
+
 
 compileSchedulingVal :: Scheduling -> GC.CompilerM op s C.Exp
 compileSchedulingVal Static =  return [C.cexp|0|]
 compileSchedulingVal (Dynamic granularity) =  return [C.cexp|$exp:granularity|]
 
-paramToCType :: Param -> GC.CompilerM op s C.Type
-paramToCType (ScalarParam _ pt) = pure $ GC.primTypeToCType pt
-paramToCType (MemParam name space') = GC.memToCType name space'
+paramToCType :: Param -> GC.CompilerM op s (C.Type, Bool)
+paramToCType (ScalarParam _ pt)     = do t <- pure $ GC.primTypeToCType pt
+                                         return (t, True)
+paramToCType (MemParam name space') = do t <- GC.memToCType name space'
+                                         return (t, False)
 
 functionRuntime :: String -> String
 functionRuntime = (++"_total_runtime")
@@ -372,7 +382,7 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs)|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs fctypes)|]
 
   let ftask_name = ftask ++ "_task"
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
