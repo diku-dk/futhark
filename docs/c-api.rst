@@ -51,8 +51,8 @@ configuration may be used for multiple concurrent contexts.
 
    With a nonzero flag, enable the capture of profiling information.
    This should not significantly impact program performance.  Use
-   :c:func:`futhark_context_report()` to retrieve captured
-   information, the details of which are backend-specific.
+   :c:func:`futhark_context_report` to retrieve captured information,
+   the details of which are backend-specific.
 
 .. c:function:: void futhark_context_config_set_logging(struct futhark_context_config *cfg, int flag)
 
@@ -108,8 +108,8 @@ Context
    information collected during program runtime.  It is the caller's
    responsibility to free the returned string.  It is likely to only
    contain interesting information if
-   ``futhark_context_config_set_debugging()`` or
-   ``futhark_context_config_set_profiling()`` has been called
+   :c:func:`futhark_context_config_set_debugging` or
+   :c:func:`futhark_context_config_set_profiling` has been called
    previously.
 
 .. c:function:: int futhark_context_clear_caches(struct futhark_context *ctx)
