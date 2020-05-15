@@ -2,7 +2,7 @@
 //
 // Various helper functions that are useful in all generated C code.
 
-static const char *fut_progname;
+static const char *fut_progname = "(some Futhark code)";
 
 static void futhark_panic(int eval, const char *fmt, ...) {
   va_list ap;
