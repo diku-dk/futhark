@@ -112,6 +112,14 @@ Context
    ``futhark_context_config_set_profiling()`` has been called
    previously.
 
+.. c:function:: int futhark_context_clear_caches(struct futhark_context *ctx)
+
+   Release any context-internal caches and buffers that may otherwise
+   use computer resources.  This is useful for freeing up those
+   resources when no Futhark entry points are expected to run for some
+   time.  Particularly relevant when using a GPU backend, due to the
+   relative scarcity of GPU memory.
+
 Values
 ------
 
