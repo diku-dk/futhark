@@ -343,7 +343,7 @@ following function::
 Context creation may fail.  Immediately after
 ``futhark_context_new()``, call ``futhark_context_get_error()`` (see
 below), which will return a non-NULL error string if context creation
-failed.
+failed. The API functions are all thread safe.
 
 Memory management is entirely manual.  Deallocation functions are
 provided for all types defined in the header file.  Everything
@@ -364,7 +364,16 @@ will cause the function to ``abort()`` rather than return an error
 code.  However, all application errors (such as bounds and array size
 checks) will produce an error code.
 
-The API functions are thread safe.
+Debug and profiling information collected during program runtime can
+be requested as a human-readable C string using the following
+function::
+
+  char *futhark_debugging_report(struct futhark_context *ctx)
+
+It is the caller's responsibility to free the returned string.  It is
+likely to only contain interesting information if
+``futhark_context_config_set_debugging()`` or
+``futhark_context_config_set_profiling()`` has been called previously.
 
 C with OpenCL
 ~~~~~~~~~~~~~

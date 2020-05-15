@@ -69,4 +69,32 @@ static int dump_file(const char *file, const char *buf, size_t n) {
   return 0;
 }
 
+struct str_builder {
+  char *str;
+  size_t capacity; // Size of buffer.
+  size_t used; // Bytes used, *not* including final zero.
+};
+
+static void str_builder_init(struct str_builder *b) {
+  b->capacity = 10;
+  b->used = 0;
+  b->str = malloc(b->capacity);
+  b->str[0] = 0;
+}
+
+static void str_builder(struct str_builder *b, const char *s, ...) {
+  va_list vl;
+  va_start(vl, s);
+  size_t needed = (size_t)vsnprintf(NULL, 0, s, vl);
+
+  while (b->capacity < b->used + needed + 1) {
+    b->capacity *= 2;
+    b->str = realloc(b->str, b->capacity);
+  }
+
+  va_start(vl, s); /* Must re-init. */
+  vsnprintf(b->str+b->used, b->capacity-b->used, s, vl);
+  b->used += needed;
+}
+
 // End of util.h.
