@@ -125,6 +125,8 @@ underscoreUse loc name =
   typeError loc mempty $ "Use of" <+> pquote (ppr name) <>
   ": variables prefixed with underscore may not be accessed."
 
+-- | A mapping from import strings to 'Env's.  This is used to resolve
+-- @import@ declarations.
 type ImportTable = M.Map String Env
 
 data Context = Context { contextEnv :: Env
@@ -187,6 +189,9 @@ localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
   in ctx { contextEnv = env' }
 
+-- | Monads that support type checking.  The reason we have this
+-- internal interface is because we use distinct monads for checking
+-- expressions and declarations.
 class Monad m => MonadTypeChecker m where
   warn :: Located loc => loc -> String -> m ()
 
@@ -212,6 +217,8 @@ class Monad m => MonadTypeChecker m where
 
   typeError :: Located loc => loc -> Notes -> Doc -> m a
 
+-- | Elaborate the given name in the given namespace at the given
+-- location, producing the corresponding unique 'VName'.
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 
@@ -338,34 +345,43 @@ qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
               reachable qs' name env'
           | otherwise = False
 
+-- | Turn a 'Left' 'TypeError' into an actual error.
 badOnLeft :: Either TypeError a -> TypeM a
 badOnLeft = either throwError return
 
+-- | All signed integer types.
 anySignedType :: [PrimType]
 anySignedType = map Signed [minBound .. maxBound]
 
+-- | All unsigned integer types.
 anyUnsignedType :: [PrimType]
 anyUnsignedType = map Unsigned [minBound .. maxBound]
 
+-- | All integer types.
 anyIntType :: [PrimType]
 anyIntType = anySignedType ++ anyUnsignedType
 
+-- | All floating-point types.
 anyFloatType :: [PrimType]
 anyFloatType = map FloatType [minBound .. maxBound]
 
+-- | All number types.
 anyNumberType :: [PrimType]
 anyNumberType = anyIntType ++ anyFloatType
 
+-- | All primitive types.
 anyPrimType :: [PrimType]
 anyPrimType = Bool : anyIntType ++ anyFloatType
 
 --- Name handling
 
+-- | The 'NameMap' corresponding to the intrinsics module.
 intrinsicsNameMap :: NameMap
 intrinsicsNameMap = M.fromList $ map mapping $ M.toList intrinsics
   where mapping (v, IntrinsicType{}) = ((Type, baseName v), QualName [] v)
         mapping (v, _)               = ((Term, baseName v), QualName [] v)
 
+-- | The names that are available in the initial environment.
 topLevelNameMap :: NameMap
 topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
   where atTopLevel :: (Namespace, Name) -> Bool

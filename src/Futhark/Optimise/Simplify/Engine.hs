@@ -75,7 +75,6 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Analysis.Usage
 import Futhark.Construct
 import Futhark.Optimise.Simplify.Lore
 import Futhark.Util (splitFromEnd)
@@ -388,7 +387,7 @@ provides = patternNames . stmPattern
 expandUsage :: (Attributes lore, Aliased lore) =>
                ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
 expandUsage vtable utable bnd =
-  UT.expand (`ST.lookupAliases` vtable) (usageInStm bnd <> usageThroughAliases) <>
+  UT.expand (`ST.lookupAliases` vtable) (UT.usageInStm bnd <> usageThroughAliases) <>
   utable
   where pat = stmPattern bnd
         usageThroughAliases =

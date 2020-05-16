@@ -122,6 +122,8 @@ data TypeBinding = TypeAbbr Liftedness [TypeParam] StructType
 data BoundV = BoundV [TypeParam] StructType
                 deriving (Show)
 
+-- | A mapping from names (which always exist in some namespace) to a
+-- unique (tagged) name.
 type NameMap = M.Map (Namespace, Name) (QualName VName)
 
 -- | Modules produces environment with this representation.

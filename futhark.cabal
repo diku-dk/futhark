@@ -69,7 +69,6 @@ library
       Futhark.Analysis.Rephrase
       Futhark.Analysis.ScalExp
       Futhark.Analysis.SymbolTable
-      Futhark.Analysis.Usage
       Futhark.Analysis.UsageTable
       Futhark.Bench
       Futhark.Binder
@@ -139,7 +138,6 @@ library
       Futhark.Compiler.Program
       Futhark.Construct
       Futhark.Doc.Generator
-      Futhark.Doc.Html
       Futhark.Error
       Futhark.FreshNames
       Futhark.Internalise
