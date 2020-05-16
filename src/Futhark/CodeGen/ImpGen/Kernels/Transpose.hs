@@ -193,7 +193,7 @@ mapTranspose block_dim args t kind =
 -- We try to remedy this by using a special kernel that will process a larger
 -- part of the input, by using more complex indexing. In our example, we could
 -- use all threads in a group if we are processing @(2/FUT_BLOCK_DIM)@ as large
--- a slice of each rows per group. The variable 'mulx' contains this factor for
+-- a slice of each rows per group. The variable @mulx@ contains this factor for
 -- the kernel to handle input arrays with low height.
 --
 -- See issue #308 on GitHub for more details.

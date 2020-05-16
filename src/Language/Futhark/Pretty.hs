@@ -59,6 +59,7 @@ instance IsName VName where
 instance IsName Name where
   pprName = ppr
 
+-- | Prettyprint a name to a string.
 prettyName :: IsName v => v -> String
 prettyName = prettyDoc 80 . pprName
 

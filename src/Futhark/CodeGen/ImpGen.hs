@@ -129,7 +129,7 @@ data Operations lore r op = Operations { opsExpCompiler :: ExpCompiler lore r op
                                      }
 
 -- | An operations set for which the expression compiler always
--- returns 'CompileExp'.
+-- returns 'defCompileExp'.
 defaultOperations :: (Mem lore, FreeIn op) =>
                      OpCompiler lore r op -> Operations lore r op
 defaultOperations opc = Operations { opsExpCompiler = defCompileExp

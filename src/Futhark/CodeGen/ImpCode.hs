@@ -277,7 +277,7 @@ withElemType (Count e) t =
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
--- | Turn a 'VName' into a 'int32' 'Imp.ScalarVar'.
+-- | Turn a 'VName' into a 'Int32' 'Imp.ScalarVar'.
 vi32 :: VName -> Exp
 vi32 = flip var $ IntType Int32
 

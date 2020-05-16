@@ -1,6 +1,55 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+-- | = Constructing Futhark ASTs
+--
+-- This module re-exports and defines a bunch of building blocks for
+-- constructing fragments of Futhark ASTs.  More importantly, it also
+-- contains a basic introduction on how to use them.
+--
+-- The "Futhark.Representation.AST.Syntax" module contains the core
+-- AST definition.  One important invariant is that all bound names in
+-- a Futhark program must be /globally/ unique.  In principle, you
+-- could use the facilities from "Futhark.MonadFreshNames" (or your
+-- own bespoke source of unique names) to manually construct
+-- expressions, statements, and entire ASTs.  In practice, this would
+-- be very tedious.  Instead, we have defined a collection of building
+-- blocks (centered around the 'MonadBinder' type class) that permits
+-- a more abstract way of generating code.
+--
+-- Constructing ASTs with these building blocks requires you to ensure
+-- that all free variables are in scope.  See
+-- "Futhark.Representation.AST.Attributes.Scope".
+--
+-- == 'MonadBinder'
+--
+-- A monad that implements 'MonadBinder' tracks the statements added
+-- so far, the current names in scope, and allows you to add
+-- additional statements with 'addStm'.  Any monad that implements
+-- 'MonadBinder' also implements the t'Lore' type family, which
+-- indicates which lore it works with.  Inside a 'MonadBinder' we can
+-- use 'collectStms' to gather up the 'Stms' added with 'addStm' in
+-- some nested computation.
+--
+-- The 'BinderT' monad (and its convenient 'Binder' version) provides
+-- the simplest implementation of 'MonadBinder'.
+--
+-- == Higher-level building blocks
+--
+-- On top of the raw facilities provided by 'MonadBinder', we have
+-- more convenient facilities.  For example, 'letSubExp' lets us
+-- conveniently create a 'Stm' for an 'Exp' that produces a /single/
+-- value, and returns the (fresh) name for the resulting variable:
+--
+-- @
+-- z <- letSubExp "z" $ BasicOp $ BinOp (Add Int32) (Var x) (Var y)
+-- @
+--
+-- == Examples
+--
+-- The "Futhark.Transform.FirstOrderTransform" module is a
+-- (relatively) simple example of how to use these components.  As are
+-- some of the high-level building blocks in this very module.
 module Futhark.Construct
   ( letSubExp
   , letSubExps

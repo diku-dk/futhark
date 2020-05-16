@@ -3,6 +3,7 @@ cabal-version: 2.4
 name:           futhark
 version:        0.16.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
+
 description:    Futhark is a small programming language designed to be compiled to
                 efficient parallel code. It is a statically typed, data-parallel,
                 and purely functional array language in the ML family, and comes
@@ -11,6 +12,20 @@ description:    Futhark is a small programming language designed to be compiled 
                 is hardware-agnostic.
                 .
                 For more information, see the website at https://futhark-lang.org
+                .
+                For introductionary information about hacking on the
+                Futhark compiler, see
+                <https://futhark.readthedocs.io/en/latest/hacking.html the hacking guide>.
+                Regarding the internal design of the compiler, the following modules make
+                good starting points:
+                .
+                * "Futhark.Representation.AST.Syntax" explains the
+                  basic design of the intermediate representation (IR).
+                * "Futhark.Construct" explains how to write code that
+                  manipulates and creates AST fragments.
+                .
+                <<assets/ohyes.png You too can go fast once you rewrite your program in Futhark.>>
+
 category:       Language
 homepage:       https://futhark-lang.org
 bug-reports:    https://github.com/diku-dk/futhark/issues
@@ -29,6 +44,8 @@ extra-source-files:
     docs/Makefile
     docs/conf.py
     docs/requirements.txt
+extra-doc-files:
+  assets/*.png
 
 source-repository head
   type: git

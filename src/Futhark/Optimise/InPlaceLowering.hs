@@ -44,7 +44,7 @@
 --    (2) @k@ and @y@ must be available at the beginning of the loop.
 --
 --    (3) @x@ must be visible whenever @r@ is visible.  (This means
---    that both @x@ and @r@ must be bound in the same 'Body'.)
+--    that both @x@ and @r@ must be bound in the same t'Body'.)
 --
 --    (4) If @x@ is consumed at a point after the loop, @r@ must not
 --    be used after that point.

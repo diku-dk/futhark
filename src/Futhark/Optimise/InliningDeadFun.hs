@@ -209,7 +209,7 @@ addLocations caller_safety more_locs = fmap onStm
         onLambda :: Lambda -> Lambda
         onLambda lam = lam { lambdaBody = onBody $ lambdaBody lam }
 
--- | Inline 'NotConstFun' functions and remove the resulting dead functions.
+-- | Inline all functions and remove the resulting dead functions.
 inlineFunctions :: Pass SOACS SOACS
 inlineFunctions =
   Pass { passName = "Inline functions"

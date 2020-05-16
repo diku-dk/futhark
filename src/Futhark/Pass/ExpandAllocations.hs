@@ -208,8 +208,6 @@ memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
 -- much memory (and which space) is needed.
 type Extraction = M.Map VName (SubExp, Space)
 
--- | Extract allocations from 'Thread' statements with
--- 'extractThreadAllocations'.
 extractKernelBodyAllocations :: Names -> Names -> KernelBody KernelsMem
                              -> (KernelBody KernelsMem,
                                  Extraction)
