@@ -1,4 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+-- | In the context of this module, a "size" is any kind of tunable
+-- (run-time) constant.
 module Futhark.Representation.Kernels.Sizes
   ( SizeClass (..)
   , KernelPath

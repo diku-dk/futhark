@@ -3,14 +3,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
--- | This module provides facilities for transforming Futhark programs such
--- that names are unique, via the 'renameProg' function.
--- Additionally, the module also supports adding integral \"tags\" to
--- names (incarnated as the 'ID' type), in order to support more
--- efficient comparisons and renamings.  This is done by 'tagProg'.
--- The intent is that you call 'tagProg' once at some early stage,
--- then use 'renameProg' from then on.  Functions are also provided
--- for removing the tags again from expressions, patterns and typs.
+-- | This module provides facilities for transforming Futhark programs
+-- such that names are unique, via the 'renameProg' function.
 module Futhark.Transform.Rename
   (
   -- * Renaming programs

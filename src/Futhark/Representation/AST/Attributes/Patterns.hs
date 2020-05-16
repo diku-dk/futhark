@@ -82,15 +82,15 @@ patternContextNames = map patElemName . patternContextElements
 patternValueNames :: PatternT attr -> [VName]
 patternValueNames = map patElemName . patternValueElements
 
--- | Return a list of the 'types's bound by the 'Pattern'.
+-- | Return a list of the typess bound by the pattern.
 patternTypes :: Typed attr => PatternT attr -> [Type]
 patternTypes = map identType . patternIdents
 
--- | Return a list of the 'Types's bound by the value part of the 'Pattern'.
+-- | Return a list of the typess bound by the value part of the pattern.
 patternValueTypes :: Typed attr => PatternT attr -> [Type]
 patternValueTypes = map identType . patternValueIdents
 
--- | Return the number of names bound by the 'Pattern'.
+-- | Return the number of names bound by the pattern.
 patternSize :: PatternT attr -> Int
 patternSize (Pattern context values) = length context + length values
 

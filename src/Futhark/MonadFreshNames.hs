@@ -78,7 +78,7 @@ newName = modifyNameSource . flip FreshNames.newName
 newNameFromString :: MonadFreshNames m => String -> m VName
 newNameFromString s = newName $ VName (nameFromString s) 0
 
--- | Produce a fresh 'ID', using the given base name as a template.
+-- | Produce a fresh 'VName', using the given base name as a template.
 newID :: MonadFreshNames m => Name -> m VName
 newID s = newName $ VName s 0
 

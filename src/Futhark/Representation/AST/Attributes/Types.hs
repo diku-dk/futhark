@@ -366,8 +366,7 @@ hasStaticShape (Array bt (Shape shape) u) =
         isFree (Ext _)  = Nothing
 
 -- | Given two lists of 'ExtType's of the same length, return a list
--- of 'ExtType's that is a subtype (as per 'isSubtypeOf') of the two
--- operands.
+-- of 'ExtType's that is a subtype of the two operands.
 generaliseExtTypes :: [TypeBase ExtShape u]
                    -> [TypeBase ExtShape u]
                    -> [TypeBase ExtShape u]
