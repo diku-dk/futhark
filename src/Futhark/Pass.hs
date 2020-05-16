@@ -1,7 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- | Definition of a polymorphic (generic) pass that can work with programs of any
 -- lore.
 module Futhark.Pass

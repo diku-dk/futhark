@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- | @futhark dataset@
 module Futhark.CLI.Dataset (main) where
 

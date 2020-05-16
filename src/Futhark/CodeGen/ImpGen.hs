@@ -2,7 +2,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
@@ -241,7 +240,7 @@ instance MonadFreshNames (ImpM lore r op) where
 -- Cannot be an KernelsMem scope because the index functions have
 -- the wrong leaves (VName instead of Imp.Exp).
 instance HasScope SOACS (ImpM lore r op) where
-  askScope = M.map (LetInfo . entryType) <$> gets stateVTable
+  askScope = gets $ M.map (LetInfo . entryType) . stateVTable
     where entryType (MemVar _ memEntry) =
             Mem (entryMemSpace memEntry)
           entryType (ArrayVar _ arrayEntry) =

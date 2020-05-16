@@ -133,7 +133,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
 
         onBody (variance, szsubst, scope) (Body battr stms bres) = do
           stms' <- stmsFromList <$> mapM (onStm (variance', szsubst', scope')) (stmsToList stms)
-          Body battr stms' <$> pure bres
+          pure $ Body battr stms' bres
           where variance' = varianceInStms variance stms
                 szsubst' = mkSizeSubsts stms <> szsubst
                 scope' = scope <> scopeOf stms

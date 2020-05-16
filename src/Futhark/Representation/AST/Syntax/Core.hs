@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.Representation.AST.Syntax" in order for
 -- "Futhark.Representation.AST.Annotations" to use these definitions.  This

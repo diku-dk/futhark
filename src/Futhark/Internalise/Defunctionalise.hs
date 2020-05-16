@@ -710,7 +710,7 @@ envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Scalar $ Prim $ Sign
 -- return type, list of parameters, and body expression.
 liftValDec :: VName -> PatternType -> [VName] -> [Pattern] -> Exp -> DefM ()
 liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
-  where dims' = map (flip TypeParamDim noLoc) dims
+  where dims' = map (`TypeParamDim` noLoc) dims
         -- FIXME: this pass is still not correctly size-preserving, so
         -- forget those return sizes that we forgot to propagate along
         -- the way.  Hopefully the internaliser is conservative and

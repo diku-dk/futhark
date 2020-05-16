@@ -403,7 +403,7 @@ transformExp (Match e cs (t, retext) loc) =
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
   (p', rr) <- transformPattern p
-  CasePat <$> pure p' <*> withRecordReplacements rr (transformExp e) <*> pure loc
+  CasePat p' <$> withRecordReplacements rr (transformExp e) <*> pure loc
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e

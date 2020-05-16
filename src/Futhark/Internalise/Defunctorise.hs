@@ -255,8 +255,8 @@ transformTypeDecl (TypeDecl dt (Info et)) =
 transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te doc loc) = do
   name' <- transformName name
-  emit =<< TypeDec <$> (TypeBind name' l <$> traverse transformNames tparams
-                        <*> transformTypeDecl te <*> pure doc <*> pure loc)
+  emit . TypeDec =<< (TypeBind name' l <$> traverse transformNames tparams
+                      <*> transformTypeDecl te <*> pure doc <*> pure loc)
 
 transformModBind :: ModBind -> TransformM Scope
 transformModBind mb = do

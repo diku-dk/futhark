@@ -80,15 +80,14 @@ aggInlineFunctions cg =
 
             (vtable', consts') <-
               if any ((`calledByConsts` cg) . funDefName) to_be_inlined'
-              then simplifyConsts =<<
-                   performCSEOnStms True <$>
+              then simplifyConsts . performCSEOnStms True =<<
                    inlineInStms (fdmap to_be_inlined') consts
               else pure (vtable, consts)
 
             let simplifyFun' fd
                   | i `rem` simplifyRate == 0 =
-                      copyPropagateInFun simpleSOACS vtable' =<<
-                      performCSEOnFunDef True <$>
+                      copyPropagateInFun simpleSOACS vtable' .
+                      performCSEOnFunDef True =<<
                       simplifyFun vtable' fd
                   | otherwise =
                       copyPropagateInFun simpleSOACS vtable' fd

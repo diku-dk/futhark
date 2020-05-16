@@ -138,7 +138,7 @@ simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
   (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam $ map Just arrs
 
   (,) <$> (Screma <$> Engine.simplify w <*>
-           (ScremaForm <$> pure scans' <*> pure reds' <*> pure map_lam') <*>
+           pure (ScremaForm scans' reds' map_lam') <*>
             Engine.simplify arrs) <*>
     pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 

@@ -367,7 +367,7 @@ simplifyCmpOp _ _ (CmpOp cmp e1 e2)
                            CmpLle -> True
 
 simplifyCmpOp _ _ (CmpOp cmp (Constant v1) (Constant v2)) =
-  constRes =<< BoolValue <$> doCmpOp cmp v1 v2
+  constRes . BoolValue =<< doCmpOp cmp v1 v2
 
 simplifyCmpOp look _ (CmpOp CmpEq{} (Constant (IntValue x)) (Var v))
   | Just (BasicOp (ConvOp BToI{} b), cs) <- look v =

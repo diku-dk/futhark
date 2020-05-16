@@ -2,7 +2,6 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE StandaloneDeriving         #-}
-{-# LANGUAGE StrictData                 #-}
 {-# LANGUAGE Strict                     #-}
 -- | This is an ever-changing syntax representation for Futhark.  Some
 -- types, such as @Exp@, are parametrised by type and name

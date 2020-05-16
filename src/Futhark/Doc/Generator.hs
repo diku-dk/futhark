@@ -546,7 +546,7 @@ vnameLink' :: VName -> String -> String -> String
 vnameLink :: VName -> DocM String
 vnameLink vname = do
   current <- asks ctxCurrent
-  file <- maybe current fst <$> asks (M.lookup vname . ctxFileMap)
+  file <- asks $ maybe current fst . M.lookup vname . ctxFileMap
   return $ vnameLink' vname current file
 
 vnameLink' (VName _ tag) current file =
