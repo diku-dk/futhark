@@ -6,7 +6,6 @@
 module Language.Futhark.Query
   ( BoundTo(..)
   , boundLoc
-  , allBindings
   , AtPos(..)
   , atPos
   , Pos(..)

@@ -51,6 +51,7 @@ identityMapper = ASTMapper { mapOnExp = return
                            , mapOnPatternType = return
                            }
 
+-- | The class of things that we can map an 'ASTMapper' across.
 class ASTMappable x where
   -- | Map a monadic action across the immediate children of an
   -- object.  Importantly, the 'astMap' action is not invoked for

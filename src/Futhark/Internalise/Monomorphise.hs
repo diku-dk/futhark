@@ -47,8 +47,9 @@ import           Language.Futhark.TypeChecker.Types
 i32 :: TypeBase dim als
 i32 = Scalar $ Prim $ Signed Int32
 
--- | The monomorphization monad reads 'PolyBinding's and writes 'ValBinding's.
--- The 'TypeParam's in a 'ValBinding' can only be shape parameters.
+-- The monomorphization monad reads 'PolyBinding's and writes
+-- 'ValBind's.  The 'TypeParam's in the 'ValBind's can only be size
+-- parameters.
 --
 -- Each 'Polybinding' is also connected with the 'RecordReplacements'
 -- that were active when the binding was defined.  This is used only
@@ -57,15 +58,15 @@ data PolyBinding = PolyBinding RecordReplacements
                    (VName, [TypeParam], [Pattern],
                      Maybe (TypeExp VName), StructType, [VName], Exp, SrcLoc)
 
--- | Mapping from record names to the variable names that contain the
+-- Mapping from record names to the variable names that contain the
 -- fields.  This is used because the monomorphiser also expands all
 -- record patterns.
 type RecordReplacements = M.Map VName RecordReplacement
 
 type RecordReplacement = M.Map Name (VName, PatternType)
 
--- | Monomorphization environment mapping names of polymorphic functions to a
--- representation of their corresponding function bindings.
+-- Monomorphization environment mapping names of polymorphic functions
+-- to a representation of their corresponding function bindings.
 data Env = Env { envPolyBindings :: M.Map VName PolyBinding
                , envTypeBindings :: M.Map VName TypeBinding
                , envRecordReplacements :: RecordReplacements
@@ -90,7 +91,7 @@ withRecordReplacements rr = localEnv mempty { envRecordReplacements = rr }
 replaceRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
 replaceRecordReplacements rr = local $ \env -> env { envRecordReplacements = rr }
 
--- | The monomorphization monad.
+-- The monomorphization monad.
 newtype MonoM a = MonoM (RWST Env (Seq.Seq (VName, ValBind)) VNameSource
                          (State Lifts) a)
   deriving (Functor, Applicative, Monad,
@@ -112,10 +113,10 @@ lookupFun vn = do
 lookupRecordReplacement :: VName -> MonoM (Maybe RecordReplacement)
 lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 
--- | Given instantiated type of function, produce size arguments.
+-- Given instantiated type of function, produce size arguments.
 type InferSizeArgs = StructType -> [Exp]
 
--- | The kind of type relative to which we monomorphise.  What is
+-- The kind of type relative to which we monomorphise.  What is
 -- important to us is not the specific dimensions, but merely whether
 -- they are known or anonymous (the latter False).
 type MonoType = TypeBase Bool ()
@@ -125,7 +126,7 @@ monoType = bimap onDim (const ())
   where onDim AnyDim = False
         onDim _      = True
 
--- | Mapping from function name and instance list to a new function name in case
+-- Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
 type Lifts = [((VName, MonoType), (VName, InferSizeArgs))]
 
@@ -178,7 +179,7 @@ transformFName loc fname t
                                      loc)
           size_args
 
--- | This carries out record replacements in the alias information of a type.
+-- This carries out record replacements in the alias information of a type.
 transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
 transformType t = do
   rrs <- asks envRecordReplacements
@@ -191,7 +192,7 @@ transformType t = do
            then second (mconcat . map replace . S.toList) t
            else t
 
--- | Monomorphization of expressions.
+-- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
 transformExp e@Literal{} = return e
 transformExp e@IntLit{} = return e
@@ -411,7 +412,7 @@ transformDimIndex (DimSlice me1 me2 me3) =
   DimSlice <$> trans me1 <*> trans me2 <*> trans me3
   where trans = mapM transformExp
 
--- | Transform an operator section into a lambda.
+-- Transform an operator section into a lambda.
 desugarBinOpSection :: Exp -> Maybe Exp -> Maybe Exp
                     -> PatternType
                     -> (StructType, Maybe VName) -> (StructType, Maybe VName)
@@ -458,7 +459,7 @@ noticeDims = mapM_ notice . nestedDims
   where notice (NamedDim v) = void $ transformFName noLoc v i32
         notice _            = return ()
 
--- | Convert a collection of 'ValBind's to a nested sequence of let-bound,
+-- Convert a collection of 'ValBind's to a nested sequence of let-bound,
 -- monomorphic functions with the given expression at the bottom.
 unfoldLetFuns :: [ValBind] -> Exp -> Exp
 unfoldLetFuns [] e = e
@@ -556,7 +557,7 @@ noNamedParams = f
           Sum $ fmap (map f) cs
         f' t = t
 
--- | Monomorphise a polymorphic function at the types given in the instance
+-- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphiseBinding :: Bool -> PolyBinding -> MonoType
@@ -655,7 +656,7 @@ typeSubstsM loc orig_t1 orig_t2 =
                         return $ NamedDim $ qualName d
         onDim False = return AnyDim
 
--- | Perform a given substitution on the types in a pattern.
+-- Perform a given substitution on the types in a pattern.
 substPattern :: Bool -> (PatternType -> PatternType) -> Pattern -> Pattern
 substPattern entry f pat = case pat of
   TuplePattern pats loc       -> TuplePattern (map (substPattern entry f) pats) loc
@@ -673,7 +674,7 @@ toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ loc) =
   PolyBinding mempty (name, tparams, params, retdecl, rettype, retext, body, loc)
 
--- | Remove all type variables and type abbreviations from a value binding.
+-- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
 removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats body _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
