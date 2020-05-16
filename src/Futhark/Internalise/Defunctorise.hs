@@ -318,6 +318,7 @@ transformImports ((name,imp):imps) = do
                       else Nothing  }
     maybeHideEntryPoint d = d
 
+-- | Perform defunctorisation.
 transformProg :: MonadFreshNames m => Imports -> m [Dec]
 transformProg prog = modifyNameSource $ \namesrc ->
   let ((), namesrc', prog') = runTransformM namesrc $ transformImports prog

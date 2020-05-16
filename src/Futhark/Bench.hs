@@ -37,14 +37,20 @@ import System.Timeout (timeout)
 
 import Futhark.Test
 
+-- | The runtime of a single succesful run.
 newtype RunResult = RunResult { runMicroseconds :: Int }
                   deriving (Eq, Show)
+
+-- | The results for a single named dataset is either an error
+-- message, or runtime measurements along the stderr that was
+-- produced.
 data DataResult = DataResult String (Either T.Text ([RunResult], T.Text))
                 deriving (Eq, Show)
+
+-- | The results for all datasets for some benchmark program.
 data BenchResult = BenchResult FilePath [DataResult]
                  deriving (Eq, Show)
 
--- Intermediate types to help write the JSON instances.
 newtype DataResults = DataResults { unDataResults :: [DataResult] }
 newtype BenchResults = BenchResults { unBenchResults :: [BenchResult] }
 

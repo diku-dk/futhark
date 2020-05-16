@@ -824,7 +824,6 @@ mustHaveConstr usage c t fs = do
     _ -> do unify usage t $ Scalar $ Sum $ M.singleton c fs
             return ()
 
--- | Assert that some type must have a field with this name and type.
 mustHaveFieldWith :: MonadUnify m =>
                      UnifyDims m -> Usage -> BreadCrumbs
                   -> Name -> PatternType -> m PatternType
@@ -855,6 +854,7 @@ mustHaveFieldWith onDims usage bcs l t = do
     _ -> do unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type'
             return l_type
 
+-- | Assert that some type must have a field with this name and type.
 mustHaveField :: MonadUnify m =>
                  Usage -> Name -> PatternType -> m PatternType
 mustHaveField usage = mustHaveFieldWith (unifyDims usage) usage noBreadCrumbs
