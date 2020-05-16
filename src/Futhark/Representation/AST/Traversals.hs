@@ -98,7 +98,7 @@ mapExpM tv (If c texp fexp (IfAttr ts s)) =
 mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
-  Apply fname <$> pure args' <*> mapM (mapOnRetType tv) ret <*> pure loc
+  Apply fname args' <$> mapM (mapOnRetType tv) ret <*> pure loc
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp <$> (Index <$> mapOnVName tv arr <*>
                mapM (traverse (mapOnSubExp tv)) slice)
@@ -119,13 +119,13 @@ mapExpM tv (BasicOp (Reshape shape arrexp)) =
                mapM (Data.Traversable.traverse (mapOnSubExp tv)) shape <*>
                mapOnVName tv arrexp)
 mapExpM tv (BasicOp (Rearrange perm e)) =
-  BasicOp <$> (Rearrange <$> pure perm <*> mapOnVName tv e)
+  BasicOp <$> (Rearrange perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Rotate es e)) =
   BasicOp <$> (Rotate <$> mapM (mapOnSubExp tv) es <*> mapOnVName tv e)
 mapExpM tv (BasicOp (Concat i x ys size)) =
-  BasicOp <$> (Concat <$> pure i <*>
-              mapOnVName tv x <*> mapM (mapOnVName tv) ys <*>
-              mapOnSubExp tv size)
+  BasicOp <$> (Concat i <$>
+               mapOnVName tv x <*> mapM (mapOnVName tv) ys <*>
+               mapOnSubExp tv size)
 mapExpM tv (BasicOp (Copy e)) =
   BasicOp <$> (Copy <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Manifest perm e)) =
