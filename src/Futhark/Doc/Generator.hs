@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+-- | The core logic of @futhark doc@.
 module Futhark.Doc.Generator (renderFiles) where
 
 import Control.Arrow ((***))
@@ -91,6 +92,11 @@ vnameToFileMap = mconcat . map forFile
                 forMod ModFun{} = mempty
                 forMty = forMod . mtyMod
 
+-- | @renderFiles important_imports imports@ produces HTML files
+-- documenting the type-checked program @imports@, with the files in
+-- @important_imports@ considered most important.  The HTML files must
+-- be written to the specific locations indicated in the return value,
+-- or the relative links will be wrong.
 renderFiles :: [FilePath] -> Imports -> ([(FilePath, Html)], Warnings)
 renderFiles important_imports imports = runWriter $ do
   (import_pages, documented) <- runWriterT $ forM imports $ \(current, fm) ->

@@ -2,6 +2,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+-- | Implementation of unification and other core type system building
+-- blocks.
 module Language.Futhark.TypeChecker.Unify
   ( Constraint(..)
   , Usage
@@ -72,14 +74,20 @@ instance Pretty BreadCrumb where
   ppr (Matching s) =
     s
 
+-- | Unification failures can occur deep down inside complicated types
+-- (consider nested records).  We leave breadcrumbs behind us so we
+-- can report the path we took to find the mismatch.
 newtype BreadCrumbs = BreadCrumbs [BreadCrumb]
 
+-- | An empty path.
 noBreadCrumbs :: BreadCrumbs
 noBreadCrumbs = BreadCrumbs []
 
+-- | Is the path empty?
 hasNoBreadCrumbs :: BreadCrumbs -> Bool
 hasNoBreadCrumbs (BreadCrumbs xs) = null xs
 
+-- | Drop a breadcrumb on the path behind you.
 breadCrumb :: BreadCrumb -> BreadCrumbs -> BreadCrumbs
 breadCrumb (MatchingFields xs) (BreadCrumbs (MatchingFields ys : bcs)) =
   BreadCrumbs $ MatchingFields (ys++xs) : bcs
@@ -94,9 +102,12 @@ instance Pretty BreadCrumbs where
 data Usage = Usage (Maybe String) SrcLoc
   deriving (Show)
 
+-- | Construct a 'Usage' from a location and a description.
 mkUsage :: SrcLoc -> String -> Usage
 mkUsage = flip (Usage . Just)
 
+-- | Construct a 'Usage' that has just a location, but no particular
+-- description.
 mkUsage' :: SrcLoc -> Usage
 mkUsage' = Usage Nothing
 
@@ -108,10 +119,11 @@ instance Located Usage where
   locOf (Usage _ loc) = locOf loc
 
 -- | The level at which a type variable is bound.  Higher means
--- deeper.  We can only unify a type variable at level 'i' with a type
--- 't' if all type names that occur in 't' are at most at level 'i'.
+-- deeper.  We can only unify a type variable at level @i@ with a type
+-- @t@ if all type names that occur in @t@ are at most at level @i@.
 type Level = Int
 
+-- | A constraint on a yet-ambiguous type variable.
 data Constraint = NoConstraint Liftedness Usage
                 | ParamType Liftedness SrcLoc
                 | Constraint StructType Usage
@@ -230,6 +242,9 @@ prettySource ctx loc (RigidCond t1 t2) =
   "One branch returns array of type: " <> align (ppr t1) </>
   "The other an array of type:       " <> align (ppr t2)
 
+-- | Retrieve notes describing the purpose or origin of the given
+-- 'DimDecl'.  The location is used as the *current* location, for the
+-- purpose of reporting relative locations.
 dimNotes :: (Located a, MonadUnify m) => a -> DimDecl VName -> m Notes
 dimNotes ctx (NamedDim d) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
@@ -245,6 +260,8 @@ typeNotes ctx =
   fmap mconcat . mapM (dimNotes ctx . NamedDim . qualName) .
   S.toList . typeDimNames
 
+-- | Monads that which to perform unification must implement this type
+-- class.
 class Monad m => MonadUnify m where
   getConstraints :: m Constraints
   putConstraints :: Constraints -> m ()
@@ -264,10 +281,12 @@ class Monad m => MonadUnify m where
   unifyError :: Located loc => loc -> Notes -> BreadCrumbs
              -> Doc -> m a
 
+-- | Replace all type variables with their substitution.
 normTypeFully :: (Substitutable a, MonadUnify m) => a -> m a
 normTypeFully t = do constraints <- getConstraints
                      return $ applySubst (`lookupSubst` constraints) t
 
+-- | Replace any top-level type variable with its substitution.
 normType :: MonadUnify m => StructType -> m StructType
 normType t@(Scalar (TypeVar _ _ (TypeName [] v) [])) = do
   constraints <- getConstraints
@@ -276,6 +295,7 @@ normType t@(Scalar (TypeVar _ _ (TypeName [] v) [])) = do
     _ -> return t
 normType t = return t
 
+-- | Replace any top-level type variable with its substitution.
 normPatternType :: MonadUnify m => PatternType -> m PatternType
 normPatternType t@(Scalar (TypeVar als u (TypeName [] v) [])) = do
   constraints <- getConstraints
@@ -291,6 +311,8 @@ rigidConstraint ParamSize{} = True
 rigidConstraint UnknowableSize{} = True
 rigidConstraint _ = False
 
+-- | Replace 'AnyDim' dimensions that occur as 'PosImmediate' or
+-- 'PosParam' with a fresh 'NamedDim'.
 instantiateEmptyArrayDims :: MonadUnify m =>
                              SrcLoc -> String -> Rigidity
                           -> TypeBase (DimDecl VName) als
@@ -648,6 +670,7 @@ removeUniqueness (Scalar (Sum cs)) =
   Scalar $ Sum $ (fmap . fmap) removeUniqueness cs
 removeUniqueness t = t `setUniqueness` Nonunique
 
+-- | Assert that this type must be one of the given primitive types.
 mustBeOneOf :: MonadUnify m => [PrimType] -> Usage -> StructType -> m ()
 mustBeOneOf [req_t] usage t = unify usage (Scalar (Prim req_t)) t
 mustBeOneOf ts usage t = do
@@ -695,6 +718,7 @@ linkVarToTypes usage vn ts = do
       unifyError usage mempty noBreadCrumbs $
       "Cannot constrain type to one of" <+> commasep (map ppr ts)
 
+-- | Assert that this type must support equality.
 equalityType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
                 Usage -> TypeBase dim as -> m ()
 equalityType usage t = do
@@ -743,6 +767,7 @@ zeroOrderTypeWith usage bcs t = do
               text (locStr ploc) <+> "may be a function."
             _ -> return ()
 
+-- | Assert that this type must be zero-order.
 zeroOrderType :: (MonadUnify m, Pretty (ShapeDecl dim), Monoid as) =>
                  Usage -> String -> TypeBase dim as -> m ()
 zeroOrderType usage desc =
@@ -799,6 +824,7 @@ mustHaveConstr usage c t fs = do
     _ -> do unify usage t $ Scalar $ Sum $ M.singleton c fs
             return ()
 
+-- | Assert that some type must have a field with this name and type.
 mustHaveFieldWith :: MonadUnify m =>
                      UnifyDims m -> Usage -> BreadCrumbs
                   -> Name -> PatternType -> m PatternType
