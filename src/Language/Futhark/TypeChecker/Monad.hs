@@ -9,7 +9,6 @@ module Language.Futhark.TypeChecker.Monad
   , runTypeM
   , askEnv
   , askImportName
-  , checkQualNameWithEnv
   , bindSpaced
   , qualifyTypeVars
   , lookupMTy
@@ -17,10 +16,9 @@ module Language.Futhark.TypeChecker.Monad
   , localEnv
 
   , TypeError(..)
-  , unexpectedType
-  , undefinedType
   , unappliedFunctor
-  , unknownVariableError
+  , unknownVariable
+  , unknownType
   , underscoreUse
   , Notes
   , aNote
@@ -81,6 +79,7 @@ import Futhark.Util.Console
 -- | A note with extra information regarding a type error.
 newtype Note = Note Doc
 
+-- | A collection of 'Note's.
 newtype Notes = Notes [Note]
   deriving (Semigroup, Monoid)
 
@@ -90,6 +89,7 @@ instance Pretty Note where
 instance Pretty Notes where
   ppr (Notes notes) = foldMap (((line<>line)<>) . ppr) notes
 
+-- | A single note.
 aNote :: Pretty a => a -> Notes
 aNote = Notes . pure . Note . ppr
 
@@ -101,31 +101,24 @@ instance Pretty TypeError where
     text (inRed $ "Error at " <> locStr loc <> ":") </>
     msg <> ppr notes
 
-unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
-unexpectedType loc _ [] =
-  typeError loc mempty $
-  "Type of expression at" <+> text (locStr loc) <+>
-  "cannot have any type - possibly a bug in the type checker."
-unexpectedType loc t ts =
-  typeError loc mempty $
-  "Type of expression at" <+> text (locStr loc) <+> "must be one of" <+>
-  commasep (map ppr ts) <> ", but is" <+>
-  ppr t <> "."
-
-undefinedType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
-undefinedType loc name =
-  typeError loc mempty $ "Unknown type" <+> ppr name <> "."
-
+-- | An unexpected functor appeared!
 unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
 unappliedFunctor loc =
   typeError loc mempty "Cannot have parametric module here."
 
-unknownVariableError :: MonadTypeChecker m =>
-                        Namespace -> QualName Name -> SrcLoc -> m a
-unknownVariableError space name loc =
+-- | An unknown variable was referenced.
+unknownVariable :: MonadTypeChecker m =>
+                   Namespace -> QualName Name -> SrcLoc -> m a
+unknownVariable space name loc =
   typeError loc mempty $
   "Unknown" <+> ppr space <+> pquote (ppr name)
 
+-- | An unknown type was referenced.
+unknownType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
+unknownType loc name =
+  typeError loc mempty $ "Unknown type" <+> ppr name <> "."
+
+-- | A name prefixed with an underscore was used.
 underscoreUse :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> m a
 underscoreUse loc name =
@@ -152,6 +145,7 @@ newtype TypeM a = TypeM (RWST
             MonadState VNameSource,
             MonadError TypeError)
 
+-- | Run a 'TypeM' computation.
 runTypeM :: Env -> ImportTable -> ImportName -> VNameSource
          -> TypeM a
          -> Either TypeError (a, Warnings, VNameSource)
@@ -159,6 +153,7 @@ runTypeM env imports fpath src (TypeM m) = do
   (x, src', ws) <- runExcept $ runRWST m (Context env imports fpath) src
   return (x, ws, src')
 
+-- | Retrieve the current 'Env'.
 askEnv :: TypeM Env
 askEnv = asks contextEnv
 
@@ -166,12 +161,14 @@ askEnv = asks contextEnv
 askImportName :: TypeM ImportName
 askImportName = asks contextImportName
 
+-- | Look up a module type.
 lookupMTy :: SrcLoc -> QualName Name -> TypeM (QualName VName, MTy)
 lookupMTy loc qn = do
   (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Signature qn loc
   (qn',) <$> maybe explode return (M.lookup name $ envSigTable scope)
-  where explode = unknownVariableError Signature qn loc
+  where explode = unknownVariable Signature qn loc
 
+-- | Look up an import.
 lookupImport :: SrcLoc -> FilePath -> TypeM (FilePath, Env)
 lookupImport loc file = do
   imports <- asks contextImportTable
@@ -183,6 +180,8 @@ lookupImport loc file = do
                   "Known:" <+> commasep (map text (M.keys imports))
     Just scope -> return (canonical_import, scope)
 
+-- | Evaluate a 'TypeM' computation within an extended (/not/
+-- replaced) environment.
 localEnv :: Env -> TypeM a -> TypeM a
 localEnv env = local $ \ctx ->
   let env' = env <> contextEnv ctx
@@ -216,6 +215,8 @@ class Monad m => MonadTypeChecker m where
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 
+-- | Map source-level names do fresh unique internal names, and
+-- evaluate a type checker context with the mapping active.
 bindSpaced :: MonadTypeChecker m => [(Namespace, Name)] -> m a -> m a
 bindSpaced names body = do
   names' <- mapM (newID . snd) names
@@ -246,20 +247,20 @@ instance MonadTypeChecker TypeM where
     outer_env <- askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
-      Nothing -> undefinedType loc qn
+      Nothing -> unknownType loc qn
       Just (TypeAbbr l ps def) -> return (qn', ps, qualifyTypeVars outer_env mempty qs def, l)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envModTable scope of
-      Nothing -> unknownVariableError Term qn loc
+      Nothing -> unknownVariable Term qn loc
       Just m  -> return (qn', m)
 
   lookupVar loc qn = do
     outer_env <- askEnv
     (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
-      Nothing -> unknownVariableError Term qn loc
+      Nothing -> unknownVariable Term qn loc
       Just (BoundV _ t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise ->
@@ -290,7 +291,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
           | Just name' <- M.lookup (space, name) $ envNameMap scope =
               return (scope, name')
           | otherwise =
-              unknownVariableError space qn loc
+              unknownVariable space qn loc
 
         descend scope (q:qs)
           | Just (QualName _ q') <- M.lookup (Term, q) $ envNameMap scope,
@@ -301,9 +302,9 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
                   return (scope', QualName (q':qs') name')
                 ModFun{} -> unappliedFunctor loc
           | otherwise =
-              unknownVariableError space qn loc
+              unknownVariable space qn loc
 
--- Try to prepend qualifiers to the type names such that they
+-- | Try to prepend qualifiers to the type names such that they
 -- represent how to access the type in some scope.
 qualifyTypeVars :: ASTMappable t => Env -> [VName] -> [VName] -> t -> t
 qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper

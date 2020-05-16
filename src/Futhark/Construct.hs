@@ -42,7 +42,7 @@
 -- value, and returns the (fresh) name for the resulting variable:
 --
 -- @
--- z <- letSubExp "z" $ BasicOp $ BinOp (Add Int32) (Var x) (Var y)
+-- z <- letExp "z" $ BasicOp $ BinOp (Add Int32) (Var x) (Var y)
 -- @
 --
 -- == Examples
@@ -456,7 +456,7 @@ mapResult f (Body _ bnds res) =
   in mkBody (bnds<>bnds2) newres
 
 -- | Instantiate all existential parts dimensions of the given
--- type, using a monadic action to create the necessary 'SubExp's.
+-- type, using a monadic action to create the necessary t'SubExp's.
 -- You should call this function within some monad that allows you to
 -- collect the actions performed (say, 'Writer').
 instantiateShapes :: Monad m =>

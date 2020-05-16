@@ -55,8 +55,8 @@ type STVector s = UMVec.STVector s
 type Vector = UVec.Vector
 
 -- | An efficiently represented Futhark value.  Use 'pretty' to get a
--- human-readable representation, and the instances of 'Get' and 'Put'
--- to obtain binary representations
+-- human-readable representation, and the instances of c'Get' and
+-- c'Put' to obtain binary representations
 data Value = Int8Value (Vector Int) (Vector Int8)
            | Int16Value (Vector Int) (Vector Int16)
            | Int32Value (Vector Int) (Vector Int32)
