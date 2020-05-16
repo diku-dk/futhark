@@ -23,7 +23,7 @@ Configuration
 Context creation is parameterised by a configuration object.  Any
 changes to the configuration must be made *before* calling
 :c:func:`futhark_context_new`.  A configuration object must not be
-freed while before any context objects for which it is used.  The same
+freed before any context objects for which it is used.  The same
 configuration may be used for multiple concurrent contexts.
 
 .. c:type:: struct futhark_context_config
