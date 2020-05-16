@@ -1,3 +1,4 @@
+-- | Generalization (anti-unification) of 'PrimExp's.
 module Futhark.Analysis.PrimExp.Generalize
   (
     leastGeneralGeneralization
@@ -10,8 +11,7 @@ import           Data.List (elemIndex)
 import           Futhark.Analysis.PrimExp
 import           Futhark.Representation.AST.Syntax.Core (Ext(..))
 
--- | Generalization (anti-unification)
--- We assume that the two expressions have the same type.
+-- | Generalize two 'PrimExp's of the the same type.
 leastGeneralGeneralization :: (Eq v) => [(PrimExp v, PrimExp v)] -> PrimExp v -> PrimExp v ->
                               Maybe (PrimExp (Ext v), [(PrimExp v, PrimExp v)])
 leastGeneralGeneralization m exp1@(LeafExp v1 t1) exp2@(LeafExp v2 _) =

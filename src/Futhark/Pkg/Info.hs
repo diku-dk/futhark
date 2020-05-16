@@ -296,6 +296,7 @@ class (MonadIO m, MonadLogger m, MonadFail m) => MonadPkgRegistry m where
   modifyPkgRegistry :: (PkgRegistry m -> PkgRegistry m) -> m ()
   modifyPkgRegistry f = putPkgRegistry . f =<< getPkgRegistry
 
+-- | Given a package path, look up information about that package.
 lookupPackage :: MonadPkgRegistry m =>
                  PkgPath -> m (PkgInfo m)
 lookupPackage p = do

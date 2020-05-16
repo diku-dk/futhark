@@ -1,3 +1,5 @@
+-- | Facilities for creating, inspecting, and simplifying reshape and
+-- coercion operations.
 module Futhark.Representation.AST.Attributes.Reshape
        (
          -- * Basic tools
@@ -50,7 +52,7 @@ newDims = map newDim
 newShape :: ShapeChange SubExp -> Shape
 newShape = Shape . newDims
 
--- ^ Construct a 'Reshape' where all dimension changes are
+-- | Construct a 'Reshape' where all dimension changes are
 -- 'DimCoercion's.
 shapeCoerce :: [SubExp] -> VName -> Exp lore
 shapeCoerce newdims arr =

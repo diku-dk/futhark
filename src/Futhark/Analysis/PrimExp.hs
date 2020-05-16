@@ -358,6 +358,8 @@ instance Pretty v => Pretty (PrimExp v) where
   ppr (UnOpExp op x)    = ppr op <+> parens (ppr x)
   ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)
 
+-- | Produce a mapping from the leaves of the 'PrimExp' to their
+-- designated types.
 leafExpTypes :: Ord a => PrimExp a -> S.Set (a, PrimType)
 leafExpTypes (LeafExp x ptp) = S.singleton (x, ptp)
 leafExpTypes (ValueExp _) = S.empty

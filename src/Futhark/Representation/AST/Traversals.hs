@@ -29,7 +29,6 @@ module Futhark.Representation.AST.Traversals
   , mapExpM
   , mapExp
   , mapOnType
-  , mapOnLoopForm
 
   -- * Walking
   , Walker(..)
@@ -76,8 +75,7 @@ identityMapper = Mapper {
                  }
 
 -- | Map a monadic action across the immediate children of an
--- expression.  Importantly, the 'mapOnExp' action is not invoked for
--- the expression itself, and the mapping does not descend recursively
+-- expression.  Importantly, the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM :: (Applicative m, Monad m) =>
            Mapper flore tlore m -> Exp flore -> m (Exp tlore)
@@ -162,10 +160,11 @@ mapOnLoopForm tv (ForLoop i it bound loop_vars) =
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
 
--- | Like 'mapExp', but in the 'Identity' monad.
+-- | Like 'mapExpM', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
 
+-- | Transform any 'SubExp's in the type.
 mapOnType :: Monad m =>
              (SubExp -> m SubExp) -> Type -> m Type
 mapOnType _ (Prim bt) = return $ Prim bt
