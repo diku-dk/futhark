@@ -767,14 +767,14 @@ doFCmpLt = (<)
 doFCmpLe :: FloatValue -> FloatValue -> Bool
 doFCmpLe = (<=)
 
--- | Translate an 'IntValue' to 'Word64'.  This is guaranteed to fit.
+-- | Translate an T'IntValue' to 'Word64'.  This is guaranteed to fit.
 intToWord64 :: IntValue -> Word64
 intToWord64 (Int8Value v)  = fromIntegral (fromIntegral v :: Word8)
 intToWord64 (Int16Value v) = fromIntegral (fromIntegral v :: Word16)
 intToWord64 (Int32Value v) = fromIntegral (fromIntegral v :: Word32)
 intToWord64 (Int64Value v) = fromIntegral (fromIntegral v :: Word64)
 
--- | Translate an 'IntValue' to t'Int64'.  This is guaranteed to fit.
+-- | Translate an t'IntValue' to t'Int64'.  This is guaranteed to fit.
 intToInt64 :: IntValue -> Int64
 intToInt64 (Int8Value v)  = fromIntegral v
 intToInt64 (Int16Value v) = fromIntegral v
