@@ -116,7 +116,7 @@ onShader shader = do
       (use_params, uses) = unzip $ mapMaybe useAsParam $ kernelUses shader
 
       -- FIXME: None of this might be necessary
-      (local_memory_args, local_memory_params, local_memory_init) =
+      (local_memory_args, _, _) =
         unzip3 $
         flip evalState (blankNameSource :: VNameSource) $
         mapM prepareLocalMemory $ shaderLocalMemory s_state
@@ -134,7 +134,7 @@ onShader shader = do
       safety = SafetyNone
 
       --FIXME:
-      params = perm_params ++ catMaybes local_memory_params -- ++ use_params
+      params = perm_params -- ++ catMaybes local_memory_params ++ use_params
 
       layoutQuals = concat $
                     map (\(i, k, u) -> case u of
@@ -155,7 +155,6 @@ onShader shader = do
         [C.cunit|void $id:name ($params:params) {
                   $items:const_defs
                   $items:block_dim_init
-                  $items:local_memory_init
                   $items:shader_body
                 }|]
 
