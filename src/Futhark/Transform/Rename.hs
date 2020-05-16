@@ -122,8 +122,7 @@ class Rename a where
   rename :: a -> RenameM a
 
 instance Rename VName where
-  rename name = fromMaybe name <$>
-                asks (M.lookup name . envNameMap)
+  rename name = asks (fromMaybe name . M.lookup name . envNameMap)
 
 instance Rename a => Rename [a] where
   rename = mapM rename
