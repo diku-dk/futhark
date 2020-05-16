@@ -226,4 +226,4 @@ withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
 withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }
 
 lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
-lookupDim name = M.lookup name <$> asks typeEnvDims
+lookupDim name = asks $ M.lookup name . typeEnvDims

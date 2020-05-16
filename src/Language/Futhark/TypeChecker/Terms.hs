@@ -1017,7 +1017,7 @@ require why ts e = do mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< e
 
 unifies :: String -> StructType -> Exp -> TermTypeM Exp
 unifies why t e = do
-  unify (mkUsage (srclocOf e) why) t =<< toStruct <$> expType e
+  unify (mkUsage (srclocOf e) why) t . toStruct =<< expType e
   return e
 
 -- The closure of a lambda or local function are those variables that

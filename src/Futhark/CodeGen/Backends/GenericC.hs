@@ -494,7 +494,7 @@ fatMemUnRef _ = "memblock_unref"
 
 rawMem :: VName -> CompilerM op s C.Exp
 rawMem v = rawMem' <$> fat <*> pure v
-  where fat = (&&) <$> asks envFatMemory <*> (isNothing <$> cacheMem v)
+  where fat = asks ((&&) . envFatMemory) <*> (isNothing <$> cacheMem v)
 
 rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True  e = [C.cexp|$exp:e.mem|]

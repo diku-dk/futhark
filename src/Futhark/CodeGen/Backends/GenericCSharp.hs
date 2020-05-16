@@ -302,7 +302,7 @@ debugReport x = modify $ \s ->
 
 getVarAssigned :: VName -> CompilerM op s Bool
 getVarAssigned vname =
-  elem vname <$> gets compAssignedVars
+  gets $ elem vname . compAssignedVars
 
 setVarAssigned :: VName -> CompilerM op s ()
 setVarAssigned vname = modify $ \s ->

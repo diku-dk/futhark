@@ -270,7 +270,7 @@ mapSOACM tv (Stream size form lam arrs) =
   mapOnStreamForm form <*> mapOnSOACLambda tv lam <*>
   mapM (mapOnSOACVName tv) arrs
   where mapOnStreamForm (Parallel o comm lam0 acc) =
-            Parallel <$> pure o  <*> pure comm <*>
+            Parallel o comm <$>
             mapOnSOACLambda tv lam0 <*>
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =

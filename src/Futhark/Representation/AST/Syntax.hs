@@ -1,6 +1,5 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- | Futhark core language skeleton.  Concrete representations further
 -- extend this skeleton by defining a "lore", which specifies concrete
 -- annotations ("Futhark.Representation.AST.Annotations") and

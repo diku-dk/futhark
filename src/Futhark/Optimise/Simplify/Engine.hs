@@ -3,7 +3,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- |
 --
 -- Perform general rule-based simplification based on data dependency

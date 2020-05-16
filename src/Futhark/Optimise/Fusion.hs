@@ -69,7 +69,7 @@ instance MonadFreshNames FusionGM where
   putNameSource = put
 
 instance HasScope SOACS FusionGM where
-  askScope = toScope <$> asks varsInScope
+  askScope = asks $ toScope . varsInScope
     where toScope = M.map varEntryType
 
 ------------------------------------------------------------------------
@@ -745,7 +745,7 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     -- cannot be fused from outside the lambda:
     let inp_arrs = namesFromList $ M.keys $ inpArr new_res
     let unfus = infusible new_res <> inp_arrs
-    bnds <- M.keys <$> asks varsInScope
+    bnds <- asks $ M.keys . varsInScope
     let unfus'  = unfus `namesIntersection` namesFromList bnds
     -- merge fres with new_res'
     let new_res' = new_res { infusible = unfus' }
