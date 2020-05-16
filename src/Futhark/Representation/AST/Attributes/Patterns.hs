@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
--- | Inspecing and modifying 'Pattern's, function parameters and
+-- | Inspecing and modifying t'Pattern's, function parameters and
 -- pattern elements.
 module Futhark.Representation.AST.Attributes.Patterns
        (
@@ -58,27 +58,27 @@ setPatElemLore pe x = fmap (const x) pe
 patternElements :: PatternT attr -> [PatElemT attr]
 patternElements pat = patternContextElements pat ++ patternValueElements pat
 
--- | Return a list of the 'Ident's bound by the 'Pattern'.
+-- | Return a list of the 'Ident's bound by the t'Pattern'.
 patternIdents :: Typed attr => PatternT attr -> [Ident]
 patternIdents pat = patternContextIdents pat ++ patternValueIdents pat
 
--- | Return a list of the context 'Ident's bound by the 'Pattern'.
+-- | Return a list of the context 'Ident's bound by the t'Pattern'.
 patternContextIdents :: Typed attr => PatternT attr -> [Ident]
 patternContextIdents = map patElemIdent . patternContextElements
 
--- | Return a list of the value 'Ident's bound by the 'Pattern'.
+-- | Return a list of the value 'Ident's bound by the t'Pattern'.
 patternValueIdents :: Typed attr => PatternT attr -> [Ident]
 patternValueIdents = map patElemIdent . patternValueElements
 
--- | Return a list of the 'Name's bound by the 'Pattern'.
+-- | Return a list of the 'Name's bound by the t'Pattern'.
 patternNames :: PatternT attr -> [VName]
 patternNames = map patElemName . patternElements
 
--- | Return a list of the 'Name's bound by the context part of the 'Pattern'.
+-- | Return a list of the 'Name's bound by the context part of the t'Pattern'.
 patternContextNames :: PatternT attr -> [VName]
 patternContextNames = map patElemName . patternContextElements
 
--- | Return a list of the 'Name's bound by the value part of the 'Pattern'.
+-- | Return a list of the 'Name's bound by the value part of the t'Pattern'.
 patternValueNames :: PatternT attr -> [VName]
 patternValueNames = map patElemName . patternValueElements
 

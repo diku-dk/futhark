@@ -64,7 +64,7 @@ builtInFunctions :: M.Map Name (PrimType,[PrimType])
 builtInFunctions = M.fromList $ map namify $ M.toList primFuns
   where namify (k,(paramts,ret,_)) = (nameFromString k, (ret, paramts))
 
--- | If the expression is a 'BasicOp', return that 'BasicOp', otherwise 'Nothing'.
+-- | If the expression is a t'BasicOp', return it, otherwise 'Nothing'.
 asBasicOp :: Exp lore -> Maybe BasicOp
 asBasicOp (BasicOp op) = Just op
 asBasicOp _            = Nothing
@@ -123,7 +123,7 @@ safeBody = all (safeExp . stmExp) . bodyStms
 subExpVars :: [SubExp] -> [VName]
 subExpVars = mapMaybe subExpVar
 
--- | If the 'SubExp' is a 'Var' return the variable name.
+-- | If the t'SubExp' is a 'Var' return the variable name.
 subExpVar :: SubExp -> Maybe VName
 subExpVar (Var v)    = Just v
 subExpVar Constant{} = Nothing

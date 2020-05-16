@@ -183,7 +183,7 @@ instance Pretty IntValue where
   ppr (Int32Value v) = text $ show v ++ "i32"
   ppr (Int64Value v) = text $ show v ++ "i64"
 
--- | Create an 'IntValue' from a type and an 'Integer'.
+-- | Create an t'IntValue' from a type and an 'Integer'.
 intValue :: Integral int => IntType -> int -> IntValue
 intValue Int8  = Int8Value . fromIntegral
 intValue Int16 = Int16Value . fromIntegral
@@ -197,8 +197,8 @@ intValueType Int16Value{} = Int16
 intValueType Int32Value{} = Int32
 intValueType Int64Value{} = Int64
 
--- | Convert an 'IntValue' to any 'Integral' type.
-valueIntegral ::Integral int => IntValue -> int
+-- | Convert an t'IntValue' to any 'Integral' type.
+valueIntegral :: Integral int => IntValue -> int
 valueIntegral (Int8Value  v) = fromIntegral v
 valueIntegral (Int16Value v) = fromIntegral v
 valueIntegral (Int32Value v) = fromIntegral v
@@ -222,7 +222,7 @@ instance Pretty FloatValue where
     | isNaN v = text "f64.nan"
     | otherwise = text $ show v ++ "f64"
 
--- | Create a 'FloatValue' from a type and a 'Rational'.
+-- | Create a t'FloatValue' from a type and a 'Rational'.
 floatValue :: Real num => FloatType -> num -> FloatValue
 floatValue Float32 = Float32Value . fromRational . toRational
 floatValue Float64 = Float64Value . fromRational . toRational
@@ -357,8 +357,9 @@ data BinOp = Add IntType Overflow -- ^ Integer addition.
            | LogOr -- ^ Boolean or - not short-circuiting.
              deriving (Eq, Ord, Show)
 
--- | Comparison operators are like 'BinOp's, but they return 'Bool's.
--- The somewhat ugly constructor names are straight out of LLVM.
+-- | Comparison operators are like 'BinOp's, but they always return a
+-- boolean value.  The somewhat ugly constructor names are straight
+-- out of LLVM.
 data CmpOp = CmpEq PrimType -- ^ All types equality.
            | CmpUlt IntType -- ^ Unsigned less than.
            | CmpUle IntType -- ^ Unsigned less than or equal.
@@ -773,7 +774,7 @@ intToWord64 (Int16Value v) = fromIntegral (fromIntegral v :: Word16)
 intToWord64 (Int32Value v) = fromIntegral (fromIntegral v :: Word32)
 intToWord64 (Int64Value v) = fromIntegral (fromIntegral v :: Word64)
 
--- | Translate an 'IntValue' to 'Int64'.  This is guaranteed to fit.
+-- | Translate an 'IntValue' to t'Int64'.  This is guaranteed to fit.
 intToInt64 :: IntValue -> Int64
 intToInt64 (Int8Value v)  = fromIntegral v
 intToInt64 (Int16Value v) = fromIntegral v

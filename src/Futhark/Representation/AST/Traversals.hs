@@ -164,7 +164,7 @@ mapOnLoopForm tv (WhileLoop cond) =
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
 
--- | Transform any 'SubExp's in the type.
+-- | Transform any t'SubExp's in the type.
 mapOnType :: Monad m =>
              (SubExp -> m SubExp) -> Type -> m Type
 mapOnType _ (Prim bt) = return $ Prim bt

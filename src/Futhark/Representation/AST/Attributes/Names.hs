@@ -313,7 +313,7 @@ instance FreeAttr a => FreeAttr (Maybe a) where
   precomputed Nothing = id
   precomputed (Just a) = precomputed a
 
--- | The names bound by the bindings immediately in a 'Body'.
+-- | The names bound by the bindings immediately in a t'Body'.
 boundInBody :: Body lore -> Names
 boundInBody = boundByStms . bodyStms
 

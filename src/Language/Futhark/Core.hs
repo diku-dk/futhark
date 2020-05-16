@@ -6,7 +6,6 @@
 -- representation.
 module Language.Futhark.Core
   ( Uniqueness(..)
-  , StreamOrd(..)
   , Commutativity(..)
 
   -- * Location utilities
@@ -62,10 +61,6 @@ instance Monoid Uniqueness where
 instance Pretty Uniqueness where
   ppr Unique = star
   ppr Nonunique = empty
-
-data StreamOrd  = InOrder
-                | Disorder
-                    deriving (Eq, Ord, Show)
 
 -- | Whether some operator is commutative or not.  The 'Monoid'
 -- instance returns the least commutative of its arguments.

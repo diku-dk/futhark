@@ -77,7 +77,7 @@ data Ext a = Ext Int
 -- | The size of this dimension.
 type ExtSize = Ext SubExp
 
--- | Like 'Shape' but some of its elements may be bound in a local
+-- | Like t'Shape' but some of its elements may be bound in a local
 -- environment instead.  These are denoted with integral indices.
 type ExtShape = ShapeBase ExtSize
 
@@ -141,7 +141,7 @@ instance ArrayShape Rank where
   subShapeOf = (==)
 
 -- | The memory space of a block.  If 'DefaultSpace', this is the "default"
--- space, whatever that is.  The exact meaning of the 'SpaceID'
+-- space, whatever that is.  The exact meaning of the 'SpaceId'
 -- depends on the backend used.  In GPU kernels, for example, this is
 -- used to distinguish between constant, global and shared memory
 -- spaces.  In GPU-enabled host code, it is used to distinguish
@@ -157,7 +157,7 @@ data Space = DefaultSpace
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
--- | A fancier name for '()' - encodes no uniqueness information.
+-- | A fancier name for @()@ - encodes no uniqueness information.
 data NoUniqueness = NoUniqueness
                   deriving (Eq, Ord, Show)
 

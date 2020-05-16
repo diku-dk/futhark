@@ -6,8 +6,12 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE StandaloneDeriving #-}
--- | This module defines the concept of a type environment as a
--- mapping from variable names to 'Type's.  Convenience facilities are
+-- | The core Futhark AST does not contain type information when we
+-- use a variable.  Therefore, most transformations expect to be able
+-- to access some kind of symbol table that maps names to their types.
+--
+-- This module defines the concept of a type environment as a mapping
+-- from variable names to 'NameInfo's.  Convenience facilities are
 -- also provided to communicate that some monad or applicative functor
 -- maintains type information.
 module Futhark.Representation.AST.Attributes.Scope
@@ -24,7 +28,6 @@ module Futhark.Representation.AST.Attributes.Scope
 
        , SameScope
        , castScope
-       , castNameInfo
 
          -- * Extended type environment
        , ExtendedScope
@@ -131,11 +134,11 @@ instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
 
 -- | The class of things that can provide a scope.  There is no
 -- overarching rule for what this means.  For a 'Stm', it is the
--- corresponding pattern.  For a 'Lambda', is is the parameters
--- (including index).
+-- corresponding pattern.  For a 'Lambda', is is the parameters.
 class Scoped lore a | a -> lore where
   scopeOf :: a -> Scope lore
 
+-- | Extend the monadic scope with the 'scopeOf' the given value.
 inScopeOf :: (Scoped lore a, LocalScope lore m) => a -> m b -> m b
 inScopeOf = localScope . scopeOf
 
@@ -159,18 +162,22 @@ instance Scoped lore (LoopForm lore) where
   scopeOf (ForLoop i it _ xs) =
     M.insert i (IndexInfo it) $ scopeOfLParams (map fst xs)
 
+-- | The scope of a pattern.
 scopeOfPattern :: LetAttr lore ~ attr => PatternT attr -> Scope lore
 scopeOfPattern =
   mconcat . map scopeOfPatElem . patternElements
 
+-- | The scope of a pattern element.
 scopeOfPatElem :: LetAttr lore ~ attr => PatElemT attr -> Scope lore
 scopeOfPatElem (PatElem name attr) = M.singleton name $ LetInfo attr
 
+-- | The scope of some lambda parameters.
 scopeOfLParams :: LParamAttr lore ~ attr =>
                   [Param attr] -> Scope lore
 scopeOfLParams = M.fromList . map f
   where f param = (paramName param, LParamInfo $ paramAttr param)
 
+-- | The scope of some function or loop parameters.
 scopeOfFParams :: FParamAttr lore ~ attr =>
                   [Param attr] -> Scope lore
 scopeOfFParams = M.fromList . map f
@@ -179,6 +186,8 @@ scopeOfFParams = M.fromList . map f
 instance Scoped lore (Lambda lore) where
   scopeOf lam = scopeOfLParams $ lambdaParams lam
 
+-- | A constraint that indicates two lores have the same 'NameInfo'
+-- representation.
 type SameScope lore1 lore2 = (LetAttr lore1 ~ LetAttr lore2,
                               FParamAttr lore1 ~ FParamAttr lore2,
                               LParamAttr lore1 ~ LParamAttr lore2)
