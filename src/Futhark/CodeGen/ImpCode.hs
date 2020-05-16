@@ -77,6 +77,7 @@ type DimSize = SubExp
 
 data Type = Scalar PrimType | Mem Space
 
+-- | An ImpCode function parameter.
 data Param = MemParam VName Space
            | ScalarParam VName PrimType
              deriving (Show)
@@ -106,6 +107,10 @@ data Constants a = Constants
     -- contain declarations of the names defined in 'constsDecl'.
   }
 
+-- | Since the core language does not care for signedness, but the
+-- source language does, entry point input/output information has
+-- metadata for integer types (and arrays containing these) that
+-- indicate whether they are really unsigned integers.
 data Signedness = TypeUnsigned
                 | TypeDirect
                 deriving (Eq, Show)
@@ -277,7 +282,7 @@ withElemType (Count e) t =
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
--- | Turn a 'VName' into a 'Int32' 'Imp.ScalarVar'.
+-- | Turn a 'VName' into a v'Int32' 'Imp.ScalarVar'.
 vi32 :: VName -> Exp
 vi32 = flip var $ IntType Int32
 
