@@ -36,7 +36,7 @@ import Prelude hiding (mod)
 import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
@@ -484,14 +484,14 @@ instance MonadTypeChecker TermTypeM where
     outer_env <- liftTypeM askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
-      Nothing -> undefinedType loc qn
+      Nothing -> unknownType loc qn
       Just (TypeAbbr l ps def) ->
         return (qn', ps, qualifyTypeVars outer_env (map typeParamName ps) qs def, l)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeModTable scope of
-      Nothing -> unknownVariableError Term qn loc
+      Nothing -> unknownVariable Term qn loc
       Just m  -> return (qn', m)
 
   lookupVar loc qn = do
@@ -555,7 +555,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
           | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
               return (scope, name')
           | otherwise =
-              unknownVariableError space qn loc
+              unknownVariable space qn loc
 
         descend scope (q:qs)
           | Just (QualName _ q') <- M.lookup (Term, q) $ scopeNameMap scope,
@@ -570,7 +570,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
                   return (scope', QualName (q':qs') name')
                 ModFun{} -> unappliedFunctor loc
           | otherwise =
-              unknownVariableError space qn loc
+              unknownVariable space qn loc
 
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
@@ -581,7 +581,7 @@ checkIntrinsic space qn@(QualName _ name) loc
       scope <- asks termScope
       return (scope, v)
   | otherwise =
-      unknownVariableError space qn loc
+      unknownVariable space qn loc
 
 -- | Wrap 'Types.checkTypeDecl' to also perform an observation of
 -- every size in the type.
@@ -658,6 +658,17 @@ uniqueReturnAliased fname loc =
   typeError loc mempty $
   "A unique tuple element of return value of" <+>
   pquote (pprName fname) <+> "is aliased to some other tuple component."
+
+unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
+unexpectedType loc _ [] =
+  typeError loc mempty $
+  "Type of expression at" <+> text (locStr loc) <+>
+  "cannot have any type - possibly a bug in the type checker."
+unexpectedType loc t ts =
+  typeError loc mempty $
+  "Type of expression at" <+> text (locStr loc) <+> "must be one of" <+>
+  commasep (map ppr ts) <> ", but is" <+>
+  ppr t <> "."
 
 --- Basic checking
 

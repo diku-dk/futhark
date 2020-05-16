@@ -92,7 +92,7 @@ type VarAliases = Names'
 -- | Everything consumed in the expression.
 type ConsumedInExp = Names'
 
--- | The aliases of what is returned by the 'Body', and what is
+-- | The aliases of what is returned by the t'Body', and what is
 -- consumed inside of it.
 type BodyAliasing = ([VarAliases], ConsumedInExp)
 

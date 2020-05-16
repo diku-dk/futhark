@@ -160,7 +160,7 @@ nestedDims t =
         notV Unnamed  = const True
         notV (Named v) = (/=NamedDim (qualName v))
 
--- | Change the shape of a type to be just the 'Rank'.
+-- | Change the shape of a type to be just the rank.
 noSizes :: TypeBase (DimDecl vn) as -> TypeBase () as
 noSizes = first $ const ()
 

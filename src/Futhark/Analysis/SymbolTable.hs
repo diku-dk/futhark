@@ -602,7 +602,7 @@ noUpdateBounds = True
 
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
---   `cond' is the condition of the if-branch.
+--   @cond@ is the condition of the if-branch.
 updateBounds' :: ScalExp -> SymbolTable lore -> SymbolTable lore
 updateBounds' _ sym_tab | noUpdateBounds = sym_tab
 updateBounds' cond sym_tab =
@@ -617,12 +617,12 @@ updateBounds' cond sym_tab =
         where (lower, upper) = valueRange entry
       nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
-      -- | Input: a bool exp in DNF form, named `cond'
+      -- | Input: a bool exp in DNF form, named @cond@
       --   It gets the terms of the argument,
       --         i.e., cond = c1 || ... || cn
       --   and negates them.
       --   Returns [not c1, ..., not cn], i.e., the factors
-      --   of `not cond' in CNF form: not cond = (not c1) && ... && (not cn)
+      --   of @not cond@ in CNF form: not cond = (not c1) && ... && (not cn)
       getNotFactorsLEQ0 :: ScalExp -> [ScalExp]
       getNotFactorsLEQ0 (RelExp rel e_scal) =
           if scalExpType e_scal /= int32 then []
@@ -634,11 +634,11 @@ updateBounds' cond sym_tab =
       getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
       getNotFactorsLEQ0 _ = []
 
-      -- | Argument is scalar expression `e'.
+      -- | Argument is scalar expression @e@.
       --    Implementation finds the symbol defined at
-      --    the highest depth in expression `e', call it `i',
-      --    and decomposes e = a*i + b.  If `a' and `b' are
-      --    free of `i', AND `a == 1 or -1' THEN the upper/lower
+      --    the highest depth in expression @e@, call it @i@,
+      --    and decomposes e = a*i + b.  If @a@ and @b@ are
+      --    free of @i@, AND @a == 1 or -1@ THEN the upper/lower
       --    bound can be improved. Otherwise Nothing.
       --
       --  Returns: Nothing or
