@@ -16,6 +16,7 @@ module Futhark.Analysis.UsageTable
   , consumedUsage
   , inResultUsage
   , Usages
+  , usageInStm
   )
   where
 
@@ -29,6 +30,7 @@ import Prelude hiding (lookup)
 
 import Futhark.Transform.Substitute
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Aliases
 
 newtype UsageTable = UsageTable (M.Map VName Usages)
                    deriving (Eq, Show)
@@ -118,3 +120,35 @@ matches (Usages x) (Usages y) = x == (x .&. y)
 -- | x - y, but for Usages.
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
+
+
+usageInStm :: (Attributes lore, Aliased lore) => Stm lore -> UsageTable
+usageInStm (Let pat lore e) =
+  mconcat [usageInPat,
+           usageInExpLore,
+           usageInExp e,
+           usages (freeIn e)]
+  where usageInPat =
+          usages (mconcat (map freeIn $ patternElements pat)
+                     `namesSubtract`
+                     namesFromList (patternNames pat))
+        usageInExpLore =
+          usages $ freeIn lore
+
+usageInExp :: Aliased lore => Exp lore -> UsageTable
+usageInExp (Apply _ args _ _) =
+  mconcat [ mconcat $ map consumedUsage $
+            namesToList $ subExpAliases arg
+          | (arg,d) <- args, d == Consume ]
+usageInExp (DoLoop _ merge _ _) =
+  mconcat [ mconcat $ map consumedUsage $
+            namesToList $ subExpAliases se
+          | (v,se) <- merge, unique $ paramDeclType v ]
+usageInExp (If _ tbranch fbranch _) =
+  foldMap consumedUsage $ namesToList $
+  consumedInBody tbranch <> consumedInBody fbranch
+usageInExp (BasicOp (Update src _ _)) =
+  consumedUsage src
+usageInExp (Op op) =
+  mconcat $ map consumedUsage (namesToList $ consumedInOp op)
+usageInExp _ = empty

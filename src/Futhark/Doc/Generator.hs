@@ -27,8 +27,39 @@ import Prelude hiding (abs)
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad hiding (warn)
 import Language.Futhark
-import Futhark.Doc.Html
+import Futhark.Util.Pretty (Doc, ppr)
 import Futhark.Version
+
+docToHtml :: Doc -> Html
+docToHtml = toHtml . pretty
+
+primTypeHtml :: PrimType -> Html
+primTypeHtml = docToHtml . ppr
+
+prettyU :: Uniqueness -> Html
+prettyU = docToHtml . ppr
+
+renderName :: Name -> Html
+renderName name = docToHtml (ppr name)
+
+joinBy :: Html -> [Html] -> Html
+joinBy _ [] = mempty
+joinBy _ [x] = x
+joinBy sep (x:xs) = x <> foldMap (sep <>) xs
+
+commas :: [Html] -> Html
+commas = joinBy ", "
+
+parens :: Html -> Html
+parens x = "(" <> x <> ")"
+
+braces :: Html -> Html
+braces x = "{" <> x <> "}"
+brackets :: Html -> Html
+brackets x = "[" <> x <> "]"
+
+pipes :: [Html] -> Html
+pipes = joinBy " | "
 
 -- | A set of names that we should not generate links to, because they
 -- are uninteresting.  These are for example type parameters.

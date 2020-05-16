@@ -26,6 +26,9 @@
 -- IR will typically print such collections of values or types in
 -- curly braces.
 --
+-- The system of primitive types is interesting in itself.  See
+-- "Futhark.Representation.Primitive".
+--
 -- == Overall AST design
 --
 -- Internally, the Futhark compiler core intermediate representation
