@@ -1,9 +1,95 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
--- | Futhark core language skeleton.  Concrete representations further
--- extend this skeleton by defining a "lore", which specifies concrete
--- annotations ("Futhark.Representation.AST.Annotations") and
--- semantics.
+-- | = Definition of the Futhark core language IR
+--
+-- For actually /constructing/ ASTs, see "Futhark.Construct".
+--
+-- == Types and values
+--
+-- The core language type system is much more restricted than the core
+-- language.  This is a theme that repeats often.  The only types that
+-- are supported in the core language are various primitive types
+-- t'PrimType' which can be combined in arrays (ignore v'Mem' for
+-- now).  Types are represented as t'TypeBase', which is parameterised
+-- by the shape of the array and whether we keep uniqueness
+-- information.  The t'Type' alias, which is the most commonly used,
+-- uses t'Shape' and t'NoUniqueness'.
+--
+-- This means that the records, tuples, and sum types of the source
+-- language are represented merely as collections of primitives and
+-- arrays.  This is implemented in "Futhark.Internalise", but the
+-- specifics are not important for writing passes on the core
+-- language.  What /is/ important is that many constructs that
+-- conceptually return tuples instead return /multiple values/.  This
+-- is not merely syntactic sugar for a tuple: each of those values are
+-- eventually bound to distinct variables.  The prettyprinter for the
+-- IR will typically print such collections of values or types in
+-- curly braces.
+--
+-- == Overall AST design
+--
+-- Internally, the Futhark compiler core intermediate representation
+-- resembles a traditional compiler for an imperative language more
+-- than it resembles, say, a Haskell or ML compiler.  All functions
+-- are monomorphic (except for sizes), first-order, and defined at the
+-- top level.  Notably, the IR does /not/ use continuation-passing
+-- style (CPS) at any time.  Instead it uses Administrative Normal
+-- Form (ANF), where all subexpressions t'SubExp' are either
+-- constants 'PrimValue' or variables 'VName'.  Variables are
+-- represented as a human-readable t'Name' (which doesn't matter to
+-- the compiler) as well as a numeric /tag/, which is what the
+-- compiler actually looks at.  All variable names when prettyprinted
+-- are of the form @foo_123@.  Function names are just t'Name's,
+-- though.
+--
+-- The body of a function ('FunDef') is a t'Body', which consists of
+-- a sequence of statements ('Stms') and a t'Result'.  Execution of a
+-- t'Body' consists of executing all of the statements, then returning
+-- the values of the variables indicated by the result.
+--
+-- A statement ('Stm') consists of a t'Pattern' alongside an
+-- expression 'ExpT'.  A pattern contains a "context" part and a
+-- "value" part.  The context is used for things like the size of
+-- arrays in the value part whose size is existential.
+--
+-- For example, the source language expression @let z = x + y - 1 in
+-- z@ would in the core language be represented (in prettyprinted
+-- form) as something like:
+--
+-- @
+-- let {a_12} = x_10 + y_11
+-- let {b_13} = a_12 - 1
+-- in {b_13}
+-- @
+--
+-- == Lores
+--
+-- Most AST types ('Stm', 'ExpT', t'Prog', etc) are parameterised by a
+-- type parameter with the somewhat silly name @lore@.  The lore
+-- specifies how to fill out various polymorphic parts of the AST.
+-- For example, 'ExpT' has a constructor v'Op' whose payload depends
+-- on @lore@, via the use of a type family called t'Op' (a kind of
+-- type-level function) which is applied to the @lore@.  The SOACS
+-- representation ("Futhark.Representation.SOACS") thus uses a lore
+-- called @SOACS@, and defines that @Op SOACS@ is a SOAC, while the
+-- Kernels representation ("Futhark.Representation.Kernels") defines
+-- @Op Kernels@ as some kind of kernel construct.  Similarly, various
+-- other annotations (e.g. what information we store in a t'PatElemT')
+-- are also type families.
+--
+-- The full list of possible annotations is defined as part of the
+-- type class 'Annotations' (although other type families are also
+-- used elsewhere in the compiler on an ad hoc basis).
+--
+-- Essentially, the @lore@ type parameter functions as a kind of
+-- proxy, saving us from having to parameterise the AST type with all
+-- the different forms of annotations that we desire (it would easily
+-- become a type with a dozen type parameters).
+--
+-- Defining a new representation (or /lore/) thus requires you to
+-- define an empty datatype and implement a handful of type class
+-- instances for it.  See the source of "Futhark.Representation.Seq"
+-- for what is likely the simplest example.
 module Futhark.Representation.AST.Syntax
   (
     module Language.Futhark.Core

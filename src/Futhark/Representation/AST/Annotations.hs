@@ -1,4 +1,6 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+-- | The core Futhark AST is parameterised by a @lore@ type parameter,
+-- which is then used to invoke the type families defined here.
 module Futhark.Representation.AST.Annotations
        ( Annotations (..)
        , module Futhark.Representation.AST.RetType
@@ -11,6 +13,9 @@ import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Types
 
+-- | A collection of type families, along with constraints specifying
+-- that the types they map to should satisfy some minimal
+-- requirements.
 class (Show (LetAttr l), Show (ExpAttr l), Show (BodyAttr l), Show (FParamAttr l), Show (LParamAttr l), Show (RetType l), Show (BranchType l), Show (Op l),
        Eq (LetAttr l), Eq (ExpAttr l), Eq (BodyAttr l), Eq (FParamAttr l), Eq (LParamAttr l), Eq (RetType l), Eq (BranchType l), Eq (Op l),
        Ord (LetAttr l), Ord (ExpAttr l), Ord (BodyAttr l), Ord (FParamAttr l), Ord (LParamAttr l), Ord (RetType l), Ord (BranchType l), Ord (Op l),

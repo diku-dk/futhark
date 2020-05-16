@@ -460,13 +460,12 @@ data AtomicUpdate lore r
   | AtomicLocking (Locking -> DoAtomicUpdate lore r)
     -- ^ Requires explicit locking.
 
--- | Is there an atomic 'BinOp' corresponding to this 'BinOp'?
+-- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
   BinOp ->
   Maybe (VName -> VName -> Count Imp.Elements Imp.Exp -> Imp.Exp -> Imp.AtomicOp)
 
--- | 'atomicUpdate', but where it is explicitly visible whether a
--- locking strategy is necessary.
+-- | Do an atomic update corresponding to a binary operator lambda.
 atomicUpdateLocking :: AtomicBinOp -> Lambda KernelsMem
                     -> AtomicUpdate KernelsMem KernelEnv
 

@@ -150,7 +150,7 @@ segBinOpResults = sum . map (length . segBinOpNeutral)
 segBinOpChunks :: [SegBinOp lore] -> [a] -> [[a]]
 segBinOpChunks = chunks . map (length . segBinOpNeutral)
 
--- | The body of a 'Kernel'.
+-- | The body of a 'SegOp'.
 data KernelBody lore = KernelBody { kernelBodyLore :: BodyAttr lore
                                   , kernelBodyStms :: Stms lore
                                   , kernelBodyResult :: [KernelResult]
@@ -181,7 +181,7 @@ data ResultManifest
 data KernelResult = Returns ResultManifest SubExp
                     -- ^ Each "worker" in the kernel returns this.
                     -- Whether this is a result-per-thread or a
-                    -- result-per-group depends on the 'SegLevel'.
+                    -- result-per-group depends on where the 'SegOp' occurs.
                   | WriteReturns
                     [SubExp] -- Size of array.  Must match number of dims.
                     VName -- Which array
@@ -199,7 +199,7 @@ data KernelResult = Returns ResultManifest SubExp
                     -- result to be written per physical thread.
                   deriving (Eq, Show, Ord)
 
--- | Get the root 'SubExp' corresponding values for a 'KernelResult'.
+-- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (Returns _ se) = se
 kernelResultSubExp (WriteReturns _ arr _) = Var arr
@@ -406,7 +406,7 @@ checkSegSpace (SegSpace _ dims) =
 -- scan, or histogram).  The 'SegSpace' encodes the original map
 -- structure.
 --
--- All 'SegOps' are parameterised by the representation of their body,
+-- All 'SegOp's are parameterised by the representation of their body,
 -- as well as a *level*.  The *level* is a representation-specific bit
 -- of information.  For example, in GPU backends, it is used to
 -- indicate whether the 'SegOp' is expected to run at the thread-level
@@ -971,7 +971,7 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
   where scope = scopeOfSegSpace space
         scope_vtable = ST.fromScope scope
 
--- | Does this lore contain 'SegOp's in its 'Op's?  A lore must be an
+-- | Does this lore contain 'SegOp's in its t'Op's?  A lore must be an
 -- instance of this class for the simplification rules to work.
 class HasSegOp lore where
   type SegOpLevel lore

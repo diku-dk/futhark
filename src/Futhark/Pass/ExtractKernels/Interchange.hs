@@ -118,7 +118,7 @@ interchangeLoop
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
 -- statements - one of these will be the loop, which will then contain
--- statements with 'Map' expressions.
+-- statements with @map@ expressions.
 interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                     KernelNest -> SeqLoop
                  -> m (Stms SOACS)

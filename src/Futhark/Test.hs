@@ -654,8 +654,8 @@ compileProgram extra_options futhark backend program = do
 -- executing the @entry@ entry point and providing @input@ on stdin.
 -- The program must have been compiled in advance with
 -- 'compileProgram'.  If @runner@ is non-null, then it is used as
--- "interpreter" for the compiled program (e.g. 'python' when using
--- the Python backends, or 'mono' for the C# backends).  The
+-- "interpreter" for the compiled program (e.g. @python@ when using
+-- the Python backends, or @mono@ for the C# backends).  The
 -- @extra_options@ are passed to the program.
 runProgram :: MonadIO m =>
               String -> [String]
