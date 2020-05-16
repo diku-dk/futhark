@@ -6,6 +6,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.Representation.SOACS.SOAC
        ( SOAC(..)
+       , StreamOrd(..)
        , StreamForm(..)
        , ScremaForm(..)
        , HistOp(..)
@@ -115,6 +116,13 @@ data HistOp lore = HistOp { histWidth :: SubExp
                           , histOp :: Lambda lore
                           }
                       deriving (Eq, Ord, Show)
+
+-- | Is the stream chunk required to correspond to a contiguous
+-- subsequence of the original input ('InOrder') or not?  'Disorder'
+-- streams can be more efficient, but not all algorithms work with
+-- this.
+data StreamOrd  = InOrder | Disorder
+                deriving (Eq, Ord, Show)
 
 data StreamForm lore  =
     Parallel StreamOrd Commutativity (Lambda lore) [SubExp]

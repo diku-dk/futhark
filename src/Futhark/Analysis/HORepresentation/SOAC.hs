@@ -72,7 +72,7 @@ import qualified Data.Sequence as Seq
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.SOACS.SOAC
-  (StreamForm(..), ScremaForm(..), scremaType, getStreamAccums, HistOp(..))
+  (StreamForm(..), ScremaForm(..), scremaType, getStreamAccums, HistOp(..), StreamOrd(..))
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Representation.AST
   hiding (Var, Iota, Rearrange, Reshape, Replicate, typeOf)

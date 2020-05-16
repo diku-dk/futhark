@@ -34,7 +34,6 @@ module Futhark.Test
        , ExpectedResult (..)
        , Success(..)
        , Values (..)
-       , GenValue (..)
        , Value
        )
        where
@@ -632,6 +631,10 @@ getExpectedResult prog entry tr =
 binaryName :: FilePath -> FilePath
 binaryName = dropExtension
 
+-- | @compileProgram extra_options futhark backend program@ compiles
+-- @program@ with the command @futhark backend extra-options...@, and
+-- returns stdout and stderr of the compiler.  Throws an IO exception
+-- containing stderr if compilation fails.
 compileProgram :: (MonadIO m, MonadError [T.Text] m) =>
                   [String] -> FilePath -> String -> FilePath
                -> m (SBS.ByteString, SBS.ByteString)
@@ -646,6 +649,14 @@ compileProgram extra_options futhark backend program = do
         options = [program, "-o", binOutputf] ++ extra_options
         progNotFound s = s <> ": command not found"
 
+-- | @runProgram runner extra_options prog entry input@ runs the
+-- Futhark program @prog@ (which must have the @.fut@ suffix),
+-- executing the @entry@ entry point and providing @input@ on stdin.
+-- The program must have been compiled in advance with
+-- 'compileProgram'.  If @runner@ is non-null, then it is used as
+-- "interpreter" for the compiled program (e.g. 'python' when using
+-- the Python backends, or 'mono' for the C# backends).  The
+-- @extra_options@ are passed to the program.
 runProgram :: MonadIO m =>
               String -> [String]
            -> String -> T.Text -> Values
