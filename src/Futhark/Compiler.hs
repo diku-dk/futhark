@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
+-- | High-level API for invoking the Futhark compiler.
 module Futhark.Compiler
        (
          runPipelineOnProgram

@@ -2312,6 +2312,9 @@ consumeArg loc (Scalar (Arrow _ _ _ t2)) (FuncDiet _ pd) =
 consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _       = return [observation (aliases at) loc]
 
+-- | Type-check a single expression in isolation.  This expression may
+-- turn out to be polymorphic, in which case the list of type
+-- parameters will be non-empty.
 checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e

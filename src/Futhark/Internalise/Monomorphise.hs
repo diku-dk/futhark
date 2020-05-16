@@ -23,9 +23,7 @@
 -- representation.
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Internalise.Monomorphise
-  ( transformProg
-  , transformDecs
-  ) where
+  ( transformProg ) where
 
 import           Control.Monad.RWS hiding (Sum)
 import           Control.Monad.State
