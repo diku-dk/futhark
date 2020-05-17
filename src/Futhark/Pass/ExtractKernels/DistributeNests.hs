@@ -677,7 +677,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
         inPlaceReturn ispace (aw, inp, is_vs) =
           WriteReturns (init ws++[aw]) (kernelInputArray inp)
-          [ (map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
+          [ (map DimFix $ map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
           where (gtids,ws) = unzip ispace
 
 segmentedUpdateKernel :: (MonadFreshNames m, DistLore lore) =>
@@ -710,7 +710,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     arr_t <- lookupType arr'
     v_t <- subExpType v'
     return (v_t,
-            WriteReturns (arrayDims arr_t) arr' [(write_is, v')])
+            WriteReturns (arrayDims arr_t) arr' [(map DimFix write_is, v')])
 
   mk_lvl <- mkSegLevel
   (k, prestms) <- mapKernel mk_lvl ispace kernel_inps [res_t] $

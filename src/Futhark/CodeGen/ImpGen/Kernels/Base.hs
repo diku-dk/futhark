@@ -1429,12 +1429,15 @@ compileThreadResult _ pe (ConcatReturns (SplitStrided stride) _ _ what) = do
 compileThreadResult _ pe (WriteReturns rws _arr dests) = do
   constants <- kernelConstants <$> askEnv
   rws' <- mapM toExp rws
-  forM_ dests $ \(is, e) -> do
-    is' <- mapM toExp is
-    let condInBounds i rw = 0 .<=. i .&&. i .<. rw
+  forM_ dests $ \(slice, e) -> do
+    slice' <- mapM (traverse toExp) slice
+    let condInBounds (DimFix i) rw =
+          0 .<=. i .&&. i .<. rw
+        condInBounds (DimSlice i n s) rw =
+          0 .<=. i .&&. i+n*s .<. rw
         write = foldl (.&&.) (kernelThreadActive constants) $
-                zipWith condInBounds is' rws'
-    sWhen write $ copyDWIMFix (patElemName pe) (map (toExp' int32) is) e []
+                zipWith condInBounds slice' rws'
+    sWhen write $ copyDWIM (patElemName pe) slice' e []
 
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."

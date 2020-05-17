@@ -524,7 +524,7 @@ transformStm _ (Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) = runBinder_ 
       (i_res, v_res) = splitAt (sum as_ns) $ bodyResult $ lambdaBody lam'
       kstms = bodyStms $ lambdaBody lam'
       krets = do (a_w, a, is_vs) <- zip3 as_ws as_vs $ chunks as_ns $ zip i_res v_res
-                 return $ WriteReturns [a_w] a [ ([i],v) | (i,v) <- is_vs ]
+                 return $ WriteReturns [a_w] a [ ([DimFix i],v) | (i,v) <- is_vs ]
       body = KernelBody () kstms krets
       inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
                   return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]

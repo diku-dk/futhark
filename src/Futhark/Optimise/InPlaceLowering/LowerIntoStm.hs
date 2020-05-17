@@ -9,11 +9,12 @@ module Futhark.Optimise.InPlaceLowering.LowerIntoStm
 
 import Control.Monad
 import Control.Monad.Writer
-import Data.List (find)
+import Data.List (find, unzip4)
 import Data.Maybe (mapMaybe)
 import Data.Either
 import qualified Data.Map as M
 
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
 import Futhark.Representation.Kernels
@@ -63,51 +64,65 @@ lowerUpdate _ _ _ =
   Nothing
 
 lowerUpdateKernels :: MonadFreshNames m => LowerUpdate Kernels m
-lowerUpdateKernels _
+lowerUpdateKernels scope
   (Let pat aux (Op (SegOp (SegMap lvl space ts kbody)))) updates
   | all ((`elem` patternNames pat) . updateValue) updates = do
-      (pat', kbody', poststms) <-
-        lowerUpdatesIntoSegMap pat updates space kbody
-      let cs = stmAuxCerts aux <> foldMap updateCertificates updates
-      Just $ return $
-        certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
-        stmsToList poststms
+      mk <- lowerUpdatesIntoSegMap scope pat updates space kbody
+      Just $ do
+        (pat', kbody', poststms) <- mk
+        let cs = stmAuxCerts aux <> foldMap updateCertificates updates
+        return $
+          certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody') :
+          stmsToList poststms
 lowerUpdateKernels scope stm updates = lowerUpdate scope stm updates
 
-lowerUpdatesIntoSegMap :: Pattern (Aliases Kernels)
+lowerUpdatesIntoSegMap :: MonadFreshNames m =>
+                          Scope (Aliases Kernels)
+                       -> Pattern (Aliases Kernels)
                        -> [DesiredUpdate (LetAttr (Aliases Kernels))]
                        -> SegSpace
                        -> KernelBody (Aliases Kernels)
-                       -> Maybe (Pattern (Aliases Kernels),
-                                 KernelBody (Aliases Kernels),
-                                 Stms (Aliases Kernels))
-lowerUpdatesIntoSegMap pat updates kspace kbody = do
+                       -> Maybe (m (Pattern (Aliases Kernels),
+                                    KernelBody (Aliases Kernels),
+                                    Stms (Aliases Kernels)))
+lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
-  (pes, krets, poststms) <-
-    unzip3 <$> zipWithM onRet (patternElements pat) (kernelBodyResult kbody)
-  return (Pattern [] pes,
-          kbody { kernelBodyResult = krets },
-          mconcat poststms)
+  mk <- zipWithM onRet (patternElements pat) (kernelBodyResult kbody)
+  return $ do
+    (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
+    return (Pattern [] pes,
+            kbody { kernelBodyStms = kernelBodyStms kbody <> mconcat bodystms
+                  , kernelBodyResult = krets
+                  },
+            mconcat poststms)
 
-  where (gtids, dims) = unzip $ unSegSpace kspace
+  where (gtids, _dims) = unzip $ unSegSpace kspace
 
-        onRet (PatElem v v_attr) (Returns _ se)
-          | Just (DesiredUpdate bindee_nm bindee_attr _cs src is _val) <-
+        onRet (PatElem v v_attr) ret
+          | Just (DesiredUpdate bindee_nm bindee_attr _cs src slice _val) <-
               find ((==v) . updateValue) updates = do
 
-              guard $ sliceDims is == dims
+              Returns _ se <- Just ret
 
-              let ret = WriteReturns (arrayDims $ snd bindee_attr) src
-                        [(map Var gtids, se)]
+              Just $ do
+                let pexp = primExpFromSubExp int32
+                (slice', bodystms) <- flip runBinderT scope $
+                  traverse (letSubExp "index" <=< toExp) $
+                  fixSlice (map (fmap pexp) slice) $
+                  map (pexp . Var) gtids
 
-              return (PatElem bindee_nm bindee_attr,
-                      ret,
-                      oneStm $ mkLet [] [Ident v $ typeOf v_attr] $
-                      BasicOp $ Index bindee_nm is)
+                let res_dims = arrayDims $ snd bindee_attr
+                    ret' = WriteReturns res_dims src [(map DimFix slice', se)]
+
+                return (PatElem bindee_nm bindee_attr,
+                        bodystms,
+                        ret',
+                        oneStm $ mkLet [] [Ident v $ typeOf v_attr] $
+                        BasicOp $ Index bindee_nm slice)
 
         onRet pe ret =
-          return (pe, ret, mempty)
+          Just $ return (pe, mempty, ret, mempty)
 
 lowerUpdateIntoLoop :: (Bindable lore, BinderOps lore,
                         Aliased lore, LetAttr lore ~ (als, Type),
