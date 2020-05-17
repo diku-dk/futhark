@@ -635,6 +635,8 @@ declMemShader name space = do
     ScalarSpace{} -> decl [C.cdecl|$ty:ty $id:name[];|]
                      -- FIXME: Determine the array size without hardcoding.
     _             -> case ty of
+                       [C.cty|bool|] ->
+                         decl [C.cdecl|typename shared_bool $id:name[256];|]
                        [C.cty|int|] ->
                          decl [C.cdecl|typename shared_int $id:name[256];|]
                        [C.cty|float|] ->
@@ -658,7 +660,7 @@ declMemShader name space = do
                        [C.cty|typename uint32_t|] ->
                          decl [C.cdecl|typename shared_uint $id:name[256];|]
                        [C.cty|typename uint64_t|] ->
-                         decl [C.cdecl|typename shared_uint $id:name[256];|]
+                         decl [C.cdecl|typename shared_uint64_t $id:name[256];|]
 
                        _ ->
                          decl [C.cdecl|$ty:ty $id:name[256];|]
@@ -1706,7 +1708,6 @@ compileExpToName target desc t e = do
   return desc'
 
 compileExp :: BackendTarget -> Exp -> CompilerM op s C.Exp
-
 compileExp target = compilePrimExp target compileLeaf
   where compileLeaf (ScalarVar src) =
           return [C.cexp|$id:src|]
