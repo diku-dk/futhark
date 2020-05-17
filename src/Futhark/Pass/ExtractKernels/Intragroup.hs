@@ -242,7 +242,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           (dests_ws, dests_ns, dests_vs) = unzip3 dests
           (i_res, v_res) = splitAt (sum dests_ns) $ bodyResult $ lambdaBody lam'
           krets = do (a_w, a, is_vs) <- zip3 dests_ws dests_vs $ chunks dests_ns $ zip i_res v_res
-                     return $ WriteReturns [a_w] a [ ([i],v) | (i,v) <- is_vs ]
+                     return $ WriteReturns [a_w] a [ ([DimFix i],v) | (i,v) <- is_vs ]
           inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
                       return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
 

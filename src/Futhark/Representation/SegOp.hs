@@ -185,7 +185,7 @@ data KernelResult = Returns ResultManifest SubExp
                   | WriteReturns
                     [SubExp] -- Size of array.  Must match number of dims.
                     VName -- Which array
-                    [([SubExp], SubExp)]
+                    [(Slice SubExp, SubExp)]
                     -- Arbitrary number of index/value pairs.
                   | ConcatReturns
                     SplitOrdering -- Permuted?
@@ -305,8 +305,8 @@ checkKernelBody ts (KernelBody (_, attr) stms kres) = do
         checkKernelResult (WriteReturns rws arr res) t = do
           mapM_ (TC.require [Prim int32]) rws
           arr_t <- lookupType arr
-          forM_ res $ \(is, e) -> do
-            mapM_ (TC.require [Prim int32]) is
+          forM_ res $ \(slice, e) -> do
+            mapM_ (traverse $ TC.require [Prim int32]) slice
             TC.require [t] e
             unless (arr_t == t `arrayOfShape` Shape rws) $
               TC.bad $ TC.TypeError $ "WriteReturns returning " ++
