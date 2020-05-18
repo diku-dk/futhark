@@ -74,12 +74,12 @@ nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 slugsComm :: [SegBinOpSlug] -> Commutativity
 slugsComm = mconcat . map (segBinOpComm . slugOp)
 
-
 segBinOpOpSlug :: Imp.Exp
              -> (SegBinOp MCMem, [VName])
              -> MulticoreGen SegBinOpSlug
 segBinOpOpSlug local_tid (op, param_arrs) =
   SegBinOpSlug op <$> mapM (\param_arr -> return (param_arr, [local_tid])) param_arrs
+
 
 
 nonsegmentedReduction :: Pattern MCMem
@@ -253,3 +253,41 @@ segmentedReduction pat space reds kbody = do
   emit $ Imp.Op $ Imp.ParLoop (decideScheduling fbody)
                                ntask n_segments (product $ init ns')
                               (Imp.MulticoreFunc freeParams body_allocs fbody' tid)
+
+
+
+nonsegmentRedSequential :: Pattern MCMem
+                        -> SegSpace
+                        -> [SegBinOp MCMem]
+                        -> DoSegBody
+                        -> MulticoreGen ()
+nonsegmentRedSequential pat space reds kbody = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+  dPrimV_ (segFlat space) 0
+  flat_idx <- dPrim "iter" int32
+
+  forM_ reds $ \red ->
+    sLoopNest (segBinOpShape red) $ \vec_is ->
+      forM_ (zip (patternElements pat) (segBinOpNeutral red)) $
+        \(pe, ne) -> copyDWIMFix (patElemName pe) vec_is ne []
+
+  sFor "i" (product ns') $ \i -> do
+    flat_idx <-- i
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
+    kbody $ \all_red_res -> do
+      let all_red_res' = segBinOpChunks reds all_red_res
+      forM_ (zip all_red_res' reds) $ \(red_res, red) -> do
+        let (xParams, yParams) = splitAt (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
+        sLoopNest (segBinOpShape red) $ \vec_is -> do
+          sComment "load acc params" $
+            forM_ (zip xParams (patternElements pat)) $ \(p, pe) ->
+              copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
+          sComment "load next params" $
+            forM_ (zip yParams red_res) $ \(p, (res, res_is)) ->
+              copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+          sComment "red body" $
+            compileStms mempty (bodyStms $ (lambdaBody . segBinOpLambda) red) $
+                forM_ (zip (patternElements pat) (bodyResult $ (lambdaBody . segBinOpLambda) red)) $
+                  \(pe, se) -> copyDWIMFix (patElemName pe) vec_is se []
