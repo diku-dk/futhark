@@ -882,7 +882,7 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 
 Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
 
-``loop pat = initial = while cond do loopbody``
+``loop pat = initial while cond do loopbody``
 ...............................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
