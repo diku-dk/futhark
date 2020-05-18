@@ -157,5 +157,5 @@ jobs:
       shell: bash
       run: |
         cabal update
-        try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
+        try() { cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
