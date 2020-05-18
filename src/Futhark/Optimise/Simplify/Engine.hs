@@ -51,7 +51,6 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyFun
        , simplifyLambda
        , simplifyLambdaNoHoisting
-       , simplifyParam
        , bindLParams
        , simplifyBody
        , SimplifiedBody
@@ -114,9 +113,9 @@ emptyEnv rules blockers =
 type Protect m = SubExp -> Pattern (Lore m) -> Op (Lore m) -> Maybe (m ())
 
 data SimpleOps lore =
-  SimpleOps { mkExpAttrS :: ST.SymbolTable (Wise lore)
+  SimpleOps { mkExpDecS :: ST.SymbolTable (Wise lore)
                          -> Pattern (Wise lore) -> Exp (Wise lore)
-                         -> SimpleM lore (ExpAttr (Wise lore))
+                         -> SimpleM lore (ExpDec (Wise lore))
             , mkBodyS :: ST.SymbolTable (Wise lore)
                       -> Stms (Wise lore) -> Result
                       -> SimpleM lore (Body (Wise lore))
@@ -134,8 +133,8 @@ type SimplifyOp lore op = op -> SimpleM lore (OpWithWisdom op, Stms (Wise lore))
 
 bindableSimpleOps :: (SimplifiableLore lore, Bindable lore) =>
                      SimplifyOp lore (Op lore) -> SimpleOps lore
-bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS' protectHoistedOpS'
-  where mkExpAttrS' _ pat e = return $ mkExpAttr pat e
+bindableSimpleOps = SimpleOps mkExpDecS' mkBodyS' mkLetNamesS' protectHoistedOpS'
+  where mkExpDecS' _ pat e = return $ mkExpDec pat e
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ name e = (,) <$> mkLetNames name e <*> pure mempty
         protectHoistedOpS' _ _ _ = Nothing
@@ -287,11 +286,11 @@ protectIf :: MonadBinder m =>
           -> (Exp (Lore m) -> Bool)
           -> SubExp -> Stm (Lore m) -> m ()
 protectIf _ _ taken (Let pat (StmAux cs _)
-                     (If cond taken_body untaken_body (IfAttr if_ts IfFallback))) = do
+                     (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   certifying cs $
     letBind_ pat $ If cond' taken_body untaken_body $
-    IfAttr if_ts IfFallback
+    IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat (StmAux cs _) (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
@@ -307,7 +306,7 @@ protectIf _ f taken (Let pat (StmAux cs _) e)
       if_ts <- expTypesFromPattern pat
       certifying cs $
         letBind_ pat $ If taken taken_body untaken_body $
-        IfAttr if_ts IfFallback
+        IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
 
@@ -596,13 +595,13 @@ simplifyStms :: SimplifiableLore lore =>
 simplifyStms stms m =
   case stmsHead stms of
     Nothing -> inspectStms mempty m
-    Just (Let pat (StmAux stm_cs attr) e, stms') -> do
+    Just (Let pat (StmAux stm_cs dec) e, stms') -> do
       stm_cs' <- simplify stm_cs
       ((e', e_stms), e_cs) <- collectCerts $ simplifyExp e
       (pat', pat_cs) <- collectCerts $ simplifyPattern pat
       let cs = stm_cs'<>e_cs<>pat_cs
       inspectStms e_stms $
-        inspectStm (mkWiseLetStm pat' (StmAux cs attr) e') $
+        inspectStm (mkWiseLetStm pat' (StmAux cs dec) e') $
         simplifyStms stms' m
 
 inspectStm :: SimplifiableLore lore =>
@@ -633,7 +632,7 @@ simplifyOp op = do f <- asks $ simplifyOpS . fst
 simplifyExp :: SimplifiableLore lore =>
                Exp lore -> SimpleM lore (Exp (Wise lore), Stms (Wise lore))
 
-simplifyExp (If cond tbranch fbranch (IfAttr ts ifsort)) = do
+simplifyExp (If cond tbranch fbranch (IfDec ts ifsort)) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
@@ -648,14 +647,14 @@ simplifyExp (If cond tbranch fbranch (IfAttr ts ifsort)) = do
   tbranch' <- localVtable (ST.updateBounds True cond) $ simplifyBody ds tbranch
   fbranch' <- localVtable (ST.updateBounds False cond) $ simplifyBody ds fbranch
   (tbranch'',fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
-  return (If cond' tbranch'' fbranch'' $ IfAttr ts' ifsort, hoisted)
+  return (If cond' tbranch'' fbranch'' $ IfDec ts' ifsort, hoisted)
 
 simplifyExp (DoLoop ctx val form loopbody) = do
   let (ctxparams, ctxinit) = unzip ctx
       (valparams, valinit) = unzip val
-  ctxparams' <- mapM (simplifyParam simplify) ctxparams
+  ctxparams' <- mapM (traverse simplify) ctxparams
   ctxinit' <- mapM simplify ctxinit
-  valparams' <- mapM (simplifyParam simplify) valparams
+  valparams' <- mapM (traverse simplify) valparams
   valinit' <- mapM simplify valinit
   let ctx' = zip ctxparams' ctxinit'
       val' = zip valparams' valinit'
@@ -664,7 +663,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
     ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
       let (loop_params, loop_arrs) = unzip loopvars
-      loop_params' <- mapM (simplifyParam simplify) loop_params
+      loop_params' <- mapM (traverse simplify) loop_params
       loop_arrs' <- mapM simplify loop_arrs
       let form' = ForLoop loopvar it boundexp' (zip loop_params' loop_arrs')
       return (form',
@@ -733,9 +732,9 @@ simplifyExpBase = mapExpM hoist
                 }
 
 type SimplifiableLore lore = (Attributes lore,
-                              Simplifiable (LetAttr lore),
-                              Simplifiable (FParamAttr lore),
-                              Simplifiable (LParamAttr lore),
+                              Simplifiable (LetDec lore),
+                              Simplifiable (FParamInfo lore),
+                              Simplifiable (LParamInfo lore),
                               Simplifiable (RetType lore),
                               Simplifiable (BranchType lore),
                               CanBeWise (Op lore),
@@ -778,18 +777,14 @@ instance Simplifiable SubExp where
   simplify (Constant v) =
     return $ Constant v
 
-simplifyPattern :: (SimplifiableLore lore, Simplifiable attr) =>
-                   PatternT attr
-                -> SimpleM lore (PatternT attr)
+simplifyPattern :: (SimplifiableLore lore, Simplifiable dec) =>
+                   PatternT dec
+                -> SimpleM lore (PatternT dec)
 simplifyPattern pat =
   Pattern <$>
   mapM inspect (patternContextElements pat) <*>
   mapM inspect (patternValueElements pat)
   where inspect (PatElem name lore) = PatElem name <$> simplify lore
-
-simplifyParam :: (attr -> SimpleM lore attr) -> Param attr -> SimpleM lore (Param attr)
-simplifyParam simplifyAttribute (Param name attr) =
-  Param name <$> simplifyAttribute attr
 
 instance Simplifiable () where
   simplify = pure
@@ -847,7 +842,7 @@ simplifyLambdaMaybeHoist :: SimplifiableLore lore =>
                          -> [Maybe VName]
                          -> SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
 simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) arrs = do
-  params' <- mapM (simplifyParam simplify) params
+  params' <- mapM (traverse simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
       paramnames = namesFromList $ boundByLambda lam
@@ -887,7 +882,7 @@ simplifyFun :: SimplifiableLore lore =>
                FunDef lore -> SimpleM lore (FunDef (Wise lore))
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
-  params' <- mapM (simplifyParam simplify) params
+  params' <- mapM (traverse simplify) params
   let ds = map diet (retTypeValues rettype')
   body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
   return $ FunDef entry fname rettype' params' body'

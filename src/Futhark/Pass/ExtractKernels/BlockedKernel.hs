@@ -37,9 +37,9 @@ import Futhark.Transform.Rename
 type DistLore lore = (Bindable lore,
                       HasSegOp lore,
                       BinderOps lore,
-                      LetAttr lore ~ Type,
-                      ExpAttr lore ~ (),
-                      BodyAttr lore ~ ())
+                      LetDec lore ~ Type,
+                      ExpDec lore ~ (),
+                      BodyDec lore ~ ())
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 

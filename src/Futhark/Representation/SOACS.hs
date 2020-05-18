@@ -46,7 +46,7 @@ import qualified Futhark.TypeCheck as TypeCheck
 -- | The lore for the basic representation.
 data SOACS
 
-instance Annotations SOACS where
+instance Decorations SOACS where
   type Op SOACS = SOAC SOACS
 
 instance Attributes SOACS where
@@ -70,11 +70,11 @@ instance TypeCheck.Checkable SOACS where
 instance Bindable SOACS where
   mkBody = AST.Body ()
   mkExpPat ctx val _ = basicPattern ctx val
-  mkExpAttr _ _ = ()
+  mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
 instance BinderOps SOACS where
-  mkExpAttrB = bindableMkExpAttrB
+  mkExpDecB = bindableMkExpDecB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 

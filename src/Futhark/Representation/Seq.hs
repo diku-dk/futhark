@@ -30,7 +30,7 @@ import Futhark.Optimise.Simplify.Rules
 
 data Seq
 
-instance Annotations Seq where
+instance Decorations Seq where
   type Op Seq = ()
 
 instance Attributes Seq where
@@ -44,18 +44,18 @@ instance TypeCheck.Checkable Seq where
 instance Bindable Seq where
   mkBody = Body ()
   mkExpPat ctx val _ = basicPattern ctx val
-  mkExpAttr _ _ = ()
+  mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
 instance BinderOps Seq where
-  mkExpAttrB = bindableMkExpAttrB
+  mkExpDecB = bindableMkExpDecB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Seq where
 
 instance BinderOps (Engine.Wise Seq) where
-  mkExpAttrB = bindableMkExpAttrB
+  mkExpDecB = bindableMkExpDecB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 

@@ -25,7 +25,7 @@ module Futhark.Representation.AST.Attributes.Names
        , boundByStms
        , boundByLambda
        -- * Efficient computation
-       , FreeAttr(..)
+       , FreeDec(..)
        , FV
        , fvBind
        , fvName
@@ -113,11 +113,11 @@ fvName v = FV $ oneName v
 fvNames :: Names -> FV
 fvNames = FV
 
-freeWalker :: (FreeAttr (ExpAttr lore),
-               FreeAttr (BodyAttr lore),
-               FreeIn (FParamAttr lore),
-               FreeIn (LParamAttr lore),
-               FreeIn (LetAttr lore),
+freeWalker :: (FreeDec (ExpDec lore),
+               FreeDec (BodyDec lore),
+               FreeIn (FParamInfo lore),
+               FreeIn (LParamInfo lore),
+               FreeIn (LetDec lore),
                FreeIn (Op lore)) =>
               Walker lore (State FV)
 freeWalker = identityWalker {
@@ -131,11 +131,11 @@ freeWalker = identityWalker {
 -- statements and result.  Filters away the names that are bound by
 -- the statements.
 freeInStmsAndRes :: (FreeIn (Op lore),
-                     FreeIn (LetAttr lore),
-                     FreeIn (LParamAttr lore),
-                     FreeIn (FParamAttr lore),
-                     FreeAttr (BodyAttr lore),
-                     FreeAttr (ExpAttr lore)) =>
+                     FreeIn (LetDec lore),
+                     FreeIn (LParamInfo lore),
+                     FreeIn (FParamInfo lore),
+                     FreeDec (BodyDec lore),
+                     FreeDec (ExpDec lore)) =>
                     Stms lore -> Result -> FV
 freeInStmsAndRes stms res =
   fvBind (boundByStms stms) $ foldMap freeIn' stms <> freeIn' res
@@ -168,41 +168,41 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
 instance FreeIn a => FreeIn [a] where
   freeIn' = foldMap freeIn'
 
-instance (FreeAttr (ExpAttr lore),
-          FreeAttr (BodyAttr lore),
-          FreeIn (FParamAttr lore),
-          FreeIn (LParamAttr lore),
-          FreeIn (LetAttr lore),
+instance (FreeDec (ExpDec lore),
+          FreeDec (BodyDec lore),
+          FreeIn (FParamInfo lore),
+          FreeIn (LParamInfo lore),
+          FreeIn (LetDec lore),
           FreeIn (RetType lore),
           FreeIn (Op lore)) => FreeIn (FunDef lore) where
   freeIn' (FunDef _ _ rettype params body) =
     fvBind (namesFromList $ map paramName params) $
     freeIn' rettype <> freeIn' params <> freeIn' body
 
-instance (FreeAttr (ExpAttr lore),
-          FreeAttr (BodyAttr lore),
-          FreeIn (FParamAttr lore),
-          FreeIn (LParamAttr lore),
-          FreeIn (LetAttr lore),
+instance (FreeDec (ExpDec lore),
+          FreeDec (BodyDec lore),
+          FreeIn (FParamInfo lore),
+          FreeIn (LParamInfo lore),
+          FreeIn (LetDec lore),
           FreeIn (Op lore)) => FreeIn (Lambda lore) where
   freeIn' (Lambda params body rettype) =
     fvBind (namesFromList $ map paramName params) $
     freeIn' rettype <> freeIn' params <> freeIn' body
 
-instance (FreeAttr (ExpAttr lore),
-          FreeAttr (BodyAttr lore),
-          FreeIn (FParamAttr lore),
-          FreeIn (LParamAttr lore),
-          FreeIn (LetAttr lore),
+instance (FreeDec (ExpDec lore),
+          FreeDec (BodyDec lore),
+          FreeIn (FParamInfo lore),
+          FreeIn (LParamInfo lore),
+          FreeIn (LetDec lore),
           FreeIn (Op lore)) => FreeIn (Body lore) where
-  freeIn' (Body attr stms res) =
-    precomputed attr $ freeIn' attr <> freeInStmsAndRes stms res
+  freeIn' (Body dec stms res) =
+    precomputed dec $ freeIn' dec <> freeInStmsAndRes stms res
 
-instance (FreeAttr (ExpAttr lore),
-          FreeAttr (BodyAttr lore),
-          FreeIn (FParamAttr lore),
-          FreeIn (LParamAttr lore),
-          FreeIn (LetAttr lore),
+instance (FreeDec (ExpDec lore),
+          FreeDec (BodyDec lore),
+          FreeIn (FParamInfo lore),
+          FreeIn (LParamInfo lore),
+          FreeIn (LetDec lore),
           FreeIn (Op lore)) => FreeIn (Exp lore) where
   freeIn' (DoLoop ctxmerge valmerge form loopbody) =
     let (ctxparams, ctxinits) = unzip ctxmerge
@@ -215,14 +215,14 @@ instance (FreeAttr (ExpAttr lore),
        freeIn' (ctxparams ++ valparams) <> freeIn' loopbody
   freeIn' e = execState (walkExpM freeWalker e) mempty
 
-instance (FreeAttr (ExpAttr lore),
-          FreeAttr (BodyAttr lore),
-          FreeIn (FParamAttr lore),
-          FreeIn (LParamAttr lore),
-          FreeIn (LetAttr lore),
+instance (FreeDec (ExpDec lore),
+          FreeDec (BodyDec lore),
+          FreeIn (FParamInfo lore),
+          FreeIn (LParamInfo lore),
+          FreeIn (LetDec lore),
           FreeIn (Op lore)) => FreeIn (Stm lore) where
-  freeIn' (Let pat (StmAux cs attr) e) =
-    freeIn' cs <> precomputed attr (freeIn' attr <> freeIn' e <> freeIn' pat)
+  freeIn' (Let pat (StmAux cs dec) e) =
+    freeIn' cs <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm lore) => FreeIn (Stms lore) where
   freeIn' = foldMap freeIn'
@@ -263,13 +263,13 @@ instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Mem s)           = freeIn' s
   freeIn' (Prim _)          = mempty
 
-instance FreeIn attr => FreeIn (Param attr) where
-  freeIn' (Param _ attr) = freeIn' attr
+instance FreeIn dec => FreeIn (Param dec) where
+  freeIn' (Param _ dec) = freeIn' dec
 
-instance FreeIn attr => FreeIn (PatElemT attr) where
-  freeIn' (PatElem _ attr) = freeIn' attr
+instance FreeIn dec => FreeIn (PatElemT dec) where
+  freeIn' (PatElem _ dec) = freeIn' dec
 
-instance FreeIn (LParamAttr lore) => FreeIn (LoopForm lore) where
+instance FreeIn (LParamInfo lore) => FreeIn (LoopForm lore) where
   freeIn' (ForLoop _ _ bound loop_vars) = freeIn' bound <> freeIn' loop_vars
   freeIn' (WhileLoop cond) = freeIn' cond
 
@@ -279,7 +279,7 @@ instance FreeIn d => FreeIn (DimChange d) where
 instance FreeIn d => FreeIn (DimIndex d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
-instance FreeIn attr => FreeIn (PatternT attr) where
+instance FreeIn dec => FreeIn (PatternT dec) where
   freeIn' (Pattern context values) =
     fvBind bound_here $ freeIn' $ context ++ values
     where bound_here = namesFromList $ map patElemName $ context ++ values
@@ -287,29 +287,29 @@ instance FreeIn attr => FreeIn (PatternT attr) where
 instance FreeIn Certificates where
   freeIn' (Certificates cs) = freeIn' cs
 
-instance FreeIn attr => FreeIn (StmAux attr) where
-  freeIn' (StmAux cs attr) = freeIn' cs <> freeIn' attr
+instance FreeIn dec => FreeIn (StmAux dec) where
+  freeIn' (StmAux cs dec) = freeIn' cs <> freeIn' dec
 
-instance FreeIn a => FreeIn (IfAttr a) where
-  freeIn' (IfAttr r _) = freeIn' r
+instance FreeIn a => FreeIn (IfDec a) where
+  freeIn' (IfDec r _) = freeIn' r
 
 -- | Either return precomputed free names stored in the attribute, or
 -- the freshly computed names.  Relies on lazy evaluation to avoid the
 -- work.
-class FreeIn attr => FreeAttr attr where
-  precomputed :: attr -> FV -> FV
+class FreeIn dec => FreeDec dec where
+  precomputed :: dec -> FV -> FV
   precomputed _ = id
 
-instance FreeAttr () where
+instance FreeDec () where
 
-instance (FreeAttr a, FreeIn b) => FreeAttr (a,b) where
+instance (FreeDec a, FreeIn b) => FreeDec (a,b) where
   precomputed (a,_) = precomputed a
 
-instance FreeAttr a => FreeAttr [a] where
+instance FreeDec a => FreeDec [a] where
   precomputed [] = id
   precomputed (a:_) = precomputed a
 
-instance FreeAttr a => FreeAttr (Maybe a) where
+instance FreeDec a => FreeDec (Maybe a) where
   precomputed Nothing = id
   precomputed (Just a) = precomputed a
 

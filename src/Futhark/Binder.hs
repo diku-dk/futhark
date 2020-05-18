@@ -8,7 +8,7 @@ module Futhark.Binder
   , runBinderT, runBinderT_
   , runBinderT', runBinderT'_
   , BinderOps (..)
-  , bindableMkExpAttrB
+  , bindableMkExpDecB
   , bindableMkBodyB
   , bindableMkLetNamesB
   , Binder
@@ -35,16 +35,16 @@ import Futhark.Binder.Class
 import Futhark.Representation.AST
 
 class Attributes lore => BinderOps lore where
-  mkExpAttrB :: (MonadBinder m, Lore m ~ lore) =>
-                Pattern lore -> Exp lore -> m (ExpAttr lore)
+  mkExpDecB :: (MonadBinder m, Lore m ~ lore) =>
+                Pattern lore -> Exp lore -> m (ExpDec lore)
   mkBodyB :: (MonadBinder m, Lore m ~ lore) =>
              Stms lore -> Result -> m (Body lore)
   mkLetNamesB :: (MonadBinder m, Lore m ~ lore) =>
                  [VName] -> Exp lore -> m (Stm lore)
 
-bindableMkExpAttrB :: (MonadBinder m, Bindable (Lore m)) =>
-                      Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
-bindableMkExpAttrB pat e = return $ mkExpAttr pat e
+bindableMkExpDecB :: (MonadBinder m, Bindable (Lore m)) =>
+                      Pattern (Lore m) -> Exp (Lore m) -> m (ExpDec (Lore m))
+bindableMkExpDecB pat e = return $ mkExpDec pat e
 
 bindableMkBodyB :: (MonadBinder m, Bindable (Lore m)) =>
                    Stms (Lore m) -> Result -> m (Body (Lore m))
@@ -86,7 +86,7 @@ instance (Attributes lore, Monad m) =>
 instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
          MonadBinder (BinderT lore m) where
   type Lore (BinderT lore m) = lore
-  mkExpAttrM = mkExpAttrB
+  mkExpDecM = mkExpDecB
   mkBodyM = mkBodyB
   mkLetNamesM = mkLetNamesB
 

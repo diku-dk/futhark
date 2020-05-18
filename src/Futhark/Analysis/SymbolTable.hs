@@ -13,7 +13,7 @@ module Futhark.Analysis.SymbolTable
   , bindingDepth
   , valueRange
   , entryStm
-  , entryLetBoundAttr
+  , entryLetBoundDec
   , entryType
   , asScalExp
     -- * Lookup
@@ -104,7 +104,7 @@ empty = SymbolTable 0 M.empty mempty False
 
 fromScope :: Attributes lore => Scope lore -> SymbolTable lore
 fromScope = M.foldlWithKey' insertFreeVar' empty
-  where insertFreeVar' m k attr = insertFreeVar k attr m
+  where insertFreeVar' m k dec = insertFreeVar k dec m
 
 toScope :: SymbolTable lore -> Scope lore
 toScope = M.map entryInfo . bindings
@@ -147,7 +147,7 @@ data LoopVarEntry lore =
 
 data LetBoundEntry lore =
   LetBoundEntry { letBoundRange    :: ScalExpRange
-                , letBoundAttr     :: LetAttr lore
+                , letBoundDec      :: LetDec lore
                 , letBoundAliases  :: Names
                 , letBoundStm      :: Stm lore
                 , letBoundStmDepth :: Int
@@ -160,7 +160,7 @@ data LetBoundEntry lore =
 
 data FParamEntry lore =
   FParamEntry { fparamRange    :: ScalExpRange
-              , fparamAttr     :: FParamAttr lore
+              , fparamDec      :: FParamInfo lore
               , fparamAliases  :: Names
               , fparamStmDepth :: Int
               , fparamConsumed :: Bool
@@ -168,14 +168,14 @@ data FParamEntry lore =
 
 data LParamEntry lore =
   LParamEntry { lparamRange    :: ScalExpRange
-              , lparamAttr     :: LParamAttr lore
+              , lparamDec      :: LParamInfo lore
               , lparamStmDepth :: Int
               , lparamIndex    :: IndexArray
               , lparamConsumed :: Bool
               }
 
 data FreeVarEntry lore =
-  FreeVarEntry { freeVarAttr     :: NameInfo lore
+  FreeVarEntry { freeVarDec      :: NameInfo lore
                , freeVarStmDepth :: Int
                , freeVarRange    :: ScalExpRange
                , freeVarIndex    :: VName -> IndexArray
@@ -185,11 +185,11 @@ data FreeVarEntry lore =
                }
 
 entryInfo :: Entry lore -> NameInfo lore
-entryInfo (LetBound entry) = LetInfo $ letBoundAttr entry
-entryInfo (LoopVar entry) = IndexInfo $ loopVarType entry
-entryInfo (FParam entry) = FParamInfo $ fparamAttr entry
-entryInfo (LParam entry) = LParamInfo $ lparamAttr entry
-entryInfo (FreeVar entry) = freeVarAttr entry
+entryInfo (LetBound entry) = LetName $ letBoundDec entry
+entryInfo (LoopVar entry) = IndexName $ loopVarType entry
+entryInfo (FParam entry) = FParamName $ fparamDec entry
+entryInfo (LParam entry) = LParamName $ lparamDec entry
+entryInfo (FreeVar entry) = freeVarDec entry
 
 entryType :: Attributes lore => Entry lore -> Type
 entryType = typeOf . entryInfo
@@ -250,9 +250,9 @@ entryStm :: Entry lore -> Maybe (Stm lore)
 entryStm (LetBound entry) = Just $ letBoundStm entry
 entryStm _                = Nothing
 
-entryLetBoundAttr :: Entry lore -> Maybe (LetAttr lore)
-entryLetBoundAttr (LetBound entry) = Just $ letBoundAttr entry
-entryLetBoundAttr _                = Nothing
+entryLetBoundDec :: Entry lore -> Maybe (LetDec lore)
+entryLetBoundDec (LetBound entry) = Just $ letBoundDec entry
+entryLetBoundDec _                = Nothing
 
 asStm :: Entry lore -> Maybe (Stm lore)
 asStm = fmap letBoundStm . isVarBound
@@ -405,7 +405,7 @@ defBndEntry :: (Attributes lore, IndexOp (Op lore)) =>
 defBndEntry vtable patElem range als bnd =
   LetBoundEntry {
       letBoundRange = simplifyRange $ scalExpRange range
-    , letBoundAttr = patElemAttr patElem
+    , letBoundDec = patElemDec patElem
     , letBoundAliases = als
     , letBoundStm = bnd
     , letBoundScalExp =
@@ -516,7 +516,7 @@ insertFParam :: Attributes lore =>
 insertFParam fparam = flip (foldr (`isAtLeast` 0)) sizes . insertEntry name entry
   where name = AST.paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
-                                   , fparamAttr = AST.paramAttr fparam
+                                   , fparamDec = AST.paramDec fparam
                                    , fparamAliases = mempty
                                    , fparamStmDepth = 0
                                    , fparamConsumed = False
@@ -538,7 +538,7 @@ insertLParamWithRange param range indexf vtable =
   let vtable' = insertEntry name bind vtable
   in foldr (`isAtLeast` 0) vtable' sizevars
   where bind = LParam LParamEntry { lparamRange = range
-                                  , lparamAttr = AST.paramAttr param
+                                  , lparamDec = AST.paramDec param
                                   , lparamStmDepth = 0
                                   , lparamIndex = indexf
                                   , lparamConsumed = False
@@ -576,9 +576,9 @@ insertLoopVar name it bound = insertEntry name bind
           }
 
 insertFreeVar :: Attributes lore => VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
-insertFreeVar name attr = insertEntry name entry
+insertFreeVar name dec = insertEntry name entry
   where entry = FreeVar FreeVarEntry {
-            freeVarAttr = attr
+            freeVarDec = dec
           , freeVarRange = (Nothing, Nothing)
           , freeVarStmDepth = 0
           , freeVarIndex  = \_ _ -> Nothing
@@ -735,7 +735,7 @@ isAtLeast name x =
 hideIf :: (Entry lore -> Bool) -> SymbolTable lore -> SymbolTable lore
 hideIf hide vtable = vtable { bindings = M.map maybeHide $ bindings vtable }
   where maybeHide entry
-          | hide entry = FreeVar FreeVarEntry { freeVarAttr = entryInfo entry
+          | hide entry = FreeVar FreeVarEntry { freeVarDec = entryInfo entry
                                               , freeVarStmDepth = bindingDepth entry
                                               , freeVarRange = valueRange entry
                                               , freeVarIndex = \_ _ -> Nothing

@@ -471,7 +471,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   removeOpWisdom = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaWisdom) return
 
-instance Annotations lore => ST.IndexOp (SOAC lore) where
+instance Decorations lore => ST.IndexOp (SOAC lore) where
   indexOp vtable k soac [i] = do
     (lam,se,arr_params,arrs) <- lambdaAndSubExp soac
     let arr_indexes = M.fromList $ catMaybes $ zipWith arrIndex arr_params arrs

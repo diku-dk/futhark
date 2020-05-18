@@ -235,7 +235,7 @@ constructKernel :: (DistLore lore, MonadFreshNames m, LocalScope lore m) =>
 constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
   let cs = loopNestingCertificates first_nest
-      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexInfo Int32
+      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int32
       pat = loopNestingPattern first_nest
       rts = map (stripArray (length ispace)) $ patternTypes pat
 

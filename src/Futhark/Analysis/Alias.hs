@@ -59,10 +59,10 @@ analyseStms orig_aliases =
 
 analyseStm :: (Attributes lore, CanBeAliased (Op lore)) =>
               AliasTable -> Stm lore -> Stm (Aliases lore)
-analyseStm aliases (Let pat (StmAux cs attr) e) =
+analyseStm aliases (Let pat (StmAux cs dec) e) =
   let e' = analyseExp aliases e
       pat' = addAliasesToPattern pat e'
-      lore' = (Names' $ consumedInExp e', attr)
+      lore' = (Names' $ consumedInExp e', dec)
   in Let pat' (StmAux cs lore') e'
 
 analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
@@ -70,9 +70,9 @@ analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
 
 -- Would be better to put this in a BranchType annotation, but that
 -- requires a lot of other work.
-analyseExp aliases (If cond tb fb attr) =
-  let Body ((tb_als, tb_cons), tb_attr) tb_stms tb_res = analyseBody aliases tb
-      Body ((fb_als, fb_cons), fb_attr) fb_stms fb_res = analyseBody aliases fb
+analyseExp aliases (If cond tb fb dec) =
+  let Body ((tb_als, tb_cons), tb_dec) tb_stms tb_res = analyseBody aliases tb
+      Body ((fb_als, fb_cons), fb_dec) fb_stms fb_res = analyseBody aliases fb
       cons = tb_cons <> fb_cons
       isConsumed v = any (`nameIn` unNames cons) $
                      v : namesToList (M.findWithDefault mempty v aliases)
@@ -81,9 +81,9 @@ analyseExp aliases (If cond tb fb attr) =
                     namesToList . unNames
       tb_als' = map notConsumed tb_als
       fb_als' = map notConsumed fb_als
-      tb' = Body ((tb_als', tb_cons), tb_attr) tb_stms tb_res
-      fb' = Body ((fb_als', fb_cons), fb_attr) fb_stms fb_res
-  in If cond tb' fb' attr
+      tb' = Body ((tb_als', tb_cons), tb_dec) tb_stms tb_res
+      fb' = Body ((fb_als', fb_cons), fb_dec) fb_stms fb_res
+  in If cond tb' fb' dec
 
 analyseExp aliases e = mapExp analyse e
   where analyse =

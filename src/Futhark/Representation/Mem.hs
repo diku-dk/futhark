@@ -55,7 +55,7 @@
 -- always produces an array in the same memory block as its input, and
 -- with the same index function, except with some indices fixed.
 module Futhark.Representation.Mem
-       ( LetAttrMem
+       ( LetDecMem
        , FParamMem
        , LParamMem
        , RetTypeMem
@@ -131,7 +131,7 @@ import Futhark.Representation.Aliases
 import Futhark.Representation.AST.Attributes.Ranges
 import qualified Futhark.Analysis.SymbolTable as ST
 
-type LetAttrMem = MemInfo SubExp NoUniqueness MemBind
+type LetDecMem = MemInfo SubExp NoUniqueness MemBind
 type FParamMem = MemInfo SubExp Uniqueness MemBind
 type LParamMem = MemInfo SubExp NoUniqueness MemBind
 type RetTypeMem = FunReturns
@@ -142,13 +142,13 @@ class AllocOp op where
   allocOp :: SubExp -> Space -> op
 
 type Mem lore = (AllocOp (Op lore),
-                              FParamAttr lore ~ FParamMem,
-                              LParamAttr lore ~ LParamMem,
-                              LetAttr lore ~ LetAttrMem,
+                              FParamInfo lore ~ FParamMem,
+                              LParamInfo lore ~ LParamMem,
+                              LetDec lore ~ LetDecMem,
                               RetType lore ~ RetTypeMem,
                               BranchType lore ~ BranchTypeMem,
                               CanBeAliased (Op lore),
-                              Attributes lore, Annotations lore,
+                              Attributes lore, Decorations lore,
                               TC.Checkable lore,
                               OpReturns lore)
 
@@ -502,8 +502,8 @@ matchFunctionReturnType rettype result = do
   where checkResultSubExp Constant{} =
           return ()
         checkResultSubExp (Var v) = do
-          attr <- varMemInfo v
-          case attr of
+          dec <- varMemInfo v
+          case dec of
             MemPrim _ -> return ()
             MemMem{} -> return ()
             MemArray _ _ _ (ArrayIn _ ixfun)
@@ -700,21 +700,21 @@ extInIxFn ixfun = S.fromList $ concatMap (mapMaybe isExt . toList) ixfun
 varMemInfo :: Mem lore =>
               VName -> TC.TypeM lore (MemInfo SubExp NoUniqueness MemBind)
 varMemInfo name = do
-  attr <- TC.lookupVar name
+  dec <- TC.lookupVar name
 
-  case attr of
-    LetInfo (_, summary) -> return summary
-    FParamInfo summary -> return $ noUniquenessReturns summary
-    LParamInfo summary -> return summary
-    IndexInfo it -> return $ MemPrim $ IntType it
+  case dec of
+    LetName (_, summary) -> return summary
+    FParamName summary -> return $ noUniquenessReturns summary
+    LParamName summary -> return summary
+    IndexName it -> return $ MemPrim $ IntType it
 
 nameInfoToMemInfo :: Mem lore => NameInfo lore -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
-    FParamInfo summary -> noUniquenessReturns summary
-    LParamInfo summary -> summary
-    LetInfo summary -> summary
-    IndexInfo it -> MemPrim $ IntType it
+    FParamName summary -> noUniquenessReturns summary
+    LParamName summary -> summary
+    LetName summary -> summary
+    IndexName it -> MemPrim $ IntType it
 
 lookupMemInfo :: (HasScope lore m, Mem lore) =>
                   VName -> m (MemInfo SubExp NoUniqueness MemBind)
@@ -776,7 +776,7 @@ bodyReturnsFromPattern pat =
 
         asReturns pe =
          (patElemName pe,
-          case patElemAttr pe of
+          case patElemDec pe of
             MemPrim pt -> MemPrim pt
             MemMem space -> MemMem space
             MemArray pt shape u (ArrayIn mem ixfun) ->
@@ -789,22 +789,22 @@ bodyReturnsFromPattern pat =
          )
 
 instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
-  ppAnnot = bindeeAnnot patElemName patElemAttr
+  ppAnnot = bindeeAnnot patElemName patElemDec
 
 instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (Param (MemInfo SubExp u r)) where
-  ppAnnot = bindeeAnnot paramName paramAttr
+  ppAnnot = bindeeAnnot paramName paramDec
 
 bindeeAnnot :: (PP.Pretty u, PP.Pretty r) =>
                (a -> VName) -> (a -> MemInfo SubExp u r)
             -> a -> Maybe PP.Doc
 bindeeAnnot bindeeName bindeeLore bindee =
   case bindeeLore bindee of
-    attr@MemArray{} ->
+    dec@MemArray{} ->
       Just $
       PP.text "-- " <>
       PP.oneLine (PP.ppr (bindeeName bindee) <>
                   PP.text " : " <>
-                  PP.ppr attr)
+                  PP.ppr dec)
     MemMem {} ->
       Nothing
     MemPrim _ ->
@@ -812,12 +812,12 @@ bindeeAnnot bindeeName bindeeLore bindee =
 
 extReturns :: [ExtType] -> [ExpReturns]
 extReturns ts =
-    evalState (mapM addAttr ts) 0
-    where addAttr (Prim bt) =
+    evalState (mapM addDec ts) 0
+    where addDec (Prim bt) =
             return $ MemPrim bt
-          addAttr (Mem space) =
+          addDec (Mem space) =
             return $ MemMem space
-          addAttr t@(Array bt shape u)
+          addDec t@(Array bt shape u)
             | existential t = do
               i <- get <* modify (+1)
               return $ MemArray bt shape u $ Just $
@@ -910,9 +910,9 @@ expReturns (BasicOp op) =
 
 expReturns e@(DoLoop ctx val _ _) = do
   t <- expExtType e
-  zipWithM typeWithAttr t $ map fst val
-    where typeWithAttr t p =
-            case (t, paramAttr p) of
+  zipWithM typeWithDec t $ map fst val
+    where typeWithDec t p =
+            case (t, paramDec p) of
               (Array bt shape u, MemArray _ _ _ (ArrayIn mem ixfun))
                 | Just (i, mem_p) <- isMergeVar mem,
                   Mem space <- paramType mem_p ->
@@ -933,7 +933,7 @@ expReturns e@(DoLoop ctx val _ _) = do
 expReturns (Apply _ _ ret _) =
   return $ map funReturnsToExpReturns ret
 
-expReturns (If _ _ _ (IfAttr ret _)) =
+expReturns (If _ _ _ (IfDec ret _)) =
   return $ map bodyReturnsToExpReturns ret
 
 expReturns (Op op) =
@@ -956,9 +956,9 @@ class TypedOp (Op lore) => OpReturns lore where
                Op lore -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
 
-applyFunReturns :: Typed attr =>
+applyFunReturns :: Typed dec =>
                    [FunReturns]
-                -> [Param attr]
+                -> [Param dec]
                 -> [(SubExp,Type)]
                 -> Maybe [FunReturns]
 applyFunReturns rets params args

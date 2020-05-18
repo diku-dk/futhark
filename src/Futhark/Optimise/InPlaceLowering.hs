@@ -155,14 +155,14 @@ optimiseStms (bnd:bnds) m = do
   where boundHere = patternNames $ stmPattern bnd
 
         checkIfForwardableUpdate (Let pat (StmAux cs _) e)
-            | Pattern [] [PatElem v attr] <- pat,
+            | Pattern [] [PatElem v dec] <- pat,
               BasicOp (Update src slice (Var ve)) <- e =
-                maybeForward ve v attr cs src slice
+                maybeForward ve v dec cs src slice
         checkIfForwardableUpdate _ = return ()
 
 optimiseInStm :: Constraints lore => Stm (Aliases lore) -> ForwardingM lore (Stm (Aliases lore))
-optimiseInStm (Let pat attr e) =
-  Let pat attr <$> optimiseExp e
+optimiseInStm (Let pat dec e) =
+  Let pat dec <$> optimiseExp e
 
 optimiseExp :: Constraints lore => Exp (Aliases lore) -> ForwardingM lore (Exp (Aliases lore))
 optimiseExp (DoLoop ctx val form body) =
@@ -205,7 +205,7 @@ data TopDown lore = TopDown { topDownCounter :: Int
                             }
 
 data BottomUp lore = BottomUp { bottomUpSeen :: Names
-                              , forwardThese :: [DesiredUpdate (LetAttr (Aliases lore))]
+                              , forwardThese :: [DesiredUpdate (LetDec (Aliases lore))]
                               }
 
 instance Semigroup (BottomUp lore) where
@@ -239,28 +239,28 @@ runForwardingM f g (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDow
                                , topOnOp = g
                                }
 
-bindingParams :: (attr -> NameInfo (Aliases lore))
-              -> [Param attr]
+bindingParams :: (dec -> NameInfo (Aliases lore))
+              -> [Param dec]
                -> ForwardingM lore a
                -> ForwardingM lore a
 bindingParams f params = local $ \(TopDown n vtable d x y) ->
   let entry fparam =
         (paramName fparam,
-         Entry n mempty d False $ f $ paramAttr fparam)
+         Entry n mempty d False $ f $ paramDec fparam)
       entries = M.fromList $ map entry params
   in TopDown (n+1) (M.union entries vtable) d x y
 
 bindingFParams :: [FParam (Aliases lore)]
                -> ForwardingM lore a
                -> ForwardingM lore a
-bindingFParams = bindingParams FParamInfo
+bindingFParams = bindingParams FParamName
 
 bindingScope :: Scope (Aliases lore)
              -> ForwardingM lore a
              -> ForwardingM lore a
 bindingScope scope = local $ \(TopDown n vtable d x y) ->
   let entries = M.map entry scope
-      infoAliases (LetInfo (aliases, _)) = unNames aliases
+      infoAliases (LetName (aliases, _)) = unNames aliases
       infoAliases _ = mempty
       entry info = Entry n (infoAliases info) d False info
   in TopDown (n+1) (entries<>vtable) d x y
@@ -271,9 +271,9 @@ bindingStm :: Stm (Aliases lore)
 bindingStm (Let pat _ _) = local $ \(TopDown n vtable d x y) ->
   let entries = M.fromList $ map entry $ patternElements pat
       entry patElem =
-        let (aliases, _) = patElemAttr patElem
+        let (aliases, _) = patElemDec patElem
         in (patElemName patElem,
-            Entry n (unNames aliases) d True $ LetInfo $ patElemAttr patElem)
+            Entry n (unNames aliases) d True $ LetName $ patElemDec patElem)
   in TopDown (n+1) (M.union entries vtable) d x y
 
 bindingNumber :: VName -> ForwardingM lore Int
@@ -320,10 +320,10 @@ tapBottomUp m = do (x,bup) <- listen m
 
 maybeForward :: Constraints lore =>
                 VName
-             -> VName -> LetAttr (Aliases lore)
+             -> VName -> LetDec (Aliases lore)
              -> Certificates -> VName -> Slice SubExp
              -> ForwardingM lore ()
-maybeForward v dest_nm dest_attr cs src slice = do
+maybeForward v dest_nm dest_dec cs src slice = do
   -- Checks condition (2)
   available <- (freeIn src <> freeIn slice <> freeIn cs)
                `areAvailableBefore` v
@@ -333,5 +333,5 @@ maybeForward v dest_nm dest_attr cs src slice = do
   optimisable <- isOptimisable v
   not_prim <- not . primType <$> lookupType v
   when (available && samebody && optimisable && not_prim) $ do
-    let fwd = DesiredUpdate dest_nm dest_attr cs src slice v
+    let fwd = DesiredUpdate dest_nm dest_dec cs src slice v
     tell mempty { forwardThese = [fwd] }

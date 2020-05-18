@@ -468,11 +468,11 @@ instance Typed DeclType where
 instance Typed Ident where
   typeOf = identType
 
-instance Typed attr => Typed (Param attr) where
-  typeOf = typeOf . paramAttr
+instance Typed dec => Typed (Param dec) where
+  typeOf = typeOf . paramDec
 
-instance Typed attr => Typed (PatElemT attr) where
-  typeOf = typeOf . patElemAttr
+instance Typed dec => Typed (PatElemT dec) where
+  typeOf = typeOf . patElemDec
 
 instance Typed b => Typed (a,b) where
   typeOf = typeOf . snd
@@ -484,8 +484,8 @@ class DeclTyped t where
 instance DeclTyped DeclType where
   declTypeOf = id
 
-instance DeclTyped attr => DeclTyped (Param attr) where
-  declTypeOf = declTypeOf . paramAttr
+instance DeclTyped dec => DeclTyped (Param dec) where
+  declTypeOf = declTypeOf . paramDec
 
 -- | Typeclass for things that contain 'ExtType's.
 class FixExt t => ExtTyped t where
@@ -511,9 +511,9 @@ instance SetType Type where
 instance SetType b => SetType (a, b) where
   setType (a, b) t = (a, setType b t)
 
-instance SetType attr => SetType (PatElemT attr) where
-  setType (PatElem name attr) t =
-    PatElem name $ setType attr t
+instance SetType dec => SetType (PatElemT dec) where
+  setType (PatElem name dec) t =
+    PatElem name $ setType dec t
 
 -- | Something with an existential context that can be (partially)
 -- fixed.

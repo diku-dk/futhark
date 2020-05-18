@@ -21,9 +21,9 @@ import Futhark.Representation.Kernels
 import Futhark.Construct
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
-data DesiredUpdate attr =
+data DesiredUpdate dec =
   DesiredUpdate { updateName :: VName -- ^ Name of result.
-                , updateType :: attr -- ^ Type of result.
+                , updateType :: dec -- ^ Type of result.
                 , updateCertificates :: Certificates
                 , updateSource :: VName
                 , updateIndices :: Slice SubExp
@@ -34,16 +34,16 @@ data DesiredUpdate attr =
 instance Functor DesiredUpdate where
   f `fmap` u = u { updateType = f $ updateType u }
 
-updateHasValue :: VName -> DesiredUpdate attr -> Bool
+updateHasValue :: VName -> DesiredUpdate dec -> Bool
 updateHasValue name = (name==) . updateValue
 
 type LowerUpdate lore m = Scope (Aliases lore)
                           -> Stm (Aliases lore)
-                          -> [DesiredUpdate (LetAttr (Aliases lore))]
+                          -> [DesiredUpdate (LetDec (Aliases lore))]
                           -> Maybe (m [Stm (Aliases lore)])
 
 lowerUpdate :: (MonadFreshNames m, Bindable lore,
-                LetAttr lore ~ Type, CanBeAliased (Op lore)) => LowerUpdate lore m
+                LetDec lore ~ Type, CanBeAliased (Op lore)) => LowerUpdate lore m
 lowerUpdate scope (Let pat aux (DoLoop ctx val form body)) updates = do
   canDo <- lowerUpdateIntoLoop scope updates pat ctx val form body
   Just $ do
@@ -53,12 +53,12 @@ lowerUpdate scope (Let pat aux (DoLoop ctx val form body)) updates = do
                   mkLet ctxpat valpat $ DoLoop ctx' val' form body'] ++ postbnds
 lowerUpdate _
   (Let pat aux (BasicOp (SubExp (Var v))))
-  [DesiredUpdate bindee_nm bindee_attr cs src is val]
+  [DesiredUpdate bindee_nm bindee_dec cs src is val]
   | patternNames pat == [src] =
-    let is' = fullSlice (typeOf bindee_attr) is
+    let is' = fullSlice (typeOf bindee_dec) is
     in Just $
        return [certify (stmAuxCerts aux <> cs) $
-               mkLet [] [Ident bindee_nm $ typeOf bindee_attr] $
+               mkLet [] [Ident bindee_nm $ typeOf bindee_dec] $
                BasicOp $ Update v is' $ Var val]
 lowerUpdate _ _ _ =
   Nothing
@@ -79,7 +79,7 @@ lowerUpdateKernels scope stm updates = lowerUpdate scope stm updates
 lowerUpdatesIntoSegMap :: MonadFreshNames m =>
                           Scope (Aliases Kernels)
                        -> Pattern (Aliases Kernels)
-                       -> [DesiredUpdate (LetAttr (Aliases Kernels))]
+                       -> [DesiredUpdate (LetDec (Aliases Kernels))]
                        -> SegSpace
                        -> KernelBody (Aliases Kernels)
                        -> Maybe (m (Pattern (Aliases Kernels),
@@ -99,8 +99,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
 
   where (gtids, _dims) = unzip $ unSegSpace kspace
 
-        onRet (PatElem v v_attr) ret
-          | Just (DesiredUpdate bindee_nm bindee_attr _cs src slice _val) <-
+        onRet (PatElem v v_dec) ret
+          | Just (DesiredUpdate bindee_nm bindee_dec _cs src slice _val) <-
               find ((==v) . updateValue) updates = do
 
               Returns _ se <- Just ret
@@ -112,23 +112,23 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                   fixSlice (map (fmap pexp) slice) $
                   map (pexp . Var) gtids
 
-                let res_dims = arrayDims $ snd bindee_attr
+                let res_dims = arrayDims $ snd bindee_dec
                     ret' = WriteReturns res_dims src [(map DimFix slice', se)]
 
-                return (PatElem bindee_nm bindee_attr,
+                return (PatElem bindee_nm bindee_dec,
                         bodystms,
                         ret',
-                        oneStm $ mkLet [] [Ident v $ typeOf v_attr] $
+                        oneStm $ mkLet [] [Ident v $ typeOf v_dec] $
                         BasicOp $ Index bindee_nm slice)
 
         onRet pe ret =
           Just $ return (pe, mempty, ret, mempty)
 
 lowerUpdateIntoLoop :: (Bindable lore, BinderOps lore,
-                        Aliased lore, LetAttr lore ~ (als, Type),
+                        Aliased lore, LetDec lore ~ (als, Type),
                         MonadFreshNames m) =>
                        Scope lore
-                    -> [DesiredUpdate (LetAttr lore)]
+                    -> [DesiredUpdate (LetDec lore)]
                     -> Pattern lore
                     -> [(FParam lore, SubExp)]
                     -> [(FParam lore, SubExp)]
@@ -185,7 +185,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
     return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
   where usedInBody = mconcat $ map expandAliases $ namesToList $ freeIn body <> freeIn form
         expandAliases v = case M.lookup v scope of
-                            Just (LetInfo attr) -> oneName v <> aliasesOf attr
+                            Just (LetName dec) -> oneName v <> aliasesOf dec
                             _ -> oneName v
         resmap = zip (bodyResult body) $ patternValueIdents pat
 
@@ -198,7 +198,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
           return (origmerge ++ extramerge, prebnds, postbnds)
 
         mkMerge summary
-          | Just (update, mergename, mergeattr) <- relatedUpdate summary = do
+          | Just (update, mergename, mergedec) <- relatedUpdate summary = do
             source <- newVName "modified_source"
             let source_t = snd $ updateType update
                 elmident = Ident
@@ -213,7 +213,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
                    (fullSlice source_t $ updateIndices update)])
             return $ Right (Param
                             mergename
-                            (toDecl (typeOf mergeattr) Unique),
+                            (toDecl (typeOf mergedec) Unique),
                             Var source)
           | otherwise = return $ Left $ mergeParam summary
 
@@ -260,25 +260,25 @@ summariseLoop updates usedInBody resmap merge =
         loopInvariant (Var v)    = v `notElem` merge_param_names
         loopInvariant Constant{} = True
 
-data LoopResultSummary attr =
+data LoopResultSummary dec =
   LoopResultSummary { resultSubExp :: SubExp
                     , inPatternAs :: Ident
                     , mergeParam :: (Param DeclType, SubExp)
-                    , relatedUpdate :: Maybe (DesiredUpdate attr, VName, attr)
+                    , relatedUpdate :: Maybe (DesiredUpdate dec, VName, dec)
                     }
   deriving (Show)
 
-indexSubstitutions :: [LoopResultSummary attr]
-                   -> IndexSubstitutions attr
+indexSubstitutions :: [LoopResultSummary dec]
+                   -> IndexSubstitutions dec
 indexSubstitutions = mapMaybe getSubstitution
   where getSubstitution res = do
-          (DesiredUpdate _ _ cs _ is _, nm, attr) <- relatedUpdate res
+          (DesiredUpdate _ _ cs _ is _, nm, dec) <- relatedUpdate res
           let name = paramName $ fst $ mergeParam res
-          return (name, (cs, nm, attr, is))
+          return (name, (cs, nm, dec, is))
 
 manipulateResult :: (Bindable lore, MonadFreshNames m) =>
-                    [LoopResultSummary (LetAttr lore)]
-                 -> IndexSubstitutions (LetAttr lore)
+                    [LoopResultSummary (LetDec lore)]
+                 -> IndexSubstitutions (LetDec lore)
                  -> m (Result, Stms lore)
 manipulateResult summaries substs = do
   let (orig_ses,updated_ses) = partitionEithers $ map unchangedRes summaries
@@ -292,8 +292,8 @@ manipulateResult summaries substs = do
     substRes (Var res_v) (subst_v, (_, nm, _, _))
       | res_v == subst_v =
         return $ Var nm
-    substRes res_se (_, (cs, nm, attr, is)) = do
-      v' <- newIdent' (++"_updated") $ Ident nm $ typeOf attr
+    substRes res_se (_, (cs, nm, dec, is)) = do
+      v' <- newIdent' (++"_updated") $ Ident nm $ typeOf dec
       tell [certify cs $ mkLet [] [v'] $ BasicOp $
-            Update nm (fullSlice (typeOf attr) is) res_se]
+            Update nm (fullSlice (typeOf dec) is) res_se]
       return $ Var $ identName v'

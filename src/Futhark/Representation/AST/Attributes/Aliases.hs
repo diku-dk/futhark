@@ -27,8 +27,8 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Names
 
-class (Annotations lore, AliasedOp (Op lore),
-       AliasesOf (LetAttr lore)) => Aliased lore where
+class (Decorations lore, AliasedOp (Op lore),
+       AliasesOf (LetDec lore)) => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
 
@@ -85,9 +85,9 @@ funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
 expAliases :: (Aliased lore) => Exp lore -> [Names]
-expAliases (If _ tb fb attr) =
+expAliases (If _ tb fb dec) =
   drop (length all_aliases - length ts) all_aliases
-  where ts = ifReturns attr
+  where ts = ifReturns dec
         all_aliases = ifAliases
                       (bodyAliases tb, consumedInBody tb)
                       (bodyAliases fb, consumedInBody fb)
@@ -137,8 +137,8 @@ consumedInExp _ = mempty
 consumedByLambda :: Aliased lore => Lambda lore -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
-patternAliases :: AliasesOf attr => PatternT attr -> [Names]
-patternAliases = map (aliasesOf . patElemAttr) . patternElements
+patternAliases :: AliasesOf dec => PatternT dec -> [Names]
+patternAliases = map (aliasesOf . patElemDec) . patternElements
 
 -- | Something that contains alias information.
 class AliasesOf a where
@@ -148,8 +148,8 @@ class AliasesOf a where
 instance AliasesOf Names where
   aliasesOf = id
 
-instance AliasesOf attr => AliasesOf (PatElemT attr) where
-  aliasesOf = aliasesOf . patElemAttr
+instance AliasesOf dec => AliasesOf (PatElemT dec) where
+  aliasesOf = aliasesOf . patElemDec
 
 class IsOp op => AliasedOp op where
   opAliases :: op -> [Names]

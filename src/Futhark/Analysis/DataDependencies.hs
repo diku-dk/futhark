@@ -56,7 +56,7 @@ depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 -- of that parameter is live after the loop.  @deps@ is the data
 -- dependencies of the loop body.  This is computed by straightforward
 -- fixpoint iteration.
-findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
+findNecessaryForReturned :: (Param dec -> Bool) -> [(Param dec, SubExp)]
                          -> M.Map VName Names
                          -> Names
 findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =

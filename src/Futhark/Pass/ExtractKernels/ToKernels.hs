@@ -38,8 +38,8 @@ segThread desc =
 
 injectSOACS :: (Monad m,
                 SameScope from to,
-                ExpAttr from ~ ExpAttr to,
-                BodyAttr from ~ BodyAttr to,
+                ExpDec from ~ ExpDec to,
+                BodyDec from ~ BodyDec to,
                 RetType from ~ RetType to,
                 BranchType from ~ BranchType to,
                 Op from ~ SOAC from) =>

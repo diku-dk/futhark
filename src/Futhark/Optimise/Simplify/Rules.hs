@@ -349,7 +349,7 @@ removeUnnecessaryCopy (vtable,used) (Pattern [] [d]) _ (Copy v)
         -- because we don't have the information conveniently
         -- available.
         consumable = case M.lookup v $ ST.toScope vtable of
-                       Just (FParamInfo info) -> unique $ declTypeOf info
+                       Just (FParamName info) -> unique $ declTypeOf info
                        _ -> False
 removeUnnecessaryCopy _ _ _ _ = Skip
 
@@ -735,7 +735,7 @@ simplifyIndexing vtable seType idd inds consuming =
             (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
             altbody <- mkBodyM altbnds [altres]
             letSubExp "index_concat_branch" $ If cmp thisbody altbody $
-              IfAttr [primBodyType res_t] IfNormal
+              IfDec [primBodyType res_t] IfNormal
       SubExpResult cs <$> mkBranch xs_and_starts
 
     Just (ArrayLit ses _, cs)
@@ -836,7 +836,7 @@ simplifyConcat _ _ _  _ = Skip
 
 ruleIf :: BinderOps lore => TopDownRuleIf lore
 
-ruleIf _ pat _ (e1, tb, fb, IfAttr _ ifsort)
+ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = Simplify $ do
   let ses = bodyResult branch
@@ -856,12 +856,12 @@ ruleIf _ pat _ (e1, tb, fb, IfAttr _ ifsort)
 -- if c then True else v == c || v
 ruleIf _ pat _
   (cond, Body _ tstms [Constant (BoolValue True)],
-         Body _ fstms [se], IfAttr ts _)
+         Body _ fstms [se], IfDec ts _)
   | null tstms, null fstms, [Prim Bool] <- bodyTypeValues ts =
       Simplify $ letBind_ pat $ BasicOp $ BinOp LogOr cond se
 
 -- When type(x)==bool, if c then x else y == (c && x) || (!c && y)
-ruleIf _ pat _ (cond, tb, fb, IfAttr ts _)
+ruleIf _ pat _ (cond, tb, fb, IfDec ts _)
   | Body _ tstms [tres] <- tb,
     Body _ fstms [fres] <- fb,
     all (safeExp . stmExp) $ tstms <> fstms,
@@ -873,7 +873,7 @@ ruleIf _ pat _ (cond, tb, fb, IfAttr ts _)
                      (pure $ BasicOp $ SubExp fres))
   letBind_ pat e
 
-ruleIf _ pat _ (_, tbranch, _, IfAttr _ IfFallback)
+ruleIf _ pat _ (_, tbranch, _, IfDec _ IfFallback)
   | null $ patternContextNames pat,
     all (safeExp . stmExp) $ bodyStms tbranch = Simplify $ do
       let ses = bodyResult tbranch
@@ -899,7 +899,7 @@ ruleIf _ _ _ _ = Skip
 -- either invariant to the branches (only done for results in the
 -- context), or the same in both branches.
 hoistBranchInvariant :: BinderOps lore => TopDownRuleIf lore
-hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = Simplify $ do
+hoistBranchInvariant _ pat _ (cond, tb, fb, IfDec ret ifsort) = Simplify $ do
   let tses = bodyResult tb
       fses = bodyResult fb
   (hoistings, (pes, ts, res)) <-
@@ -919,7 +919,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = Simplify $ do
              tb'' <- reshapeBodyResults tb' $ map extTypeOf ret'
              fb'' <- reshapeBodyResults fb' $ map extTypeOf ret'
              letBind_ (Pattern ctx_pes val_pes) $
-               If cond tb'' fb'' (IfAttr ret' ifsort)
+               If cond tb'' fb'' (IfDec ret' ifsort)
      else cannotSimplify
   where num_ctx = length $ patternContextElements pat
         bound_in_branches = namesFromList $ concatMap (patternNames . stmPattern) $
@@ -947,7 +947,7 @@ hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = Simplify $ do
               letBindNames_ [patElemName pe] =<<
                 (If cond <$> resultBodyM [tse]
                          <*> resultBodyM [fse]
-                         <*> pure (IfAttr bt ifsort))
+                         <*> pure (IfDec bt ifsort))
               hoisted pe t
 
           | otherwise =
@@ -1245,7 +1245,7 @@ ruleBasicOp _ _ _ _ =
 -- if *none* of the return values are used, but this rule is more
 -- precise.
 removeDeadBranchResult :: BinderOps lore => BottomUpRuleIf lore
-removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
+removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfDec rettype ifsort)
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
     -- Figure out which of the names in 'pat' are used...
@@ -1263,7 +1263,7 @@ removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
       fb' = fb { bodyResult = pick fses }
       pat' = pick $ patternElements pat
       rettype' = pick rettype
-  in Simplify $ letBind_ (Pattern [] pat') $ If e1 tb' fb' $ IfAttr rettype' ifsort
+  in Simplify $ letBind_ (Pattern [] pat') $ If e1 tb' fb' $ IfDec rettype' ifsort
 
   | otherwise = Skip
 

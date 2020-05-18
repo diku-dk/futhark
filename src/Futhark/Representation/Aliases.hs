@@ -96,21 +96,21 @@ type ConsumedInExp = Names'
 -- consumed inside of it.
 type BodyAliasing = ([VarAliases], ConsumedInExp)
 
-instance (Annotations lore, CanBeAliased (Op lore)) =>
-         Annotations (Aliases lore) where
-  type LetAttr (Aliases lore) = (VarAliases, LetAttr lore)
-  type ExpAttr (Aliases lore) = (ConsumedInExp, ExpAttr lore)
-  type BodyAttr (Aliases lore) = (BodyAliasing, BodyAttr lore)
-  type FParamAttr (Aliases lore) = FParamAttr lore
-  type LParamAttr (Aliases lore) = LParamAttr lore
+instance (Decorations lore, CanBeAliased (Op lore)) =>
+         Decorations (Aliases lore) where
+  type LetDec (Aliases lore) = (VarAliases, LetDec lore)
+  type ExpDec (Aliases lore) = (ConsumedInExp, ExpDec lore)
+  type BodyDec (Aliases lore) = (BodyAliasing, BodyDec lore)
+  type FParamInfo (Aliases lore) = FParamInfo lore
+  type LParamInfo (Aliases lore) = LParamInfo lore
   type RetType (Aliases lore) = RetType lore
   type BranchType (Aliases lore) = BranchType lore
   type Op (Aliases lore) = OpWithAliases (Op lore)
 
-instance AliasesOf (VarAliases, attr) where
+instance AliasesOf (VarAliases, dec) where
   aliasesOf = unNames . fst
 
-instance FreeAttr Names' where
+instance FreeDec Names' where
 
 withoutAliases :: (HasScope (Aliases lore) m, Monad m) =>
                  ReaderT (Scope lore) m a -> m a
@@ -123,15 +123,15 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) 
     withoutAliases . expTypesFromPattern . removePatternAliases
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
-  bodyAliases = map unNames . fst . fst . bodyAttr
-  consumedInBody = unNames . snd . fst . bodyAttr
+  bodyAliases = map unNames . fst . fst . bodyDec
+  consumedInBody = unNames . snd . fst . bodyDec
 
-instance PrettyAnnot (PatElemT attr) =>
-  PrettyAnnot (PatElemT (VarAliases, attr)) where
+instance PrettyAnnot (PatElemT dec) =>
+  PrettyAnnot (PatElemT (VarAliases, dec)) where
 
-  ppAnnot (PatElem name (Names' als, attr)) =
+  ppAnnot (PatElem name (Names' als, dec)) =
     let alias_comment = PP.oneLine <$> aliasComment name als
-    in case (alias_comment, ppAnnot (PatElem name attr)) of
+    in case (alias_comment, ppAnnot (PatElem name dec)) of
          (_, Nothing) ->
            alias_comment
          (Just alias_comment', Just inner_comment) ->
@@ -142,10 +142,10 @@ instance PrettyAnnot (PatElemT attr) =>
 
 instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) where
   ppExpLore (consumed, inner) e =
-    maybeComment $ catMaybes [expAttr,
-                              mergeAttr,
+    maybeComment $ catMaybes [exp_dec,
+                              merge_dec,
                               ppExpLore inner $ removeExpAliases e]
-    where mergeAttr =
+    where merge_dec =
             case e of
               DoLoop _ merge _ body ->
                 let mergeParamAliases fparam als
@@ -158,7 +158,7 @@ instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
                    bodyAliases body
               _ -> Nothing
 
-          expAttr = case namesToList $ unNames consumed of
+          exp_dec = case namesToList $ unNames consumed of
             []  -> Nothing
             als -> Just $ PP.oneLine $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
@@ -196,10 +196,10 @@ removeAliases = Rephraser { rephraseExpLore = return . snd
 
 removeScopeAliases :: Scope (Aliases lore) -> Scope lore
 removeScopeAliases = M.map unAlias
-  where unAlias (LetInfo (_, attr)) = LetInfo attr
-        unAlias (FParamInfo attr) = FParamInfo attr
-        unAlias (LParamInfo attr) = LParamInfo attr
-        unAlias (IndexInfo it) = IndexInfo it
+  where unAlias (LetName (_, dec)) = LetName dec
+        unAlias (FParamName dec) = FParamName dec
+        unAlias (LParamName dec) = LParamName dec
+        unAlias (IndexName it) = IndexName it
 
 removeProgAliases :: CanBeAliased (Op lore) =>
                      Prog (Aliases lore) -> Prog lore
@@ -225,21 +225,21 @@ removePatternAliases :: PatternT (Names', a)
                      -> PatternT a
 removePatternAliases = runIdentity . rephrasePattern (return . snd)
 
-addAliasesToPattern :: (Attributes lore, CanBeAliased (Op lore), Typed attr) =>
-                       PatternT attr -> Exp (Aliases lore)
-                    -> PatternT (VarAliases, attr)
+addAliasesToPattern :: (Attributes lore, CanBeAliased (Op lore), Typed dec) =>
+                       PatternT dec -> Exp (Aliases lore)
+                    -> PatternT (VarAliases, dec)
 addAliasesToPattern pat e =
   uncurry Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: (Attributes lore, CanBeAliased (Op lore)) =>
-                 BodyAttr lore -> Stms (Aliases lore) -> Result -> Body (Aliases lore)
+                 BodyDec lore -> Stms (Aliases lore) -> Result -> Body (Aliases lore)
 mkAliasedBody innerlore bnds res =
   Body (mkBodyAliases bnds res, innerlore) bnds res
 
-mkPatternAliases :: (Aliased lore, Typed attr) =>
-                    PatternT attr -> Exp lore
-                 -> ([PatElemT (VarAliases, attr)],
-                     [PatElemT (VarAliases, attr)])
+mkPatternAliases :: (Aliased lore, Typed dec) =>
+                    PatternT dec -> Exp lore
+                 -> ([PatElemT (VarAliases, dec)],
+                     [PatElemT (VarAliases, dec)])
 mkPatternAliases pat e =
   -- Some part of the pattern may be the context.  This does not have
   -- aliases from expAliases, so we use a hack to compute aliases of
@@ -251,7 +251,7 @@ mkPatternAliases pat e =
   in (zipWith annotateBindee (patternContextElements pat) context_als,
       zipWith annotateBindee (patternValueElements pat) als)
   where annotateBindee bindee names =
-            bindee `setPatElemLore` (Names' names', patElemAttr bindee)
+            bindee `setPatElemLore` (Names' names', patElemDec bindee)
           where names' =
                   case patElemType bindee of
                     Array {} -> names
@@ -259,7 +259,7 @@ mkPatternAliases pat e =
                     _        -> mempty
 
 mkContextAliases :: Aliased lore =>
-                    PatternT attr -> Exp lore -> [Names]
+                    PatternT dec -> Exp lore -> [Names]
 mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
   let ctx = map fst ctxmerge
       init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
@@ -331,17 +331,17 @@ trackAliases (aliasmap, consumed) bnd =
 
 mkAliasedLetStm :: (Attributes lore, CanBeAliased (Op lore)) =>
                    Pattern lore
-                -> StmAux (ExpAttr lore) -> Exp (Aliases lore)
+                -> StmAux (ExpDec lore) -> Exp (Aliases lore)
                 -> Stm (Aliases lore)
-mkAliasedLetStm pat (StmAux cs attr) e =
+mkAliasedLetStm pat (StmAux cs dec) e =
   Let (addAliasesToPattern pat e)
-  (StmAux cs (Names' $ consumedInExp e, attr))
+  (StmAux cs (Names' $ consumedInExp e, dec))
   e
 
 instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where
-  mkExpAttr pat e =
-    let attr = mkExpAttr (removePatternAliases pat) $ removeExpAliases e
-    in (Names' $ consumedInExp e, attr)
+  mkExpDec pat e =
+    let dec = mkExpDec (removePatternAliases pat) $ removeExpAliases e
+    in (Names' $ consumedInExp e, dec)
 
   mkExpPat ctx val e =
     addAliasesToPattern (mkExpPat ctx val $ removeExpAliases e) e
@@ -349,8 +349,8 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
   mkLetNames names e = do
     env <- asksScope removeScopeAliases
     flip runReaderT env $ do
-      Let pat attr _ <- mkLetNames names $ removeExpAliases e
-      return $ mkAliasedLetStm pat attr e
+      Let pat dec _ <- mkLetNames names $ removeExpAliases e
+      return $ mkAliasedLetStm pat dec e
 
   mkBody bnds res =
     let Body bodylore _ _ = mkBody (fmap removeStmAliases bnds) res
@@ -358,5 +358,5 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
 
 instance (Attributes (Aliases lore), Bindable (Aliases lore)) => BinderOps (Aliases lore) where
   mkBodyB = bindableMkBodyB
-  mkExpAttrB = bindableMkExpAttrB
+  mkExpDecB = bindableMkExpDecB
   mkLetNamesB = bindableMkLetNamesB

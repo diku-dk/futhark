@@ -33,14 +33,14 @@ import Futhark.MonadFreshNames
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
 class (Attributes lore,
-       FParamAttr lore ~ DeclType,
-       LParamAttr lore ~ Type,
+       FParamInfo lore ~ DeclType,
+       LParamInfo lore ~ Type,
        RetType lore ~ DeclExtType,
        BranchType lore ~ ExtType,
-       SetType (LetAttr lore)) =>
+       SetType (LetDec lore)) =>
       Bindable lore where
   mkExpPat :: [Ident] -> [Ident] -> Exp lore -> Pattern lore
-  mkExpAttr :: Pattern lore -> Exp lore -> ExpAttr lore
+  mkExpDec :: Pattern lore -> Exp lore -> ExpDec lore
   mkBody :: Stms lore -> Result -> Body lore
   mkLetNames :: (MonadFreshNames m, HasScope lore m) =>
                 [VName] -> Exp lore -> m (Stm lore)
@@ -59,7 +59,7 @@ class (Attributes (Lore m),
        LocalScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: Data.Kind.Type
-  mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
+  mkExpDecM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpDec (Lore m))
   mkBodyM :: Stms (Lore m) -> Result -> m (Body (Lore m))
   mkLetNamesM :: [VName] -> Exp (Lore m) -> m (Stm (Lore m))
   addStm      :: Stm (Lore m) -> m ()
@@ -73,7 +73,7 @@ class (Attributes (Lore m),
     return x
 
 mkLetM :: MonadBinder m => Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
-mkLetM pat e = Let pat <$> (StmAux mempty <$> mkExpAttrM pat e) <*> pure e
+mkLetM pat e = Let pat <$> (StmAux mempty <$> mkExpDecM pat e) <*> pure e
 
 letBind :: MonadBinder m =>
            Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
@@ -89,8 +89,8 @@ letBind_ pat e = void $ letBind pat e
 mkLet :: Bindable lore => [Ident] -> [Ident] -> Exp lore -> Stm lore
 mkLet ctx val e =
   let pat = mkExpPat ctx val e
-      attr = mkExpAttr pat e
-  in Let pat (StmAux mempty attr) e
+      dec = mkExpDec pat e
+  in Let pat (StmAux mempty dec) e
 
 letBindNames :: MonadBinder m =>
                 [VName] -> Exp (Lore m) -> m [Ident]

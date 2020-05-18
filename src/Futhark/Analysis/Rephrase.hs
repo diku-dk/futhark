@@ -17,11 +17,11 @@ where
 import Futhark.Representation.AST
 
 data Rephraser m from to
-  = Rephraser { rephraseExpLore :: ExpAttr from -> m (ExpAttr to)
-              , rephraseLetBoundLore :: LetAttr from -> m (LetAttr to)
-              , rephraseFParamLore :: FParamAttr from -> m (FParamAttr to)
-              , rephraseLParamLore :: LParamAttr from -> m (LParamAttr to)
-              , rephraseBodyLore :: BodyAttr from -> m (BodyAttr to)
+  = Rephraser { rephraseExpLore :: ExpDec from -> m (ExpDec to)
+              , rephraseLetBoundLore :: LetDec from -> m (LetDec to)
+              , rephraseFParamLore :: FParamInfo from -> m (FParamInfo to)
+              , rephraseLParamLore :: LParamInfo from -> m (LParamInfo to)
+              , rephraseBodyLore :: BodyDec from -> m (BodyDec to)
               , rephraseRetType :: RetType from -> m (RetType to)
               , rephraseBranchType :: BranchType from -> m (BranchType to)
               , rephraseOp :: Op from -> m (Op to)
@@ -44,10 +44,10 @@ rephraseExp :: Monad m => Rephraser m from to -> Exp from -> m (Exp to)
 rephraseExp = mapExpM . mapper
 
 rephraseStm :: Monad m => Rephraser m from to -> Stm from -> m (Stm to)
-rephraseStm rephraser (Let pat (StmAux cs attr) e) =
+rephraseStm rephraser (Let pat (StmAux cs dec) e) =
   Let <$>
   rephrasePattern (rephraseLetBoundLore rephraser) pat <*>
-  (StmAux cs <$> rephraseExpLore rephraser attr) <*>
+  (StmAux cs <$> rephraseExpLore rephraser dec) <*>
   rephraseExp rephraser e
 
 rephrasePattern :: Monad m =>

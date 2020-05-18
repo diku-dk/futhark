@@ -40,25 +40,25 @@ import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.RWS.Lazy
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST.Annotations
+import Futhark.Representation.AST.Decorations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Pretty ()
 
 -- | How some name in scope was bound.
-data NameInfo lore = LetInfo (LetAttr lore)
-                   | FParamInfo (FParamAttr lore)
-                   | LParamInfo (LParamAttr lore)
-                   | IndexInfo IntType
+data NameInfo lore = LetName (LetDec lore)
+                   | FParamName (FParamInfo lore)
+                   | LParamName (LParamInfo lore)
+                   | IndexName IntType
 
-deriving instance Annotations lore => Show (NameInfo lore)
+deriving instance Decorations lore => Show (NameInfo lore)
 
-instance Annotations lore => Typed (NameInfo lore) where
-  typeOf (LetInfo attr) = typeOf attr
-  typeOf (FParamInfo attr) = typeOf attr
-  typeOf (LParamInfo attr) = typeOf attr
-  typeOf (IndexInfo it) = Prim $ IntType it
+instance Decorations lore => Typed (NameInfo lore) where
+  typeOf (LetName dec) = typeOf dec
+  typeOf (FParamName dec) = typeOf dec
+  typeOf (LParamName dec) = typeOf dec
+  typeOf (IndexName it) = Prim $ IntType it
 
 -- | A scope is a mapping from variable names to information about
 -- that name.
@@ -69,7 +69,7 @@ type Scope lore = M.Map VName (NameInfo lore)
 -- for 'lookupType' exists, which is sufficient (if not always
 -- maximally efficient, and using 'error' to fail) when 'askScope'
 -- is defined.
-class (Applicative m, Annotations lore) => HasScope lore m | m -> lore where
+class (Applicative m, Decorations lore) => HasScope lore m | m -> lore where
   -- | Return the type of the given variable, or fail if it is not in
   -- the type environment.
   lookupType :: VName -> m Type
@@ -93,18 +93,18 @@ class (Applicative m, Annotations lore) => HasScope lore m | m -> lore where
   asksScope :: (Scope lore -> a) -> m a
   asksScope f = f <$> askScope
 
-instance (Applicative m, Monad m, Annotations lore) =>
+instance (Applicative m, Monad m, Decorations lore) =>
          HasScope lore (ReaderT (Scope lore) m) where
   askScope = ask
 
 instance (Monad m, HasScope lore m) => HasScope lore (ExceptT e m) where
   askScope = lift askScope
 
-instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
+instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
          HasScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m) where
   askScope = ask
 
-instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
+instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
          HasScope lore (Control.Monad.RWS.Lazy.RWST (Scope lore) w s m) where
   askScope = ask
 
@@ -120,15 +120,15 @@ class (HasScope lore m, Monad m) => LocalScope lore m where
 instance (Monad m, LocalScope lore m) => LocalScope lore (ExceptT e m) where
   localScope = mapExceptT . localScope
 
-instance (Applicative m, Monad m, Annotations lore) =>
+instance (Applicative m, Monad m, Decorations lore) =>
          LocalScope lore (ReaderT (Scope lore) m) where
   localScope = local . M.union
 
-instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
+instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
          LocalScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m) where
   localScope = local . M.union
 
-instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
+instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
          LocalScope lore (Control.Monad.RWS.Lazy.RWST (Scope lore) w s m) where
   localScope = local . M.union
 
@@ -160,37 +160,37 @@ instance Scoped lore (VName, NameInfo lore) where
 instance Scoped lore (LoopForm lore) where
   scopeOf (WhileLoop _) = mempty
   scopeOf (ForLoop i it _ xs) =
-    M.insert i (IndexInfo it) $ scopeOfLParams (map fst xs)
+    M.insert i (IndexName it) $ scopeOfLParams (map fst xs)
 
 -- | The scope of a pattern.
-scopeOfPattern :: LetAttr lore ~ attr => PatternT attr -> Scope lore
+scopeOfPattern :: LetDec lore ~ dec => PatternT dec -> Scope lore
 scopeOfPattern =
   mconcat . map scopeOfPatElem . patternElements
 
 -- | The scope of a pattern element.
-scopeOfPatElem :: LetAttr lore ~ attr => PatElemT attr -> Scope lore
-scopeOfPatElem (PatElem name attr) = M.singleton name $ LetInfo attr
+scopeOfPatElem :: LetDec lore ~ dec => PatElemT dec -> Scope lore
+scopeOfPatElem (PatElem name dec) = M.singleton name $ LetName dec
 
 -- | The scope of some lambda parameters.
-scopeOfLParams :: LParamAttr lore ~ attr =>
-                  [Param attr] -> Scope lore
+scopeOfLParams :: LParamInfo lore ~ dec =>
+                  [Param dec] -> Scope lore
 scopeOfLParams = M.fromList . map f
-  where f param = (paramName param, LParamInfo $ paramAttr param)
+  where f param = (paramName param, LParamName $ paramDec param)
 
 -- | The scope of some function or loop parameters.
-scopeOfFParams :: FParamAttr lore ~ attr =>
-                  [Param attr] -> Scope lore
+scopeOfFParams :: FParamInfo lore ~ dec =>
+                  [Param dec] -> Scope lore
 scopeOfFParams = M.fromList . map f
-  where f param = (paramName param, FParamInfo $ paramAttr param)
+  where f param = (paramName param, FParamName $ paramDec param)
 
 instance Scoped lore (Lambda lore) where
   scopeOf lam = scopeOfLParams $ lambdaParams lam
 
 -- | A constraint that indicates two lores have the same 'NameInfo'
 -- representation.
-type SameScope lore1 lore2 = (LetAttr lore1 ~ LetAttr lore2,
-                              FParamAttr lore1 ~ FParamAttr lore2,
-                              LParamAttr lore1 ~ LParamAttr lore2)
+type SameScope lore1 lore2 = (LetDec lore1 ~ LetDec lore2,
+                              FParamInfo lore1 ~ FParamInfo lore2,
+                              LParamInfo lore1 ~ LParamInfo lore2)
 
 -- | If two scopes are really the same, then you can convert one to
 -- the other.
@@ -200,10 +200,10 @@ castScope = M.map castNameInfo
 
 castNameInfo :: SameScope fromlore tolore =>
                 NameInfo fromlore -> NameInfo tolore
-castNameInfo (LetInfo attr) = LetInfo attr
-castNameInfo (FParamInfo attr) = FParamInfo attr
-castNameInfo (LParamInfo attr) = LParamInfo attr
-castNameInfo (IndexInfo it) = IndexInfo it
+castNameInfo (LetName dec) = LetName dec
+castNameInfo (FParamName dec) = FParamName dec
+castNameInfo (LParamName dec) = LParamName dec
+castNameInfo (IndexName it) = IndexName it
 
 -- | A monad transformer that carries around an extended 'Scope'.
 -- Its 'lookupType' method will first look in the extended 'Scope',

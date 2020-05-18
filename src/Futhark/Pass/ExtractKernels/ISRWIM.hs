@@ -136,12 +136,12 @@ transposedArrays arrs = forM arrs $ \arr -> do
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =
   let t = rowType $ paramType param
-  in param { paramAttr = t }
+  in param { paramDec = t }
 
 setParamOuterDimTo :: SubExp -> LParam -> LParam
 setParamOuterDimTo w param =
   let t = setOuterDimTo w $ paramType param
-  in param { paramAttr = t }
+  in param { paramDec = t }
 
 setIdentOuterDimTo :: SubExp -> Ident -> Ident
 setIdentOuterDimTo w ident =

@@ -31,10 +31,10 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 
 data SeqMem
 
-instance Annotations SeqMem where
-  type LetAttr    SeqMem = LetAttrMem
-  type FParamAttr SeqMem = FParamMem
-  type LParamAttr SeqMem = LParamMem
+instance Decorations SeqMem where
+  type LetDec    SeqMem = LetDecMem
+  type FParamInfo SeqMem = FParamMem
+  type LParamInfo SeqMem = LParamMem
   type RetType    SeqMem = RetTypeMem
   type BranchType SeqMem = BranchTypeMem
   type Op         SeqMem = MemOp ()
@@ -65,12 +65,12 @@ instance TC.Checkable SeqMem where
   matchBranchType = matchBranchReturnType
 
 instance BinderOps SeqMem where
-  mkExpAttrB _ _ = return ()
+  mkExpDecB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
 instance BinderOps (Engine.Wise SeqMem) where
-  mkExpAttrB pat e = return $ Engine.mkWiseExpAttr pat () e
+  mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 

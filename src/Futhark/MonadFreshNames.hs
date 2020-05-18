@@ -104,7 +104,7 @@ newIdent' f ident =
 
 -- | Produce a fresh 'Param', using the given name as a template.
 newParam :: MonadFreshNames m =>
-            String -> attr -> m (Param attr)
+            String -> dec -> m (Param dec)
 newParam s t = do
   s' <- newID $ nameFromString s
   return $ Param s' t

@@ -37,7 +37,7 @@ makeLocalArrays (Count group_size) num_threads scans = do
           let (scan_x_params, _scan_y_params) =
                 splitAt (length nes) $ lambdaParams scan_op
           (arrs, used_mems) <- fmap unzip $ forM scan_x_params $ \p ->
-            case paramAttr p of
+            case paramDec p of
               MemArray pt shape _ (ArrayIn mem _) -> do
                 let shape' = Shape [num_threads] <> shape
                 arr <- lift $ sArray "scan_arr" pt shape' $

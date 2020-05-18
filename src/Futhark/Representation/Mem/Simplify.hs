@@ -95,8 +95,8 @@ blockers = Engine.noExtraHoistBlockers {
 -- | Some constraints that must hold for the simplification rules to work.
 type SimplifyMemory lore =
   (Simplify.SimplifiableLore lore,
-   ExpAttr lore ~ (),
-   BodyAttr lore ~ (),
+   ExpDec lore ~ (),
+   BodyDec lore ~ (),
    AllocOp (Op (Wise lore)),
    CanBeWise (Op lore),
    BinderOps (Wise lore),
@@ -112,7 +112,7 @@ callKernelRules = standardRules <>
 -- the array is not existential, then we can create a block of the
 -- proper size and always return there.
 unExistentialiseMemory :: SimplifyMemory lore => TopDownRuleIf (Wise lore)
-unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
+unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   | ST.simplifyMemory vtable,
     fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
     not $ null fixable = Simplify $ do
@@ -133,7 +133,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
               zipWithM updateResult (patternElements pat) res
           updateResult pat_elem (Var v)
             | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
-              (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemAttr pat_elem = do
+              (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
                 v_copy <- newVName $ baseString v <> "_nonext_copy"
                 let v_pat = Pattern [] [PatElem v_copy $
                                         MemArray pt shape u $ ArrayIn mem ixfun]
@@ -145,7 +145,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
             return se
       tbranch' <- updateBody tbranch
       fbranch' <- updateBody fbranch
-      letBind_ pat $ If cond tbranch' fbranch' ifattr
+      letBind_ pat $ If cond tbranch' fbranch' ifdec
   where onlyUsedIn name here = not $ any ((name `nameIn`) . freeIn) $
                                           filter ((/=here) . patElemName) $
                                           patternValueElements pat
@@ -154,7 +154,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifattr)
         inContext = (`elem` patternContextNames pat)
 
         hasConcretisableMemory fixable pat_elem
-          | (_, MemArray pt shape _ (ArrayIn mem ixfun)) <- patElemAttr pat_elem,
+          | (_, MemArray pt shape _ (ArrayIn mem ixfun)) <- patElemDec pat_elem,
             Just (j, Mem space) <-
               fmap patElemType <$> find ((mem==) . patElemName . snd)
                                         (zip [(0::Int)..] $ patternElements pat),
@@ -174,17 +174,17 @@ unExistentialiseMemory _ _ _ _ = Skip
 -- | If we are copying something that is itself a copy, just copy the
 -- original one instead.
 copyCopyToCopy :: (BinderOps lore,
-                   LetAttr lore ~ (VarWisdom, MemBound u)) =>
+                   LetDec lore ~ (VarWisdom, MemBound u)) =>
                   TopDownRuleBasicOp lore
 copyCopyToCopy vtable pat@(Pattern [] [pat_elem]) _ (Copy v1)
   | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
 
     Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
-      ST.entryLetBoundAttr =<< ST.lookup v1 vtable,
+      ST.entryLetBoundDec =<< ST.lookup v1 vtable,
 
     Just (Mem src_space) <- ST.lookupType srcmem vtable,
 
-    (_, MemArray _ _ _ (ArrayIn destmem dest_ixfun)) <- patElemAttr pat_elem,
+    (_, MemArray _ _ _ (ArrayIn destmem dest_ixfun)) <- patElemDec pat_elem,
 
     Just (Mem dest_space) <- ST.lookupType destmem vtable,
 
@@ -204,12 +204,12 @@ copyCopyToCopy _ _ _ _ = Skip
 -- | If the destination of a copy is the same as the source, just
 -- remove it.
 removeIdentityCopy :: (BinderOps lore,
-                       LetAttr lore ~ (VarWisdom, MemBound u)) =>
+                       LetDec lore ~ (VarWisdom, MemBound u)) =>
                       TopDownRuleBasicOp lore
 removeIdentityCopy vtable pat@(Pattern [] [pe]) _ (Copy v)
-  | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemAttr pe,
+  | (_, MemArray _ _ _ (ArrayIn dest_mem dest_ixfun)) <- patElemDec pe,
     Just (_, MemArray _ _ _ (ArrayIn src_mem src_ixfun)) <-
-      ST.entryLetBoundAttr =<< ST.lookup v vtable,
+      ST.entryLetBoundDec =<< ST.lookup v vtable,
     dest_mem == src_mem, dest_ixfun == src_ixfun =
       Simplify $ letBind_ pat $ BasicOp $ SubExp $ Var v
 

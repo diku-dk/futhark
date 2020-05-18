@@ -621,7 +621,7 @@ soacToStream soac = do
                                                         (BasicOp $ SubExp se)
                                   ) accpars accs
                 plus_bdy = lambdaBody plus
-                newlambdy = Body (bodyAttr plus_bdy)
+                newlambdy = Body (bodyDec plus_bdy)
                                  (stmsFromList parbnds <> bodyStms plus_bdy)
                                  (bodyResult plus_bdy)
             renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus

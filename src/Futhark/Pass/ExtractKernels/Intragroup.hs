@@ -160,11 +160,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                           ForLoop i it bound inps -> ForLoop i it bound inps
                           WhileLoop cond          -> WhileLoop cond
 
-    If cond tbody fbody ifattr -> do
+    If cond tbody fbody ifdec -> do
       tbody' <- intraGroupBody lvl tbody
       fbody' <- intraGroupBody lvl fbody
       certifying (stmAuxCerts aux) $
-        letBind_ pat $ If cond tbody' fbody' ifattr
+        letBind_ pat $ If cond tbody' fbody' ifdec
 
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
