@@ -131,7 +131,7 @@ interchangeLoops nest loop = do
           fmap snd $ find ((==v) . paramName . fst) $
           concatMap loopNestingParamsAndArrs $ kernelNestLoops nest
 
-data Branch = Branch [Int] Pattern SubExp Body Body (IfAttr (BranchType SOACS))
+data Branch = Branch [Int] Pattern SubExp Body Body (IfDec (BranchType SOACS))
 
 branchStm :: Branch -> Stm
 branchStm (Branch _ pat cond tbranch fbranch ret) =
@@ -140,7 +140,7 @@ branchStm (Branch _ pat cond tbranch fbranch ret) =
 interchangeBranch1 :: (MonadBinder m, LocalScope SOACS m) =>
                       Branch -> LoopNesting -> m Branch
 interchangeBranch1
-  (Branch perm branch_pat cond tbranch fbranch (IfAttr ret if_sort))
+  (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
   (MapNesting pat cs w params_and_arrs) = do
     let ret' = map (`arrayOfRow` Free w) ret
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
@@ -167,7 +167,7 @@ interchangeBranch1
     tbranch' <- mkBranch tbranch
     fbranch' <- mkBranch fbranch
     return $ Branch [0..patternSize pat-1] pat' cond tbranch' fbranch' $
-      IfAttr ret' if_sort
+      IfDec ret' if_sort
   where dummyBind se = do
           dummy <- newVName "dummy"
           letBindNames_ [dummy] (BasicOp $ SubExp se)

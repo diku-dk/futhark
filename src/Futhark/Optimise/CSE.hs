@@ -94,12 +94,12 @@ type CSEM lore = Reader (CSEState lore)
 
 cseInBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              [Diet] -> Body lore -> CSEM lore (Body lore)
-cseInBody ds (Body bodyattr bnds res) = do
+cseInBody ds (Body bodydec bnds res) = do
   (bnds', res') <-
     cseInStms (res_cons <> consumedInStms bnds) (stmsToList bnds) $ do
     CSEState (_, nsubsts) _ <- ask
     return $ substituteNames nsubsts res
-  return $ Body bodyattr bnds' res'
+  return $ Body bodydec bnds' res'
   where res_cons = mconcat $ zipWith consumeResult ds res
         consumeResult Consume se = freeIn se
         consumeResult _ _ = mempty
@@ -137,25 +137,25 @@ cseInStm :: Attributes lore =>
             Names -> Stm lore
          -> ([Stm lore] -> CSEM lore a)
          -> CSEM lore a
-cseInStm consumed (Let pat (StmAux cs eattr) e) m = do
+cseInStm consumed (Let pat (StmAux cs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if any (bad cse_arrays) $ patternValueElements pat then
-    m [Let pat' (StmAux cs eattr) e']
+    m [Let pat' (StmAux cs edec) e']
     else
-    case M.lookup (eattr, e') esubsts of
+    case M.lookup (edec, e') esubsts of
       Just subpat ->
         local (addNameSubst pat' subpat) $ do
           let lets =
-                [ Let (Pattern [] [patElem']) (StmAux cs eattr) $
+                [ Let (Pattern [] [patElem']) (StmAux cs edec) $
                     BasicOp $ SubExp $ Var $ patElemName patElem
                 | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
                   let patElem' = patElem { patElemName = name }
                 ]
           m lets
-      _ -> local (addExpSubst pat' eattr e') $
-           m [Let pat' (StmAux cs eattr) e']
+      _ -> local (addExpSubst pat' edec e') $
+           m [Let pat' (StmAux cs edec) e']
 
   where bad cse_arrays pe
           | Mem{} <- patElemType pe = True
@@ -164,7 +164,7 @@ cseInStm consumed (Let pat (StmAux cs eattr) e) m = do
           | otherwise = False
 
 type ExpressionSubstitutions lore = M.Map
-                                    (ExpAttr lore, Exp lore)
+                                    (ExpDec lore, Exp lore)
                                     (Pattern lore)
 type NameSubstitutions = M.Map VName VName
 
@@ -176,19 +176,19 @@ data CSEState lore = CSEState
 newCSEState :: Bool -> CSEState lore
 newCSEState = CSEState (M.empty, M.empty)
 
-mkSubsts :: PatternT attr -> PatternT attr -> M.Map VName VName
+mkSubsts :: PatternT dec -> PatternT dec -> M.Map VName VName
 mkSubsts pat vs = M.fromList $ zip (patternNames pat) (patternNames vs)
 
-addNameSubst :: PatternT attr -> PatternT attr -> CSEState lore -> CSEState lore
+addNameSubst :: PatternT dec -> PatternT dec -> CSEState lore -> CSEState lore
 addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst :: Attributes lore =>
-               Pattern lore -> ExpAttr lore -> Exp lore
+               Pattern lore -> ExpDec lore -> Exp lore
             -> CSEState lore
             -> CSEState lore
-addExpSubst pat eattr e (CSEState (esubsts, nsubsts) cse_arrays) =
-  CSEState (M.insert (eattr,e) pat esubsts, nsubsts) cse_arrays
+addExpSubst pat edec e (CSEState (esubsts, nsubsts) cse_arrays) =
+  CSEState (M.insert (edec,e) pat esubsts, nsubsts) cse_arrays
 
 -- | The operations that permit CSE.
 class CSEInOp op where
@@ -217,9 +217,9 @@ instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
 
 cseInKernelBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                    Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)
-cseInKernelBody (Kernel.KernelBody bodyattr bnds res) = do
-  Body _ bnds' _ <- cseInBody (map (const Observe) res) $ Body bodyattr bnds []
-  return $ Kernel.KernelBody bodyattr bnds' res
+cseInKernelBody (Kernel.KernelBody bodydec bnds res) = do
+  Body _ bnds' _ <- cseInBody (map (const Observe) res) $ Body bodydec bnds []
+  return $ Kernel.KernelBody bodydec bnds' res
 
 instance CSEInOp op => CSEInOp (Memory.MemOp op) where
   cseInOp o@Memory.Alloc{} = return o

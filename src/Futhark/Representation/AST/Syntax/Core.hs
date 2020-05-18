@@ -3,7 +3,7 @@
 {-# LANGUAGE Strict #-}
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.Representation.AST.Syntax" in order for
--- "Futhark.Representation.AST.Annotations" to use these definitions.  This
+-- "Futhark.Representation.AST.Decorations" to use these definitions.  This
 -- module is re-exported from "Futhark.Representation.AST.Syntax" and
 -- there should be no reason to include it explicitly.
 module Futhark.Representation.AST.Syntax.Core
@@ -228,13 +228,12 @@ data SubExp = Constant PrimValue
             deriving (Show, Eq, Ord)
 
 -- | A function or lambda parameter.
-data Param attr = Param
-                  { paramName :: VName
-                    -- ^ Name of the parameter.
-                  , paramAttr :: attr
-                    -- ^ Function parameter attribute.
-                  }
-                  deriving (Ord, Show, Eq)
+data Param dec = Param
+                 { paramName :: VName
+                   -- ^ Name of the parameter.
+                 , paramDec :: dec
+                   -- ^ Function parameter decoration.
+                 } deriving (Ord, Show, Eq)
 
 instance Foldable Param where
   foldMap = foldMapDefault
@@ -243,7 +242,7 @@ instance Functor Param where
   fmap = fmapDefault
 
 instance Traversable Param where
-  traverse f (Param name attr) = Param name <$> f attr
+  traverse f (Param name dec) = Param name <$> f dec
 
 -- | How to index a single dimension of an array.
 data DimIndex d = DimFix
@@ -299,18 +298,18 @@ fixSlice (DimSlice orig_k _ orig_s:mis') (i:is') =
 fixSlice _ _ = []
 
 -- | An element of a pattern - consisting of a name (essentially a
--- pair of the name and type) and an addditional parametric attribute.
--- This attribute is what is expected to contain the type of the
+-- pair of the name and type) and an addditional parametric decoration.
+-- This decoration is what is expected to contain the type of the
 -- resulting variable.
-data PatElemT attr = PatElem { patElemName :: VName
+data PatElemT dec = PatElem { patElemName :: VName
                                -- ^ The name being bound.
-                             , patElemAttr :: attr
-                               -- ^ Pattern element attribute.
+                             , patElemDec :: dec
+                               -- ^ Pattern element decoration.
                              }
                    deriving (Ord, Show, Eq)
 
 instance Functor PatElemT where
-  fmap f (PatElem name attr) = PatElem name (f attr)
+  fmap f (PatElem name dec) = PatElem name (f dec)
 
 -- | An error message is a list of error parts, which are concatenated
 -- to form the final message.

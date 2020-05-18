@@ -65,7 +65,7 @@ prettyName = prettyDoc 80 . pprName
 
 -- | Class for type constructors that represent annotations.  Used in
 -- the prettyprinter to either print the original AST, or the computed
--- attribute.
+-- decoration.
 class Annot f where
   -- | Extract value, if any.
   unAnnot :: f a -> Maybe a

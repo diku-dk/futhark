@@ -124,7 +124,7 @@ expExtType (BasicOp op)    = staticShapes <$> primOpType op
 expExtType (Op op)        = opType op
 
 -- | The number of values returned by an expression.
-expExtTypeSize :: (Annotations lore, TypedOp (Op lore)) =>
+expExtTypeSize :: (Decorations lore, TypedOp (Op lore)) =>
                   Exp lore -> Int
 expExtTypeSize = length . feelBad . expExtType
 
@@ -138,7 +138,7 @@ instance Applicative (FeelBad lore) where
   pure = FeelBad
   f <*> x = FeelBad $ feelBad f $ feelBad x
 
-instance Annotations lore => HasScope lore (FeelBad lore) where
+instance Decorations lore => HasScope lore (FeelBad lore) where
   lookupType = const $ pure $ Prim $ IntType Int32
   askScope = pure mempty
 

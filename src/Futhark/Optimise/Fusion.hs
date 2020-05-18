@@ -32,10 +32,10 @@ data VarEntry = IsArray VName (NameInfo SOACS) Names SOAC.Input
               | IsNotArray (NameInfo SOACS)
 
 varEntryType :: VarEntry -> NameInfo SOACS
-varEntryType (IsArray _ attr _ _) =
-  attr
-varEntryType (IsNotArray attr) =
-  attr
+varEntryType (IsArray _ dec _ _) =
+  dec
+varEntryType (IsNotArray dec) =
+  dec
 
 varEntryAliases :: VarEntry -> Names
 varEntryAliases (IsArray _ _ x _) = x
@@ -81,8 +81,8 @@ bindVar :: FusionGEnv -> (Ident, Names) -> FusionGEnv
 bindVar env (Ident name t, aliases) =
   env { varsInScope = M.insert name entry $ varsInScope env }
   where entry = case t of
-          Array {} -> IsArray name (LetInfo t) aliases' $ SOAC.identInput $ Ident name t
-          _        -> IsNotArray $ LetInfo t
+          Array {} -> IsArray name (LetName t) aliases' $ SOAC.identInput $ Ident name t
+          _        -> IsNotArray $ LetName t
         expand = maybe mempty varEntryAliases . flip M.lookup (varsInScope env)
         aliases' = aliases <> mconcat (map expand $ namesToList aliases)
 
@@ -108,7 +108,7 @@ bindingParams = binding . (`zip` repeat mempty) . map paramIdent
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
 bindingFamilyVar faml env (Ident nm t) =
   env { soacs       = M.insert nm faml $ soacs env
-      , varsInScope = M.insert nm (IsArray nm (LetInfo t) mempty $
+      , varsInScope = M.insert nm (IsArray nm (LetName t) mempty $
                                    SOAC.identInput $ Ident nm t) $
                       varsInScope env
       }
@@ -146,13 +146,13 @@ bindingTransform pe srcname trns = local $ \env ->
     Just (IsArray src' _ aliases input) ->
       env { varsInScope =
               M.insert vname
-              (IsArray src' (LetInfo attr) (oneName srcname <> aliases) $
+              (IsArray src' (LetName dec) (oneName srcname <> aliases) $
                trns `SOAC.addTransform` input) $
               varsInScope env
           }
     _ -> bindVar env (patElemIdent pe, oneName vname)
   where vname = patElemName pe
-        attr = patElemAttr pe
+        dec = patElemDec pe
 
 -- | Binds the fusion result to the environment.
 bindRes :: FusedRes -> FusionGM a -> FusionGM a

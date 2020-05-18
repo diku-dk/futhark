@@ -118,7 +118,7 @@ inlineInFunDef fdmap (FunDef entry name rtp args body) =
 
 inlineFunction :: MonadFreshNames m =>
                   Pattern
-               -> StmAux attr
+               -> StmAux dec
                -> [(SubExp, Diet)]
                -> (Safety, SrcLoc, [SrcLoc])
                -> FunDef SOACS
@@ -172,8 +172,8 @@ inlineInBody fdmap = onBody
         inline [] =
           pure mempty
 
-        onBody (Body attr stms res) =
-          Body attr . stmsFromList <$> inline (stmsToList stms) <*> pure res
+        onBody (Body dec stms res) =
+          Body dec . stmsFromList <$> inline (stmsToList stms) <*> pure res
 
         onStm (Let pat aux e) =
           Let pat aux <$> mapExpM inliner e

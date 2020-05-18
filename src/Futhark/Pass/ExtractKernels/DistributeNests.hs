@@ -970,7 +970,7 @@ expandKernelNest pes (outer_nest, inner_nests) = do
         expandPatElemWith dims pe = do
           name <- newVName $ baseString $ patElemName pe
           return pe { patElemName = name
-                    , patElemAttr = patElemType pe `arrayOfShape` Shape dims
+                    , patElemDec = patElemType pe `arrayOfShape` Shape dims
                     }
 
 kernelOrNot :: (MonadFreshNames m, DistLore lore) =>

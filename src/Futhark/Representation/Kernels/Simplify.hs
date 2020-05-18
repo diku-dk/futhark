@@ -41,7 +41,7 @@ simplifyLambda =
   Simplify.simplifyLambda simpleKernels kernelRules Engine.noExtraHoistBlockers
 
 simplifyKernelOp :: (Engine.SimplifiableLore lore,
-                     BodyAttr lore ~ ()) =>
+                     BodyDec lore ~ ()) =>
                     Simplify.SimplifyOp lore op
                  -> HostOp lore op
                  -> Engine.SimpleM lore (HostOp (Wise lore) (OpWithWisdom op), Stms (Wise lore))
@@ -71,7 +71,7 @@ simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 
 instance BinderOps (Wise Kernels) where
-  mkExpAttrB = bindableMkExpAttrB
+  mkExpDecB = bindableMkExpDecB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 

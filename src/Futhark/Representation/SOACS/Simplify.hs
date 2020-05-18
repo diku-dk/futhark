@@ -58,11 +58,11 @@ simplifySOACS = Simplify.simplifyProg simpleSOACS soacRules blockers
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent shapes/sizes.
-getShapeNames :: (LetAttr lore ~ (VarWisdom, Type)) =>
+getShapeNames :: (LetDec lore ~ (VarWisdom, Type)) =>
                  AST.Stm lore -> Names
 getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ stmPattern bnd
-      tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
+      tps2 = map (snd . patElemDec) $ patternElements $ stmPattern bnd
   in  namesFromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
 simplifyFun :: MonadFreshNames m =>
@@ -143,7 +143,7 @@ simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
     pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
 instance BinderOps (Wise SOACS) where
-  mkExpAttrB = bindableMkExpAttrB
+  mkExpDecB = bindableMkExpDecB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 
@@ -430,9 +430,9 @@ mapOpToOp (_, used) pat aux1 e
 
 mapOpToOp _ _ _ _ = Skip
 
-isMapWithOp :: PatternT attr
+isMapWithOp :: PatternT dec
             -> SOAC (Wise SOACS)
-            -> Maybe (PatElemT attr, Certificates, SubExp,
+            -> Maybe (PatElemT dec, Certificates, SubExp,
                       AST.Exp (Wise SOACS), [Param Type], [VName])
 isMapWithOp pat e
   | Pattern [] [map_pe] <- pat,

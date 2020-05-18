@@ -165,7 +165,7 @@ entryPointSize TypeUnsigned = 1
 entryPointSize TypeDirect = 1
 
 -- | A 'StmAux' with empty 'Certificates'.
-defAux :: attr -> StmAux attr
+defAux :: dec -> StmAux dec
 defAux = StmAux mempty
 
 -- | The certificates associated with a statement.
@@ -174,7 +174,7 @@ stmCerts = stmAuxCerts . stmAux
 
 -- | Add certificates to a statement.
 certify :: Certificates -> Stm lore -> Stm lore
-certify cs1 (Let pat (StmAux cs2 attr) e) = Let pat (StmAux (cs2<>cs1) attr) e
+certify cs1 (Let pat (StmAux cs2 dec) e) = Let pat (StmAux (cs2<>cs1) dec) e
 
 -- | A handy shorthand for properties that we usually want to things
 -- we stuff into ASTs.
@@ -194,16 +194,16 @@ instance IsOp () where
 
 -- | Lore-specific attributes; also means the lore supports some basic
 -- facilities.
-class (Annotations lore,
+class (Decorations lore,
 
        PrettyLore lore,
 
        Renameable lore, Substitutable lore,
-       FreeAttr (ExpAttr lore),
-       FreeIn (LetAttr lore),
-       FreeAttr (BodyAttr lore),
-       FreeIn (FParamAttr lore),
-       FreeIn (LParamAttr lore),
+       FreeDec (ExpDec lore),
+       FreeIn (LetDec lore),
+       FreeDec (BodyDec lore),
+       FreeIn (FParamInfo lore),
+       FreeIn (LParamInfo lore),
        FreeIn (RetType lore),
        FreeIn (BranchType lore),
 
@@ -215,7 +215,7 @@ class (Annotations lore,
                          Pattern lore -> m [BranchType lore]
 
 -- | Construct the type of an expression that would match the pattern.
-expExtTypesFromPattern :: Typed attr => PatternT attr -> [ExtType]
+expExtTypesFromPattern :: Typed dec => PatternT dec -> [ExtType]
 expExtTypesFromPattern pat =
   existentialiseExtTypes (patternContextNames pat) $
   staticShapes $ map patElemType $ patternValueElements pat

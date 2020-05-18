@@ -72,7 +72,7 @@ transformStm :: Stm KernelsMem -> ExpandM (Stms KernelsMem)
 -- It is possible that we are unable to expand allocations in some
 -- code versions.  If so, we can remove the offending branch.  Only if
 -- both versions fail do we propagate the error.
-transformStm (Let pat aux (If cond tbranch fbranch (IfAttr ts IfEquiv))) = do
+transformStm (Let pat aux (If cond tbranch fbranch (IfDec ts IfEquiv))) = do
   tbranch' <- (Right <$> transformBody tbranch) `catchError` (return . Left)
   fbranch' <- (Right <$> transformBody fbranch) `catchError` (return . Left)
   case (tbranch', fbranch') of
@@ -81,7 +81,7 @@ transformStm (Let pat aux (If cond tbranch fbranch (IfAttr ts IfEquiv))) = do
     (Right tbranch'', Left _) ->
       return $ useBranch tbranch''
     (Right tbranch'', Right fbranch'') ->
-      return $ oneStm $ Let pat aux $ If cond tbranch'' fbranch'' (IfAttr ts IfEquiv)
+      return $ oneStm $ Let pat aux $ If cond tbranch'' fbranch'' (IfDec ts IfEquiv)
     (Left e, _) ->
       throwError e
 
@@ -98,10 +98,10 @@ transformStm (Let pat aux e) = do
                                    }
 
 nameInfoConv :: NameInfo KernelsMem -> NameInfo KernelsMem
-nameInfoConv (LetInfo mem_info) = LetInfo mem_info
-nameInfoConv (FParamInfo mem_info) = FParamInfo mem_info
-nameInfoConv (LParamInfo mem_info) = LParamInfo mem_info
-nameInfoConv (IndexInfo it) = IndexInfo it
+nameInfoConv (LetName mem_info) = LetName mem_info
+nameInfoConv (FParamName mem_info) = FParamName mem_info
+nameInfoConv (LParamName mem_info) = LParamName mem_info
+nameInfoConv (IndexName it) = IndexName it
 
 transformExp :: Exp KernelsMem -> ExpandM (Stms KernelsMem, Exp KernelsMem)
 
@@ -402,15 +402,15 @@ offsetMemoryInKernelBody kbody = do
   return kbody { kernelBodyStms = stms' }
 
 offsetMemoryInBody :: Body KernelsMem -> OffsetM (Body KernelsMem)
-offsetMemoryInBody (Body attr stms res) = do
+offsetMemoryInBody (Body dec stms res) = do
   scope <- askScope
   stms' <- stmsFromList . snd <$>
            mapAccumLM (\scope' -> localScope scope' . offsetMemoryInStm) scope
            (stmsToList stms)
-  return $ Body attr stms' res
+  return $ Body dec stms' res
 
 offsetMemoryInStm :: Stm KernelsMem -> OffsetM (Scope KernelsMem, Stm KernelsMem)
-offsetMemoryInStm (Let pat attr e) = do
+offsetMemoryInStm (Let pat dec e) = do
   pat' <- offsetMemoryInPattern pat
   e' <- localScope (scopeOfPattern pat') $ offsetMemoryInExp e
   scope <- askScope
@@ -419,7 +419,7 @@ offsetMemoryInStm (Let pat attr e) = do
   rts <- runReaderT (expReturns e') scope
   let pat'' = Pattern (patternContextElements pat')
               (zipWith pick (patternValueElements pat') rts)
-      stm = Let pat'' attr e'
+      stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope
   return (scope', stm)
   where pick :: PatElemT (MemInfo SubExp NoUniqueness MemBind) ->
@@ -440,8 +440,8 @@ offsetMemoryInPattern (Pattern ctx vals) = do
   mapM_ inspectCtx ctx
   Pattern ctx <$> mapM inspectVal vals
   where inspectVal patElem = do
-          new_attr <- offsetMemoryInMemBound $ patElemAttr patElem
-          return patElem { patElemAttr = new_attr }
+          new_dec <- offsetMemoryInMemBound $ patElemDec patElem
+          return patElem { patElemDec = new_dec }
         inspectCtx patElem
           | Mem space <- patElemType patElem,
             expandable space =
@@ -452,8 +452,8 @@ offsetMemoryInPattern (Pattern ctx vals) = do
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
-  fparam' <- offsetMemoryInMemBound $ paramAttr fparam
-  return fparam { paramAttr = fparam' }
+  fparam' <- offsetMemoryInMemBound $ paramDec fparam
+  return fparam { paramDec = fparam' }
 
 offsetMemoryInMemBound :: MemBound u -> OffsetM (MemBound u)
 offsetMemoryInMemBound summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
@@ -508,11 +508,11 @@ offsetMemoryInExp e = mapExpM recurse e
 unAllocKernelsStms :: Stms KernelsMem -> Either String (Stms Kernels.Kernels)
 unAllocKernelsStms = unAllocStms False
   where
-    unAllocBody (Body attr stms res) =
-      Body attr <$> unAllocStms True stms <*> pure res
+    unAllocBody (Body dec stms res) =
+      Body dec <$> unAllocStms True stms <*> pure res
 
-    unAllocKernelBody (KernelBody attr stms res) =
-      KernelBody attr <$> unAllocStms True stms <*> pure res
+    unAllocKernelBody (KernelBody dec stms res) =
+      KernelBody dec <$> unAllocStms True stms <*> pure res
 
     unAllocStms nested =
       fmap (stmsFromList . catMaybes) . mapM (unAllocStm nested) . stmsToList
@@ -520,17 +520,17 @@ unAllocKernelsStms = unAllocStms False
     unAllocStm nested stm@(Let _ _ (Op Alloc{}))
       | nested = throwError $ "Cannot handle nested allocation: " ++ pretty stm
       | otherwise = return Nothing
-    unAllocStm _ (Let pat attr e) =
-      Just <$> (Let <$> unAllocPattern pat <*> pure attr <*> mapExpM unAlloc' e)
+    unAllocStm _ (Let pat dec e) =
+      Just <$> (Let <$> unAllocPattern pat <*> pure dec <*> mapExpM unAlloc' e)
 
     unAllocLambda (Lambda params body ret) =
       Lambda (unParams params) <$> unAllocBody body <*> pure ret
 
-    unParams = mapMaybe $ traverse unAttr
+    unParams = mapMaybe $ traverse unMem
 
     unAllocPattern pat@(Pattern ctx val) =
-      Pattern <$> maybe bad return (mapM (rephrasePatElem unAttr) ctx)
-              <*> maybe bad return (mapM (rephrasePatElem unAttr) val)
+      Pattern <$> maybe bad return (mapM (rephrasePatElem unMem) ctx)
+              <*> maybe bad return (mapM (rephrasePatElem unMem) val)
       where bad = Left $ "Cannot handle memory in pattern " ++ pretty pat
 
     unAllocOp Alloc{} = Left "unAllocOp: unhandled Alloc"
@@ -542,10 +542,10 @@ unAllocKernelsStms = unAllocStms False
                                          , mapOnSegOpBody = unAllocKernelBody
                                          }
 
-    unParam p = maybe bad return $ traverse unAttr p
+    unParam p = maybe bad return $ traverse unMem p
       where bad = Left $ "Cannot handle memory-typed parameter '" ++ pretty p ++ "'"
 
-    unT t = maybe bad return $ unAttr t
+    unT t = maybe bad return $ unMem t
       where bad = Left $ "Cannot handle memory type '" ++ pretty t ++ "'"
 
     unAlloc' = Mapper { mapOnBody = const unAllocBody
@@ -558,17 +558,17 @@ unAllocKernelsStms = unAllocStms False
                       , mapOnVName = Right
                       }
 
-unAttr :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
-unAttr (MemPrim pt) = Just $ Prim pt
-unAttr (MemArray pt shape u _) = Just $ Array pt shape u
-unAttr MemMem{} = Nothing
+unMem :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
+unMem (MemPrim pt) = Just $ Prim pt
+unMem (MemArray pt shape u _) = Just $ Array pt shape u
+unMem MemMem{} = Nothing
 
 unAllocScope :: Scope KernelsMem -> Scope Kernels.Kernels
 unAllocScope = M.mapMaybe unInfo
-  where unInfo (LetInfo attr) = LetInfo <$> unAttr attr
-        unInfo (FParamInfo attr) = FParamInfo <$> unAttr attr
-        unInfo (LParamInfo attr) = LParamInfo <$> unAttr attr
-        unInfo (IndexInfo it) = Just $ IndexInfo it
+  where unInfo (LetName dec) = LetName <$> unMem dec
+        unInfo (FParamName dec) = FParamName <$> unMem dec
+        unInfo (LParamName dec) = LParamName <$> unMem dec
+        unInfo (IndexName it) = Just $ IndexName it
 
 removeCommonSizes :: Extraction
                   -> [(SubExp, [(VName, Space)])]

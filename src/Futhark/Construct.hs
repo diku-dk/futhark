@@ -187,7 +187,7 @@ eIf' ce te fe if_sort = do
   ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
   te'' <- addContextForBranch ts te'
   fe'' <- addContextForBranch ts fe'
-  return $ If ce' te'' fe'' $ IfAttr ts if_sort
+  return $ If ce' te'' fe'' $ IfDec ts if_sort
   where addContextForBranch ts (Body _ stms val_res) = do
           body_ts <- extendedScope (traverse subExpType val_res) stmsscope
           let ctx_res = map snd $ sortOn fst $
@@ -425,8 +425,8 @@ isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) slice
         allOfIt d (DimSlice _ n _) = d == n
         allOfIt _ _ = False
 
-ifCommon :: [Type] -> IfAttr ExtType
-ifCommon ts = IfAttr (staticShapes ts) IfNormal
+ifCommon :: [Type] -> IfDec ExtType
+ifCommon ts = IfDec (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore
@@ -496,7 +496,7 @@ removeExistentials t1 t2 =
 
 -- | Can be used as the definition of 'mkLetNames' for a 'Bindable'
 -- instance for simple representations.
-simpleMkLetNames :: (ExpAttr lore ~ (), LetAttr lore ~ Type,
+simpleMkLetNames :: (ExpDec lore ~ (), LetDec lore ~ Type,
                      MonadFreshNames m, TypedOp (Op lore), HasScope lore m) =>
                     [VName] -> Exp lore -> m (Stm lore)
 simpleMkLetNames names e = do

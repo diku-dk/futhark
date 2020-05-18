@@ -98,7 +98,7 @@ type RangeM = Reader RangeEnv
 runRangeM :: RangeM a -> a
 runRangeM = flip runReader emptyRangeEnv
 
-bindFunParams :: Typed attr => [Param attr] -> RangeM a -> RangeM a
+bindFunParams :: Typed dec => [Param dec] -> RangeM a -> RangeM a
 bindFunParams []             m =
   m
 bindFunParams (param:params) m = do
@@ -109,7 +109,7 @@ bindFunParams (param:params) m = do
   where bindFunParam = M.insert (paramName param) unknownRange
         dims = arrayDims $ paramType param
 
-bindPattern :: Typed attr => PatternT (Range, attr) -> RangeM a -> RangeM a
+bindPattern :: Typed dec => PatternT (Range, dec) -> RangeM a -> RangeM a
 bindPattern pat m = do
   ranges <- rangesRep
   local bindPatElems $
@@ -118,7 +118,7 @@ bindPattern pat m = do
   where bindPatElems env =
           foldl bindPatElem env $ patternElements pat
         bindPatElem env patElem =
-          M.insert (patElemName patElem) (fst $ patElemAttr patElem) env
+          M.insert (patElemName patElem) (fst $ patElemDec patElem) env
         dims = nub $ concatMap arrayDims $ patternTypes pat
 
 refineDimensionRanges :: AS.RangesRep -> [SubExp]
@@ -155,14 +155,14 @@ refineUpperBound = flip minimumBound
 lookupRange :: VName -> RangeM Range
 lookupRange = asks . M.findWithDefault unknownRange
 
-simplifyPatRanges :: PatternT (Range, attr)
-                  -> RangeM (PatternT (Range, attr))
+simplifyPatRanges :: PatternT (Range, dec)
+                  -> RangeM (PatternT (Range, dec))
 simplifyPatRanges (Pattern context values) =
   Pattern <$> mapM simplifyPatElemRange context <*> mapM simplifyPatElemRange values
   where simplifyPatElemRange patElem = do
-          let (range, innerattr) = patElemAttr patElem
+          let (range, innerdec) = patElemDec patElem
           range' <- simplifyRange range
-          return $ setPatElemLore patElem (range', innerattr)
+          return $ setPatElemLore patElem (range', innerdec)
 
 simplifyRange :: Range -> RangeM Range
 simplifyRange (lower, upper) = do

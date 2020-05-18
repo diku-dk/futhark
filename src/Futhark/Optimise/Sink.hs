@@ -79,9 +79,9 @@ multiplicity stm =
 
 optimiseBranch :: SymbolTable -> Sinking -> Body SinkLore
                -> (Body SinkLore, Sunk)
-optimiseBranch vtable sinking (Body attr stms res) =
+optimiseBranch vtable sinking (Body dec stms res) =
   let (stms', stms_sunk) = optimiseStms vtable sinking' stms $ freeIn res
-  in (Body attr (sunk_stms <> stms') res,
+  in (Body dec (sunk_stms <> stms') res,
       sunk <> stms_sunk)
   where free_in_stms = freeIn stms <> freeIn res
         (sinking_here, sinking') = M.partitionWithKey sunkHere sinking
@@ -164,15 +164,15 @@ optimiseStms init_vtable init_sinking all_stms free_in_res =
 
 optimiseBody :: SymbolTable -> Sinking -> Body SinkLore
              -> (Body SinkLore, Sunk)
-optimiseBody vtable sinking (Body attr stms res) =
+optimiseBody vtable sinking (Body dec stms res) =
   let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
-  in (Body attr stms' res, sunk)
+  in (Body dec stms' res, sunk)
 
 optimiseKernelBody :: SymbolTable -> Sinking -> KernelBody SinkLore
                    -> (KernelBody SinkLore, Sunk)
-optimiseKernelBody vtable sinking (KernelBody attr stms res) =
+optimiseKernelBody vtable sinking (KernelBody dec stms res) =
   let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
-  in (KernelBody attr stms' res, sunk)
+  in (KernelBody dec stms' res, sunk)
 
 sink :: Pass Kernels Kernels
 sink = Pass "sink" "move memory loads closer to their uses" $

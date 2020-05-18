@@ -77,16 +77,16 @@
 -- called @SOACS@, and defines that @Op SOACS@ is a SOAC, while the
 -- Kernels representation ("Futhark.Representation.Kernels") defines
 -- @Op Kernels@ as some kind of kernel construct.  Similarly, various
--- other annotations (e.g. what information we store in a t'PatElemT')
+-- other decorations (e.g. what information we store in a t'PatElemT')
 -- are also type families.
 --
--- The full list of possible annotations is defined as part of the
--- type class 'Annotations' (although other type families are also
+-- The full list of possible decorations is defined as part of the
+-- type class 'Decorations' (although other type families are also
 -- used elsewhere in the compiler on an ad hoc basis).
 --
 -- Essentially, the @lore@ type parameter functions as a kind of
 -- proxy, saving us from having to parameterise the AST type with all
--- the different forms of annotations that we desire (it would easily
+-- the different forms of decorations that we desire (it would easily
 -- become a type with a dozen type parameters).
 --
 -- Defining a new representation (or /lore/) thus requires you to
@@ -96,7 +96,7 @@
 module Futhark.Representation.AST.Syntax
   (
     module Language.Futhark.Core
-  , module Futhark.Representation.AST.Annotations
+  , module Futhark.Representation.AST.Decorations
   , module Futhark.Representation.AST.Syntax.Core
 
   -- * Types
@@ -131,7 +131,7 @@ module Futhark.Representation.AST.Syntax
   , ExpT(..)
   , Exp
   , LoopForm (..)
-  , IfAttr (..)
+  , IfDec (..)
   , IfSort (..)
   , Safety (..)
   , LambdaT(..)
@@ -159,17 +159,17 @@ import Data.Loc
 import qualified Data.Sequence as Seq
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Annotations
+import Futhark.Representation.AST.Decorations
 import Futhark.Representation.AST.Syntax.Core
 
 -- | A type alias for namespace control.
-type PatElem lore = PatElemT (LetAttr lore)
+type PatElem lore = PatElemT (LetDec lore)
 
 -- | A pattern is conceptually just a list of names and their types.
-data PatternT attr =
-  Pattern { patternContextElements :: [PatElemT attr]
+data PatternT dec =
+  Pattern { patternContextElements :: [PatElemT dec]
             -- ^ existential context (sizes and memory blocks)
-          , patternValueElements   :: [PatElemT attr]
+          , patternValueElements   :: [PatElemT dec]
             -- ^ "real" values
           }
   deriving (Ord, Show, Eq)
@@ -177,30 +177,30 @@ data PatternT attr =
 instance Functor PatternT where
   fmap f (Pattern ctx val) = Pattern (map (fmap f) ctx) (map (fmap f) val)
 
-instance Semigroup (PatternT attr) where
+instance Semigroup (PatternT dec) where
   Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
-instance Monoid (PatternT attr) where
+instance Monoid (PatternT dec) where
   mempty = Pattern [] []
 
 -- | A type alias for namespace control.
-type Pattern lore = PatternT (LetAttr lore)
+type Pattern lore = PatternT (LetDec lore)
 
 -- | Auxilliary Information associated with a statement.
-data StmAux attr = StmAux { stmAuxCerts :: !Certificates
-                          , stmAuxAttr :: attr
+data StmAux dec = StmAux { stmAuxCerts :: !Certificates
+                          , stmAuxDec :: dec
                           }
                   deriving (Ord, Show, Eq)
 
 -- | A local variable binding.
 data Stm lore = Let { stmPattern :: Pattern lore
-                    , stmAux :: StmAux (ExpAttr lore)
+                    , stmAux :: StmAux (ExpDec lore)
                     , stmExp :: Exp lore
                     }
 
-deriving instance Annotations lore => Ord (Stm lore)
-deriving instance Annotations lore => Show (Stm lore)
-deriving instance Annotations lore => Eq (Stm lore)
+deriving instance Decorations lore => Ord (Stm lore)
+deriving instance Decorations lore => Show (Stm lore)
+deriving instance Decorations lore => Eq (Stm lore)
 
 -- | A sequence of statements.
 type Stms lore = Seq.Seq (Stm lore)
@@ -223,14 +223,14 @@ type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT lore = Body { bodyAttr :: BodyAttr lore
+data BodyT lore = Body { bodyDec :: BodyDec lore
                        , bodyStms :: Stms lore
                        , bodyResult :: Result
                        }
 
-deriving instance Annotations lore => Ord (BodyT lore)
-deriving instance Annotations lore => Show (BodyT lore)
-deriving instance Annotations lore => Eq (BodyT lore)
+deriving instance Decorations lore => Ord (BodyT lore)
+deriving instance Decorations lore => Show (BodyT lore)
+deriving instance Decorations lore => Eq (BodyT lore)
 
 -- | Type alias for namespace reasons.
 type Body = BodyT
@@ -366,7 +366,7 @@ data ExpT lore
 
   | Apply  Name [(SubExp, Diet)] [RetType lore] (Safety, SrcLoc, [SrcLoc])
 
-  | If     SubExp (BodyT lore) (BodyT lore) (IfAttr (BranchType lore))
+  | If     SubExp (BodyT lore) (BodyT lore) (IfDec (BranchType lore))
 
   | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
     -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
@@ -374,9 +374,9 @@ data ExpT lore
 
   | Op (Op lore)
 
-deriving instance Annotations lore => Eq (ExpT lore)
-deriving instance Annotations lore => Show (ExpT lore)
-deriving instance Annotations lore => Ord (ExpT lore)
+deriving instance Decorations lore => Eq (ExpT lore)
+deriving instance Decorations lore => Show (ExpT lore)
+deriving instance Decorations lore => Ord (ExpT lore)
 
 -- | Whether something is safe or unsafe (mostly function calls, and
 -- in the context of whether operations are dynamically checked).
@@ -389,14 +389,14 @@ data Safety = Unsafe | Safe deriving (Eq, Ord, Show)
 data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
                    | WhileLoop VName
 
-deriving instance Annotations lore => Eq (LoopForm lore)
-deriving instance Annotations lore => Show (LoopForm lore)
-deriving instance Annotations lore => Ord (LoopForm lore)
+deriving instance Decorations lore => Eq (LoopForm lore)
+deriving instance Decorations lore => Show (LoopForm lore)
+deriving instance Decorations lore => Ord (LoopForm lore)
 
 -- | Data associated with a branch.
-data IfAttr rt = IfAttr { ifReturns :: [rt]
-                        , ifSort :: IfSort
-                        }
+data IfDec rt = IfDec { ifReturns :: [rt]
+                      , ifSort :: IfSort
+                      }
                  deriving (Eq, Show, Ord)
 
 data IfSort = IfNormal -- ^ An ordinary branch.
@@ -423,16 +423,16 @@ data LambdaT lore = Lambda { lambdaParams     :: [LParam lore]
                            , lambdaReturnType :: [Type]
                            }
 
-deriving instance Annotations lore => Eq (LambdaT lore)
-deriving instance Annotations lore => Show (LambdaT lore)
-deriving instance Annotations lore => Ord (LambdaT lore)
+deriving instance Decorations lore => Eq (LambdaT lore)
+deriving instance Decorations lore => Show (LambdaT lore)
+deriving instance Decorations lore => Ord (LambdaT lore)
 
 -- | Type alias for namespacing reasons.
 type Lambda = LambdaT
 
-type FParam lore = Param (FParamAttr lore)
+type FParam lore = Param (FParamInfo lore)
 
-type LParam lore = Param (LParamAttr lore)
+type LParam lore = Param (LParamInfo lore)
 
 -- | Function Declarations
 data FunDef lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
@@ -444,9 +444,9 @@ data FunDef lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
                           , funDefBody :: BodyT lore
                           }
 
-deriving instance Annotations lore => Eq (FunDef lore)
-deriving instance Annotations lore => Show (FunDef lore)
-deriving instance Annotations lore => Ord (FunDef lore)
+deriving instance Decorations lore => Eq (FunDef lore)
+deriving instance Decorations lore => Show (FunDef lore)
+deriving instance Decorations lore => Ord (FunDef lore)
 
 -- | Information about the parameters and return value of an entry
 -- point.  The first element is for parameters, the second for return

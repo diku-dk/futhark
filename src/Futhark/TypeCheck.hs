@@ -253,7 +253,7 @@ instance Checkable lore =>
          HasScope (Aliases lore) (TypeM lore) where
   lookupType = fmap typeOf . lookupVar
   askScope = asks $ M.fromList . mapMaybe varType . M.toList . envVtable
-    where varType (name, attr) = Just (name, attr)
+    where varType (name, dec) = Just (name, dec)
 
 runTypeM :: Env lore -> TypeM lore a
          -> Either (TypeError lore) (a, Consumption)
@@ -294,9 +294,9 @@ occur = tell . Consumption . filter (not . nullOccurence)
 observe :: Checkable lore =>
            VName -> TypeM lore ()
 observe name = do
-  attr <- lookupVar name
-  unless (primType $ typeOf attr) $
-    occur [observation $ oneName name <> aliases attr]
+  dec <- lookupVar name
+  unless (primType $ typeOf dec) $
+    occur [observation $ oneName name <> aliases dec]
 
 -- | Proclaim that we have written to the given variables.
 consume :: Checkable lore => Names -> TypeM lore ()
@@ -355,7 +355,7 @@ expandAliases :: Names -> Env lore -> Names
 expandAliases names env = names <> aliasesOfAliases
   where aliasesOfAliases =  mconcat . map look . namesToList $ names
         look k = case M.lookup k $ envVtable env of
-          Just (LetInfo (als, _)) -> unNames als
+          Just (LetName (als, _)) -> unNames als
           _                       -> mempty
 
 binding :: Checkable lore =>
@@ -366,14 +366,14 @@ binding bnds = check . local (`bindVars` bnds)
   where bindVars = M.foldlWithKey' bindVar
         boundnames = M.keys bnds
 
-        bindVar env name (LetInfo (Names' als, attr)) =
-          let als' | primType (typeOf attr) = mempty
+        bindVar env name (LetName (Names' als, dec)) =
+          let als' | primType (typeOf dec) = mempty
                    | otherwise = expandAliases als env
           in env { envVtable =
-                     M.insert name (LetInfo (Names' als', attr)) $ envVtable env
+                     M.insert name (LetName (Names' als', dec)) $ envVtable env
                  }
-        bindVar env name attr =
-          env { envVtable = M.insert name attr $ envVtable env }
+        bindVar env name dec =
+          env { envVtable = M.insert name dec $ envVtable env }
 
         -- Check whether the bound variables have been used correctly
         -- within their scope.
@@ -388,7 +388,7 @@ lookupVar name = do
   bnd <- asks $ M.lookup name . envVtable
   case bnd of
     Nothing -> bad $ UnknownVariableError name
-    Just attr -> return attr
+    Just dec -> return dec
 
 lookupAliases :: Checkable lore => VName -> TypeM lore Names
 lookupAliases name = do
@@ -398,7 +398,7 @@ lookupAliases name = do
            else oneName name <> aliases info
 
 aliases :: NameInfo (Aliases lore) -> Names
-aliases (LetInfo (als, _)) = unNames als
+aliases (LetName (als, _)) = unNames als
 aliases _ = mempty
 
 subExpAliasesM :: Checkable lore => SubExp -> TypeM lore Names
@@ -504,7 +504,7 @@ funParamsToNameInfos :: [FParam lore]
                      -> [(VName, NameInfo (Aliases lore))]
 funParamsToNameInfos = map nameTypeAndLore
   where nameTypeAndLore fparam = (paramName fparam,
-                                  FParamInfo $ paramAttr fparam)
+                                  FParamName $ paramDec fparam)
 
 checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
@@ -512,7 +512,7 @@ checkFunParams params = foldM_ check mempty params
   where param_bound = namesFromList $ map paramName params
         check prev param =
           context ("In function parameter " ++ pretty param) $ do
-            checkFParamLore (paramName param) (paramAttr param)
+            checkFParamLore (paramName param) (paramDec param)
             case namesToList $
                  (freeIn param `namesIntersection` param_bound)
                  `namesSubtract` prev of
@@ -525,7 +525,7 @@ checkLambdaParams :: Checkable lore =>
                      [LParam lore] -> TypeM lore ()
 checkLambdaParams = mapM_ $ \param ->
   context ("In lambda parameter " ++ pretty param) $
-    checkLParamLore (paramName param) (paramAttr param)
+    checkLParamLore (paramName param) (paramDec param)
 
 checkFun' :: Checkable lore =>
              (Name,
@@ -800,8 +800,8 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
           observe a
           case peelArray 1 a_t of
             Just a_t_r -> do
-              checkLParamLore (paramName p) $ paramAttr p
-              unless (a_t_r `subtypeOf` typeOf (paramAttr p)) $
+              checkLParamLore (paramName p) $ paramDec p
+              unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
                  bad $ TypeError $ "Loop parameter " ++ pretty p ++
                  " not valid for element of " ++ pretty a ++ ", which has row type " ++ pretty a_t_r
             _ -> bad $ TypeError $ "Cannot loop over " ++ pretty a ++
@@ -909,9 +909,9 @@ checkBinOpArgs t e1 e2 = do
   require [Prim t] e2
 
 checkPatElem :: Checkable lore =>
-                PatElemT (LetAttr lore) -> TypeM lore ()
-checkPatElem (PatElem name attr) = context ("When checking pattern element " ++ pretty name) $
-                                   checkLetBoundLore name attr
+                PatElemT (LetDec lore) -> TypeM lore ()
+checkPatElem (PatElem name dec) = context ("When checking pattern element " ++ pretty name) $
+                                   checkLetBoundLore name dec
 
 checkDimIndex :: Checkable lore =>
                  DimIndex SubExp -> TypeM lore ()
@@ -922,9 +922,9 @@ checkStm :: Checkable lore =>
             Stm (Aliases lore)
          -> TypeM lore a
          -> TypeM lore a
-checkStm stm@(Let pat (StmAux (Certificates cs) (_,attr)) e) m = do
+checkStm stm@(Let pat (StmAux (Certificates cs) (_,dec)) e) m = do
   context "When checking certificates" $ mapM_ (requireI [Prim Cert]) cs
-  context "When checking expression annotation" $ checkExpLore attr
+  context "When checking expression annotation" $ checkExpLore dec
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e
   binding (maybeWithoutAliases $ scopeOf stm) $ do
@@ -942,7 +942,7 @@ checkStm stm@(Let pat (StmAux (Certificates cs) (_,attr)) e) m = do
       case stmExp stm of
         Apply{} -> M.map withoutAliases
         _ -> id
-    withoutAliases (LetInfo (_, lattr)) = LetInfo (mempty, lattr)
+    withoutAliases (LetName (_, ldec)) = LetName (mempty, ldec)
     withoutAliases info = info
 
 matchExtPattern :: Checkable lore =>
@@ -1048,7 +1048,7 @@ checkLambda (Lambda params body rettype) args = do
     checkFun' (fname,
                staticShapes $ map (`toDecl` Nonunique) rettype,
                [ (paramName param,
-                  LParamInfo $ paramAttr param)
+                  LParamName $ paramDec param)
                | param <- params ]) consumable $ do
       checkLambdaParams params
       mapM_ checkType rettype
@@ -1087,30 +1087,30 @@ class Attributes lore => CheckableOp lore where
 
 -- | The class of lores that can be type-checked.
 class (Attributes lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore where
-  checkExpLore :: ExpAttr lore -> TypeM lore ()
-  checkBodyLore :: BodyAttr lore -> TypeM lore ()
-  checkFParamLore :: VName -> FParamAttr lore -> TypeM lore ()
-  checkLParamLore :: VName -> LParamAttr lore -> TypeM lore ()
-  checkLetBoundLore :: VName -> LetAttr lore -> TypeM lore ()
+  checkExpLore :: ExpDec lore -> TypeM lore ()
+  checkBodyLore :: BodyDec lore -> TypeM lore ()
+  checkFParamLore :: VName -> FParamInfo lore -> TypeM lore ()
+  checkLParamLore :: VName -> LParamInfo lore -> TypeM lore ()
+  checkLetBoundLore :: VName -> LetDec lore -> TypeM lore ()
   checkRetType :: [RetType lore] -> TypeM lore ()
   matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
   primFParam :: VName -> PrimType -> TypeM lore (FParam (Aliases lore))
   matchReturnType :: [RetType lore] -> Result -> TypeM lore ()
   matchBranchType :: [BranchType lore] -> Body (Aliases lore) -> TypeM lore ()
 
-  default checkExpLore :: ExpAttr lore ~ () => ExpAttr lore -> TypeM lore ()
+  default checkExpLore :: ExpDec lore ~ () => ExpDec lore -> TypeM lore ()
   checkExpLore = return
 
-  default checkBodyLore :: BodyAttr lore ~ () => BodyAttr lore -> TypeM lore ()
+  default checkBodyLore :: BodyDec lore ~ () => BodyDec lore -> TypeM lore ()
   checkBodyLore = return
 
-  default checkFParamLore :: FParamAttr lore ~ DeclType => VName -> FParamAttr lore -> TypeM lore ()
+  default checkFParamLore :: FParamInfo lore ~ DeclType => VName -> FParamInfo lore -> TypeM lore ()
   checkFParamLore _ = checkType
 
-  default checkLParamLore :: LParamAttr lore ~ Type => VName -> LParamAttr lore -> TypeM lore ()
+  default checkLParamLore :: LParamInfo lore ~ Type => VName -> LParamInfo lore -> TypeM lore ()
   checkLParamLore _ = checkType
 
-  default checkLetBoundLore :: LetAttr lore ~ Type => VName -> LetAttr lore -> TypeM lore ()
+  default checkLetBoundLore :: LetDec lore ~ Type => VName -> LetDec lore -> TypeM lore ()
   checkLetBoundLore _ = checkType
 
   default checkRetType :: RetType lore ~ DeclExtType => [RetType lore] -> TypeM lore ()
@@ -1119,7 +1119,7 @@ class (Attributes lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable l
   default matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
   matchPattern pat = matchExtPattern pat <=< expExtType
 
-  default primFParam :: FParamAttr lore ~ DeclType => VName -> PrimType -> TypeM lore (FParam (Aliases lore))
+  default primFParam :: FParamInfo lore ~ DeclType => VName -> PrimType -> TypeM lore (FParam (Aliases lore))
   primFParam name t = return $ Param name (Prim t)
 
   default matchReturnType :: RetType lore ~ DeclExtType => [RetType lore] -> Result -> TypeM lore ()

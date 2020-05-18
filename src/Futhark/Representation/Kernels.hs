@@ -28,7 +28,7 @@ import qualified Futhark.TypeCheck as TypeCheck
 
 data Kernels
 
-instance Annotations Kernels where
+instance Decorations Kernels where
   type Op Kernels = HostOp Kernels (SOAC Kernels)
 instance Attributes Kernels where
   expTypesFromPattern = return . expExtTypesFromPattern
@@ -43,11 +43,11 @@ instance TypeCheck.Checkable Kernels where
 instance Bindable Kernels where
   mkBody = Body ()
   mkExpPat ctx val _ = basicPattern ctx val
-  mkExpAttr _ _ = ()
+  mkExpDec _ _ = ()
   mkLetNames = simpleMkLetNames
 
 instance BinderOps Kernels where
-  mkExpAttrB = bindableMkExpAttrB
+  mkExpDecB = bindableMkExpDecB
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 

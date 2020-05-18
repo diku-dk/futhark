@@ -124,7 +124,7 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
   let red_op_params = lambdaParams red_op
       (red_acc_params, _) = splitAt (length nes) red_op_params
   forM red_acc_params $ \p ->
-    case paramAttr p of
+    case paramDec p of
       MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [num_threads] <> shape
         sArray "red_arr" pt shape' $

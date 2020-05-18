@@ -34,10 +34,10 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 
 data KernelsMem
 
-instance Annotations KernelsMem where
-  type LetAttr    KernelsMem = LetAttrMem
-  type FParamAttr KernelsMem = FParamMem
-  type LParamAttr KernelsMem = LParamMem
+instance Decorations KernelsMem where
+  type LetDec    KernelsMem = LetDecMem
+  type FParamInfo KernelsMem = FParamMem
+  type LParamInfo KernelsMem = LParamMem
   type RetType    KernelsMem = RetTypeMem
   type BranchType KernelsMem = BranchTypeMem
   type Op         KernelsMem = MemOp (HostOp KernelsMem ())
@@ -71,12 +71,12 @@ instance TC.Checkable KernelsMem where
   matchBranchType = matchBranchReturnType
 
 instance BinderOps KernelsMem where
-  mkExpAttrB _ _ = return ()
+  mkExpDecB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB' ()
 
 instance BinderOps (Engine.Wise KernelsMem) where
-  mkExpAttrB pat e = return $ Engine.mkWiseExpAttr pat () e
+  mkExpDecB pat e = return $ Engine.mkWiseExpDec pat () e
   mkBodyB stms res = return $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB''
 

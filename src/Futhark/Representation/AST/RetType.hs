@@ -40,9 +40,9 @@ class (Show rt, Eq rt, Ord rt, DeclExtTyped rt) => IsRetType rt where
   -- | Given a function return type, the parameters of the function,
   -- and the arguments for a concrete call, return the instantiated
   -- return type for the concrete call, if valid.
-  applyRetType :: Typed attr =>
+  applyRetType :: Typed dec =>
                   [rt]
-               -> [Param attr]
+               -> [Param dec]
                -> [(SubExp, Type)]
                -> Maybe [rt]
 

@@ -131,15 +131,15 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
           onBody (variance, szsubst, scope') (lambdaBody lam)
           where scope' = scope <> scopeOfLParams (lambdaParams lam)
 
-        onBody (variance, szsubst, scope) (Body battr stms bres) = do
+        onBody (variance, szsubst, scope) (Body bdec stms bres) = do
           stms' <- stmsFromList <$> mapM (onStm (variance', szsubst', scope')) (stmsToList stms)
-          pure $ Body battr stms' bres
+          pure $ Body bdec stms' bres
           where variance' = varianceInStms variance stms
                 szsubst' = mkSizeSubsts stms <> szsubst
                 scope' = scope <> scopeOf stms
 
-        onStm (variance, szsubst, _) (Let pat attr (BasicOp (Index arr is))) =
-          Let pat attr . oldOrNew <$> f free_ker_vars isThreadLocal isGidVariant sizeSubst outer_scope arr is
+        onStm (variance, szsubst, _) (Let pat dec (BasicOp (Index arr is))) =
+          Let pat dec . oldOrNew <$> f free_ker_vars isThreadLocal isGidVariant sizeSubst outer_scope arr is
           where oldOrNew Nothing =
                   BasicOp $ Index arr is
                 oldOrNew (Just (arr', is')) =
@@ -159,8 +159,8 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
                   | Just v' <- M.lookup v szsubst = sizeSubst v'
                   | otherwise                      = Nothing
 
-        onStm (variance, szsubst, scope) (Let pat attr e) =
-          Let pat attr <$> mapExpM (mapper (variance, szsubst, scope)) e
+        onStm (variance, szsubst, scope) (Let pat dec e) =
+          Let pat dec <$> mapExpM (mapper (variance, szsubst, scope)) e
 
         onOp ctx (OtherOp soac) =
           OtherOp <$> mapSOACM identitySOACMapper{ mapOnSOACLambda = onLambda ctx } soac

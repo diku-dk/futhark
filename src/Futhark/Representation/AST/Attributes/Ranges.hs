@@ -65,7 +65,7 @@ instance FreeIn KnownBound where
   freeIn' (MaximumBound b1 b2) = freeIn' b1 <> freeIn' b2
   freeIn' (ScalarBound e)      = freeIn' e
 
-instance FreeAttr KnownBound where
+instance FreeDec KnownBound where
   precomputed _ = id
 
 instance PP.Pretty KnownBound where
@@ -126,8 +126,8 @@ type ScalExpRange = (Maybe SE.ScalExp, Maybe SE.ScalExp)
 -- up to date, unless whatever maintains the syntax tree is careful.
 type Ranged lore = (Attributes lore,
                     RangedOp (Op lore),
-                    RangeOf (LetAttr lore),
-                    RangesOf (BodyAttr lore))
+                    RangeOf (LetDec lore),
+                    RangesOf (BodyDec lore))
 
 -- | Something that contains range information.
 class RangeOf a where
@@ -137,8 +137,8 @@ class RangeOf a where
 instance RangeOf Range where
   rangeOf = id
 
-instance RangeOf attr => RangeOf (PatElemT attr) where
-  rangeOf = rangeOf . patElemAttr
+instance RangeOf dec => RangeOf (PatElemT dec) where
+  rangeOf = rangeOf . patElemDec
 
 instance RangeOf SubExp where
   rangeOf se = (Just lower, Just upper)
@@ -153,11 +153,11 @@ class RangesOf a where
 instance RangeOf a => RangesOf [a] where
   rangesOf = map rangeOf
 
-instance RangeOf attr => RangesOf (PatternT attr) where
+instance RangeOf dec => RangesOf (PatternT dec) where
   rangesOf = map rangeOf . patternElements
 
 instance Ranged lore => RangesOf (Body lore) where
-  rangesOf = rangesOf . bodyAttr
+  rangesOf = rangesOf . bodyDec
 
 subExpKnownRange :: SubExp -> (KnownBound, KnownBound)
 subExpKnownRange (Var v) =

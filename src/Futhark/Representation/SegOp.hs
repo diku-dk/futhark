@@ -151,14 +151,14 @@ segBinOpChunks :: [SegBinOp lore] -> [a] -> [[a]]
 segBinOpChunks = chunks . map (length . segBinOpNeutral)
 
 -- | The body of a 'SegOp'.
-data KernelBody lore = KernelBody { kernelBodyLore :: BodyAttr lore
+data KernelBody lore = KernelBody { kernelBodyLore :: BodyDec lore
                                   , kernelBodyStms :: Stms lore
                                   , kernelBodyResult :: [KernelResult]
                                   }
 
-deriving instance Annotations lore => Ord (KernelBody lore)
-deriving instance Annotations lore => Show (KernelBody lore)
-deriving instance Annotations lore => Eq (KernelBody lore)
+deriving instance Decorations lore => Ord (KernelBody lore)
+deriving instance Decorations lore => Show (KernelBody lore)
+deriving instance Decorations lore => Eq (KernelBody lore)
 
 -- | Metadata about whether there is a subtle point to this
 -- 'KernelResult'.  This is used to protect things like tiling, which
@@ -215,14 +215,14 @@ instance FreeIn KernelResult where
     freeIn' dims <> freeIn' v
 
 instance Attributes lore => FreeIn (KernelBody lore) where
-  freeIn' (KernelBody attr stms res) =
-    fvBind bound_in_stms $ freeIn' attr <> freeIn' stms <> freeIn' res
+  freeIn' (KernelBody dec stms res) =
+    fvBind bound_in_stms $ freeIn' dec <> freeIn' stms <> freeIn' res
     where bound_in_stms = foldMap boundByStm stms
 
 instance Attributes lore => Substitute (KernelBody lore) where
-  substituteNames subst (KernelBody attr stms res) =
+  substituteNames subst (KernelBody dec stms res) =
     KernelBody
-    (substituteNames subst attr)
+    (substituteNames subst dec)
     (substituteNames subst stms)
     (substituteNames subst res)
 
@@ -243,10 +243,10 @@ instance Substitute KernelResult where
     TileReturns (substituteNames subst dims) (substituteNames subst v)
 
 instance Attributes lore => Rename (KernelBody lore) where
-  rename (KernelBody attr stms res) = do
-    attr' <- rename attr
+  rename (KernelBody dec stms res) = do
+    dec' <- rename dec
     renamingStms stms $ \stms' ->
-      KernelBody attr' stms' <$> rename res
+      KernelBody dec' stms' <$> rename res
 
 instance Rename KernelResult where
   rename = substituteRename
@@ -256,44 +256,44 @@ aliasAnalyseKernelBody :: (Attributes lore,
                            CanBeAliased (Op lore)) =>
                           KernelBody lore
                        -> KernelBody (Aliases lore)
-aliasAnalyseKernelBody (KernelBody attr stms res) =
-  let Body attr' stms' _ = Alias.analyseBody mempty $ Body attr stms []
-  in KernelBody attr' stms' res
+aliasAnalyseKernelBody (KernelBody dec stms res) =
+  let Body dec' stms' _ = Alias.analyseBody mempty $ Body dec stms []
+  in KernelBody dec' stms' res
 
 removeKernelBodyAliases :: CanBeAliased (Op lore) =>
                            KernelBody (Aliases lore) -> KernelBody lore
-removeKernelBodyAliases (KernelBody (_, attr) stms res) =
-  KernelBody attr (fmap removeStmAliases stms) res
+removeKernelBodyAliases (KernelBody (_, dec) stms res) =
+  KernelBody dec (fmap removeStmAliases stms) res
 
 addKernelBodyRanges :: (Attributes lore, CanBeRanged (Op lore)) =>
                        KernelBody lore -> Range.RangeM (KernelBody (Ranges lore))
-addKernelBodyRanges (KernelBody attr stms res) =
+addKernelBodyRanges (KernelBody dec stms res) =
   Range.analyseStms stms $ \stms' -> do
-  let attr' = (mkBodyRanges stms $ map kernelResultSubExp res, attr)
-  return $ KernelBody attr' stms' res
+  let dec' = (mkBodyRanges stms $ map kernelResultSubExp res, dec)
+  return $ KernelBody dec' stms' res
 
 removeKernelBodyRanges :: CanBeRanged (Op lore) =>
                           KernelBody (Ranges lore) -> KernelBody lore
-removeKernelBodyRanges (KernelBody (_, attr) stms res) =
-  KernelBody attr (fmap removeStmRanges stms) res
+removeKernelBodyRanges (KernelBody (_, dec) stms res) =
+  KernelBody dec (fmap removeStmRanges stms) res
 
 removeKernelBodyWisdom :: CanBeWise (Op lore) =>
                           KernelBody (Wise lore) -> KernelBody lore
-removeKernelBodyWisdom (KernelBody attr stms res) =
-  let Body attr' stms' _ = removeBodyWisdom $ Body attr stms []
-  in KernelBody attr' stms' res
+removeKernelBodyWisdom (KernelBody dec stms res) =
+  let Body dec' stms' _ = removeBodyWisdom $ Body dec stms []
+  in KernelBody dec' stms' res
 
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
-consumedInKernelBody (KernelBody attr stms res) =
-  consumedInBody (Body attr stms []) <> mconcat (map consumedByReturn res)
+consumedInKernelBody (KernelBody dec stms res) =
+  consumedInBody (Body dec stms []) <> mconcat (map consumedByReturn res)
   where consumedByReturn (WriteReturns _ a _) = oneName a
         consumedByReturn _                    = mempty
 
 checkKernelBody :: TC.Checkable lore =>
                    [Type] -> KernelBody (Aliases lore) -> TC.TypeM lore ()
-checkKernelBody ts (KernelBody (_, attr) stms kres) = do
-  TC.checkBodyLore attr
+checkKernelBody ts (KernelBody (_, dec) stms kres) = do
+  TC.checkBodyLore dec
   TC.checkStms stms $ do
     unless (length ts == length kres) $
       TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
@@ -395,7 +395,7 @@ segSpaceDims (SegSpace _ space) = map snd space
 -- this 'SegSpace'.
 scopeOfSegSpace :: SegSpace -> Scope lore
 scopeOfSegSpace (SegSpace phys space) =
-  M.fromList $ zip (phys : map fst space) $ repeat $ IndexInfo Int32
+  M.fromList $ zip (phys : map fst space) $ repeat $ IndexName Int32
 
 checkSegSpace :: TC.Checkable lore => SegSpace -> TC.TypeM lore ()
 checkSegSpace (SegSpace _ dims) =
@@ -682,7 +682,7 @@ instance (Attributes lore, ASTConstraints lvl) =>
   rename = mapSegOpM renamer
     where renamer = SegOpMapper rename rename rename rename rename
 
-instance (Attributes lore, FreeIn (LParamAttr lore), FreeIn lvl) =>
+instance (Attributes lore, FreeIn (LParamInfo lore), FreeIn lvl) =>
          FreeIn (SegOp lvl lore) where
   freeIn' e = flip execState mempty $ mapSegOpM free e
     where walk f x = modify (<>f x) >> return x
@@ -864,21 +864,21 @@ instance Engine.Simplifiable KernelResult where
     TileReturns <$> Engine.simplify dims <*> Engine.simplify what
 
 mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
-                    BodyAttr lore -> Stms (Wise lore) -> [KernelResult] -> KernelBody (Wise lore)
-mkWiseKernelBody attr bnds res =
-  let Body attr' _ _ = mkWiseBody attr bnds res_vs
-  in KernelBody attr' bnds res
+                    BodyDec lore -> Stms (Wise lore) -> [KernelResult] -> KernelBody (Wise lore)
+mkWiseKernelBody dec bnds res =
+  let Body dec' _ _ = mkWiseBody dec bnds res_vs
+  in KernelBody dec' bnds res
   where res_vs = map kernelResultSubExp res
 
 mkKernelBodyM :: MonadBinder m =>
                  Stms (Lore m) -> [KernelResult]
               -> m (KernelBody (Lore m))
 mkKernelBodyM stms kres = do
-  Body attr' _ _ <- mkBodyM stms res_ses
-  return $ KernelBody attr' stms kres
+  Body dec' _ _ <- mkBodyM stms res_ses
+  return $ KernelBody dec' stms kres
   where res_ses = map kernelResultSubExp kres
 
-simplifyKernelBody :: (Engine.SimplifiableLore lore, BodyAttr lore ~ ()) =>
+simplifyKernelBody :: (Engine.SimplifiableLore lore, BodyDec lore ~ ()) =>
                       SegSpace -> KernelBody lore
                    -> Engine.SimpleM lore (KernelBody (Wise lore), Stms (Wise lore))
 simplifyKernelBody space (KernelBody _ stms res) = do
@@ -913,7 +913,7 @@ simplifySegBinOp (SegBinOp comm lam nes shape) = do
   return (SegBinOp comm lam' nes' shape', hoisted)
 
 simplifySegOp :: (Engine.SimplifiableLore lore,
-                  BodyAttr lore ~ (),
+                  BodyDec lore ~ (),
                   Engine.Simplifiable lvl) =>
                  SegOp lvl lore
               -> Engine.SimpleM lore (SegOp lvl (Wise lore), Stms (Wise lore))
@@ -986,30 +986,30 @@ segOpRules =
 
 segOpRuleTopDown :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
                     TopDownRuleOp lore
-segOpRuleTopDown vtable pat attr op
+segOpRuleTopDown vtable pat dec op
   | Just op' <- asSegOp op =
-      topDownSegOp vtable pat attr op'
+      topDownSegOp vtable pat dec op'
   | otherwise =
       Skip
 
 segOpRuleBottomUp :: (HasSegOp lore, BinderOps lore) =>
                      BottomUpRuleOp lore
-segOpRuleBottomUp vtable pat attr op
+segOpRuleBottomUp vtable pat dec op
   | Just op' <- asSegOp op =
-      bottomUpSegOp vtable pat attr op'
+      bottomUpSegOp vtable pat dec op'
   | otherwise =
       Skip
 
 topDownSegOp :: (HasSegOp lore, BinderOps lore, Bindable lore) =>
                 ST.SymbolTable lore
              -> Pattern lore
-             -> StmAux (ExpAttr lore)
+             -> StmAux (ExpDec lore)
              -> SegOp (SegOpLevel lore) lore
              -> Rule lore
 
 -- If a SegOp produces something invariant to the SegOp, turn it
 -- into a replicate.
-topDownSegOp vtable (Pattern [] kpes) attr (SegMap lvl space ts (KernelBody _ kstms kres)) = Simplify $ do
+topDownSegOp vtable (Pattern [] kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres)) = Simplify $ do
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
@@ -1018,7 +1018,7 @@ topDownSegOp vtable (Pattern [] kpes) attr (SegMap lvl space ts (KernelBody _ ks
     cannotSimplify
 
   kbody <- mkKernelBodyM kstms kres'
-  addStm $ Let (Pattern [] kpes') attr $ Op $ segOp $
+  addStm $ Let (Pattern [] kpes') dec $ Op $ segOp $
     SegMap lvl space ts' kbody
 
   where isInvariant Constant{} = True
@@ -1081,13 +1081,13 @@ topDownSegOp _ _ _ _ = Skip
 bottomUpSegOp :: (HasSegOp lore, BinderOps lore) =>
                  (ST.SymbolTable lore, UT.UsageTable)
               -> Pattern lore
-              -> StmAux (ExpAttr lore)
+              -> StmAux (ExpDec lore)
               -> SegOp (SegOpLevel lore) lore
               -> Rule lore
 
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
-bottomUpSegOp (vtable, used) (Pattern [] kpes) attr (SegMap lvl space kts (KernelBody _ kstms kres)) = Simplify $ do
+bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (KernelBody _ kstms kres)) = Simplify $ do
 
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
@@ -1101,7 +1101,7 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) attr (SegMap lvl space kts (Kerne
   kbody <- localScope (scopeOfSegSpace space) $
            mkKernelBodyM kstms' kres'
 
-  addStm $ Let (Pattern [] kpes') attr $ Op $ segOp $
+  addStm $ Let (Pattern [] kpes') dec $ Op $ segOp $
     SegMap lvl space kts' kbody
   where
     free_in_kstms = foldMap freeIn kstms

@@ -36,18 +36,18 @@ instance PrettyAnnot () where
   ppAnnot = const Nothing
 
 -- | The class of lores whose annotations can be prettyprinted.
-class (Annotations lore,
+class (Decorations lore,
        Pretty (RetType lore),
        Pretty (BranchType lore),
-       Pretty (Param (FParamAttr lore)),
-       Pretty (Param (LParamAttr lore)),
-       Pretty (PatElemT (LetAttr lore)),
+       Pretty (Param (FParamInfo lore)),
+       Pretty (Param (LParamInfo lore)),
+       Pretty (PatElemT (LetDec lore)),
        PrettyAnnot (PatElem lore),
        PrettyAnnot (FParam lore),
        PrettyAnnot (LParam lore),
        Pretty (Op lore)) => PrettyLore lore where
-  ppExpLore :: ExpAttr lore -> Exp lore -> Maybe Doc
-  ppExpLore _ (If _ _ _ (IfAttr ts _)) =
+  ppExpLore :: ExpDec lore -> Exp lore -> Maybe Doc
+  ppExpLore _ (If _ _ _ (IfDec ts _)) =
     Just $ stack $ map (text . ("-- "++)) $ lines $ pretty $
     text "Branch returns:" <+> ppTuple' ts
   ppExpLore _ _ = Nothing
@@ -124,7 +124,7 @@ bindingAnnotation bnd =
     []     -> id
     annots -> (stack annots </>)
 
-instance Pretty (PatElemT attr) => Pretty (PatternT attr) where
+instance Pretty (PatElemT dec) => Pretty (PatternT dec) where
   ppr pat = ppPattern (patternContextElements pat) (patternValueElements pat)
 
 instance Pretty (PatElemT b) => Pretty (PatElemT (a,b)) where
@@ -147,10 +147,10 @@ instance Pretty (Param Type) where
     ppr name
 
 instance PrettyLore lore => Pretty (Stm lore) where
-  ppr bnd@(Let pat (StmAux cs attr) e) =
+  ppr bnd@(Let pat (StmAux cs dec) e) =
     bindingAnnotation bnd $ align $ hang 2 $
     text "let" <+> align (ppr pat) <+>
-    case (linebreak, ppExpLore attr e) of
+    case (linebreak, ppExpLore dec e) of
       (True, Nothing) -> equals </> e'
       (_, Just ann) -> equals </> (ann </> e')
       (False, Nothing) -> equals <+/> e'
@@ -212,7 +212,7 @@ instance Pretty a => Pretty (ErrorMsg a) where
           p (ErrorInt32 x) = ppr x
 
 instance PrettyLore lore => Pretty (Exp lore) where
-  ppr (If c t f (IfAttr _ ifsort)) =
+  ppr (If c t f (IfDec _ ifsort)) =
     text "if" <+> info' <+> ppr c </>
     text "then" <+> maybeNest t <+>
     text "else" <+> maybeNest f

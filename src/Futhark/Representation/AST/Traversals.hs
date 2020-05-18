@@ -92,9 +92,9 @@ mapExpM tv (BasicOp (ConvOp conv x)) =
   BasicOp <$> (ConvOp conv <$> mapOnSubExp tv x)
 mapExpM tv (BasicOp (UnOp op x)) =
   BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
-mapExpM tv (If c texp fexp (IfAttr ts s)) =
+mapExpM tv (If c texp fexp (IfDec ts s)) =
   If <$> mapOnSubExp tv c <*> mapOnBody tv mempty texp <*> mapOnBody tv mempty fexp <*>
-        (IfAttr <$> mapM (mapOnBranchType tv) ts <*> pure s)
+        (IfDec <$> mapM (mapOnBranchType tv) ts <*> pure s)
 mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
@@ -230,7 +230,7 @@ walkExpM tv (BasicOp (ConvOp _ x)) =
   walkOnSubExp tv x
 walkExpM tv (BasicOp (UnOp _ x)) =
   walkOnSubExp tv x
-walkExpM tv (If c texp fexp (IfAttr ts _)) =
+walkExpM tv (If c texp fexp (IfDec ts _)) =
   walkOnSubExp tv c >> walkOnBody tv texp >>
   walkOnBody tv fexp >> mapM_ (walkOnBranchType tv) ts
 walkExpM tv (Apply _ args ret _) =

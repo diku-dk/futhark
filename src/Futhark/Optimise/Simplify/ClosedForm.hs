@@ -63,7 +63,7 @@ foldClosedForm look pat lam accs arrs = do
   letBind_ pat =<< (If (Var isEmpty)
                     <$> resultBodyM accs
                     <*> renameBody closedBody
-                    <*> pure (IfAttr [primBodyType t] IfNormal))
+                    <*> pure (IfDec [primBodyType t] IfNormal))
   where knownBnds = determineKnownBindings look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
@@ -86,7 +86,7 @@ loopClosedForm pat merge i bound body = do
   letBind_ pat =<< (If (Var isEmpty)
                     <$> resultBodyM mergeexp
                     <*> renameBody closedBody
-                    <*> pure (IfAttr [primBodyType t] IfNormal))
+                    <*> pure (IfDec [primBodyType t] IfNormal))
   where (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
         mergenames = map paramName mergepat
