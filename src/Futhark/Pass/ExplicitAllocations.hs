@@ -182,7 +182,6 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 
   addStms binding = AllocM $ addBinderStms binding
   collectStms (AllocM m) = AllocM $ collectBinderStms m
-  certifying cs (AllocM m) = AllocM $ certifyingBinder cs m
 
 instance (Allocable fromlore tolore) =>
          Allocator tolore (AllocM fromlore tolore) where
