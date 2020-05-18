@@ -1387,7 +1387,7 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
   constants <- kernelConstants <$> askEnv
 
   let gids = map fst $ unSegSpace space
-      (dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
+      (_dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
       group_tiles' = map (toExp' int32) group_tiles
       reg_tiles' = map (toExp' int32) reg_tiles
 
@@ -1398,9 +1398,6 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
   -- responsible for?
   reg_tile_is <-
     mapM (dPrimVE "reg_tile_i") $
-    unflattenIndex group_tiles' $ kernelLocalThreadId constants
-  reg_tile_is' <-
-    mapM (dPrimV "reg_tile_i") $
     unflattenIndex group_tiles' $ kernelLocalThreadId constants
 
   -- Compute output array slice for the register tile belonging to

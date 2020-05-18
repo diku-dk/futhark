@@ -18,29 +18,22 @@ module Futhark.Optimise.BlkRegTiling
        where
 import Control.Monad.State
 import Control.Monad.Reader
-import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.Sequence as Seq
 import Data.List
 import Data.Maybe
-import Data.Tuple
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
 import Futhark.Tools
-import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import Futhark.Representation.AST.Attributes.Names
-
-import Debug.Trace
-import Futhark.Util.Pretty
 
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
 
 mm_BlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
-mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
-  | KernelBody () kstms kres <- old_kbody,
+mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
+  | KernelBody () kstms _ <- old_kbody,
 
     -- build the variance table, that records, for
     -- each variable name, the variables it depends on
@@ -49,16 +42,16 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
 
     -- check that the code fits the pattern having:
     -- some `code1`, followed by one Screma SOAC, followed by some `code2`
-    (code1, Just screma_stmt, code2)   <- matchCodeStreamCode kstms,
+    (code1, Just screma_stmt, _)   <- matchCodeStreamCode kstms,
 
-    Let pat_redomap aux_redomap (Op _) <- screma_stmt,
+    Let pat_redomap _ (Op _) <- screma_stmt,
 
     -- checks that the Screma SOAC is actually a redomap and normalizes it
-    Just (common_dim, arrs, (red_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
+    Just (common_dim, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
 
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
-    Just arr_var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
+    Just _ <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
 
     -- get the variables on which the first result of redomap depends on
     fst_res : _      <- patternValueElements pat_redomap,
@@ -69,14 +62,12 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
     --    to produce the input for the redomap, and
     -- 2. potentially some statements on which the redomap
     --    is independent; these are recorded in `code2'`
-    Just (code2', arr_tab0) <- foldl (processIndirections (namesFromList arrs) res_red_var)
+    Just (_, _) <- foldl (processIndirections (namesFromList arrs) res_red_var)
                                      (Just (Seq.empty, M.empty)) code1,
-
-    -- null code2 && null code2', -- FIXME: remove the need for these assumptions
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims <- reverse $ unSegSpace seg_space,
+    (gtid_x, width_B) : (gtid_y, height_A) : _ <- reverse $ unSegSpace seg_space,
 
     -- sanity check that the reduce part is not missing
     not (null red_nes) = do
@@ -107,10 +98,10 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
         tx_rx      <- letSubExp "TxRx" =<< toExp (primFromSe tx * primFromSe rx)
         ty_ry      <- letSubExp "TyRy" =<< toExp (primFromSe ty * primFromSe ry)
 
-        a_loc_sz  <- letSubExp "a_loc_sz" =<<
-                        toExp (primFromSe ty * primFromSe ry * primFromSe tk)
-
-        b_loc_sz  <- letSubExp "b_loc_sz" =<<
+        a_loc_sz   <- letSubExp "a_loc_sz" =<<
+                         toExp (primFromSe ty * primFromSe ry * primFromSe tk)
+                   
+        b_loc_sz   <- letSubExp "b_loc_sz" =<<
                         toExp (primFromSe tk * primFromSe tx * primFromSe rx)
 
         gridDim_x  <- letSubExp "gridDim_x"  =<< ceilDiv width_B  tx_rx
@@ -135,7 +126,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
             css_init <- scratch "css_init" (elemType red_t) [ry, rx]
             css <- forLoop ry [css_init] $ \i [css_merge] -> do
               css' <- forLoop rx [css_merge] $ \j [css_merge'] -> do
-                css'' <- updateSe "css" css_merge' [i, j] red_ne
+                css'' <- update' "css" css_merge' [i, j] red_ne
                 resultBodyM [Var css'']
               resultBodyM [Var css']
             return [Var css]
@@ -148,21 +139,21 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                kk <- letExp "kk" =<< toExp (LeafExp kk0 int32 * primFromSe tk)
                a_loc <- forLoop ry [a_loc_init'] $ \i0 [a_loc_merge] -> do
                  loop_a_loc <- forLoop tk_div_tx [a_loc_merge] $ \k0 [a_loc_merge'] -> do
-               
+
                    scatter_a_loc <- segScatter2D "A_glb2loc" a_loc_sz a_loc_merge'
                                       segthd_lvl (ty, tx) $ \(thd_y, thd_x) -> do
-               
+
                        k <- letExp "k" =<< toExp (LeafExp thd_x int32 +
                               LeafExp k0 int32 * primFromSe tx)
                        i <- letExp "i" =<< toExp (LeafExp thd_y int32 +
                               LeafExp i0 int32 * primFromSe ty)
-               
+
                        letBindNames_ [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp i int32)
                        a_col_idx <- letExp "A_col_idx" =<< toExp (LeafExp kk int32 + LeafExp k int32)
-               
+
                        a_elem <- letSubExp "A_elem" =<<
                                 eIf (toExp $ LeafExp gtid_y int32 .<. primFromSe height_A .&&.
-                                             if epilogue then 
+                                             if epilogue then
                                                LeafExp a_col_idx int32 .<. primFromSe common_dim
                                              else true)
                                     (do addStm load_A
@@ -177,21 +168,21 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                        return (a_elem, a_loc_ind)
                    resultBodyM $ map Var scatter_a_loc
                  resultBodyM [Var loop_a_loc]
-               
-               -- Cosmin: copy B from global to shared memory 
+
+               -- Cosmin: copy B from global to shared memory
                b_loc <- forLoop tk_div_ty [b_loc_init'] $ \k0 [b_loc_merge] -> do
                  loop_b_loc <- forLoop rx [b_loc_merge] $ \j0 [b_loc_merge'] -> do
                    scatter_b_loc <- segScatter2D "B_glb2loc" b_loc_sz b_loc_merge'
                          segthd_lvl (ty, tx) $ \(thd_y, thd_x) -> do
-               
+
                      k <- letExp "k" =<< toExp (LeafExp thd_y int32 +
                             LeafExp k0 int32 * primFromSe ty)
                      j <- letExp "j" =<< toExp (LeafExp thd_x int32 +
                             LeafExp j0 int32 * primFromSe tx)
-               
+
                      letBindNames_ [gtid_x]  =<< toExp (LeafExp jjj int32 + LeafExp j int32)
                      b_row_idx <- letExp "B_row_idx" =<< toExp (LeafExp kk int32 + LeafExp k int32)
-               
+
                      b_elem <- letSubExp "B_elem" =<<
                                 eIf (toExp $ LeafExp gtid_x int32 .<. primFromSe width_B .&&.
                                              if epilogue then
@@ -201,7 +192,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                                         res <- index "B_elem" inp_B [b_row_idx]
                                         resultBodyM [Var res])
                                     (eBody [eBlank $ Prim map_t2])
-               
+
                      b_loc_ind <- letSubExp "b_loc_ind" =<<
                               eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
                                   (toExp (LeafExp j int32 + LeafExp k int32 * primFromSe tx_rx)
@@ -210,7 +201,7 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                      return (b_elem, b_loc_ind)
                    resultBodyM $ map Var scatter_b_loc
                  resultBodyM [Var loop_b_loc]
-               
+
                -- inner loop updating this thread's accumulator (loop k in mmm_kernels)
                thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] -> do
                  resultBodyM =<< letTupExp' "foo" =<<
@@ -221,64 +212,62 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
                                         ResultPrivate (ty, tx) $ \(thd_y, thd_x) -> do
                              asss_init <- scratch "asss_init" map_t1 [ry]
                              bsss_init <- scratch "bsss_init" map_t2 [rx]
-                           
+
                              asss <- forLoop ry [asss_init] $ \i [asss_merge] -> do
                                -- COSMIN re-wrote this
                                a_loc_ind <- letExp "a_loc_ind" =<< toExp (LeafExp k int32 +
                                               (LeafExp thd_y int32 * primFromSe ry +
                                                LeafExp i int32) * primFromSe tk)
-                           
+
                                asss <- update "asss" asss_merge [i] =<< index "A_loc_elem" a_loc [a_loc_ind]
                                resultBodyM [Var asss]
-                           
+
                              bsss <- forLoop rx [bsss_init] $ \j [bsss_merge] -> do
                                -- COSMIN re-wrote this
                                b_loc_ind <- letExp "b_loc_ind" =<< toExp (LeafExp j int32 +
                                               LeafExp k int32 * primFromSe tx_rx +
                                               LeafExp thd_x int32 * primFromSe rx)
-                           
+
                                bsss <- update "bsss" bsss_merge [j] =<< index "B_loc_elem" b_loc [b_loc_ind]
                                resultBodyM [Var bsss]
                              return $ map Var [asss, bsss]
-                           
+
                            let [asss, bsss] = reg_mem
-                           
+
                            -- the actual redomap
                            redomap_res <- segMap2D "redomap_res" segthd_lvl
                                             ResultPrivate (ty, tx) $ \(thd_y, thd_x) -> do
-                           
+
                              as <- index "as" asss [thd_y, thd_x] -- [ry]
                              bs <- index "bs" bsss [thd_y, thd_x] -- [rx]
                              css_init <- index "css_init" acc_merge [thd_y, thd_x] -- [ry, rx]
-                           
+
                              css <- forLoop ry [css_init] $ \i [css_merge] -> do
-                           
+
                                a <- index "a" as [i]
                                css <- forLoop rx [css_merge] $ \j [css_merge'] -> do
-                           
+
                                  b <- index "b" bs [j]
                                  c <- index "c" css_merge' [i, j]
-                           
+
                                  map_res  <- newVName "map_res"
                                  map_lam' <- renameLambda map_lam
                                  red_lam' <- renameLambda red_lam
-                           
+
                                  addStms $ rebindLambda map_lam' [a, b] map_res
                                         <> rebindLambda red_lam' [c, map_res] c
-                           
+
                                  css <- update "css" css_merge' [i, j] c
-                           
+
                                  resultBodyM [Var css]
                                resultBodyM [Var css]
                              return [Var css]
-                           
+
                            -- TODO: where to put code2..? ie. code following the redomap
                            resultBodyM $ map Var redomap_res
                        )
                        (resultBodyM [Var acc_merge])
                return [thd_acc, a_loc, b_loc]
-
-            -- -} -- TODO: END nested function
 
           -- build prologue
           full_tiles <- letExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
@@ -306,13 +295,10 @@ mm_BlkRegTiling stm@(Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old
             space' = SegSpace gid_flat [(gid_y, gridDim_y), (gid_x, gridDim_x)]
             kbody' = KernelBody () stms_seggroup ret_seggroup
         return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
+
       return $ Just (host_stms, new_kernel)
-  where
 
-
-  
-mm_BlkRegTiling _ = do
-  trace "nej" $ return Nothing
+mm_BlkRegTiling _ = do return Nothing
 
 primFromSe :: SubExp -> PrimExp VName
 primFromSe se = primExpFromSubExp int32 se
@@ -337,13 +323,11 @@ index se_desc arr outer_indices = do
   let indices = map (DimFix . Var) outer_indices ++ inner_slices
   letExp se_desc $ BasicOp $ Index arr indices
 
-
 update :: MonadBinder m => String -> VName -> [VName] -> VName -> m VName
-update se_desc arr indices new_elem =
-  letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) (Var new_elem)
+update se_desc arr indices new_elem = update' se_desc arr indices (Var new_elem)
 
-updateSe :: MonadBinder m => String -> VName -> [VName] -> SubExp -> m VName
-updateSe se_desc arr indices new_elem =
+update' :: MonadBinder m => String -> VName -> [VName] -> SubExp -> m VName
+update' se_desc arr indices new_elem =
   letExp se_desc $ BasicOp $ Update arr (map (DimFix . Var) indices) new_elem
 
 forLoop' :: SubExp            -- loop var
@@ -504,14 +488,14 @@ segMap2D :: String           -- desc
          -> ((VName, VName)  -- f
              -> Binder Kernels [SubExp])
          -> Binder Kernels [VName]
-segMap2D desc lvl manifest (dim_y, dim_x) f = do
-  thd_x    <- newVName "thd_x"
-  thd_y    <- newVName "thd_y"
+segMap2D desc lvl manifest (dim_x, dim_y) f = do
+  ltid_x    <- newVName "ltid_x"
+  ltid_y    <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(thd_y, dim_y), (thd_x, dim_x)]
+  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
   ((ts, res), stms) <- runBinder $ do
-    res <- f (thd_y, thd_x)
+    res <- f (ltid_x, ltid_y)
     ts  <- mapM subExpType res
     return (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
@@ -526,14 +510,14 @@ segScatter2D :: String   -- desc
              -> (SubExp, SubExp) -- (dim_y, dim_x)
              -> ((VName, VName) -> Binder Kernels (SubExp, SubExp)) -- f
              -> Binder Kernels [VName]
-segScatter2D desc arr_size updt_arr lvl (dim_y, dim_x) f = do
-  thd_x <- newVName "thd_x"
-  thd_y <- newVName "thd_y" 
+segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
+  ltid_x <- newVName "ltid_x"
+  ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(thd_y, dim_y), (thd_x, dim_x)]
+  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
   ((t_v, res_v, res_i), stms) <- runBinder $ do
-    (res_v, res_i) <- f (thd_y, thd_x)
+    (res_v, res_i) <- f (ltid_x, ltid_y)
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
