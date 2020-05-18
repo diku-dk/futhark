@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ master ]
+
+  push:
+    branches: [ master ]
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-18.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v8
+
+    - name: Cache cabal
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-cabal
+      with:
+        path: ~/.cabal
+        key: ${{ runner.os }}-test-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+
+    - name: Style check
+      run: nix-shell --pure --run "tools/style-check.sh src"
+
+    - name: Unit tests
+      run: nix-shell --pure --run "cabal update && cabal test"
+
+    - name: Integration and library tests
+      run: nix-shell --pure --run "./run-tests.sh"
+
+  build-linux-nix:
+    runs-on: ubuntu-18.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v8
+
+    - name: Cache cabal
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-cabal
+      with:
+        path: ~/.cabal
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+
+    - name: Build Futhark
+      run: nix-build
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark
+        path: result/futhark-nightly.tar.xz
+
+
+  build-linux-cabal:
+    runs-on: ubuntu-18.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo add-apt-repository ppa:hvr/ghc
+        sudo apt-get update
+        sudo apt-get install ghc-8.8.2
+
+    - name: Cache cabal
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-cabal
+      with:
+        path: ~/.cabal
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+
+    - name: Build Futhark
+      run: |
+        export PATH=/opt/ghc/bin:$PATH
+        cabal --version
+        cabal update
+        cabal install --install-method=copy --overwrite-policy=always
+
+  build-linux-stack:
+    runs-on: ubuntu-18.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y haskell-stack
+
+    - name: Cache stack
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-stack
+      with:
+        path: .stack-work
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}-${{ hashFiles('stack.yaml') }}-${{ hashFiles('stack.yaml.lock') }}
+
+    - name: Build Futhark
+      run: |
+        stack setup
+        stack install
+
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        brew install cabal-install ghc
+
+    - name: Cache cabal
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-cabal
+      with:
+        path: ~/.cabal
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+
+    - name: Build
+      run: |
+        cabal v2-update
+        cabal install --install-method=copy --overwrite-policy=always
+
+  build-windows:
+    runs-on: windows-2019
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        choco install -y msys2
+        choco install -y ghc --version=8.8.2
+
+    - name: Cache cabal
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-cabal
+      with:
+        path: ~\AppData\cabal
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+
+    - name: Build
+      run: |
+        cabal update
+        cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.
