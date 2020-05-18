@@ -67,6 +67,10 @@ class (Attributes (Lore m),
   addStms     :: Stms (Lore m) -> m ()
   collectStms :: m a -> m (a, Stms (Lore m))
   certifying :: Certificates -> m a -> m a
+  certifying cs m = do
+    (x, stms) <- collectStms m
+    addStms $ certify cs <$> stms
+    return x
 
 mkLetM :: MonadBinder m => Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
 mkLetM pat e = Let pat <$> (StmAux mempty <$> mkExpAttrM pat e) <*> pure e

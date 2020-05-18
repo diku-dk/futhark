@@ -81,7 +81,6 @@ instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
 
   addStms = RuleM . addStms
   collectStms (RuleM m) = RuleM $ collectStms m
-  certifying cs (RuleM m) = RuleM $ certifying cs m
 
 -- | Execute a 'RuleM' action.  If succesful, returns the result and a
 -- list of new bindings.  Even if the action fail, there may still be

@@ -19,7 +19,6 @@ module Futhark.Binder
   -- * Non-class interface
   , addBinderStms
   , collectBinderStms
-  , certifyingBinder
   -- * The 'MonadBinder' typeclass
   , module Futhark.Binder.Class
   )
@@ -94,8 +93,6 @@ instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
   addStms     = addBinderStms
   collectStms = collectBinderStms
 
-  certifying = certifyingBinder
-
 runBinderT :: MonadFreshNames m =>
               BinderT lore m a
            -> Scope lore
@@ -163,14 +160,6 @@ collectBinderStms m = do
   (new_stms, _) <- BinderT get
   BinderT $ put (old_stms, old_scope)
   return (x, new_stms)
-
-certifyingBinder :: (MonadFreshNames m, BinderOps lore) =>
-                    Certificates -> BinderT lore m a
-                 -> BinderT lore m a
-certifyingBinder cs m = do
-  (x, stms) <- collectStms m
-  addStms $ certify cs <$> stms
-  return x
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

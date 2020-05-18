@@ -113,7 +113,6 @@ instance MonadBinder InternaliseM where
 
   addStms = InternaliseM . addStms
   collectStms (InternaliseM m) = InternaliseM $ collectStms m
-  certifying cs (InternaliseM m) = InternaliseM $ certifying cs m
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> InternaliseM ()
