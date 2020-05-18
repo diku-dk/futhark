@@ -248,7 +248,7 @@ smallDestHistogram pat space histops num_threads kbody = do
   body' <- collect $ do
      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
      compileStms mempty (kernelBodyStms kbody) $ do
-       let (red_res, map_res) = splitAt (length map_pes) $ kernelBodyResult kbody
+       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
            (buckets, vs) = splitAt (length histops) red_res
            perOp = chunks $ map (length . histDest) histops
 
