@@ -47,7 +47,7 @@ onOp num_subhistos_per_group op = do
           forM (histType op) $ \t -> do
             let sub_local_shape = Shape [Var num_subhistos_per_group] <>
                                   (arrayShape t `setOuterDim` hist_H_chk)
-            sAllocArray "subhistogram_local" (elemType t) sub_local_shape DefaultSpace
+            sAllocArray "subhistogram" (elemType t) sub_local_shape DefaultSpace
 
         return (local_subhistos, mk_op local_subhistos)
   return init_local_subhistos
