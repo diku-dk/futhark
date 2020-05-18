@@ -154,6 +154,7 @@ jobs:
         key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
 
     - name: Build
+      shell: bash
       run: |
         cabal update
         try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
