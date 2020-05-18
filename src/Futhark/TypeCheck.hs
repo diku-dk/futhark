@@ -819,7 +819,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
             pretty (paramType condparam) ++ "."
           Nothing ->
             bad $ TypeError $
-            "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge varible."
+            "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge variable."
         let funparams = mergepat
             paramts   = map paramDeclType funparams
         checkFuncall Nothing paramts mergeargs
