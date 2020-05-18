@@ -1,7 +1,7 @@
 <img src="assets/logo.svg" height="50px"/> The Futhark Programming Language
 ==========
 
-[![Join the chat at https://gitter.im/futhark-lang/Lobby](https://badges.gitter.im/futhark-lang/Lobby.svg)](https://gitter.im/futhark-lang/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)[![Build Status](https://github.com/diku-dk/futhark/workflows/CI/badge.svg)](https://travis-ci.org/diku-dk/futhark)[![Build Status](https://dev.azure.com/futhark/futhark/_apis/build/status/diku-dk.futhark?branchName=master)](https://dev.azure.com/futhark/futhark/_build/latest?definitionId=1&branchName=master)
+[![Join the chat at https://gitter.im/futhark-lang/Lobby](https://badges.gitter.im/futhark-lang/Lobby.svg)](https://gitter.im/futhark-lang/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)![CI](https://github.com/diku-dk/futhark/workflows/CI/badge.svg)[![Build Status](https://dev.azure.com/futhark/futhark/_apis/build/status/diku-dk.futhark?branchName=master)](https://dev.azure.com/futhark/futhark/_build/latest?definitionId=1&branchName=master)
 
 Futhark is a purely functional data-parallel programming language.
 Its optimising compiler is able to compile it to typically very
