@@ -9,6 +9,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , decideScheduling
  , sUnpauseProfiling
  , groupResultArrays
+ , renameSegBinOp
  )
  where
 
@@ -20,6 +21,7 @@ import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Representation.MCMem
+import Futhark.Transform.Rename
 
 type MulticoreGen = ImpM MCMem () Imp.Multicore
 
@@ -28,6 +30,14 @@ toParam :: VName -> TypeBase shape u -> Imp.Param
 toParam name (Prim pt)   = Imp.ScalarParam name pt
 toParam name (Mem space) = Imp.MemParam name space
 toParam _     Array{}    = error "Cannot make Array into Imp.Param"
+
+
+renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
+renameSegBinOp segbinops =
+  forM segbinops $ \(SegBinOp comm lam ne shape) -> do
+    lam' <- renameLambda lam
+    return $ SegBinOp comm lam' ne shape
+
 
 
 compileKBody :: KernelBody MCMem

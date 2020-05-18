@@ -16,7 +16,7 @@ import Futhark.CodeGen.ImpGen.Multicore.Base
 
 type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
 
--- Compile a SegRed construct
+-- Generate code for a SegRed construct
 compileSegRed :: Pattern MCMem
                  -> SegSpace
                  -> [SegBinOp MCMem]
@@ -147,20 +147,24 @@ nonsegmentedReduction pat space reds kbody = do
   emit $ Imp.Op $ Imp.ParLoop scheduling ntasks flat_idx (product ns')
                               (Imp.MulticoreFunc freeParams mempty fbody tid)
 
+
+  reds' <- renameSegBinOp reds
+  slugs' <- mapM (segBinOpOpSlug tid') $ zip reds' stage_one_red_arrs
+
   sComment "neutral-initialise the output" $
-    forM_ slugs $ \slug ->
+    forM_ slugs' $ \slug ->
       forM_ (zip (patternElements pat) (slugNeutral slug)) $ \(pe, ne) ->
         sLoopNest (slugShape slug) $ \vec_is ->
           copyDWIMFix (patElemName pe) vec_is ne []
 
   dPrimV_ (segFlat space) 0
   -- Reduce over intermediate results
-  dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+  dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
   sFor "i" ntasks' $ \i' -> do
     emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
     tid <-- i'
     sComment "Apply main thread reduction" $
-      forM_ slugs $ \slug ->
+      forM_ slugs' $ \slug ->
         sLoopNest (slugShape slug) $ \vec_is -> do
         sComment "load acc params" $
           forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
