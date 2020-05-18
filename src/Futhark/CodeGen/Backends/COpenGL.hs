@@ -205,8 +205,8 @@ callShader (GetSizeMax v size_class) =
   in GC.stm [C.cstm|$id:v = ctx->opengl.$id:field;|]
 
 callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
+  -- FIXME: We might account for safety with by using a uniform.
   when (safety == SafetyFull) $
-  --TODO: Account for full safety?
     GC.stm [C.cstm|
     OPENGL_SUCCEED(glGetError());
     |]
@@ -218,6 +218,7 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
   launchShader name num_workgroups' workgroup_size' local_bytes
   where setShaderArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName GC.TargetHost "shader_arg" bt e
+          -- FIXME: Support all types of uniform variables.
           GC.stm [C.cstm|glUniform1i($int:i, $id:v);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
