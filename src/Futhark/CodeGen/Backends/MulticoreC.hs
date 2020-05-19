@@ -10,6 +10,8 @@ module Futhark.CodeGen.Backends.MulticoreC
   ) where
 
 import Control.Monad
+
+import Data.Maybe
 import Data.FileEmbed
 
 import qualified Language.C.Syntax as C
@@ -20,6 +22,7 @@ import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.MonadFreshNames
+import Futhark.CodeGen.Backends.SimpleRepresentation
 
 compileProg :: MonadFreshNames m => Prog MCMem
             -> m GC.CParts
@@ -182,6 +185,7 @@ compileProg =
                         return ctx->scheduler.num_threads;
                        }|])
 
+data ValueType = Prim | MemBlock | Other
 
 cliOptions :: [Option]
 cliOptions =
@@ -208,43 +212,64 @@ closureStructField :: VName -> Name
 closureStructField v =
   nameFromString "free_" <> nameFromString (pretty v)
 
-compileStructFields :: [VName] -> [(C.Type, Bool)] -> [C.FieldGroup]
+compileStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileStructFields = zipWith field
   where
-    field name (ty, True) =
+    field name (ty, Prim) =
       [C.csdecl|$ty:ty $id:(closureStructField name);|]
-    field name (ty, False) =
+    field name (_, MemBlock) =
+      [C.csdecl|$ty:(defaultMemBlockType) $id:(closureStructField name);|]
+    field name (ty, Other) =
       [C.csdecl|$ty:ty *$id:(closureStructField name);|]
 
 compileSetStructValues :: C.ToIdent a =>
-                          a -> [VName] -> [(C.Type, Bool)] -> [C.Stm]
-compileSetStructValues struct names types = zipWith field names types
+                          a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
+compileSetStructValues struct = zipWith field
   where
-    field name (_, True) =
+    field name (_, Prim) =
       [C.cstm|$id:struct.$id:(closureStructField name)=$id:name;|]
-    field name (_, False) =
+    field name (_, MemBlock) =
+      [C.cstm|$id:struct.$id:(closureStructField name)=$id:name.mem;|]
+    field name (_, Other) =
       [C.cstm|$id:struct.$id:(closureStructField name)=&$id:name;|]
 
 
+
 compileGetStructVals :: C.ToIdent a =>
-                        a -> [VName] -> [(C.Type, Bool)] -> [C.InitGroup]
+                        a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetStructVals struct = zipWith field
   where
-    field name (ty, True) =
+    field name (ty, Prim) =
       [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureStructField name);|]
-    field name (ty, False) =
+    field name (ty, MemBlock) =
+      let name' = baseString name ++ "_" ++ show (baseTag name)
+      in [C.cdecl|$ty:ty $id:name = {.desc = $string:name',
+                                     .mem = $id:struct->$id:(closureStructField name),
+                                     .size = 0, .references = NULL};|]
+    field name (ty, Other) =
       [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureStructField name);|]
+
 
 
 compileSchedulingVal :: Scheduling -> GC.CompilerM op s C.Exp
 compileSchedulingVal Static =  return [C.cexp|0|]
 compileSchedulingVal (Dynamic granularity) =  return [C.cexp|$exp:granularity|]
 
-paramToCType :: Param -> GC.CompilerM op s (C.Type, Bool)
-paramToCType (ScalarParam _ pt)     = do t <- pure $ GC.primTypeToCType pt
-                                         return (t, True)
-paramToCType (MemParam name space') = do t <- GC.memToCType name space'
-                                         return (t, False)
+paramToCType :: Param -> GC.CompilerM op s (C.Type, ValueType)
+paramToCType (ScalarParam _ pt)     = do
+  let t = GC.primTypeToCType pt
+  return (t, Prim)
+paramToCType (MemParam name space') = mcMemToCType name space'
+
+mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
+mcMemToCType v space = do
+  refcount <- GC.fatMemory space
+  cached <- isJust <$> GC.cacheMem v
+  if refcount && not cached
+     then return (GC.fatMemType space, MemBlock)
+     else do t <- GC.rawMemCType space
+             return (t, Other)
+
 
 functionRuntime :: String -> String
 functionRuntime = (++"_total_runtime")
