@@ -41,6 +41,7 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
+import Futhark.Representation.Primitive (intByteSize)
 import Futhark.Util.Pretty hiding (space, bool, group)
 
 --- Uniqueness
@@ -2442,7 +2443,7 @@ causalityCheck binding_body = do
 --
 -- Note: currently unable to detect float underflow (such as 1e-400 -> 0)
 literalOverflowCheck :: Exp -> TermTypeM ()
-literalOverflowCheck = (() <$) . check
+literalOverflowCheck = void . check
   where check e@(IntLit x ty loc) = e <$ case ty of
           Info (Scalar (Prim t)) -> warnBounds (inBoundsI x t) x t loc
           _ -> error "Inferred type of int literal is not a number"
@@ -2453,11 +2454,7 @@ literalOverflowCheck = (() <$) . check
           Info (Scalar (Prim t)) -> warnBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
           _ -> error "Inferred type of int literal is not a number"
         check e = astMap identityMapper{mapOnExp = check} e
-        bitWidth :: IntType -> Int
-        bitWidth Int8 = 8
-        bitWidth Int16 = 16
-        bitWidth Int32 = 32
-        bitWidth Int64 = 64
+        bitWidth ty = 8 * intByteSize ty :: Int
         inBoundsI x (Signed t) = x >= -2^(bitWidth t - 1) && x < 2^(bitWidth t - 1)
         inBoundsI x (Unsigned t) = x >= 0 && x < 2^bitWidth t
         inBoundsI x (FloatType Float32) = not $ isInfinite (fromIntegral x :: Float)
@@ -2465,9 +2462,8 @@ literalOverflowCheck = (() <$) . check
         inBoundsI _ Bool = error "Inferred type of int literal is not a number"
         inBoundsF x Float32 = not $ isInfinite (realToFrac x :: Float)
         inBoundsF x Float64 = not $ isInfinite x
-        warnBounds inBounds x ty loc = if inBounds
-          then pure ()
-          else warn loc $ "Literal " <> show x <> " out of bounds for inferred type " <> pretty ty
+        warnBounds inBounds x ty loc = unless inBounds
+          $ warn loc $ "Literal " <> show x <> " out of bounds for inferred type " <> pretty ty <> "."
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
