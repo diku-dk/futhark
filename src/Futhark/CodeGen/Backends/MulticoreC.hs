@@ -185,7 +185,6 @@ compileProg =
                         return ctx->scheduler.num_threads;
                        }|])
 
-data ValueType = Prim | MemBlock | Other
 
 cliOptions :: [Option]
 cliOptions =
