@@ -23,9 +23,10 @@ compileSegScan :: Pattern MCMem
                 -> MulticoreGen ()
 compileSegScan pat space reds kbody
   | [_] <- unSegSpace space =
-      nonsegmentedScan pat space reds kbody
+      sequentialScan pat space reds kbody
   | otherwise =
-      segmentedScan pat space reds kbody
+      sequentialScan pat space reds kbody
+      -- segmentedScan pat space reds kbody
 
 
 accumulatorArray :: [SegBinOp MCMem]
@@ -45,6 +46,57 @@ yParams scan =
 
 lamBody :: SegBinOp MCMem -> Body MCMem
 lamBody = lambdaBody . segBinOpLambda
+
+sequentialScan :: Pattern MCMem
+               -> SegSpace
+               -> [SegBinOp MCMem]
+               -> KernelBody MCMem
+               -> MulticoreGen ()
+sequentialScan pat space scan_ops kbody = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+  dPrimV_ (segFlat space) 0
+  flat_idx <- dPrim "iter" int32
+
+  let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
+      per_scan_res            = segBinOpChunks scan_ops all_scan_res
+      per_scan_pes            = segBinOpChunks scan_ops $ patternValueElements pat
+
+  dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
+
+  sFor "i" (product ns') $ \i -> do
+    flat_idx <-- i
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    compileStms mempty (kernelBodyStms kbody) $ do
+      sComment "write mapped values results to memory" $ do
+        let map_arrs = drop (segBinOpResults scan_ops) $ patternElements pat
+        zipWithM_ (compileThreadResult space) map_arrs map_res
+
+      forM_ (zip3 per_scan_pes scan_ops per_scan_res) $ \(pes, scan_op, scan_res) ->
+        sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
+
+        -- Read accum value
+        let last_is = last is
+        last_is' <- toExp $ Var last_is
+
+        sComment "Read accum value" $
+          sIf (last_is' .==. 0)
+              (forM_ (zip (xParams scan_op) $ segBinOpNeutral scan_op) $ \(p, ne) ->
+                copyDWIMFix (paramName p) [] ne [])
+              (forM_ (zip (xParams scan_op) pes) $ \(p, pe) ->
+                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 (init is) ++ [last_is'-1] ++ vec_is))
+        -- Read next value
+        sComment "Read next values" $
+          forM_ (zip (yParams scan_op) scan_res) $ \(p, se) ->
+            copyDWIMFix (paramName p) [] (kernelResultSubExp se) vec_is
+
+        compileStms mempty (bodyStms $ lamBody scan_op) $
+          forM_ (zip pes (bodyResult $ lamBody scan_op)) $
+            \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
+
+
+
+
 
 nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
