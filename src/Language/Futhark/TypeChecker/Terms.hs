@@ -2449,8 +2449,8 @@ literalOverflowCheck = (() <$) . check
         check e@(FloatLit x ty loc) = e <$ case ty of
           Info (Scalar (Prim (FloatType t))) -> warnBounds (inBoundsF x t) x t loc
           _ -> error "Inferred type of float literal is not a float"
-        check e@(Negate (IntLit x ty _) loc) = e <$ case ty of
-          Info (Scalar (Prim t)) -> warnBounds (inBoundsI (-x) t) (-x) t loc
+        check e@(Negate (IntLit x ty loc1) loc2) = e <$ case ty of
+          Info (Scalar (Prim t)) -> warnBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
           _ -> error "Inferred type of int literal is not a number"
         check e = astMap identityMapper{mapOnExp = check} e
         bitWidth :: IntType -> Int
