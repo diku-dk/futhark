@@ -288,7 +288,7 @@ allocsForPattern sizeidents validents rts hints = do
   let sizes' = [ PatElem size $ MemPrim int32 | size <- map identName sizeidents ]
   (vals, (exts, mems)) <-
     runWriterT $ forM (zip3 validents rts hints) $ \(ident, rt, hint) -> do
-      let shape = arrayShape $ identType ident
+      let shape = arrayShape $ identType $ traceWith "allocsForPattern.ident" ident
       case rt of
         MemPrim _ -> do
           summary <- lift $ summaryForBindage (identType ident) hint
@@ -300,20 +300,20 @@ allocsForPattern sizeidents validents rts hints = do
 
         MemArray bt _ u (Just (ReturnsInBlock mem extixfun)) -> do
           (patels, ixfn) <- instantiateExtIxFun ident extixfun
-          tell (patels, [])
+          tell (traceWith "allocsForPattern.ReturnsInBlock.patels" patels, [])
 
-          return $ PatElem (identName ident) $
+          return $ traceWith "allocsForPattern.ReturnsInBlock.return" $ PatElem (identName ident) $
             MemArray bt shape u $
             ArrayIn mem ixfn
 
         MemArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
             summary <- lift $ summaryForBindage (identType ident) hint
-            return $ PatElem (identName ident) summary
+            return $ traceWith "allocsForPattern.Nothing" $ PatElem (identName ident) summary
 
         MemArray bt _ u (Just (ReturnsNewBlock space _ extixfn)) -> do
           -- treat existential index function first
-          (patels, ixfn) <- instantiateExtIxFun ident extixfn
+          (patels, ixfn) <- instantiateExtIxFun ident $ traceWith "allocsForPattern.ReturnsNewBlock" extixfn
           tell (patels, [])
 
           memid <- lift $ mkMemIdent ident space
@@ -323,8 +323,14 @@ allocsForPattern sizeidents validents rts hints = do
 
         _ -> error "Impossible case reached in allocsForPattern!"
 
-  return (sizes' <> exts <> mems,
-          vals)
+  return $ trace (unwords ["\nrt:", show rts,
+                           "\n\nsizes':", show sizes',
+                           "\n\nexts:", show exts,
+                           "\n\nmems:", show mems,
+                           "\n\nvals:", show vals,
+                            "\n"])
+    (sizes' <> exts <> mems,
+      vals)
   where knownShape = mapM known . shapeDims
         known (Free v) = Just v
         known Ext{} = Nothing
@@ -635,7 +641,7 @@ allocInStm (Let (Pattern sizeElems valElems) _ e) = do
 
 allocInExp :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
               Exp fromlore -> AllocM fromlore tolore (Exp tolore)
-allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
+allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
   allocInMergeParams mempty ctx $ \_ ctxparams' _ ->
   -- What we need, is that the index functions in val are not being linearized,
   -- and that the index functions in bodybnds also not be linearized, and that we can then do that all later
@@ -644,54 +650,85 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
   form' <- allocInLoopForm form
   localScope (scopeOf form') $ do
     (valinit_ctx, valinit') <- mk_loop_val valinit
-    let (body', init_subs_and_spaces) = pairM $ allocInStms bodybnds $ helper valinit' mk_loop_val
-    (init_subs, spaces) <- init_subs_and_spaces
-    body'' <- insertStmsM body'
+    -- let (body', init_subs_and_spaces) = pairM $ allocInStms bodybnds $ helper valinit' mk_loop_val
+    (body', body_ixfuns) <- allocInIfBody (length val) body
+    bodyres_spaces <- mapM ixfunSpace body_ixfuns
+    init_ixfuns <- mapM bodyReturnMIxf valinit'
+    init_spaces <- mapM ixfunSpace init_ixfuns
+    let (spaces, subs) = unzip $
+                         zipWith generalize
+                         (zip init_spaces init_ixfuns)
+                         (zip bodyres_spaces body_ixfuns)
+        init_subs = map (selectSub fst) subs
+        res_subs = map (selectSub snd) subs
+    res_body <- addResCtxInLoopBody body' spaces $ traceWith "going to add res on res_subs" res_subs
+    -- (init_subs, spaces) <- init_subs_and_spaces
     (newctx, memctx, vals')  <- foldM substituteInVal ([], [], []) $ zip3 (zip valparams' valinit') spaces init_subs
+
+    let size_ext = length res_then - length trets
+        (ind_ses0, r_then_else) =
+          partition (\(r_then, r_else, _) -> r_then == r_else) $
+          zip3 res_then res_else [0 .. size_ext - 1]
+        (r_then_ext, r_else_ext, _) = unzip3 r_then_else
+        ind_ses = zipWith (\(se, _, i) k -> (i-k, se)) ind_ses0
+                  [0 .. length ind_ses0 - 1]
+        rets'' = foldl (\acc (i, se) -> fixExt i se acc) trets ind_ses
+        tbranch'' = tbranch' { bodyResult = traceWith "res_then2" $ r_then_ext ++ drop size_ext res_then }
+
+
     return $
       trace (unwords ["ctxparams':", show ctxparams',
                        "\n\nnew_ctx_params:", show new_ctx_params,
                        "\n\nctxinit:", show ctxinit,
                        "\n\nvalinit_ctx:", show valinit_ctx,
-                       "\n\nnewctx:", show newctx,
-                       "\n\nmemctx:", show memctx,
+                       -- "\n\nnewctx:", show newctx,
+                       -- "\n\nmemctx:", show memctx,
+                       "\n\ninit_ixfuns:", show init_ixfuns,
+                       "\n\ninit_spaces:", show init_spaces,
+                       "\n\nbody_ixfuns:", show body_ixfuns,
+                       "\n\nbodyres_spaces:", show bodyres_spaces,
                        "\n\nvalparams':", show valparams',
                        "\n\nvalinit':", show valinit',
                        "\n\nspaces:", show spaces,
                        "\n\ninit_subs:", show init_subs,
-                       "\n\nvals':", show vals',
+                       "\n\nres_subs:", show res_subs,
+                       -- "\n\nvals':", show vals',
+                       "\n\nbody':", pretty body',
+                       "\n\nres_body:", pretty res_body,
                        "\n"]) $
       DoLoop
       (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx) ++ newctx ++ memctx)
-      vals'
-      form' body''
+      -- (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx))
+      -- vals'
+      (zip valparams' valinit')
+      form' res_body
   where
-    helper valinit' mk_loop_val bodybnds' = do
-      init_ixfuns <- mapM bodyReturnMIxf valinit'
-      init_spaces <- mapM ixfunSpace init_ixfuns
-      bodyres_ixfuns <- mapM bodyReturnMIxf $ drop (length ctx) bodyres
-      bodyres_spaces <- mapM ixfunSpace bodyres_ixfuns
-      ((val_ses,valres'),val_retbnds) <- collectStms $ mk_loop_val $
-                                         valres
-      let (spaces, subs) = unzip $
-                           zipWith generalize
-                           (zip init_spaces init_ixfuns)
-                           (zip bodyres_spaces bodyres_ixfuns)
-          init_subs = map (selectSub fst) subs
-          res_subs = map (selectSub snd) subs
-          body' = Body () bodybnds' bodyres
-      res_body <- addResCtxInLoopBody body' spaces $ traceWith "going to add res on res_subs" res_subs
-      return $
-        trace (unwords ["init_ixfuns:", show init_ixfuns,
-                         "\n\ninit_spaces:", show init_spaces,
-                         "\n\nbodyres_ixfun:", show bodyres_ixfuns,
-                         "\n\nres_subs:", show res_subs,
-                         "\n\nbodyres_spaces:", show bodyres_spaces,
-                         "\n\nres_body:", pretty res_body,
-                         "\n"]) $
-        (res_body, (init_subs, spaces))
-        -- Also return stuff needed to amend merge params
-        -- Body () (bodybnds'<>val_retbnds) (ctxres++val_ses++valres')
+    -- helper valinit' mk_loop_val bodybnds' = do
+    --   init_ixfuns <- mapM bodyReturnMIxf valinit'
+    --   init_spaces <- mapM ixfunSpace init_ixfuns
+    --   bodyres_ixfuns <- mapM bodyReturnMIxf $ drop (length ctx) bodyres
+    --   bodyres_spaces <- mapM ixfunSpace bodyres_ixfuns
+    --   ((val_ses,valres'),val_retbnds) <- collectStms $ mk_loop_val $
+    --                                      valres
+    --   let (spaces, subs) = unzip $
+    --                        zipWith generalize
+    --                        (zip init_spaces init_ixfuns)
+    --                        (zip bodyres_spaces bodyres_ixfuns)
+    --       init_subs = map (selectSub fst) subs
+    --       res_subs = map (selectSub snd) subs
+    --       body' = Body () bodybnds' bodyres
+    --   res_body <- addResCtxInLoopBody body' spaces $ traceWith "going to add res on res_subs" res_subs
+    --   return $
+    --     trace (unwords ["init_ixfuns:", show init_ixfuns,
+    --                      "\n\ninit_spaces:", show init_spaces,
+    --                      "\n\nbodyres_ixfun:", show bodyres_ixfuns,
+    --                      "\n\nres_subs:", show res_subs,
+    --                      "\n\nbodyres_spaces:", show bodyres_spaces,
+    --                      "\n\nres_body:", pretty res_body,
+    --                      "\n"]) $
+    --     (res_body, (init_subs, spaces))
+    --     -- Also return stuff needed to amend merge params
+    --     -- Body () (bodybnds'<>val_retbnds) (ctxres++val_ses++valres')
 
     allocInParam' :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                    Space -> FParam tolore -> AllocM fromlore tolore (FParam tolore)
@@ -796,7 +833,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfAttr rets ifsort)) = do
   (fbranch', frets) <- addResCtxInIfBody rets fbranch spaces fsubs
   if frets /= trets then error "In allocInExp, IF case: antiunification of then/else produce different ExtInFn!"
     else do -- above is a sanity check; implementation continues on else branch
-    let res_then = bodyResult tbranch'
+    let res_then = traceWith "res_then" $ bodyResult tbranch'
         res_else = bodyResult fbranch'
         size_ext = length res_then - length trets
         (ind_ses0, r_then_else) =
@@ -806,7 +843,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfAttr rets ifsort)) = do
         ind_ses = zipWith (\(se, _, i) k -> (i-k, se)) ind_ses0
                   [0 .. length ind_ses0 - 1]
         rets'' = foldl (\acc (i, se) -> fixExt i se acc) trets ind_ses
-        tbranch'' = tbranch' { bodyResult = r_then_ext ++ drop size_ext res_then }
+        tbranch'' = tbranch' { bodyResult = traceWith "res_then2" $ r_then_ext ++ drop size_ext res_then }
         fbranch'' = fbranch' { bodyResult = r_else_ext ++ drop size_ext res_else }
         res_if_expr = If cond tbranch'' fbranch'' $ IfAttr rets'' ifsort
     return res_if_expr
@@ -875,10 +912,9 @@ addResCtxInLoopBody (Body () bnds res) spaces substs = do
             --               vname <- newVName "existential_param"
             --               param { paramAttr = MemArray pt shape u $ ArrayIn vname ixfun' }
             --             _ -> error "impossible in substituteInVal"
-            let i = length m
             ext_ses <- mapM (primExpToSubExp "ixfn_exist"
                             (return . BasicOp . SubExp .Var))
-                       m
+                       $ traceWith "addResCtxInLoopBody.m" m
             mem_ctx_r <- bodyReturnMemCtx r
             return (res_acc ++ traceWith "addResCtxInLoopBody.[r]" [r],
                     ext_acc ++ traceWith "addResCtxInLoopBody.ext_ses" ext_ses,
@@ -940,7 +976,9 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
                             MemArray pt shp' u $
                             ReturnsNewBlock sp' 0 ixfn'
                           _ -> error "Impossible case reached in addResCtxInIfBody"
-            return (res_acc ++ [r],
+            return $
+              trace (unwords ["addResCtxInIfBody.mem_ctx_r:", show mem_ctx_r]) $
+                   (res_acc ++ [r],
                     ext_acc ++ ext_ses,
                     ctx_acc ++ mem_ctx_r,
                     br_acc ++ [exttp],
