@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Warnings for overflowing literals, such as `1000 : u8`.
+
 ### Removed
 
 ### Changed
