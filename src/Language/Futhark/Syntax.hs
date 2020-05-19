@@ -47,6 +47,7 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
+  , AttrInfo(..)
   , BinOp (..)
   , IdentBase (..)
   , Inclusiveness(..)
@@ -199,6 +200,9 @@ instance IsPrimValue Double where
 
 instance IsPrimValue Bool where
   primValue = BoolValue
+
+newtype AttrInfo = AttrInfo Name
+  deriving (Eq, Ord, Show)
 
 class Eq dim => ArrayDim dim where
   -- | @unifyDims x y@ combines @x@ and @y@ to contain their maximum
@@ -724,6 +728,10 @@ data ExpBase f vn =
             | Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn))
               (f PatternType, f [VName]) SrcLoc
             -- ^ A match expression.
+
+            | Attr AttrInfo (ExpBase f vn) SrcLoc
+            -- ^ An attribute applied to the following expression.
+
 deriving instance Showable f vn => Show (ExpBase f vn)
 deriving instance Eq (ExpBase NoInfo VName)
 deriving instance Ord (ExpBase NoInfo VName)
@@ -764,6 +772,7 @@ instance Located (ExpBase f vn) where
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (Constr _ _ _ loc)             = locOf loc
   locOf (Match _ _ _ loc)              = locOf loc
+  locOf (Attr _ _ loc)                 = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc

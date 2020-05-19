@@ -333,9 +333,9 @@ mkAliasedLetStm :: (Attributes lore, CanBeAliased (Op lore)) =>
                    Pattern lore
                 -> StmAux (ExpDec lore) -> Exp (Aliases lore)
                 -> Stm (Aliases lore)
-mkAliasedLetStm pat (StmAux cs dec) e =
+mkAliasedLetStm pat (StmAux cs attrs dec) e =
   Let (addAliasesToPattern pat e)
-  (StmAux cs (Names' $ consumedInExp e, dec))
+  (StmAux cs attrs (Names' $ consumedInExp e, dec))
   e
 
 instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where

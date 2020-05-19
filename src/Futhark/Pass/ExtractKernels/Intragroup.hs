@@ -100,13 +100,14 @@ intraGroupParallelise knest lam = runMaybeT $ do
   let nested_pat = loopNestingPattern first_nest
       rts = map (length ispace `stripArray`) $ patternTypes nested_pat
       lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
-      kstm = Let nested_pat (StmAux cs ()) $ Op $ SegOp $ SegMap lvl kspace rts kbody'
+      kstm = Let nested_pat aux $
+             Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   return ((intra_min_par, intra_avail_par), Var group_size, log,
            prelude_stms, oneStm kstm)
   where first_nest = fst knest
-        cs = loopNestingCertificates first_nest
+        aux = loopNestingAux first_nest
 
 data Acc = Acc { accMinPar :: S.Set [SubExp]
                , accAvailPar :: S.Set [SubExp]
@@ -168,7 +169,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
-      let loopnest = MapNesting pat (stmAuxCerts aux) w $ zip (lambdaParams lam) arrs
+      let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
           env = DistEnv { distNest =
                             singleNesting $ Nesting mempty loopnest
                         , distScope =

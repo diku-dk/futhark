@@ -154,7 +154,7 @@ optimiseStms (bnd:bnds) m = do
 
   where boundHere = patternNames $ stmPattern bnd
 
-        checkIfForwardableUpdate (Let pat (StmAux cs _) e)
+        checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
             | Pattern [] [PatElem v dec] <- pat,
               BasicOp (Update src slice (Var ve)) <- e =
                 maybeForward ve v dec cs src slice

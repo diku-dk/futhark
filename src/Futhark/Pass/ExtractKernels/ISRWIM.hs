@@ -53,7 +53,7 @@ iswim res_pat w scan_fun scan_input
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
-      addStm $ Let res_pat' (StmAux map_cs ()) $ Op $ Screma map_w
+      addStm $ Let res_pat' (StmAux map_cs mempty ()) $ Op $ Screma map_w
         (mapSOAC map_fun') map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
@@ -110,7 +110,8 @@ irwim res_pat w comm red_fun red_input
 
       let map_fun' = Lambda map_params map_body map_rettype
 
-      addStm $ Let res_pat (StmAux map_cs ()) $ Op $ Screma map_w (mapSOAC map_fun') arrs'
+      addStm $ Let res_pat (StmAux map_cs mempty ()) $
+        Op $ Screma map_w (mapSOAC map_fun') arrs'
   | otherwise = Nothing
 
 rwimPossible :: Lambda

@@ -137,25 +137,25 @@ cseInStm :: Attributes lore =>
             Names -> Stm lore
          -> ([Stm lore] -> CSEM lore a)
          -> CSEM lore a
-cseInStm consumed (Let pat (StmAux cs edec) e) m = do
+cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if any (bad cse_arrays) $ patternValueElements pat then
-    m [Let pat' (StmAux cs edec) e']
+    m [Let pat' (StmAux cs attrs edec) e']
     else
     case M.lookup (edec, e') esubsts of
       Just subpat ->
         local (addNameSubst pat' subpat) $ do
           let lets =
-                [ Let (Pattern [] [patElem']) (StmAux cs edec) $
+                [ Let (Pattern [] [patElem']) (StmAux cs attrs edec) $
                     BasicOp $ SubExp $ Var $ patElemName patElem
                 | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
                   let patElem' = patElem { patElemName = name }
                 ]
           m lets
       _ -> local (addExpSubst pat' edec e') $
-           m [Let pat' (StmAux cs edec) e']
+           m [Let pat' (StmAux cs attrs edec) e']
 
   where bad cse_arrays pe
           | Mem{} <- patElemType pe = True

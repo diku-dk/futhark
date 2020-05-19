@@ -19,7 +19,6 @@ module Futhark.Analysis.Metrics
 import Control.Monad.Writer
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.String
 import Data.List (tails)
 import qualified Data.Map.Strict as M
 
@@ -98,8 +97,8 @@ expMetrics (If _ tb fb _) =
   inside "If" $ do
     inside "True" $ bodyMetrics tb
     inside "False" $ bodyMetrics fb
-expMetrics (Apply fname _ _ _) =
-  seen $ "Apply" <> fromString (nameToString fname)
+expMetrics Apply{} =
+  seen "Apply"
 expMetrics (Op op) =
   opMetrics op
 
