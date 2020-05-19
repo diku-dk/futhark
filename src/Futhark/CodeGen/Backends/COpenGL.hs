@@ -17,6 +17,7 @@ import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.Backends.COpenGL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
+import qualified Futhark.CodeGen.Backends.SimpleRepresentation as SR
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenGL
 import qualified Futhark.CodeGen.ImpGen.OpenGL as ImpGen
@@ -205,7 +206,7 @@ callShader (GetSizeMax v size_class) =
   in GC.stm [C.cstm|$id:v = ctx->opengl.$id:field;|]
 
 callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
-  -- FIXME: We might account for safety with by using a uniform.
+  -- FIXME: We might account for safety by using a uniform.
   when (safety == SafetyFull) $
     GC.stm [C.cstm|
     OPENGL_SUCCEED(glGetError());
@@ -218,8 +219,16 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
   launchShader name num_workgroups' workgroup_size' local_bytes
   where setShaderArg i (ValueKArg e bt) = do
           v <- GC.compileExpToName GC.TargetHost "shader_arg" bt e
-          -- FIXME: Support all types of uniform variables.
-          GC.stm [C.cstm|glUniform1i($int:i, $id:v);|]
+          let ty = SR.primTypeToGLSLType bt
+          case ty of
+            [C.cty|float|] ->
+              GC.stm [C.cstm|glUniform1f($int:i, $id:v);|]
+            [C.cty|double|] ->
+              GC.stm [C.cstm|glUniform1d($int:i, $id:v);|]
+            [C.cty|typename int64_t|] ->
+              GC.stm [C.cstm|glUniform1i64ARB($int:i, $id:v);|]
+            _ ->
+              GC.stm [C.cstm|glUniform1i($int:i, (typename GLint)$id:v);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
         setShaderArg i (MemKArg v) = do

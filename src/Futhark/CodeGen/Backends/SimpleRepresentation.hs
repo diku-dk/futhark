@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , defaultMemBlockTypeGLSL
   , primTypeToCType
   , signedPrimTypeToCType
+  , primTypeToGLSLType
 
     -- * Primitive value operations
   , cIntOps
@@ -53,6 +54,16 @@ primTypeToCType (IntType t)   = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|typename bool|]
 primTypeToCType Cert = [C.cty|typename bool|]
+
+-- | Same as `primTypeToCType` but for GLSL.
+primTypeToGLSLType :: PrimType -> C.Type
+primTypeToGLSLType (IntType t)   =
+  case t of
+    Int64 -> [C.cty|typename int64_t|]
+    _     -> [C.cty|int|]
+primTypeToGLSLType (FloatType t) = floatTypeToCType t
+primTypeToGLSLType Bool = [C.cty|typename bool|]
+primTypeToGLSLType Cert = [C.cty|typename bool|]
 
 -- | The C type corresponding to a primitive type. Integers are
 -- assumed to have the specified sign.
