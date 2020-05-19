@@ -23,10 +23,9 @@ compileSegScan :: Pattern MCMem
                 -> MulticoreGen ()
 compileSegScan pat space reds kbody
   | [_] <- unSegSpace space =
-      sequentialScan pat space reds kbody
+      nonsegmentedScan pat space reds kbody
   | otherwise =
-      sequentialScan pat space reds kbody
-      -- segmentedScan pat space reds kbody
+      segmentedScan pat space reds kbody
 
 
 accumulatorArray :: [SegBinOp MCMem]
