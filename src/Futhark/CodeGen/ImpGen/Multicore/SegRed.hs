@@ -88,14 +88,28 @@ nonsegmentedReduction :: Pattern MCMem
                       -> DoSegBody
                       -> MulticoreGen ()
 nonsegmentedReduction pat space reds kbody = do
-  emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
-  sUnpauseProfiling
+  let ns = map snd $ unSegSpace space
 
+  ns' <- mapM toExp ns
+  let use_sequential_reduce = product ns' .<=. 50
+  sIf use_sequential_reduce
+      (sequentialRed pat space reds kbody)
+      (parallelNonsegmentedReduction pat space reds kbody)
+
+
+parallelNonsegmentedReduction :: Pattern MCMem
+                              -> SegSpace
+                              -> [SegBinOp MCMem]
+                              -> DoSegBody
+                              -> MulticoreGen ()
+parallelNonsegmentedReduction pat space reds kbody = do
+  emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
   let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+  sUnpauseProfiling
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
 
-  ns' <- mapM toExp ns
   stage_one_red_arrs <- groupResultArrays (Var num_threads) reds
 
   flat_idx <- dPrim "iter" int32
