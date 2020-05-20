@@ -15,6 +15,8 @@ module Futhark.Binder.Class
   , letBindNames_
   , collectStms_
   , bodyBind
+  , attributing
+  , auxing
 
   , module Futhark.MonadFreshNames
   )
@@ -23,7 +25,7 @@ where
 import Control.Monad.Writer
 import qualified Data.Kind
 
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.MonadFreshNames
 
 -- | The class of lores that can be constructed solely from an
@@ -32,15 +34,15 @@ import Futhark.MonadFreshNames
 -- often than you think, and the results thrown away.  If used
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
-class (Attributes lore,
-       FParamAttr lore ~ DeclType,
-       LParamAttr lore ~ Type,
+class (ASTLore lore,
+       FParamInfo lore ~ DeclType,
+       LParamInfo lore ~ Type,
        RetType lore ~ DeclExtType,
        BranchType lore ~ ExtType,
-       SetType (LetAttr lore)) =>
+       SetType (LetDec lore)) =>
       Bindable lore where
   mkExpPat :: [Ident] -> [Ident] -> Exp lore -> Pattern lore
-  mkExpAttr :: Pattern lore -> Exp lore -> ExpAttr lore
+  mkExpDec :: Pattern lore -> Exp lore -> ExpDec lore
   mkBody :: Stms lore -> Result -> Body lore
   mkLetNames :: (MonadFreshNames m, HasScope lore m) =>
                 [VName] -> Exp lore -> m (Stm lore)
@@ -54,12 +56,12 @@ class (Attributes lore,
 -- effects!  They may be called more often than you think, and the
 -- results thrown away.  It is acceptable for them to create new
 -- bindings, however.
-class (Attributes (Lore m),
+class (ASTLore (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
        LocalScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: Data.Kind.Type
-  mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
+  mkExpDecM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpDec (Lore m))
   mkBodyM :: Stms (Lore m) -> Result -> m (Body (Lore m))
   mkLetNamesM :: [VName] -> Exp (Lore m) -> m (Stm (Lore m))
   addStm      :: Stm (Lore m) -> m ()
@@ -67,9 +69,35 @@ class (Attributes (Lore m),
   addStms     :: Stms (Lore m) -> m ()
   collectStms :: m a -> m (a, Stms (Lore m))
   certifying :: Certificates -> m a -> m a
+  certifying = censorStms . fmap . certify
+
+-- | Apply a function to the statements added by this action.
+censorStms :: MonadBinder m =>
+              (Stms (Lore m) -> Stms (Lore m))
+           -> m a -> m a
+censorStms f m = do
+  (x, stms) <- collectStms m
+  addStms $ f stms
+  return x
+
+-- | Add the given attributes to any statements added by this action.
+attributing :: MonadBinder m => Attrs -> m a -> m a
+attributing attrs = censorStms $ fmap onStm
+  where onStm (Let pat aux e) =
+          Let pat aux { stmAuxAttrs = attrs <> stmAuxAttrs aux } e
+
+-- | Add the certificates and attributes to any statements added by
+-- this action.
+auxing :: MonadBinder m => StmAux anylore -> m a -> m a
+auxing (StmAux cs attrs _) = censorStms $ fmap onStm
+  where onStm (Let pat aux e) =
+          Let pat aux' e
+          where aux' = aux { stmAuxAttrs = attrs <> stmAuxAttrs aux
+                           , stmAuxCerts = cs <> stmAuxCerts aux
+                           }
 
 mkLetM :: MonadBinder m => Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
-mkLetM pat e = Let pat <$> (StmAux mempty <$> mkExpAttrM pat e) <*> pure e
+mkLetM pat e = Let pat <$> (defAux <$> mkExpDecM pat e) <*> pure e
 
 letBind :: MonadBinder m =>
            Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
@@ -85,8 +113,8 @@ letBind_ pat e = void $ letBind pat e
 mkLet :: Bindable lore => [Ident] -> [Ident] -> Exp lore -> Stm lore
 mkLet ctx val e =
   let pat = mkExpPat ctx val e
-      attr = mkExpAttr pat e
-  in Let pat (StmAux mempty attr) e
+      dec = mkExpDec pat e
+  in Let pat (defAux dec) e
 
 letBindNames :: MonadBinder m =>
                 [VName] -> Exp (Lore m) -> m [Ident]

@@ -6,7 +6,7 @@ module Futhark.CodeGen.Backends.PyOpenCL
 import Control.Monad
 import qualified Data.Map as M
 
-import Futhark.Representation.KernelsMem (Prog, KernelsMem)
+import Futhark.IR.KernelsMem (Prog, KernelsMem)
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp

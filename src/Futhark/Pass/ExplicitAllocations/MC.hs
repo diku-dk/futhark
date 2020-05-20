@@ -5,8 +5,8 @@ module Futhark.Pass.ExplicitAllocations.MC
   ( explicitAllocations )
 where
 
-import Futhark.Representation.MCMem
-import Futhark.Representation.MC
+import Futhark.IR.MCMem
+import Futhark.IR.MC
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 

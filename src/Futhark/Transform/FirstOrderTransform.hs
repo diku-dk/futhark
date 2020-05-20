@@ -24,19 +24,19 @@ import Control.Monad.State
 import qualified Data.Map.Strict as M
 import Data.List (zip4)
 
-import qualified Futhark.Representation.AST as AST
-import Futhark.Representation.SOACS
+import qualified Futhark.IR as AST
+import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR.Prop.Aliases
 import Futhark.Util (chunks, splitAt3)
 
 -- | The constraints that must hold for a lore in order to be the
 -- target of first-order transformation.
 type FirstOrderLore lore =
   (Bindable lore, BinderOps lore,
-   LetAttr SOACS ~ LetAttr lore,
-   LParamAttr SOACS ~ LParamAttr lore,
+   LetDec SOACS ~ LetDec lore,
+   LParamInfo SOACS ~ LParamInfo lore,
    CanBeAliased (Op lore))
 
 transformFunDef :: (MonadFreshNames m, FirstOrderLore tolore) =>
@@ -56,10 +56,10 @@ transformStms stms =
 -- first-order transformation.
 type Transformer m = (MonadBinder m, LocalScope (Lore m) m,
                       Bindable (Lore m), BinderOps (Lore m),
-                      LParamAttr SOACS ~ LParamAttr (Lore m),
+                      LParamInfo SOACS ~ LParamInfo (Lore m),
                       CanBeAliased (Op (Lore m)))
 
-transformBody :: (Transformer m, LetAttr (Lore m) ~ LetAttr SOACS) =>
+transformBody :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                  Body -> m (AST.Body (Lore m))
 transformBody (Body () bnds res) = insertStmsM $ do
   mapM_ transformStmRecursively bnds
@@ -67,7 +67,7 @@ transformBody (Body () bnds res) = insertStmsM $ do
 
 -- | First transform any nested 'Body' or 'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
-transformStmRecursively :: (Transformer m, LetAttr (Lore m) ~ LetAttr SOACS) =>
+transformStmRecursively :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                            Stm -> m ()
 
 transformStmRecursively (Let pat aux (Op soac)) =
@@ -183,7 +183,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
   loopBody <- runBodyBinder $
-    localScope (M.insert iter (IndexInfo Int32) $
+    localScope (M.insert iter (IndexName Int32) $
                 scopeOfFParams $ map fst merge) $ do
     ivs' <- forM ivs $ \iv -> do
       iv_t <- lookupType iv
@@ -211,7 +211,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
 
   -- Bind lambda-bodies for operators.
   loopBody <- runBodyBinder $
-    localScope (M.insert iter (IndexInfo Int32) $
+    localScope (M.insert iter (IndexName Int32) $
                 scopeOfFParams $ map fst merge) $ do
 
     -- Bind images to parameters of bucket function.
@@ -263,7 +263,7 @@ transformLambda :: (MonadFreshNames m,
                     Bindable lore, BinderOps lore,
                     LocalScope somelore m,
                     SameScope somelore lore,
-                    LetAttr lore ~ LetAttr SOACS,
+                    LetDec lore ~ LetDec SOACS,
                     CanBeAliased (Op lore)) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda params body rettype) = do

@@ -7,7 +7,7 @@ import Test.Tasty.HUnit
 import Data.List (sort, mapAccumL)
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Analysis.ScalExp
 import Futhark.Analysis.ScalExpTests (parseScalExp)
 import Futhark.Analysis.AlgSimplify

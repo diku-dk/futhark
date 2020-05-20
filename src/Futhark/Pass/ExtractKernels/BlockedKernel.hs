@@ -27,8 +27,8 @@ import Data.List ()
 import Prelude hiding (quot)
 
 import Futhark.Analysis.PrimExp
-import Futhark.Representation.AST
-import Futhark.Representation.SegOp
+import Futhark.IR
+import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -37,9 +37,9 @@ import Futhark.Transform.Rename
 type DistLore lore = (Bindable lore,
                       HasSegOp lore,
                       BinderOps lore,
-                      LetAttr lore ~ Type,
-                      ExpAttr lore ~ (),
-                      BodyAttr lore ~ ())
+                      LetDec lore ~ Type,
+                      ExpDec lore ~ (),
+                      BodyDec lore ~ ())
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 

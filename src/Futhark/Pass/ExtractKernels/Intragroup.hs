@@ -16,9 +16,9 @@ import qualified Data.Set as S
 import Prelude hiding (log)
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.SOACS
-import qualified Futhark.Representation.Kernels as Out
-import Futhark.Representation.Kernels.Kernel hiding (HistOp)
+import Futhark.IR.SOACS
+import qualified Futhark.IR.Kernels as Out
+import Futhark.IR.Kernels.Kernel hiding (HistOp)
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass.ExtractKernels.DistributeNests
@@ -100,13 +100,14 @@ intraGroupParallelise knest lam = runMaybeT $ do
   let nested_pat = loopNestingPattern first_nest
       rts = map (length ispace `stripArray`) $ patternTypes nested_pat
       lvl = SegGroup (Count num_groups) (Count $ Var group_size) SegNoVirt
-      kstm = Let nested_pat (StmAux cs ()) $ Op $ SegOp $ SegMap lvl kspace rts kbody'
+      kstm = Let nested_pat aux $
+             Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   return ((intra_min_par, intra_avail_par), Var group_size, log,
            prelude_stms, oneStm kstm)
   where first_nest = fst knest
-        cs = loopNestingCertificates first_nest
+        aux = loopNestingAux first_nest
 
 data Acc = Acc { accMinPar :: S.Set [SubExp]
                , accAvailPar :: S.Set [SubExp]
@@ -160,15 +161,15 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                           ForLoop i it bound inps -> ForLoop i it bound inps
                           WhileLoop cond          -> WhileLoop cond
 
-    If cond tbody fbody ifattr -> do
+    If cond tbody fbody ifdec -> do
       tbody' <- intraGroupBody lvl tbody
       fbody' <- intraGroupBody lvl fbody
       certifying (stmAuxCerts aux) $
-        letBind_ pat $ If cond tbody' fbody' ifattr
+        letBind_ pat $ If cond tbody' fbody' ifdec
 
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
-      let loopnest = MapNesting pat (stmAuxCerts aux) w $ zip (lambdaParams lam) arrs
+      let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
           env = DistEnv { distNest =
                             singleNesting $ Nesting mempty loopnest
                         , distScope =
@@ -242,7 +243,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           (dests_ws, dests_ns, dests_vs) = unzip3 dests
           (i_res, v_res) = splitAt (sum dests_ns) $ bodyResult $ lambdaBody lam'
           krets = do (a_w, a, is_vs) <- zip3 dests_ws dests_vs $ chunks dests_ns $ zip i_res v_res
-                     return $ WriteReturns [a_w] a [ ([i],v) | (i,v) <- is_vs ]
+                     return $ WriteReturns [a_w] a [ ([DimFix i],v) | (i,v) <- is_vs ]
           inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
                       return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
 

@@ -240,6 +240,7 @@ generateContextFuns cfg kernels sizes failures = do
                          int detail_memory;
                          int debugging;
                          int profiling;
+                         int profiling_paused;
                          typename lock_t lock;
                          char *error;
                          $sdecls:fields
@@ -304,7 +305,7 @@ generateContextFuns cfg kernels sizes failures = do
                                  free(ctx);
                                }|])
 
-  GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                  CUDA_SUCCEED(cuCtxSynchronize());
@@ -332,24 +333,13 @@ generateContextFuns cfg kernels sizes failures = do
                  return 0;
                }|])
 
-  GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
-    ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
-                         return ctx->error;
+
+  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
+    ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+     [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+                         return 0;
                        }|])
-
-
-  GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 (void)ctx;
-               }|])
-
-  GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 (void)ctx;
-               }|])
 
   where
     loadKernel (name, _) =

@@ -23,7 +23,7 @@ import           Data.Maybe
 
 import           Futhark.Analysis.PrimExp
 import           Futhark.Construct
-import           Futhark.Representation.AST
+import           Futhark.IR
 
 -- | Convert a 'PrimExp' to a Futhark expression.  The provided
 -- function converts the leaves.
@@ -61,7 +61,7 @@ primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
 -- used to convert expressions that are not trivially 'PrimExp's.
 -- This includes constants and variable names, which are passed as
 -- 'SubExp's.
-primExpFromExp :: (Fail.MonadFail m, Annotations lore) =>
+primExpFromExp :: (Fail.MonadFail m, Decorations lore) =>
                   (VName -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
   BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y

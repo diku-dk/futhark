@@ -19,7 +19,7 @@ import qualified Data.Sequence as Seq
 
 import           Futhark.MonadFreshNames
 import           Language.Futhark
-import           Futhark.Representation.AST.Pretty ()
+import           Futhark.IR.Pretty ()
 
 -- | An expression or an extended 'Lambda' (with size parameters,
 -- which AST lambdas do not support).
@@ -442,6 +442,10 @@ defuncExp (Match e cs t loc) = do
       sv' = snd $ NE.head csPairs
   return (Match e' cs' t loc, sv')
 
+defuncExp (Attr info e loc) = do
+  (e', sv) <- defuncExp e
+  return (Attr info e' loc, sv)
+
 -- | Same as 'defuncExp', except it ignores the static value.
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
@@ -710,7 +714,7 @@ envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Scalar $ Prim $ Sign
 -- return type, list of parameters, and body expression.
 liftValDec :: VName -> PatternType -> [VName] -> [Pattern] -> Exp -> DefM ()
 liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
-  where dims' = map (flip TypeParamDim noLoc) dims
+  where dims' = map (`TypeParamDim` noLoc) dims
         -- FIXME: this pass is still not correctly size-preserving, so
         -- forget those return sizes that we forgot to propagate along
         -- the way.  Hopefully the internaliser is conservative and
@@ -966,6 +970,7 @@ freeVars expr = case expr of
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
   Constr _ es _ _     -> foldMap freeVars es
+  Attr _ e _          -> freeVars e
   Match e cs _ _      -> freeVars e <> foldMap caseFV cs
     where caseFV (CasePat p eCase _) = (names (patternDimNames p) <> freeVars eCase)
                                        `without` patternVars p

@@ -217,9 +217,9 @@ jobs:
     inputs:
       gitHubConnection: 'release'
       repositoryName: 'diku-dk/futhark'
-      action: 'edit'
-      tagSource: 'Git tag'
-      tag: '$(githubTag)'
       assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
-      assetUploadMode: 'replace'
+      action: 'edit'
+      target: '$(Build.SourceVersion)'
+      tag: '$(githubTag)'
       addChangeLog: false
+      assetUploadMode: 'replace'

@@ -19,7 +19,7 @@ module Futhark.Optimise.Simplify.Lore
        , addWisdomToPattern
        , mkWiseBody
        , mkWiseLetStm
-       , mkWiseExpAttr
+       , mkWiseExpDec
 
        , CanBeWise (..)
        )
@@ -30,13 +30,13 @@ import Control.Monad.Reader
 import qualified Data.Kind
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Ranges
-import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.Aliases
+import Futhark.IR
+import Futhark.IR.Prop.Ranges
+import Futhark.IR.Prop.Aliases
+import Futhark.IR.Aliases
   (unNames, Names' (..), VarAliases, ConsumedInExp)
-import qualified Futhark.Representation.Aliases as Aliases
-import qualified Futhark.Representation.Ranges as Ranges
+import qualified Futhark.IR.Aliases as Aliases
+import qualified Futhark.IR.Ranges as Ranges
 import Futhark.Binder
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -69,7 +69,7 @@ data ExpWisdom = ExpWisdom { _expWisdomConsumed :: ConsumedInExp
 instance FreeIn ExpWisdom where
   freeIn' = mempty
 
-instance FreeAttr ExpWisdom where
+instance FreeDec ExpWisdom where
   precomputed = const . fvNames . unNames . expWisdomFree
 
 instance Substitute ExpWisdom where
@@ -104,16 +104,16 @@ instance FreeIn BodyWisdom where
   freeIn' (BodyWisdom als cons rs free) =
     freeIn' als <> freeIn' cons <> freeIn' rs <> freeIn' free
 
-instance FreeAttr BodyWisdom where
+instance FreeDec BodyWisdom where
   precomputed = const . fvNames . unNames . bodyWisdomFree
 
-instance (Annotations lore,
-          CanBeWise (Op lore)) => Annotations (Wise lore) where
-  type LetAttr (Wise lore) = (VarWisdom, LetAttr lore)
-  type ExpAttr (Wise lore) = (ExpWisdom, ExpAttr lore)
-  type BodyAttr (Wise lore) = (BodyWisdom, BodyAttr lore)
-  type FParamAttr (Wise lore) = FParamAttr lore
-  type LParamAttr (Wise lore) = LParamAttr lore
+instance (Decorations lore,
+          CanBeWise (Op lore)) => Decorations (Wise lore) where
+  type LetDec (Wise lore) = (VarWisdom, LetDec lore)
+  type ExpDec (Wise lore) = (ExpWisdom, ExpDec lore)
+  type BodyDec (Wise lore) = (BodyWisdom, BodyDec lore)
+  type FParamInfo (Wise lore) = FParamInfo lore
+  type LParamInfo (Wise lore) = LParamInfo lore
   type RetType (Wise lore) = RetType lore
   type BranchType (Wise lore) = BranchType lore
   type Op (Wise lore) = OpWithWisdom (Op lore)
@@ -125,28 +125,28 @@ withoutWisdom m = do
   scope <- asksScope removeScopeWisdom
   runReaderT m scope
 
-instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
+instance (ASTLore lore, CanBeWise (Op lore)) => ASTLore (Wise lore) where
   expTypesFromPattern =
     withoutWisdom . expTypesFromPattern . removePatternWisdom
 
-instance PrettyAnnot (PatElemT attr) => PrettyAnnot (PatElemT (VarWisdom, attr)) where
+instance PrettyAnnot (PatElemT dec) => PrettyAnnot (PatElemT (VarWisdom, dec)) where
   ppAnnot = ppAnnot . fmap snd
 
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
-  ppExpLore (_, attr) = ppExpLore attr . removeExpWisdom
+  ppExpLore (_, dec) = ppExpLore dec . removeExpWisdom
 
-instance AliasesOf (VarWisdom, attr) where
+instance AliasesOf (VarWisdom, dec) where
   aliasesOf = unNames . varWisdomAliases . fst
 
-instance RangeOf (VarWisdom, attr) where
+instance RangeOf (VarWisdom, dec) where
   rangeOf = varWisdomRange . fst
 
-instance RangesOf (BodyWisdom, attr) where
+instance RangesOf (BodyWisdom, dec) where
   rangesOf = bodyWisdomRanges . fst
 
-instance (Attributes lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
-  bodyAliases = map unNames . bodyWisdomAliases . fst . bodyAttr
-  consumedInBody = unNames . bodyWisdomConsumed . fst . bodyAttr
+instance (ASTLore lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
+  bodyAliases = map unNames . bodyWisdomAliases . fst . bodyDec
+  consumedInBody = unNames . bodyWisdomConsumed . fst . bodyDec
 
 removeWisdom :: CanBeWise (Op lore) => Rephraser Identity (Wise lore) lore
 removeWisdom = Rephraser { rephraseExpLore = return . snd
@@ -161,17 +161,17 @@ removeWisdom = Rephraser { rephraseExpLore = return . snd
 
 removeScopeWisdom :: Scope (Wise lore) -> Scope lore
 removeScopeWisdom = M.map unAlias
-  where unAlias (LetInfo (_, attr)) = LetInfo attr
-        unAlias (FParamInfo attr) = FParamInfo attr
-        unAlias (LParamInfo attr) = LParamInfo attr
-        unAlias (IndexInfo it) = IndexInfo it
+  where unAlias (LetName (_, dec)) = LetName dec
+        unAlias (FParamName dec) = FParamName dec
+        unAlias (LParamName dec) = LParamName dec
+        unAlias (IndexName it) = IndexName it
 
 addScopeWisdom :: Scope lore -> Scope (Wise lore)
 addScopeWisdom = M.map alias
-  where alias (LetInfo attr) = LetInfo (VarWisdom mempty unknownRange, attr)
-        alias (FParamInfo attr) = FParamInfo attr
-        alias (LParamInfo attr) = LParamInfo attr
-        alias (IndexInfo it) = IndexInfo it
+  where alias (LetName dec) = LetName (VarWisdom mempty unknownRange, dec)
+        alias (FParamName dec) = FParamName dec
+        alias (LParamName dec) = LParamName dec
+        alias (IndexName it) = IndexName it
 
 removeFunDefWisdom :: CanBeWise (Op lore) => FunDef (Wise lore) -> FunDef lore
 removeFunDefWisdom = runIdentity . rephraseFunDef removeWisdom
@@ -191,7 +191,7 @@ removeExpWisdom = runIdentity . rephraseExp removeWisdom
 removePatternWisdom :: PatternT (VarWisdom, a) -> PatternT a
 removePatternWisdom = runIdentity . rephrasePattern (return . snd)
 
-addWisdomToPattern :: (Attributes lore, CanBeWise (Op lore)) =>
+addWisdomToPattern :: (ASTLore lore, CanBeWise (Op lore)) =>
                       Pattern lore
                    -> Exp (Wise lore)
                    -> Pattern (Wise lore)
@@ -201,30 +201,30 @@ addWisdomToPattern pat e =
   (zipWith addRanges valals ranges)
   where (ctxals, valals) = Aliases.mkPatternAliases pat e
         addRanges patElem range =
-          let (als, innerlore) = patElemAttr patElem
+          let (als, innerlore) = patElemDec patElem
           in patElem `setPatElemLore` (VarWisdom als range, innerlore)
         ranges = expRanges e
 
-mkWiseBody :: (Attributes lore, CanBeWise (Op lore)) =>
-              BodyAttr lore -> Stms (Wise lore) -> Result -> Body (Wise lore)
+mkWiseBody :: (ASTLore lore, CanBeWise (Op lore)) =>
+              BodyDec lore -> Stms (Wise lore) -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
   Body (BodyWisdom aliases consumed ranges (Names' $ freeIn $ freeInStmsAndRes bnds res),
         innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
         ranges = Ranges.mkBodyRanges bnds res
 
-mkWiseLetStm :: (Attributes lore, CanBeWise (Op lore)) =>
+mkWiseLetStm :: (ASTLore lore, CanBeWise (Op lore)) =>
                 Pattern lore
-             -> StmAux (ExpAttr lore) -> Exp (Wise lore)
+             -> StmAux (ExpDec lore) -> Exp (Wise lore)
              -> Stm (Wise lore)
-mkWiseLetStm pat (StmAux cs attr) e =
+mkWiseLetStm pat (StmAux cs attrs dec) e =
   let pat' = addWisdomToPattern pat e
-  in Let pat' (StmAux cs $ mkWiseExpAttr pat' attr e) e
+  in Let pat' (StmAux cs attrs $ mkWiseExpDec pat' dec e) e
 
-mkWiseExpAttr :: (Attributes lore, CanBeWise (Op lore)) =>
-                 Pattern (Wise lore) -> ExpAttr lore -> Exp (Wise lore)
-              -> ExpAttr (Wise lore)
-mkWiseExpAttr pat explore e =
+mkWiseExpDec :: (ASTLore lore, CanBeWise (Op lore)) =>
+                 Pattern (Wise lore) -> ExpDec lore -> Exp (Wise lore)
+              -> ExpDec (Wise lore)
+mkWiseExpDec pat explore e =
   (ExpWisdom
     (Names' $ consumedInExp e)
     (Names' $ freeIn pat <> freeIn explore <> freeIn e),
@@ -235,14 +235,14 @@ instance (Bindable lore,
   mkExpPat ctx val e =
     addWisdomToPattern (mkExpPat ctx val $ removeExpWisdom e) e
 
-  mkExpAttr pat e =
-    mkWiseExpAttr pat (mkExpAttr (removePatternWisdom pat) $ removeExpWisdom e) e
+  mkExpDec pat e =
+    mkWiseExpDec pat (mkExpDec (removePatternWisdom pat) $ removeExpWisdom e) e
 
   mkLetNames names e = do
     env <- asksScope removeScopeWisdom
     flip runReaderT env $ do
-      Let pat attr _ <- mkLetNames names $ removeExpWisdom e
-      return $ mkWiseLetStm pat attr e
+      Let pat dec _ <- mkLetNames names $ removeExpWisdom e
+      return $ mkWiseLetStm pat dec e
 
   mkBody bnds res =
     let Body bodylore _ _ = mkBody (fmap removeStmWisdom bnds) res

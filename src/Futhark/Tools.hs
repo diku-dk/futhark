@@ -19,8 +19,8 @@ where
 
 import Control.Monad.Identity
 
-import Futhark.Representation.AST
-import Futhark.Representation.SOACS.SOAC
+import Futhark.IR
+import Futhark.IR.SOACS.SOAC
 import Futhark.MonadFreshNames
 import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert
@@ -46,7 +46,7 @@ nonuniqueParams params = runBinder $ forM params $ \param ->
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
 redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
-                          ExpAttr lore ~ (), Op lore ~ SOAC lore) =>
+                          ExpDec lore ~ (), Op lore ~ SOAC lore) =>
                          Pattern lore
                       -> ( SubExp
                          , Commutativity
@@ -65,10 +65,10 @@ redomapToMapAndReduce (Pattern [] patelems)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
 
-splitScanOrRedomap :: (Typed attr, MonadFreshNames m) =>
-                      [PatElemT attr]
+splitScanOrRedomap :: (Typed dec, MonadFreshNames m) =>
+                      [PatElemT dec]
                    -> SubExp -> LambdaT lore -> [SubExp]
-                   -> m ([Ident], PatternT attr, [(SubExp, VName)])
+                   -> m ([Ident], PatternT dec, [(SubExp, VName)])
 splitScanOrRedomap patelems w map_lam accs = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
       (acc_ts, _arr_ts) = splitAt (length accs) $ lambdaReturnType map_lam
@@ -146,16 +146,16 @@ sequentialStreamWholeArray pat w nes lam arrs = do
             letBindNames_ [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
       _ -> letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
 
-partitionChunkedFoldParameters :: Int -> [Param attr]
-                               -> (Param attr, [Param attr], [Param attr])
+partitionChunkedFoldParameters :: Int -> [Param dec]
+                               -> (Param dec, [Param dec], [Param dec])
 partitionChunkedFoldParameters _ [] =
   error "partitionChunkedFoldParameters: lambda takes no parameters"
 partitionChunkedFoldParameters num_accs (chunk_param : params) =
   let (acc_params, arr_params) = splitAt num_accs params
   in (chunk_param, acc_params, arr_params)
 
-partitionChunkedKernelFoldParameters :: Int -> [Param attr]
-                                     -> (VName, Param attr, [Param attr], [Param attr])
+partitionChunkedKernelFoldParameters :: Int -> [Param dec]
+                                     -> (VName, Param dec, [Param dec], [Param dec])
 partitionChunkedKernelFoldParameters num_accs (i_param : chunk_param : params) =
   let (acc_params, arr_params) = splitAt num_accs params
   in (paramName i_param, chunk_param, acc_params, arr_params)

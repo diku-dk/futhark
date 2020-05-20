@@ -10,7 +10,7 @@ import Prelude hiding (quot, rem)
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.MCMem
+import Futhark.IR.MCMem
 import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen.Multicore.Base
 

@@ -54,10 +54,10 @@ import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.Range as Range
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Representation.Aliases
-import Futhark.Representation.Ranges
-import Futhark.Representation.Kernels
-import Futhark.Representation.MC
+import Futhark.IR.Aliases
+import Futhark.IR.Ranges
+import Futhark.IR.Kernels
+import Futhark.IR.MC
 import Futhark.Pass
 
 -- We do not care about ranges, but in order to use ST.SymbolTable
@@ -66,11 +66,11 @@ type SymbolTable lore = ST.SymbolTable lore
 type Sinking lore = M.Map VName (Stm lore)
 type Sunk = S.Set VName
 type Sinker lore a = SymbolTable lore -> Sinking lore -> a -> (a, Sunk)
-type Constraints lore = (Attributes lore,
+type Constraints lore = (ASTLore lore,
                          Aliased lore,
                          ST.IndexOp (Op lore),
-                         RangesOf (BodyAttr lore),
-                         RangeOf (LetAttr lore),
+                         RangesOf (BodyDec lore),
+                         RangeOf (LetDec lore),
                          RangedOp (Op lore))
 
 -- | Given a statement, compute how often each of its free variables
@@ -196,7 +196,7 @@ optimiseSegOp onOp vtable sinking op =
 
 type SinkLore lore = Ranges (Aliases lore)
 
-sink :: (Attributes lore,
+sink :: (ASTLore lore,
          CanBeAliased (Op lore),
          CanBeRanged (OpWithAliases (Op lore)),
          AliasedOp (OpWithRanges (OpWithAliases (Op lore))),

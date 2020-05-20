@@ -255,8 +255,8 @@ transformTypeDecl (TypeDecl dt (Info et)) =
 transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te doc loc) = do
   name' <- transformName name
-  emit =<< TypeDec <$> (TypeBind name' l <$> traverse transformNames tparams
-                        <*> transformTypeDecl te <*> pure doc <*> pure loc)
+  emit . TypeDec =<< (TypeBind name' l <$> traverse transformNames tparams
+                      <*> transformTypeDecl te <*> pure doc <*> pure loc)
 
 transformModBind :: ModBind -> TransformM Scope
 transformModBind mb = do
@@ -318,6 +318,7 @@ transformImports ((name,imp):imps) = do
                       else Nothing  }
     maybeHideEntryPoint d = d
 
+-- | Perform defunctorisation.
 transformProg :: MonadFreshNames m => Imports -> m [Dec]
 transformProg prog = modifyNameSource $ \namesrc ->
   let ((), namesrc', prog') = runTransformM namesrc $ transformImports prog

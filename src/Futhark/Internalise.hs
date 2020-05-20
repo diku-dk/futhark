@@ -3,7 +3,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -22,11 +21,11 @@ import Data.Loc
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
-import Futhark.Representation.SOACS as I hiding (stmPattern)
+import Futhark.IR.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR.Prop.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util (splitAt3)
 
@@ -720,6 +719,14 @@ internaliseExp desc (E.Unsafe e _) =
   local mkUnsafe $ internaliseExp desc e
   where mkUnsafe env | envSafe env = env
                      | otherwise = env { envDoBoundsChecks = False }
+
+internaliseExp desc (E.Attr (AttrInfo attr) e _) =
+  local f $ internaliseExp desc e
+  where f env | attr == "unsafe",
+                not $ envSafe env =
+                  env { envDoBoundsChecks = False }
+              | otherwise =
+                  env { envAttrs = oneAttr (AttrAtom attr) <> envAttrs env }
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
@@ -1733,7 +1740,8 @@ funcall desc (QualName _ fname) args loc = do
                "\nFunction has parameters\n " ++ pretty fun_params
     Just ts -> do
       safety <- askSafety
-      ses <- letTupExp' desc $
+      attrs <- asks envAttrs
+      ses <- attributing attrs $ letTupExp' desc $
              I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 

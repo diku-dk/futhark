@@ -50,10 +50,10 @@ module Futhark.CodeGen.ImpCode
 
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
-  , module Futhark.Representation.Primitive
+  , module Futhark.IR.Primitive
   , module Futhark.Analysis.PrimExp
-  , module Futhark.Representation.Kernels.Sizes
-  , module Futhark.Representation.AST.Attributes.Names
+  , module Futhark.IR.Kernels.Sizes
+  , module Futhark.IR.Prop.Names
   )
   where
 
@@ -63,21 +63,22 @@ import Data.Traversable
 import qualified Data.Map as M
 
 import Language.Futhark.Core
-import Futhark.Representation.Primitive
-import Futhark.Representation.AST.Syntax
+import Futhark.IR.Primitive
+import Futhark.IR.Syntax
   (SubExp(..), Space(..), SpaceId,
    ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
-import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Pretty ()
+import Futhark.IR.Prop.Names
+import Futhark.IR.Pretty ()
 import Futhark.Analysis.PrimExp
 import Futhark.Util.Pretty hiding (space)
-import Futhark.Representation.Kernels.Sizes (Count(..))
+import Futhark.IR.Kernels.Sizes (Count(..))
 
 type MemSize = SubExp
 type DimSize = SubExp
 
 data Type = Scalar PrimType | Mem Space
 
+-- | An ImpCode function parameter.
 data Param = MemParam VName Space
            | ScalarParam VName PrimType
              deriving (Show)
@@ -107,6 +108,10 @@ data Constants a = Constants
     -- contain declarations of the names defined in 'constsDecl'.
   }
 
+-- | Since the core language does not care for signedness, but the
+-- source language does, entry point input/output information has
+-- metadata for integer types (and arrays containing these) that
+-- indicate whether they are really unsigned integers.
 data Signedness = TypeUnsigned
                 | TypeDirect
                 deriving (Eq, Show)
@@ -278,7 +283,7 @@ withElemType (Count e) t =
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
--- | Turn a 'VName' into a 'int32' 'Imp.ScalarVar'.
+-- | Turn a 'VName' into a v'Int32' 'Imp.ScalarVar'.
 vi32 :: VName -> Exp
 vi32 = flip var $ IntType Int32
 

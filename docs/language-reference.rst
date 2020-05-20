@@ -436,6 +436,7 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` [("=" `exp`)] `loopform` "do" `exp`
+      : | "#[" attr "]" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`
@@ -798,6 +799,13 @@ Logical negation if ``x`` is of type ``bool``.  Bitwise negation if
 
 Numerical negation of ``x``, which must be of numeric type.
 
+``#[attr] e``
+.............
+
+Apply the given attribute to the expression.  Attributes are an ad-hoc
+and optional mechanism for providing extra information, directives, or
+hints to the compiler.  See :ref:`attributes` for more information.
+
 ``unsafe e``
 ............
 
@@ -882,7 +890,7 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 
 Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
 
-``loop pat = initial = while cond do loopbody``
+``loop pat = initial while cond do loopbody``
 ...............................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
@@ -1564,3 +1572,45 @@ file::
 In fact, a plain ``import "file"`` is equivalent to::
 
   local open import "file"
+
+.. _attributes:
+
+Attributes
+----------
+
+.. productionlist::
+   attr:   `id`
+
+An expression can be prefixed with an attribute.  This may affect how
+it is treated by the compiler or other tools.  In no case will
+attributes affect or change the *semantics* of a program, but it may
+affect how well it compiles (or in some cases, whether it compiles at
+all).  Unknown attributes are silently ignored.  Most have no effect
+in the interpreter.  The following expression attributes are
+supported.
+
+``incremental_flattening_no_outer``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When using incremental flattening, do not generalise the "only outer
+parallelism" version for this SOAC.
+
+``incremental_flattening_no_intra``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When using incremental flattening, do not generalise the "intra-group
+parallelism" version for this SOAC.
+
+``noinline``
+~~~~~~~~~~~~
+
+When surrounding a function application, do not inline this
+application.  Otherwise has no effect.  If used within a parallel
+construct (e.g. ``map``), this will likely prevent the GPU backends
+from generating working code.
+
+``unsafe``
+~~~~~~~~~~
+
+Do not perform any dynamic safety checks (such as bound checks) during
+execution of the expression.

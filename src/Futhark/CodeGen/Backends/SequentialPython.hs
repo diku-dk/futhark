@@ -4,7 +4,7 @@ module Futhark.CodeGen.Backends.SequentialPython
 
 import Control.Monad
 
-import Futhark.Representation.SeqMem
+import Futhark.IR.SeqMem
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericPython as GenericPython

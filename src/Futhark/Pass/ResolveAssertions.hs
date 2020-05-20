@@ -17,11 +17,11 @@ import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.AST.Syntax
+import Futhark.IR.Syntax
 import Futhark.Construct
 import Futhark.Pass
-import Futhark.Representation.SOACS (SOACS)
-import qualified Futhark.Representation.SOACS.Simplify as Simplify
+import Futhark.IR.SOACS (SOACS)
+import qualified Futhark.IR.SOACS.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify as Simplify
 
 import Prelude

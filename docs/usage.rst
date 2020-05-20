@@ -320,10 +320,12 @@ contain code that causes the C compiler to warn (for example, unused
 support code that is not needed by the Futhark program).
 
 The generated header file (here, ``futlib.h``) specifies the API, and
-is intended to be human-readable.  The basic usage revolves around
-creating a *configuration object*, which can then be used to obtain a
-*context object*, which must be passed whenever entry points are
-called.
+is intended to be human-readable.  See :ref:`c-api` for more
+information.
+
+The basic usage revolves around creating a *configuration object*,
+which can then be used to obtain a *context object*, which must be
+passed whenever entry points are called.
 
 The configuration object is created using the following function::
 
@@ -343,28 +345,16 @@ following function::
 Context creation may fail.  Immediately after
 ``futhark_context_new()``, call ``futhark_context_get_error()`` (see
 below), which will return a non-NULL error string if context creation
-failed.
+failed. The API functions are all thread safe.
 
 Memory management is entirely manual.  Deallocation functions are
 provided for all types defined in the header file.  Everything
 returned by an entry point must be manually deallocated.
 
-Functions that can fail return an integer: 0 on success and a non-zero
-value on error.  A human-readable string describing the error can be
-retrieved with the following function::
-
-  char *futhark_context_get_error(struct futhark_context *ctx);
-
-It is the caller's responsibility to ``free()`` the returned string.
-Any subsequent call to the function returns ``NULL``, until a new
-error occurs.
-
 For now, many internal errors, such as failure to allocate memory,
 will cause the function to ``abort()`` rather than return an error
 code.  However, all application errors (such as bounds and array size
 checks) will produce an error code.
-
-The API functions are thread safe.
 
 C with OpenCL
 ~~~~~~~~~~~~~

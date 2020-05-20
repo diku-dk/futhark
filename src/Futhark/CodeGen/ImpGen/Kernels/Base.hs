@@ -44,8 +44,8 @@ import Prelude hiding (quot, rem)
 import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Representation.KernelsMem
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
@@ -461,13 +461,12 @@ data AtomicUpdate lore r
   | AtomicLocking (Locking -> DoAtomicUpdate lore r)
     -- ^ Requires explicit locking.
 
--- | Is there an atomic 'BinOp' corresponding to this 'BinOp'?
+-- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
   BinOp ->
   Maybe (VName -> VName -> Count Imp.Elements Imp.Exp -> Imp.Exp -> Imp.AtomicOp)
 
--- | 'atomicUpdate', but where it is explicitly visible whether a
--- locking strategy is necessary.
+-- | Do an atomic update corresponding to a binary operator lambda.
 atomicUpdateLocking :: AtomicBinOp -> Lambda KernelsMem
                     -> AtomicUpdate KernelsMem KernelEnv
 
@@ -622,7 +621,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
       (run_loop <-- 0)
 
 -- | Horizontally fission a lambda that models a binary operator.
-splitOp :: Attributes lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
+splitOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
 splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where n = length $ lambdaReturnType lam
         splitStm (Var res) = do
@@ -1431,12 +1430,15 @@ compileThreadResult _ pe (ConcatReturns (SplitStrided stride) _ _ what) = do
 compileThreadResult _ pe (WriteReturns rws _arr dests) = do
   constants <- kernelConstants <$> askEnv
   rws' <- mapM toExp rws
-  forM_ dests $ \(is, e) -> do
-    is' <- mapM toExp is
-    let condInBounds i rw = 0 .<=. i .&&. i .<. rw
+  forM_ dests $ \(slice, e) -> do
+    slice' <- mapM (traverse toExp) slice
+    let condInBounds (DimFix i) rw =
+          0 .<=. i .&&. i .<. rw
+        condInBounds (DimSlice i n s) rw =
+          0 .<=. i .&&. i+n*s .<. rw
         write = foldl (.&&.) (kernelThreadActive constants) $
-                zipWith condInBounds is' rws'
-    sWhen write $ copyDWIMFix (patElemName pe) (map (toExp' int32) is) e []
+                zipWith condInBounds slice' rws'
+    sWhen write $ copyDWIM (patElemName pe) slice' e []
 
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."

@@ -1,5 +1,4 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Language.Futhark.Interpreter
@@ -37,8 +36,8 @@ import Data.Loc
 
 import Language.Futhark hiding (Value, matchDims)
 import qualified Language.Futhark as F
-import Futhark.Representation.Primitive (intValue, floatValue)
-import qualified Futhark.Representation.Primitive as P
+import Futhark.IR.Primitive (intValue, floatValue)
+import qualified Futhark.IR.Primitive as P
 import qualified Language.Futhark.Semantic as T
 
 import Futhark.Util.Pretty hiding (apply, bool)
@@ -986,6 +985,8 @@ eval env (Match e cs (Info ret, Info retext) _) = do
           case c' of
             Just v' -> return v'
             Nothing -> match v cs'
+
+eval env (Attr _ e _) = eval env e
 
 evalCase :: Value -> Env -> CaseBase Info VName
          -> EvalM (Maybe Value)

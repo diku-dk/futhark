@@ -2,5 +2,5 @@
 with nixpkgs;
 stdenv.mkDerivation {
   name = "futhark";
-  buildInputs = [ zlib zlib.out pkgconfig haskell.compiler.ghc8101 cabal-install opencl-headers ocl-icd hlint ];
+  buildInputs = [ zlib zlib.out pkgconfig haskell.compiler.ghc8101 cabal-install opencl-headers ocl-icd hlint file ];
 }

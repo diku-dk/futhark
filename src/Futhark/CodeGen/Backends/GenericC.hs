@@ -91,10 +91,10 @@ import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
-import Futhark.CodeGen.Backends.SimpleRepresentation
+import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (isBuiltInFunction)
+import Futhark.IR.Prop (isBuiltInFunction)
 
 
 data CompilerState s = CompilerState {
@@ -515,7 +515,7 @@ fatMemUnRef _ = "memblock_unref"
 
 rawMem :: VName -> CompilerM op s C.Exp
 rawMem v = rawMem' <$> fat <*> pure v
-  where fat = (&&) <$> asks envFatMemory <*> (isNothing <$> cacheMem v)
+  where fat = asks ((&&) . envFatMemory) <*> (isNothing <$> cacheMem v)
 
 rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True  e = [C.cexp|$exp:e.mem|]
@@ -630,7 +630,7 @@ defineMemorySpace space = do
           -- tracking probably needs to be rethought.
           if space == DefaultSpace
           then [C.citem|{}|]
-          else [C.citem|fprintf(stderr, $string:peakmsg, (long long) ctx->$id:peakname);|])
+          else [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
           Space sid    -> ("peak_mem_usage_" ++ sid,
@@ -812,7 +812,7 @@ arrayLibraryFunctions space pt signed shape = do
   headerDecl (ArrayDecl name)
     [C.cedecl|$ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   headerDecl (ArrayDecl name)
-    [C.cedecl|typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
+    [C.cedecl|const typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
 
   return [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
@@ -852,7 +852,7 @@ arrayLibraryFunctions space pt signed shape = do
             return arr->mem.mem;
           }
 
-          typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
+          const typename int64_t* $id:shape_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
             (void)ctx;
             return arr->shape;
           }
@@ -1515,7 +1515,9 @@ int main(int argc, char** argv) {
       fclose(runtime_file);
     }
 
-    futhark_debugging_report(ctx);
+    char *report = futhark_context_report(ctx);
+    fputs(report, stderr);
+    free(report);
   }
 
   futhark_context_free(ctx);
@@ -1571,20 +1573,12 @@ $edecls:entry_point_decls
           mapM_ earlyDecl memstructs
           entry_points <-
             mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
-          extra
-          mapM_ earlyDecl $ concat memfuns
-          profilereport <- gets $ DL.toList . compProfileItems
 
-          ctx_ty <- contextType
-          headerDecl MiscDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx);|]
-          libDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx) {
-                      if (ctx->detail_memory || ctx->profiling) {
-                        $items:memreport
-                      }
-                      if (ctx->profiling) {
-                        $items:profilereport
-                      }
-                    }|]
+          extra
+
+          mapM_ earlyDecl $ concat memfuns
+
+          commonLibFuns memreport
 
           return (prototypes, definitions, entry_points)
 
@@ -1601,6 +1595,45 @@ $edecls:entry_point_decls
       timing_h = $(embedStringFile "rts/c/timing.h")
       lock_h   = $(embedStringFile "rts/c/lock.h")
       tuning_h = $(embedStringFile "rts/c/tuning.h")
+
+commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
+commonLibFuns memreport = do
+  ctx <- contextType
+  profilereport <- gets $ DL.toList . compProfileItems
+
+  publicDef_ "context_report" MiscDecl $ \s ->
+    ([C.cedecl|char* $id:s($ty:ctx *ctx);|],
+     [C.cedecl|char* $id:s($ty:ctx *ctx) {
+                 struct str_builder builder;
+                 str_builder_init(&builder);
+                 if (ctx->detail_memory || ctx->profiling) {
+                   $items:memreport
+                 }
+                 if (ctx->profiling) {
+                   $items:profilereport
+                 }
+                 return builder.str;
+               }|])
+
+  publicDef_ "context_get_error" MiscDecl $ \s ->
+    ([C.cedecl|char* $id:s($ty:ctx* ctx);|],
+     [C.cedecl|char* $id:s($ty:ctx* ctx) {
+                         char* error = ctx->error;
+                         ctx->error = NULL;
+                         return error;
+                       }|])
+
+  publicDef_ "context_pause_profiling" MiscDecl $ \s ->
+    ([C.cedecl|void $id:s($ty:ctx* ctx);|],
+     [C.cedecl|void $id:s($ty:ctx* ctx) {
+                 ctx->profiling_paused = 1;
+               }|])
+
+  publicDef_ "context_unpause_profiling" MiscDecl $ \s ->
+    ([C.cedecl|void $id:s($ty:ctx* ctx);|],
+     [C.cedecl|void $id:s($ty:ctx* ctx) {
+                 ctx->profiling_paused = 0;
+               }|])
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do

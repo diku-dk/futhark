@@ -15,7 +15,7 @@ import Data.List (foldl')
 import Prelude hiding (quot)
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Kernels
+import Futhark.IR.Kernels
 import Futhark.Transform.Rename
 import Futhark.Pass
 import Futhark.Tools
@@ -128,7 +128,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
               merge_params = map fst merge
 
           maybe_tiled <-
-            localScope (M.insert i (IndexInfo it) $ scopeOfFParams merge_params) $
+            localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params) $
             tileInBody branch_variant' variance initial_lvl initial_space
             (map paramType merge_params) $ mkBody (bodyStms loopbody) (bodyResult loopbody)
 
@@ -240,7 +240,7 @@ injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody)
 tileDoLoop :: SegSpace -> VarianceTable
            -> Stms Kernels -> Names
            -> (Stms Kernels, Tiling, TiledBody)
-           -> [Type] -> Pattern Kernels -> StmAux (ExpAttr Kernels)
+           -> [Type] -> Pattern Kernels -> StmAux (ExpDec Kernels)
            -> [(FParam Kernels, SubExp)] -> VName -> IntType -> SubExp
            -> Stms Kernels -> Result
            -> TileM (Stms Kernels, Tiling, TiledBody)

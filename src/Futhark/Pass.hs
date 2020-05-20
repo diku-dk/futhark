@@ -1,7 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- | Definition of a polymorphic (generic) pass that can work with programs of any
 -- lore.
 module Futhark.Pass
@@ -25,7 +24,7 @@ import Data.Either
 import Prelude hiding (log)
 
 import Futhark.Error
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Util.Log
 import Futhark.MonadFreshNames
 

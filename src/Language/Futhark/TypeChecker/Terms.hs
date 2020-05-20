@@ -36,11 +36,12 @@ import Prelude hiding (mod)
 import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, checkQualNameWithEnv)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
+import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util.Pretty hiding (space, bool, group)
 
 --- Uniqueness
@@ -484,14 +485,14 @@ instance MonadTypeChecker TermTypeM where
     outer_env <- liftTypeM askEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
-      Nothing -> undefinedType loc qn
+      Nothing -> unknownType loc qn
       Just (TypeAbbr l ps def) ->
         return (qn', ps, qualifyTypeVars outer_env (map typeParamName ps) qs def, l)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeModTable scope of
-      Nothing -> unknownVariableError Term qn loc
+      Nothing -> unknownVariable Term qn loc
       Just m  -> return (qn', m)
 
   lookupVar loc qn = do
@@ -555,7 +556,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
           | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
               return (scope, name')
           | otherwise =
-              unknownVariableError space qn loc
+              unknownVariable space qn loc
 
         descend scope (q:qs)
           | Just (QualName _ q') <- M.lookup (Term, q) $ scopeNameMap scope,
@@ -570,7 +571,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
                   return (scope', QualName (q':qs') name')
                 ModFun{} -> unappliedFunctor loc
           | otherwise =
-              unknownVariableError space qn loc
+              unknownVariable space qn loc
 
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
@@ -581,7 +582,7 @@ checkIntrinsic space qn@(QualName _ name) loc
       scope <- asks termScope
       return (scope, v)
   | otherwise =
-      unknownVariableError space qn loc
+      unknownVariable space qn loc
 
 -- | Wrap 'Types.checkTypeDecl' to also perform an observation of
 -- every size in the type.
@@ -658,6 +659,17 @@ uniqueReturnAliased fname loc =
   typeError loc mempty $
   "A unique tuple element of return value of" <+>
   pquote (pprName fname) <+> "is aliased to some other tuple component."
+
+unexpectedType :: MonadTypeChecker m => SrcLoc -> StructType -> [StructType] -> m a
+unexpectedType loc _ [] =
+  typeError loc mempty $
+  "Type of expression at" <+> text (locStr loc) <+>
+  "cannot have any type - possibly a bug in the type checker."
+unexpectedType loc t ts =
+  typeError loc mempty $
+  "Type of expression at" <+> text (locStr loc) <+> "must be one of" <+>
+  commasep (map ppr ts) <> ", but is" <+>
+  ppr t <> "."
 
 --- Basic checking
 
@@ -1017,7 +1029,7 @@ require why ts e = do mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< e
 
 unifies :: String -> StructType -> Exp -> TermTypeM Exp
 unifies why t e = do
-  unify (mkUsage (srclocOf e) why) t =<< toStruct <$> expType e
+  unify (mkUsage (srclocOf e) why) t . toStruct =<< expType e
   return e
 
 -- The closure of a lambda or local function are those variables that
@@ -1879,6 +1891,9 @@ checkExp (Match e cs _ loc) =
       "type returned from pattern match" t
     return $ Match e' cs' (Info t, Info retext) loc
 
+checkExp (Attr info e loc) =
+  Attr info <$> checkExp e <*> pure loc
+
 checkCases :: PatternType
            -> NE.NonEmpty (CaseBase NoInfo Name)
            -> TermTypeM (NE.NonEmpty (CaseBase Info VName), PatternType, [VName])
@@ -2312,6 +2327,9 @@ consumeArg loc (Scalar (Arrow _ _ _ t2)) (FuncDiet _ pd) =
 consumeArg loc at Consume = return [consumption (aliases at) loc]
 consumeArg loc at _       = return [observation (aliases at) loc]
 
+-- | Type-check a single expression in isolation.  This expression may
+-- turn out to be polymorphic, in which case the list of type
+-- parameters will be non-empty.
 checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = fmap fst . runTermTypeM $ do
   e' <- checkExp e
@@ -2322,6 +2340,7 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   e'' <- updateTypes e'
   checkUnmatched e''
   causalityCheck e''
+  literalOverflowCheck e''
   return (tparams, e'')
 
 -- Verify that all sum type constructors and empty array literals have
@@ -2422,6 +2441,33 @@ causalityCheck binding_body = do
           align (textwrap "Bind the expression producing" <+> pquote (pprName d) <+>
                  "with 'let' beforehand.")
 
+-- | Traverse the expression, emitting warnings if any of the literals overflow
+-- their inferred types
+--
+-- Note: currently unable to detect float underflow (such as 1e-400 -> 0)
+literalOverflowCheck :: Exp -> TermTypeM ()
+literalOverflowCheck = void . check
+  where check e@(IntLit x ty loc) = e <$ case ty of
+          Info (Scalar (Prim t)) -> warnBounds (inBoundsI x t) x t loc
+          _ -> error "Inferred type of int literal is not a number"
+        check e@(FloatLit x ty loc) = e <$ case ty of
+          Info (Scalar (Prim (FloatType t))) -> warnBounds (inBoundsF x t) x t loc
+          _ -> error "Inferred type of float literal is not a float"
+        check e@(Negate (IntLit x ty loc1) loc2) = e <$ case ty of
+          Info (Scalar (Prim t)) -> warnBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
+          _ -> error "Inferred type of int literal is not a number"
+        check e = astMap identityMapper{mapOnExp = check} e
+        bitWidth ty = 8 * intByteSize ty :: Int
+        inBoundsI x (Signed t) = x >= -2^(bitWidth t - 1) && x < 2^(bitWidth t - 1)
+        inBoundsI x (Unsigned t) = x >= 0 && x < 2^bitWidth t
+        inBoundsI x (FloatType Float32) = not $ isInfinite (fromIntegral x :: Float)
+        inBoundsI x (FloatType Float64) = not $ isInfinite (fromIntegral x :: Double)
+        inBoundsI _ Bool = error "Inferred type of int literal is not a number"
+        inBoundsF x Float32 = not $ isInfinite (realToFrac x :: Float)
+        inBoundsF x Float64 = not $ isInfinite x
+        warnBounds inBounds x ty loc = unless inBounds
+          $ warn loc $ "Literal " <> show x <> " out of bounds for inferred type " <> pretty ty <> "."
+
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
 -- definitions, by treating them as 0-ary functions.
@@ -2451,6 +2497,8 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 
   -- Check if the function body can actually be evaluated.
   causalityCheck body''
+
+  literalOverflowCheck body''
 
   bindSpaced [(Term, fname)] $ do
     fname' <- checkName Term fname loc

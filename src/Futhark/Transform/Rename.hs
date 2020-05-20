@@ -3,14 +3,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
--- | This module provides facilities for transforming Futhark programs such
--- that names are unique, via the 'renameProg' function.
--- Additionally, the module also supports adding integral \"tags\" to
--- names (incarnated as the 'ID' type), in order to support more
--- efficient comparisons and renamings.  This is done by 'tagProg'.
--- The intent is that you call 'tagProg' once at some early stage,
--- then use 'renameProg' from then on.  Functions are also provided
--- for removing the tags again from expressions, patterns and typs.
+-- | This module provides facilities for transforming Futhark programs
+-- such that names are unique, via the 'renameProg' function.
 module Futhark.Transform.Rename
   (
   -- * Renaming programs
@@ -37,10 +31,10 @@ import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import Data.Maybe
 
-import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Traversals
-import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
+import Futhark.IR.Prop.Names
+import Futhark.IR.Prop.Patterns
 import Futhark.FreshNames hiding (newName)
 import Futhark.MonadFreshNames (MonadFreshNames(..), modifyNameSource, newName)
 import Futhark.Transform.Substitute
@@ -95,8 +89,8 @@ renameLambda = modifyNameSource . runRenamer . rename
 
 -- | Produce an equivalent pattern but with each pattern element given
 -- a new name.
-renamePattern :: (Rename attr, MonadFreshNames m) =>
-                 PatternT attr -> m (PatternT attr)
+renamePattern :: (Rename dec, MonadFreshNames m) =>
+                 PatternT dec -> m (PatternT dec)
 renamePattern = modifyNameSource . runRenamer . rename'
   where rename' pat = bind (patternNames pat) $ rename pat
 
@@ -128,8 +122,7 @@ class Rename a where
   rename :: a -> RenameM a
 
 instance Rename VName where
-  rename name = fromMaybe name <$>
-                asks (M.lookup name . envNameMap)
+  rename name = asks (fromMaybe name . M.lookup name . envNameMap)
 
 instance Rename a => Rename [a] where
   rename = mapM rename
@@ -187,27 +180,30 @@ instance Rename SubExp where
   rename (Var v)      = Var <$> rename v
   rename (Constant v) = return $ Constant v
 
-instance Rename attr => Rename (Param attr) where
-  rename (Param name attr) = Param <$> rename name <*> rename attr
+instance Rename dec => Rename (Param dec) where
+  rename (Param name dec) = Param <$> rename name <*> rename dec
 
-instance Rename attr => Rename (PatternT attr) where
+instance Rename dec => Rename (PatternT dec) where
   rename (Pattern context values) = Pattern <$> rename context <*> rename values
 
-instance Rename attr => Rename (PatElemT attr) where
-  rename (PatElem ident attr) = PatElem <$> rename ident <*> rename attr
+instance Rename dec => Rename (PatElemT dec) where
+  rename (PatElem ident dec) = PatElem <$> rename ident <*> rename dec
 
 instance Rename Certificates where
   rename (Certificates cs) = Certificates <$> rename cs
 
-instance Rename attr => Rename (StmAux attr) where
-  rename (StmAux cs attr) =
-    StmAux <$> rename cs <*> rename attr
+instance Rename Attrs where
+  rename = pure
+
+instance Rename dec => Rename (StmAux dec) where
+  rename (StmAux cs attrs dec) =
+    StmAux <$> rename cs <*> rename attrs <*> rename dec
 
 instance Renameable lore => Rename (Body lore) where
-  rename (Body attr stms res) = do
-    attr' <- rename attr
+  rename (Body dec stms res) = do
+    dec' <- rename dec
     renamingStms stms $ \stms' ->
-      Body attr' stms' <$> rename res
+      Body dec' stms' <$> rename res
 
 instance Renameable lore => Rename (Stm lore) where
   rename (Let pat elore e) = Let <$> rename pat <*> rename elore <*> rename e
@@ -293,11 +289,11 @@ instance Rename d => Rename (DimIndex d) where
   rename (DimSlice i n s) = DimSlice <$> rename i <*> rename n <*> rename s
 
 -- | Lores in which all annotations are renameable.
-type Renameable lore = (Rename (LetAttr lore),
-                        Rename (ExpAttr lore),
-                        Rename (BodyAttr lore),
-                        Rename (FParamAttr lore),
-                        Rename (LParamAttr lore),
+type Renameable lore = (Rename (LetDec lore),
+                        Rename (ExpDec lore),
+                        Rename (BodyDec lore),
+                        Rename (FParamInfo lore),
+                        Rename (LParamInfo lore),
                         Rename (RetType lore),
                         Rename (BranchType lore),
                         Rename (Op lore))
