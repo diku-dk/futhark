@@ -27,7 +27,7 @@ import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.Trans.Maybe
 import Control.Monad.Reader
 
-import Futhark.Representation.AST.Syntax
+import Futhark.IR.Syntax
 import qualified Futhark.FreshNames as FreshNames
 import Futhark.FreshNames hiding (newName)
 
@@ -78,7 +78,7 @@ newName = modifyNameSource . flip FreshNames.newName
 newNameFromString :: MonadFreshNames m => String -> m VName
 newNameFromString s = newName $ VName (nameFromString s) 0
 
--- | Produce a fresh 'ID', using the given base name as a template.
+-- | Produce a fresh 'VName', using the given base name as a template.
 newID :: MonadFreshNames m => Name -> m VName
 newID s = newName $ VName s 0
 
@@ -104,7 +104,7 @@ newIdent' f ident =
 
 -- | Produce a fresh 'Param', using the given name as a template.
 newParam :: MonadFreshNames m =>
-            String -> attr -> m (Param attr)
+            String -> dec -> m (Param dec)
 newParam s t = do
   s' <- newID $ nameFromString s
   return $ Param s' t

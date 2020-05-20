@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 -- | This module defines an efficient value representation as well as
 -- parsing and comparison functions.  This is because the standard
 -- Futhark parser is not able to cope with large values (like arrays
@@ -42,11 +41,11 @@ import Data.Loc (Pos(..))
 
 import qualified Language.Futhark.Syntax as F
 import Language.Futhark.Pretty()
-import Futhark.Representation.Primitive (PrimValue)
+import Futhark.IR.Primitive (PrimValue)
 import Language.Futhark.Parser.Lexer
 import qualified Futhark.Util.Pretty as PP
-import Futhark.Representation.AST.Attributes.Constants (IsValue(..))
-import Futhark.Representation.AST.Pretty ()
+import Futhark.IR.Prop.Constants (IsValue(..))
+import Futhark.IR.Pretty ()
 import Futhark.Util.Pretty
 import Futhark.Util (maybeHead)
 
@@ -56,8 +55,8 @@ type STVector s = UMVec.STVector s
 type Vector = UVec.Vector
 
 -- | An efficiently represented Futhark value.  Use 'pretty' to get a
--- human-readable representation, and the instances of 'Get' and 'Put'
--- to obtain binary representations
+-- human-readable representation, and v'put' to obtain binary a
+-- representation.
 data Value = Int8Value (Vector Int) (Vector Int8)
            | Int16Value (Vector Int) (Vector Int16)
            | Int32Value (Vector Int) (Vector Int32)

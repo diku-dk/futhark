@@ -2,7 +2,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
 module Futhark.Optimise.Simplify
   ( simplifyProg
   , simplifySomething
@@ -23,7 +22,7 @@ module Futhark.Optimise.Simplify
   where
 
 import Data.Bifunctor (second)
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -99,7 +98,7 @@ simplifyFun :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
              -> m (FunDef lore)
 simplifyFun = simplifySomething Engine.simplifyFun removeFunDefWisdom
 
--- | Simplify just a single 'Lambda'.
+-- | Simplify just a single t'Lambda'.
 simplifyLambda :: (MonadFreshNames m, HasScope lore m,
                    Engine.SimplifiableLore lore) =>
                   Engine.SimpleOps lore

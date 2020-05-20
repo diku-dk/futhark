@@ -48,8 +48,8 @@ import Data.List (foldl', genericLength, zip4, zip6)
 import Prelude hiding (quot, rem)
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.KernelsMem
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations()
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
@@ -866,10 +866,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
   return (pick_local, run)
 
--- Most of this function is not the histogram part itself, but rather
--- figuring out whether to use a local or global memory strategy, as
--- well as collapsing the subhistograms produced (which are always in
--- global memory, but their number may vary).
+-- | Generate code for a segmented histogram called from the host.
 compileSegHist :: Pattern KernelsMem
                -> Count NumGroups SubExp -> Count GroupSize SubExp
                -> SegSpace
@@ -877,6 +874,10 @@ compileSegHist :: Pattern KernelsMem
                -> KernelBody KernelsMem
                -> CallKernelGen ()
 compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
+  -- Most of this function is not the histogram part itself, but
+  -- rather figuring out whether to use a local or global memory
+  -- strategy, as well as collapsing the subhistograms produced (which
+  -- are always in global memory, but their number may vary).
   num_groups' <- traverse toExp num_groups
   group_size' <- traverse toExp group_size
 

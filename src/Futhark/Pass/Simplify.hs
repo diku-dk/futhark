@@ -11,16 +11,16 @@ module Futhark.Pass.Simplify
   )
   where
 
-import qualified Futhark.Representation.SOACS.Simplify as SOACS
-import qualified Futhark.Representation.Kernels.Simplify as Kernels
-import qualified Futhark.Representation.Seq as Seq
-import qualified Futhark.Representation.MC as MC
-import qualified Futhark.Representation.KernelsMem as KernelsMem
-import qualified Futhark.Representation.SeqMem as SeqMem
-import qualified Futhark.Representation.MCMem as MCMem
+import qualified Futhark.IR.SOACS.Simplify as SOACS
+import qualified Futhark.IR.Kernels.Simplify as Kernels
+import qualified Futhark.IR.Seq as Seq
+import qualified Futhark.IR.MC as MC
+import qualified Futhark.IR.KernelsMem as KernelsMem
+import qualified Futhark.IR.SeqMem as SeqMem
+import qualified Futhark.IR.MCMem as MCMem
 
 import Futhark.Pass
-import Futhark.Representation.AST.Syntax
+import Futhark.IR.Syntax
 
 simplify :: (Prog lore -> PassM (Prog lore))
          -> Pass lore lore

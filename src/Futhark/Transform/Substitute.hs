@@ -15,11 +15,11 @@ module Futhark.Transform.Substitute
 import Control.Monad.Identity
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Traversals
-import Futhark.Representation.AST.Attributes.Scope
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
+import Futhark.IR.Prop.Scope
 import Futhark.Analysis.PrimExp
-import Futhark.Representation.AST.Attributes.Names
+import Futhark.IR.Prop.Names
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.
@@ -72,21 +72,27 @@ instance Substitute SubExp where
 instance Substitutable lore => Substitute (Exp lore) where
   substituteNames substs = mapExp $ replace substs
 
-instance Substitute attr => Substitute (PatElemT attr) where
-  substituteNames substs (PatElem ident attr) =
-    PatElem (substituteNames substs ident) (substituteNames substs attr)
+instance Substitute dec => Substitute (PatElemT dec) where
+  substituteNames substs (PatElem ident dec) =
+    PatElem (substituteNames substs ident) (substituteNames substs dec)
 
-instance Substitute attr => Substitute (StmAux attr) where
-  substituteNames substs (StmAux cs attr) =
-    StmAux (substituteNames substs cs) (substituteNames substs attr)
+instance Substitute Attrs where
+  substituteNames _ attrs = attrs
 
-instance Substitute attr => Substitute (Param attr) where
-  substituteNames substs (Param name attr) =
+instance Substitute dec => Substitute (StmAux dec) where
+  substituteNames substs (StmAux cs attrs dec) =
+    StmAux
+    (substituteNames substs cs)
+    (substituteNames substs attrs)
+    (substituteNames substs dec)
+
+instance Substitute dec => Substitute (Param dec) where
+  substituteNames substs (Param name dec) =
     Param
     (substituteNames substs name)
-    (substituteNames substs attr)
+    (substituteNames substs dec)
 
-instance Substitute attr => Substitute (PatternT attr) where
+instance Substitute dec => Substitute (PatternT dec) where
   substituteNames substs (Pattern context values) =
     Pattern (substituteNames substs context) (substituteNames substs values)
 
@@ -102,9 +108,9 @@ instance Substitutable lore => Substitute (Stm lore) where
     (substituteNames substs e)
 
 instance Substitutable lore => Substitute (Body lore) where
-  substituteNames substs (Body attr stms res) =
+  substituteNames substs (Body dec stms res) =
     Body
-    (substituteNames substs attr)
+    (substituteNames substs dec)
     (substituteNames substs stms)
     (substituteNames substs res)
 
@@ -167,26 +173,26 @@ instance Substitute v => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
 
 instance Substitutable lore => Substitute (NameInfo lore) where
-  substituteNames subst (LetInfo attr) =
-    LetInfo $ substituteNames subst attr
-  substituteNames subst (FParamInfo attr) =
-    FParamInfo $ substituteNames subst attr
-  substituteNames subst (LParamInfo attr) =
-    LParamInfo $ substituteNames subst attr
-  substituteNames _ (IndexInfo it) =
-    IndexInfo it
+  substituteNames subst (LetName dec) =
+    LetName $ substituteNames subst dec
+  substituteNames subst (FParamName dec) =
+    FParamName $ substituteNames subst dec
+  substituteNames subst (LParamName dec) =
+    LParamName $ substituteNames subst dec
+  substituteNames _ (IndexName it) =
+    IndexName it
 
 instance Substitute FV where
   substituteNames subst = fvNames . substituteNames subst . freeIn
 
 -- | Lores in which all annotations support name
 -- substitution.
-type Substitutable lore = (Annotations lore,
-                           Substitute (ExpAttr lore),
-                           Substitute (BodyAttr lore),
-                           Substitute (LetAttr lore),
-                           Substitute (FParamAttr lore),
-                           Substitute (LParamAttr lore),
+type Substitutable lore = (Decorations lore,
+                           Substitute (ExpDec lore),
+                           Substitute (BodyDec lore),
+                           Substitute (LetDec lore),
+                           Substitute (FParamInfo lore),
+                           Substitute (LParamInfo lore),
                            Substitute (RetType lore),
                            Substitute (BranchType lore),
                            Substitute (Op lore))

@@ -1,6 +1,55 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+-- | = Constructing Futhark ASTs
+--
+-- This module re-exports and defines a bunch of building blocks for
+-- constructing fragments of Futhark ASTs.  More importantly, it also
+-- contains a basic introduction on how to use them.
+--
+-- The "Futhark.IR.Syntax" module contains the core
+-- AST definition.  One important invariant is that all bound names in
+-- a Futhark program must be /globally/ unique.  In principle, you
+-- could use the facilities from "Futhark.MonadFreshNames" (or your
+-- own bespoke source of unique names) to manually construct
+-- expressions, statements, and entire ASTs.  In practice, this would
+-- be very tedious.  Instead, we have defined a collection of building
+-- blocks (centered around the 'MonadBinder' type class) that permits
+-- a more abstract way of generating code.
+--
+-- Constructing ASTs with these building blocks requires you to ensure
+-- that all free variables are in scope.  See
+-- "Futhark.IR.Prop.Scope".
+--
+-- == 'MonadBinder'
+--
+-- A monad that implements 'MonadBinder' tracks the statements added
+-- so far, the current names in scope, and allows you to add
+-- additional statements with 'addStm'.  Any monad that implements
+-- 'MonadBinder' also implements the t'Lore' type family, which
+-- indicates which lore it works with.  Inside a 'MonadBinder' we can
+-- use 'collectStms' to gather up the 'Stms' added with 'addStm' in
+-- some nested computation.
+--
+-- The 'BinderT' monad (and its convenient 'Binder' version) provides
+-- the simplest implementation of 'MonadBinder'.
+--
+-- == Higher-level building blocks
+--
+-- On top of the raw facilities provided by 'MonadBinder', we have
+-- more convenient facilities.  For example, 'letSubExp' lets us
+-- conveniently create a 'Stm' for an 'Exp' that produces a /single/
+-- value, and returns the (fresh) name for the resulting variable:
+--
+-- @
+-- z <- letExp "z" $ BasicOp $ BinOp (Add Int32) (Var x) (Var y)
+-- @
+--
+-- == Examples
+--
+-- The "Futhark.Transform.FirstOrderTransform" module is a
+-- (relatively) simple example of how to use these components.  As are
+-- some of the high-level building blocks in this very module.
 module Futhark.Construct
   ( letSubExp
   , letSubExps
@@ -68,7 +117,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.MonadFreshNames
 import Futhark.Binder
 
@@ -138,7 +187,7 @@ eIf' ce te fe if_sort = do
   ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
   te'' <- addContextForBranch ts te'
   fe'' <- addContextForBranch ts fe'
-  return $ If ce' te'' fe'' $ IfAttr ts if_sort
+  return $ If ce' te'' fe'' $ IfDec ts if_sort
   where addContextForBranch ts (Body _ stms val_res) = do
           body_ts <- extendedScope (traverse subExpType val_res) stmsscope
           let ctx_res = map snd $ sortOn fst $
@@ -376,8 +425,8 @@ isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) slice
         allOfIt d (DimSlice _ n _) = d == n
         allOfIt _ _ = False
 
-ifCommon :: [Type] -> IfAttr ExtType
-ifCommon ts = IfAttr (staticShapes ts) IfNormal
+ifCommon :: [Type] -> IfDec ExtType
+ifCommon ts = IfDec (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore
@@ -407,7 +456,7 @@ mapResult f (Body _ bnds res) =
   in mkBody (bnds<>bnds2) newres
 
 -- | Instantiate all existential parts dimensions of the given
--- type, using a monadic action to create the necessary 'SubExp's.
+-- type, using a monadic action to create the necessary t'SubExp's.
 -- You should call this function within some monad that allows you to
 -- collect the actions performed (say, 'Writer').
 instantiateShapes :: Monad m =>
@@ -447,7 +496,7 @@ removeExistentials t1 t2 =
 
 -- | Can be used as the definition of 'mkLetNames' for a 'Bindable'
 -- instance for simple representations.
-simpleMkLetNames :: (ExpAttr lore ~ (), LetAttr lore ~ Type,
+simpleMkLetNames :: (ExpDec lore ~ (), LetDec lore ~ Type,
                      MonadFreshNames m, TypedOp (Op lore), HasScope lore m) =>
                     [VName] -> Exp lore -> m (Stm lore)
 simpleMkLetNames names e = do
@@ -455,7 +504,7 @@ simpleMkLetNames names e = do
   (ts, shapes) <- instantiateShapes' et
   let shapeElems = [ PatElem shape shapet | Ident shape shapet <- shapes ]
   let valElems = zipWith PatElem names ts
-  return $ Let (Pattern shapeElems valElems) (StmAux mempty ()) e
+  return $ Let (Pattern shapeElems valElems) (defAux ()) e
 
 -- | Instances of this class can be converted to Futhark expressions
 -- within a 'MonadBinder'.

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
+-- | High-level API for invoking the Futhark compiler.
 module Futhark.Compiler
        (
          runPipelineOnProgram
@@ -29,8 +29,8 @@ import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Internalise
 import Futhark.Pipeline
 import Futhark.MonadFreshNames
-import Futhark.Representation.AST
-import qualified Futhark.Representation.SOACS as I
+import Futhark.IR
+import qualified Futhark.IR.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Compiler.Program
 import Futhark.Util.Log

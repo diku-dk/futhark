@@ -18,7 +18,7 @@ import Data.Maybe
 import qualified Data.Map.Strict as M
 
 import Futhark.Construct
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Rule
 
@@ -41,7 +41,7 @@ Motivation:
 
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
-foldClosedForm :: (Attributes lore, BinderOps lore) =>
+foldClosedForm :: (ASTLore lore, BinderOps lore) =>
                   VarLookup lore
                -> Pattern lore
                -> Lambda lore
@@ -63,12 +63,12 @@ foldClosedForm look pat lam accs arrs = do
   letBind_ pat =<< (If (Var isEmpty)
                     <$> resultBodyM accs
                     <*> renameBody closedBody
-                    <*> pure (IfAttr [primBodyType t] IfNormal))
+                    <*> pure (IfDec [primBodyType t] IfNormal))
   where knownBnds = determineKnownBindings look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
-loopClosedForm :: (Attributes lore, BinderOps lore) =>
+loopClosedForm :: (ASTLore lore, BinderOps lore) =>
                   Pattern lore
                -> [(FParam lore,SubExp)]
                -> Names -> SubExp -> Body lore
@@ -86,7 +86,7 @@ loopClosedForm pat merge i bound body = do
   letBind_ pat =<< (If (Var isEmpty)
                     <$> resultBodyM mergeexp
                     <*> renameBody closedBody
-                    <*> pure (IfAttr [primBodyType t] IfNormal))
+                    <*> pure (IfDec [primBodyType t] IfNormal))
   where (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
         mergenames = map paramName mergepat

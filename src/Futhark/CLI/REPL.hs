@@ -243,7 +243,7 @@ getIt = do
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
   (imports, src, tenv, ienv) <- getIt
-  cur_import <- T.mkInitialImport . fromMaybe "." <$> gets futharkiLoaded
+  cur_import <- gets $ T.mkInitialImport . fromMaybe "." . futharkiLoaded
 
   -- Most of the complexity here concerns the dealing with the fact
   -- that 'import "foo"' is a declaration.  We have to involve a lot
@@ -381,7 +381,7 @@ mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
 unbreakCommand :: Command
 unbreakCommand _ = do
-  top <- fmap (NE.head . breakingStack) <$> gets futharkiBreaking
+  top <- gets $ fmap (NE.head . breakingStack) . futharkiBreaking
   case top of
     Nothing -> liftIO $ putStrLn "Not currently stopped at a breakpoint."
     Just top' -> do modify $ \s -> s { futharkiSkipBreaks = locOf top' : futharkiSkipBreaks s }
@@ -389,7 +389,7 @@ unbreakCommand _ = do
 
 frameCommand :: Command
 frameCommand which = do
-  maybe_stack <- fmap breakingStack <$> gets futharkiBreaking
+  maybe_stack <- gets $ fmap breakingStack . futharkiBreaking
   case (maybe_stack, readMaybe $ T.unpack which) of
     (Just stack, Just i)
       | frame:_ <- NE.drop i stack -> do

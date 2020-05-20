@@ -9,15 +9,33 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+
+  * Warnings for overflowing literals, such as `1000 : u8`.
+
+  * Futhark now supports an attribute system, whereby expressions can
+    be tagged with attributes that provide hints or directions to the
+    compiler.  This is an expert-level feature, but it is sometimes
+    useful.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.15.7]
+
+### Added
+
   * Faster index calculations for very tight GPU kernels (such as the
     ones corresponding to 2D tiling).
 
   * `scan` with vectorised operators (e.g. `map2 (+)`) is now faster
     in some cases.
 
-### Removed
-
-### Changed
+  * The C API has now been documented and stabilized, including
+    obtaining profiling information (although this is still
+    unstructured).
 
 ### Fixed
 

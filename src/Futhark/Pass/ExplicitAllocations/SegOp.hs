@@ -8,8 +8,8 @@ module Futhark.Pass.ExplicitAllocations.SegOp
        )
 where
 
-import qualified Futhark.Representation.Mem.IxFun as IxFun
-import Futhark.Representation.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
 import Futhark.Pass.ExplicitAllocations
 
 instance SizeSubst (SegOp lvl lore) where
@@ -53,14 +53,14 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
                             fullSliceNum base_dims [DimFix my_id]
                   ixfun_y = IxFun.slice ixfun_base $
                             fullSliceNum base_dims [DimFix other_id]
-              return (x { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_x },
-                      y { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun_y })
+              return (x { paramDec = MemArray bt shape u $ ArrayIn mem ixfun_x },
+                      y { paramDec = MemArray bt shape u $ ArrayIn mem ixfun_y })
             Prim bt ->
-              return (x { paramAttr = MemPrim bt },
-                      y { paramAttr = MemPrim bt })
+              return (x { paramDec = MemPrim bt },
+                      y { paramDec = MemPrim bt })
             Mem space ->
-              return (x { paramAttr = MemMem space },
-                      y { paramAttr = MemMem space })
+              return (x { paramDec = MemMem space },
+                      y { paramDec = MemMem space })
 
 allocInBinOpLambda :: Allocable fromlore tolore =>
                       SubExp -> SegSpace -> Lambda fromlore

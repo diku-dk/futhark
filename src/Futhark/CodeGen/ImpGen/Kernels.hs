@@ -20,7 +20,7 @@ import Prelude hiding (quot)
 
 import Futhark.Error
 import Futhark.MonadFreshNames
-import Futhark.Representation.KernelsMem
+import Futhark.IR.KernelsMem
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import Futhark.CodeGen.ImpGen hiding (compileProg)
@@ -31,7 +31,7 @@ import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
 

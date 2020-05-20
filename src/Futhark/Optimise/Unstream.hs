@@ -10,8 +10,8 @@ import Control.Monad.State
 import Control.Monad.Reader
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Kernels
-import Futhark.Representation.MC
+import Futhark.IR.Kernels
+import Futhark.IR.MC
 import Futhark.Pass
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
@@ -22,7 +22,7 @@ unstreamKernels = unstream onHostOp
 unstreamMC :: Pass MC MC
 unstreamMC = unstream onSegOp
 
-unstream :: Attributes lore => OnOp lore -> Pass lore lore
+unstream :: ASTLore lore => OnOp lore -> Pass lore lore
 unstream onOp = Pass "unstream" "sequentialise remaining SOACs" $
                 intraproceduralTransformation optimise
   where optimise scope stms =
@@ -30,20 +30,21 @@ unstream onOp = Pass "unstream" "sequentialise remaining SOACs" $
 
 type UnstreamM lore = ReaderT (Scope lore) (State VNameSource)
 
-type OnOp lore = Pattern lore -> StmAux (ExpAttr lore) -> Op lore -> UnstreamM lore [Stm lore]
+type OnOp lore =
+  Pattern lore -> StmAux (ExpDec lore) -> Op lore -> UnstreamM lore [Stm lore]
 
-optimiseStms :: Attributes lore =>
+optimiseStms :: ASTLore lore =>
                 OnOp lore -> Stms lore -> UnstreamM lore (Stms lore)
 optimiseStms onOp stms =
   localScope (scopeOf stms) $
   stmsFromList . concat <$> mapM (optimiseStm onOp) (stmsToList stms)
 
-optimiseBody :: Attributes lore =>
+optimiseBody :: ASTLore lore =>
                 OnOp lore -> Body lore -> UnstreamM lore (Body lore)
 optimiseBody onOp (Body aux stms res) =
   Body aux <$> optimiseStms onOp stms <*> pure res
 
-optimiseKernelBody :: Attributes lore =>
+optimiseKernelBody :: ASTLore lore =>
                       OnOp lore -> KernelBody lore
                    -> UnstreamM lore (KernelBody lore)
 optimiseKernelBody onOp (KernelBody attr stms res) =
@@ -52,13 +53,13 @@ optimiseKernelBody onOp (KernelBody attr stms res) =
   (stmsFromList . concat <$> mapM (optimiseStm onOp) (stmsToList stms)) <*>
   pure res
 
-optimiseLambda :: Attributes lore =>
+optimiseLambda :: ASTLore lore =>
                   OnOp lore -> Lambda lore -> UnstreamM lore (Lambda lore)
 optimiseLambda onOp lam = localScope (scopeOfLParams $ lambdaParams lam) $ do
   body <- optimiseBody onOp $ lambdaBody lam
   return lam { lambdaBody = body}
 
-optimiseStm :: Attributes lore =>
+optimiseStm :: ASTLore lore =>
                OnOp lore -> Stm lore -> UnstreamM lore [Stm lore]
 
 optimiseStm onOp (Let pat aux (Op op)) =
@@ -71,7 +72,7 @@ optimiseStm onOp (Let pat aux e) =
                                   }
 
 
-optimiseSegOp :: Attributes lore =>
+optimiseSegOp :: ASTLore lore =>
                  OnOp lore -> SegOp lvl lore
               -> UnstreamM lore (SegOp lvl lore)
 optimiseSegOp onOp op =

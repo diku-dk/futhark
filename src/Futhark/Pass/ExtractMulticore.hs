@@ -7,13 +7,13 @@ import Control.Monad.State
 
 import Futhark.Tools
 import Futhark.Pass
-import Futhark.Representation.AST
-import Futhark.Representation.MC
-import qualified Futhark.Representation.MC as MC
-import Futhark.Representation.SOACS
+import Futhark.IR
+import Futhark.IR.MC
+import qualified Futhark.IR.MC as MC
+import Futhark.IR.SOACS
   hiding (Body, Exp, Lambda, LParam, Pattern, Stm)
-import qualified Futhark.Representation.SOACS as SOACS
-import qualified Futhark.Representation.SOACS.Simplify as SOACS
+import qualified Futhark.IR.SOACS as SOACS
+import qualified Futhark.IR.SOACS.Simplify as SOACS
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Util (chunks, takeLast)
@@ -181,7 +181,7 @@ transformSOAC :: Pattern SOACS -> SOAC SOACS -> ExtractM (Stms MC)
 
 transformSOAC pat (Screma w form arrs)
   | Just lam <- isMapSOAC form =
-      transformMap $ MapLoop pat mempty w lam arrs
+      transformMap $ MapLoop pat (defAux ()) w lam arrs
 
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       (gtid, space) <- mkSegSpace w
@@ -215,7 +215,7 @@ transformSOAC pat (Scatter w lam ivs dests) = do
       rets = takeLast (length dests) $ lambdaReturnType lam
       kres = do (a_w, a, is_vs) <- zip3 dests_ws dests_vs $
                                    chunks dests_ns $ zip i_res v_res
-                return $ WriteReturns [a_w] a [ ([i],v) | (i,v) <- is_vs ]
+                return $ WriteReturns [a_w] a [ ([DimFix i],v) | (i,v) <- is_vs ]
       kbody = KernelBody () kstms kres
   return $ oneStm $ Let pat (defAux ()) $ Op $ SegMap () space rets kbody
 

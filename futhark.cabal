@@ -3,6 +3,7 @@ cabal-version: 2.4
 name:           futhark
 version:        0.16.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
+
 description:    Futhark is a small programming language designed to be compiled to
                 efficient parallel code. It is a statically typed, data-parallel,
                 and purely functional array language in the ML family, and comes
@@ -11,6 +12,20 @@ description:    Futhark is a small programming language designed to be compiled 
                 is hardware-agnostic.
                 .
                 For more information, see the website at https://futhark-lang.org
+                .
+                For introductionary information about hacking on the
+                Futhark compiler, see
+                <https://futhark.readthedocs.io/en/latest/hacking.html the hacking guide>.
+                Regarding the internal design of the compiler, the following modules make
+                good starting points:
+                .
+                * "Futhark.IR.Syntax" explains the
+                  basic design of the intermediate representation (IR).
+                * "Futhark.Construct" explains how to write code that
+                  manipulates and creates AST fragments.
+                .
+                <<assets/ohyes.png You too can go fast once you rewrite your program in Futhark.>>
+
 category:       Language
 homepage:       https://futhark-lang.org
 bug-reports:    https://github.com/diku-dk/futhark/issues
@@ -29,6 +44,8 @@ extra-source-files:
     docs/Makefile
     docs/conf.py
     docs/requirements.txt
+extra-doc-files:
+  assets/*.png
 
 source-repository head
   type: git
@@ -41,8 +58,8 @@ library
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
       Futhark.Analysis.DataDependencies
-      Futhark.Analysis.HORepresentation.MapNest
-      Futhark.Analysis.HORepresentation.SOAC
+      Futhark.Analysis.HORep.MapNest
+      Futhark.Analysis.HORep.SOAC
       Futhark.Analysis.Metrics
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
@@ -52,7 +69,6 @@ library
       Futhark.Analysis.Rephrase
       Futhark.Analysis.ScalExp
       Futhark.Analysis.SymbolTable
-      Futhark.Analysis.Usage
       Futhark.Analysis.UsageTable
       Futhark.Bench
       Futhark.Binder
@@ -60,10 +76,10 @@ library
       Futhark.CLI.Autotune
       Futhark.CLI.Bench
       Futhark.CLI.C
-      Futhark.CLI.Check
-      Futhark.CLI.CSharp
       Futhark.CLI.CSOpenCL
+      Futhark.CLI.CSharp
       Futhark.CLI.CUDA
+      Futhark.CLI.Check
       Futhark.CLI.Datacmp
       Futhark.CLI.Dataset
       Futhark.CLI.Dev
@@ -100,7 +116,7 @@ library
       Futhark.CodeGen.Backends.SequentialC
       Futhark.CodeGen.Backends.SequentialCSharp
       Futhark.CodeGen.Backends.SequentialPython
-      Futhark.CodeGen.Backends.SimpleRepresentation
+      Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.Kernels
       Futhark.CodeGen.ImpCode.Multicore
@@ -131,9 +147,45 @@ library
       Futhark.Compiler.Program
       Futhark.Construct
       Futhark.Doc.Generator
-      Futhark.Doc.Html
       Futhark.Error
       Futhark.FreshNames
+      Futhark.IR
+      Futhark.IR.Aliases
+      Futhark.IR.Decorations
+      Futhark.IR.Kernels
+      Futhark.IR.Kernels.Kernel
+      Futhark.IR.Kernels.Simplify
+      Futhark.IR.Kernels.Sizes
+      Futhark.IR.KernelsMem
+      Futhark.IR.MC
+      Futhark.IR.MCMem
+      Futhark.IR.Mem
+      Futhark.IR.Mem.IxFun
+      Futhark.IR.Mem.Simplify
+      Futhark.IR.Pretty
+      Futhark.IR.Primitive
+      Futhark.IR.Prop
+      Futhark.IR.Prop.Aliases
+      Futhark.IR.Prop.Constants
+      Futhark.IR.Prop.Names
+      Futhark.IR.Prop.Patterns
+      Futhark.IR.Prop.Ranges
+      Futhark.IR.Prop.Rearrange
+      Futhark.IR.Prop.Reshape
+      Futhark.IR.Prop.Scope
+      Futhark.IR.Prop.TypeOf
+      Futhark.IR.Prop.Types
+      Futhark.IR.Ranges
+      Futhark.IR.RetType
+      Futhark.IR.SOACS
+      Futhark.IR.SOACS.SOAC
+      Futhark.IR.SOACS.Simplify
+      Futhark.IR.SegOp
+      Futhark.IR.Seq
+      Futhark.IR.SeqMem
+      Futhark.IR.Syntax
+      Futhark.IR.Syntax.Core
+      Futhark.IR.Traversals
       Futhark.Internalise
       Futhark.Internalise.AccurateSizes
       Futhark.Internalise.Bindings
@@ -149,10 +201,10 @@ library
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.LoopKernel
-      Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.InPlaceLowering
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
+      Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.ClosedForm
       Futhark.Optimise.Simplify.Engine
@@ -173,9 +225,9 @@ library
       Futhark.Pass.ExtractKernels.BlockedKernel
       Futhark.Pass.ExtractKernels.DistributeNests
       Futhark.Pass.ExtractKernels.Distribution
+      Futhark.Pass.ExtractKernels.ISRWIM
       Futhark.Pass.ExtractKernels.Interchange
       Futhark.Pass.ExtractKernels.Intragroup
-      Futhark.Pass.ExtractKernels.ISRWIM
       Futhark.Pass.ExtractKernels.StreamKernel
       Futhark.Pass.ExtractKernels.ToKernels
       Futhark.Pass.ExtractMulticore
@@ -188,43 +240,6 @@ library
       Futhark.Pkg.Info
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
-      Futhark.Representation.Aliases
-      Futhark.Representation.AST
-      Futhark.Representation.AST.Annotations
-      Futhark.Representation.AST.Attributes
-      Futhark.Representation.AST.Attributes.Aliases
-      Futhark.Representation.AST.Attributes.Constants
-      Futhark.Representation.AST.Attributes.Names
-      Futhark.Representation.AST.Attributes.Patterns
-      Futhark.Representation.AST.Attributes.Ranges
-      Futhark.Representation.AST.Attributes.Rearrange
-      Futhark.Representation.AST.Attributes.Reshape
-      Futhark.Representation.AST.Attributes.Scope
-      Futhark.Representation.AST.Attributes.TypeOf
-      Futhark.Representation.AST.Attributes.Types
-      Futhark.Representation.AST.Pretty
-      Futhark.Representation.AST.RetType
-      Futhark.Representation.AST.Syntax
-      Futhark.Representation.AST.Syntax.Core
-      Futhark.Representation.AST.Traversals
-      Futhark.Representation.MC
-      Futhark.Representation.MCMem
-      Futhark.Representation.Mem
-      Futhark.Representation.Mem.IxFun
-      Futhark.Representation.Mem.Simplify
-      Futhark.Representation.Kernels
-      Futhark.Representation.Kernels.Kernel
-      Futhark.Representation.Kernels.Simplify
-      Futhark.Representation.Kernels.Sizes
-      Futhark.Representation.KernelsMem
-      Futhark.Representation.Primitive
-      Futhark.Representation.Ranges
-      Futhark.Representation.SegOp
-      Futhark.Representation.Seq
-      Futhark.Representation.SeqMem
-      Futhark.Representation.SOACS
-      Futhark.Representation.SOACS.Simplify
-      Futhark.Representation.SOACS.SOAC
       Futhark.Test
       Futhark.Test.Values
       Futhark.Tools
@@ -242,12 +257,12 @@ library
       Futhark.Util.Table
       Futhark.Version
       Language.Futhark
-      Language.Futhark.Attributes
       Language.Futhark.Core
-      Language.Futhark.Prelude
       Language.Futhark.Interpreter
       Language.Futhark.Parser
+      Language.Futhark.Prelude
       Language.Futhark.Pretty
+      Language.Futhark.Prop
       Language.Futhark.Query
       Language.Futhark.Semantic
       Language.Futhark.Syntax
@@ -335,15 +350,15 @@ test-suite unit
       Futhark.BenchTests
       Futhark.Optimise.AlgSimplifyTests
       Futhark.Pkg.SolveTests
-      Futhark.Representation.AST.Attributes.RearrangeTests
-      Futhark.Representation.AST.Attributes.ReshapeTests
-      Futhark.Representation.AST.AttributesTests
-      Futhark.Representation.AST.Syntax.CoreTests
-      Futhark.Representation.AST.SyntaxTests
-      Futhark.Representation.Mem.IxFun.Alg
-      Futhark.Representation.Mem.IxFunTests
-      Futhark.Representation.Mem.IxFunWrapper
-      Futhark.Representation.PrimitiveTests
+      Futhark.IR.Prop.RearrangeTests
+      Futhark.IR.Prop.ReshapeTests
+      Futhark.IR.PropTests
+      Futhark.IR.Syntax.CoreTests
+      Futhark.IR.SyntaxTests
+      Futhark.IR.Mem.IxFun.Alg
+      Futhark.IR.Mem.IxFunTests
+      Futhark.IR.Mem.IxFunWrapper
+      Futhark.IR.PrimitiveTests
       Language.Futhark.CoreTests
       Language.Futhark.SyntaxTests
       Paths_futhark

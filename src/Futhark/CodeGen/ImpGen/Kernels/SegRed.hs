@@ -50,17 +50,17 @@ module Futhark.CodeGen.ImpGen.Kernels.SegRed
 
 import Control.Monad.Except
 import Data.Maybe
-import Data.List (genericLength, zip4, zip7)
+import Data.List (genericLength, zip7)
 
 import Prelude hiding (quot, rem)
 
 import Futhark.Error
 import Futhark.Transform.Rename
-import Futhark.Representation.KernelsMem
+import Futhark.IR.KernelsMem
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Util (chunks)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 
@@ -124,7 +124,7 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
   let red_op_params = lambdaParams red_op
       (red_acc_params, _) = splitAt (length nes) red_op_params
   forM red_acc_params $ \p ->
-    case paramAttr p of
+    case paramDec p of
       MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [num_threads] <> shape
         sArray "red_arr" pt shape' $
@@ -205,9 +205,10 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
            slugs reds_op_renamed [0..]) $
       \(SegBinOp _ red_op nes _,
         red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
-      let red_acc_params = take (length nes) $ lambdaParams red_op
+      let (red_x_params, red_y_params) = splitAt (length nes) $ lambdaParams red_op
       reductionStageTwo constants pes (kernelGroupId constants) 0 [0] 0
-        (kernelNumGroups constants) slug red_acc_params red_op_renamed nes
+        (kernelNumGroups constants) slug red_x_params red_y_params
+        red_op_renamed nes
         1 counter (ValueExp $ IntValue $ Int32Value i)
         sync_arr group_res_arrs red_arrs
 
@@ -396,11 +397,12 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                    slugs reds_op_renamed [0..]) $
             \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes,
               slug, red_op_renamed, i) -> do
-              let red_acc_params = take (length nes) $ lambdaParams red_op
+              let (red_x_params, red_y_params) =
+                    splitAt (length nes) $ lambdaParams red_op
               reductionStageTwo constants pes
                 group_id flat_segment_id (map (`Imp.var` int32) segment_gtids)
                 first_group_for_segment groups_per_segment
-                slug red_acc_params red_op_renamed nes
+                slug red_x_params red_y_params red_op_renamed nes
                 (fromIntegral num_counters) counter (ValueExp $ IntValue $ Int32Value i)
                 sync_arr group_res_arrs red_arrs
 
@@ -609,13 +611,13 @@ reductionStageTwo :: KernelConstants
                   -> Imp.Exp
                   -> Imp.Exp
                   -> SegBinOpSlug
-                  -> [LParam KernelsMem]
+                  -> [LParam KernelsMem] -> [LParam KernelsMem]
                   -> Lambda KernelsMem -> [SubExp]
                   -> Imp.Exp -> VName -> Imp.Exp -> VName -> [VName] -> [VName]
                   -> InKernelGen ()
 reductionStageTwo constants segred_pes
                   group_id flat_segment_id segment_gtids first_group_for_segment groups_per_segment
-                  slug red_acc_params
+                  slug red_x_params red_y_params
                   red_op_renamed nes
                   num_counters counter counter_i sync_arr group_res_arrs red_arrs = do
   let local_tid = kernelLocalThreadId constants
@@ -650,19 +652,41 @@ reductionStageTwo constants segred_pes
       sOp $ Imp.Atomic DefaultSpace $
       Imp.AtomicAdd Int32 old_counter counter_mem counter_offset $
       negate groups_per_segment
+
     sLoopNest (slugShape slug) $ \vec_is -> do
-      comment "read in the per-group-results" $
-        forM_ (zip4 red_acc_params red_arrs nes group_res_arrs) $
-        \(p, arr, ne, group_res_arr) -> do
-          let load_group_result =
+      -- There is no guarantee that the number of workgroups for the
+      -- segment is less than the workgroup size, so each thread may
+      -- have to read multiple elements.  We do this in a sequential
+      -- way that may induce non-coalesced accesses, but the total
+      -- number of accesses should be tiny here.
+      comment "read in the per-group-results" $ do
+        read_per_thread <- dPrimVE "read_per_thread" $
+                           groups_per_segment `quotRoundingUp` group_size
+
+        forM_ (zip red_x_params nes) $ \(p, ne) ->
+          copyDWIMFix (paramName p) [] ne []
+
+        sFor "i" read_per_thread $ \i -> do
+
+          group_res_id <- dPrimVE "group_res_id" $
+                          local_tid * read_per_thread + i
+          index_of_group_res <- dPrimVE "index_of_group_res" $
+                                first_group_for_segment + group_res_id
+
+          sWhen (group_res_id .<. groups_per_segment) $ do
+            forM_ (zip red_y_params group_res_arrs) $
+              \(p, group_res_arr) ->
                 copyDWIMFix (paramName p) []
-                (Var group_res_arr) ([0, first_group_for_segment + local_tid] ++ vec_is)
-              load_neutral_element =
-                copyDWIMFix (paramName p) [] ne []
-          sIf (local_tid .<. groups_per_segment)
-            load_group_result load_neutral_element
-          when (primType $ paramType p) $
-            copyDWIMFix arr [local_tid] (Var $ paramName p) []
+                (Var group_res_arr)
+                ([0, index_of_group_res] ++ vec_is)
+
+            compileStms mempty (bodyStms $ slugBody slug) $
+              forM_ (zip red_x_params (bodyResult $ slugBody slug)) $ \(p, se) ->
+              copyDWIMFix (paramName p) [] se []
+
+      forM_ (zip red_x_params red_arrs) $ \(p, arr) ->
+        when (primType $ paramType p) $
+        copyDWIMFix arr [local_tid] (Var $ paramName p) []
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
@@ -672,4 +696,6 @@ reductionStageTwo constants segred_pes
         sComment "and back to memory with the final result" $
           sWhen (local_tid .==. 0) $
           forM_ (zip segred_pes $ lambdaParams red_op_renamed) $ \(pe, p) ->
-          copyDWIMFix (patElemName pe) (segment_gtids++vec_is) (Var $ paramName p) []
+          copyDWIMFix
+          (patElemName pe) (segment_gtids++vec_is)
+          (Var $ paramName p) []

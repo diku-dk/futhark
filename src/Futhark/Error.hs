@@ -27,6 +27,7 @@ data ErrorClass = CompilerBug
                 | CompilerLimitation
                 deriving (Eq, Ord, Show)
 
+-- | A compiler error.
 data CompilerError =
     ExternalError Doc
     -- ^ An error that happened due to something the user did, such as
@@ -39,9 +40,11 @@ instance Show CompilerError where
   show (ExternalError s) = pretty s
   show (InternalError s _ _) = T.unpack s
 
+-- | Raise an 'ExternalError based on a prettyprinting result.
 externalError :: MonadError CompilerError m => Doc -> m a
 externalError = throwError . ExternalError
 
+-- | Raise an 'ExternalError based on a string.
 externalErrorS :: MonadError CompilerError m => String -> m a
 externalErrorS = externalError . text
 
@@ -55,14 +58,18 @@ data InternalError = Error ErrorClass T.Text
 
 instance Exception InternalError
 
+-- | Throw an t'InternalError' that is a 'CompilerBug'.
 compilerBug :: T.Text -> a
 compilerBug = throw . Error CompilerBug
 
+-- | Throw an t'InternalError' that is a 'CompilerLimitation'.
 compilerLimitation :: T.Text -> a
 compilerLimitation = throw . Error CompilerLimitation
 
+-- | Like 'compilerBug', but with a 'String'.
 compilerBugS :: String -> a
 compilerBugS = compilerBug . T.pack
 
+-- | Like 'compilerLimitation', but with a 'String'.
 compilerLimitationS :: String -> a
 compilerLimitationS = compilerLimitation . T.pack

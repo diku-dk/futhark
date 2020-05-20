@@ -24,13 +24,13 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.List (find, (\\), tails)
 
-import Futhark.Representation.SOACS hiding (SOAC(..))
-import qualified Futhark.Representation.SOACS as Futhark
+import Futhark.IR.SOACS hiding (SOAC(..))
+import qualified Futhark.IR.SOACS as Futhark
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
+import qualified Futhark.Analysis.HORep.SOAC as SOAC
+import qualified Futhark.Analysis.HORep.MapNest as MapNest
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
@@ -352,7 +352,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
               c_num_buckets = length ops_c
               (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
               body' =
-                Body { bodyAttr = bodyAttr body_p -- body_p and body_c have the same lores
+                Body { bodyDec = bodyDec body_p -- body_p and body_c have the same lores
                      , bodyStms = bodyStms body_p <> bodyStms body_c
                      , bodyResult = take c_num_buckets (bodyResult body_c) ++
                                     take p_num_buckets (bodyResult body_p) ++
@@ -381,7 +381,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
                       ys_p  = take leny ys
                       ys2  = drop leny ys
           let (body_p, body2) = (lambdaBody lam_p, lambdaBody lam_c)
-          let body' = Body { bodyAttr = bodyAttr body_p -- body_p and body2 have the same lores
+          let body' = Body { bodyDec = bodyDec body_p -- body_p and body2 have the same lores
                            , bodyStms = bodyStms body_p <> bodyStms body2
                            , bodyResult = zipW (bodyResult body_p) (bodyResult body2)
                            }
@@ -590,12 +590,12 @@ iswim _ _ _ =
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =
   let t = rowType $ paramType param
-  in param { paramAttr = t }
+  in param { paramDec = t }
 
 setParamOuterDimTo :: SubExp -> LParam -> LParam
 setParamOuterDimTo w param =
   let t = paramType param `setOuterSize` w
-  in param { paramAttr = t }
+  in param { paramDec = t }
 
 setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
 setPatternOuterDimTo w = fmap (`setOuterSize` w)

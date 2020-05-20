@@ -7,7 +7,7 @@ import Control.Monad
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.MCMem
+import Futhark.IR.MCMem
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 
@@ -35,14 +35,17 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
    compileStms (freeIn kres) kstms $ do
      let writeResult pe (Returns _ se) =
            copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
-         writeResult pe (WriteReturns dims _ idx_vals) = do
+         writeResult pe (WriteReturns rws _ idx_vals) = do
            let (iss, vs) = unzip idx_vals
-           dims' <- mapM toExp dims
-           forM_ (zip iss vs) $ \(idx, v) -> do
-             is' <- mapM toExp idx
-             let in_bounds = foldl1 (.&&.) ( zipWith (.<.) is' dims') .&&.
-                             foldl1 (.&&.) ( map (0.<=.) is')
-                 when_in_bounds = copyDWIMFix (patElemName pe) is' v []
+           rws' <- mapM toExp rws
+           forM_ (zip iss vs) $ \(slice, v) -> do
+             slice' <- mapM (traverse toExp) slice
+             let condInBounds (DimFix i) rw =
+                   0 .<=. i .&&. i .<. rw
+                 condInBounds (DimSlice i n s) rw =
+                   0 .<=. i .&&. i+n*s .<. rw
+                 in_bounds = foldl1 (.&&.) $ zipWith condInBounds slice' rws'
+                 when_in_bounds = copyDWIM (patElemName pe) slice' v []
              sWhen in_bounds when_in_bounds
 
          writeResult _ res =

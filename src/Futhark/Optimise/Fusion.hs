@@ -14,15 +14,15 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 import qualified Data.List         as L
 
-import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.SOACS hiding (SOAC(..))
-import qualified Futhark.Representation.Aliases as Aliases
-import qualified Futhark.Representation.SOACS as Futhark
+import Futhark.IR.Prop.Aliases
+import Futhark.IR.SOACS hiding (SOAC(..))
+import qualified Futhark.IR.Aliases as Aliases
+import qualified Futhark.IR.SOACS as Futhark
 import Futhark.MonadFreshNames
-import Futhark.Representation.SOACS.Simplify
+import Futhark.IR.SOACS.Simplify
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Construct
-import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import qualified Futhark.Analysis.HORep.SOAC as SOAC
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -32,10 +32,10 @@ data VarEntry = IsArray VName (NameInfo SOACS) Names SOAC.Input
               | IsNotArray (NameInfo SOACS)
 
 varEntryType :: VarEntry -> NameInfo SOACS
-varEntryType (IsArray _ attr _ _) =
-  attr
-varEntryType (IsNotArray attr) =
-  attr
+varEntryType (IsArray _ dec _ _) =
+  dec
+varEntryType (IsNotArray dec) =
+  dec
 
 varEntryAliases :: VarEntry -> Names
 varEntryAliases (IsArray _ _ x _) = x
@@ -69,7 +69,7 @@ instance MonadFreshNames FusionGM where
   putNameSource = put
 
 instance HasScope SOACS FusionGM where
-  askScope = toScope <$> asks varsInScope
+  askScope = asks $ toScope . varsInScope
     where toScope = M.map varEntryType
 
 ------------------------------------------------------------------------
@@ -81,8 +81,8 @@ bindVar :: FusionGEnv -> (Ident, Names) -> FusionGEnv
 bindVar env (Ident name t, aliases) =
   env { varsInScope = M.insert name entry $ varsInScope env }
   where entry = case t of
-          Array {} -> IsArray name (LetInfo t) aliases' $ SOAC.identInput $ Ident name t
-          _        -> IsNotArray $ LetInfo t
+          Array {} -> IsArray name (LetName t) aliases' $ SOAC.identInput $ Ident name t
+          _        -> IsNotArray $ LetName t
         expand = maybe mempty varEntryAliases . flip M.lookup (varsInScope env)
         aliases' = aliases <> mconcat (map expand $ namesToList aliases)
 
@@ -108,7 +108,7 @@ bindingParams = binding . (`zip` repeat mempty) . map paramIdent
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
 bindingFamilyVar faml env (Ident nm t) =
   env { soacs       = M.insert nm faml $ soacs env
-      , varsInScope = M.insert nm (IsArray nm (LetInfo t) mempty $
+      , varsInScope = M.insert nm (IsArray nm (LetName t) mempty $
                                    SOAC.identInput $ Ident nm t) $
                       varsInScope env
       }
@@ -146,13 +146,13 @@ bindingTransform pe srcname trns = local $ \env ->
     Just (IsArray src' _ aliases input) ->
       env { varsInScope =
               M.insert vname
-              (IsArray src' (LetInfo attr) (oneName srcname <> aliases) $
+              (IsArray src' (LetName dec) (oneName srcname <> aliases) $
                trns `SOAC.addTransform` input) $
               varsInScope env
           }
     _ -> bindVar env (patElemIdent pe, oneName vname)
   where vname = patElemName pe
-        attr = patElemAttr pe
+        dec = patElemDec pe
 
 -- | Binds the fusion result to the environment.
 bindRes :: FusedRes -> FusionGM a -> FusionGM a
@@ -745,7 +745,7 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     -- cannot be fused from outside the lambda:
     let inp_arrs = namesFromList $ M.keys $ inpArr new_res
     let unfus = infusible new_res <> inp_arrs
-    bnds <- M.keys <$> asks varsInScope
+    bnds <- asks $ M.keys . varsInScope
     let unfus'  = unfus `namesIntersection` namesFromList bnds
     -- merge fres with new_res'
     let new_res' = new_res { infusible = unfus' }
@@ -817,10 +817,10 @@ replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
             throwError $ Error
             ("In Fusion.hs, replaceSOAC, unfused kernel "
              ++"still in result: "++pretty names)
-          insertKerSOAC (outNames ker) ker
+          insertKerSOAC aux (outNames ker) ker
 
-insertKerSOAC :: [VName] -> FusedKer -> FusionGM (Stms SOACS)
-insertKerSOAC names ker = do
+insertKerSOAC :: StmAux () -> [VName] -> FusedKer -> FusionGM (Stms SOACS)
+insertKerSOAC aux names ker = do
   new_soac' <- finaliseSOAC $ fsoac ker
   runBinder_ $ do
     f_soac <- SOAC.toSOAC new_soac'
@@ -828,7 +828,7 @@ insertKerSOAC names ker = do
     -- issue #224).  We insert copy expressions to fix it.
     f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
-    letBind_ (basicPattern [] validents) $ Op f_soac'
+    auxing aux $ letBind_ (basicPattern [] validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
 
 -- | Perform simplification and fusion inside the lambda(s) of a SOAC.

@@ -33,14 +33,10 @@ futhark_hlint() {
 }
 
 # Run hlint on changed files.
-for file in $(git diff-index --cached --name-only HEAD | egrep '\.l?hsc?$'); do
-    if [ -f $file ]; then
-        echo "Checking $file with hlint:"
-        if ! futhark_hlint "$file"; then
-            fail
-        fi
-    fi
-done
+files=$(git diff-index --cached --name-only HEAD | egrep '\.l?hsc?$')
+if [ "$files" ]; then
+    futhark_hlint $files
+fi
 
 if ! stack build; then
     fail

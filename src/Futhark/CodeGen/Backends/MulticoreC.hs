@@ -16,13 +16,13 @@ import Data.FileEmbed
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
-import Futhark.Representation.MCMem (Prog, MCMem)
+import Futhark.IR.MCMem (Prog, MCMem)
 import Futhark.CodeGen.ImpCode.Multicore
 import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.MonadFreshNames
-import Futhark.CodeGen.Backends.SimpleRepresentation
+import Futhark.CodeGen.Backends.SimpleRep
 
 compileProg :: MonadFreshNames m => Prog MCMem
             -> m GC.CParts
@@ -159,25 +159,6 @@ compileProg =
                                  (void)ctx;
                                  return 0;
                                }|])
-          GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
-            ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
-                                 char* error = ctx->error;
-                                 ctx->error = NULL;
-                                 return error;
-                               }|])
-
-          GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-            ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         ctx->profiling_paused = 1;
-                       }|])
-
-          GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
-            ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                         ctx->profiling_paused = 0;
-                       }|])
 
           GC.publicDef_ "context_get_num_threads" GC.InitDecl $ \s ->
             ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],

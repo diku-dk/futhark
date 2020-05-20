@@ -19,14 +19,14 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelTarget (..)
        , FailureMsg(..)
        , module Futhark.CodeGen.ImpCode
-       , module Futhark.Representation.Kernels.Sizes
+       , module Futhark.IR.Kernels.Sizes
        )
        where
 
 import qualified Data.Map as M
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
-import Futhark.Representation.Kernels.Sizes
+import Futhark.IR.Kernels.Sizes
 import qualified Futhark.CodeGen.ImpCode as Imp
 
 import Futhark.Util.Pretty

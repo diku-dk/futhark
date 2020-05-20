@@ -35,7 +35,7 @@ import qualified Data.Map.Strict as M
 import Data.Monoid
 
 import Language.Futhark.Syntax hiding (ID)
-import Language.Futhark.Attributes
+import Language.Futhark.Prop
 import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
 
@@ -138,6 +138,7 @@ import Language.Futhark.Parser.Lexer
       '}'             { L $$ RCURLY }
       '['             { L $$ LBRACKET }
       ']'             { L $$ RBRACKET }
+      '#['            { L $$ HASH_LBRACKET }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '\\'            { L $$ BACKSLASH }
@@ -530,6 +531,8 @@ QualName :: { (QualName Name, SrcLoc) }
 Exp :: { UncheckedExp }
      : Exp ':' TypeExpDecl { Ascript $1 $3 (srcspan $1 $>) }
      | Exp ':>' TypeExpDecl { Coerce $1 $3 (NoInfo,NoInfo) (srcspan $1 $>) }
+     | '#[' AttrInfo ']' Exp %prec bottom
+                           { Attr $2 $4 (srcspan $1 $>) }
      | Exp2 %prec ':'      { $1 }
 
 Exp2 :: { UncheckedExp }
@@ -546,7 +549,7 @@ Exp2 :: { UncheckedExp }
 
      | MatchExp { $1 }
 
-     | unsafe Exp2     { Unsafe $2 (srcspan $1 $>) }
+     | unsafe Exp2         { Unsafe $2 (srcspan $1 $>) }
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
@@ -881,6 +884,10 @@ FieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
+
+AttrInfo :: { AttrInfo }
+         : id { let L _ (ID s) = $1 in AttrInfo s }
+         | unsafe { AttrInfo "unsafe" } -- HACK
 
 Value :: { Value }
 Value : IntValue { $1 }

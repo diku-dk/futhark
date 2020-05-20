@@ -392,7 +392,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                                  free(ctx);
                                }|])
 
-  GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                  // Check for any delayed error.
@@ -425,27 +425,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                  return 0;
                }|])
 
-  GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
-    ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
-                         char* error = ctx->error;
-                         ctx->error = NULL;
-                         return error;
-                       }|])
-
-  GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 ctx->profiling_paused = 1;
-               }|])
-
-  GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 ctx->profiling_paused = 0;
-               }|])
-
-  GC.publicDef_ "context_clear_caches" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                          ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
@@ -550,20 +530,18 @@ openClReport names = report_kernels ++ [report_total]
           let runs = kernelRuns name
               total_runtime = kernelRuntime name
           in [[C.citem|
-               fprintf(stderr,
-                       $string:(format_string name),
-                       ctx->$id:runs,
-                       (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
-                       (long int) ctx->$id:total_runtime);
+               str_builder(&builder,
+                           $string:(format_string name),
+                           ctx->$id:runs,
+                           (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
+                           (long int) ctx->$id:total_runtime);
               |],
               [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
         report_total = [C.citem|
-                          if (ctx->profiling) {
-                            fprintf(stderr, "%d operations with cumulative runtime: %6ldus\n",
-                                    ctx->total_runs, ctx->total_runtime);
-                          }
+                          str_builder(&builder, "%d operations with cumulative runtime: %6ldus\n",
+                                      ctx->total_runs, ctx->total_runtime);
                         |]
 
 sizeHeuristicsCode :: SizeHeuristic -> C.Stm

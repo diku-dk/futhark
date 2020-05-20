@@ -20,7 +20,7 @@ import Prelude hiding (quot, rem)
 import Futhark.Error
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.MCMem
+import Futhark.IR.MCMem
 import Futhark.Transform.Rename
 
 type MulticoreGen = ImpM MCMem () Imp.Multicore

@@ -15,7 +15,7 @@ import Futhark.CodeGen.ImpGen.Multicore.SegScan
 import Futhark.CodeGen.ImpGen.Multicore.SegHist
 
 import Futhark.CodeGen.ImpGen
-import Futhark.Representation.MCMem
+import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog MCMem

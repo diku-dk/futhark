@@ -8,7 +8,7 @@ module Futhark.Binder
   , runBinderT, runBinderT_
   , runBinderT', runBinderT'_
   , BinderOps (..)
-  , bindableMkExpAttrB
+  , bindableMkExpDecB
   , bindableMkBodyB
   , bindableMkLetNamesB
   , Binder
@@ -19,7 +19,6 @@ module Futhark.Binder
   -- * Non-class interface
   , addBinderStms
   , collectBinderStms
-  , certifyingBinder
   -- * The 'MonadBinder' typeclass
   , module Futhark.Binder.Class
   )
@@ -33,19 +32,19 @@ import Control.Monad.Error.Class
 import qualified Data.Map.Strict as M
 
 import Futhark.Binder.Class
-import Futhark.Representation.AST
+import Futhark.IR
 
-class Attributes lore => BinderOps lore where
-  mkExpAttrB :: (MonadBinder m, Lore m ~ lore) =>
-                Pattern lore -> Exp lore -> m (ExpAttr lore)
+class ASTLore lore => BinderOps lore where
+  mkExpDecB :: (MonadBinder m, Lore m ~ lore) =>
+                Pattern lore -> Exp lore -> m (ExpDec lore)
   mkBodyB :: (MonadBinder m, Lore m ~ lore) =>
              Stms lore -> Result -> m (Body lore)
   mkLetNamesB :: (MonadBinder m, Lore m ~ lore) =>
                  [VName] -> Exp lore -> m (Stm lore)
 
-bindableMkExpAttrB :: (MonadBinder m, Bindable (Lore m)) =>
-                      Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
-bindableMkExpAttrB pat e = return $ mkExpAttr pat e
+bindableMkExpDecB :: (MonadBinder m, Bindable (Lore m)) =>
+                      Pattern (Lore m) -> Exp (Lore m) -> m (ExpDec (Lore m))
+bindableMkExpDecB pat e = return $ mkExpDec pat e
 
 bindableMkBodyB :: (MonadBinder m, Bindable (Lore m)) =>
                    Stms (Lore m) -> Result -> m (Body (Lore m))
@@ -67,7 +66,7 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (Attributes lore, Monad m) =>
+instance (ASTLore lore, Monad m) =>
          HasScope lore (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ M.lookup name . snd
@@ -76,7 +75,7 @@ instance (Attributes lore, Monad m) =>
       Just t' -> return $ typeOf t'
   askScope = BinderT $ gets snd
 
-instance (Attributes lore, Monad m) =>
+instance (ASTLore lore, Monad m) =>
          LocalScope lore (BinderT lore m) where
   localScope types (BinderT m) = BinderT $ do
     modify $ second (M.union types)
@@ -84,17 +83,15 @@ instance (Attributes lore, Monad m) =>
     modify $ second (`M.difference` types)
     return x
 
-instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
+instance (ASTLore lore, MonadFreshNames m, BinderOps lore) =>
          MonadBinder (BinderT lore m) where
   type Lore (BinderT lore m) = lore
-  mkExpAttrM = mkExpAttrB
+  mkExpDecM = mkExpDecB
   mkBodyM = mkBodyB
   mkLetNamesM = mkLetNamesB
 
   addStms     = addBinderStms
   collectStms = collectBinderStms
-
-  certifying = certifyingBinder
 
 runBinderT :: MonadFreshNames m =>
               BinderT lore m a
@@ -163,14 +160,6 @@ collectBinderStms m = do
   (new_stms, _) <- BinderT get
   BinderT $ put (old_stms, old_scope)
   return (x, new_stms)
-
-certifyingBinder :: (MonadFreshNames m, BinderOps lore) =>
-                    Certificates -> BinderT lore m a
-                 -> BinderT lore m a
-certifyingBinder cs m = do
-  (x, stms) <- collectStms m
-  addStms $ certify cs <$> stms
-  return x
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

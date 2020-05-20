@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+-- | The core logic of @futhark doc@.
 module Futhark.Doc.Generator (renderFiles) where
 
 import Control.Arrow ((***))
@@ -26,8 +27,39 @@ import Prelude hiding (abs)
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad hiding (warn)
 import Language.Futhark
-import Futhark.Doc.Html
+import Futhark.Util.Pretty (Doc, ppr)
 import Futhark.Version
+
+docToHtml :: Doc -> Html
+docToHtml = toHtml . pretty
+
+primTypeHtml :: PrimType -> Html
+primTypeHtml = docToHtml . ppr
+
+prettyU :: Uniqueness -> Html
+prettyU = docToHtml . ppr
+
+renderName :: Name -> Html
+renderName name = docToHtml (ppr name)
+
+joinBy :: Html -> [Html] -> Html
+joinBy _ [] = mempty
+joinBy _ [x] = x
+joinBy sep (x:xs) = x <> foldMap (sep <>) xs
+
+commas :: [Html] -> Html
+commas = joinBy ", "
+
+parens :: Html -> Html
+parens x = "(" <> x <> ")"
+
+braces :: Html -> Html
+braces x = "{" <> x <> "}"
+brackets :: Html -> Html
+brackets x = "[" <> x <> "]"
+
+pipes :: [Html] -> Html
+pipes = joinBy " | "
 
 -- | A set of names that we should not generate links to, because they
 -- are uninteresting.  These are for example type parameters.
@@ -91,6 +123,11 @@ vnameToFileMap = mconcat . map forFile
                 forMod ModFun{} = mempty
                 forMty = forMod . mtyMod
 
+-- | @renderFiles important_imports imports@ produces HTML files
+-- documenting the type-checked program @imports@, with the files in
+-- @important_imports@ considered most important.  The HTML files must
+-- be written to the specific locations indicated in the return value,
+-- or the relative links will be wrong.
 renderFiles :: [FilePath] -> Imports -> ([(FilePath, Html)], Warnings)
 renderFiles important_imports imports = runWriter $ do
   (import_pages, documented) <- runWriterT $ forM imports $ \(current, fm) ->
@@ -540,7 +577,7 @@ vnameLink' :: VName -> String -> String -> String
 vnameLink :: VName -> DocM String
 vnameLink vname = do
   current <- asks ctxCurrent
-  file <- maybe current fst <$> asks (M.lookup vname . ctxFileMap)
+  file <- asks $ maybe current fst . M.lookup vname . ctxFileMap
   return $ vnameLink' vname current file
 
 vnameLink' (VName _ tag) current file =
