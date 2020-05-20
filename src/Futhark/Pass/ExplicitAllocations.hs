@@ -634,14 +634,13 @@ allocInExp (DoLoop ctx vals form body) =
   form' <- allocInLoopForm form
   localScope (scopeOf form') $ do
     (valinit_ctx, valinit') <- mk_loop_val valinit
-    (body', body_ixfuns) <- allocInIfBody (length vals) body
-    bodyres_spaces <- mapM ixfunSpace body_ixfuns
+    (body', body_ixfuns, body_spaces) <- allocInLoopBody (length vals) body
     init_ixfuns <- mapM bodyReturnMIxf valinit'
     init_spaces <- mapM ixfunSpace init_ixfuns
     let (spaces, subs) = unzip $
                          zipWith generalize
                          (zip init_spaces init_ixfuns)
-                         (zip bodyres_spaces body_ixfuns)
+                         (zip body_spaces body_ixfuns)
         init_subs = map (selectSub fst) subs
         res_subs = map (selectSub snd) subs
     res_body <- addResCtxInLoopBody body' spaces res_subs
@@ -706,15 +705,6 @@ allocInExp (DoLoop ctx vals form body) =
     (_ctxparams, ctxinit) = unzip ctx
     (_valparams, valinit) = unzip vals
 
-    ixfunSpace x =
-      case x of
-        Just (ArrayIn mem _) -> do
-          meminfo <- lookupMemInfo mem
-          case meminfo of
-            MemMem space -> return $ Just space
-            _ -> return Nothing
-        _ -> return Nothing
-
     generalize :: (Maybe Space, Maybe MemBind) -> (Maybe Space, Maybe MemBind)
                -> (Maybe Space, Maybe (ExtIxFun, [(PrimExp VName, PrimExp VName)]))
     generalize (Just sp1, Just (ArrayIn _ ixf1)) (Just sp2, Just (ArrayIn _ ixf2)) =
@@ -777,6 +767,29 @@ allocInExp e = mapExpM alloc e
                          , mapOnOp = \op -> do handle <- asks allocInOp
                                                handle op
                          }
+
+ixfunSpace :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+              Maybe MemBind -> AllocM fromlore tolore (Maybe Space)
+ixfunSpace x =
+  case x of
+    Just (ArrayIn mem _) -> do
+      meminfo <- lookupMemInfo mem
+      case meminfo of
+        MemMem space -> return $ Just space
+        _ -> return Nothing
+    _ -> return Nothing
+
+-- | Just introduces the new representation (index functions); but
+-- does not unify (e.g., does not ensures direct); implementation
+-- extends `allocInBodyNoDirect`, but also return `MemBind`
+allocInLoopBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                 Int -> Body fromlore -> AllocM fromlore tolore (Body tolore, [Maybe MemBind], [Maybe Space])
+allocInLoopBody num_vals (Body _ bnds res) =
+  allocInStms bnds $ \bnds' -> do
+  let (_, val_res) = splitFromEnd num_vals res
+  mem_ixfs <- mapM bodyReturnMIxf val_res
+  mem_spaces <- mapM ixfunSpace mem_ixfs
+  return (Body () bnds' res, mem_ixfs, mem_spaces)
 
 -- | Just introduces the new representation (index functions); but
 -- does not unify (e.g., does not ensures direct); implementation
