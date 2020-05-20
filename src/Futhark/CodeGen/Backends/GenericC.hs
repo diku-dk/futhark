@@ -614,7 +614,9 @@ defineMemorySpace space = do
   -- count of the source by one.
   let setdef = [C.cedecl|static int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
   int ret = $id:(fatMemUnRef space)(ctx, lhs, lhs_desc);
-  (*(rhs->references))++;
+  if (rhs->references != NULL) {
+    (*(rhs->references))++;
+  }
   *lhs = *rhs;
   return ret;
 }
