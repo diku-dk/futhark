@@ -221,8 +221,9 @@ instance (FreeDec (ExpDec lore),
           FreeIn (LParamInfo lore),
           FreeIn (LetDec lore),
           FreeIn (Op lore)) => FreeIn (Stm lore) where
-  freeIn' (Let pat (StmAux cs dec) e) =
-    freeIn' cs <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
+  freeIn' (Let pat (StmAux cs attrs dec) e) =
+    freeIn' cs <> freeIn' attrs <>
+    precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm lore) => FreeIn (Stms lore) where
   freeIn' = foldMap freeIn'
@@ -287,8 +288,11 @@ instance FreeIn dec => FreeIn (PatternT dec) where
 instance FreeIn Certificates where
   freeIn' (Certificates cs) = freeIn' cs
 
+instance FreeIn Attrs where
+  freeIn' (Attrs _) = mempty
+
 instance FreeIn dec => FreeIn (StmAux dec) where
-  freeIn' (StmAux cs dec) = freeIn' cs <> freeIn' dec
+  freeIn' (StmAux cs attrs dec) = freeIn' cs <> freeIn' attrs <> freeIn' dec
 
 instance FreeIn a => FreeIn (IfDec a) where
   freeIn' (IfDec r _) = freeIn' r

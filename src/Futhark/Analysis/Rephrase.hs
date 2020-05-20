@@ -44,10 +44,10 @@ rephraseExp :: Monad m => Rephraser m from to -> Exp from -> m (Exp to)
 rephraseExp = mapExpM . mapper
 
 rephraseStm :: Monad m => Rephraser m from to -> Stm from -> m (Stm to)
-rephraseStm rephraser (Let pat (StmAux cs dec) e) =
+rephraseStm rephraser (Let pat (StmAux cs attrs dec) e) =
   Let <$>
   rephrasePattern (rephraseLetBoundLore rephraser) pat <*>
-  (StmAux cs <$> rephraseExpLore rephraser dec) <*>
+  (StmAux cs attrs <$> rephraseExpLore rephraser dec) <*>
   rephraseExp rephraser e
 
 rephrasePattern :: Monad m =>

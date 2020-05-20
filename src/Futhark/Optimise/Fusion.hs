@@ -817,10 +817,10 @@ replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
             throwError $ Error
             ("In Fusion.hs, replaceSOAC, unfused kernel "
              ++"still in result: "++pretty names)
-          insertKerSOAC (outNames ker) ker
+          insertKerSOAC aux (outNames ker) ker
 
-insertKerSOAC :: [VName] -> FusedKer -> FusionGM (Stms SOACS)
-insertKerSOAC names ker = do
+insertKerSOAC :: StmAux () -> [VName] -> FusedKer -> FusionGM (Stms SOACS)
+insertKerSOAC aux names ker = do
   new_soac' <- finaliseSOAC $ fsoac ker
   runBinder_ $ do
     f_soac <- SOAC.toSOAC new_soac'
@@ -828,7 +828,7 @@ insertKerSOAC names ker = do
     -- issue #224).  We insert copy expressions to fix it.
     f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
-    letBind_ (basicPattern [] validents) $ Op f_soac'
+    auxing aux $ letBind_ (basicPattern [] validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
 
 -- | Perform simplification and fusion inside the lambda(s) of a SOAC.

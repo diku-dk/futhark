@@ -40,7 +40,7 @@ interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
 interchangeLoop
   isMapParameter
   (SeqLoop perm loop_pat merge form body)
-  (MapNesting pat cs w params_and_arrs) = do
+  (MapNesting pat aux w params_and_arrs) = do
     merge_expanded <-
       localScope (scopeOfLParams $ map fst params_and_arrs) $
       mapM expand merge
@@ -64,7 +64,7 @@ interchangeLoop
     body' <- mkDummyStms (params'<>new_params) body
 
     let lam = Lambda (params'<>new_params) body' rettype
-        map_bnd = Let loop_pat_expanded (StmAux cs ()) $
+        map_bnd = Let loop_pat_expanded aux $
                   Op $ Screma w (mapSOAC lam) $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
@@ -141,7 +141,7 @@ interchangeBranch1 :: (MonadBinder m, LocalScope SOACS m) =>
                       Branch -> LoopNesting -> m Branch
 interchangeBranch1
   (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
-  (MapNesting pat cs w params_and_arrs) = do
+  (MapNesting pat aux w params_and_arrs) = do
     let ret' = map (`arrayOfRow` Free w) ret
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
@@ -161,7 +161,7 @@ interchangeBranch1
             resultBody <$> (mapM (dummyBindIfNotIn bound_in_branch) =<< bodyBind branch)
           let lam = Lambda params branch' lam_ret
               res = map Var $ patternNames branch_pat'
-              map_bnd = Let branch_pat' (StmAux cs ()) $ Op $ Screma w (mapSOAC lam) arrs
+              map_bnd = Let branch_pat' aux $ Op $ Screma w (mapSOAC lam) arrs
           return $ mkBody (oneStm map_bnd) res
 
     tbranch' <- mkBranch tbranch

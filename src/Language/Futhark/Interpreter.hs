@@ -986,6 +986,8 @@ eval env (Match e cs (Info ret, Info retext) _) = do
             Just v' -> return v'
             Nothing -> match v cs'
 
+eval env (Attr _ e _) = eval env e
+
 evalCase :: Value -> Env -> CaseBase Info VName
          -> EvalM (Maybe Value)
 evalCase v env (CasePat p cExp _) = runMaybeT $ do
