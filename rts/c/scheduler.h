@@ -5,7 +5,7 @@
 
 #define MULTICORE
 /* #define MCDEBUG */
-/* #define MCPROFILE */
+#define MCPROFILE
 
 #ifdef _WIN32
 #include <windows.h>
@@ -24,6 +24,7 @@ static long int ran_iter, start_iter = 0;
 #endif
 
 static int scheduler_error = 0;
+
 
 /* A wrapper for getting rusage on Linux and MacOS */
 /* TODO maybe figure out this for windows */
@@ -61,7 +62,7 @@ static inline void output_thread_usage(struct worker *worker)
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
   struct timeval user_cpu_time = usage.ru_utime;
   struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %d - work time %llu - user time: %llu us - sys: %llu us - dequeue: (%llu/%llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
+  fprintf(stderr, "tid: %2d - work time %llu - user time: %llu us - sys: %10llu us - dequeue: (%8llu/%8llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
           worker->tid,
           worker->time_spent_working,
           (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
@@ -143,14 +144,6 @@ static inline void *scheduler_worker(void* arg)
   return NULL;
 }
 
-static inline void scheduler_set_queue_profiling(struct scheduler *scheduler, int val)
-{
-  for (int i = 0; i < scheduler->num_threads; i++) {
-    scheduler->workers[i].q.profile = val;
-  }
-}
-
-
 
 static inline int scheduler_dynamic(struct scheduler *scheduler,
                                     struct scheduler_task *task,
@@ -207,10 +200,6 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   if (ntask != NULL) {
     *ntask = scheduler->num_threads;
   }
-
-#ifdef MCPROFILE
-  scheduler_set_queue_profiling(scheduler, 0);
-#endif
 
   return scheduler_error;
 }
@@ -278,10 +267,6 @@ static inline int scheduler_static(struct scheduler *scheduler,
     *ntask = nsubtasks;
   }
 
-#ifdef MCPROFILE
-  scheduler_set_queue_profiling(scheduler, 0);
-#endif
-
   return scheduler_error;
 }
 
@@ -348,12 +333,15 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_do_task] starting task %s with %ld iterations \n", task->name, task->iterations);
 #endif
-#ifdef MCPROFILE
-  scheduler_set_queue_profiling(scheduler, 1);
-#endif
-
   if (task->iterations == 0) {
     if (ntask != NULL)  *ntask = 0;
+    return 0;
+  }
+
+  /* Run task directly if below some threshold */
+  if (task->iterations == 1) {
+    CHECK_ERR(task->fn(task->args, 0, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid), task->name);
+    *ntask = (worker_local == NULL) ? 1 : scheduler->num_threads;
     return 0;
   }
 
@@ -367,9 +355,7 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   ran_iter = 0;
 #endif
 
-  /* Run task directly if below some threshold */
-  /* if (task->iterations < 1000) { */
-  /* } */
+
 
   // TODO reevaluate if you really need two functions
   switch(task->granularity)

@@ -60,7 +60,6 @@ struct subtask_queue {
   uint64_t time_dequeue;
   uint64_t n_dequeues;
   uint64_t n_enqueues;
-  int profile;
 };
 
 
@@ -201,11 +200,9 @@ static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *s
   subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used) % subtask_queue->capacity] = subtask;
   subtask_queue->num_used++;
 
-  if (subtask_queue->profile) {
-    uint64_t end = get_wall_time();
-    subtask_queue->time_enqueue += (end - start);
-    subtask_queue->n_enqueues++;
-  }
+  uint64_t end = get_wall_time();
+  subtask_queue->time_enqueue += (end - start);
+  subtask_queue->n_enqueues++;
 
   // Broadcast a reader (if any) that there is now an element.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
@@ -227,7 +224,6 @@ static inline int subtask_queue_steal(struct worker *worker,
     return 1;
   }
 
-  int was_profiling = subtask_queue->profile;
   uint64_t start = get_wall_time();
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
 
@@ -250,11 +246,9 @@ static inline int subtask_queue_steal(struct worker *worker,
     return -1;
   }
 
-  if (subtask_queue->profile && was_profiling){
-    uint64_t end = get_wall_time();
-    subtask_queue->time_dequeue += (end - start);
-    subtask_queue->n_dequeues++;
-  }
+  uint64_t end = get_wall_time();
+  subtask_queue->time_dequeue += (end - start);
+  subtask_queue->n_dequeues++;
 
   // Broadcast a writer (if any) that there is now room for more.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
@@ -310,7 +304,6 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
 
   // I don't want to measure time waiting from initial initailization of queue
   // until first task so we use a little hack here
-  int was_profiling = subtask_queue->profile;
   uint64_t start = get_wall_time();
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
@@ -344,11 +337,9 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
     return -1;
   }
 
-  if (subtask_queue->profile) {
-    uint64_t end = get_wall_time();
-    subtask_queue->time_dequeue += (end - start);
-    subtask_queue->n_dequeues++;
-  }
+  uint64_t end = get_wall_time();
+  subtask_queue->time_dequeue += (end - start);
+  subtask_queue->n_dequeues++;
 
   // Broadcast a writer (if any) that there is now room for more.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
