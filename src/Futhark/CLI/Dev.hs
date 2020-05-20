@@ -20,12 +20,12 @@ import Futhark.Compiler
 import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
 import Futhark.Pipeline
-import qualified Futhark.Representation.SOACS as SOACS
-import qualified Futhark.Representation.Kernels as Kernels
-import qualified Futhark.Representation.Seq as Seq
-import qualified Futhark.Representation.KernelsMem as KernelsMem
-import qualified Futhark.Representation.SeqMem as SeqMem
-import Futhark.Representation.AST (Prog, pretty)
+import qualified Futhark.IR.SOACS as SOACS
+import qualified Futhark.IR.Kernels as Kernels
+import qualified Futhark.IR.Seq as Seq
+import qualified Futhark.IR.KernelsMem as KernelsMem
+import qualified Futhark.IR.SeqMem as SeqMem
+import Futhark.IR (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 

@@ -49,10 +49,10 @@ module Futhark.CodeGen.ImpCode
 
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
-  , module Futhark.Representation.Primitive
+  , module Futhark.IR.Primitive
   , module Futhark.Analysis.PrimExp
-  , module Futhark.Representation.Kernels.Sizes
-  , module Futhark.Representation.AST.Attributes.Names
+  , module Futhark.IR.Kernels.Sizes
+  , module Futhark.IR.Prop.Names
   )
   where
 
@@ -62,15 +62,15 @@ import Data.Traversable
 import qualified Data.Map as M
 
 import Language.Futhark.Core
-import Futhark.Representation.Primitive
-import Futhark.Representation.AST.Syntax
+import Futhark.IR.Primitive
+import Futhark.IR.Syntax
   (SubExp(..), Space(..), SpaceId,
    ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
-import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Pretty ()
+import Futhark.IR.Prop.Names
+import Futhark.IR.Pretty ()
 import Futhark.Analysis.PrimExp
 import Futhark.Util.Pretty hiding (space)
-import Futhark.Representation.Kernels.Sizes (Count(..))
+import Futhark.IR.Kernels.Sizes (Count(..))
 
 type MemSize = SubExp
 type DimSize = SubExp

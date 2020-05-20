@@ -53,8 +53,8 @@ import Data.List (zip4, partition, sort)
 import Futhark.Optimise.Simplify.Lore
   (mkWiseBody, mkWiseLetStm, removeExpWisdom, removeScopeWisdom)
 import Futhark.MonadFreshNames
-import Futhark.Representation.Mem
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.Mem
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
@@ -933,5 +933,5 @@ bindPatternWithAllocations types names e = do
 data ExpHint = NoHint
              | Hint IxFun Space
 
-defaultExpHints :: (Monad m, Attributes lore) => Exp lore -> m [ExpHint]
+defaultExpHints :: (Monad m, ASTLore lore) => Exp lore -> m [ExpHint]
 defaultExpHints e = return $ replicate (expExtTypeSize e) NoHint

@@ -17,14 +17,14 @@ module Futhark.CodeGen.ImpCode.Kernels
   , Kernel (..)
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
-  , module Futhark.Representation.Kernels.Sizes
+  , module Futhark.IR.Kernels.Sizes
   )
   where
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.Representation.Kernels.Sizes
-import Futhark.Representation.AST.Pretty ()
+import Futhark.IR.Kernels.Sizes
+import Futhark.IR.Pretty ()
 import Futhark.Util.Pretty
 
 type Program = Imp.Definitions HostOp

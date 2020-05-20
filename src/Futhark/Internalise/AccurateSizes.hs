@@ -15,7 +15,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Futhark.Construct
-import Futhark.Representation.AST
+import Futhark.IR
 
 argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
 argShapes shapes valts valargts =

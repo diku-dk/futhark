@@ -1,7 +1,7 @@
 -- | Re-export the external Futhark modules for convenience.
 module Language.Futhark
   ( module Language.Futhark.Syntax
-  , module Language.Futhark.Attributes
+  , module Language.Futhark.Prop
   , module Language.Futhark.Pretty
 
   , Ident, DimIndex, Exp, Pattern
@@ -14,7 +14,7 @@ module Language.Futhark
   where
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes
+import Language.Futhark.Prop
 import Language.Futhark.Pretty
 
 -- | An identifier with type- and aliasing information.

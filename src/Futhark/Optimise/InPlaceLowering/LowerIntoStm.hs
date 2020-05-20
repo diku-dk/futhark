@@ -15,9 +15,9 @@ import Data.Either
 import qualified Data.Map as M
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.Aliases
-import Futhark.Representation.Kernels
+import Futhark.IR.Prop.Aliases
+import Futhark.IR.Aliases
+import Futhark.IR.Kernels
 import Futhark.Construct
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 

@@ -9,7 +9,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Kernels
+import Futhark.IR.Kernels
 import Futhark.Pass
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT

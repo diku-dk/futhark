@@ -41,11 +41,11 @@ import Data.Loc (Pos(..))
 
 import qualified Language.Futhark.Syntax as F
 import Language.Futhark.Pretty()
-import Futhark.Representation.Primitive (PrimValue)
+import Futhark.IR.Primitive (PrimValue)
 import Language.Futhark.Parser.Lexer
 import qualified Futhark.Util.Pretty as PP
-import Futhark.Representation.AST.Attributes.Constants (IsValue(..))
-import Futhark.Representation.AST.Pretty ()
+import Futhark.IR.Prop.Constants (IsValue(..))
+import Futhark.IR.Pretty ()
 import Futhark.Util.Pretty
 import Futhark.Util (maybeHead)
 

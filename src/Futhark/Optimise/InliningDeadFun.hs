@@ -17,8 +17,8 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Control.Parallel.Strategies
 
-import Futhark.Representation.SOACS
-import Futhark.Representation.SOACS.Simplify
+import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Simplify
   (simpleSOACS, simplifyFun, simplifyConsts)
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Simplify.Lore (addScopeWisdom)

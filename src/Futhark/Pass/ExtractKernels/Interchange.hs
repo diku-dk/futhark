@@ -21,7 +21,7 @@ import Data.List (find)
 
 import Futhark.Pass.ExtractKernels.Distribution
   (LoopNesting(..), KernelNest, kernelNestLoops)
-import Futhark.Representation.SOACS
+import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Tools

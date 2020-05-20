@@ -19,8 +19,8 @@ where
 
 import Control.Monad.Identity
 
-import Futhark.Representation.AST
-import Futhark.Representation.SOACS.SOAC
+import Futhark.IR
+import Futhark.IR.SOACS.SOAC
 import Futhark.MonadFreshNames
 import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert

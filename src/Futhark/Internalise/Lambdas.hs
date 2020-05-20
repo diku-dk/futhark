@@ -12,7 +12,7 @@ module Futhark.Internalise.Lambdas
 import Data.Loc
 
 import Language.Futhark as E
-import Futhark.Representation.SOACS as I
+import Futhark.IR.SOACS as I
 import Futhark.MonadFreshNames
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes

@@ -27,7 +27,7 @@ import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.Trans.Maybe
 import Control.Monad.Reader
 
-import Futhark.Representation.AST.Syntax
+import Futhark.IR.Syntax
 import qualified Futhark.FreshNames as FreshNames
 import Futhark.FreshNames hiding (newName)
 

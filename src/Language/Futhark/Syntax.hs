@@ -105,7 +105,7 @@ import           Data.Traversable
 import qualified Data.List.NonEmpty               as NE
 import           Prelude
 
-import           Futhark.Representation.Primitive (FloatType (..),
+import           Futhark.IR.Primitive (FloatType (..),
                                                    FloatValue (..),
                                                    IntType (..), IntValue (..))
 import           Futhark.Util.Pretty

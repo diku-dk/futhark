@@ -25,7 +25,7 @@ where
 import Control.Monad.Writer
 import qualified Data.Kind
 
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.MonadFreshNames
 
 -- | The class of lores that can be constructed solely from an
@@ -34,7 +34,7 @@ import Futhark.MonadFreshNames
 -- often than you think, and the results thrown away.  If used
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
-class (Attributes lore,
+class (ASTLore lore,
        FParamInfo lore ~ DeclType,
        LParamInfo lore ~ Type,
        RetType lore ~ DeclExtType,
@@ -56,7 +56,7 @@ class (Attributes lore,
 -- effects!  They may be called more often than you think, and the
 -- results thrown away.  It is acceptable for them to create new
 -- bindings, however.
-class (Attributes (Lore m),
+class (ASTLore (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
        LocalScope (Lore m) m) =>
       MonadBinder m where

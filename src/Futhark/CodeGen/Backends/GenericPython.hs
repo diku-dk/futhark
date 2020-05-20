@@ -53,15 +53,15 @@ import Control.Monad.RWS
 import Data.Maybe
 import qualified Data.Map as M
 
-import Futhark.Representation.Primitive hiding (Bool)
+import Futhark.IR.Primitive hiding (Bool)
 import Futhark.MonadFreshNames
-import Futhark.Representation.AST.Syntax (Space(..))
+import Futhark.IR.Syntax (Space(..))
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (isBuiltInFunction)
+import Futhark.IR.Prop (isBuiltInFunction)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.

@@ -9,7 +9,7 @@ module Futhark.Analysis.DataDependencies
 
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST
+import Futhark.IR
 
 -- | A mapping from a variable name @v@, to those variables on which
 -- the value of @v@ is dependent.  The intuition is that we could
@@ -18,10 +18,10 @@ import Futhark.Representation.AST
 type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: Attributes lore => Body lore -> Dependencies
+dataDependencies :: ASTLore lore => Body lore -> Dependencies
 dataDependencies = dataDependencies' M.empty
 
-dataDependencies' :: Attributes lore =>
+dataDependencies' :: ASTLore lore =>
                      Dependencies -> Body lore -> Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where grow deps (Let pat _ (If c tb fb _)) =

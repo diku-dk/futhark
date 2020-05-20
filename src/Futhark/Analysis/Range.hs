@@ -16,34 +16,34 @@ import Control.Monad.Reader
 import Data.List (nub)
 
 import qualified Futhark.Analysis.ScalExp as SE
-import Futhark.Representation.Ranges
+import Futhark.IR.Ranges
 import Futhark.Analysis.AlgSimplify as AS
 
 -- Entry point
 
 -- | Perform variable range analysis on the given program, returning a
 -- program with embedded range annotations.
-rangeAnalysis :: (Attributes lore, CanBeRanged (Op lore)) =>
+rangeAnalysis :: (ASTLore lore, CanBeRanged (Op lore)) =>
                  Prog lore -> Prog (Ranges lore)
 rangeAnalysis (Prog consts funs) =
   Prog (runRangeM $ mapM analyseStm consts) (map analyseFun funs)
 
 -- Implementation
 
-analyseFun :: (Attributes lore, CanBeRanged (Op lore)) =>
+analyseFun :: (ASTLore lore, CanBeRanged (Op lore)) =>
               FunDef lore -> FunDef (Ranges lore)
 analyseFun (FunDef entry fname restype params body) =
   runRangeM $ bindFunParams params $
   FunDef entry fname restype params <$> analyseBody body
 
-analyseBody :: (Attributes lore, CanBeRanged (Op lore)) =>
+analyseBody :: (ASTLore lore, CanBeRanged (Op lore)) =>
                Body lore
             -> RangeM (Body (Ranges lore))
 analyseBody (Body lore origbnds result) =
   analyseStms origbnds $ \bnds' ->
     return $ mkRangedBody lore bnds' result
 
-analyseStms :: (Attributes lore, CanBeRanged (Op lore)) =>
+analyseStms :: (ASTLore lore, CanBeRanged (Op lore)) =>
                Stms lore
             -> (Stms (Ranges lore) -> RangeM a)
             -> RangeM a
@@ -55,14 +55,14 @@ analyseStms = analyseStms' mempty . stmsToList
           bindPattern (stmPattern bnd') $
             analyseStms' (acc <> oneStm bnd') bnds m
 
-analyseStm :: (Attributes lore, CanBeRanged (Op lore)) =>
+analyseStm :: (ASTLore lore, CanBeRanged (Op lore)) =>
               Stm lore -> RangeM (Stm (Ranges lore))
 analyseStm (Let pat lore e) = do
   e' <- analyseExp e
   pat' <- simplifyPatRanges $ addRangesToPattern pat e'
   return $ Let pat' lore e'
 
-analyseExp :: (Attributes lore, CanBeRanged (Op lore)) =>
+analyseExp :: (ASTLore lore, CanBeRanged (Op lore)) =>
               Exp lore
            -> RangeM (Exp (Ranges lore))
 analyseExp = mapExpM analyse
@@ -77,7 +77,7 @@ analyseExp = mapExpM analyse
                  , mapOnOp = return . addOpRanges
                  }
 
-analyseLambda :: (Attributes lore, CanBeRanged (Op lore)) =>
+analyseLambda :: (ASTLore lore, CanBeRanged (Op lore)) =>
                  Lambda lore
               -> RangeM (Lambda (Ranges lore))
 analyseLambda lam = do

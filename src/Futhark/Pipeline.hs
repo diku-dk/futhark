@@ -34,7 +34,7 @@ import Prelude hiding (id, (.))
 
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Error
-import Futhark.Representation.AST (Prog, PrettyLore)
+import Futhark.IR (Prog, PrettyLore)
 import Futhark.TypeCheck
 import Futhark.Pass
 import Futhark.Util.Log

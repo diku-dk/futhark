@@ -6,7 +6,7 @@ where
 
 import           Futhark.Analysis.PrimExp
 import           Futhark.Optimise.Simplify.Engine as Engine
-import           Futhark.Representation.AST
+import           Futhark.IR
 
 -- | Simplify a 'PrimExp', including copy propagation.  If a 'LeafExp'
 -- refers to a name that is a 'Constant', the node turns into a

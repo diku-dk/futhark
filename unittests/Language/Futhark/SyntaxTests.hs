@@ -12,7 +12,7 @@ import Test.Tasty
 
 import Language.Futhark.Syntax
 
-import Futhark.Representation.PrimitiveTests()
+import Futhark.IR.PrimitiveTests()
 
 tests :: TestTree
 tests = testGroup "Source SyntaxTests" []

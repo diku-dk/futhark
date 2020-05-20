@@ -14,7 +14,7 @@ import qualified Language.C.Quote.OpenCL as C
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
-import Futhark.Representation.KernelsMem
+import Futhark.IR.KernelsMem
   hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.ImpCode.OpenCL

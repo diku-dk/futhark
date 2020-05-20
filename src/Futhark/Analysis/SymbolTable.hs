@@ -65,15 +65,15 @@ import qualified Data.Map.Strict as M
 import Prelude hiding (elem, lookup)
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.AST hiding (FParam, lookupType)
-import qualified Futhark.Representation.AST as AST
+import Futhark.IR hiding (FParam, lookupType)
+import qualified Futhark.IR as AST
 import Futhark.Analysis.ScalExp
 
 import qualified Futhark.Analysis.AlgSimplify as AS
-import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.IR.Prop.Ranges
   (Range, ScalExpRange, Ranged)
-import qualified Futhark.Representation.AST.Attributes.Ranges as Ranges
-import qualified Futhark.Representation.AST.Attributes.Aliases as Aliases
+import qualified Futhark.IR.Prop.Ranges as Ranges
+import qualified Futhark.IR.Prop.Aliases as Aliases
 
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int
@@ -102,7 +102,7 @@ instance Monoid (SymbolTable lore) where
 empty :: SymbolTable lore
 empty = SymbolTable 0 M.empty mempty False
 
-fromScope :: Attributes lore => Scope lore -> SymbolTable lore
+fromScope :: ASTLore lore => Scope lore -> SymbolTable lore
 fromScope = M.foldlWithKey' insertFreeVar' empty
   where insertFreeVar' m k dec = insertFreeVar k dec m
 
@@ -191,7 +191,7 @@ entryInfo (FParam entry) = FParamName $ fparamDec entry
 entryInfo (LParam entry) = LParamName $ lparamDec entry
 entryInfo (FreeVar entry) = freeVarDec entry
 
-entryType :: Attributes lore => Entry lore -> Type
+entryType :: ASTLore lore => Entry lore -> Type
 entryType = typeOf . entryInfo
 
 isVarBound :: Entry lore -> Maybe (LetBoundEntry lore)
@@ -274,10 +274,10 @@ lookupBasicOp name vtable = case lookupExp name vtable of
   Just (BasicOp e, cs) -> Just (e, cs)
   _                    -> Nothing
 
-lookupType :: Attributes lore => VName -> SymbolTable lore -> Maybe Type
+lookupType :: ASTLore lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
 
-lookupSubExpType :: Attributes lore => SubExp -> SymbolTable lore -> Maybe Type
+lookupSubExpType :: ASTLore lore => SubExp -> SymbolTable lore -> Maybe Type
 lookupSubExpType (Var v) = lookupType v
 lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
 
@@ -288,7 +288,7 @@ lookupSubExp name vtable = do
     BasicOp (SubExp se) -> Just (se,cs)
     _                   -> Nothing
 
-lookupScalExp :: Attributes lore => VName -> SymbolTable lore -> Maybe ScalExp
+lookupScalExp :: ASTLore lore => VName -> SymbolTable lore -> Maybe ScalExp
 lookupScalExp name vtable =
   case (lookup name vtable, lookupRange name vtable) of
     -- If we know the lower and upper bound, and these are the same,
@@ -311,7 +311,7 @@ lookupAliases name vtable = case M.lookup name $ bindings vtable of
 available :: VName -> SymbolTable lore -> Bool
 available name = maybe False (not . consumed) . M.lookup name . bindings
 
-index :: Attributes lore => VName -> [SubExp] -> SymbolTable lore
+index :: ASTLore lore => VName -> [SubExp] -> SymbolTable lore
       -> Maybe Indexed
 index name is table = do
   is' <- mapM asPrimExp is
@@ -345,14 +345,14 @@ rangesRep = M.filter knownRange . M.map toRep . bindings
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
 class IndexOp op where
-  indexOp :: (Attributes lore, IndexOp (Op lore)) =>
+  indexOp :: (ASTLore lore, IndexOp (Op lore)) =>
              SymbolTable lore -> Int -> op
           -> [PrimExp VName] -> Maybe Indexed
   indexOp _ _ _ _ = Nothing
 
 instance IndexOp () where
 
-indexExp :: (IndexOp (Op lore), Attributes lore) =>
+indexExp :: (IndexOp (Op lore), ASTLore lore) =>
             SymbolTable lore -> Exp lore -> Int -> IndexArray
 
 indexExp vtable (Op op) k is =
@@ -395,7 +395,7 @@ indexExp table (BasicOp (Index v slice)) _ is =
 
 indexExp _ _ _ _ = Nothing
 
-defBndEntry :: (Attributes lore, IndexOp (Op lore)) =>
+defBndEntry :: (ASTLore lore, IndexOp (Op lore)) =>
                SymbolTable lore
             -> PatElem lore
             -> Range
@@ -459,13 +459,13 @@ bindingEntries bnd@(Let pat _ _) vtable = do
   return $ defBndEntry vtable pat_elem
     (Ranges.rangeOf pat_elem) (Aliases.aliasesOf pat_elem) bnd
 
-insertEntry :: Attributes lore =>
+insertEntry :: ASTLore lore =>
                VName -> Entry lore -> SymbolTable lore
             -> SymbolTable lore
 insertEntry name entry =
   insertEntries [(name,entry)]
 
-insertEntries :: Attributes lore =>
+insertEntries :: ASTLore lore =>
                  [(VName, Entry lore)] -> SymbolTable lore
               -> SymbolTable lore
 insertEntries entries vtable =
@@ -509,7 +509,7 @@ expandAliases names vtable = names <> aliasesOfAliases
   where aliasesOfAliases =
           mconcat . map (`lookupAliases` vtable) . namesToList $ names
 
-insertFParam :: Attributes lore =>
+insertFParam :: ASTLore lore =>
                 AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
@@ -523,13 +523,13 @@ insertFParam fparam = flip (foldr (`isAtLeast` 0)) sizes . insertEntry name entr
                                    }
         sizes = subExpVars $ arrayDims $ AST.paramType fparam
 
-insertFParams :: Attributes lore =>
+insertFParams :: ASTLore lore =>
                  [AST.FParam lore]
               -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldl' (flip insertFParam) symtable fparams
 
-insertLParamWithRange :: Attributes lore =>
+insertLParamWithRange :: ASTLore lore =>
                          LParam lore -> ScalExpRange -> IndexArray -> SymbolTable lore
                       -> SymbolTable lore
 insertLParamWithRange param range indexf vtable =
@@ -546,12 +546,12 @@ insertLParamWithRange param range indexf vtable =
         name = AST.paramName param
         sizevars = subExpVars $ arrayDims $ AST.paramType param
 
-insertLParam :: Attributes lore =>
+insertLParam :: ASTLore lore =>
                 LParam lore -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing) (const Nothing)
 
-insertArrayLParam :: Attributes lore =>
+insertArrayLParam :: ASTLore lore =>
                      LParam lore -> Maybe VName -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =
@@ -566,7 +566,7 @@ insertArrayLParam param Nothing vtable =
   -- Well, we still know that it's a param...
   insertLParam param vtable
 
-insertLoopVar :: Attributes lore => VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
+insertLoopVar :: ASTLore lore => VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name it bound = insertEntry name bind
   where bind = LoopVar LoopVarEntry {
             loopVarRange = (Just 0,
@@ -575,7 +575,7 @@ insertLoopVar name it bound = insertEntry name bind
           , loopVarType = it
           }
 
-insertFreeVar :: Attributes lore => VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
+insertFreeVar :: ASTLore lore => VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
 insertFreeVar name dec = insertEntry name entry
   where entry = FreeVar FreeVarEntry {
             freeVarDec = dec
@@ -585,7 +585,7 @@ insertFreeVar name dec = insertEntry name entry
           , freeVarConsumed = False
           }
 
-updateBounds :: Attributes lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
+updateBounds :: ASTLore lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
   case runReader (toScalExp (`lookupScalExp` vtable) $ BasicOp $ SubExp cond) types of
     Nothing    -> vtable
@@ -684,7 +684,7 @@ updateBounds' cond sym_tab =
                                            sym_bds
                Nothing        -> oneName sym <> cur_syms
 
-consume :: Attributes lore => VName -> SymbolTable lore -> SymbolTable lore
+consume :: ASTLore lore => VName -> SymbolTable lore -> SymbolTable lore
 consume consumee vtable = foldl' consume' vtable $ namesToList $
                           expandAliases (oneName consumee) vtable
   where consume' vtable' v | Just e <- lookup v vtable = insertEntry v (consume'' e) vtable'

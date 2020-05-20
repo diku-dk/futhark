@@ -35,7 +35,7 @@ import qualified Data.Map.Strict as M
 import Data.Monoid
 
 import Language.Futhark.Syntax hiding (ID)
-import Language.Futhark.Attributes
+import Language.Futhark.Prop
 import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
 

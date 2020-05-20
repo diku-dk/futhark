@@ -36,8 +36,8 @@ import Data.Loc
 
 import Language.Futhark hiding (Value, matchDims)
 import qualified Language.Futhark as F
-import Futhark.Representation.Primitive (intValue, floatValue)
-import qualified Futhark.Representation.Primitive as P
+import Futhark.IR.Primitive (intValue, floatValue)
+import qualified Futhark.IR.Primitive as P
 import qualified Language.Futhark.Semantic as T
 
 import Futhark.Util.Pretty hiding (apply, bool)

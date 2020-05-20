@@ -41,7 +41,7 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
-import Futhark.Representation.Primitive (intByteSize)
+import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util.Pretty hiding (space, bool, group)
 
 --- Uniqueness

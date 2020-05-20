@@ -25,7 +25,7 @@ import Data.Monoid
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
                               Name, nameFromText, nameToText)
-import Language.Futhark.Attributes (leadingOperator)
+import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
 
 }

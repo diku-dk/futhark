@@ -12,11 +12,11 @@ import Data.List (delete, find, foldl', zip4)
 import Prelude hiding (quot, rem)
 
 import Futhark.Transform.Rename
-import Futhark.Representation.KernelsMem
+import Futhark.IR.KernelsMem
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 import Futhark.Util (takeLast)
 

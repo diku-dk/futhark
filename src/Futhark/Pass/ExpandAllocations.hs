@@ -20,10 +20,10 @@ import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass
-import Futhark.Representation.AST
-import Futhark.Representation.KernelsMem
-import Futhark.Representation.Kernels.Simplify as Kernels
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR
+import Futhark.IR.KernelsMem
+import Futhark.IR.Kernels.Simplify as Kernels
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)
 import Futhark.Pass.ExtractKernels.ToKernels (segThread)
 import Futhark.Pass.ExplicitAllocations.Kernels (explicitAllocationsInStms)

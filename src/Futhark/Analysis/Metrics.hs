@@ -22,7 +22,7 @@ import qualified Data.Text as T
 import Data.List (tails)
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST
+import Futhark.IR
 
 newtype AstMetrics = AstMetrics (M.Map Text Int)
 

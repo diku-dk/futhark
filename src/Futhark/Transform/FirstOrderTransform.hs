@@ -24,11 +24,11 @@ import Control.Monad.State
 import qualified Data.Map.Strict as M
 import Data.List (zip4)
 
-import qualified Futhark.Representation.AST as AST
-import Futhark.Representation.SOACS
+import qualified Futhark.IR as AST
+import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR.Prop.Aliases
 import Futhark.Util (chunks, splitAt3)
 
 -- | The constraints that must hold for a lore in order to be the

@@ -44,8 +44,8 @@ import Prelude hiding (quot, rem)
 import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Representation.KernelsMem
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
@@ -620,7 +620,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
       (run_loop <-- 0)
 
 -- | Horizontally fission a lambda that models a binary operator.
-splitOp :: Attributes lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
+splitOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
 splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where n = length $ lambdaReturnType lam
         splitStm (Var res) = do

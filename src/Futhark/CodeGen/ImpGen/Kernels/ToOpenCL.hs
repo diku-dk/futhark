@@ -22,7 +22,7 @@ import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Quote.CUDA as CUDAC
 
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
-import Futhark.CodeGen.Backends.SimpleRepresentation
+import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)

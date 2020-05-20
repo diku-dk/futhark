@@ -8,16 +8,16 @@ module Futhark.Analysis.ScalExp
   , toScalExp
   , expandScalExp
   , LookupVar
-  , module Futhark.Representation.Primitive
+  , module Futhark.IR.Primitive
   )
 where
 
 import Data.List (find)
 import Data.Maybe
 
-import Futhark.Representation.Primitive hiding (SQuot, SRem, SDiv, SMod, SSignum)
-import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SSignum)
-import qualified Futhark.Representation.AST as AST
+import Futhark.IR.Primitive hiding (SQuot, SRem, SDiv, SMod, SSignum)
+import Futhark.IR hiding (SQuot, SRem, SDiv, SMod, SSignum)
+import qualified Futhark.IR as AST
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Util.Pretty hiding (pretty)

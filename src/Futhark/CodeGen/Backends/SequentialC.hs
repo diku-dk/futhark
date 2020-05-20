@@ -13,7 +13,7 @@ import Control.Monad
 
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Representation.SeqMem
+import Futhark.IR.SeqMem
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GC

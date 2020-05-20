@@ -16,10 +16,10 @@ import Control.Monad.Identity
 import Data.List ()
 
 import Futhark.Analysis.Rephrase
-import Futhark.Representation.AST
-import Futhark.Representation.SOACS (SOACS)
-import qualified Futhark.Representation.SOACS.SOAC as SOAC
-import Futhark.Representation.Kernels
+import Futhark.IR
+import Futhark.IR.SOACS (SOACS)
+import qualified Futhark.IR.SOACS.SOAC as SOAC
+import Futhark.IR.Kernels
 import Futhark.Tools
 
 getSize :: (MonadBinder m, Op (Lore m) ~ HostOp (Lore m) inner) =>

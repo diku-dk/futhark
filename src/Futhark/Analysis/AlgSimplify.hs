@@ -18,9 +18,9 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 
-import Futhark.Representation.AST hiding (SDiv, SMod, SQuot, SRem, SSignum)
+import Futhark.IR hiding (SDiv, SMod, SQuot, SRem, SSignum)
 import Futhark.Analysis.ScalExp
-import qualified Futhark.Representation.Primitive as P
+import qualified Futhark.IR.Primitive as P
 
 -- | Ranges are inclusive.
 type RangesRep = M.Map VName (Int, Maybe ScalExp, Maybe ScalExp)

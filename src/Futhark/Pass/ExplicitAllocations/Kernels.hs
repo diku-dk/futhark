@@ -11,9 +11,9 @@ where
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import qualified Futhark.Representation.Mem.IxFun as IxFun
-import Futhark.Representation.KernelsMem
-import Futhark.Representation.Kernels
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
+import Futhark.IR.Kernels
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 

@@ -58,7 +58,7 @@ import Control.Monad.Except
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Binder
 
 data RuleError = CannotSimplify
@@ -73,7 +73,7 @@ newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource (Except RuleError
 instance Fail.MonadFail (RuleM lore) where
   fail = throwError . OtherError
 
-instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
+instance (ASTLore lore, BinderOps lore) => MonadBinder (RuleM lore) where
   type Lore (RuleM lore) = lore
   mkExpDecM pat e = RuleM $ mkExpDecM pat e
   mkBodyM bnds res = RuleM $ mkBodyM bnds res

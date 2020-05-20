@@ -14,15 +14,15 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 import qualified Data.List         as L
 
-import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.SOACS hiding (SOAC(..))
-import qualified Futhark.Representation.Aliases as Aliases
-import qualified Futhark.Representation.SOACS as Futhark
+import Futhark.IR.Prop.Aliases
+import Futhark.IR.SOACS hiding (SOAC(..))
+import qualified Futhark.IR.Aliases as Aliases
+import qualified Futhark.IR.SOACS as Futhark
 import Futhark.MonadFreshNames
-import Futhark.Representation.SOACS.Simplify
+import Futhark.IR.SOACS.Simplify
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Construct
-import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import qualified Futhark.Analysis.HORep.SOAC as SOAC
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute

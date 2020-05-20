@@ -48,8 +48,8 @@ import Data.List (foldl', genericLength, zip4, zip6)
 import Prelude hiding (quot, rem)
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.KernelsMem
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations()
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen

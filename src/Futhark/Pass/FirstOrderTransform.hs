@@ -24,7 +24,7 @@ module Futhark.Pass.FirstOrderTransform
   where
 
 import Futhark.Transform.FirstOrderTransform (FirstOrderLore, transformFunDef, transformStms)
-import Futhark.Representation.SOACS (SOACS, scopeOf)
+import Futhark.IR.SOACS (SOACS, scopeOf)
 import Futhark.Pass
 
 -- | The first-order transformation pass.

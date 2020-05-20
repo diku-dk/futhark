@@ -15,8 +15,8 @@ import Data.List ()
 import Prelude hiding (quot)
 
 import Futhark.Analysis.PrimExp
-import Futhark.Representation.AST
-import Futhark.Representation.Kernels
+import Futhark.IR
+import Futhark.IR.Kernels
        hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.Pass.ExtractKernels.BlockedKernel

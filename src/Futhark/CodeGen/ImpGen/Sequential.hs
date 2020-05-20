@@ -7,7 +7,7 @@ module Futhark.CodeGen.ImpGen.Sequential
 
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
-import Futhark.Representation.SeqMem
+import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog SeqMem -> m Imp.Program

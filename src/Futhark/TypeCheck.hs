@@ -59,7 +59,7 @@ import Data.Maybe
 
 import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
-import Futhark.Representation.Aliases
+import Futhark.IR.Aliases
 import Futhark.Util
 import Futhark.Util.Pretty (Pretty, prettyDoc, indent, ppr, text, (<+>), align)
 
@@ -1081,12 +1081,12 @@ requirePrimExp t e = context ("in PrimExp " ++ pretty e) $ do
   unless (primExpType e == t) $ bad $ TypeError $
     pretty e ++ " must have type " ++ pretty t
 
-class Attributes lore => CheckableOp lore where
+class ASTLore lore => CheckableOp lore where
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
   -- ^ Used at top level; can be locally changed with 'checkOpWith'.
 
 -- | The class of lores that can be type-checked.
-class (Attributes lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore where
+class (ASTLore lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore where
   checkExpLore :: ExpDec lore -> TypeM lore ()
   checkBodyLore :: BodyDec lore -> TypeM lore ()
   checkFParamLore :: VName -> FParamInfo lore -> TypeM lore ()

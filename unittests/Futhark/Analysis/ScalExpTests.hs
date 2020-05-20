@@ -18,7 +18,7 @@ import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
 import Futhark.Analysis.ScalExp
-import Futhark.Representation.AST hiding (constant, SDiv)
+import Futhark.IR hiding (constant, SDiv)
 
 tests :: TestTree
 tests = testGroup "ScalExpTests" []

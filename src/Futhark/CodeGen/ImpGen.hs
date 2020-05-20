@@ -97,9 +97,9 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
   (Count, Bytes, Elements,
    bytes, elements, withElemType)
-import Futhark.Representation.Mem
-import Futhark.Representation.SOACS (SOACS)
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.Mem
+import Futhark.IR.SOACS (SOACS)
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util

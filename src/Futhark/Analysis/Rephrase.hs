@@ -14,7 +14,7 @@ module Futhark.Analysis.Rephrase
        )
 where
 
-import Futhark.Representation.AST
+import Futhark.IR
 
 data Rephraser m from to
   = Rephraser { rephraseExpLore :: ExpDec from -> m (ExpDec to)

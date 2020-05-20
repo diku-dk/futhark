@@ -21,11 +21,11 @@ import Data.Loc
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
-import Futhark.Representation.SOACS as I hiding (stmPattern)
+import Futhark.IR.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR.Prop.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util (splitAt3)
 

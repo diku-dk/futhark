@@ -32,9 +32,9 @@ import Control.Monad.Error.Class
 import qualified Data.Map.Strict as M
 
 import Futhark.Binder.Class
-import Futhark.Representation.AST
+import Futhark.IR
 
-class Attributes lore => BinderOps lore where
+class ASTLore lore => BinderOps lore where
   mkExpDecB :: (MonadBinder m, Lore m ~ lore) =>
                 Pattern lore -> Exp lore -> m (ExpDec lore)
   mkBodyB :: (MonadBinder m, Lore m ~ lore) =>
@@ -66,7 +66,7 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (Attributes lore, Monad m) =>
+instance (ASTLore lore, Monad m) =>
          HasScope lore (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ M.lookup name . snd
@@ -75,7 +75,7 @@ instance (Attributes lore, Monad m) =>
       Just t' -> return $ typeOf t'
   askScope = BinderT $ gets snd
 
-instance (Attributes lore, Monad m) =>
+instance (ASTLore lore, Monad m) =>
          LocalScope lore (BinderT lore m) where
   localScope types (BinderT m) = BinderT $ do
     modify $ second (M.union types)
@@ -83,7 +83,7 @@ instance (Attributes lore, Monad m) =>
     modify $ second (`M.difference` types)
     return x
 
-instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
+instance (ASTLore lore, MonadFreshNames m, BinderOps lore) =>
          MonadBinder (BinderT lore m) where
   type Lore (BinderT lore m) = lore
   mkExpDecM = mkExpDecB

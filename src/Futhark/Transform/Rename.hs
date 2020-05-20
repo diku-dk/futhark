@@ -31,10 +31,10 @@ import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import Data.Maybe
 
-import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Traversals
-import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
+import Futhark.IR.Prop.Names
+import Futhark.IR.Prop.Patterns
 import Futhark.FreshNames hiding (newName)
 import Futhark.MonadFreshNames (MonadFreshNames(..), modifyNameSource, newName)
 import Futhark.Transform.Substitute

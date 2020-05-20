@@ -71,13 +71,13 @@ import System.IO.Temp
 import Prelude
 
 import Futhark.Analysis.Metrics
-import Futhark.Representation.Primitive
+import Futhark.IR.Primitive
        (IntType(..), intValue, FloatType(..), intByteSize, floatByteSize)
 import Futhark.Test.Values
 import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
 import Language.Futhark.Syntax (PrimType(..), PrimValue(..))
-import Language.Futhark.Attributes (primValueType, primByteSize)
+import Language.Futhark.Prop (primValueType, primByteSize)
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
