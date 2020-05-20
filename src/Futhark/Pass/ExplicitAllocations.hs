@@ -300,9 +300,14 @@ allocsForPattern sizeidents validents rts hints = do
 
         MemArray bt _ u (Just (ReturnsInBlock mem extixfun)) -> do
           (patels, ixfn) <- instantiateExtIxFun ident extixfun
-          tell (traceWith "allocsForPattern.ReturnsInBlock.patels" patels, [])
+          tell (patels, [])
 
-          return $ traceWith "allocsForPattern.ReturnsInBlock.return" $ PatElem (identName ident) $
+          return $ trace (unwords ["\nallocsForPattern.ReturnsInBlock.extixfun", show extixfun,
+                                   "\n\nallocsForPattern.ReturnsInBlock.ixfn", show ixfn,
+                                   "\n\nallocsForPattern.ReturnsInBlock.patels", show patels,
+                                   "\n"
+                                   ]) $
+            PatElem (identName ident) $
             MemArray bt shape u $
             ArrayIn mem ixfn
 
@@ -323,12 +328,12 @@ allocsForPattern sizeidents validents rts hints = do
 
         _ -> error "Impossible case reached in allocsForPattern!"
 
-  return $ trace (unwords ["\nrt:", show rts,
-                           "\n\nsizes':", show sizes',
-                           "\n\nexts:", show exts,
-                           "\n\nmems:", show mems,
-                           "\n\nvals:", show vals,
-                            "\n"])
+  return -- $ trace (unwords ["\nrt:", show rts,
+         --                   "\n\nsizes':", show sizes',
+         --                   "\n\nexts:", show exts,
+         --                   "\n\nmems:", show mems,
+         --                   "\n\nvals:", show vals,
+         --                    "\n"])
     (sizes' <> exts <> mems,
       vals)
   where knownShape = mapM known . shapeDims
@@ -344,7 +349,8 @@ allocsForPattern sizeidents validents rts hints = do
                                Ident -> ExtIxFun ->
                                m ([PatElemT (MemInfo d u ret)], IxFun)
         instantiateExtIxFun idd ext_ixfn = do
-          let isAndPtps = S.toList $
+          let isAndPtps = traceWith "isAndPtps" $
+                          S.toList $
                           foldMap onlyExts $
                           foldMap leafExpTypes ext_ixfn
 
@@ -665,16 +671,24 @@ allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
     -- (init_subs, spaces) <- init_subs_and_spaces
     (newctx, memctx, vals')  <- foldM substituteInVal ([], [], []) $ zip3 (zip valparams' valinit') spaces init_subs
 
-    let size_ext = length res_then - length trets
-        (ind_ses0, r_then_else) =
-          partition (\(r_then, r_else, _) -> r_then == r_else) $
-          zip3 res_then res_else [0 .. size_ext - 1]
-        (r_then_ext, r_else_ext, _) = unzip3 r_then_else
-        ind_ses = zipWith (\(se, _, i) k -> (i-k, se)) ind_ses0
-                  [0 .. length ind_ses0 - 1]
-        rets'' = foldl (\acc (i, se) -> fixExt i se acc) trets ind_ses
-        tbranch'' = tbranch' { bodyResult = traceWith "res_then2" $ r_then_ext ++ drop size_ext res_then }
+    -- let size_ext = length res_then - length trets
+    --     (ind_ses0, r_then_else) =
+    --       partition (\(r_then, r_else, _) -> r_then == r_else) $
+    --       zip3 res_then res_else [0 .. size_ext - 1]
+    --     (r_then_ext, r_else_ext, _) = unzip3 r_then_else
+    --     ind_ses = zipWith (\(se, _, i) k -> (i-k, se)) ind_ses0
+    --               [0 .. length ind_ses0 - 1]
+    --     rets'' = foldl (\acc (i, se) -> fixExt i se acc) trets ind_ses
+    --     tbranch'' = tbranch' { bodyResult = traceWith "res_then2" $ r_then_ext ++ drop size_ext res_then }
 
+    let res = DoLoop
+              (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx) ++ newctx ++ memctx)
+              -- (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx))
+              vals'
+              -- (zip valparams' valinit')
+              form' res_body
+
+    t <- expExtType res
 
     return $
       trace (unwords ["ctxparams':", show ctxparams',
@@ -695,13 +709,10 @@ allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
                        -- "\n\nvals':", show vals',
                        "\n\nbody':", pretty body',
                        "\n\nres_body:", pretty res_body,
+                       "\n\ntype:", show t,
                        "\n"]) $
-      DoLoop
-      (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx) ++ newctx ++ memctx)
-      -- (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx))
-      -- vals'
-      (zip valparams' valinit')
-      form' res_body
+            res
+
   where
     -- helper valinit' mk_loop_val bodybnds' = do
     --   init_ixfuns <- mapM bodyReturnMIxf valinit'
@@ -760,15 +771,9 @@ allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
                     val_acc ++ [(param, val')])
         Just (ixfun, m) -> do -- Generalizes
           let i = length m
-              ixfun' = IxFun.substituteInIxFun (M.fromList $ zip (fmap Ext [0..]) (fmap (fmap Free) m)) ixfun
           let space' = fromMaybe DefaultSpace space
-          ixfun'' <- trace ("ixfun: " ++ show ixfun ++ "\n\nm: " ++ show m++"\n\n") instantiateIxFun ixfun'
           vname <- newVName "existential_param_1"
           let mem_param = Param vname $ MemMem space'
-          param' <- case paramDeclType param of
-                Array pt shape u -> do
-                  return $ param { paramAttr = MemArray pt shape u $ ArrayIn vname ixfun'' }
-                _ -> error "impossible in substituteInVal"
           existentials <- mapM (primExpToSubExp "ixfn_exist"
                                 (return . BasicOp . SubExp . Var))
                           m
@@ -781,8 +786,24 @@ allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
                                                  MemArray _ _ _ _ -> error "impossible existential_params"
                                          newParam "existential_param_2" $ meminfo')
                                 existentials
+          -- TODO: Clean up this mess...
+          let blabbab = map (Var . paramName) existential_params
+              blabbab' = map (fmap Free . primExpFromSubExp int32) blabbab
+          let ixfun' = IxFun.substituteInIxFun (M.fromList $ zip (fmap Ext [0..]) $ blabbab') ixfun
+          ixfun'' <- instantiateIxFun ixfun'
+          param' <- case paramDeclType param of
+                Array pt shape u -> do
+                  return $ param { paramAttr = MemArray pt shape u $ ArrayIn vname ixfun'' }
+                _ -> error "impossible in substituteInVal"
           mem_ctx_r <- bodyReturnMemCtx val
           return $
+            trace (unwords ["\nm: ", show m,
+                             "\n\nixfun: ", show ixfun,
+                             "\n\nixfun':", show ixfun',
+                             "\n\nexts  :", show $ zip existential_params existentials,
+                             "\n\nmem   :", show $ zip [mem_param] mem_ctx_r,
+                             "\n\nval   :", show $ [(param', val)],
+                             "\n"]) $
             (ctx_acc ++ zip existential_params (trace (unwords ["\n\ngot mem_ctx_r:", show mem_ctx_r, "\n"]) existentials),
              mem_ctx_acc ++ zip [mem_param] mem_ctx_r,
              val_acc ++ [(param', val)])

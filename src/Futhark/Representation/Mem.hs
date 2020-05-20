@@ -665,17 +665,17 @@ matchPatternToExp pat e = do
             (ReturnsInBlock x_mem x_ixfun, Just (ReturnsInBlock y_mem y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_mem == y_mem && x_ixfun' == y_ixfun'
+              in IxFun.closeEnough x_ixfun' y_ixfun'
             (ReturnsInBlock _ x_ixfun,
              Just (ReturnsNewBlock _ _ y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_ixfun' == y_ixfun'
+              in IxFun.closeEnough x_ixfun' y_ixfun'
             (ReturnsNewBlock x_space x_i x_ixfun,
              Just (ReturnsNewBlock y_space y_i y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_space == y_space && x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
+              in IxFun.closeEnough x_ixfun' y_ixfun'
             (_, Nothing) -> True
             _ -> False
         matches _ _ _ _ = False
