@@ -586,13 +586,12 @@ matchReturnType rettype res ts = do
         extInShape shp <> extInMemReturn ret
       extsInMemInfo _ = S.empty
 
-      checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
-          | x_mem == y_mem =
-              unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
-                throwError $ unwords  ["Index function unification failed (ReturnsInBlock)",
-                    "\nixfun of body result: ", pretty y_ixfun,
-                    "\nixfun of return type: ", pretty x_ixfun,
-                    "\nand context elements: ", pretty ctx_res]
+      checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun) =
+        unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
+        throwError $ unwords  ["Index function unification failed (ReturnsInBlock)",
+                               "\nixfun of body result: ", pretty y_ixfun,
+                               "\nixfun of return type: ", pretty x_ixfun,
+                               "\nand context elements: ", pretty ctx_res]
       checkMemReturn (ReturnsNewBlock x_space x_ext x_ixfun)
                      (ArrayIn y_mem y_ixfun) = do
         (x_mem, x_mem_type)  <- fetchCtx x_ext
