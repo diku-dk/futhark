@@ -29,8 +29,8 @@ import qualified Data.Map.Strict as M
 import Prelude hiding (lookup)
 
 import Futhark.Transform.Substitute
-import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR
+import Futhark.IR.Prop.Aliases
 
 newtype UsageTable = UsageTable (M.Map VName Usages)
                    deriving (Eq, Show)
@@ -122,7 +122,7 @@ withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 
 
-usageInStm :: (Attributes lore, Aliased lore) => Stm lore -> UsageTable
+usageInStm :: (ASTLore lore, Aliased lore) => Stm lore -> UsageTable
 usageInStm (Let pat lore e) =
   mconcat [usageInPat,
            usageInExpLore,

@@ -6,7 +6,7 @@ where
 import Test.QuickCheck
 
 import Language.Futhark.Core
-import Futhark.Representation.PrimitiveTests()
+import Futhark.IR.PrimitiveTests()
 
 instance Arbitrary Name where
   arbitrary = nameFromString <$> listOf1 (elements ['a'..'z'])

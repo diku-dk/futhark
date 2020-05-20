@@ -85,10 +85,10 @@ import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
-import Futhark.CodeGen.Backends.SimpleRepresentation
+import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util (zEncodeString)
-import Futhark.Representation.AST.Attributes (isBuiltInFunction)
+import Futhark.IR.Prop (isBuiltInFunction)
 
 
 data CompilerState s = CompilerState {

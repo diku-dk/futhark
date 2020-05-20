@@ -15,11 +15,11 @@ module Futhark.Transform.Substitute
 import Control.Monad.Identity
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Traversals
-import Futhark.Representation.AST.Attributes.Scope
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
+import Futhark.IR.Prop.Scope
 import Futhark.Analysis.PrimExp
-import Futhark.Representation.AST.Attributes.Names
+import Futhark.IR.Prop.Names
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.

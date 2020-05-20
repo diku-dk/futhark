@@ -15,7 +15,7 @@ import Data.List (foldl')
 import Prelude hiding (quot)
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Kernels
+import Futhark.IR.Kernels
 import Futhark.Transform.Rename
 import Futhark.Pass
 import Futhark.Tools

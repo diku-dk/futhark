@@ -21,7 +21,7 @@ module Language.Futhark.Parser
 import qualified Data.Text as T
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes
+import Language.Futhark.Prop
 import Language.Futhark.Parser.Parser
 import Language.Futhark.Parser.Lexer
 

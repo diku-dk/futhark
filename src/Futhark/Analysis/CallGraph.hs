@@ -18,7 +18,7 @@ import qualified Data.Set as S
 import Data.Maybe (fromMaybe)
 import Data.List (foldl')
 
-import Futhark.Representation.SOACS
+import Futhark.IR.SOACS
 
 type FunctionTable = M.Map Name (FunDef SOACS)
 

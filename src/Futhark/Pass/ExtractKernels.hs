@@ -167,10 +167,10 @@ import Data.Maybe
 
 import Prelude hiding (log)
 
-import Futhark.Representation.SOACS
-import Futhark.Representation.SOACS.Simplify (simplifyStms)
-import qualified Futhark.Representation.Kernels as Out
-import Futhark.Representation.Kernels.Kernel
+import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Simplify (simplifyStms)
+import qualified Futhark.IR.Kernels as Out
+import Futhark.IR.Kernels.Kernel
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT

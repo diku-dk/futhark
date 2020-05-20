@@ -45,7 +45,7 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.SOACS
+import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util (takeLast)

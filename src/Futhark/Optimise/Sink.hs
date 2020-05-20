@@ -52,9 +52,9 @@ import qualified Data.Set as S
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.Range as Range
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Representation.Aliases
-import Futhark.Representation.Ranges
-import Futhark.Representation.Kernels
+import Futhark.IR.Aliases
+import Futhark.IR.Ranges
+import Futhark.IR.Kernels
 import Futhark.Pass
 
 -- We do not care about ranges, but in order to use ST.SymbolTable

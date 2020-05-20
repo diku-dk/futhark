@@ -12,7 +12,7 @@ module Futhark.Analysis.PrimExp
   , false
   , constFoldPrimExp
 
-  , module Futhark.Representation.Primitive
+  , module Futhark.IR.Primitive
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
@@ -21,8 +21,8 @@ import           Data.Traversable
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import           Futhark.Representation.AST.Attributes.Names
-import           Futhark.Representation.Primitive
+import           Futhark.IR.Prop.Names
+import           Futhark.IR.Primitive
 import           Futhark.Util.IntegralExp
 import           Futhark.Util.Pretty
 

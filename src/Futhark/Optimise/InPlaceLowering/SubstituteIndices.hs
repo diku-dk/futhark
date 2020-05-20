@@ -14,8 +14,8 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 import Control.Monad
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.AST
+import Futhark.IR.Prop.Aliases
+import Futhark.IR
 import Futhark.Construct
 import Futhark.Util
 

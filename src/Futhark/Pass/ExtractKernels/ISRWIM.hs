@@ -11,7 +11,7 @@ import Control.Arrow (first)
 import Control.Monad.State
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.SOACS
+import Futhark.IR.SOACS
 import Futhark.Tools
 
 -- | Interchange Scan With Inner Map. Tries to turn a @scan(map)@ into a

@@ -73,9 +73,9 @@ import Control.Arrow((&&&))
 import Data.Maybe
 import qualified Data.Map as M
 
-import Futhark.Representation.Primitive hiding (Bool)
+import Futhark.IR.Primitive hiding (Bool)
 import Futhark.MonadFreshNames
-import Futhark.Representation.AST.Syntax (Space(..))
+import Futhark.IR.Syntax (Space(..))
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.GenericCSharp.AST
 import Futhark.CodeGen.Backends.GenericCSharp.Options

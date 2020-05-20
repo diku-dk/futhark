@@ -53,8 +53,8 @@ import Data.Foldable
 import Data.Maybe
 import Data.List (elemIndex, sortOn)
 
-import Futhark.Representation.AST
-import Futhark.Representation.SegOp
+import Futhark.IR
+import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util
@@ -305,7 +305,7 @@ data DistributionBody = DistributionBody {
 distributionInnerPattern :: DistributionBody -> PatternT Type
 distributionInnerPattern = fst . innerTarget . distributionTarget
 
-distributionBodyFromStms :: Attributes lore =>
+distributionBodyFromStms :: ASTLore lore =>
                             Targets -> Stms lore -> (DistributionBody, Result)
 distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
   let bound_by_stms = namesFromList $ M.keys $ scopeOf stms
@@ -319,7 +319,7 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
       },
       inner_res')
 
-distributionBodyFromStm :: Attributes lore =>
+distributionBodyFromStm :: ASTLore lore =>
                            Targets -> Stm lore -> (DistributionBody, Result)
 distributionBodyFromStm targets bnd =
   distributionBodyFromStms targets $ oneStm bnd
@@ -514,7 +514,7 @@ tryDistribute mk_lvl nest targets stms =
       return Nothing
   where (dist_body, inner_body_res) = distributionBodyFromStms targets stms
 
-tryDistributeStm :: (MonadFreshNames m, HasScope t m, Attributes lore) =>
+tryDistributeStm :: (MonadFreshNames m, HasScope t m, ASTLore lore) =>
                     Nestings -> Targets -> Stm lore
                  -> m (Maybe (Result, Targets, KernelNest))
 tryDistributeStm nest targets bnd =

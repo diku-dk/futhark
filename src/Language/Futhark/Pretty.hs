@@ -32,7 +32,7 @@ import           Futhark.Util.Pretty
 import           Futhark.Util
 
 import           Language.Futhark.Syntax
-import           Language.Futhark.Attributes
+import           Language.Futhark.Prop
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma

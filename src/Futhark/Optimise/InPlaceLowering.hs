@@ -72,9 +72,9 @@ import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 
 import Futhark.Analysis.Alias
-import Futhark.Representation.Aliases
-import Futhark.Representation.Kernels
-import Futhark.Representation.Seq (Seq)
+import Futhark.IR.Aliases
+import Futhark.IR.Kernels
+import Futhark.IR.Seq (Seq)
 import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.MonadFreshNames
 import Futhark.Binder

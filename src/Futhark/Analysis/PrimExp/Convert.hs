@@ -23,7 +23,7 @@ import           Data.Maybe
 
 import           Futhark.Analysis.PrimExp
 import           Futhark.Construct
-import           Futhark.Representation.AST
+import           Futhark.IR
 
 -- | Convert a 'PrimExp' to a Futhark expression.  The provided
 -- function converts the leaves.

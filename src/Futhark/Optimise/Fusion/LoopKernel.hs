@@ -24,13 +24,13 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.List (find, (\\), tails)
 
-import Futhark.Representation.SOACS hiding (SOAC(..))
-import qualified Futhark.Representation.SOACS as Futhark
+import Futhark.IR.SOACS hiding (SOAC(..))
+import qualified Futhark.IR.SOACS as Futhark
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
+import qualified Futhark.Analysis.HORep.SOAC as SOAC
+import qualified Futhark.Analysis.HORep.MapNest as MapNest
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct

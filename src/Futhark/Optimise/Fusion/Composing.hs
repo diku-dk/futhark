@@ -21,9 +21,9 @@ import Data.List (mapAccumL)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 
-import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import qualified Futhark.Analysis.HORep.SOAC as SOAC
 
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Binder (Bindable(..), insertStm, insertStms, mkLet)
 import Futhark.Construct (mapResult)
 import Futhark.Util (splitAt3, takeLast, dropLast)

@@ -31,8 +31,8 @@ import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplify.ClosedForm
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR
+import Futhark.IR.Prop.Aliases
 import Futhark.Construct
 import Futhark.Util
 

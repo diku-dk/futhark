@@ -44,12 +44,12 @@ import Control.Monad.Trans.Maybe
 import Data.Maybe
 import Data.List (find, partition, tails)
 
-import Futhark.Representation.AST
-import qualified Futhark.Representation.SOACS as SOACS
-import Futhark.Representation.SOACS.SOAC hiding (HistOp, histDest)
-import Futhark.Representation.SOACS (SOACS)
-import Futhark.Representation.SOACS.Simplify (simpleSOACS)
-import Futhark.Representation.SegOp
+import Futhark.IR
+import qualified Futhark.IR.SOACS as SOACS
+import Futhark.IR.SOACS.SOAC hiding (HistOp, histDest)
+import Futhark.IR.SOACS (SOACS)
+import Futhark.IR.SOACS.Simplify (simpleSOACS)
+import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -140,10 +140,10 @@ instance MonadFreshNames m => MonadFreshNames (DistNestT lore m) where
   getNameSource = DistNestT $ lift getNameSource
   putNameSource = DistNestT . lift . putNameSource
 
-instance (Monad m, Attributes lore) => HasScope lore (DistNestT lore m) where
+instance (Monad m, ASTLore lore) => HasScope lore (DistNestT lore m) where
   askScope = asks distScope
 
-instance (Monad m, Attributes lore) => LocalScope lore (DistNestT lore m) where
+instance (Monad m, ASTLore lore) => LocalScope lore (DistNestT lore m) where
   localScope types = local $ \env ->
     env { distScope = types <> distScope env }
 

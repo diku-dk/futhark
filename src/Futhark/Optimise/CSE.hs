@@ -38,19 +38,19 @@ import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 
 import Futhark.Analysis.Alias
-import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.Aliases
+import Futhark.IR
+import Futhark.IR.Prop.Aliases
+import Futhark.IR.Aliases
   (removeProgAliases, removeFunDefAliases, removeStmAliases,
    Aliases, consumedInStms)
-import qualified Futhark.Representation.Kernels.Kernel as Kernel
-import qualified Futhark.Representation.SOACS.SOAC as SOAC
-import qualified Futhark.Representation.Mem as Memory
+import qualified Futhark.IR.Kernels.Kernel as Kernel
+import qualified Futhark.IR.SOACS.SOAC as SOAC
+import qualified Futhark.IR.Mem as Memory
 import Futhark.Transform.Substitute
 import Futhark.Pass
 
 -- | Perform CSE on every function in a program.
-performCSE :: (Attributes lore, CanBeAliased (Op lore),
+performCSE :: (ASTLore lore, CanBeAliased (Op lore),
                CSEInOp (OpWithAliases (Op lore))) =>
               Bool -> Pass lore lore
 performCSE cse_arrays =
@@ -65,14 +65,14 @@ performCSE cse_arrays =
         onFun _ = pure . cseInFunDef cse_arrays
 
 -- | Perform CSE on a single function.
-performCSEOnFunDef :: (Attributes lore, CanBeAliased (Op lore),
+performCSEOnFunDef :: (ASTLore lore, CanBeAliased (Op lore),
                        CSEInOp (OpWithAliases (Op lore))) =>
                       Bool -> FunDef lore -> FunDef lore
 performCSEOnFunDef cse_arrays =
   removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 -- | Perform CSE on some statements.
-performCSEOnStms :: (Attributes lore, CanBeAliased (Op lore),
+performCSEOnStms :: (ASTLore lore, CanBeAliased (Op lore),
                      CSEInOp (OpWithAliases (Op lore))) =>
                     Bool -> Stms lore -> Stms lore
 performCSEOnStms cse_arrays =
@@ -82,7 +82,7 @@ performCSEOnStms cse_arrays =
                            (stmsToList stms) (return ()))
           (newCSEState cse_arrays)
 
-cseInFunDef :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+cseInFunDef :: (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
                Bool -> FunDef lore -> FunDef lore
 cseInFunDef cse_arrays fundec =
   fundec { funDefBody =
@@ -92,7 +92,7 @@ cseInFunDef cse_arrays fundec =
 
 type CSEM lore = Reader (CSEState lore)
 
-cseInBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+cseInBody :: (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
              [Diet] -> Body lore -> CSEM lore (Body lore)
 cseInBody ds (Body bodydec bnds res) = do
   (bnds', res') <-
@@ -104,13 +104,13 @@ cseInBody ds (Body bodydec bnds res) = do
         consumeResult Consume se = freeIn se
         consumeResult _ _ = mempty
 
-cseInLambda :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+cseInLambda :: (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
                Lambda lore -> CSEM lore (Lambda lore)
 cseInLambda lam = do
   body' <- cseInBody (map (const Observe) $ lambdaReturnType lam) $ lambdaBody lam
   return lam { lambdaBody = body' }
 
-cseInStms :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+cseInStms :: (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
              Names -> [Stm lore]
           -> CSEM lore a
           -> CSEM lore (Stms lore, a)
@@ -133,7 +133,7 @@ cseInStms consumed (bnd:bnds) m =
         patElemDiet pe | patElemName pe `nameIn` consumed = Consume
                        | otherwise                        = Observe
 
-cseInStm :: Attributes lore =>
+cseInStm :: ASTLore lore =>
             Names -> Stm lore
          -> ([Stm lore] -> CSEM lore a)
          -> CSEM lore a
@@ -183,7 +183,7 @@ addNameSubst :: PatternT dec -> PatternT dec -> CSEState lore -> CSEState lore
 addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
-addExpSubst :: Attributes lore =>
+addExpSubst :: ASTLore lore =>
                Pattern lore -> ExpDec lore -> Exp lore
             -> CSEState lore
             -> CSEState lore
@@ -203,19 +203,19 @@ subCSE m = do
   CSEState _ cse_arrays <- ask
   return $ runReader m $ newCSEState cse_arrays
 
-instance (Attributes lore, Aliased lore,
+instance (ASTLore lore, Aliased lore,
           CSEInOp (Op lore), CSEInOp op) => CSEInOp (Kernel.HostOp lore op) where
   cseInOp (Kernel.SegOp op) = Kernel.SegOp <$> cseInOp op
   cseInOp (Kernel.OtherOp op) = Kernel.OtherOp <$> cseInOp op
   cseInOp x = return x
 
-instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+instance (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
          CSEInOp (Kernel.SegOp lvl lore) where
   cseInOp = subCSE .
             Kernel.mapSegOpM
             (Kernel.SegOpMapper return cseInLambda cseInKernelBody return return)
 
-cseInKernelBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+cseInKernelBody :: (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
                    Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)
 cseInKernelBody (Kernel.KernelBody bodydec bnds res) = do
   Body _ bnds' _ <- cseInBody (map (const Observe) res) $ Body bodydec bnds []
@@ -225,7 +225,7 @@ instance CSEInOp op => CSEInOp (Memory.MemOp op) where
   cseInOp o@Memory.Alloc{} = return o
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 
-instance (Attributes lore,
+instance (ASTLore lore,
           CanBeAliased (Op lore),
           CSEInOp (OpWithAliases (Op lore))) =>
          CSEInOp (SOAC.SOAC (Aliases lore)) where
