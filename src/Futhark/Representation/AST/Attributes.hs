@@ -166,7 +166,7 @@ entryPointSize TypeDirect = 1
 
 -- | A 'StmAux' with empty 'Certificates'.
 defAux :: dec -> StmAux dec
-defAux = StmAux mempty
+defAux = StmAux mempty mempty
 
 -- | The certificates associated with a statement.
 stmCerts :: Stm lore -> Certificates
@@ -174,7 +174,8 @@ stmCerts = stmAuxCerts . stmAux
 
 -- | Add certificates to a statement.
 certify :: Certificates -> Stm lore -> Stm lore
-certify cs1 (Let pat (StmAux cs2 dec) e) = Let pat (StmAux (cs2<>cs1) dec) e
+certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
+  Let pat (StmAux (cs2<>cs1) attrs dec) e
 
 -- | A handy shorthand for properties that we usually want to things
 -- we stuff into ASTs.

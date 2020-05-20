@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Strict #-}
 -- | = Definition of the Futhark core language IR
 --
@@ -108,6 +109,12 @@ module Futhark.Representation.AST.Syntax
   , TypeBase(..)
   , Diet(..)
 
+  -- * Attributes
+  , Attr(..)
+  , Attrs(..)
+  , oneAttr
+  , inAttrs
+
   -- * Abstract syntax tree
   , Ident (..)
   , SubExp(..)
@@ -154,13 +161,34 @@ module Futhark.Representation.AST.Syntax
   )
   where
 
+import qualified Data.Set as S
 import Data.Foldable
 import Data.Loc
 import qualified Data.Sequence as Seq
+import Data.String
 
 import Language.Futhark.Core
 import Futhark.Representation.AST.Decorations
 import Futhark.Representation.AST.Syntax.Core
+
+-- | A single attribute.
+newtype Attr = AttrAtom Name
+  deriving (Ord, Show, Eq)
+
+instance IsString Attr where
+  fromString = AttrAtom . fromString
+
+-- | Every statement is associated with a set of attributes, which can
+-- have various effects throughout the compiler.
+newtype Attrs = Attrs { unAttrs :: S.Set Attr }
+  deriving (Ord, Show, Eq, Monoid, Semigroup)
+
+-- | Construct 'Attrs' from a single 'Attr'.
+oneAttr :: Attr -> Attrs
+oneAttr = Attrs . S.singleton
+
+inAttrs :: Attr -> Attrs -> Bool
+inAttrs attr (Attrs attrs) = attr `S.member` attrs
 
 -- | A type alias for namespace control.
 type PatElem lore = PatElemT (LetDec lore)
@@ -188,8 +216,9 @@ type Pattern lore = PatternT (LetDec lore)
 
 -- | Auxilliary Information associated with a statement.
 data StmAux dec = StmAux { stmAuxCerts :: !Certificates
-                          , stmAuxDec :: dec
-                          }
+                         , stmAuxAttrs :: Attrs
+                         , stmAuxDec :: dec
+                         }
                   deriving (Ord, Show, Eq)
 
 -- | A local variable binding.

@@ -720,6 +720,14 @@ internaliseExp desc (E.Unsafe e _) =
   where mkUnsafe env | envSafe env = env
                      | otherwise = env { envDoBoundsChecks = False }
 
+internaliseExp desc (E.Attr (AttrInfo attr) e _) =
+  local f $ internaliseExp desc e
+  where f env | attr == "unsafe",
+                not $ envSafe env =
+                  env { envDoBoundsChecks = False }
+              | otherwise =
+                  env { envAttrs = oneAttr (AttrAtom attr) <> envAttrs env }
+
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
   c <- assertingOne $ letExp "assert_c" $
@@ -1732,7 +1740,8 @@ funcall desc (QualName _ fname) args loc = do
                "\nFunction has parameters\n " ++ pretty fun_params
     Just ts -> do
       safety <- askSafety
-      ses <- letTupExp' desc $
+      attrs <- asks envAttrs
+      ses <- attributing attrs $ letTupExp' desc $
              I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 

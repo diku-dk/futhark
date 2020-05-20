@@ -15,6 +15,8 @@ module Futhark.Binder.Class
   , letBindNames_
   , collectStms_
   , bodyBind
+  , attributing
+  , auxing
 
   , module Futhark.MonadFreshNames
   )
@@ -67,13 +69,35 @@ class (Attributes (Lore m),
   addStms     :: Stms (Lore m) -> m ()
   collectStms :: m a -> m (a, Stms (Lore m))
   certifying :: Certificates -> m a -> m a
-  certifying cs m = do
-    (x, stms) <- collectStms m
-    addStms $ certify cs <$> stms
-    return x
+  certifying = censorStms . fmap . certify
+
+-- | Apply a function to the statements added by this action.
+censorStms :: MonadBinder m =>
+              (Stms (Lore m) -> Stms (Lore m))
+           -> m a -> m a
+censorStms f m = do
+  (x, stms) <- collectStms m
+  addStms $ f stms
+  return x
+
+-- | Add the given attributes to any statements added by this action.
+attributing :: MonadBinder m => Attrs -> m a -> m a
+attributing attrs = censorStms $ fmap onStm
+  where onStm (Let pat aux e) =
+          Let pat aux { stmAuxAttrs = attrs <> stmAuxAttrs aux } e
+
+-- | Add the certificates and attributes to any statements added by
+-- this action.
+auxing :: MonadBinder m => StmAux anylore -> m a -> m a
+auxing (StmAux cs attrs _) = censorStms $ fmap onStm
+  where onStm (Let pat aux e) =
+          Let pat aux' e
+          where aux' = aux { stmAuxAttrs = attrs <> stmAuxAttrs aux
+                           , stmAuxCerts = cs <> stmAuxCerts aux
+                           }
 
 mkLetM :: MonadBinder m => Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
-mkLetM pat e = Let pat <$> (StmAux mempty <$> mkExpDecM pat e) <*> pure e
+mkLetM pat e = Let pat <$> (defAux <$> mkExpDecM pat e) <*> pure e
 
 letBind :: MonadBinder m =>
            Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
@@ -90,7 +114,7 @@ mkLet :: Bindable lore => [Ident] -> [Ident] -> Exp lore -> Stm lore
 mkLet ctx val e =
   let pat = mkExpPat ctx val e
       dec = mkExpDec pat e
-  in Let pat (StmAux mempty dec) e
+  in Let pat (defAux dec) e
 
 letBindNames :: MonadBinder m =>
                 [VName] -> Exp (Lore m) -> m [Ident]

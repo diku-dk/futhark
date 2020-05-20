@@ -285,26 +285,26 @@ protectIf :: MonadBinder m =>
              Protect m
           -> (Exp (Lore m) -> Bool)
           -> SubExp -> Stm (Lore m) -> m ()
-protectIf _ _ taken (Let pat (StmAux cs _)
+protectIf _ _ taken (Let pat aux
                      (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
-  certifying cs $
+  auxing aux $
     letBind_ pat $ If cond' taken_body untaken_body $
     IfDec if_ts IfFallback
-protectIf _ _ taken (Let pat (StmAux cs _) (BasicOp (Assert cond msg loc))) = do
+protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
-  certifying cs $ letBind_ pat $ BasicOp $ Assert cond' msg loc
-protectIf protect _ taken (Let pat (StmAux cs _) (Op op))
+  auxing aux $ letBind_ pat $ BasicOp $ Assert cond' msg loc
+protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
-      certifying cs m
-protectIf _ f taken (Let pat (StmAux cs _) e)
+      auxing aux m
+protectIf _ f taken (Let pat aux e)
   | f e = do
       taken_body <- eBody [pure e]
       untaken_body <- eBody $ map (emptyOfType $ patternContextNames pat)
                                   (patternValueTypes pat)
       if_ts <- expTypesFromPattern pat
-      certifying cs $
+      auxing aux $
         letBind_ pat $ If taken taken_body untaken_body $
         IfDec if_ts IfFallback
 protectIf _ _ _ stm =
@@ -595,13 +595,13 @@ simplifyStms :: SimplifiableLore lore =>
 simplifyStms stms m =
   case stmsHead stms of
     Nothing -> inspectStms mempty m
-    Just (Let pat (StmAux stm_cs dec) e, stms') -> do
+    Just (Let pat (StmAux stm_cs attrs dec) e, stms') -> do
       stm_cs' <- simplify stm_cs
       ((e', e_stms), e_cs) <- collectCerts $ simplifyExp e
       (pat', pat_cs) <- collectCerts $ simplifyPattern pat
       let cs = stm_cs'<>e_cs<>pat_cs
       inspectStms e_stms $
-        inspectStm (mkWiseLetStm pat' (StmAux cs dec) e') $
+        inspectStm (mkWiseLetStm pat' (StmAux cs attrs dec) e') $
         simplifyStms stms' m
 
 inspectStm :: SimplifiableLore lore =>

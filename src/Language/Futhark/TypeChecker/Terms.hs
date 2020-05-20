@@ -1891,6 +1891,9 @@ checkExp (Match e cs _ loc) =
       "type returned from pattern match" t
     return $ Match e' cs' (Info t, Info retext) loc
 
+checkExp (Attr info e loc) =
+  Attr info <$> checkExp e <*> pure loc
+
 checkCases :: PatternType
            -> NE.NonEmpty (CaseBase NoInfo Name)
            -> TermTypeM (NE.NonEmpty (CaseBase Info VName), PatternType, [VName])

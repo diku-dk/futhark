@@ -217,9 +217,9 @@ mkWiseLetStm :: (Attributes lore, CanBeWise (Op lore)) =>
                 Pattern lore
              -> StmAux (ExpDec lore) -> Exp (Wise lore)
              -> Stm (Wise lore)
-mkWiseLetStm pat (StmAux cs dec) e =
+mkWiseLetStm pat (StmAux cs attrs dec) e =
   let pat' = addWisdomToPattern pat e
-  in Let pat' (StmAux cs $ mkWiseExpDec pat' dec e) e
+  in Let pat' (StmAux cs attrs $ mkWiseExpDec pat' dec e) e
 
 mkWiseExpDec :: (Attributes lore, CanBeWise (Op lore)) =>
                  Pattern (Wise lore) -> ExpDec lore -> Exp (Wise lore)

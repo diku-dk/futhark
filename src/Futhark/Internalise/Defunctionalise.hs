@@ -442,6 +442,10 @@ defuncExp (Match e cs t loc) = do
       sv' = snd $ NE.head csPairs
   return (Match e' cs' t loc, sv')
 
+defuncExp (Attr info e loc) = do
+  (e', sv) <- defuncExp e
+  return (Attr info e' loc, sv)
+
 -- | Same as 'defuncExp', except it ignores the static value.
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
@@ -966,6 +970,7 @@ freeVars expr = case expr of
   Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
   Constr _ es _ _     -> foldMap freeVars es
+  Attr _ e _          -> freeVars e
   Match e cs _ _      -> freeVars e <> foldMap caseFV cs
     where caseFV (CasePat p eCase _) = (names (patternDimNames p) <> freeVars eCase)
                                        `without` patternVars p

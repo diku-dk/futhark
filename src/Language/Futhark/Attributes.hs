@@ -557,6 +557,7 @@ typeOf (Constr _ _ (Info t) _)  = t
 typeOf (Match _ cs (Info t, _) _) =
   unscopeType (foldMap unscopeSet cs) t
   where unscopeSet (CasePat p _ _) = S.map identName $ patternIdents p
+typeOf (Attr _ e _) = typeOf e
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.

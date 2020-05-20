@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+
   * Warnings for overflowing literals, such as `1000 : u8`.
+
+  * Futhark now supports an attribute system, whereby expressions can
+    be tagged with attributes that provide hints or directions to the
+    compiler.  This is an expert-level feature, but it is sometimes
+    useful.
 
 ### Removed
 

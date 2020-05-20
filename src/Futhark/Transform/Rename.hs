@@ -192,9 +192,12 @@ instance Rename dec => Rename (PatElemT dec) where
 instance Rename Certificates where
   rename (Certificates cs) = Certificates <$> rename cs
 
+instance Rename Attrs where
+  rename = pure
+
 instance Rename dec => Rename (StmAux dec) where
-  rename (StmAux cs dec) =
-    StmAux <$> rename cs <*> rename dec
+  rename (StmAux cs attrs dec) =
+    StmAux <$> rename cs <*> rename attrs <*> rename dec
 
 instance Renameable lore => Rename (Body lore) where
   rename (Body dec stms res) = do

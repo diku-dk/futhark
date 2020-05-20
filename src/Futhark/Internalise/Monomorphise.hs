@@ -401,6 +401,9 @@ transformExp (Match e cs (t, retext) loc) =
   Match <$> transformExp e <*> mapM transformCase cs <*>
   ((,) <$> traverse transformType t <*> pure retext) <*> pure loc
 
+transformExp (Attr info e loc) =
+  Attr info <$> transformExp e <*> pure loc
+
 transformCase :: Case -> MonoM Case
 transformCase (CasePat p e loc) = do
   (p', rr) <- transformPattern p

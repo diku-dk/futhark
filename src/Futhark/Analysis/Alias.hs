@@ -59,11 +59,11 @@ analyseStms orig_aliases =
 
 analyseStm :: (Attributes lore, CanBeAliased (Op lore)) =>
               AliasTable -> Stm lore -> Stm (Aliases lore)
-analyseStm aliases (Let pat (StmAux cs dec) e) =
+analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
   let e' = analyseExp aliases e
       pat' = addAliasesToPattern pat e'
       lore' = (Names' $ consumedInExp e', dec)
-  in Let pat' (StmAux cs lore') e'
+  in Let pat' (StmAux cs attrs lore') e'
 
 analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
               AliasTable -> Exp lore -> Exp (Aliases lore)

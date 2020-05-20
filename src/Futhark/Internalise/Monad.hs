@@ -69,6 +69,7 @@ data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
   , envSafe :: Bool
+  , envAttrs :: Attrs
   }
 
 data InternaliseState = InternaliseState {
@@ -126,6 +127,7 @@ runInternaliseM safe (InternaliseM m) =
                    envSubsts = mempty
                  , envDoBoundsChecks = True
                  , envSafe = safe
+                 , envAttrs = mempty
                  }
         newState src =
           InternaliseState { stateNameSource = src

@@ -76,9 +76,15 @@ instance Substitute dec => Substitute (PatElemT dec) where
   substituteNames substs (PatElem ident dec) =
     PatElem (substituteNames substs ident) (substituteNames substs dec)
 
+instance Substitute Attrs where
+  substituteNames _ attrs = attrs
+
 instance Substitute dec => Substitute (StmAux dec) where
-  substituteNames substs (StmAux cs dec) =
-    StmAux (substituteNames substs cs) (substituteNames substs dec)
+  substituteNames substs (StmAux cs attrs dec) =
+    StmAux
+    (substituteNames substs cs)
+    (substituteNames substs attrs)
+    (substituteNames substs dec)
 
 instance Substitute dec => Substitute (Param dec) where
   substituteNames substs (Param name dec) =

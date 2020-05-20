@@ -16,6 +16,7 @@ module Futhark.Representation.AST.Pretty
   )
   where
 
+import           Data.Foldable (toList)
 import           Data.Maybe
 
 import           Futhark.Util.Pretty
@@ -118,9 +119,17 @@ instance PrettyLore lore => Pretty (Body lore) where
     | otherwise = stack (map ppr $ stmsToList stms) </>
                   text "in" <+> braces (commasep $ map ppr res)
 
+instance Pretty Attr where
+  ppr (AttrAtom v) = ppr v
+
+attrAnnots :: Stm lore -> [Doc]
+attrAnnots = map f . toList . unAttrs . stmAuxAttrs . stmAux
+  where f v = text "#[" <> ppr v <> text "]"
+
 bindingAnnotation :: PrettyLore lore => Stm lore -> Doc -> Doc
 bindingAnnotation bnd =
-  case mapMaybe ppAnnot $ patternElements $ stmPattern bnd of
+  case attrAnnots bnd <>
+       mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
     []     -> id
     annots -> (stack annots </>)
 
@@ -147,7 +156,7 @@ instance Pretty (Param Type) where
     ppr name
 
 instance PrettyLore lore => Pretty (Stm lore) where
-  ppr bnd@(Let pat (StmAux cs dec) e) =
+  ppr bnd@(Let pat (StmAux cs _ dec) e) =
     bindingAnnotation bnd $ align $ hang 2 $
     text "let" <+> align (ppr pat) <+>
     case (linebreak, ppExpLore dec e) of

@@ -171,6 +171,8 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Match e cases (t, ext) loc) =
     Match <$> mapOnExp tv e <*> astMap tv cases
           <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext) <*> pure loc
+  astMap tv (Attr attr e loc) =
+    Attr attr <$> mapOnExp tv e <*> pure loc
 
 instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
@@ -420,3 +422,5 @@ bareExp (Constr name es _ loc) =
   Constr name (map bareExp es) NoInfo loc
 bareExp (Match e cases _ loc) =
   Match (bareExp e) (fmap bareCase cases) (NoInfo,NoInfo) loc
+bareExp (Attr attr e loc) =
+  Attr attr (bareExp e) loc

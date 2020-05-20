@@ -450,7 +450,7 @@ isMapWithOp pat e
 -- the data dependencies to see that the "dead" result is not
 -- actually used for computing one of the live ones.
 removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
-removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
+removeDeadReduction (_, used) pat aux (Screma w form arrs)
   | Just ([Reduce comm redlam nes], maplam) <- isRedomapSOAC form,
     not $ all (`UT.used` used) $ patternNames pat, -- Quick/cheap check
 
@@ -475,7 +475,7 @@ removeDeadReduction (_, used) pat (StmAux cs _) (Screma w form arrs)
   let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
   redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix++dead_fix)
 
-  certifying cs $ letBind_ (Pattern [] $ used_red_pes ++ map_pes) $
+  auxing aux $ letBind_ (Pattern [] $ used_red_pes ++ map_pes) $
     Op $ Screma w (redomapSOAC [Reduce comm redlam' used_nes] maplam') arrs
 
 removeDeadReduction _ _ _ _ = Skip

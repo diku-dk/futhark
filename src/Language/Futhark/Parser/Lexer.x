@@ -84,6 +84,7 @@ tokens :-
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
   "'~"                     { tokenC APOSTROPHE_THEN_TILDE }
   "`"                      { tokenC BACKTICK }
+  "#["                     { tokenC HASH_LBRACKET }
   "..<"                    { tokenC TWO_DOTS_LT }
   "..>"                    { tokenC TWO_DOTS_GT }
   "..."                    { tokenC THREE_DOTS }
@@ -328,6 +329,7 @@ data Token = ID Name
            | APOSTROPHE_THEN_HAT
            | APOSTROPHE_THEN_TILDE
            | BACKTICK
+           | HASH_LBRACKET
            | TWO_DOTS
            | TWO_DOTS_LT
            | TWO_DOTS_GT

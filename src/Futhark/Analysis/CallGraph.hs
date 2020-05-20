@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | This module exports functionality for generating a call graph of
 -- an Futhark program.
 module Futhark.Analysis.CallGraph
@@ -7,6 +8,7 @@ module Futhark.Analysis.CallGraph
   , calls
   , calledByConsts
   , allCalledBy
+  , findNoninlined
   )
   where
 
@@ -93,3 +95,24 @@ buildFGexp e = execWriter $ mapExpM folder e
           mapOnBody = \_ body -> do tell $ buildFGBody body
                                     return body
           }
+
+-- | The set of all functions that are called noinline somewhere.
+findNoninlined :: Prog SOACS -> S.Set Name
+findNoninlined prog =
+  foldMap onStm $ foldMap (bodyStms . funDefBody) (progFuns prog) <> progConsts prog
+  where onStm :: Stm -> S.Set Name
+        onStm (Let _ aux (Apply fname _ _ _))
+          | "noinline" `inAttrs` stmAuxAttrs aux =
+              S.singleton fname
+        onStm (Let _ _ e) = execWriter $ mapExpM folder e
+          where folder =
+                  identityMapper
+                  { mapOnBody = \_ body -> do tell $ foldMap onStm $ bodyStms body
+                                              return body
+                  , mapOnOp = mapSOACM
+                              identitySOACMapper
+                              { mapOnSOACLambda = \lam -> do
+                                  tell $ foldMap onStm $ bodyStms $ lambdaBody lam
+                                  return lam
+                              }
+                  }

@@ -504,7 +504,7 @@ simpleMkLetNames names e = do
   (ts, shapes) <- instantiateShapes' et
   let shapeElems = [ PatElem shape shapet | Ident shape shapet <- shapes ]
   let valElems = zipWith PatElem names ts
-  return $ Let (Pattern shapeElems valElems) (StmAux mempty ()) e
+  return $ Let (Pattern shapeElems valElems) (defAux ()) e
 
 -- | Instances of this class can be converted to Futhark expressions
 -- within a 'MonadBinder'.
