@@ -276,6 +276,9 @@ functionRuntime = (++"_total_runtime")
 functionRuns :: String -> String
 functionRuns = (++"_runs")
 
+functionIter :: String -> String
+functionIter = (++"_iter")
+
 
 multiCoreReport :: [(String, Bool)] -> [C.BlockItem]
 multiCoreReport names = report_kernels
@@ -283,13 +286,14 @@ multiCoreReport names = report_kernels
         report_kernels = concatMap reportKernel names
         format_string name True =
           let padding = replicate (longest_name - length name) ' '
-          in unwords ["tid %2d -", name ++ padding, "ran %7d times; avg: %9ldus; total: %8ldus\n"]
+          in unwords ["tid %2d -", name ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
         format_string name False =
           let padding = replicate (longest_name - length name) ' '
-          in unwords ["        ", name ++ padding, "ran %7d times; avg: %9ldus; total: %9ldus\n"]
+          in unwords ["        ", name ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
         reportKernel (name, is_array) =
           let runs = functionRuns name
               total_runtime = functionRuntime name
+              iters = functionIter name
           in if is_array then
                    [[C.citem|
                      for (int i = 0; i < ctx->scheduler.num_threads; i++) {
@@ -298,7 +302,10 @@ multiCoreReport names = report_kernels
                          i,
                          ctx->$id:runs[i],
                          (long int) ctx->$id:total_runtime[i] / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1),
-                         (long int) ctx->$id:total_runtime[i]);
+                         (long int) ctx->$id:total_runtime[i],
+                         (long int) (ctx->$id:iters[i]),
+                         (long int) (ctx->$id:iters[i]) / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1)
+                         );
                      }
                    |]]
 
@@ -308,7 +315,9 @@ multiCoreReport names = report_kernels
                        $string:(format_string name is_array),
                        ctx->$id:runs,
                        (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
-                       (long int) ctx->$id:total_runtime);
+                       (long int) ctx->$id:total_runtime,
+                       (long int) (ctx->$id:iters),
+                       (long int) (ctx->$id:iters) / (ctx->$id:runs != 0 ? ctx->$id:runs : 1));
                    |],
                    [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
                    [C.citem|ctx->total_runs += ctx->$id:runs;|]]
@@ -318,10 +327,11 @@ addBenchmarkFields :: String -> Maybe VName -> GC.CompilerM op s ()
 addBenchmarkFields name (Just _) = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
   GC.contextField (functionRuns name) [C.cty|int*|] $ Just [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
+  GC.contextField (functionIter name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads)|]
 addBenchmarkFields name Nothing = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
-
+  GC.contextField (functionIter name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
 
 benchmarkCode :: String -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
@@ -345,9 +355,11 @@ benchmarkCode name tid code = do
         end = name ++ "_end"
         -- This case should be mutex protected
         updateFields Nothing    = [C.citems|ctx->$id:(functionRuns name)++;
-                                            ctx->$id:(functionRuntime name) += elapsed;|]
+                                            ctx->$id:(functionRuntime name) += elapsed;
+                                            ctx->$id:(functionIter name) += $id:name.iterations;|]
         updateFields (Just tid') = [C.citems|ctx->$id:(functionRuns name)[$id:tid']++;
-                                            ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;|]
+                                            ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;
+                                            ctx->$id:(functionIter name)[$id:tid'] += (end-start);|]
 
 
 multicoreName :: String -> GC.CompilerM op s String
