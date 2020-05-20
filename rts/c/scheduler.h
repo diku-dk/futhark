@@ -95,9 +95,14 @@ static int num_processors()
 #endif
 }
 
+
+
+__thread struct worker* worker_local = NULL;
+
 static inline void *scheduler_worker(void* arg)
 {
   struct worker *worker = (struct worker*) arg;
+  worker_local = worker;
   struct subtask *subtask = NULL;
   while(1) {
     if (subtask_queue_dequeue(worker, &subtask) == 0) {
@@ -116,7 +121,6 @@ static inline void *scheduler_worker(void* arg)
 #ifdef MCDEBUG
       ran_iter += (subtask->end-subtask->start);
 #endif
-
       // Only one error can be returned at the time now
       // Maybe we can provide a stack like structure for pushing errors onto
       // if we wish to backpropagte multiple errors
@@ -146,17 +150,6 @@ static inline void scheduler_set_queue_profiling(struct scheduler *scheduler, in
   }
 }
 
-
-static inline struct worker* get_own_worker_struct(struct scheduler *scheduler)
-{
-  pthread_t pid = pthread_self();
-  for (int i = 0; i < scheduler->num_threads; i++) {
-    if (pid == scheduler->workers[i].thread) {
-      return &scheduler->workers[i];
-    }
-  }
-  return NULL;
-}
 
 
 static inline int scheduler_dynamic(struct scheduler *scheduler,
@@ -301,13 +294,9 @@ static inline int delegate_work(struct scheduler *scheduler,
 
 #ifdef MCDEBUG
   fprintf(stderr, "[delegate_work] tid %d\n", calling_worker->tid);
-  /* fprintf(stderr, "[delegate_work] granularity %d\n", task->granularity); */
+  fprintf(stderr, "[delegate_work] granularity %d\n", task->granularity);
   fprintf(stderr, "[delegate_work] iterations %ld\n", task->iterations);
 #endif
-
-  CHECK_ERR(task->fn(task->args, 0, task->iterations, calling_worker->tid), task->name);
-  *ntask = scheduler->num_threads;
-  return 0;
 
   pthread_mutex_t mutex;
   CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
@@ -315,7 +304,6 @@ static inline int delegate_work(struct scheduler *scheduler,
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
   int shared_counter = 1;
-
 
   struct subtask *subtask = setup_subtask(task->fn, task->args,
                                           &mutex, &cond, &shared_counter,
@@ -369,9 +357,8 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
     return 0;
   }
 
-  struct worker *worker = get_own_worker_struct(scheduler);
-  if (worker != NULL) {
-    CHECK_ERR(delegate_work(scheduler, task, ntask, worker), "delegate_work");
+  if (worker_local != NULL) {
+    CHECK_ERR(delegate_work(scheduler, task, ntask, worker_local), "delegate_work");
     return 0;
   }
 
@@ -391,7 +378,6 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
     return scheduler_static(scheduler, task, ntask);
   default:
     return scheduler_dynamic(scheduler, task, ntask);
-    return -1;
   }
 }
 
