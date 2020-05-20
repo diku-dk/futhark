@@ -41,6 +41,7 @@ module Futhark.Pass.ExplicitAllocations
        )
 where
 
+import Debug.Trace
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
@@ -297,8 +298,16 @@ allocsForPattern sizeidents validents rts hints = do
         MemArray bt _ u (Just (ReturnsInBlock mem extixfun)) -> do
           (patels, ixfn) <- instantiateExtIxFun ident extixfun
           tell (patels, [])
+          -- TODO: This is probably not right
+          space <- lift $ lookupMemSpace $ trace (unwords ["Looking up mem space:", show mem]) mem
+          tell ([], [PatElem mem $ MemMem $ trace (unwords ["got it:", show mem, "  ", show space]) space])
 
           return $
+            trace (unwords ["\nident:", show ident,
+                            "\n\npatels:", show patels,
+                            "\n\nixfn", show ixfn,
+                            "\n\nmem", show mem,
+                            "\n"]) $
             PatElem (identName ident) $
             MemArray bt shape u $
             ArrayIn mem ixfn
@@ -315,7 +324,14 @@ allocsForPattern sizeidents validents rts hints = do
 
           memid <- lift $ mkMemIdent ident space
           tell ([], [PatElem (identName memid) $ MemMem space])
-          return $ PatElem (identName ident) $ MemArray bt shape u $
+          return $
+            trace (unwords ["\nident:", show ident,
+                            "\n\npatels:", show patels,
+                            "\n\nmemid:", show memid,
+                            "\n\nixfn", show ixfn,
+                            "\n\nspace", show space,
+                            "\n"]) $
+            PatElem (identName ident) $ MemArray bt shape u $
             ArrayIn (identName memid) ixfn
 
         _ -> error "Impossible case reached in allocsForPattern!"
@@ -788,8 +804,8 @@ allocInLoopBody num_vals (Body _ bnds res) =
   allocInStms bnds $ \bnds' -> do
   let (_, val_res) = splitFromEnd num_vals res
   mem_ixfs <- mapM bodyReturnMIxf val_res
-  mem_spaces <- mapM ixfunSpace mem_ixfs
-  return (Body () bnds' res, mem_ixfs, mem_spaces)
+  mem_spaces <- mapM ixfunSpace $ trace (unwords ["allocInLoopBody.mem_ixfs", show mem_ixfs]) mem_ixfs
+  return (Body () bnds' res, mem_ixfs, trace (unwords ["allocInLoopBody.mem_ixfs", show mem_ixfs, "  ", show mem_spaces]) mem_spaces)
 
 -- | Just introduces the new representation (index functions); but
 -- does not unify (e.g., does not ensures direct); implementation
