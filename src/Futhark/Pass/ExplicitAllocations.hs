@@ -41,7 +41,6 @@ module Futhark.Pass.ExplicitAllocations
        )
 where
 
-import Debug.Trace
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
@@ -62,9 +61,6 @@ import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Util (splitFromEnd, takeLast)
-
-traceWith :: Show a => String -> a -> a
-traceWith s a = trace (s ++ ": " ++ show a ++ "\n") a
 
 data AllocStm = SizeComputation VName (PrimExp VName)
               | Allocation VName SubExp Space
@@ -288,7 +284,7 @@ allocsForPattern sizeidents validents rts hints = do
   let sizes' = [ PatElem size $ MemPrim int32 | size <- map identName sizeidents ]
   (vals, (exts, mems)) <-
     runWriterT $ forM (zip3 validents rts hints) $ \(ident, rt, hint) -> do
-      let shape = arrayShape $ identType $ traceWith "allocsForPattern.ident" ident
+      let shape = arrayShape $ identType ident
       case rt of
         MemPrim _ -> do
           summary <- lift $ summaryForBindage (identType ident) hint
@@ -302,11 +298,7 @@ allocsForPattern sizeidents validents rts hints = do
           (patels, ixfn) <- instantiateExtIxFun ident extixfun
           tell (patels, [])
 
-          return $ trace (unwords ["\nallocsForPattern.ReturnsInBlock.extixfun", show extixfun,
-                                   "\n\nallocsForPattern.ReturnsInBlock.ixfn", show ixfn,
-                                   "\n\nallocsForPattern.ReturnsInBlock.patels", show patels,
-                                   "\n"
-                                   ]) $
+          return $
             PatElem (identName ident) $
             MemArray bt shape u $
             ArrayIn mem ixfn
@@ -314,11 +306,11 @@ allocsForPattern sizeidents validents rts hints = do
         MemArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
             summary <- lift $ summaryForBindage (identType ident) hint
-            return $ traceWith "allocsForPattern.Nothing" $ PatElem (identName ident) summary
+            return $ PatElem (identName ident) summary
 
         MemArray bt _ u (Just (ReturnsNewBlock space _ extixfn)) -> do
           -- treat existential index function first
-          (patels, ixfn) <- instantiateExtIxFun ident $ traceWith "allocsForPattern.ReturnsNewBlock" extixfn
+          (patels, ixfn) <- instantiateExtIxFun ident extixfn
           tell (patels, [])
 
           memid <- lift $ mkMemIdent ident space
@@ -328,14 +320,8 @@ allocsForPattern sizeidents validents rts hints = do
 
         _ -> error "Impossible case reached in allocsForPattern!"
 
-  return -- $ trace (unwords ["\nrt:", show rts,
-         --                   "\n\nsizes':", show sizes',
-         --                   "\n\nexts:", show exts,
-         --                   "\n\nmems:", show mems,
-         --                   "\n\nvals:", show vals,
-         --                    "\n"])
-    (sizes' <> exts <> mems,
-      vals)
+  return (sizes' <> exts <> mems,
+          vals)
   where knownShape = mapM known . shapeDims
         known (Free v) = Just v
         known Ext{} = Nothing
@@ -349,8 +335,7 @@ allocsForPattern sizeidents validents rts hints = do
                                Ident -> ExtIxFun ->
                                m ([PatElemT (MemInfo d u ret)], IxFun)
         instantiateExtIxFun idd ext_ixfn = do
-          let isAndPtps = traceWith "isAndPtps" $
-                          S.toList $
+          let isAndPtps = S.toList $
                           foldMap onlyExts $
                           foldMap leafExpTypes ext_ixfn
 
@@ -443,14 +428,13 @@ allocInFParam param pspace =
 
 allocInMergeParams :: (Allocable fromlore tolore,
                        Allocator tolore (AllocM fromlore tolore)) =>
-                      [VName]
-                   -> [(FParam fromlore,SubExp)]
+                   [(FParam fromlore,SubExp)]
                    -> ([FParam tolore]
                        -> [FParam tolore]
                        -> ([SubExp] -> AllocM fromlore tolore ([SubExp], [SubExp]))
                        -> AllocM fromlore tolore a)
                    -> AllocM fromlore tolore a
-allocInMergeParams variant merge m = do
+allocInMergeParams merge m = do
   ((valparams, handle_loop_subexps), mem_params) <-
     runWriterT $ unzip <$> mapM allocInMergeParam merge
   let mergeparams' = mem_params <> valparams
@@ -465,9 +449,8 @@ allocInMergeParams variant merge m = do
   where allocInMergeParam (mergeparam, Var v)
           | Array bt shape u <- paramDeclType mergeparam = do
               (mem, ixfun) <- lift $ lookupArraySummary v
-              space <- lift $ lookupMemSpace mem
               return (mergeparam { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun },
-                             lift . ensureArrayIn (paramType mergeparam) mem ixfun)
+                      lift . ensureArrayIn (paramType mergeparam) mem ixfun)
 
         allocInMergeParam (mergeparam, _) = doDefault mergeparam =<< lift askDefaultSpace
 
@@ -577,9 +560,6 @@ memoryInDeclExtType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
           return $ MemArray bt shape u $ ReturnsNewBlock DefaultSpace i $
             IxFun.iota $ map convert $ shapeDims shape
 
-        convert (Ext i) = LeafExp (Ext i) int32
-        convert (Free v) = Free <$> primExpFromSubExp int32 v
-
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
 startOfFreeIDRange = S.size . shapeContext
 
@@ -647,17 +627,14 @@ allocInStm (Let (Pattern sizeElems valElems) _ e) = do
 
 allocInExp :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
               Exp fromlore -> AllocM fromlore tolore (Exp tolore)
-allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
-  allocInMergeParams mempty ctx $ \_ ctxparams' _ ->
-  -- What we need, is that the index functions in val are not being linearized,
-  -- and that the index functions in bodybnds also not be linearized, and that we can then do that all later
-  allocInMergeParams (map paramName ctxparams') val $
+allocInExp (DoLoop ctx vals form body) =
+  allocInMergeParams ctx $ \_ ctxparams' _ ->
+  allocInMergeParams vals $
   \new_ctx_params valparams' mk_loop_val -> do
   form' <- allocInLoopForm form
   localScope (scopeOf form') $ do
     (valinit_ctx, valinit') <- mk_loop_val valinit
-    -- let (body', init_subs_and_spaces) = pairM $ allocInStms bodybnds $ helper valinit' mk_loop_val
-    (body', body_ixfuns) <- allocInIfBody (length val) body
+    (body', body_ixfuns) <- allocInIfBody (length vals) body
     bodyres_spaces <- mapM ixfunSpace body_ixfuns
     init_ixfuns <- mapM bodyReturnMIxf valinit'
     init_spaces <- mapM ixfunSpace init_ixfuns
@@ -667,88 +644,16 @@ allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
                          (zip bodyres_spaces body_ixfuns)
         init_subs = map (selectSub fst) subs
         res_subs = map (selectSub snd) subs
-    res_body <- addResCtxInLoopBody body' spaces $ traceWith "going to add res on res_subs" res_subs
-    -- (init_subs, spaces) <- init_subs_and_spaces
+    res_body <- addResCtxInLoopBody body' spaces res_subs
     (newctx, memctx, vals')  <- foldM substituteInVal ([], [], []) $ zip3 (zip valparams' valinit') spaces init_subs
 
-    -- let size_ext = length res_then - length trets
-    --     (ind_ses0, r_then_else) =
-    --       partition (\(r_then, r_else, _) -> r_then == r_else) $
-    --       zip3 res_then res_else [0 .. size_ext - 1]
-    --     (r_then_ext, r_else_ext, _) = unzip3 r_then_else
-    --     ind_ses = zipWith (\(se, _, i) k -> (i-k, se)) ind_ses0
-    --               [0 .. length ind_ses0 - 1]
-    --     rets'' = foldl (\acc (i, se) -> fixExt i se acc) trets ind_ses
-    --     tbranch'' = tbranch' { bodyResult = traceWith "res_then2" $ r_then_ext ++ drop size_ext res_then }
-
-    let res = DoLoop
-              (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx) ++ newctx ++ memctx)
-              -- (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx))
-              vals'
-              -- (zip valparams' valinit')
-              form' res_body
-
-    t <- expExtType res
-
     return $
-      trace (unwords ["ctxparams':", show ctxparams',
-                       "\n\nnew_ctx_params:", show new_ctx_params,
-                       "\n\nctxinit:", show ctxinit,
-                       "\n\nvalinit_ctx:", show valinit_ctx,
-                       -- "\n\nnewctx:", show newctx,
-                       -- "\n\nmemctx:", show memctx,
-                       "\n\ninit_ixfuns:", show init_ixfuns,
-                       "\n\ninit_spaces:", show init_spaces,
-                       "\n\nbody_ixfuns:", show body_ixfuns,
-                       "\n\nbodyres_spaces:", show bodyres_spaces,
-                       "\n\nvalparams':", show valparams',
-                       "\n\nvalinit':", show valinit',
-                       "\n\nspaces:", show spaces,
-                       "\n\ninit_subs:", show init_subs,
-                       "\n\nres_subs:", show res_subs,
-                       -- "\n\nvals':", show vals',
-                       "\n\nbody':", pretty body',
-                       "\n\nres_body:", pretty res_body,
-                       "\n\ntype:", show t,
-                       "\n"]) $
-            res
+      DoLoop
+      (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx) ++ newctx ++ memctx)
+      vals'
+      form' res_body
 
   where
-    -- helper valinit' mk_loop_val bodybnds' = do
-    --   init_ixfuns <- mapM bodyReturnMIxf valinit'
-    --   init_spaces <- mapM ixfunSpace init_ixfuns
-    --   bodyres_ixfuns <- mapM bodyReturnMIxf $ drop (length ctx) bodyres
-    --   bodyres_spaces <- mapM ixfunSpace bodyres_ixfuns
-    --   ((val_ses,valres'),val_retbnds) <- collectStms $ mk_loop_val $
-    --                                      valres
-    --   let (spaces, subs) = unzip $
-    --                        zipWith generalize
-    --                        (zip init_spaces init_ixfuns)
-    --                        (zip bodyres_spaces bodyres_ixfuns)
-    --       init_subs = map (selectSub fst) subs
-    --       res_subs = map (selectSub snd) subs
-    --       body' = Body () bodybnds' bodyres
-    --   res_body <- addResCtxInLoopBody body' spaces $ traceWith "going to add res on res_subs" res_subs
-    --   return $
-    --     trace (unwords ["init_ixfuns:", show init_ixfuns,
-    --                      "\n\ninit_spaces:", show init_spaces,
-    --                      "\n\nbodyres_ixfun:", show bodyres_ixfuns,
-    --                      "\n\nres_subs:", show res_subs,
-    --                      "\n\nbodyres_spaces:", show bodyres_spaces,
-    --                      "\n\nres_body:", pretty res_body,
-    --                      "\n"]) $
-    --     (res_body, (init_subs, spaces))
-    --     -- Also return stuff needed to amend merge params
-    --     -- Body () (bodybnds'<>val_retbnds) (ctxres++val_ses++valres')
-
-    allocInParam' :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                   Space -> FParam tolore -> AllocM fromlore tolore (FParam tolore)
-                   -- TODO: Can be removed?
-    allocInParam' space param =
-      case paramDeclType param of
-        Prim bt -> return $ param { paramAttr = MemPrim bt }
-        Mem space' -> return $ param { paramAttr = MemMem space' }
-        Array pt shape u -> error "Impossible in allocInParam'"
 
     substituteInVal :: (Allocable fromlore tolore,
                          Allocator tolore (AllocM fromlore tolore)) =>
@@ -763,22 +668,20 @@ allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
         Nothing -> do -- Does not generalize
           val' <- ensureDirect space val
           let space' = fromMaybe DefaultSpace space
-          -- param' <- allocInParam' space' param
           mem_ctx_r <- bodyReturnMemCtx val'
           mem_param <- newParam "existential_param_4" $ MemMem space'
           return $ (ctx_acc,
                     mem_ctx_acc ++ zip [mem_param] mem_ctx_r,
                     val_acc ++ [(param, val')])
         Just (ixfun, m) -> do -- Generalizes
-          let i = length m
           let space' = fromMaybe DefaultSpace space
           vname <- newVName "existential_param_1"
           let mem_param = Param vname $ MemMem space'
           existentials <- mapM (primExpToSubExp "ixfn_exist"
                                 (return . BasicOp . SubExp . Var))
                           m
-          existential_params <- mapM (\existential -> do
-                                         meminfo <- subExpMemInfo existential
+          existential_params <- mapM (\ext -> do
+                                         meminfo <- subExpMemInfo ext
                                          let meminfo' =
                                                case meminfo of
                                                  MemPrim pt -> MemPrim pt
@@ -796,34 +699,21 @@ allocInExp (DoLoop ctx val form body@(Body () bodybnds bodyres)) =
                   return $ param { paramAttr = MemArray pt shape u $ ArrayIn vname ixfun'' }
                 _ -> error "impossible in substituteInVal"
           mem_ctx_r <- bodyReturnMemCtx val
-          return $
-            trace (unwords ["\nm: ", show m,
-                             "\n\nixfun: ", show ixfun,
-                             "\n\nixfun':", show ixfun',
-                             "\n\nexts  :", show $ zip existential_params existentials,
-                             "\n\nmem   :", show $ zip [mem_param] mem_ctx_r,
-                             "\n\nval   :", show $ [(param', val)],
-                             "\n"]) $
-            (ctx_acc ++ zip existential_params (trace (unwords ["\n\ngot mem_ctx_r:", show mem_ctx_r, "\n"]) existentials),
-             mem_ctx_acc ++ zip [mem_param] mem_ctx_r,
-             val_acc ++ [(param', val)])
-
-    pairM :: Monad m => m (a, b) -> (m a, m b)
-    pairM m =
-      (fst <$> m, snd <$> m)
+          return (ctx_acc ++ zip existential_params existentials,
+                  mem_ctx_acc ++ zip [mem_param] mem_ctx_r,
+                  val_acc ++ [(param', val)])
 
     (_ctxparams, ctxinit) = unzip ctx
-    (_valparams, valinit) = unzip val
-    (ctxres, valres) = splitAt (length ctx) bodyres
+    (_valparams, valinit) = unzip vals
 
     ixfunSpace x =
       case x of
         Just (ArrayIn mem _) -> do
-          meminfo <- lookupMemInfo $ traceWith "looking it up" mem
+          meminfo <- lookupMemInfo mem
           case meminfo of
-            MemMem space -> return $ Just $ traceWith "returning it" space
-            _ -> return $ traceWith "returning it 2" Nothing
-        _ -> return $ traceWith "returning it 3" Nothing
+            MemMem space -> return $ Just space
+            _ -> return Nothing
+        _ -> return Nothing
 
     generalize :: (Maybe Space, Maybe MemBind) -> (Maybe Space, Maybe MemBind)
                -> (Maybe Space, Maybe (ExtIxFun, [(PrimExp VName, PrimExp VName)]))
@@ -846,7 +736,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfAttr rets ifsort)) = do
   tspaces <- mkSpaceOks num_rets tbranch
   fspaces <- mkSpaceOks num_rets fbranch
   -- try to generalize (antiunify) the index functions of the then and else bodies
-  let sp_substs = zipWith generalize (zip (traceWith "tspaces" tspaces) $ traceWith "tm_ixfs" tm_ixfs) (zip fspaces fm_ixfs)
+  let sp_substs = zipWith generalize (zip tspaces tm_ixfs) (zip fspaces fm_ixfs)
       (spaces, subs) = unzip sp_substs
       tsubs = map (selectSub fst) subs
       fsubs = map (selectSub snd) subs
@@ -854,7 +744,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfAttr rets ifsort)) = do
   (fbranch', frets) <- addResCtxInIfBody rets fbranch spaces fsubs
   if frets /= trets then error "In allocInExp, IF case: antiunification of then/else produce different ExtInFn!"
     else do -- above is a sanity check; implementation continues on else branch
-    let res_then = traceWith "res_then" $ bodyResult tbranch'
+    let res_then = bodyResult tbranch'
         res_else = bodyResult fbranch'
         size_ext = length res_then - length trets
         (ind_ses0, r_then_else) =
@@ -864,7 +754,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfAttr rets ifsort)) = do
         ind_ses = zipWith (\(se, _, i) k -> (i-k, se)) ind_ses0
                   [0 .. length ind_ses0 - 1]
         rets'' = foldl (\acc (i, se) -> fixExt i se acc) trets ind_ses
-        tbranch'' = tbranch' { bodyResult = traceWith "res_then2" $ r_then_ext ++ drop size_ext res_then }
+        tbranch'' = tbranch' { bodyResult = r_then_ext ++ drop size_ext res_then }
         fbranch'' = fbranch' { bodyResult = r_else_ext ++ drop size_ext res_else }
         res_if_expr = If cond tbranch'' fbranch'' $ IfAttr rets'' ifsort
     return res_if_expr
@@ -925,27 +815,22 @@ addResCtxInLoopBody (Body () bnds res) spaces substs = do
             return (res_acc ++ [r'],
                     ext_acc,
                     ctx_acc ++ mem_ctx_r)
-          Just (ixfn, m) -> do -- generalizes
-            -- Not needed since we only return a subexp from here, the index function is derived from the merge parameters
-            -- ixfun' <- instantiateIxFun $ IxFun.substituteInIxFun m ixfun
-            -- param' <- case paramDeclType param of
-            --             Array pt shape u -> do
-            --               vname <- newVName "existential_param"
-            --               param { paramAttr = MemArray pt shape u $ ArrayIn vname ixfun' }
-            --             _ -> error "impossible in substituteInVal"
+          Just (_, m) -> do -- generalizes
             ext_ses <- mapM (primExpToSubExp "ixfn_exist"
                             (return . BasicOp . SubExp .Var))
-                       $ traceWith "addResCtxInLoopBody.m" m
+                       m
             mem_ctx_r <- bodyReturnMemCtx r
-            return (res_acc ++ traceWith "addResCtxInLoopBody.[r]" [r],
-                    ext_acc ++ traceWith "addResCtxInLoopBody.ext_ses" ext_ses,
-                    ctx_acc ++ traceWith "addResCtxInLoopBody.mem_ctx_r" mem_ctx_r)
+            return (res_acc ++ [r],
+                    ext_acc ++ ext_ses,
+                    ctx_acc ++ mem_ctx_r)
 
 selectSub :: ((a, a) -> a) -> Maybe (ExtIxFun, [(a, a)]) ->
              Maybe (ExtIxFun, [a])
 selectSub f (Just (ixfn, m)) = Just (ixfn, map f m)
 selectSub _ Nothing = Nothing
 
+bodyReturnMIxf :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                  SubExp -> AllocM fromlore tolore (Maybe MemBind)
 bodyReturnMIxf Constant{} = return Nothing
 bodyReturnMIxf (Var v) = do
   info <- lookupMemInfo v
@@ -997,13 +882,12 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
                             MemArray pt shp' u $
                             ReturnsNewBlock sp' 0 ixfn'
                           _ -> error "Impossible case reached in addResCtxInIfBody"
-            return $
-              trace (unwords ["addResCtxInIfBody.mem_ctx_r:", show mem_ctx_r]) $
-                   (res_acc ++ [r],
-                    ext_acc ++ ext_ses,
-                    ctx_acc ++ mem_ctx_r,
-                    br_acc ++ [exttp],
-                    k + i)
+            return
+              (res_acc ++ [r],
+               ext_acc ++ ext_ses,
+               ctx_acc ++ mem_ctx_r,
+               br_acc ++ [exttp],
+               k + i)
 
       adjustNewBlockExistential :: ([BodyReturns], Int) -> BodyReturns -> ([BodyReturns], Int)
       adjustNewBlockExistential (acc, k) (MemArray pt shp u (ReturnsNewBlock space _ ixfun)) =
@@ -1025,6 +909,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
       adjustExtPE :: Int -> PrimExp (Ext VName) -> PrimExp (Ext VName)
       adjustExtPE k = fmap (adjustExtV k)
 
+convert :: Ext SubExp -> PrimExp (Ext VName)
 convert (Ext i) = LeafExp (Ext i) int32
 convert (Free v) = Free <$> primExpFromSubExp int32 v
 
