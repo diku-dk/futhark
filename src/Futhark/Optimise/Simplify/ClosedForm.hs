@@ -18,7 +18,7 @@ import Data.Maybe
 import qualified Data.Map.Strict as M
 
 import Futhark.Construct
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Rule
 
@@ -41,7 +41,7 @@ Motivation:
 
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
-foldClosedForm :: (Attributes lore, BinderOps lore) =>
+foldClosedForm :: (ASTLore lore, BinderOps lore) =>
                   VarLookup lore
                -> Pattern lore
                -> Lambda lore
@@ -68,7 +68,7 @@ foldClosedForm look pat lam accs arrs = do
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
-loopClosedForm :: (Attributes lore, BinderOps lore) =>
+loopClosedForm :: (ASTLore lore, BinderOps lore) =>
                   Pattern lore
                -> [(FParam lore,SubExp)]
                -> Names -> SubExp -> Body lore

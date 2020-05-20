@@ -9,7 +9,7 @@ import           Data.List (elemIndex)
 
 
 import           Futhark.Analysis.PrimExp
-import           Futhark.Representation.AST.Syntax.Core (Ext(..))
+import           Futhark.IR.Syntax.Core (Ext(..))
 
 -- | Generalize two 'PrimExp's of the the same type.
 leastGeneralGeneralization :: (Eq v) => [(PrimExp v, PrimExp v)] -> PrimExp v -> PrimExp v ->

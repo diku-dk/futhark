@@ -19,7 +19,7 @@ import qualified Data.Sequence as Seq
 
 import           Futhark.MonadFreshNames
 import           Language.Futhark
-import           Futhark.Representation.AST.Pretty ()
+import           Futhark.IR.Pretty ()
 
 -- | An expression or an extended 'Lambda' (with size parameters,
 -- which AST lambdas do not support).

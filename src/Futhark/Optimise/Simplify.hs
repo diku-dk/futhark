@@ -22,7 +22,7 @@ module Futhark.Optimise.Simplify
   where
 
 import Data.Bifunctor (second)
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST

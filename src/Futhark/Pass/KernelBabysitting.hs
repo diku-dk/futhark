@@ -15,8 +15,8 @@ import Data.List (elemIndex, isPrefixOf, sort)
 import Data.Maybe
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.AST
-import Futhark.Representation.Kernels
+import Futhark.IR
+import Futhark.IR.Kernels
        hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.Tools

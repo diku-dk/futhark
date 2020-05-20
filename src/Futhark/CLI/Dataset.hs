@@ -20,7 +20,7 @@ import System.Random.PCG (initialize, Variate, uniformR)
 
 import Language.Futhark.Syntax hiding
   (Value, ValueType, PrimValue(..), IntValue(..), FloatValue(..))
-import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
+import Language.Futhark.Prop (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 

@@ -69,8 +69,8 @@ import Data.Either
 import Data.List (find, foldl', nub, mapAccumL)
 import Data.Maybe
 
-import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR
+import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -324,7 +324,7 @@ emptyOfType ctx_names (Array pt shape _) = do
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
 -- further optimisation..
-notWorthHoisting :: Attributes lore => BlockPred lore
+notWorthHoisting :: ASTLore lore => BlockPred lore
 notWorthHoisting _ _ (Let pat _ e) =
   not (safeExp e) && any ((>0) . arrayRank) (patternTypes pat)
 
@@ -368,7 +368,7 @@ hoistStms rules block vtable uses orig_stms = do
                 (uses'',stms') <- simplifyStmsBottomUp' vtable' uses' optimstms
                 return (uses'', stms'++stms)
 
-blockUnhoistedDeps :: Attributes lore =>
+blockUnhoistedDeps :: ASTLore lore =>
                       [Either (Stm lore) (Stm lore)]
                    -> [Either (Stm lore) (Stm lore)]
 blockUnhoistedDeps = snd . mapAccumL block mempty
@@ -383,7 +383,7 @@ blockUnhoistedDeps = snd . mapAccumL block mempty
 provides :: Stm lore -> [VName]
 provides = patternNames . stmPattern
 
-expandUsage :: (Attributes lore, Aliased lore) =>
+expandUsage :: (ASTLore lore, Aliased lore) =>
                ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
 expandUsage vtable utable bnd =
   UT.expand (`ST.lookupAliases` vtable) (UT.usageInStm bnd <> usageThroughAliases) <>
@@ -439,10 +439,10 @@ blockIf block m = do
   (blocked, hoisted) <- hoistStms rules block vtable usages stms
   return ((blocked, x), hoisted)
 
-hasFree :: Attributes lore => Names -> BlockPred lore
+hasFree :: ASTLore lore => Names -> BlockPred lore
 hasFree ks _ _ need = ks `namesIntersect` freeIn need
 
-isNotSafe :: Attributes lore => BlockPred lore
+isNotSafe :: ASTLore lore => BlockPred lore
 isNotSafe _ _ = not . safeExp . stmExp
 
 isInPlaceBound :: BlockPred m
@@ -450,13 +450,13 @@ isInPlaceBound _ _ = isUpdate . stmExp
   where isUpdate (BasicOp Update{}) = True
         isUpdate _ = False
 
-isNotCheap :: Attributes lore => BlockPred lore
+isNotCheap :: ASTLore lore => BlockPred lore
 isNotCheap _ _ = not . cheapStm
 
-cheapStm :: Attributes lore => Stm lore -> Bool
+cheapStm :: ASTLore lore => Stm lore -> Bool
 cheapStm = cheapExp . stmExp
 
-cheapExp :: Attributes lore => Exp lore -> Bool
+cheapExp :: ASTLore lore => Exp lore -> Bool
 cheapExp (BasicOp BinOp{})        = True
 cheapExp (BasicOp SubExp{})       = True
 cheapExp (BasicOp UnOp{})         = True
@@ -473,7 +473,7 @@ cheapExp _                        = True -- Used to be False, but
 stmIs :: (Stm lore -> Bool) -> BlockPred lore
 stmIs f _ _ = f
 
-loopInvariantStm :: Attributes lore => ST.SymbolTable lore -> Stm lore -> Bool
+loopInvariantStm :: ASTLore lore => ST.SymbolTable lore -> Stm lore -> Bool
 loopInvariantStm vtable =
   all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
 
@@ -731,7 +731,7 @@ simplifyExpBase = mapExpM hoist
                   error "Unhandled Op in simplification engine."
                 }
 
-type SimplifiableLore lore = (Attributes lore,
+type SimplifiableLore lore = (ASTLore lore,
                               Simplifiable (LetDec lore),
                               Simplifiable (FParamInfo lore),
                               Simplifiable (LParamInfo lore),

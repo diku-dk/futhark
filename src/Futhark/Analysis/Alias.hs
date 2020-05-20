@@ -3,8 +3,8 @@
 -- program with an arbitrary lore and produces one with aliases.  This
 -- module does not implement the aliasing logic itself, and derives
 -- its information from definitions in
--- "Futhark.Representation.AST.Attributes.Aliases" and
--- "Futhark.Representation.Aliases".  The alias information computed
+-- "Futhark.IR.Prop.Aliases" and
+-- "Futhark.IR.Aliases".  The alias information computed
 -- here will include transitive aliases (note that this is not what
 -- the building blocks do).
 module Futhark.Analysis.Alias
@@ -22,16 +22,16 @@ module Futhark.Analysis.Alias
 import Data.List (foldl')
 import qualified Data.Map as M
 
-import Futhark.Representation.AST.Syntax
-import Futhark.Representation.Aliases
+import Futhark.IR.Syntax
+import Futhark.IR.Aliases
 
 -- | Perform alias analysis on a Futhark program.
-aliasAnalysis :: (Attributes lore, CanBeAliased (Op lore)) =>
+aliasAnalysis :: (ASTLore lore, CanBeAliased (Op lore)) =>
                  Prog lore -> Prog (Aliases lore)
 aliasAnalysis (Prog consts funs) =
   Prog (fst (analyseStms mempty consts)) (map analyseFun funs)
 
-analyseFun :: (Attributes lore, CanBeAliased (Op lore)) =>
+analyseFun :: (ASTLore lore, CanBeAliased (Op lore)) =>
               FunDef lore -> FunDef (Aliases lore)
 analyseFun (FunDef entry fname restype params body) =
   FunDef entry fname restype params body'
@@ -41,14 +41,14 @@ analyseFun (FunDef entry fname restype params body) =
 -- aliases.
 type AliasTable = M.Map VName Names
 
-analyseBody :: (Attributes lore,
+analyseBody :: (ASTLore lore,
                 CanBeAliased (Op lore)) =>
                AliasTable -> Body lore -> Body (Aliases lore)
 analyseBody atable (Body lore stms result) =
   let (stms', _atable') = analyseStms atable stms
   in mkAliasedBody lore stms' result
 
-analyseStms :: (Attributes lore, CanBeAliased (Op lore)) =>
+analyseStms :: (ASTLore lore, CanBeAliased (Op lore)) =>
                AliasTable -> Stms lore -> (Stms (Aliases lore), AliasesAndConsumed)
 analyseStms orig_aliases =
   foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
@@ -57,7 +57,7 @@ analyseStms orig_aliases =
               atable' = trackAliases aliases stm'
           in (stms<>oneStm stm', atable')
 
-analyseStm :: (Attributes lore, CanBeAliased (Op lore)) =>
+analyseStm :: (ASTLore lore, CanBeAliased (Op lore)) =>
               AliasTable -> Stm lore -> Stm (Aliases lore)
 analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
   let e' = analyseExp aliases e
@@ -65,7 +65,7 @@ analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
       lore' = (Names' $ consumedInExp e', dec)
   in Let pat' (StmAux cs attrs lore') e'
 
-analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
+analyseExp :: (ASTLore lore, CanBeAliased (Op lore)) =>
               AliasTable -> Exp lore -> Exp (Aliases lore)
 
 -- Would be better to put this in a BranchType annotation, but that
@@ -97,7 +97,7 @@ analyseExp aliases e = mapExp analyse e
                  , mapOnOp = return . addOpAliases
                  }
 
-analyseLambda :: (Attributes lore, CanBeAliased (Op lore)) =>
+analyseLambda :: (ASTLore lore, CanBeAliased (Op lore)) =>
                  Lambda lore -> Lambda (Aliases lore)
 analyseLambda lam =
   -- XXX: it may cause trouble that we pass mempty to analyseBody

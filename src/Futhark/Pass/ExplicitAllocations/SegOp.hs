@@ -7,8 +7,8 @@ module Futhark.Pass.ExplicitAllocations.SegOp
        )
 where
 
-import qualified Futhark.Representation.Mem.IxFun as IxFun
-import Futhark.Representation.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
 import Futhark.Pass.ExplicitAllocations
 
 allocInKernelBody :: Allocable fromlore tolore =>

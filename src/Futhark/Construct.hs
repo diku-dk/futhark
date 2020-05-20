@@ -7,7 +7,7 @@
 -- constructing fragments of Futhark ASTs.  More importantly, it also
 -- contains a basic introduction on how to use them.
 --
--- The "Futhark.Representation.AST.Syntax" module contains the core
+-- The "Futhark.IR.Syntax" module contains the core
 -- AST definition.  One important invariant is that all bound names in
 -- a Futhark program must be /globally/ unique.  In principle, you
 -- could use the facilities from "Futhark.MonadFreshNames" (or your
@@ -19,7 +19,7 @@
 --
 -- Constructing ASTs with these building blocks requires you to ensure
 -- that all free variables are in scope.  See
--- "Futhark.Representation.AST.Attributes.Scope".
+-- "Futhark.IR.Prop.Scope".
 --
 -- == 'MonadBinder'
 --
@@ -117,7 +117,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.MonadFreshNames
 import Futhark.Binder
 

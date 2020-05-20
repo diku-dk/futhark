@@ -16,9 +16,9 @@ import qualified Data.Set as S
 import Prelude hiding (log)
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.SOACS
-import qualified Futhark.Representation.Kernels as Out
-import Futhark.Representation.Kernels.Kernel hiding (HistOp)
+import Futhark.IR.SOACS
+import qualified Futhark.IR.Kernels as Out
+import Futhark.IR.Kernels.Kernel hiding (HistOp)
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass.ExtractKernels.DistributeNests

@@ -6,7 +6,7 @@ module Futhark.CodeGen.Backends.CSOpenCL
 import Control.Monad
 import Data.List (intersperse)
 
-import Futhark.Representation.KernelsMem (Prog, KernelsMem, int32)
+import Futhark.IR.KernelsMem (Prog, KernelsMem, int32)
 import Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericCSharp as CS
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp

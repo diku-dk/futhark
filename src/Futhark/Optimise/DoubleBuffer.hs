@@ -33,11 +33,11 @@ import           Data.Maybe
 import           Data.List (find)
 
 import           Futhark.Construct
-import           Futhark.Representation.AST
+import           Futhark.IR
 import           Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
 import           Futhark.Pass.ExplicitAllocations.Kernels ()
-import qualified Futhark.Representation.Mem.IxFun as IxFun
-import           Futhark.Representation.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import           Futhark.IR.KernelsMem
 import           Futhark.Pass
 import           Futhark.Util (maybeHead)
 
