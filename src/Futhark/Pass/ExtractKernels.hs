@@ -634,6 +634,18 @@ onMap path (MapLoop pat aux w lam arrs) = do
                         , distStms = mempty
                         }
 
+mayExploitOuter :: Attrs -> Bool
+mayExploitOuter attrs =
+  not $
+  "incremental_flattening_no_outer" `inAttrs` attrs ||
+  "incremental_flattening_only_inner" `inAttrs` attrs
+
+mayExploitIntra :: Attrs -> Bool
+mayExploitIntra attrs =
+  not $
+  "incremental_flattening_no_intra" `inAttrs` attrs ||
+  "incremental_flattening_only_inner" `inAttrs` attrs
+
 onMap' :: KernelNest -> KernelPath
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
@@ -649,16 +661,14 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
   ((outer_suff, outer_suff_key), outer_suff_stms) <-
     sufficientParallelism "suff_outer_par" nest_ws path
 
-  intra <- if worthIntraGroup lam &&
-              not ("incremental_flattening_no_outer" `inAttrs` stmAuxAttrs aux) then
+  intra <- if worthIntraGroup lam && mayExploitIntra (stmAuxAttrs aux) then
              flip runReaderT types $ intraGroupParallelise loopnest lam
            else return Nothing
   seq_body <- renameBody =<< mkBody <$>
               mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
   let seq_alts = [(outer_suff, seq_body)
                  | worthSequentialising lam,
-                   not $ "incremental_flattening_no_outer"
-                   `inAttrs` stmAuxAttrs aux]
+                   mayExploitOuter $ stmAuxAttrs aux]
 
   case intra of
     Nothing -> do

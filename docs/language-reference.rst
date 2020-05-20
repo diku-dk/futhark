@@ -1601,6 +1601,13 @@ parallelism" version for this SOAC.
 When using incremental flattening, do not generalise the "intra-group
 parallelism" version for this SOAC.
 
+``incremental_flattening_only_inner``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When using incremental flattening, do not generalise multiple versions
+at this level, but do exploit inner parallelism (which may give rise
+to multiple versions)
+
 ``noinline``
 ~~~~~~~~~~~~
 
