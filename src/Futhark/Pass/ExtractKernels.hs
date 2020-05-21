@@ -402,7 +402,7 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w form arrs)))
       (_, bnds) <- fst <$> runBinderT (simplifyStms =<< collectStms_ (certifying cs do_irwim)) types
       transformStms path $ stmsToList bnds
 
-transformStm path (Let pat (StmAux cs _ _) (Op (Screma w form arrs)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
 
   let paralleliseOuter = runBinder_ $ do
@@ -433,7 +433,8 @@ transformStm path (Let pat (StmAux cs _ _) (Op (Screma w form arrs)))
         renameBody =<<
         (mkBody <$> paralleliseInner path' <*> pure (map Var (patternNames pat)))
 
-  if not $ lambdaContainsParallelism map_lam
+  if not (lambdaContainsParallelism map_lam) ||
+     "sequential_inner" `inAttrs` stmAuxAttrs aux
     then paralleliseOuter
     else if incrementalFlattening then do
     ((outer_suff, outer_suff_key), suff_stms) <-
@@ -447,7 +448,8 @@ transformStm path (Let pat (StmAux cs _ _) (Op (Screma w form arrs)))
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
-transformStm path (Let pat (StmAux cs _ _) (Op (Stream w (Parallel _ _ _ []) map_fun arrs))) = do
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel _ _ _ []) map_fun arrs)))
+  | not ("sequential_inner" `inAttrs` stmAuxAttrs aux) = do
   -- No reduction part.  Remove the stream and leave the body
   -- parallel.  It will be distributed.
   types <- asksScope scopeForSOACs
@@ -455,14 +457,16 @@ transformStm path (Let pat (StmAux cs _ _) (Op (Stream w (Parallel _ _ _ []) map
     (stmsToList . snd <$> runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types)
 
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
-  | incrementalFlattening = do
+  | incrementalFlattening,
+    not ("sequential_inner" `inAttrs` stmAuxAttrs aux) = do
       ((outer_suff, outer_suff_key), suff_stms) <-
         sufficientParallelism "suff_outer_stream" [w] path
 
       outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
       inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
 
-      (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+      (suff_stms<>) <$>
+        kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
   | otherwise = paralleliseOuter path
 
