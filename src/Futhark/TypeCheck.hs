@@ -788,6 +788,14 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
       (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
+  let val_free = freeIn $ map fst valmerge
+      usedInVal p = paramName p `nameIn` val_free
+  case find (not . usedInVal . fst) ctxmerge of
+    Just p ->
+      bad $ TypeError $ "Loop context parameter " ++ pretty p ++ " unused."
+    Nothing ->
+      return ()
+
   binding (scopeOf form) $ do
     case form of
       ForLoop loopvar it boundexp loopvars -> do
