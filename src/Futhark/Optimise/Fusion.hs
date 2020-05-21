@@ -292,12 +292,12 @@ soacInputs soac = do
   other_nms <- expandSoacInpArr other_nms0
   return (inp_nms, other_nms)
 
-addNewKerWithInfusible :: FusedRes -> ([Ident], Certificates, SOAC, Names) -> Names -> FusionGM FusedRes
-addNewKerWithInfusible res (idd, cs, soac, consumed) ufs = do
+addNewKerWithInfusible :: FusedRes -> ([Ident], StmAux (), SOAC, Names) -> Names -> FusionGM FusedRes
+addNewKerWithInfusible res (idd, aux, soac, consumed) ufs = do
   nm_ker <- KernName <$> newVName "ker"
   scope <- askScope
   let out_nms = map identName idd
-      new_ker = newKernel cs soac consumed out_nms scope
+      new_ker = newKernel aux soac consumed out_nms scope
       comb    = M.unionWith S.union
       os' = M.fromList [(arr,nm_ker) | arr <- out_nms]
             `M.union` outArr res
@@ -332,9 +332,9 @@ inlineSOACInputs soac = do
 --   @orig_soac@ and @out_idds@ the current SOAC and its binding pattern
 --   @consumed@ is the set of names consumed by the SOAC.
 --   Output: a new Fusion Result (after processing the current SOAC binding)
-greedyFuse :: [Stm] -> Names -> FusedRes -> (Pattern, Certificates, SOAC, Names)
+greedyFuse :: [Stm] -> Names -> FusedRes -> (Pattern, StmAux (), SOAC, Names)
            -> FusionGM FusedRes
-greedyFuse rem_bnds lam_used_nms res (out_idds, cs, orig_soac, consumed) = do
+greedyFuse rem_bnds lam_used_nms res (out_idds, aux, orig_soac, consumed) = do
   soac <- inlineSOACInputs orig_soac
   (inp_nms, other_nms) <- soacInputs soac
   -- Assumption: the free vars in lambda are already in @infusible res@.
@@ -355,8 +355,8 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, cs, orig_soac, consumed) = do
 
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
         if   is_screma || any isInfusible out_nms
-        then horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed)
-        else prodconsGreedyFuse          res (out_idds, cs, soac, consumed)
+        then horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed)
+        else prodconsGreedyFuse          res (out_idds, aux, soac, consumed)
   --
   -- (ii) check whether fusing @soac@ will violate any in-place update
   --      restriction, e.g., would move an input array past its in-place update.
@@ -381,7 +381,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, cs, orig_soac, consumed) = do
   let comb      = M.unionWith S.union
 
   if not fusible_ker then
-    addNewKerWithInfusible res (patternIdents out_idds, cs, soac, consumed) ufs
+    addNewKerWithInfusible res (patternIdents out_idds, aux, soac, consumed) ufs
   else do
      -- Need to suitably update `inpArr':
      --   (i) first remove the inpArr bindings of the old kernel
@@ -414,9 +414,9 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, cs, orig_soac, consumed) = do
      --                 but make sure NOT to add a new kernel!
      return $ FusedRes True (outArr res) inpArr'' ufs kernels'
 
-prodconsGreedyFuse :: FusedRes -> (Pattern, Certificates, SOAC, Names)
+prodconsGreedyFuse :: FusedRes -> (Pattern, StmAux (), SOAC, Names)
                    -> FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
-prodconsGreedyFuse res (out_idds, cs, soac, consumed) = do
+prodconsGreedyFuse res (out_idds, aux, soac, consumed) = do
   let out_nms        = patternNames out_idds    -- Extract VNames from output patterns
       to_fuse_knmSet = getKersWithInpArrs res out_nms  -- Find kernels which consume outputs
       to_fuse_knms   = S.toList to_fuse_knmSet
@@ -434,11 +434,11 @@ prodconsGreedyFuse res (out_idds, cs, soac, consumed) = do
         Nothing    -> return (False, [])
         Just kers' -> return (True, map certifyKer kers')
   return (ok_kers_compat, fused_kers, to_fuse_knms, to_fuse_kers, to_fuse_knms)
-  where certifyKer k = k { certificates = certificates k <> cs }
+  where certifyKer k = k { kerAux = kerAux k <> aux }
 
-horizontGreedyFuse :: [Stm] -> FusedRes -> (Pattern, Certificates, SOAC, Names)
+horizontGreedyFuse :: [Stm] -> FusedRes -> (Pattern, StmAux (), SOAC, Names)
                    -> FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
-horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
+horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
   (inp_nms, _) <- soacInputs soac
   let out_nms        = patternNames out_idds
       infusible_nms  = namesFromList $ filter (`nameIn` infusible res) out_nms
@@ -470,7 +470,7 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
 
   scope <- askScope
   let kernminds' = L.sortBy (\(_,_,i1) (_,_,i2)->compare i1 i2) $ catMaybes kernminds
-      soac_kernel = newKernel cs soac consumed out_nms scope
+      soac_kernel = newKernel aux soac consumed out_nms scope
 
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
   -- kernel until which fusion succeded, and @fused_ker@ is the resulting kernel.
@@ -522,7 +522,9 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
                                    (fsoac cur_ker) (fusedConsumed cur_ker) ker
                         case new_ker of
                           Nothing -> return (False, n,bnd_ind,cur_ker,mempty)
-                          Just krn-> return (True,n+1,bnd_ind,krn,new_ufus_nms)
+                          Just krn->
+                            let krn' = krn { kerAux = aux <> kerAux krn }
+                            in return (True,n+1,bnd_ind,krn',new_ufus_nms)
             ) (True,0,0,soac_kernel,infusible_nms) kernminds'
 
   -- Find the kernels we have fused into and the name of the last such
@@ -656,7 +658,7 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
           bres' <- checkForUpdates bres e
           foldM fusionGatherExp bres' (e:pat_vars)
 
-  where cs = stmCerts bnd
+  where aux = stmAux bnd
         rem_bnds = bnd : bnds
         consumed = consumedInExp $ Alias.analyseExp mempty e
 
@@ -665,13 +667,13 @@ fusionGatherStms fres (bnd@(Let pat _ e):bnds) res = do
           bres  <- bindingFamily pat $ fusionGatherStms lres bnds res
           bres' <- foldM fusionGatherSubExp bres nes
           consumed' <- varsAliases consumed
-          greedyFuse rem_bnds used_lam bres' (pat, cs, soac, consumed')
+          greedyFuse rem_bnds used_lam bres' (pat, aux, soac, consumed')
 
         mapLike fres' soac lambda = do
           bres  <- bindingFamily pat $ fusionGatherStms fres' bnds res
           (used_lam, blres) <- fusionGatherLam (mempty, bres) lambda
           consumed' <- varsAliases consumed
-          greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed')
+          greedyFuse rem_bnds used_lam blres (pat, aux, soac, consumed')
 
 fusionGatherStms fres [] res =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
@@ -828,7 +830,7 @@ insertKerSOAC aux names ker = do
     -- issue #224).  We insert copy expressions to fix it.
     f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
-    auxing aux $ letBind_ (basicPattern [] validents) $ Op f_soac'
+    auxing (kerAux ker <> aux) $ letBind_ (basicPattern [] validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
 
 -- | Perform simplification and fusion inside the lambda(s) of a SOAC.
