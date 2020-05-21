@@ -531,8 +531,6 @@ QualName :: { (QualName Name, SrcLoc) }
 Exp :: { UncheckedExp }
      : Exp ':' TypeExpDecl { Ascript $1 $3 (srcspan $1 $>) }
      | Exp ':>' TypeExpDecl { Coerce $1 $3 (NoInfo,NoInfo) (srcspan $1 $>) }
-     | '#[' AttrInfo ']' Exp %prec bottom
-                           { Attr $2 $4 (srcspan $1 $>) }
      | Exp2 %prec ':'      { $1 }
 
 Exp2 :: { UncheckedExp }
@@ -551,6 +549,8 @@ Exp2 :: { UncheckedExp }
 
      | unsafe Exp2         { Unsafe $2 (srcspan $1 $>) }
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
+     | '#[' AttrInfo ']' Exp %prec bottom
+                           { Attr $2 $4 (srcspan $1 $>) }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }
