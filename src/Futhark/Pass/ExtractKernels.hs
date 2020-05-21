@@ -327,6 +327,15 @@ kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
 
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
 
+transformStm _ stm
+  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
+    runBinder_ $ FOT.transformStmRecursively stm
+
+transformStm path (Let pat aux (Op soac))
+  | "sequential_outer" `inAttrs` stmAuxAttrs aux =
+      transformStms path . stmsToList . fmap (certify (stmAuxCerts aux)) =<<
+      runBinder_ (FOT.transformSOAC pat soac)
+
 transformStm path (Let pat aux (If c tb fb rt)) = do
   tb' <- transformBody path tb
   fb' <- transformBody path fb
@@ -621,7 +630,9 @@ onMap path (MapLoop pat aux w lam arrs) = do
         runDistNestT (env path') $
         distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
 
-  if not incrementalFlattening then exploitInnerParallelism path
+  if not incrementalFlattening &&
+     not ("sequential_inner" `inAttrs` stmAuxAttrs aux)
+    then exploitInnerParallelism path
     else do
 
     let exploitOuterParallelism path' = do
@@ -707,15 +718,17 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                                 (intra_suff_key, False)]
                                 ++ path) <*> pure res
 
-      ((outer_suff_stms<>intra_suff_stms)<>) <$>
-        kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
+      if "sequential_inner" `inAttrs` stmAuxAttrs aux
+        then kernelAlternatives pat seq_body []
+        else ((outer_suff_stms<>intra_suff_stms)<>) <$>
+             kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
 
 onInnerMap :: KernelPath -> MapLoop -> DistAcc Out.Kernels
            -> DistNestT Out.Kernels DistribM (DistAcc Out.Kernels)
 onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
       addStmToAcc (mapLoopStm maploop) acc
-  | not incrementalFlattening =
+  | not incrementalFlattening, not $ "sequential_inner" `inAttrs` stmAuxAttrs aux =
       distributeMap maploop acc
   | otherwise =
       distributeSingleStm acc (mapLoopStm maploop) >>= \case

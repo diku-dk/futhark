@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Futhark.Pass.ExtractKernels.DistributeNests
   ( MapLoop(..)
   , mapLoopStm
@@ -54,6 +55,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.CopyPropagate
+import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -271,6 +273,15 @@ onTopLevelStms stms = do
 maybeDistributeStm :: (MonadFreshNames m, DistLore lore) =>
                       Stm SOACS -> DistAcc lore
                    -> DistNestT lore m (DistAcc lore)
+
+maybeDistributeStm stm acc
+  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
+      addStmToAcc stm acc
+
+maybeDistributeStm (Let pat aux (Op soac)) acc
+  | "sequential_outer" `inAttrs` stmAuxAttrs aux =
+      distributeMapBodyStms acc . fmap (certify (stmAuxCerts aux)) =<<
+      runBinder_ (FOT.transformSOAC pat soac)
 
 maybeDistributeStm stm@(Let pat _ (Op (Screma w form arrs))) acc
   | Just lam <- isMapSOAC form =
