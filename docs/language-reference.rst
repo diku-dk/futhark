@@ -1581,13 +1581,20 @@ Attributes
 .. productionlist::
    attr:   `id`
 
-An expression can be prefixed with an attribute.  This may affect how
-it is treated by the compiler or other tools.  In no case will
-attributes affect or change the *semantics* of a program, but it may
-affect how well it compiles (or in some cases, whether it compiles at
-all).  Unknown attributes are silently ignored.  Most have no effect
-in the interpreter.  The following expression attributes are
-supported.
+An expression can be prefixed with an attribute, written as
+``#[attr]``.  This may affect how it is treated by the compiler or
+other tools.  In no case will attributes affect or change the
+*semantics* of a program, but it may affect how well it compiles (or
+in some cases, whether it compiles at all).  Unknown attributes are
+silently ignored.  Most have no effect in the interpreter.
+
+Many attributes affect second-order array combinators (*SOACS*).
+These must be applied to a fully saturated function application or
+they will have no effect.  If two SOACs with contradictory attributes
+are combined through fusion, it is unspecified which attributes take
+precedence.
+
+The following expression attributes are supported.
 
 ``incremental_flattening_no_outer``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
