@@ -47,7 +47,7 @@ transformFunDef consts_scope (FunDef entry fname rettype params body) = do
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
 transformStms :: (MonadFreshNames m, FirstOrderLore tolore) =>
-                   Stms SOACS -> m (AST.Stms tolore)
+                 Stms SOACS -> m (AST.Stms tolore)
 transformStms stms =
   fmap snd $ modifyNameSource $ runState $ runBinderT m mempty
   where m = mapM_ transformStmRecursively stms
