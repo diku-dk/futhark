@@ -690,7 +690,9 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
       par_body <- renameBody =<< mkBody <$>
                   mk_par_stms ((outer_suff_key, False) : path) <*> pure res
 
-      (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
+      if "sequential_inner" `inAttrs` stmAuxAttrs aux
+        then kernelAlternatives pat seq_body []
+        else (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
 
     Just ((_intra_min_par, intra_avail_par), group_size, log, intra_prelude, intra_stms) -> do
       addLog log
