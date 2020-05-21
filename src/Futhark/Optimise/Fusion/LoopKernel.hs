@@ -122,12 +122,11 @@ data FusedKer = FusedKer {
 
   , outputTransform :: SOAC.ArrayTransforms
   , outNames :: [VName]
-  , certificates :: Certificates
-  }
-                deriving (Show)
+  , kerAux :: StmAux ()
+  } deriving (Show)
 
-newKernel :: Certificates -> SOAC -> Names -> [VName] -> Scope SOACS -> FusedKer
-newKernel cs soac consumed out_nms scope =
+newKernel :: StmAux () -> SOAC -> Names -> [VName] -> Scope SOACS -> FusedKer
+newKernel aux soac consumed out_nms scope =
   FusedKer { fsoac = soac
            , inplace = consumed
            , fusedVars = []
@@ -135,7 +134,7 @@ newKernel cs soac consumed out_nms scope =
            , outputTransform = SOAC.noTransforms
            , outNames = out_nms
            , kernelScope = scope
-           , certificates = cs
+           , kerAux = aux
            }
 
 arrInputs :: FusedKer -> S.Set VName

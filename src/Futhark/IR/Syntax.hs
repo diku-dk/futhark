@@ -221,6 +221,10 @@ data StmAux dec = StmAux { stmAuxCerts :: !Certificates
                          }
                   deriving (Ord, Show, Eq)
 
+instance Semigroup dec => Semigroup (StmAux dec) where
+  StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
+    StmAux (cs1<>cs2) (attrs1<>attrs2) (dec1<>dec2)
+
 -- | A local variable binding.
 data Stm lore = Let { stmPattern :: Pattern lore
                     , stmAux :: StmAux (ExpDec lore)
