@@ -1599,19 +1599,19 @@ The following expression attributes are supported.
 ``incremental_flattening_no_outer``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using incremental flattening, do not generalise the "only outer
+When using incremental flattening, do not generate the "only outer
 parallelism" version for this SOAC.
 
 ``incremental_flattening_no_intra``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using incremental flattening, do not generalise the "intra-group
+When using incremental flattening, do not generate the "intra-group
 parallelism" version for this SOAC.
 
 ``incremental_flattening_only_inner``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using incremental flattening, do not generalise multiple versions
+When using incremental flattening, do not generate multiple versions
 at this level, but do exploit inner parallelism (which may give rise
 to multiple versions)
 
