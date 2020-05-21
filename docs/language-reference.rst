@@ -1616,6 +1616,22 @@ application.  Otherwise has no effect.  If used within a parallel
 construct (e.g. ``map``), this will likely prevent the GPU backends
 from generating working code.
 
+``sequential``
+~~~~~~~~~~~~~~
+
+*Fully* sequentialise the corresponding function call.
+
+``sequential_outer``
+~~~~~~~~~~~~~~~~~~~~
+
+Turn the outer parallelism in the corresponding function call
+sequential, but preserve any inner parallelism.
+
+``sequential_inner``
+~~~~~~~~~~~~~~~~~~~~
+
+Exploit only outer parallelism in the corresponding function call.
+
 ``unsafe``
 ~~~~~~~~~~
 
