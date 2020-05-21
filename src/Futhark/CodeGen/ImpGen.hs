@@ -1207,6 +1207,8 @@ sDeclareMem name space = do
   return name'
 
 sAlloc_ :: VName -> Count Bytes Imp.Exp -> Space -> ImpM lore op ()
+sAlloc_  _ _ (ScalarSpace _ _) = do
+  return ()
 sAlloc_ name' size' space = do
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of

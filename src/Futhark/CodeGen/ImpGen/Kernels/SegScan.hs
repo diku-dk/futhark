@@ -21,7 +21,6 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 -- import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
 -- import Futhark.Tools hiding (toExp)--(letSubExp)
 -- import Futhark.Construct  hiding (toExp)
-import Futhark.MonadFreshNames
 
 compileSegScan :: Pattern ExplicitMemory
                -> SegLevel -- At which level the *body* of a SegOp executes.
@@ -69,19 +68,18 @@ compileSegScan  (Pattern _ pes)
     available_local_mem <- dPrim "available_local_mem" int32
     sOp $ Imp.GetSizeMax available_local_mem Imp.SizeLocalMemory
 
-
-
     -- TODO: calc eLEMS_PER_THREAD
-    let eLMPT = 1
-    eLEMS_PER_THREAD <- dPrim "eLEMS_PER_THREAD" int32
-    eLEMS_PER_THREAD <-- eLMPT
-    let eLM_shape = Shape [Var eLEMS_PER_THREAD]
-    let eLEMS_PER_THREAD_var = Imp.var eLEMS_PER_THREAD int32
+    -- element_sizes <- forM_ hxp $ \para -> do
+    --       let pt = elemType $ paramType para
+    --           shape = Shape [Constant eLEMS_PER_THREAD]
+    --       return (unCount (typeSize (Array pt shape NoUniqueness)))
 
-    element_sizes <- forM_ hxp $ \para -> do
-          let pt = elemType $ paramType para
-              shape = Shape [Var eLEMS_PER_THREAD]
-          return (unCount (typeSize (Array pt shape NoUniqueness)))
+
+    let eLMPT = 1::Integer
+    -- intValueType :: IntValue -> IntType
+    let eLEMS_PER_THREAD = IntValue $ intValue Int32 eLMPT
+    let eLEMS_PER_THREAD_const = ValueExp eLEMS_PER_THREAD -- Constant eLEMS_PER_THREAD
+    let eLM_shape = Shape [Constant eLEMS_PER_THREAD]
 
 
 
@@ -111,11 +109,13 @@ compileSegScan  (Pattern _ pes)
             sAllocArray "exchange" pt shape $ Space "local"
 
       -- TODO: reuse exchange.
+-- sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
       block_id <- sAllocArray "block_id" int32 (Shape [intConst Int32 1]) (Space "local")
 
       -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn (head exchange) $ IxFun.iota [1]
       -- m <- lookupArray $ head exchange
       -- TODO: reuse exchange - comment in
+-- sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
       -- MemLocation m _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
       -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn m $ IxFun.iota [1]
 
@@ -140,19 +140,37 @@ compileSegScan  (Pattern _ pes)
       --       dPrim "chunk" pt
 
 -- This works for one element of typesize 4
-      chunk <- forM xp $ \para  -> do
-            let pt = elemType $ paramType para
-            let name = "chunk"
-            mem <- sAlloc (name ++ "_mem") 4 $ Space "private"
-            sArray name pt eLM_shape $ ArrayIn mem $ IxFun.iota [4]
-            -- sAllocArray name pt eLM_shape $ ScalarSpace [intConst Int8 1] pt
-
       -- chunk <- forM xp $ \para  -> do
       --       let pt = elemType $ paramType para
       --       let name = "chunk"
-      --       -- elm <- lookupVar eLEMS_PER_THREAD
-      --       mem <- sAlloc (name ++ "_mem") 4 $ ScalarSpace [intConst Int8 1] pt
-      --       -- -- sArray name pt eLM_shape $ ArrayIn mem $ IxFun.iota [4]
+      --       mem <- sAlloc (name ++ "_mem") 4 $ Space "private"
+      --       sArray name pt eLM_shape $ ArrayIn mem $ IxFun.iota [4]
+            -- sAllocArray name pt eLM_shape $ ScalarSpace [intConst Int8 1] pt
+
+      chunk <- forM xp $ \para  -> do
+            let pt = elemType $ paramType para
+            -- sAllocArray name pt eLM_shape $ ScalarSpace [Constant eLEMS_PER_THREAD] pt
+            let loc = ScalarSpace [Constant eLEMS_PER_THREAD] pt
+            sAllocArray "chunk" pt eLM_shape loc
+
+            -- mem <- sAlloc (name ++ "_mem") 4 $ ScalarSpace [Constant eLEMS_PER_THREAD] pt
+            -- sArray name pt eLM_shape $ ArrayIn mem $ IxFun.iota [eLEMS_PER_THREAD_prim]
+
+
+      -- sAlloc_ :: VName -> Count Bytes Imp.Exp -> Space -> ImpM lore op ()
+      -- sAlloc   (ScalarSpace  _) = do
+      --   return ()
+      -- sAlloc_ name' size' space = do
+      --   allocator <- asks $ M.lookup space . envAllocCompilers
+      --   case allocator of
+      --     Nothing -> emit $ Imp.Allocate name' size' space
+      --     Just allocator' -> allocator' name' size'
+
+      -- sAlloc (ScalarSpace  _) = do
+      --   return ()
+
+      -- sAlloc_
+
 
       --       name' <- newVName name
       --       -- dArray :: VName -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op ()
@@ -172,7 +190,7 @@ compileSegScan  (Pattern _ pes)
 
 
 
-                -- shape_c = Shape [eLEMS_PER_THREAD_var]
+                -- shape_c = Shape [eLEMS_PER_THREAD_const]
                 -- shape_c = Shape [Var eLEMS_PER_THREAD]
             -- name' <- newVName "chunk"
             -- entry <- memBoundToVarEntry Nothing $ MemArray pt shape NoUniqueness mem
@@ -185,9 +203,9 @@ compileSegScan  (Pattern _ pes)
 
       sComment "Coalesced read, apply map, write result and write to reg" $ do
         block_offset <- dPrim "block_offset" int32
-        block_offset <-- wG_ID_var * kernelGroupSize constants * eLEMS_PER_THREAD_var
+        block_offset <-- wG_ID_var * kernelGroupSize constants * eLEMS_PER_THREAD_const
         let block_offset_var = Imp.var block_offset int32
-        sFor "i" eLEMS_PER_THREAD_var $ \i -> do
+        sFor "i" eLEMS_PER_THREAD_const $ \i -> do
           -- let dgtid = Imp.vi32 wG_ID * unCount group_size' + ltid -- old
           let dgtid = block_offset_var + i * unCount group_size' + ltid
           -- TODO: I don't think this hack works with segmented arrays.
@@ -214,9 +232,9 @@ compileSegScan  (Pattern _ pes)
 
         sOp Imp.LocalBarrier
         loc_offset <- dPrim "loc_offset" int32
-        loc_offset <-- ltid * eLEMS_PER_THREAD_var
+        loc_offset <-- ltid * eLEMS_PER_THREAD_const
         let loc_offset_var = Imp.var loc_offset int32
-        sFor "i" eLEMS_PER_THREAD_var $ \i -> do
+        sFor "i" eLEMS_PER_THREAD_const $ \i -> do
           forM_ (zip chunk exchange) $ \(ch, ex) ->
                 copyDWIMFix ch [i] (Var ex) [loc_offset_var+i]
 
@@ -229,7 +247,7 @@ compileSegScan  (Pattern _ pes)
       forM_ (zip acc chunk) $ \(a, c) -> copyDWIMFix a [] (Var c) [0]
 
       sComment "Per-Thread Scan" $ do
-        sFor "i" (eLEMS_PER_THREAD_var-1) $ \i -> do
+        sFor "i" (eLEMS_PER_THREAD_const-1) $ \i -> do
           dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
           let (scan_x_params, scan_y_params) = splitAt (length nes) $ lambdaParams scan_op
           forM_ (zip scan_x_params acc) $ \(param, a) ->
@@ -525,7 +543,7 @@ compileSegScan  (Pattern _ pes)
           forM_ (zip myacc (bodyResult $ lambdaBody scan_op)) $ \(ma, sr) ->
             copyDWIMFix ma [] sr []
 
-        sFor "i" eLEMS_PER_THREAD_var $ \i -> do
+        sFor "i" eLEMS_PER_THREAD_const $ \i -> do
           scan_op_renamed <- renameLambda scan_op
           dScope Nothing $ scopeOfLParams $ lambdaParams scan_op_renamed
           let (scan_x_params2, scan_y_params2) = splitAt (length nes) $ lambdaParams scan_op_renamed
@@ -535,15 +553,15 @@ compileSegScan  (Pattern _ pes)
             copyDWIMFix (paramName param) [] (Var ch) [i]
           compileStms mempty (bodyStms $ lambdaBody scan_op_renamed) $
             forM_ (zip exchange (bodyResult $ lambdaBody scan_op_renamed)) $ \(e, sr) ->
-              copyDWIMFix e [ltid*eLEMS_PER_THREAD_var+i] sr []
+              copyDWIMFix e [ltid*eLEMS_PER_THREAD_const+i] sr []
 
         sOp Imp.LocalBarrier
 
         block_offset <- dPrim "block_offset" int32
-        block_offset <-- wG_ID_var * kernelGroupSize constants * eLEMS_PER_THREAD_var
+        block_offset <-- wG_ID_var * kernelGroupSize constants * eLEMS_PER_THREAD_const
         let block_offset_var = Imp.var block_offset int32
 
-        sFor "i" eLEMS_PER_THREAD_var $ \i -> do
+        sFor "i" eLEMS_PER_THREAD_const $ \i -> do
           dgtid <- dPrim "dgtid" int32
           dgtid <-- block_offset_var + i * kernelGroupSize constants + ltid
           let dgtid_var = Imp.var dgtid int32
