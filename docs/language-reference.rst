@@ -1600,47 +1600,46 @@ The following expression attributes are supported.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When using incremental flattening, do not generate the "only outer
-parallelism" version for this SOAC.
+parallelism" version for the attributed SOACs.
 
 ``incremental_flattening_no_intra``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When using incremental flattening, do not generate the "intra-group
-parallelism" version for this SOAC.
+parallelism" version for the attributed SOACs.
 
 ``incremental_flattening_only_inner``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When using incremental flattening, do not generate multiple versions
-at this level, but do exploit inner parallelism (which may give rise
-to multiple versions)
+for this SOAC, but do exploit inner parallelism (which may give rise
+to multiple versions at deeper levels).
 
 ``noinline``
 ~~~~~~~~~~~~
 
-When surrounding a function application, do not inline this
-application.  Otherwise has no effect.  If used within a parallel
-construct (e.g. ``map``), this will likely prevent the GPU backends
-from generating working code.
+Do not inline the attributed function application.  If used within a
+parallel construct (e.g. ``map``), this will likely prevent the GPU
+backends from generating working code.
 
 ``sequential``
 ~~~~~~~~~~~~~~
 
-*Fully* sequentialise the corresponding function call.
+*Fully* sequentialise the attributed SOAC.
 
 ``sequential_outer``
 ~~~~~~~~~~~~~~~~~~~~
 
-Turn the outer parallelism in the corresponding function call
-sequential, but preserve any inner parallelism.
+Turn the outer parallelism in the attributed SOAC sequential, but
+preserve any inner parallelism.
 
 ``sequential_inner``
 ~~~~~~~~~~~~~~~~~~~~
 
-Exploit only outer parallelism in the corresponding function call.
+Exploit only outer parallelism in the attributed SOAC.
 
 ``unsafe``
 ~~~~~~~~~~
 
 Do not perform any dynamic safety checks (such as bound checks) during
-execution of the expression.
+execution of the attributed expression.
