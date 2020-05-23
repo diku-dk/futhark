@@ -14,8 +14,8 @@ full language.  The text describes how ambiguities are resolved in
 practice (for example by applying rules of operator precedence).
 
 This reference describes only the language itself.  Documentation for
-the basis library is `available elsewhere
-<https://futhark-lang.org/docs/>`_.
+the built-in prelude is `available elsewhere
+<https://futhark-lang.org/docs/prelude>`_.
 
 Identifiers and Keywords
 ------------------------
