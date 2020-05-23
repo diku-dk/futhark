@@ -158,9 +158,11 @@ pprArray :: (UVec.Unbox a, F.IsPrimValue a) => [Int] -> UVec.Vector a -> Doc
 pprArray [] vs =
   ppr $ F.primValue $ UVec.head vs
 pprArray (d:ds) vs =
-  brackets $ commasep $ map (pprArray ds . slice) [0..d-1]
+  brackets $ cat $ punctuate separator $ map (pprArray ds . slice) [0..d-1]
   where slice_size = product ds
         slice i = UVec.slice (i*slice_size) slice_size vs
+        separator | null ds   = comma <> space
+                  | otherwise = comma <> line
 
 -- | A representation of the simple values we represent in this module.
 data ValueType = ValueType [Int] F.PrimType
