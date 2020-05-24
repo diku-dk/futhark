@@ -88,21 +88,7 @@ nonsegmentedReduction :: Pattern MCMem
                       -> DoSegBody
                       -> MulticoreGen ()
 nonsegmentedReduction pat space reds kbody = do
-  let ns = map snd $ unSegSpace space
 
-  ns' <- mapM toExp ns
-  let use_sequential_reduce = product ns' .<=. 50
-  sIf use_sequential_reduce
-      (sequentialRed pat space reds kbody)
-      (parallelNonsegmentedReduction pat space reds kbody)
-
-
-parallelNonsegmentedReduction :: Pattern MCMem
-                              -> SegSpace
-                              -> [SegBinOp MCMem]
-                              -> DoSegBody
-                              -> MulticoreGen ()
-parallelNonsegmentedReduction pat space reds kbody = do
   emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -119,7 +105,6 @@ parallelNonsegmentedReduction pat space reds kbody = do
   tid' <- toExp $ Var tid
 
   slugs <- mapM (segBinOpOpSlug tid') $ zip reds stage_one_red_arrs
-
 
   sFor "i" num_threads' $ \i -> do
     tid <-- i
@@ -148,7 +133,10 @@ parallelNonsegmentedReduction pat space reds kbody = do
                 forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
                   \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
-  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
+  dPrimV_ (segFlat space) 0
+  seq_body <- sequentialRed stage_one_red_arrs flat_idx space reds kbody
+
+  let freeVariables = namesToList $ freeIn (seq_body <> fbody) `namesSubtract`
                                     namesFromList (tid : [flat_idx])
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
@@ -158,39 +146,38 @@ parallelNonsegmentedReduction pat space reds kbody = do
 
   ntasks <- dPrim "num_tasks" $ IntType Int32
   ntasks' <- toExp $ Var ntasks
-  emit $ Imp.Op $ Imp.ParLoop scheduling ntasks flat_idx (product ns')
-                              (Imp.MulticoreFunc freeParams mempty fbody tid)
-
+  emit $ Imp.Op $ Imp.ParLoop scheduling ntasks flat_idx (product ns') freeParams
+                              (Imp.MulticoreFunc mempty fbody tid)
+                              (Imp.SequentialFunc mempty seq_body)
 
   reds' <- renameSegBinOp reds
   slugs' <- mapM (segBinOpOpSlug tid') $ zip reds' stage_one_red_arrs
 
+
+  dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
   sComment "neutral-initialise the output" $
     forM_ slugs' $ \slug ->
-      forM_ (zip (patternElements pat) (slugNeutral slug)) $ \(pe, ne) ->
+      forM_ (zip (patternElements pat) (slugAccs slug)) $ \(pe, (acc, _)) ->
         sLoopNest (slugShape slug) $ \vec_is ->
-          copyDWIMFix (patElemName pe) vec_is ne []
+          copyDWIMFix (patElemName pe) vec_is (Var acc) (0 : vec_is)
 
-  dPrimV_ (segFlat space) 0
-  -- Reduce over intermediate results
-  dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
-  sFor "i" ntasks' $ \i' -> do
-    emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
-    tid <-- i'
-    sComment "Apply main thread reduction" $
-      forM_ slugs' $ \slug ->
-        sLoopNest (slugShape slug) $ \vec_is -> do
-        sComment "load acc params" $
-          forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-          copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
-        sComment "load next params" $
-          forM_ (zip (nextParams slug) $ patternElements pat) $ \(p, pe) ->
-          copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
-        sComment "red body" $
-          compileStms mempty (bodyStms $ slugBody slug) $
-            forM_ (zip (patternElements pat) (bodyResult $ slugBody slug)) $
-              \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
-
+  sWhen (ntasks' .>. 0) $
+    sFor "i" (ntasks'-1) $ \i' -> do
+      emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
+      tid <-- (i' + 1)
+      sComment "Apply main thread reduction" $
+        forM_ slugs' $ \slug ->
+          sLoopNest (slugShape slug) $ \vec_is -> do
+            sComment "load acc params" $
+              forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+              copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
+            sComment "load next params" $
+              forM_ (zip (nextParams slug) $ patternElements pat) $ \(p, pe) ->
+              copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
+            sComment "red body" $
+              compileStms mempty (bodyStms $ slugBody slug) $
+                forM_ (zip (patternElements pat) (bodyResult $ slugBody slug)) $
+                  \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
 
 -- Each thread reduces over the number of segments
 -- each of which is done sequentially
@@ -226,7 +213,7 @@ segmentedReduction pat space reds kbody = do
       forM_ reds $ \red->
         forM_ (zip (patternElements pat) (segBinOpNeutral red)) $ \(pe, ne) ->
           sLoopNest (segBinOpShape red) $ \vec_is ->
-            copyDWIMFix (patElemName pe) (map (`Imp.var` int32) (init is) ++ vec_is) ne []
+            copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) ne []
 
     sComment "function main body" $ do
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
@@ -240,7 +227,7 @@ segmentedReduction pat space reds kbody = do
             sComment "load accum" $ do
               let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
               forM_ (zip acc_params (patternElements pat)) $ \(p, pe) ->
-                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map (`Imp.var` int32) (init is) ++ vec_is)
+                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 (init is) ++ vec_is)
 
             sComment "load new val" $ do
               let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
@@ -252,8 +239,9 @@ segmentedReduction pat space reds kbody = do
               compileStms mempty (bodyStms lbody) $
                 sComment "write back to res" $
                 forM_ (zip (patternElements pat) (bodyResult lbody)) $
-                  \(pe, se') -> copyDWIMFix (patElemName pe) (map (`Imp.var` int32) (init is) ++ vec_is) se' []
+                  \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) se' []
         flat_idx <-- flat_idx' + 1
+
   let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                     namesFromList (tid : [n_segments])
 
@@ -265,44 +253,36 @@ segmentedReduction pat space reds kbody = do
   let (body_allocs, fbody') = extractAllocations fbody
 
   emit $ Imp.Op $ Imp.ParLoop (decideScheduling fbody)
-                               ntask n_segments (product $ init ns')
-                              (Imp.MulticoreFunc freeParams body_allocs fbody' tid)
+                               ntask n_segments (product $ init ns') freeParams
+                              (Imp.MulticoreFunc body_allocs fbody' tid)
+                              (Imp.SequentialFunc mempty fbody)
 
 
 
-sequentialRed :: Pattern MCMem
+sequentialRed :: [[VName]]
+              -> VName
               -> SegSpace
               -> [SegBinOp MCMem]
               -> DoSegBody
-              -> MulticoreGen ()
-sequentialRed pat space reds kbody = do
+              -> MulticoreGen Imp.Code
+sequentialRed result_arr flat_idx space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
-  dPrimV_ (segFlat space) 0
-  flat_idx <- dPrim "iter" int32
-
-  forM_ reds $ \red ->
-    sLoopNest (segBinOpShape red) $ \vec_is ->
-      forM_ (zip (patternElements pat) (segBinOpNeutral red)) $
-        \(pe, ne) -> copyDWIMFix (patElemName pe) vec_is ne []
-
-  sFor "i" (product ns') $ \i -> do
-    flat_idx <-- i
+  collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
-
     kbody $ \all_red_res -> do
       let all_red_res' = segBinOpChunks reds all_red_res
-      forM_ (zip all_red_res' reds) $ \(red_res, red) -> do
+      forM_ (zip3 all_red_res' reds result_arr) $ \(red_res, red, res_arr) -> do
         let (xParams, yParams) = splitAt (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
         sLoopNest (segBinOpShape red) $ \vec_is -> do
           sComment "load acc params" $
-            forM_ (zip xParams (patternElements pat)) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var $ patElemName pe) ((map Imp.vi32 $ init is) ++ vec_is)
+            forM_ (zip xParams res_arr) $ \(p, res) ->
+              copyDWIMFix (paramName p) [] (Var res) (0 : vec_is)
           sComment "load next params" $
             forM_ (zip yParams red_res) $ \(p, (res, res_is)) ->
               copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-          sComment "red body" $
+          sComment "sequential red body" $
             compileStms mempty (bodyStms $ (lambdaBody . segBinOpLambda) red) $
-                forM_ (zip (patternElements pat) (bodyResult $ (lambdaBody . segBinOpLambda) red)) $
-                  \(pe, se) -> copyDWIMFix (patElemName pe) ((map Imp.vi32 $ init is) ++ vec_is) se []
+                forM_ (zip res_arr (bodyResult $ (lambdaBody . segBinOpLambda) red)) $
+                  \(res, se) -> copyDWIMFix res (0 : vec_is) se []

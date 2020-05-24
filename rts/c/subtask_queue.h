@@ -8,11 +8,12 @@
 #include <assert.h>
 
 
-typedef int (*task_fn)(void* args, int start, int end, int subtask_id);
+typedef int (*par_task_fn)(void* args, int start, int end, int subtask_id);
+typedef int (*seq_task_fn)(void* args, int start, int end, int tid);
 
 /* A subtask that can be executed by a thread */
 struct subtask {
-  task_fn fn;
+  par_task_fn par_fn;
   void* args;
   int start, end;
   // How much of a task to take a the time
@@ -35,7 +36,8 @@ struct scheduler {
 /* A task for the scheduler to execute */
 struct scheduler_task {
   const char* name;
-  task_fn fn;
+  par_task_fn par_fn;
+  seq_task_fn seq_fn;
   void* args;
   long int iterations;
   int granularity;
@@ -74,7 +76,7 @@ struct worker {
 };
 
 
-static inline struct subtask* setup_subtask(task_fn fn,
+static inline struct subtask* setup_subtask(par_task_fn par_fn,
                                             void* args,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
@@ -87,14 +89,14 @@ static inline struct subtask* setup_subtask(task_fn fn,
     assert(!"malloc failed in setup_subtask");
     return  NULL;
   }
-  subtask->fn         = fn;
-  subtask->args       = args;
-  subtask->mutex      = mutex;
-  subtask->cond       = cond;
-  subtask->counter    = counter;
-  subtask->start      = start;
-  subtask->end        = end;
-  subtask->chunk      = chunk;
+  subtask->par_fn  = par_fn;
+  subtask->args    = args;
+  subtask->mutex   = mutex;
+  subtask->cond    = cond;
+  subtask->counter = counter;
+  subtask->start   = start;
+  subtask->end     = end;
+  subtask->chunk   = chunk;
   return subtask;
 }
 

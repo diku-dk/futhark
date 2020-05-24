@@ -6,6 +6,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Code
        , Multicore(..)
        , MulticoreFunc(..)
+       , SequentialFunc(..)
        , Scheduling(..)
        , ValueType(..)
        , module Futhark.CodeGen.ImpCode
@@ -26,10 +27,12 @@ type Function = Imp.Function Multicore
 type Code = Imp.Code Multicore
 
 -- | A function
-data MulticoreFunc = MulticoreFunc [Param] Code Code VName
+data MulticoreFunc = MulticoreFunc Code Code VName
+
+data SequentialFunc = SequentialFunc Code Code
 
 -- | A parallel operation.
-data Multicore = ParLoop Scheduling VName VName Imp.Exp MulticoreFunc
+data Multicore = ParLoop Scheduling VName VName Imp.Exp [Param] MulticoreFunc SequentialFunc
                | MulticoreCall (Maybe VName) String  -- This needs to be fixed
 
 type Granularity = Int32
@@ -43,25 +46,37 @@ data Scheduling = Dynamic Granularity
                 | Static
 
 instance Pretty MulticoreFunc where
-  ppr (MulticoreFunc params prebody body _ ) =
-    ppr params <+>
+  ppr (MulticoreFunc prebody body _ ) =
     ppr prebody <+>
     langle <+>
     nestedBlock "{" "}" (ppr body)
 
+instance Pretty SequentialFunc where
+  ppr (SequentialFunc prebody body) =
+    ppr prebody <+>
+    langle <+>
+    nestedBlock "{" "}" (ppr body)
+
+
 instance Pretty Multicore where
-  ppr (ParLoop _ _ntask i e func) =
+  ppr (ParLoop _ _ntask i e params par_func seq_func) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
-    nestedBlock "{" "}" (ppr func)
+    ppr params <+>
+    nestedBlock "{" "}" (ppr par_func) <+>
+    nestedBlock "{" "}" (ppr seq_func)
   ppr (MulticoreCall dests f) =
     ppr dests <+> ppr f
 
 
+instance FreeIn SequentialFunc where
+  freeIn' (SequentialFunc prebody body) =
+    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
+
 instance FreeIn MulticoreFunc where
-  freeIn' (MulticoreFunc _ prebody body _) =
+  freeIn' (MulticoreFunc prebody body _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
 
 instance FreeIn Multicore where
-  freeIn' (ParLoop _ ntask i e func) =
-    fvBind (oneName i) $ freeIn' ntask <> freeIn' e <> freeIn' func
+  freeIn' (ParLoop _ ntask i e _ par_func seq_func) =
+    fvBind (oneName i) $ freeIn' ntask <> freeIn' e <> freeIn' par_func <> freeIn' seq_func
   freeIn' (MulticoreCall dests _ ) = freeIn' dests

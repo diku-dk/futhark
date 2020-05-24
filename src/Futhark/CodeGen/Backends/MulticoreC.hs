@@ -319,14 +319,14 @@ benchmarkCode :: String -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
   return [C.citems|
-     typename int64_t $id:start;
+     typename uint64_t $id:start;
      if (ctx->profiling && !ctx->profiling_paused) {
        $id:start = get_wall_time();
      }
      $items:code
 
      if (ctx->profiling && !ctx->profiling_paused) {
-       typename int64_t $id:end = get_wall_time();
+       typename uint64_t $id:end = get_wall_time();
        typename uint64_t elapsed = $id:end - $id:start;
        $items:(updateFields tid)
      }
@@ -348,14 +348,15 @@ multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
   return $ baseString s' ++ "_" ++ show (baseTag s')
 
-multicoreDef :: String -> (String -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s String
-multicoreDef s f = do
+multicorFunDef :: String -> (String -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s String
+multicorFunDef s f = do
   s' <- multicoreName s
   GC.libDecl =<< f s'
   return s'
 
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)) = do
+compileOp (ParLoop scheduling ntasks i e params (MulticoreFunc prebody body tid)
+                                                (SequentialFunc seq_prebody seq_body)) = do
   fctypes <- mapM paramToCType params
   let fargs = map paramName params
   e' <- GC.compileExp e
@@ -364,13 +365,13 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   let lexical = lexicalMemoryUsage $
                 Function False [] params body [] []
 
-  fstruct <- multicoreDef "parloop_struct" $ \s ->
+  fstruct <- multicorFunDef "parloop_struct" $ \s ->
      return [C.cedecl|struct $id:s {
                         struct futhark_context *ctx;
                         $sdecls:(compileStructFields fargs fctypes)
                       };|]
 
-  ftask <- multicoreDef "parloop" $ \s -> do
+  ftask <- multicorFunDef "parloop" $ \s -> do
 
     fbody <- benchmarkCode s (Just tid) <=<
              GC.inNewFunction True $ GC.cachingMemory lexical $
@@ -397,6 +398,33 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
                        return err;
                      }|]
 
+
+  fseqtask <- multicorFunDef "sequential" $ \s -> do
+
+    fbody <- benchmarkCode s (Just tid) <=<
+             GC.inNewFunction True $ GC.cachingMemory lexical $
+             \decl_cached free_cached -> GC.blockScope $ do
+      mapM_ GC.item
+        [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
+
+      mapM_ GC.item decl_cached
+      GC.compileCode seq_prebody
+      seq_body' <- GC.blockScope $ GC.compileCode seq_body
+      GC.stm [C.cstm|for (int $id:i = 0; $id:i < end; $id:i++) {
+                       $items:seq_body'
+                     }|]
+      GC.stm [C.cstm|cleanup: {}|]
+      mapM_ GC.stm free_cached
+
+    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
+                       int err = 0;
+                       struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+                       struct futhark_context *ctx = $id:fstruct->ctx;
+                       $items:fbody
+                       return err;
+                     }|]
+
+
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs fctypes)|]
@@ -404,7 +432,8 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
   let ftask_name = ftask ++ "_task"
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
-  GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
+  GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:ftask;|]
+  GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fseqtask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
   GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
@@ -416,7 +445,7 @@ compileOp (ParLoop scheduling ntasks i e (MulticoreFunc params prebody body tid)
                                               }|]
 
   mapM_ GC.item code'
-  mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_name] [True, False]
+  mapM_ GC.profileReport $ multiCoreReport $ zip [fseqtask, ftask, ftask_name] [True, True, False]
 
 
 compileOp (MulticoreCall Nothing f) =

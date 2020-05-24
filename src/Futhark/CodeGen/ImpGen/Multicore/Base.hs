@@ -10,6 +10,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , sUnpauseProfiling
  , groupResultArrays
  , renameSegBinOp
+ , resultArrays
  )
  where
 
@@ -64,6 +65,17 @@ compileThreadResult _ _ WriteReturns{} =
 
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
+
+-- | Arrays for storing group results.
+--
+resultArrays :: [SegBinOp MCMem] -> MulticoreGen [[VName]]
+resultArrays reds =
+  forM reds $ \(SegBinOp _ lam _ shape) ->
+    forM (lambdaReturnType lam) $ \t -> do
+    let pt = elemType t
+        full_shape = shape <> arrayShape t
+    sAllocArray "res_arr" pt full_shape DefaultSpace
+
 
 -- | Arrays for storing group results.
 --
@@ -135,20 +147,23 @@ extractAllocations segop_code = f segop_code
           let (ta, tcode') = f tcode
               (fa, fcode') = f fcode
           in (ta <> fa, Imp.If cond tcode' fcode')
-        f (Imp.Op (Imp.ParLoop sched ntask i e
-                   (Imp.MulticoreFunc free prebody body n))) =
+        f (Imp.Op (Imp.ParLoop sched ntask i e free
+                   (Imp.MulticoreFunc par_prebody par_body n)
+                   (Imp.SequentialFunc seq_prebody seq_body))) =
           -- We can't not extract allocations all the way out
           -- a task, since it might contain (multiple) nested SegOp.
           -- then threads might share the same mem struct
           -- See segredomap/ez6.fut for example
           -- ( I think my reasoning is OK? )
-          let (body_allocs, body') = extractAllocations body
+          let (par_body_allocs, par_body') = extractAllocations par_body
+              (seq_body_allocs, seq_body') = extractAllocations seq_body
               -- (free_allocs, here_allocs) = f body_allocs
               -- free' = filter (not .
               --                 (`nameIn` Imp.declaredIn body_allocs) .
               --                 Imp.paramName) free
           in (mempty,
-              Imp.Op (Imp.ParLoop sched ntask i e $
-                      Imp.MulticoreFunc free (body_allocs <> prebody) body' n))
+              Imp.Op (Imp.ParLoop sched ntask i e free
+                     (Imp.MulticoreFunc (par_body_allocs <> par_prebody) par_body' n)
+                     (Imp.SequentialFunc (seq_body_allocs <> seq_prebody) seq_body')))
         f code =
           (mempty, code)

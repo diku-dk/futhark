@@ -107,12 +107,12 @@ static inline void *scheduler_worker(void* arg)
   struct subtask *subtask = NULL;
   while(1) {
     if (subtask_queue_dequeue(worker, &subtask) == 0) {
-      assert(subtask->fn != NULL);
+      assert(subtask->par_fn != NULL);
       assert(subtask->args != NULL);
 #ifdef MCPROFILE
       int64_t start = get_wall_time();
 #endif
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, worker->tid);
+      int err = subtask->par_fn(subtask->args, subtask->start, subtask->end, worker->tid);
 #ifdef MCPROFILE
       int64_t end = get_wall_time();
       worker->time_spent_working += end - start;
@@ -173,7 +173,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   int start = 0;
   int end = iter_pr_subtask + (int)(remainder != 0);
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
+    struct subtask *subtask = setup_subtask(task->par_fn, task->args,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks);
     assert(subtask != NULL);
@@ -238,7 +238,7 @@ static inline int scheduler_static(struct scheduler *scheduler,
 #endif
 
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
+    struct subtask *subtask = setup_subtask(task->par_fn, task->args,
                                             &mutex, &cond, &shared_counter,
                                             start, end, 0);
     assert(subtask != NULL);
@@ -290,7 +290,7 @@ static inline int delegate_work(struct scheduler *scheduler,
 
   int shared_counter = 1;
 
-  struct subtask *subtask = setup_subtask(task->fn, task->args,
+  struct subtask *subtask = setup_subtask(task->par_fn, task->args,
                                           &mutex, &cond, &shared_counter,
                                           0, task->iterations, task->granularity);
   CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
@@ -305,9 +305,9 @@ static inline int delegate_work(struct scheduler *scheduler,
     if (subtask_queue_dequeue(calling_worker, &subtask) == 0) {
       if (subtask == NULL) continue;
       // Do work
-      assert(subtask->fn != NULL);
+      assert(subtask->par_fn != NULL);
       assert(subtask->args != NULL);
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, calling_worker->tid);
+      int err = subtask->par_fn(subtask->args, subtask->start, subtask->end, calling_worker->tid);
       if (err != 0) {
         return err;
       }
@@ -320,6 +320,17 @@ static inline int delegate_work(struct scheduler *scheduler,
   }
 
   *ntask = scheduler->num_threads;
+  return 0;
+}
+
+static inline int do_task_directly(struct scheduler_task *task,
+                                   int *ntask)
+{
+  int err = task->seq_fn(task->args, 0, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid);
+  if (err != 0) {
+    return err;
+  }
+  *ntask = 0;
   return 0;
 }
 
@@ -339,10 +350,8 @@ static inline int scheduler_do_task(struct scheduler *scheduler,
   }
 
   /* Run task directly if below some threshold */
-  if (task->iterations == 1) {
-    CHECK_ERR(task->fn(task->args, 0, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid), task->name);
-    *ntask = (worker_local == NULL) ? 1 : scheduler->num_threads;
-    return 0;
+  if (task->iterations < 50) {
+    return do_task_directly(task, ntask);
   }
 
   if (worker_local != NULL) {

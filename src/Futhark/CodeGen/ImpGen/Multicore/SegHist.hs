@@ -139,17 +139,18 @@ segmentedHist pat space histops kbody = do
                    forM_ (zip all_red_pes  $ bodyResult $ lambdaBody lam) $
                    \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ [buck] ++ is') se []
 
-  let paramsNames = namesToList $ freeIn fbody `namesSubtract`
-                                  namesFromList (tid : [n_segments])
+  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
+                      namesFromList (tid : [n_segments])
 
-  ts <- mapM lookupType paramsNames
-  let params = zipWith toParam paramsNames ts
+  ts <- mapM lookupType freeVariables
+  let freeParams = zipWith toParam freeVariables ts
       sched = decideScheduling fbody
 
   ntask <- dPrim "num_tasks" $ IntType Int32
 
-  emit $ Imp.Op $ Imp.ParLoop sched ntask n_segments (product $ init ns')
-                              (Imp.MulticoreFunc params mempty fbody tid)
+  emit $ Imp.Op $ Imp.ParLoop sched ntask n_segments (product $ init ns') freeParams
+                              (Imp.MulticoreFunc mempty fbody tid)
+                              (Imp.SequentialFunc mempty fbody)
 
 
 renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
@@ -275,7 +276,8 @@ smallDestHistogram pat space histops num_threads kbody = do
                  copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
                do_op (bucket_is ++ is')
 
-  let freeVariables = namesToList $ freeIn (prebody <> body') `namesSubtract`
+  seq_body <- sequentialHist flat_idx pat space histops kbody
+  let freeVariables = namesToList $ freeIn (prebody <> seq_body <> body') `namesSubtract`
                                     namesFromList (thread_id : [flat_idx])
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
@@ -284,46 +286,50 @@ smallDestHistogram pat space histops num_threads kbody = do
 
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32
+  num_histos' <- toExp $ Var num_histos
 
-  emit $ Imp.Op $ Imp.ParLoop sched num_histos flat_idx (product ns')
-                              (Imp.MulticoreFunc freeParams prebody body' thread_id)
+  emit $ Imp.Op $ Imp.ParLoop sched num_histos flat_idx (product ns') freeParams
+                              (Imp.MulticoreFunc prebody body' thread_id)
+                              (Imp.SequentialFunc mempty seq_body)
 
   emit $ Imp.DebugPrint "nonsegmented hist stage 2"  Nothing
   let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
+      stage_two_hist =
+        forM_ (zip3 pes_per_op histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
+          bucket_id <- newVName "bucket_id"
+          subhistogram_id <- newVName "subhistogram_id"
 
-  forM_ (zip3 pes_per_op histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
-    bucket_id <- newVName "bucket_id"
-    subhistogram_id <- newVName "subhistogram_id"
+          flat_gtid <- newVName "flat_gtid"
+          let unitHistoCase =
+             -- This is OK because the memory blocks are at least as
+             -- large as the ones we are supposed to use for the result.
+               forM_ (zip red_pes hists) $ \(pe, subhisto) -> do
+                 emit $ Imp.DebugPrint "unitHistoCase" Nothing
+                 pe_mem <- memLocationName . entryArrayLocation <$>
+                           lookupArray (patElemName pe)
+                 subhisto_mem <- memLocationName . entryArrayLocation <$>
+                                 lookupArray subhisto
+                 emit $ Imp.SetMem pe_mem subhisto_mem DefaultSpace
 
-    flat_gtid <- newVName "flat_gtid"
-    let unitHistoCase =
-       -- This is OK because the memory blocks are at least as
-       -- large as the ones we are supposed to use for the result.
-         forM_ (zip red_pes hists) $ \(pe, subhisto) -> do
-           emit $ Imp.DebugPrint "unitHistoCase" Nothing
-           pe_mem <- memLocationName . entryArrayLocation <$>
-                     lookupArray (patElemName pe)
-           subhisto_mem <- memLocationName . entryArrayLocation <$>
-                           lookupArray subhisto
-           emit $ Imp.SetMem pe_mem subhisto_mem DefaultSpace
+          sIf (Imp.var num_histos int32 .==. 1) unitHistoCase $ do
 
-    sIf (Imp.var num_histos int32 .==. 1) unitHistoCase $ do
+            emit $ Imp.DebugPrint "multiHistocase" Nothing
 
-      emit $ Imp.DebugPrint "multiHistocase" Nothing
+            let num_buckets = histWidth op
 
-      let num_buckets = histWidth op
+            let segred_space =
+                  SegSpace flat_gtid $
+                  segment_dims ++
+                  [(bucket_id, num_buckets)] ++
+                  [(subhistogram_id, Var num_histos)]
 
-      let segred_space =
-            SegSpace flat_gtid $
-            segment_dims ++
-            [(bucket_id, num_buckets)] ++
-            [(subhistogram_id, Var num_histos)]
+            let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) (histShape op)
+            compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont ->
+              red_cont $ flip map hists $ \subhisto ->
+                    (Var subhisto, map Imp.vi32 $
+                      map fst segment_dims ++ [subhistogram_id, bucket_id])
 
-      let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) (histShape op)
-      compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont ->
-        red_cont $ flip map hists $ \subhisto ->
-              (Var subhisto, map Imp.vi32 $
-                map fst segment_dims ++ [subhistogram_id, bucket_id])
+  sWhen (num_histos' .>. 0) stage_two_hist
    where segment_dims = init $ unSegSpace space
 
 
@@ -399,3 +405,51 @@ largeDestHistogram pat space histops kbody = do
 
   -- emit $ Imp.Op $ Imp.ParLoop Imp.Static num_subtasks flat_idx (product ns')
   --                             (Imp.MulticoreFunc params mempty body' thread_id)
+
+
+sequentialHist :: VName
+               -> Pattern MCMem
+               -> SegSpace
+               -> [HistOp MCMem]
+               -> KernelBody MCMem
+               -> MulticoreGen Imp.Code
+sequentialHist flat_idx pat space histops kbody = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+  let num_red_res = length histops + sum (map (length . histNeutral) histops)
+      (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+
+  collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    compileStms mempty (kernelBodyStms kbody) $ do
+      let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
+          (buckets, vs) = splitAt (length histops) red_res
+          perOp = chunks $ map (length . histDest) histops
+
+      let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
+      forM_ (zip4 histops (perOp vs) buckets pes_per_op) $
+         \(HistOp dest_w _ _ _ shape lam, vs', bucket, dest_res) -> do
+
+           let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
+               bucket'   = toExp' int32 $ kernelResultSubExp bucket
+               dest_w'   = toExp' int32 dest_w
+               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+
+           sComment "save map-out results" $
+             forM_ (zip map_pes map_res) $ \(pe, res) ->
+               copyDWIMFix (patElemName pe) (map Imp.vi32 is) (kernelResultSubExp res) []
+
+           sComment "perform non-atomic updates" $
+             sWhen bucket_in_bounds $ do
+               dLParams $ lambdaParams lam
+               let segment_dims =  map Imp.vi32 $ init is
+               sLoopNest shape $ \is' -> do
+                 forM_ (zip vs_params vs') $ \(p, res) ->
+                   copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
+                 -- sComment "bind lhs" $
+                 forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
+                   copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
+                 -- sComment "execute operation" $
+                 compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
+                   forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
+                     \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []

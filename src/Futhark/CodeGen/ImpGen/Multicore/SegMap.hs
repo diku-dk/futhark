@@ -11,6 +11,45 @@ import Futhark.IR.MCMem
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 
+
+writeResult :: [VName]
+            -> PatElemT dec
+            -> KernelResult
+            -> MulticoreGen ()
+writeResult is pe (Returns _ se) =
+  copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
+writeResult _ pe (WriteReturns rws _ idx_vals) = do
+  let (iss, vs) = unzip idx_vals
+  rws' <- mapM toExp rws
+  forM_ (zip iss vs) $ \(slice, v) -> do
+    slice' <- mapM (traverse toExp) slice
+    let condInBounds (DimFix i) rw =
+          0 .<=. i .&&. i .<. rw
+        condInBounds (DimSlice i n s) rw =
+          0 .<=. i .&&. i+n*s .<. rw
+        in_bounds = foldl1 (.&&.) $ zipWith condInBounds slice' rws'
+        when_in_bounds = copyDWIM (patElemName pe) slice' v []
+    sWhen in_bounds when_in_bounds
+writeResult _ _ res =
+  error $ "writeResult: cannot handle " ++ pretty res
+
+
+sequentialBody :: Pattern MCMem
+               -> VName
+               -> SegSpace
+               -> KernelBody MCMem
+               -> MulticoreGen Imp.Code
+sequentialBody pat flat_idx space (KernelBody _ kstms kres) =
+  collect $ do
+    let (is, ns) = unzip $ unSegSpace space
+    ns' <- mapM toExp ns
+
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    compileStms (freeIn kres) kstms $
+      zipWithM_ (writeResult is) (patternElements pat) kres
+
+
+
 compileSegMap :: Pattern MCMem
               -> SegSpace
               -> KernelBody MCMem
@@ -19,44 +58,33 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
   emit $ Imp.DebugPrint "SegMap " Nothing
   sUnpauseProfiling
 
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
+  num_tasks <- dPrim "ntask" $ IntType Int32
+
   flat_idx <- dPrim "iter" int32
 
   tid <- dPrim "tid" int32
   tid' <- toExp $ Var tid
 
-  let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
-  num_tasks <- dPrim "ntask" $ IntType Int32
+  dPrimV_ (segFlat space) 0
 
-  body' <- collect $ do
+  par_body <- collect $ do
    emit $ Imp.DebugPrint "SegMap fbody" Nothing
    dPrimV_ (segFlat space) tid'
    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
-   compileStms (freeIn kres) kstms $ do
-     let writeResult pe (Returns _ se) =
-           copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
-         writeResult pe (WriteReturns rws _ idx_vals) = do
-           let (iss, vs) = unzip idx_vals
-           rws' <- mapM toExp rws
-           forM_ (zip iss vs) $ \(slice, v) -> do
-             slice' <- mapM (traverse toExp) slice
-             let condInBounds (DimFix i) rw =
-                   0 .<=. i .&&. i .<. rw
-                 condInBounds (DimSlice i n s) rw =
-                   0 .<=. i .&&. i+n*s .<. rw
-                 in_bounds = foldl1 (.&&.) $ zipWith condInBounds slice' rws'
-                 when_in_bounds = copyDWIM (patElemName pe) slice' v []
-             sWhen in_bounds when_in_bounds
+   compileStms (freeIn kres) kstms $
+     zipWithM_ (writeResult is) (patternElements pat) kres
 
-         writeResult _ res =
-           error $ "writeResult: cannot handle " ++ pretty res
-     zipWithM_ writeResult (patternElements pat) kres
-  let freeVariables = namesToList (freeIn body' `namesSubtract` namesFromList [tid, flat_idx])
+  seq_body <- sequentialBody pat flat_idx space (KernelBody mempty kstms kres)
+
+  let freeVariables = namesToList (freeIn (seq_body <> par_body) `namesSubtract` namesFromList [tid, flat_idx])
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
-      scheduling = decideScheduling body'
+      scheduling = decideScheduling par_body
 
-  let (body_allocs, body'') = extractAllocations body'
+  let (body_allocs, par_body') = extractAllocations par_body
 
-  emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks flat_idx (product ns')
-                             (Imp.MulticoreFunc freeParams body_allocs body'' tid)
+  emit $ Imp.Op $ Imp.ParLoop scheduling num_tasks flat_idx (product ns') freeParams
+                             (Imp.MulticoreFunc body_allocs par_body' tid)
+                             (Imp.SequentialFunc body_allocs par_body')
