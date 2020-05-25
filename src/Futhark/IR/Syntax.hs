@@ -166,6 +166,7 @@ import Data.Foldable
 import Data.Loc
 import qualified Data.Sequence as Seq
 import Data.String
+import Data.Traversable (fmapDefault, foldMapDefault)
 
 import Language.Futhark.Core
 import Futhark.IR.Decorations
@@ -203,14 +204,21 @@ data PatternT dec =
           }
   deriving (Ord, Show, Eq)
 
-instance Functor PatternT where
-  fmap f (Pattern ctx val) = Pattern (map (fmap f) ctx) (map (fmap f) val)
-
 instance Semigroup (PatternT dec) where
   Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 instance Monoid (PatternT dec) where
   mempty = Pattern [] []
+
+instance Functor PatternT where
+  fmap = fmapDefault
+
+instance Foldable PatternT where
+  foldMap = foldMapDefault
+
+instance Traversable PatternT where
+  traverse f (Pattern ctx vals) =
+    Pattern <$> traverse (traverse f) ctx <*> traverse (traverse f) vals
 
 -- | A type alias for namespace control.
 type Pattern lore = PatternT (LetDec lore)
