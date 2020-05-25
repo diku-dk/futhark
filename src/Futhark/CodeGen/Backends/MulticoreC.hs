@@ -340,7 +340,7 @@ benchmarkCode name tid code = do
                                             ctx->$id:(functionIter name) += $id:name.iterations;|]
         updateFields (Just tid') = [C.citems|ctx->$id:(functionRuns name)[$id:tid']++;
                                             ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;
-                                            ctx->$id:(functionIter name)[$id:tid'] += (end-start);|]
+                                            ctx->$id:(functionIter name)[$id:tid'] += iterations;|]
 
 
 multicoreName :: String -> GC.CompilerM op s String
@@ -348,31 +348,79 @@ multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
   return $ baseString s' ++ "_" ++ show (baseTag s')
 
-multicorFunDef :: String -> (String -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s String
-multicorFunDef s f = do
+multicoreFunDef :: String -> (String -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s String
+multicoreFunDef s f = do
   s' <- multicoreName s
   GC.libDecl =<< f s'
   return s'
 
+-- generateFunction :: C.ToIdent a => String
+--                   -> Futhark.CodeGen.ImpCode.Code op
+--                   -> a
+--                   -> [VName]
+--                   -> [(C.Type, ValueType)]
+--                   -> GC.CompilerM op s String
+generateFunction basename code fstruct fargs fctypes =
+  multicoreFunDef basename $ \s -> do
+    fbody <- GC.blockScope $ do
+      mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
+      code' <- GC.blockScope $ GC.compileCode code
+      mapM_ GC.item [C.citems|$items:code'|]
+    return [C.cedecl|int $id:s(void *args, int iterations) {
+                           int err = 0;
+                           struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+                           struct futhark_context *ctx = $id:fstruct->ctx;
+                           $items:fbody
+                           cleanup: {}
+                           return err;
+                      }|]
+
+
+
+-- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop scheduling ntasks i e params (MulticoreFunc prebody body tid)
-                                                (SequentialFunc seq_prebody seq_body)) = do
+compileOp (ParLoop params e par_code seq_code) = do
+
   fctypes <- mapM paramToCType params
   let fargs = map paramName params
   e' <- GC.compileExp e
-  granularity <- compileSchedulingVal scheduling
+
+  fstruct <- multicoreFunDef "task_struct" $ \s ->
+    return [C.cedecl|struct $id:s {
+                       struct futhark_context *ctx;
+                       $sdecls:(compileStructFields fargs fctypes)
+                     };|]
+
+  fpar_task <- generateFunction "par_task" par_code fstruct fargs fctypes
+  fseq_task <- generateFunction "seq_task" seq_code fstruct fargs fctypes
+
+  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
+  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs fctypes)|]
+
+  let ftask_err = fpar_task ++ "_err"
+  let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&$id:fstruct, $id:fpar_task, $id:fseq_task, $exp:e');
+                        if ($id:ftask_err != 0) {
+                          futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
+                        }|]
+
+  mapM_ GC.item code'
+
+
+
+compileOp (MCFunc params ntasks i prebody body tid) = do
+  fctypes <- mapM paramToCType params
+  let fargs = map paramName params
 
   let lexical = lexicalMemoryUsage $
                 Function False [] params body [] []
 
-  fstruct <- multicorFunDef "parloop_struct" $ \s ->
-     return [C.cedecl|struct $id:s {
-                        struct futhark_context *ctx;
-                        $sdecls:(compileStructFields fargs fctypes)
-                      };|]
-
-  ftask <- multicorFunDef "parloop" $ \s -> do
-
+  fstruct <- multicoreFunDef "parloop_struct" $ \s ->
+    return [C.cedecl|struct $id:s {
+                       struct futhark_context *ctx;
+                       $sdecls:(compileStructFields fargs fctypes)
+                     };|]
+  ftask <- multicoreFunDef "parloop" $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=<
              GC.inNewFunction True $ GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do
@@ -381,6 +429,7 @@ compileOp (ParLoop scheduling ntasks i e params (MulticoreFunc prebody body tid)
 
       mapM_ GC.item decl_cached
 
+      GC.decl [C.cdecl|int iterations = end - start;|]
       GC.decl [C.cdecl|int $id:i = start;|]
       GC.compileCode prebody
       body' <- GC.blockScope $ GC.compileCode body
@@ -398,33 +447,6 @@ compileOp (ParLoop scheduling ntasks i e params (MulticoreFunc prebody body tid)
                        return err;
                      }|]
 
-
-  fseqtask <- multicorFunDef "sequential" $ \s -> do
-
-    fbody <- benchmarkCode s (Just tid) <=<
-             GC.inNewFunction True $ GC.cachingMemory lexical $
-             \decl_cached free_cached -> GC.blockScope $ do
-      mapM_ GC.item
-        [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
-
-      mapM_ GC.item decl_cached
-      GC.compileCode seq_prebody
-      seq_body' <- GC.blockScope $ GC.compileCode seq_body
-      GC.stm [C.cstm|for (int $id:i = 0; $id:i < end; $id:i++) {
-                       $items:seq_body'
-                     }|]
-      GC.stm [C.cstm|cleanup: {}|]
-      mapM_ GC.stm free_cached
-
-    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
-                       int err = 0;
-                       struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
-                       struct futhark_context *ctx = $id:fstruct->ctx;
-                       $items:fbody
-                       return err;
-                     }|]
-
-
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct fargs fctypes)|]
@@ -433,20 +455,26 @@ compileOp (ParLoop scheduling ntasks i e params (MulticoreFunc prebody body tid)
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:ftask;|]
-  GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fseqtask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
-  GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
+  GC.stm  [C.cstm|$id:ftask_name.iterations = iterations;|]
+  -- GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
 
   let ftask_err = ftask ++ "_err"
-  code' <- benchmarkCode ftask_name Nothing [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
-                                              if ($id:ftask_err != 0) {
-                                                futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
-                                              }|]
+  code' <- benchmarkCode ftask_name Nothing
+    [C.citems|int $id:ftask_err = scheduler_parallel(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
+              if ($id:ftask_err != 0) {
+                futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
+              }|]
 
   mapM_ GC.item code'
-  mapM_ GC.profileReport $ multiCoreReport $ zip [fseqtask, ftask, ftask_name] [True, True, False]
 
+compileOp (SeqCode i prebody body) = do
+  GC.decl [C.cdecl|int $id:i = 0;|]
+  GC.compileCode prebody
+  body' <- GC.blockScope $ GC.compileCode body
+  GC.stm [C.cstm|for (; $id:i < iterations; $id:i++) {
+                       $items:body'
+                     }|]
 
 compileOp (MulticoreCall Nothing f) =
   GC.stm [C.cstm|$id:f(ctx);|]

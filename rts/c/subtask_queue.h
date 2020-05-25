@@ -8,12 +8,12 @@
 #include <assert.h>
 
 
-typedef int (*par_task_fn)(void* args, int start, int end, int subtask_id);
-typedef int (*seq_task_fn)(void* args, int start, int end, int tid);
+typedef int (*task_fn)(void* args, int iterations);
+typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
 
 /* A subtask that can be executed by a thread */
 struct subtask {
-  par_task_fn par_fn;
+  sub_task_fn par_fn;
   void* args;
   int start, end;
   // How much of a task to take a the time
@@ -36,8 +36,7 @@ struct scheduler {
 /* A task for the scheduler to execute */
 struct scheduler_task {
   const char* name;
-  par_task_fn par_fn;
-  seq_task_fn seq_fn;
+  sub_task_fn par_fn;
   void* args;
   long int iterations;
   int granularity;
@@ -76,7 +75,7 @@ struct worker {
 };
 
 
-static inline struct subtask* setup_subtask(par_task_fn par_fn,
+static inline struct subtask* setup_subtask(sub_task_fn par_fn,
                                             void* args,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
