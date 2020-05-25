@@ -98,7 +98,7 @@ expAliases (DoLoop ctxmerge valmerge _ loopbody) =
           splitAt (length ctxmerge) $ bodyAliases loopbody
         merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t _) =
-  funcallAliases args $ retTypeValues t
+  funcallAliases args $ map declExtTypeOf t
 expAliases (Op op) = opAliases op
 
 returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]

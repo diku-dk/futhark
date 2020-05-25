@@ -44,7 +44,7 @@ nonuniqueParams params = runBinder $ forM params $ \param ->
 -- Reuses the original pattern for the @reduce@, and creates a new
 -- pattern with new 'Ident's for the result of the @map@.
 --
--- Only handles a 'Pattern' with an empty 'patternContextElements'
+-- Only handles a pattern with an empty 'patternContextElements'.
 redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
                           ExpDec lore ~ (), Op lore ~ SOAC lore) =>
                          Pattern lore

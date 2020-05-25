@@ -883,6 +883,6 @@ simplifyFun :: SimplifiableLore lore =>
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
   params' <- mapM (traverse simplify) params
-  let ds = map diet (retTypeValues rettype')
+  let ds = map (diet . declExtTypeOf) rettype'
   body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
   return $ FunDef entry fname rettype' params' body'

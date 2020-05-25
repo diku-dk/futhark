@@ -859,7 +859,7 @@ ruleIf _ pat _ (e1, tb, fb, IfDec _ ifsort)
 ruleIf _ pat _
   (cond, Body _ tstms [Constant (BoolValue True)],
          Body _ fstms [se], IfDec ts _)
-  | null tstms, null fstms, [Prim Bool] <- bodyTypeValues ts =
+  | null tstms, null fstms, [Prim Bool] <- map extTypeOf ts =
       Simplify $ letBind_ pat $ BasicOp $ BinOp LogOr cond se
 
 -- When type(x)==bool, if c then x else y == (c && x) || (!c && y)
@@ -867,7 +867,7 @@ ruleIf _ pat _ (cond, tb, fb, IfDec ts _)
   | Body _ tstms [tres] <- tb,
     Body _ fstms [fres] <- fb,
     all (safeExp . stmExp) $ tstms <> fstms,
-    all (==Prim Bool) $ bodyTypeValues ts = Simplify $ do
+    all ((==Prim Bool) . extTypeOf) ts = Simplify $ do
   addStms tstms
   addStms fstms
   e <- eBinOp LogOr (pure $ BasicOp $ BinOp LogAnd cond tres)

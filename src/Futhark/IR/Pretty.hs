@@ -12,7 +12,6 @@ module Futhark.IR.Pretty
   , PrettyAnnot (..)
   , PrettyLore (..)
   , ppTuple'
-  , bindingAnnotation
   )
   where
 
@@ -126,13 +125,6 @@ attrAnnots :: Stm lore -> [Doc]
 attrAnnots = map f . toList . unAttrs . stmAuxAttrs . stmAux
   where f v = text "#[" <> ppr v <> text "]"
 
-bindingAnnotation :: PrettyLore lore => Stm lore -> Doc -> Doc
-bindingAnnotation bnd =
-  case attrAnnots bnd <>
-       mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
-    []     -> id
-    annots -> (stack annots </>)
-
 instance Pretty (PatElemT dec) => Pretty (PatternT dec) where
   ppr pat = ppPattern (patternContextElements pat) (patternValueElements pat)
 
@@ -157,7 +149,7 @@ instance Pretty (Param Type) where
 
 instance PrettyLore lore => Pretty (Stm lore) where
   ppr bnd@(Let pat (StmAux cs _ dec) e) =
-    bindingAnnotation bnd $ align $ hang 2 $
+    stmannot $ align $ hang 2 $
     text "let" <+> align (ppr pat) <+>
     case (linebreak, ppExpLore dec e) of
       (True, Nothing) -> equals </> e'
@@ -173,6 +165,12 @@ instance PrettyLore lore => Pretty (Stm lore) where
                         BasicOp ArrayLit{} -> False
                         BasicOp Assert{}   -> True
                         _                  -> cs /= mempty
+
+          stmannot =
+            case attrAnnots bnd <>
+            mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
+              []     -> id
+              annots -> (stack annots </>)
 
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
@@ -292,5 +290,6 @@ ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commasep $ map ppr bs
 ppPattern as bs = braces $ commasep (map ppr as) <> semi </> commasep (map ppr bs)
 
+-- | Like 'prettyTuple', but produces a 'Doc'.
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets

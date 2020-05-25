@@ -490,7 +490,7 @@ checkFun :: Checkable lore =>
 checkFun (FunDef _ fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
-               retTypeValues rettype,
+               map declExtTypeOf rettype,
                funParamsToNameInfos params) consumable $ do
       checkFunParams params
       checkRetType rettype
@@ -1122,7 +1122,7 @@ class (ASTLore lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore
   checkLetBoundLore _ = checkType
 
   default checkRetType :: RetType lore ~ DeclExtType => [RetType lore] -> TypeM lore ()
-  checkRetType = mapM_ checkExtType . retTypeValues
+  checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
   default matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
   matchPattern pat = matchExtPattern pat <=< expExtType
