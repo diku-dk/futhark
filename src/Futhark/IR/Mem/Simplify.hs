@@ -121,7 +121,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
       -- arrays.
       (arr_to_mem, oldmem_to_mem) <-
         fmap unzip $ forM fixable $ \(arr_pe, mem_size, oldmem, space) -> do
-          size <- letSubExp "size" =<< toExp mem_size
+          size <- toSubExp "size" mem_size
           mem <- letExp "mem" $ Op $ allocOp size space
           return ((patElemName arr_pe, mem), (oldmem, mem))
 

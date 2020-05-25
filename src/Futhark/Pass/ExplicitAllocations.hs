@@ -767,9 +767,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
                     k)
           Just (ixfn, m) -> do -- generalizes
             let i = length m
-            ext_ses <- mapM (primExpToSubExp "ixfn_exist"
-                             (return . BasicOp . SubExp . Var))
-                       m
+            ext_ses <- mapM (toSubExp "ixfn_exist") m
             mem_ctx_r <- bodyReturnMemCtx r
             let sp' = fromMaybe DefaultSpace sp
                 ixfn' = fmap (adjustExtPE k) ixfn

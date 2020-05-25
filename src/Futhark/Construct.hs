@@ -107,6 +107,7 @@ module Futhark.Construct
   , simpleMkLetNames
 
   , ToExp(..)
+  , toSubExp
   )
 where
 
@@ -524,3 +525,7 @@ instance ToExp SubExp where
 
 instance ToExp VName where
   toExp = return . BasicOp . SubExp . Var
+
+-- | A convenient composition of 'letSubExp' and 'toExp'.
+toSubExp :: (MonadBinder m, ToExp a) => String -> a -> m SubExp
+toSubExp s e = letSubExp s =<< toExp e

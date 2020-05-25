@@ -108,7 +108,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
               Just $ do
                 let pexp = primExpFromSubExp int32
                 (slice', bodystms) <- flip runBinderT scope $
-                  traverse (letSubExp "index" <=< toExp) $
+                  traverse (toSubExp "index") $
                   fixSlice (map (fmap pexp) slice) $
                   map (pexp . Var) gtids
 
