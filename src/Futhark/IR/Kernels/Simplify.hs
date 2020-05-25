@@ -71,9 +71,6 @@ simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
   return (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
 
 instance BinderOps (Wise Kernels) where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 instance HasSegOp (Wise Kernels) where
   type SegOpLevel (Wise Kernels) = SegLevel
