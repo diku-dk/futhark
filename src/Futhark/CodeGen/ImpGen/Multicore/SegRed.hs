@@ -153,7 +153,7 @@ nonsegmentedReduction pat space reds kbody = do
     ntasks <- dPrim "num_tasks" $ IntType Int32
     ntasks' <- toExp $ Var ntasks
 
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks flat_idx mempty fbody (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks flat_idx scheduling mempty fbody (segFlat space)
 
     reds' <- renameSegBinOp reds
     slugs' <- mapM (segBinOpOpSlug tid') $ zip reds' stage_one_red_arrs
@@ -294,11 +294,11 @@ sequentialRed result_arr flat_idx space reds kbody = do
         sLoopNest (segBinOpShape red) $ \vec_is -> do
           sComment "load acc params" $
             forM_ (zip xParams res_arr) $ \(p, res) ->
-              copyDWIMFix (paramName p) [] (Var res) (vec_is)
+              copyDWIMFix (paramName p) [] (Var res) vec_is
           sComment "load next params" $
             forM_ (zip yParams red_res) $ \(p, (res, res_is)) ->
               copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
           sComment "sequential red body" $
             compileStms mempty (bodyStms $ (lambdaBody . segBinOpLambda) red) $
                 forM_ (zip res_arr (bodyResult $ (lambdaBody . segBinOpLambda) red)) $
-                  \(res, se) -> copyDWIMFix res (vec_is) se []
+                  \(res, se) -> copyDWIMFix res vec_is se []

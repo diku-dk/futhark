@@ -4,7 +4,7 @@
 #define _SCHEDULER_H_
 
 #define MULTICORE
-#define MCDEBUG
+/* #define MCDEBUG */
 #define MCPROFILE
 
 #ifdef _WIN32
@@ -327,6 +327,9 @@ static inline int do_task_directly(task_fn seq_fn,
                                    void * args,
                                    int iterations)
 {
+#ifdef MCDEBUG
+  fprintf(stderr, "[do_task_directly] doing task directly\n", iterations);
+#endif
   assert(seq_fn != NULL);
   return seq_fn(args, iterations);
 }
@@ -336,18 +339,15 @@ static inline int scheduler_do_task(void *args,
                                     task_fn seq_fn,
                                     int iterations)
 {
+#ifdef MCDEBUG
   fprintf(stderr, "[scheduler_do_task] starting task with %d iterations\n", iterations);
+#endif
   /* Run task directly if below some threshold */
-  if (iterations < 50 || 1) {
-    fprintf(stderr, "doing task directly\n");
+  if (iterations < 50) {
     return do_task_directly(seq_fn, args, iterations);
   }
 
-  int err = par_fn(args, iterations);
-  if (err != 0) {
-    return err;
-  }
-  return err;
+  return par_fn(args, iterations);
 }
 
 
@@ -356,8 +356,8 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
                                      int *ntask)
 {
 #ifdef MCDEBUG
-#endif
   fprintf(stderr, "[scheduler_parallel] starting task %s with %ld iterations \n", task->name, task->iterations);
+#endif
 
 
   assert(scheduler != NULL);
@@ -367,6 +367,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
     if (ntask != NULL)  *ntask = 0;
     return 0;
   }
+
   if (worker_local != NULL) {
     CHECK_ERR(delegate_work(scheduler, task, ntask, worker_local), "delegate_work");
     return 0;

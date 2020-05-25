@@ -34,7 +34,7 @@ data SequentialFunc = SequentialFunc Code Code
 -- | A parallel operation.
 data Multicore = ParLoop [Param] Imp.Exp Code Code
                | MulticoreCall (Maybe VName) String
-               | MCFunc [Param] VName VName Code Code VName
+               | MCFunc [Param] VName VName Scheduling Code Code VName
                | SeqCode VName Code Code
 
 type Granularity = Int32
@@ -63,7 +63,7 @@ instance Pretty SequentialFunc where
 instance Pretty Multicore where
   ppr (ParLoop _ _ par_code seq_code) =
     ppr par_code <+> ppr seq_code
-  ppr (MCFunc _ _ _ prebody body _ ) =
+  ppr (MCFunc _ _ _ _ prebody body _ ) =
     ppr prebody <+> ppr body
   ppr (SeqCode _ prebody body) =
     ppr prebody <+> ppr body
@@ -82,9 +82,8 @@ instance FreeIn MulticoreFunc where
 instance FreeIn Multicore where
   freeIn' (ParLoop _ _ par_code seq_code) =
     freeIn' par_code <> freeIn' seq_code
-  freeIn' (MCFunc _ _ _ prebody body _) =
-    freeIn' prebody <> freeIn' body
+  freeIn' (MCFunc _ _ _ _ prebody body _) =
+    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (SeqCode _ prebody body) =
-    freeIn' prebody <> freeIn' body
-    -- fvBind (oneName i) $ freeIn' ntask <> freeIn' e <> freeIn' par_func <> freeIn' seq_func
+    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests

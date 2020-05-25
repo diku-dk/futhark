@@ -354,12 +354,12 @@ multicoreFunDef s f = do
   GC.libDecl =<< f s'
   return s'
 
--- generateFunction :: C.ToIdent a => String
---                   -> Futhark.CodeGen.ImpCode.Code op
---                   -> a
---                   -> [VName]
---                   -> [(C.Type, ValueType)]
---                   -> GC.CompilerM op s String
+generateFunction :: C.ToIdent a => String
+                  -> Code
+                  -> a
+                  -> [VName]
+                  -> [(C.Type, ValueType)]
+                  -> GC.CompilerM Multicore s String
 generateFunction basename code fstruct fargs fctypes =
   multicoreFunDef basename $ \s -> do
     fbody <- GC.blockScope $ do
@@ -408,9 +408,10 @@ compileOp (ParLoop params e par_code seq_code) = do
 
 
 
-compileOp (MCFunc params ntasks i prebody body tid) = do
+compileOp (MCFunc params ntasks i sched prebody body tid) = do
   fctypes <- mapM paramToCType params
   let fargs = map paramName params
+  granularity <- compileSchedulingVal sched
 
   let lexical = lexicalMemoryUsage $
                 Function False [] params body [] []
@@ -457,7 +458,7 @@ compileOp (MCFunc params ntasks i prebody body tid) = do
   GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = iterations;|]
-  -- GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
+  GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
 
   let ftask_err = ftask ++ "_err"
   code' <- benchmarkCode ftask_name Nothing
@@ -467,6 +468,8 @@ compileOp (MCFunc params ntasks i prebody body tid) = do
               }|]
 
   mapM_ GC.item code'
+  mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_name] [True, False]
+
 
 compileOp (SeqCode i prebody body) = do
   GC.decl [C.cdecl|int $id:i = 0;|]
