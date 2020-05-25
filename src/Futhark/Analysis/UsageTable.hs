@@ -3,7 +3,6 @@
 -- (and if) a variable is used.
 module Futhark.Analysis.UsageTable
   ( UsageTable
-  , empty
   , without
   , lookup
   , used
@@ -20,7 +19,6 @@ module Futhark.Analysis.UsageTable
   )
   where
 
-import Control.Arrow (first)
 import Data.Bits
 import qualified Data.Foldable as Foldable
 import Data.List (foldl')
@@ -28,10 +26,10 @@ import qualified Data.Map.Strict as M
 
 import Prelude hiding (lookup)
 
-import Futhark.Transform.Substitute
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 
+-- | A usage table.
 newtype UsageTable = UsageTable (M.Map VName Usages)
                    deriving (Eq, Show)
 
@@ -40,28 +38,20 @@ instance Semigroup UsageTable where
     UsageTable $ M.unionWith (<>) table1 table2
 
 instance Monoid UsageTable where
-  mempty = empty
+  mempty = UsageTable mempty
 
-instance Substitute UsageTable where
-  substituteNames subst (UsageTable table)
-    | not $ M.null $ subst `M.intersection` table =
-      UsageTable $ M.fromList $
-      map (first $ substituteNames subst) $ M.toList table
-    | otherwise = UsageTable table
-
-empty :: UsageTable
-empty = UsageTable M.empty
-
-
+-- | Remove these entries from the usage table.
 without :: UsageTable -> [VName] -> UsageTable
 without (UsageTable table) = UsageTable . Foldable.foldl (flip M.delete) table
 
+-- | Look up a variable in the usage table.
 lookup :: VName -> UsageTable -> Maybe Usages
 lookup name (UsageTable table) = M.lookup name table
 
 lookupPred :: (Usages -> Bool) -> VName -> UsageTable -> Bool
 lookupPred f name = maybe False f . lookup name
 
+-- | Is the variable present in the usage table?  That is, has it been used?
 used :: VName -> UsageTable -> Bool
 used = lookupPred $ const True
 
@@ -75,9 +65,11 @@ expand look (UsageTable m) = UsageTable $ foldl' grow m $ M.toList m
 is :: Usages -> VName -> UsageTable -> Bool
 is = lookupPred . matches
 
+-- | Has the variable been consumed?
 isConsumed :: VName -> UsageTable -> Bool
 isConsumed = is consumedU
 
+-- | Has the variable been used in the 'Result' of a body?
 isInResult :: VName -> UsageTable -> Bool
 isInResult = is inResultU
 
@@ -86,19 +78,27 @@ isInResult = is inResultU
 isUsedDirectly :: VName -> UsageTable -> Bool
 isUsedDirectly = is presentU
 
+-- | Construct a usage table reflecting that these variables have been
+-- used.
 usages :: Names -> UsageTable
 usages names = UsageTable $ M.fromList [ (name, presentU) | name <- namesToList names ]
 
+-- | Construct a usage table where the given variable has been used in
+-- this specific way.
 usage :: VName -> Usages -> UsageTable
 usage name uses = UsageTable $ M.singleton name uses
 
+-- | Construct a usage table where the given variable has been consumed.
 consumedUsage :: VName -> UsageTable
 consumedUsage name = UsageTable $ M.singleton name consumedU
 
+-- | Construct a usage table where the given variable has been used in
+-- the 'Result' of a body.
 inResultUsage :: VName -> UsageTable
 inResultUsage name = UsageTable $ M.singleton name inResultU
 
-newtype Usages = Usages Int
+-- | A description of how a single variable has been used.
+newtype Usages = Usages Int -- Bitmap representation for speed.
   deriving (Eq, Ord, Show)
 
 instance Semigroup Usages where
@@ -121,7 +121,8 @@ matches (Usages x) (Usages y) = x == (x .&. y)
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 
-
+-- | Produce a usage table reflecting the use of the free variables in
+-- a single statement.
 usageInStm :: (ASTLore lore, Aliased lore) => Stm lore -> UsageTable
 usageInStm (Let pat lore e) =
   mconcat [usageInPat,
@@ -151,4 +152,4 @@ usageInExp (BasicOp (Update src _ _)) =
   consumedUsage src
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)
-usageInExp _ = empty
+usageInExp _ = mempty

@@ -474,6 +474,10 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
     ---------------------------------
     _ -> fail "Cannot fuse"
 
+getStreamOrder :: StreamForm lore -> StreamOrd
+getStreamOrder (Parallel o _ _ _) = o
+getStreamOrder (Sequential  _) = InOrder
+
 fuseStreamHelper :: [VName] -> Names -> [VName] -> [(VName,Ident)]
                  -> SOAC -> SOAC -> TryFusion ([VName], SOAC)
 fuseStreamHelper out_kernms unfus_set outVars outPairs

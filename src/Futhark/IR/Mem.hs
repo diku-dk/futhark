@@ -11,7 +11,7 @@
 --
 -- There are two primary concepts you will need to understand:
 --
---  1. Memory blocks, which are Futhark values of type c'Mem'
+--  1. Memory blocks, which are Futhark values of type v'Mem'
 --     (parametrized with their size).  These correspond to arbitrary
 --     blocks of memory, and are created using the 'Alloc' operation.
 --

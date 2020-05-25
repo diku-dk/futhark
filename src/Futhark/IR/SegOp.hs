@@ -6,7 +6,9 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
--- | Segmented operations.
+-- | Segmented operations.  These correspond to perfect @map@ nests on
+-- top of /something/, except that the @map@s are conceptually only
+-- over @iota@s (so there will be explicit indexing inside them).
 module Futhark.IR.SegOp
   ( SegOp(..)
   , SegVirt(..)
@@ -37,7 +39,6 @@ module Futhark.IR.SegOp
   , mapSegOpM
 
     -- * Simplification
-  , simplifyKernelBody
   , simplifySegOp
   , HasSegOp(..)
   , segOpRules
@@ -283,6 +284,7 @@ removeKernelBodyWisdom (KernelBody dec stms res) =
   let Body dec' stms' _ = removeBodyWisdom $ Body dec stms []
   in KernelBody dec' stms' res
 
+-- | The variables consumed in the kernel body.
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
 consumedInKernelBody (KernelBody dec stms res) =
@@ -621,6 +623,7 @@ mapSegBinOp tv (SegBinOp comm red_op nes shape) =
   <*> mapM (mapOnSegOpSubExp tv) nes
   <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
 
+-- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM :: (Applicative m, Monad m) =>
              SegOpMapper lvl flore tlore m
           -> SegOp lvl flore -> m (SegOp lvl tlore)
@@ -912,6 +915,7 @@ simplifySegBinOp (SegBinOp comm lam nes shape) = do
   nes' <- mapM Engine.simplify nes
   return (SegBinOp comm lam' nes' shape', hoisted)
 
+-- | Simplify the given 'SegOp'.
 simplifySegOp :: (Engine.SimplifiableLore lore,
                   BodyDec lore ~ (),
                   Engine.Simplifiable lvl) =>
