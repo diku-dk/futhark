@@ -44,7 +44,7 @@ simplifyScalExp vtable pat _ e = Simplify $ do
         isNothing $ valOrVar se,
         SE.scalExpSize se < size_bound,
         Just se' <- valOrVar $ AS.simplify se ranges ->
-        letBind_ pat $ BasicOp $ SubExp se'
+        letBind pat $ BasicOp $ SubExp se'
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
         size_bound = 10 -- don't touch scalexps bigger than this.

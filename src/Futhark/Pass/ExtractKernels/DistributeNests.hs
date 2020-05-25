@@ -684,7 +684,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    letBind_ pat $ Op $ segOp k
+    letBind pat $ Op $ segOp k
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = error "Ill-typed nested scatter encountered."
@@ -736,7 +736,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    letBind_ pat $ Op $ segOp k
+    letBind pat $ Op $ segOp k
 
 segmentedHistKernel :: (MonadFreshNames m, DistLore lore) =>
                        KernelNest

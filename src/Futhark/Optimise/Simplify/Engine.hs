@@ -289,12 +289,12 @@ protectIf _ _ taken (Let pat aux
                      (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   auxing aux $
-    letBind_ pat $ If cond' taken_body untaken_body $
+    letBind pat $ If cond' taken_body untaken_body $
     IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
-  auxing aux $ letBind_ pat $ BasicOp $ Assert cond' msg loc
+  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
       auxing aux m
@@ -305,7 +305,7 @@ protectIf _ f taken (Let pat aux e)
                                   (patternValueTypes pat)
       if_ts <- expTypesFromPattern pat
       auxing aux $
-        letBind_ pat $ If taken taken_body untaken_body $
+        letBind pat $ If taken taken_body untaken_body $
         IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm

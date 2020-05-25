@@ -50,11 +50,11 @@ internaliseStreamMapLambda internaliseLambda lam args = do
       internaliseLambda lam $ I.Prim int32 : map outer argtypes
     let orig_chunk_param : params = lam_params
     body <- runBodyBinder $ do
-      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
     (rettype', _) <- instantiateShapes' rettype
     body' <- localScope (scopeOfLParams params) $ insertStmsM $ do
-      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       ensureResultShape asserting
         (ErrorMsg [ErrorString "not all iterations produce same shape"])
         (srclocOf lam) (map outer rettype') body
@@ -91,7 +91,7 @@ internaliseStreamLambda internaliseLambda lam rowts = do
       internaliseLambda lam $ I.Prim int32 : chunktypes
     let orig_chunk_param : params = lam_params
     body <- runBodyBinder $ do
-      letBindNames_ [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
+      letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
     return (chunk_param:params, body)
 

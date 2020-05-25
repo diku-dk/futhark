@@ -58,9 +58,9 @@ foldClosedForm look pat lam accs arrs = do
                 (map paramName (lambdaParams lam))
                 (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
-  letBindNames_ [isEmpty] $
+  letBindNames [isEmpty] $
     BasicOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
-  letBind_ pat =<< (If (Var isEmpty)
+  letBind pat =<< (If (Var isEmpty)
                     <$> resultBodyM accs
                     <*> renameBody closedBody
                     <*> pure (IfDec [primBodyType t] IfNormal))
@@ -80,10 +80,10 @@ loopClosedForm pat merge i bound body = do
   closedBody <- checkResults mergenames bound i knownBnds
                 (map identName mergeidents) body mergeexp
   isEmpty <- newVName "bound_is_zero"
-  letBindNames_ [isEmpty] $
+  letBindNames [isEmpty] $
     BasicOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
 
-  letBind_ pat =<< (If (Var isEmpty)
+  letBind pat =<< (If (Var isEmpty)
                     <$> resultBodyM mergeexp
                     <*> renameBody closedBody
                     <*> pure (IfDec [primBodyType t] IfNormal))
@@ -126,15 +126,15 @@ checkResults pat size untouchable knownBnds params body accs = do
 
           case bop of
               LogAnd ->
-                letBindNames_ [p] $ BasicOp $ BinOp LogAnd this el
+                letBindNames [p] $ BasicOp $ BinOp LogAnd this el
               Add t w | Just properly_typed_size <- properIntSize t -> do
                           size' <- properly_typed_size
-                          letBindNames_ [p] =<<
+                          letBindNames [p] =<<
                             eBinOp (Add t w) (eSubExp this)
                             (pure $ BasicOp $ BinOp (Mul t w) el size')
               FAdd t | Just properly_typed_size <- properFloatSize t -> do
                         size' <- properly_typed_size
-                        letBindNames_ [p] =<<
+                        letBindNames [p] =<<
                           eBinOp (FAdd t) (eSubExp this)
                           (pure $ BasicOp $ BinOp (FMul t) el size')
               _ -> cannotSimplify -- Um... sorry.

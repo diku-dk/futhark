@@ -638,10 +638,10 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
 
         (loop_initial_cond, init_loop_cond_bnds) <- collectStms $ do
           forM_ (zip shapepat shapeinit) $ \(p, se) ->
-            letBindNames_ [paramName p] $ BasicOp $ SubExp se
+            letBindNames [paramName p] $ BasicOp $ SubExp se
           forM_ (zip (concat nested_mergepat) mergeinit) $ \(p, se) ->
             unless (se == I.Var (paramName p)) $
-            letBindNames_ [paramName p] $ BasicOp $
+            letBindNames [paramName p] $ BasicOp $
             case se of I.Var v | not $ primType $ paramType p ->
                                    Reshape (map DimCoercion $ arrayDims $ paramType p) v
                        _ -> SubExp se
@@ -662,10 +662,10 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
           loop_end_cond_body <- renameBody <=< insertStmsM $ do
             forM_ (zip shapepat shapeargs) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
-              letBindNames_ [paramName p] $ BasicOp $ SubExp se
+              letBindNames [paramName p] $ BasicOp $ SubExp se
             forM_ (zip (concat nested_mergepat) ses) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
-              letBindNames_ [paramName p] $ BasicOp $
+              letBindNames [paramName p] $ BasicOp $
               case se of I.Var v | not $ primType $ paramType p ->
                                      Reshape (map DimCoercion $ arrayDims $ paramType p) v
                          _ -> SubExp se
@@ -736,7 +736,7 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   certifying c $ mapM rebind =<< internaliseExp desc e2
   where rebind v = do
           v' <- newVName "assert_res"
-          letBindNames_ [v'] $ I.BasicOp $ I.SubExp v
+          letBindNames [v'] $ I.BasicOp $ I.SubExp v
           return $ I.Var v'
 
 internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
@@ -856,7 +856,7 @@ internaliseArg :: String -> (E.Exp, Maybe VName) -> InternaliseM [SubExp]
 internaliseArg desc (arg, argdim) = do
   arg' <- internaliseExp desc arg
   case (arg', argdim) of
-    ([se], Just d) -> letBindNames_ [d] $ BasicOp $ SubExp se
+    ([se], Just d) -> letBindNames [d] $ BasicOp $ SubExp se
     _ -> return ()
   return arg'
 
@@ -943,7 +943,7 @@ internalisePat' p ses body loc m = do
   stmPattern p t $ \pat_names match -> do
     ses' <- match loc ses
     forM_ (zip pat_names ses') $ \(v,se) ->
-      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
+      letBindNames [v] $ I.BasicOp $ I.SubExp se
     m body
 
 internaliseSlice :: SrcLoc
@@ -1132,10 +1132,10 @@ internaliseStreamRed desc o comm lam0 lam arr = do
 
   -- Synthesize neutral elements by applying the fold function
   -- to an empty chunk.
-  letBindNames_ [I.paramName chunk_param] $
+  letBindNames [I.paramName chunk_param] $
     I.BasicOp $ I.SubExp $ constant (0::Int32)
   forM_ lam_val_params $ \p ->
-    letBindNames_ [I.paramName p] $
+    letBindNames [I.paramName p] $
     I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
     I.arrayDims $ I.paramType p
   accs <- bodyBind =<< renameBody lam_body
@@ -1763,7 +1763,7 @@ bindExtSizes ret retext ses = do
       combine' _ _ = mempty
 
   forM_ (M.toList $ mconcat $ zipWith combine ts ses_ts) $ \(v, se) ->
-    letBindNames_ [v] $ BasicOp $ SubExp se
+    letBindNames [v] $ BasicOp $ SubExp se
 
 askSafety :: InternaliseM Safety
 askSafety = do check <- asks envDoBoundsChecks

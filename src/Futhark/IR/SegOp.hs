@@ -1031,7 +1031,7 @@ topDownSegOp vtable (Pattern [] kpes) dec (SegMap lvl space ts (KernelBody _ kst
         checkForInvarianceResult (_, pe, Returns rm se)
           | rm == ResultMaySimplify,
             isInvariant se = do
-              letBindNames_ [patElemName pe] $
+              letBindNames [patElemName pe] $
                 BasicOp $ Replicate (Shape $ segSpaceDims space) se
               return False
         checkForInvarianceResult _ =
@@ -1050,7 +1050,7 @@ topDownSegOp _ (Pattern [] pes) _ (SegRed lvl space ops ts kbody)
           pes' = red_pes' ++ map_pes
           ts' = red_ts' ++ map_ts
           kbody' = kbody { kernelBodyResult = red_res' ++ map_res }
-      letBind_ (Pattern [] pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
+      letBind (Pattern [] pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
   where (red_pes, map_pes) = splitAt (segBinOpResults ops) pes
         (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
         (red_res, map_res) = splitAt (segBinOpResults ops) $ kernelBodyResult kbody
@@ -1131,12 +1131,12 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (Kernel
                                        d
                                        (constant (1::Int32))) $
                             segSpaceDims space
-              index kpe' = letBind_ (Pattern [] [kpe']) $ BasicOp $ Index arr $
+              index kpe' = letBind (Pattern [] [kpe']) $ BasicOp $ Index arr $
                            outer_slice <> remaining_slice
           if patElemName kpe `UT.isConsumed` used
             then do precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
                     index kpe { patElemName = precopy }
-                    letBind_ (Pattern [] [kpe]) $ BasicOp $ Copy precopy
+                    letBind (Pattern [] [kpe]) $ BasicOp $ Copy precopy
             else index kpe
           return (kpes'', kts'', kres'',
                   if patElemName pe `nameIn` free_in_kstms

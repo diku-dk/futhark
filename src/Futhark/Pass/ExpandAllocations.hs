@@ -606,7 +606,7 @@ sliceKernelSizes num_threads sizes space kstms = do
           new_inds = unflattenIndex
                      (map (primExpFromSubExp int32) kspace_dims)
                      (primExpFromSubExp int32 $ Var $ paramName flat_gtid_lparam)
-      zipWithM_ letBindNames_ (map pure kspace_gtids) =<< mapM toExp new_inds
+      zipWithM_ letBindNames (map pure kspace_gtids) =<< mapM toExp new_inds
 
       mapM_ addStm kstms'
       return sizes

@@ -170,7 +170,7 @@ interchangeBranch1
       IfDec ret' if_sort
   where dummyBind se = do
           dummy <- newVName "dummy"
-          letBindNames_ [dummy] (BasicOp $ SubExp se)
+          letBindNames [dummy] (BasicOp $ SubExp se)
           return $ Var dummy
 
         dummyBindIfNotIn bound_in_branch se

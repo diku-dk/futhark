@@ -594,9 +594,9 @@ fusionGatherStms fres (Let (Pattern [] pes) bndtp
     j <- newVName "j"
     loop_body <- runBodyBinder $ do
       forM_ (zip loop_params chunked_params) $ \(p,a_p) ->
-        letBindNames_ [paramName p] $ BasicOp $ Index (paramName a_p) $
+        letBindNames [paramName p] $ BasicOp $ Index (paramName a_p) $
         fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
-      letBindNames_ [i] $ BasicOp $ BinOp (Add it OverflowUndef) (Futhark.Var offset) (Futhark.Var j)
+      letBindNames [i] $ BasicOp $ BinOp (Add it OverflowUndef) (Futhark.Var offset) (Futhark.Var j)
       return body
     eBody [pure $
            DoLoop [] merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
@@ -830,7 +830,7 @@ insertKerSOAC aux names ker = do
     -- issue #224).  We insert copy expressions to fix it.
     f_soac' <- copyNewlyConsumed (fusedConsumed ker) $ addOpAliases f_soac
     validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf new_soac'
-    auxing (kerAux ker <> aux) $ letBind_ (basicPattern [] validents) $ Op f_soac'
+    auxing (kerAux ker <> aux) $ letBind (basicPattern [] validents) $ Op f_soac'
     transformOutput (outputTransform ker) names validents
 
 -- | Perform simplification and fusion inside the lambda(s) of a SOAC.

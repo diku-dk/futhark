@@ -313,7 +313,7 @@ kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
 kernelAlternatives pat default_body [] = runBinder_ $ do
   ses <- bodyBind default_body
   forM_ (zip (patternNames pat) ses) $ \(name, se) ->
-    letBindNames_ [name] $ BasicOp $ SubExp se
+    letBindNames [name] $ BasicOp $ SubExp se
 kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
   alts_pat <- fmap (Pattern []) $ forM (patternElements pat) $ \pe -> do
     name <- newVName $ baseString $ patElemName pe
@@ -322,7 +322,7 @@ kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
   alt_stms <- kernelAlternatives alts_pat default_body alts
   let alt_body = mkBody alt_stms $ map Var $ patternValueNames alts_pat
 
-  letBind_ pat $ If cond alt alt_body $
+  letBind pat $ If cond alt alt_body $
     IfDec (staticShapes (patternTypes pat)) IfEquiv
 
 transformStm :: KernelPath -> Stm -> DistribM KernelsStms
@@ -546,7 +546,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) = runBinder
     mapKernel segThreadCapped [(write_i,w)] inputs (map rowType $ patternTypes pat) body
   certifying cs $ do
     addStms stms
-    letBind_ pat $ Op $ SegOp kernel
+    letBind pat $ Op $ SegOp kernel
 
 transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) = do
   let bfun' = soacsLambdaToKernels bucket_fun
