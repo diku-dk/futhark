@@ -22,6 +22,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenGL
 import qualified Futhark.CodeGen.ImpGen.OpenGL as ImpGen
 import Futhark.MonadFreshNames
+import Futhark.Util (chunk, zEncodeString)
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
 compileProg prog = do
@@ -33,14 +34,19 @@ compileProg prog = do
             [copyDevToDev, copyDevToHost, copyHostToDev,
              copyScalarToDev, copyScalarFromDev]
             ++ M.keys shaders
-      Right <$> GC.compileProg GC.TargetHost operations
+      Right <$> GC.compileProg GC.TargetHost
+                (operations opengl_code opengl_prelude shaders sizes)
                 (generateBoilerplate opengl_code opengl_prelude
-                 shaders sizes)
+                                     shaders sizes)
                 include_opengl_h [Space "device", DefaultSpace]
                 cliOptions prog'
-  where operations :: GC.Operations OpenGL ()
-        operations = GC.defaultOperations
-                     { GC.opsCompiler    = callShader
+  where operations :: String -> String
+                   -> M.Map ShaderName Futhark.CodeGen.ImpCode.OpenGL.Safety
+                   -> M.Map Name SizeClass
+                   -> GC.Operations OpenGL ()
+        operations opengl_code opengl_prelude shaders sizes =
+                   GC.defaultOperations
+                     { GC.opsCompiler    = callShader opengl_code opengl_prelude shaders sizes
                      , GC.opsWriteScalar = writeOpenGLScalar
                      , GC.opsReadScalar  = readOpenGLScalar
                      , GC.opsAllocate    = allocateOpenGLBuffer
@@ -192,25 +198,35 @@ staticOpenGLArray name "device" t vs = do
 staticOpenGLArray _ space _ _ =
   error $ "OpenGL backend cannot create static array in memory space '" ++ space ++ "'"
 
-callShader :: GC.OpCompiler OpenGL ()
-callShader (GetSize v key) =
+callShader :: String -> String
+           -> M.Map ShaderName Futhark.CodeGen.ImpCode.OpenGL.Safety
+           -> M.Map Name SizeClass
+           -> GC.OpCompiler OpenGL ()
+callShader _ _ _ _ (GetSize v key) =
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
-callShader (CmpSizeLe v key x) = do
+callShader _ _ _ _ (CmpSizeLe v key x) = do
   x' <- GC.compileExp GC.TargetHost x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
   GC.stm [C.cstm|if (ctx->logging) {
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
     }|]
-callShader (GetSizeMax v size_class) =
+callShader _ _ _ _(GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
   in GC.stm [C.cstm|$id:v = ctx->opengl.$id:field;|]
 
-callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
+callShader opengl_code opengl_prelude shaders sizes
+           (LaunchShader safety name args num_workgroups workgroup_size) = do
   -- FIXME: We might account for safety by using a uniform.
   when (safety == SafetyFull) $
     GC.stm [C.cstm|
     OPENGL_SUCCEED(glGetError());
     |]
+  let shader_size_value = pretty $ zipWith shaderSizeInit (M.keys  sizes)
+                                                          (M.elems sizes)
+  let fragments         = map (\s -> [C.cinit|$string:s|])
+                          $ chunk 2000 (opengl_prelude ++ shader_size_value
+                                                       ++ opengl_code)
+  mapM_ GC.stm $ map (loadShader fragments) (M.toList shaders)
   GC.stm [C.cstm|glUseProgram(ctx->opengl.program);|]
   zipWithM_ setShaderArg [(0::Int)..] args
   num_workgroups' <- mapM (GC.compileExp GC.TargetHost) num_workgroups
@@ -257,6 +273,10 @@ callShader (LaunchShader safety name args num_workgroups workgroup_size) = do
           num_bytes' <- GC.compileExp GC.TargetHost $ unCount num_bytes
           return [C.cexp|$exp:cur + $exp:num_bytes'|]
         localBytes cur _ = return cur
+
+        shaderSizeInit k size = [C.cedecl|const int $id:k = $int:val;|]
+           where val = case size of SizeBespoke _ x -> x
+                                    _               -> 0
 
 launchShader :: C.ToExp a =>
                 String -> [a] -> [a] -> a -> GC.CompilerM op s ()

@@ -2,6 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.COpenGL.Boilerplate
   ( generateBoilerplate
+  , loadShader
   ) where
 
 import Data.FileEmbed
@@ -14,6 +15,7 @@ import qualified Language.C.Quote.OpenCL as C
 import Futhark.CodeGen.ImpCode.OpenGL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.MonadFreshNames
 import Futhark.Util (chunk, zEncodeString)
 
 generateBoilerplate :: String -> String
@@ -33,7 +35,6 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
          where val = case size of SizeBespoke _ x -> x
                                   _               -> 0
 
-      -- fragments might need ctx_fields, ctx_inits and openGL_load
       fragments        = map (\s -> [C.cinit|$string:s|])
                              $ chunk 2000 (opengl_prelude ++ shader_size_value
                                                           ++ opengl_code)
@@ -275,10 +276,6 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
   final_inits <- GC.contextFinalInits
 
   GC.libDecl [C.cedecl|static void init_context_late(struct $id:cfg *cfg, struct $id:ctx* ctx) {
-
-                     // Load all the shaders.
-                     $stms:(map (loadShader fragments) (M.toList shaders))
-
                      $stms:final_inits
                      $stms:set_sizes
   }|]
@@ -331,9 +328,11 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
                }|])
 
 loadShader :: [C.Initializer] -> (ShaderName, Safety) -> C.Stm
-loadShader srcs (name, safety) = [C.cstm|{
-  const char *opengl_program[] = {$inits:srcs, NULL};
-  setup_shader(&ctx->opengl, opengl_program);
+loadShader srcs (name, safety) =
+  let opengl_program = "opengl_program_" ++ name
+  in [C.cstm|{
+  const char *$id:opengl_program[] = {$inits:srcs, NULL};
+  setup_shader(&ctx->opengl, $id:opengl_program);
   OPENGL_SUCCEED(glGetError());
   if (ctx->debugging) {
     fprintf(stderr, "Created shader %s.\n", $string:name);
