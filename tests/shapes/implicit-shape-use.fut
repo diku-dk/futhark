@@ -30,12 +30,11 @@ let brownianBridgeDates [num_dates]
     let bbrow[ bi[0]-1 ] = sd[0] * gauss[0] in
 
     let bbrow = loop (bbrow) for i < num_dates-1 do  -- use i+1 since i in 1 .. num_dates-1
-            unsafe
             let j  = li[i+1] - 1
             let k  = ri[i+1] - 1
             let l  = bi[i+1] - 1
 
-            let wk = unsafe bbrow[k]
+            let wk = bbrow[k]
             let zi = gauss[i+1]
             let tmp= rw[i+1] * wk + sd[i+1] * zi
 

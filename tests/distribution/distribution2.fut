@@ -10,7 +10,7 @@
 
 let fftmp (num_paths: i32) (md_c: [][]f64) (zi: []f64): [num_paths]f64 =
     map (\(j: i32): f64  ->
-            let x = map2 (*) (unsafe take (j+1) zi) (unsafe take (j+1) (unsafe md_c[j]))
+            let x = map2 (*) (take (j+1) zi) (take (j+1) md_c[j])
             in  reduce (+) (0.0) x
          ) (iota num_paths)
 

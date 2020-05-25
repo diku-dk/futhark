@@ -4,5 +4,5 @@
 -- structure gpu { Update 0 }
 
 let main (n: i32) (xs: *[]i32) =
-  unsafe
+  #[unsafe]
   xs with [0:n] = map (+2) (iota n)

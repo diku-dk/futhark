@@ -197,7 +197,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
   let L = 32i32
 
   -- direction vector for dimension j
-  let dirvec (j:i32) : [L]u32 = unsafe
+  let dirvec (j:i32) : [L]u32 =
     if j == 0 then
        map (\i -> 1u32 << (32u32-u32.i32(i+1))
  	   ) (iota L)
@@ -229,7 +229,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
     map dirvec (iota D)
 
   let recSob (i:i32) (dirvec:[L]u32) (x:u32) : u32 =
-    unsafe if i == 0 then 0u32 else x ^ dirvec[index_of_least_significant_0 (i-1)]
+    if i == 0 then 0u32 else x ^ dirvec[index_of_least_significant_0 (i-1)]
 
   let recurrent (i:i32) (xs:[D]u32) : [D]u32 =
     map2 (recSob i) dirvecs xs
@@ -245,7 +245,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
   -- utils
   let recM (i:i32) : [D]u32 =
     let bit = index_of_least_significant_0 i
-    in map (\row -> unsafe row[bit]) dirvecs
+    in map (\row -> row[bit]) dirvecs
 
   -- computes sobol numbers: offs,..,offs+chunk-1
   let chunk (offs:i32) (n:i32) : [n][D]f64 =
@@ -265,7 +265,7 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
     let run (N:i32) : X.t =
       reduce_stream_per X.op (\sz (ns:[sz]i32) : X.t ->
                            if sz > 0
-                           then reduce X.op X.ne (map X.f (unsafe chunk ns[0] sz))
+                           then reduce X.op X.ne (map X.f (chunk ns[0] sz))
                            else X.ne)
       (iota N)
 

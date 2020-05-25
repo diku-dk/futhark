@@ -5,7 +5,7 @@ let main [m][b] (peri_batch_mat: [m][b][b]f32) =
   map (\peri_mat ->
          let mat = copy peri_mat
          in loop mat for im1 < (b-1) do
-              unsafe
+              #[unsafe]
               let i = im1 + 1
               let row_sum = loop row_sum = replicate b 0 for j < i do
                               map2 (+) row_sum mat[j]
