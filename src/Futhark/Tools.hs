@@ -4,7 +4,6 @@ module Futhark.Tools
   (
     module Futhark.Construct
 
-  , nonuniqueParams
   , redomapToMapAndReduce
   , dissectScrema
   , sequentialStreamWholeArray
@@ -25,18 +24,6 @@ import Futhark.MonadFreshNames
 import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Util
-
-nonuniqueParams :: (MonadFreshNames m, Bindable lore, HasScope lore m, BinderOps lore) =>
-                   [LParam lore] -> m ([LParam lore], Stms lore)
-nonuniqueParams params = runBinder $ forM params $ \param ->
-    if not $ primType $ paramType param then do
-      param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
-      let param' = Param param_name $ paramType param
-      localScope (scopeOfLParams [param']) $
-        letBindNames_ [paramName param] $ BasicOp $ Copy $ paramName param'
-      return param'
-    else
-      return param
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
 -- @map@ binding and a @reduce@ binding (returned in that order).

@@ -67,7 +67,7 @@ transformBody (Body () bnds res) = insertStmsM $ do
   mapM_ transformStmRecursively bnds
   return $ resultBody res
 
--- | First transform any nested 'Body' or 'Lambda' elements, then
+-- | First transform any nested t'Body' or t'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
 transformStmRecursively :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                            Stm -> m ()
