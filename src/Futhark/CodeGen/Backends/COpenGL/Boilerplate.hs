@@ -15,8 +15,7 @@ import qualified Language.C.Quote.OpenCL as C
 import Futhark.CodeGen.ImpCode.OpenGL
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.MonadFreshNames
-import Futhark.Util (chunk, zEncodeString)
+import Futhark.Util (zEncodeString)
 
 generateBoilerplate :: String -> String
                     -> M.Map ShaderName Safety
@@ -28,16 +27,6 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
       openGL_h    = $(embedStringFile "rts/c/opengl.h")
       glad_h      = $(embedStringFile "rts/c/glad/include/glad/glad.h")
       glad_c      = $(embedStringFile "rts/c/glad/src/glad.c")
-
-      shader_size_value = pretty $ zipWith shaderSizeInit (M.keys  sizes)
-                                                          (M.elems sizes)
-      shaderSizeInit k size = [C.cedecl|const int $id:k = $int:val;|]
-         where val = case size of SizeBespoke _ x -> x
-                                  _               -> 0
-
-      fragments        = map (\s -> [C.cinit|$string:s|])
-                             $ chunk 2000 (opengl_prelude ++ shader_size_value
-                                                          ++ opengl_code)
 
       size_name_inits  = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
 
