@@ -816,6 +816,8 @@ indexes), but you really do not want them there.  Make very sure that
 the code is correct; eliding such checks can lead to memory
 corruption.
 
+This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
+
 ``assert cond e``
 .................
 
