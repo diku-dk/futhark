@@ -34,21 +34,6 @@ writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
 
-sequentialBody :: Pattern MCMem
-               -> VName
-               -> SegSpace
-               -> KernelBody MCMem
-               -> MulticoreGen Imp.Code
-sequentialBody pat flat_idx space (KernelBody _ kstms kres) =
-  collect $ do
-    let (is, ns) = unzip $ unSegSpace space
-    ns' <- mapM toExp ns
-
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
-    compileStms (freeIn kres) kstms $
-      zipWithM_ (writeResult is) (patternElements pat) kres
-
-
 
 compileSegMap :: Pattern MCMem
               -> SegSpace
@@ -76,9 +61,8 @@ compileSegMap pat space (KernelBody _ kstms kres) = do
    compileStms (freeIn kres) kstms $
      zipWithM_ (writeResult is) (patternElements pat) kres
 
-  seq_body <- sequentialBody pat flat_idx space (KernelBody mempty kstms kres)
 
-  let freeVariables = namesToList (freeIn (seq_body <> par_body) `namesSubtract` namesFromList [tid, flat_idx])
+  let freeVariables = namesToList (freeIn par_body `namesSubtract` namesFromList [tid, flat_idx])
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
       scheduling = decideScheduling par_body
