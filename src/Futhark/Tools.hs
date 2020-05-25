@@ -88,13 +88,13 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
   -- the Scan.
   to_scan <- replicateM num_scans $ newVName "to_scan"
   to_red <- replicateM num_reds $ newVName "to_red"
-  letBindNames_ (to_scan <> to_red <> map_res) $ Op $ Screma w (mapSOAC map_lam) arrs
+  letBindNames (to_scan <> to_red <> map_res) $ Op $ Screma w (mapSOAC map_lam) arrs
 
   reduce <- reduceSOAC reds
-  letBindNames_ red_res $ Op $ Screma w reduce to_red
+  letBindNames red_res $ Op $ Screma w reduce to_red
 
   scan <- scanSOAC scans
-  letBindNames_ scan_res $ Op $ Screma w scan to_scan
+  letBindNames scan_res $ Op $ Screma w scan to_scan
 
 sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
                               Pattern (Lore m)
@@ -108,7 +108,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
   -- The chunk size is the full size of the array.
-  letBindNames_ [paramName chunk_size_param] $ BasicOp $ SubExp w
+  letBindNames [paramName chunk_size_param] $ BasicOp $ SubExp w
 
   -- The accumulator parameters are initialised to the neutral element.
   forM_ (zip fold_params nes) $ \(p, ne) ->
@@ -130,8 +130,8 @@ sequentialStreamWholeArray pat w nes lam arrs = do
     case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
-            letBindNames_ [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
-      _ -> letBindNames_ [patElemName pe] $ BasicOp $ SubExp se
+            letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
+      _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
 partitionChunkedFoldParameters :: Int -> [Param dec]
                                -> (Param dec, [Param dec], [Param dec])

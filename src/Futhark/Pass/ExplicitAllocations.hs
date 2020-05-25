@@ -70,11 +70,11 @@ data AllocStm = SizeComputation VName (PrimExp VName)
 bindAllocStm :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
                 AllocStm -> m ()
 bindAllocStm (SizeComputation name pe) =
-  letBindNames_ [name] =<< toExp (coerceIntPrimExp Int64 pe)
+  letBindNames [name] =<< toExp (coerceIntPrimExp Int64 pe)
 bindAllocStm (Allocation name size space) =
-  letBindNames_ [name] $ Op $ Alloc size space
+  letBindNames [name] $ Op $ Alloc size space
 bindAllocStm (ArrayCopy name src) =
-  letBindNames_ [name] $ BasicOp $ Copy src
+  letBindNames [name] $ BasicOp $ Copy src
 
 class (MonadFreshNames m, HasScope lore m, Mem lore) =>
       Allocator lore m where
@@ -85,11 +85,11 @@ class (MonadFreshNames m, HasScope lore m, Mem lore) =>
                           m ~ AllocM fromlore lore)
                       => AllocStm -> m ()
   addAllocStm (SizeComputation name se) =
-    letBindNames_ [name] =<< toExp (coerceIntPrimExp Int64 se)
+    letBindNames [name] =<< toExp (coerceIntPrimExp Int64 se)
   addAllocStm (Allocation name size space) =
-    letBindNames_ [name] $ Op $ allocOp size space
+    letBindNames [name] $ Op $ allocOp size space
   addAllocStm (ArrayCopy name src) =
-    letBindNames_ [name] $ BasicOp $ Copy src
+    letBindNames [name] $ BasicOp $ Copy src
 
   -- | The subexpression giving the number of elements we should
   -- allocate space for.  See 'ChunkMap' comment.
@@ -483,7 +483,7 @@ ensureArrayIn t mem ixfun (Var v) = do
             let summary = MemArray (elemType t) (arrayShape t) NoUniqueness $
                           ArrayIn mem ixfun
                 pat = Pattern [] [PatElem (identName copy) summary]
-            letBind_ pat $ BasicOp $ Copy v
+            letBind pat $ BasicOp $ Copy v
             return $ Var $ identName copy
 
 ensureDirectArray :: (Allocable fromlore tolore,
@@ -909,7 +909,7 @@ simplifiable simplifyInnerOp =
           fbody <- resultBodyM [intConst Int64 0]
           size' <- letSubExp "hoisted_alloc_size" $
                    If taken tbody fbody $ IfDec [MemPrim int64] IfFallback
-          letBind_ pat $ Op $ Alloc size' space
+          letBind pat $ Op $ Alloc size' space
         protectOp _ _ _ = Nothing
 
         simplifyOp (Alloc size space) =

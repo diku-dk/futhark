@@ -287,7 +287,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
         let indexMergeParams slice =
               localScope (scopeOfFParams mergeparams') $
               forM_ (zip mergeparams mergeparams') $ \(to, from) ->
-              letBindNames_ [paramName to] $ BasicOp $ Index (paramName from) $
+              letBindNames [paramName to] $ BasicOp $ Index (paramName from) $
               fullSlice (paramType from) slice
 
         loopbody' <- runBodyBinder $ resultBody . map Var <$>
@@ -417,7 +417,7 @@ postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
   tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
     forM_ (zip (patternNames pat) accs') $ \(us, everyone) ->
-      letBindNames_ [us] $ BasicOp $ Index everyone slice
+      letBindNames [us] $ BasicOp $ Index everyone slice
 
     if poststms == mempty
       then do -- The privstms may still be necessary for the result.
@@ -506,7 +506,7 @@ mkReadPreludeValues :: [VName] -> [VName] -> ReadPrelude
 mkReadPreludeValues prestms_live_arrs prestms_live slice =
   fmap mconcat $ forM (zip prestms_live_arrs prestms_live) $ \(arr, v) -> do
   arr_t <- lookupType arr
-  letBindNames_ [v] $ BasicOp $ Index arr $ fullSlice arr_t slice
+  letBindNames [v] $ BasicOp $ Index arr $ fullSlice arr_t slice
 
 tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Binder Kernels KernelResult
 tileReturns dims_on_top dims arr = do
@@ -539,7 +539,7 @@ segMap1D desc lvl manifest f = do
 reconstructGtids1D :: Count GroupSize SubExp -> VName -> VName -> VName
                    -> Binder Kernels ()
 reconstructGtids1D group_size gtid gid ltid  =
-  letBindNames_ [gtid] =<<
+  letBindNames [gtid] =<<
     toExp (LeafExp gid int32 *
            primExpFromSubExp int32 (unCount group_size) +
            LeafExp ltid int32)
@@ -673,7 +673,7 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
   num_whole_tiles <- letSubExp "num_whole_tiles" $ BasicOp $ BinOp (SQuot Int32) w tile_size
   return Tiling
     { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
-        letBindNames_ [gtid] =<<
+        letBindNames [gtid] =<<
           toExp (LeafExp gid int32 * primExpFromSubExp int32 tile_size +
                  LeafExp ltid int32)
         f (LeafExp gtid int32 .<. primExpFromSubExp int32 kdim)
@@ -733,10 +733,10 @@ reconstructGtids2D :: SubExp -> (VName, VName) -> (VName, VName) -> (VName, VNam
                    -> Binder Kernels ()
 reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = do
   -- Reconstruct the original gtids from gid_x/gid_y and ltid_x/ltid_y.
-  letBindNames_ [gtid_x] =<<
+  letBindNames [gtid_x] =<<
     toExp (LeafExp gid_x int32 * primExpFromSubExp int32 tile_size +
            LeafExp ltid_x int32)
-  letBindNames_ [gtid_y] =<<
+  letBindNames [gtid_y] =<<
     toExp (LeafExp gid_y int32 * primExpFromSubExp int32 tile_size +
             LeafExp ltid_y int32)
 

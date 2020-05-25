@@ -134,10 +134,10 @@ letExp _ (BasicOp (SubExp (Var v))) =
 letExp desc e = do
   n <- length <$> expExtType e
   vs <- replicateM n $ newVName desc
-  idents <- letBindNames vs e
-  case idents of
-    [ident] -> return $ identName ident
-    _       -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
+  letBindNames vs e
+  case vs of
+    [v] -> return v
+    _   -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
               String -> VName -> Slice SubExp -> Exp (Lore m)
@@ -158,7 +158,8 @@ letTupExp _ (BasicOp (SubExp (Var v))) =
 letTupExp name e = do
   numValues <- length <$> expExtType e
   names <- replicateM numValues $ newVName name
-  map identName <$> letBindNames names e
+  letBindNames names e
+  return names
 
 letTupExp' :: (MonadBinder m) =>
               String -> Exp (Lore m)
@@ -264,7 +265,7 @@ eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [m (Exp (Lore m))] -> m [SubExp]
 eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
                       bodyBind $ lambdaBody lam
-  where bindParam param arg = letBindNames_ [paramName param] =<< arg
+  where bindParam param arg = letBindNames [paramName param] =<< arg
 
 -- | Note: unsigned division.
 eDivRoundingUp :: MonadBinder m =>

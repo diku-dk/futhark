@@ -59,7 +59,7 @@ splitArrays :: (MonadBinder m, Lore m ~ Kernels) =>
             -> SplitOrdering -> SubExp -> SubExp -> SubExp -> [VName]
             -> m ()
 splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
-  letBindNames_ [chunk_size] $ Op $ SizeOp $ SplitSpace ordering w i elems_per_i
+  letBindNames [chunk_size] $ Op $ SizeOp $ SplitSpace ordering w i elems_per_i
   case ordering of
     SplitContiguous     -> do
       offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) i elems_per_i
@@ -68,12 +68,12 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
   where contiguousSlice offset slice_name arr = do
           arr_t <- lookupType arr
           let slice = fullSlice arr_t [DimSlice offset (Var chunk_size) (constant (1::Int32))]
-          letBindNames_ [slice_name] $ BasicOp $ Index arr slice
+          letBindNames [slice_name] $ BasicOp $ Index arr slice
 
         stridedSlice stride slice_name arr = do
           arr_t <- lookupType arr
           let slice = fullSlice arr_t [DimSlice i (Var chunk_size) stride]
-          letBindNames_ [slice_name] $ BasicOp $ Index arr slice
+          letBindNames [slice_name] $ BasicOp $ Index arr slice
 
 
 blockedPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -194,7 +194,7 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBinderT'_ $ do
   (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
   lvl <- mk_lvl [w] "stream_red" $ NoRecommendation SegNoVirt
-  letBind_ pat' $ Op $ SegOp $ SegRed lvl kspace
+  letBind pat' $ Op $ SegOp $ SegRed lvl kspace
     [SegBinOp comm red_lam nes mempty] ts kbody
 
   read_dummy
@@ -217,7 +217,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
 
   let pat = Pattern [] $ redout_pes ++ mapout_pes
   lvl <- mk_lvl [w] "stream_map" $ NoRecommendation SegNoVirt
-  letBind_ pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
+  letBind pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 
   return (threads, map patElemName redout_pes)
 
