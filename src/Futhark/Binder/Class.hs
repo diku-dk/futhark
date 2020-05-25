@@ -135,10 +135,10 @@ bodyBind (Body _ bnds es) = do
   addStms bnds
   return es
 
--- | Add several bindings at the outermost level of a 'Body'.
+-- | Add several bindings at the outermost level of a t'Body'.
 insertStms :: Bindable lore => Stms lore -> Body lore -> Body lore
 insertStms bnds1 (Body _ bnds2 res) = mkBody (bnds1<>bnds2) res
 
--- | Add a single binding at the outermost level of a 'Body'.
+-- | Add a single binding at the outermost level of a t'Body'.
 insertStm :: Bindable lore => Stm lore -> Body lore -> Body lore
 insertStm = insertStms . oneStm

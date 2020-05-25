@@ -20,6 +20,7 @@ import Futhark.Transform.Rename
 import Futhark.Pass
 import Futhark.Tools
 
+-- | The pass definition.
 tileLoops :: Pass Kernels Kernels
 tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
             \(Prog consts funs) ->

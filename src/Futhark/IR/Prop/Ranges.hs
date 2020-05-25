@@ -3,7 +3,11 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
--- | Utility declarations for performing range analysis.
+-- | Utility declarations for performing range analysis.  The ranges
+-- computed here are /local/ (does not take range of subexpressions
+-- into account), which is probably not very interesting.  See
+-- "Futhark.Analysis.Range" for a more comprehensive analysis built on
+-- these building blocks.
 module Futhark.IR.Prop.Ranges
        ( Bound
        , KnownBound (..)
@@ -37,7 +41,7 @@ import qualified Futhark.Util.Pretty as PP
 data KnownBound = VarBound VName
                   -- ^ Has the same bounds as this variable.  VERY
                   -- IMPORTANT: this variable may be an array, so it
-                  -- cannot be immediately translated to a 'ScalExp'.
+                  -- cannot be immediately translated to a 'SE.ScalExp'.
                 | MinimumBound KnownBound KnownBound
                   -- ^ Bounded by the minimum of these two bounds.
                 | MaximumBound KnownBound KnownBound
@@ -145,7 +149,7 @@ instance RangeOf SubExp where
     where (lower, upper) = subExpKnownRange se
 
 -- | Something that contains range information for several things,
--- most notably 'Body' or 'Pattern'.
+-- most notably t'Body' and t'Pattern'.
 class RangesOf a where
   -- | The ranges of the argument.
   rangesOf :: a -> [Range]

@@ -1,12 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | Perform range analysis of a program or other fragment.
 module Futhark.Analysis.Range
        ( rangeAnalysis
        , runRangeM
        , RangeM
-       , analyseFun
-       , analyseExp
        , analyseLambda
-       , analyseBody
        , analyseStms
        )
        where
@@ -43,6 +41,9 @@ analyseBody (Body lore origbnds result) =
   analyseStms origbnds $ \bnds' ->
     return $ mkRangedBody lore bnds' result
 
+-- | Perform range analysis on some statements, taking a continuation
+-- where the ranges of the variables bound by the statements is
+-- in scope.
 analyseStms :: (ASTLore lore, CanBeRanged (Op lore)) =>
                Stms lore
             -> (Stms (Ranges lore) -> RangeM a)
@@ -77,6 +78,7 @@ analyseExp = mapExpM analyse
                  , mapOnOp = return . addOpRanges
                  }
 
+-- | Perform range analysis on a lambda.
 analyseLambda :: (ASTLore lore, CanBeRanged (Op lore)) =>
                  Lambda lore
               -> RangeM (Lambda (Ranges lore))
@@ -93,8 +95,10 @@ type RangeEnv = M.Map VName Range
 emptyRangeEnv :: RangeEnv
 emptyRangeEnv = M.empty
 
+-- | The range analysis monad.
 type RangeM = Reader RangeEnv
 
+-- | Run a 'RangeM' action.
 runRangeM :: RangeM a -> a
 runRangeM = flip runReader emptyRangeEnv
 

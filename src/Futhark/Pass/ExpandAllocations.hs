@@ -34,7 +34,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Util.IntegralExp
 import Futhark.Util (mapAccumLM)
 
-
+-- | The memory expansion pass definition.
 expandAllocations :: Pass KernelsMem KernelsMem
 expandAllocations =
   Pass "expand allocations" "Expand allocations" $

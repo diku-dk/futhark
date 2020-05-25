@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+-- | Facilities for converting a 'Kernels' program to 'KernelsMem'.
 module Futhark.Pass.ExplicitAllocations.Kernels
        ( explicitAllocations
        , explicitAllocationsInStms
@@ -161,9 +162,11 @@ inThreadExpHints e = do
         semiStatic _ Constant{} = True
         semiStatic consts (Var v) = v `S.member` consts
 
+-- | The pass from 'Kernels' to 'KernelsMem'.
 explicitAllocations :: Pass Kernels KernelsMem
 explicitAllocations = explicitAllocationsGeneric handleHostOp kernelExpHints
 
+-- | Convert some 'Kernels' stms to 'KernelsMem'.
 explicitAllocationsInStms :: (MonadFreshNames m, HasScope KernelsMem m) =>
                              Stms Kernels -> m (Stms KernelsMem)
 explicitAllocationsInStms = explicitAllocationsInStmsGeneric handleHostOp kernelExpHints

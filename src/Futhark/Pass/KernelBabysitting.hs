@@ -1,10 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | Do various kernel optimisations - mostly related to coalescing.
-module Futhark.Pass.KernelBabysitting
-       ( babysitKernels
-       , nonlinearInMemory
-       )
+module Futhark.Pass.KernelBabysitting ( babysitKernels )
        where
 
 import Control.Arrow (first)
@@ -23,6 +20,7 @@ import Futhark.Tools
 import Futhark.Pass
 import Futhark.Util
 
+-- | The pass definition.
 babysitKernels :: Pass Kernels Kernels
 babysitKernels = Pass "babysit kernels"
                  "Transpose kernel input arrays for better performance." $

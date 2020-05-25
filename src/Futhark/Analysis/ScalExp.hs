@@ -1,4 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | A legacy representation of scalar expressions used solely for
+-- algebraic simplification.  Never use this.  Use
+-- "Futhark.Analysis.PrimExp" instead.
 module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
@@ -133,6 +136,7 @@ instance Substitute ScalExp where
 instance Rename ScalExp where
   rename = substituteRename
 
+-- | The type of a scalar expression.
 scalExpType :: ScalExp -> PrimType
 scalExpType (Val v) = primValueType v
 scalExpType (Id _ t) = t
@@ -186,6 +190,7 @@ subExpToScalExp :: SubExp -> PrimType -> ScalExp
 subExpToScalExp (Var v) t        = Id v t
 subExpToScalExp (Constant val) _ = Val val
 
+-- | Recursively convert an expression to a scalar expression.
 toScalExp :: (HasScope t f, Monad f) =>
              LookupVar -> Exp lore -> f (Maybe ScalExp)
 toScalExp look (BasicOp (SubExp (Var v)))

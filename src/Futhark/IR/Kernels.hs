@@ -26,6 +26,7 @@ import Futhark.Binder
 import Futhark.Construct
 import qualified Futhark.TypeCheck as TypeCheck
 
+-- | The phantom data type for the kernels representation.
 data Kernels
 
 instance Decorations Kernels where

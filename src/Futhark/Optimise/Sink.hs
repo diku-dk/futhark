@@ -174,6 +174,7 @@ optimiseKernelBody vtable sinking (KernelBody dec stms res) =
   let (stms', sunk) = optimiseStms vtable sinking stms $ freeIn res
   in (KernelBody dec stms' res, sunk)
 
+-- | The pass definition.
 sink :: Pass Kernels Kernels
 sink = Pass "sink" "move memory loads closer to their uses" $
        fmap (removeProgAliases . removeProgRanges) .

@@ -53,6 +53,7 @@ primExpToExp f (LeafExp v _) =
 instance ToExp v => ToExp (PrimExp v) where
   toExp = primExpToExp toExp
 
+-- | A convenient combination of 'toExp' and 'letSubExp'
 primExpToSubExp :: MonadBinder m =>
                    String -> (v -> m (Exp (Lore m))) -> PrimExp v -> m SubExp
 primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
@@ -60,7 +61,7 @@ primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
 -- | Convert an expression to a 'PrimExp'.  The provided function is
 -- used to convert expressions that are not trivially 'PrimExp's.
 -- This includes constants and variable names, which are passed as
--- 'SubExp's.
+-- t'SubExp's.
 primExpFromExp :: (Fail.MonadFail m, Decorations lore) =>
                   (VName -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
@@ -107,6 +108,7 @@ replaceInPrimExpM f (ConvOpExp cop pe) =
 replaceInPrimExpM f (FunExp h args t) =
   FunExp h <$> mapM (replaceInPrimExpM f) args <*> pure t
 
+-- | As 'replaceInPrimExpM', but in the identity monad.
 replaceInPrimExp :: (a -> PrimType -> PrimExp b) ->
                     PrimExp a -> PrimExp b
 replaceInPrimExp f e = runIdentity $ replaceInPrimExpM f' e
