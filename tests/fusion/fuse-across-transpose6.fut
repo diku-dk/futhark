@@ -44,7 +44,7 @@ let correlateDeltas [num_und][num_dates]
   map (\(zi: [num_und]f32): [num_und]f32  ->
          map (\(j: i32): f32  ->
                 let j' = j + 1
-                let x = map2 (*) (unsafe take j' zi) (unsafe take j' md_c[j])
+                let x = map2 (*) (take j' zi) (take j' md_c[j])
                 in  reduce (+) (0.0) x
             ) (iota(num_und) )
      ) zds

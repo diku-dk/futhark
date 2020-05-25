@@ -37,13 +37,13 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
 
         let num_sgms  = (last ini_sgms) + 1  -- OK
         let flags = map (\i -> if i == 0 then 1
-                               else if unsafe ini_sgms[i-1] == ini_sgms[i]
+                               else if ini_sgms[i-1] == ini_sgms[i]
                                     then 0 else 1
                         ) (iota len)
         let ones  = replicate len 1
         let tmp   = sgmPrefSum flags ones
         let (inds1,inds2,vals) = unzip3 (
-            map (\ i -> if (i == len-1) || (unsafe flags[i+1] == 1)
+            map (\ i -> if (i == len-1) || (flags[i+1] == 1)
                              -- end of segment
                              then (i+1-tmp[i], ini_sgms[i], tmp[i])
                              else (-1,-1,0)
@@ -61,7 +61,7 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
                     let sgm_len = flags[i]
                     in
                     if sgm_len > 0
-                    then if unsafe scan_data[i+sgm_len-1] > w
+                    then if scan_data[i+sgm_len-1] > w
                          then 1 -- this start of segment should be moved
                          else 0
                     else 0
@@ -78,9 +78,9 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
             let (inds_s, lens, inds_v) = unzip3 (
                 map (\ i -> let offset = scan_moves[i]
                             let (ind_s, ll) =
-                                if i > 0 && flags[i] == 0 && unsafe moves[i-1] > 0
+                                if i > 0 && flags[i] == 0 && moves[i-1] > 0
                                  -- new start of segment
-                                then (unsafe ini_sgms[i-1]-1, unsafe flags[i-1]-1)
+                                then (ini_sgms[i-1]-1, flags[i-1]-1)
                                 else (-1, 0)
                             let ind_v = if moves[i] == 0 then (num_moves-offset+i) else offset-1  -- ???
                             in  (ind_s, ll, ind_v)

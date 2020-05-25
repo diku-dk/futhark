@@ -23,7 +23,6 @@
 -- 2.170000f32] }
 
 let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[n]f32 =
-  unsafe
 ----------------------------------------------------
   -- Recurrence 1: b[i] = b[i] - a[i]*c[i-1]/b[i-1] --
   --   solved by scan with 2x2 matrix mult operator --
@@ -122,4 +121,4 @@ let main (outer: i32) (inner: i32) =
   let u = map2 (scale_row 3) (iota outer) (replicate outer (iota inner))
   let dtInv = 0.8874528f32
   let res = map_tridag_par (myD, myDD, myMu, myVar, u, dtInv)
-  in map (\i -> unsafe trunc2dec (res[i*(outer/10), i*(inner/10)])) (iota 10)
+  in map (\i -> trunc2dec (res[i*(outer/10), i*(inner/10)])) (iota 10)

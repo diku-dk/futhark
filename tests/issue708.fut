@@ -10,4 +10,4 @@ let list_insertions [n] 't (np1: i32) (x: t) (a: [n]t): [n][np1]t =
 
 let main [n] (a: [n][3]u8): [][n][3]u8 =
   (loop p = [[head a]] for i in (1...n-1)
-   do flatten (unsafe map (list_insertions (n+1) a[i]) p)) :> [][n][3]u8
+   do flatten (map (list_insertions (n+1) a[i]) p)) :> [][n][3]u8

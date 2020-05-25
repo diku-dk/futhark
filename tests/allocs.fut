@@ -10,6 +10,6 @@ let main [n] (a: [n]i32): i32 =
      in if m < length b
         then b
         else map (\(j: i32): i32  ->
-                   j + unsafe b[j % length b]) (
+                   j + b[j % length b]) (
                  iota(m)))
   in reduce (+) 0 b
