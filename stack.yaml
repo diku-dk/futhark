@@ -10,3 +10,8 @@ extra-package-dbs: []
 
 nix:
     packages: [zlib.dev, zlib.out, pkgconfig, haskell.compiler.ghc882]
+
+# By default, stack doesn't compile multiple modules in parallel.
+# This makes it do so.
+ghc-options:
+  $locals: -j
