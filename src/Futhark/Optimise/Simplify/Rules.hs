@@ -617,14 +617,14 @@ simplifyIndexing vtable seType idd inds consuming =
         Just (ST.Indexed cs e) <- ST.index idd inds' vtable,
         worthInlining e,
         all (`ST.elem` vtable) (unCertificates cs) ->
-          Just $ SubExpResult cs <$> (letSubExp "index_primexp" =<< toExp e)
+          Just $ SubExpResult cs <$> toSubExp "index_primexp" e
 
       | Just inds' <- sliceIndices inds,
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
         all worthInlining inds'',
         all (`ST.elem` vtable) (unCertificates cs) ->
           Just $ IndexResult cs arr . map DimFix <$>
-          mapM (letSubExp "index_primexp" <=< toExp) inds''
+          mapM (toSubExp "index_primexp") inds''
 
     Nothing -> Nothing
 
@@ -634,7 +634,7 @@ simplifyIndexing vtable seType idd inds consuming =
       | [DimFix ii] <- inds,
         Just (Prim (IntType from_it)) <- seType ii ->
           Just $
-          fmap (SubExpResult cs) $ letSubExp "index_iota" <=< toExp $
+          fmap (SubExpResult cs) $ toSubExp "index_iota" $
           ConvOpExp (SExt from_it to_it) (primExpFromSubExp (IntType from_it) ii)
           * primExpFromSubExp (IntType to_it) s
           + primExpFromSubExp (IntType to_it) x
@@ -642,7 +642,7 @@ simplifyIndexing vtable seType idd inds consuming =
           Just $ do
             i_offset' <- asIntS to_it i_offset
             i_stride' <- asIntS to_it i_stride
-            i_offset'' <- letSubExp "iota_offset" <=< toExp $
+            i_offset'' <- toSubExp "iota_offset" $
                           primExpFromSubExp (IntType to_it) x +
                           primExpFromSubExp (IntType to_it) s *
                           primExpFromSubExp (IntType to_it) i_offset'
@@ -1159,7 +1159,7 @@ ruleBasicOp vtable pat aux (Index idd slice)
                              (map (primExpFromSubExp int32) $ newDims newshape)
                              (map (primExpFromSubExp int32) inds)
           new_inds' <-
-            mapM (letSubExp "new_index" <=< toExp . asInt32PrimExp) new_inds
+            mapM (toSubExp "new_index" . asInt32PrimExp) new_inds
           certifying idd_cs $ auxing aux $
             letBind_ pat $ BasicOp $ Index idd2 $ map DimFix new_inds'
 

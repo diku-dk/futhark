@@ -207,7 +207,7 @@ allocStms :: [(FParam KernelsMem, SubExp)] -> [DoubleBuffer]
 allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           stms <- lift $ runBinder_ $ do
-            size' <- letSubExp "double_buffer_size" =<< toExp size
+            size' <- toSubExp "double_buffer_size" size
             letBindNames_ [name] $ Op $ Alloc size' space
           tell $ stmsToList stms
           if b then return (Param pname $ MemMem space, Var name)
