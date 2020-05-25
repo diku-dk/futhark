@@ -143,9 +143,6 @@ simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
     pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
 instance BinderOps (Wise SOACS) where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 fixLambdaParams :: (MonadBinder m, Bindable (Lore m), BinderOps (Lore m)) =>
                    AST.Lambda (Lore m) -> [Maybe SubExp] -> m (AST.Lambda (Lore m))

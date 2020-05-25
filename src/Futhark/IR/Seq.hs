@@ -48,16 +48,10 @@ instance Bindable Seq where
   mkLetNames = simpleMkLetNames
 
 instance BinderOps Seq where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Seq where
 
 instance BinderOps (Engine.Wise Seq) where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 simpleSeq :: Simplify.SimpleOps Seq
 simpleSeq = Simplify.bindableSimpleOps (const $ pure ((), mempty))

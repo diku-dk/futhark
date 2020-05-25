@@ -48,9 +48,6 @@ instance Bindable Kernels where
   mkLetNames = simpleMkLetNames
 
 instance BinderOps Kernels where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Kernels where
 

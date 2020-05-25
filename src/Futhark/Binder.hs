@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleInstances, MultiParamTypeClasses, UndecidableInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DefaultSignatures #-}
 -- | This module defines a convenience monad/typeclass for creating
 -- normalised programs.
 module Futhark.Binder
@@ -8,9 +9,6 @@ module Futhark.Binder
   , runBinderT, runBinderT_
   , runBinderT', runBinderT'_
   , BinderOps (..)
-  , bindableMkExpDecB
-  , bindableMkBodyB
-  , bindableMkLetNamesB
   , Binder
   , runBinder
   , runBinder_
@@ -37,22 +35,23 @@ import Futhark.IR
 class ASTLore lore => BinderOps lore where
   mkExpDecB :: (MonadBinder m, Lore m ~ lore) =>
                 Pattern lore -> Exp lore -> m (ExpDec lore)
+
   mkBodyB :: (MonadBinder m, Lore m ~ lore) =>
              Stms lore -> Result -> m (Body lore)
   mkLetNamesB :: (MonadBinder m, Lore m ~ lore) =>
                  [VName] -> Exp lore -> m (Stm lore)
 
-bindableMkExpDecB :: (MonadBinder m, Bindable (Lore m)) =>
-                      Pattern (Lore m) -> Exp (Lore m) -> m (ExpDec (Lore m))
-bindableMkExpDecB pat e = return $ mkExpDec pat e
+  default mkExpDecB :: (MonadBinder m, Bindable lore) =>
+                       Pattern lore -> Exp lore -> m (ExpDec lore)
+  mkExpDecB pat e = return $ mkExpDec pat e
 
-bindableMkBodyB :: (MonadBinder m, Bindable (Lore m)) =>
-                   Stms (Lore m) -> Result -> m (Body (Lore m))
-bindableMkBodyB stms res = return $ mkBody stms res
+  default mkBodyB :: (MonadBinder m, Bindable lore) =>
+                     Stms lore -> Result -> m (Body lore)
+  mkBodyB stms res = return $ mkBody stms res
 
-bindableMkLetNamesB :: (MonadBinder m, Bindable (Lore m)) =>
-                       [VName] -> Exp (Lore m) -> m (Stm (Lore m))
-bindableMkLetNamesB = mkLetNames
+  default mkLetNamesB :: (MonadBinder m, Lore m ~ lore, Bindable lore) =>
+                         [VName] -> Exp lore -> m (Stm lore)
+  mkLetNamesB = mkLetNames
 
 newtype BinderT lore m a = BinderT (StateT (Stms lore, Scope lore) m a)
   deriving (Functor, Monad, Applicative)
