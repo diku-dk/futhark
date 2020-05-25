@@ -50,13 +50,11 @@ import qualified Data.Set as S
 import Data.Maybe
 import Data.List (zip4, partition, sort)
 
-import Futhark.Optimise.Simplify.Lore
-  (mkWiseBody, mkWiseLetStm, removeExpWisdom, removeScopeWisdom)
+import Futhark.Optimise.Simplify.Lore (mkWiseBody)
 import Futhark.MonadFreshNames
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Tools
-import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
