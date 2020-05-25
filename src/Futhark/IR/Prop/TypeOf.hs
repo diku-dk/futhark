@@ -20,7 +20,6 @@ module Futhark.IR.Prop.TypeOf
          expExtType
        , expExtTypeSize
        , subExpType
-       , bodyExtType
        , primOpType
        , mapType
 
@@ -35,7 +34,6 @@ module Futhark.IR.Prop.TypeOf
        where
 
 import Data.Maybe
-import qualified Data.Set as S
 
 import Futhark.IR.Syntax
 import Futhark.IR.Prop.Reshape
@@ -141,17 +139,6 @@ instance Applicative (FeelBad lore) where
 instance Decorations lore => HasScope lore (FeelBad lore) where
   lookupType = const $ pure $ Prim $ IntType Int32
   askScope = pure mempty
-
--- | The type of a body.  Watch out: this only works for the
--- degenerate case where the body does not already return its context.
-bodyExtType :: (HasScope lore m, Monad m) =>
-               Body lore -> m [ExtType]
-bodyExtType (Body _ stms res) =
-  existentialiseExtTypes bound . staticShapes <$>
-  extendedScope (traverse subExpType res) bndscope
-  where bndscope = scopeOf stms
-        boundInLet (Let pat _ _) = S.fromList $ patternNames pat
-        bound = S.toList $ foldMap boundInLet stms
 
 -- | Given the context and value merge parameters of a Futhark @loop@,
 -- produce the return type.

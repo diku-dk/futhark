@@ -195,6 +195,14 @@ eIf' ce te fe if_sort = do
           mkBodyM stms $ ctx_res++val_res
             where stmsscope = scopeOf stms
 
+-- The type of a body.  Watch out: this only works for the degenerate
+-- case where the body does not already return its context.
+bodyExtType :: (HasScope lore m, Monad m) => Body lore -> m [ExtType]
+bodyExtType (Body _ stms res) =
+  existentialiseExtTypes (M.keys stmsscope) . staticShapes <$>
+  extendedScope (traverse subExpType res) stmsscope
+  where stmsscope = scopeOf stms
+
 eBinOp :: MonadBinder m =>
           BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
        -> m (Exp (Lore m))
