@@ -256,12 +256,16 @@ expRanges (Op ranges) = opRanges ranges
 expRanges e =
   replicate (expExtTypeSize e) unknownRange
 
+-- | The class of operations that can produce range information.
 class IsOp op => RangedOp op where
   opRanges :: op -> [Range]
 
 instance RangedOp () where
   opRanges () = []
 
+-- | The class of operations that can be given ranging information.
+-- This is a somewhat subtle concept that is only used in the
+-- simplifier and when using "lore adapters".
 class RangedOp (OpWithRanges op) =>
       CanBeRanged op where
   type OpWithRanges op :: Data.Kind.Type

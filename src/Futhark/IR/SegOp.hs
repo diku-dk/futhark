@@ -120,7 +120,7 @@ data HistOp lore =
   deriving (Eq, Ord, Show)
 
 -- | The type of a histogram produced by a 'HistOp'.  This can be
--- different from the type of the 'HistDest's in case we are
+-- different from the type of the 'histDest's in case we are
 -- dealing with a segmented histogram.
 histType :: HistOp lore -> [Type]
 histType op = map ((`arrayOfRow` histWidth op) .
