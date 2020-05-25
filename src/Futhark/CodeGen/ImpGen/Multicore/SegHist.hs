@@ -80,7 +80,6 @@ segmentedHist :: Pattern MCMem
                 -> MulticoreGen ()
 segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
-  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -166,7 +165,6 @@ nonsegmentedHist :: Pattern MCMem
                 -> MulticoreGen ()
 nonsegmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
-  sUnpauseProfiling
 
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns

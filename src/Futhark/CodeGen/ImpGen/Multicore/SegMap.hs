@@ -41,7 +41,6 @@ compileSegMap :: Pattern MCMem
               -> MulticoreGen ()
 compileSegMap pat space (KernelBody _ kstms kres) = do
   emit $ Imp.DebugPrint "SegMap " Nothing
-  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns

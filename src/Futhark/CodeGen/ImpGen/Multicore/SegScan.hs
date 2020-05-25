@@ -54,7 +54,6 @@ nonsegmentedScan :: Pattern MCMem
                  -> MulticoreGen ()
 nonsegmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
-  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -246,7 +245,6 @@ segmentedScan :: Pattern MCMem
               -> MulticoreGen ()
 segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
-  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
@@ -317,7 +315,6 @@ sequentialScan flat_idx pat space scan_ops kbody = do
       per_scan_pes            = segBinOpChunks scan_ops $ patternValueElements pat
 
   collect $ do
-
     dPrimV_ (segFlat space) 0
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx

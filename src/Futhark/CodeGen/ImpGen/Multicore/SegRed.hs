@@ -92,7 +92,6 @@ nonsegmentedReduction pat space reds kbody = do
   emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
-  sUnpauseProfiling
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
 
@@ -190,7 +189,6 @@ segmentedReduction :: Pattern MCMem
                    -> MulticoreGen ()
 segmentedReduction pat space reds kbody = do
   emit $ Imp.DebugPrint "segmented segBinOp " Nothing
-  sUnpauseProfiling
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
