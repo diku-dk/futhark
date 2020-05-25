@@ -892,17 +892,11 @@ simplifiable :: (Engine.SimplifiableLore lore,
                 (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner, Stms (Engine.Wise lore)))
              -> SimpleOps lore
 simplifiable simplifyInnerOp =
-  SimpleOps mkExpDecS' mkBodyS' mkLetNamesS' protectOp simplifyOp
+  SimpleOps mkExpDecS' mkBodyS' protectOp simplifyOp
   where mkExpDecS' _ pat e =
           return $ Engine.mkWiseExpDec pat () e
 
         mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
-
-        mkLetNamesS' vtable names e = do
-          (pat', stms) <- runBinder $ bindPatternWithAllocations env names $
-                          removeExpWisdom e
-          return (mkWiseLetStm pat' (defAux ()) e, stms)
-          where env = removeScopeWisdom $ ST.toScope vtable
 
         protectOp taken pat (Alloc size space) = Just $ do
           tbody <- resultBodyM [size]

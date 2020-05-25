@@ -128,11 +128,12 @@ toSOAC (MapNest w lam [] inps) =
   return $ SOAC.Screma w (Futhark.mapSOAC lam) inps
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw:ns) inps) = do
   let nparams = zipWith Param npnames $ map SOAC.inputRowType inps
-  (e,bnds) <- runBinder $ localScope (scopeOfLParams nparams) $ SOAC.toExp =<<
-    toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
-  bnd <- mkLetNames nres e
+  body <- runBodyBinder $ localScope (scopeOfLParams nparams) $ do
+    letBindNames nres =<< SOAC.toExp =<<
+      toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
+    return $ resultBody $ map Var nres
   let outerlam = Lambda { lambdaParams = nparams
-                        , lambdaBody = mkBody (bnds<>oneStm bnd) $ map Var nres
+                        , lambdaBody = body
                         , lambdaReturnType = nrettype
                         }
   return $ SOAC.Screma w (Futhark.mapSOAC outerlam) inps

@@ -119,9 +119,6 @@ data SimpleOps lore =
             , mkBodyS :: ST.SymbolTable (Wise lore)
                       -> Stms (Wise lore) -> Result
                       -> SimpleM lore (Body (Wise lore))
-            , mkLetNamesS :: ST.SymbolTable (Wise lore)
-                          -> [VName] -> Exp (Wise lore)
-                          -> SimpleM lore (Stm (Wise lore), Stms (Wise lore))
             , protectHoistedOpS :: Protect (Binder (Wise lore))
               -- ^ Make a hoisted Op safe.  The SubExp is a boolean
               -- that is true when the value of the statement will
@@ -133,10 +130,9 @@ type SimplifyOp lore op = op -> SimpleM lore (OpWithWisdom op, Stms (Wise lore))
 
 bindableSimpleOps :: (SimplifiableLore lore, Bindable lore) =>
                      SimplifyOp lore (Op lore) -> SimpleOps lore
-bindableSimpleOps = SimpleOps mkExpDecS' mkBodyS' mkLetNamesS' protectHoistedOpS'
+bindableSimpleOps = SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS'
   where mkExpDecS' _ pat e = return $ mkExpDec pat e
         mkBodyS' _ bnds res = return $ mkBody bnds res
-        mkLetNamesS' _ name e = (,) <$> mkLetNames name e <*> pure mempty
         protectHoistedOpS' _ _ _ = Nothing
 
 newtype SimpleM lore a =
