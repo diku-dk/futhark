@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances, LambdaCase #-}
+-- | Algebraic simplification.  Slow and limited.  Use very rarely.
 module Futhark.Analysis.AlgSimplify
   ( ScalExp
   , Error
@@ -49,6 +50,7 @@ data AlgSimplifyEnv = AlgSimplifyEnv { inSolveLTH0 :: Bool
                                      -- too much time.
                                      }
 
+-- | Why the algebraic simplification failed.
 data Error = StepsExceeded | Error String
 
 type AlgSimplifyM = StateT Int (ReaderT AlgSimplifyEnv (Either Error))
@@ -445,17 +447,9 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
             e_num <- toNumSofP e_num_scal
             gaussAllLTH0 only_static elsyms0 e_num
 
---    pos <- asks pos
---    badAlgSimplifyM "gaussOneDefaultLTH0: unimplemented!"
-
-----------------------------------------------------------
---- Pick a Symbol to Eliminate & Bring To Linear Form  ---
-----------------------------------------------------------
-
+-- | Pick a Symbol to Eliminate & Bring To Linear Form
 pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe VName
 pickSymToElim rangesrep elsyms0 e_scal =
---    ranges <- asks ranges
---    e_scal <- fromNumSofP e0
     let ids0= namesToList $ freeIn e_scal
         ids1= filter (\s -> not (S.member s elsyms0)) ids0
         ids2= filter (\s -> case M.lookup s rangesrep of

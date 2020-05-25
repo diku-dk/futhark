@@ -14,6 +14,7 @@ import Futhark.Pass
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 
+-- | The pass definition.
 unstream :: Pass Kernels Kernels
 unstream = Pass "unstream" "sequentialise remaining SOACs" $
            intraproceduralTransformation optimise

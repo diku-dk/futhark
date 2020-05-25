@@ -41,6 +41,7 @@ import           Futhark.IR.KernelsMem
 import           Futhark.Pass
 import           Futhark.Util (maybeHead)
 
+-- | The double buffering pass definition.
 doubleBuffer :: Pass KernelsMem KernelsMem
 doubleBuffer =
   Pass { passName = "Double buffer"

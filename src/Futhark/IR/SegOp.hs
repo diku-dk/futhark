@@ -333,7 +333,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
             TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
 
 kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
-kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
+kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody _ stms res) =

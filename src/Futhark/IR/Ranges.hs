@@ -22,11 +22,8 @@ module Futhark.IR.Ranges
        , mkBodyRanges
          -- * Removing ranges
        , removeProgRanges
-       , removeExpRanges
-       , removeBodyRanges
        , removeStmRanges
        , removeLambdaRanges
-       , removePatternRanges
        )
 where
 
@@ -108,6 +105,7 @@ removeRanges = Rephraser { rephraseExpLore = return
                          , rephraseOp = return . removeOpRanges
                          }
 
+-- | Remove range information from program.
 removeProgRanges :: CanBeRanged (Op lore) =>
                     Prog (Ranges lore) -> Prog lore
 removeProgRanges = runIdentity . rephraseProg removeRanges
@@ -120,10 +118,12 @@ removeBodyRanges :: CanBeRanged (Op lore) =>
                     Body (Ranges lore) -> Body lore
 removeBodyRanges = runIdentity . rephraseBody removeRanges
 
+-- | Remove range information from statement.
 removeStmRanges :: CanBeRanged (Op lore) =>
                        Stm (Ranges lore) -> Stm lore
 removeStmRanges = runIdentity . rephraseStm removeRanges
 
+-- | Remove range information from lambda.
 removeLambdaRanges :: CanBeRanged (Op lore) =>
                       Lambda (Ranges lore) -> Lambda lore
 removeLambdaRanges = runIdentity . rephraseLambda removeRanges
@@ -132,17 +132,20 @@ removePatternRanges :: PatternT (Range, a)
                     -> PatternT a
 removePatternRanges = runIdentity . rephrasePattern (return . snd)
 
+-- | Add ranges to the pattern corresponding to this expression.
 addRangesToPattern :: (ASTLore lore, CanBeRanged (Op lore)) =>
                       Pattern lore -> Exp (Ranges lore)
                    -> Pattern (Ranges lore)
 addRangesToPattern pat e =
   uncurry Pattern $ mkPatternRanges pat e
 
+-- | Construct a body with the 'Ranges' lore.
 mkRangedBody :: BodyDec lore -> Stms (Ranges lore) -> Result
              -> Body (Ranges lore)
 mkRangedBody innerlore bnds res =
   Body (mkBodyRanges bnds res, innerlore) bnds res
 
+-- | Find the ranges for the pattern elements.
 mkPatternRanges :: (ASTLore lore, CanBeRanged (Op lore)) =>
                    Pattern lore
                 -> Exp (Ranges lore)
@@ -156,6 +159,7 @@ mkPatternRanges pat e =
           in patElem `setPatElemLore` (range, innerlore)
         ranges = expRanges e
 
+-- | Find the ranges for the body result.
 mkBodyRanges :: Stms lore -> Result -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
   where boundInBnds =

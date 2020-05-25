@@ -546,7 +546,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
         hasPatName nms bnd = any (`nameIn` nms) $ patternNames $ stmPattern bnd
 
--- | Simplify a single 'Body'.  The @[Diet]@ only covers the value
+-- | Simplify a single body.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
 simplifyBody :: SimplifiableLore lore =>
                 [Diet] -> Body lore -> SimpleM lore (SimplifiedBody lore Result)
