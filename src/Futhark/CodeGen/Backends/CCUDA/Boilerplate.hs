@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+-- | Various boilerplate definitions for the CUDA backend.
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   (
     generateBoilerplate
@@ -18,6 +19,8 @@ import Data.FileEmbed (embedStringFile)
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
+-- | Called after most code has been generated to generate the bulk of
+-- the boilerplate.
 generateBoilerplate :: String -> String -> M.Map KernelName Safety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]

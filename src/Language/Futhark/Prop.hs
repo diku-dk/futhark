@@ -331,6 +331,8 @@ stripArray _ t = t
 tupleRecord :: [TypeBase dim as] -> TypeBase dim as
 tupleRecord = Scalar . Record . M.fromList . zip tupleFieldNames
 
+-- | Does this type corespond to a tuple?  If so, return the elements
+-- of that tuple.
 isTupleRecord :: TypeBase dim as -> Maybe [TypeBase dim as]
 isTupleRecord (Scalar (Record fs)) = areTupleFields fs
 isTupleRecord _ = Nothing
@@ -360,13 +362,18 @@ sortFields l = map snd $ sortOn fst $ zip (map (fieldish . fst) l') l'
         fieldish s = case reads $ nameToString s of
           [(x, "")] -> Left (x::Int)
           _         -> Right s
+
+-- | Sort the constructors of a sum type in some well-defined (but not
+-- otherwise significant) manner.
 sortConstrs :: M.Map Name a -> [(Name, a)]
 sortConstrs cs = sortOn fst $ M.toList cs
 
+-- | Is this a 'TypeParamType'?
 isTypeParam :: TypeParamBase vn -> Bool
-isTypeParam TypeParamType{}       = True
-isTypeParam TypeParamDim{}        = False
+isTypeParam TypeParamType{} = True
+isTypeParam TypeParamDim{}  = False
 
+-- | Is this a 'TypeParamDim'?
 isSizeParam :: TypeParamBase vn -> Bool
 isSizeParam = not . isTypeParam
 
@@ -1010,6 +1017,7 @@ leadingOperator s = maybe Backtick snd $ find ((`isPrefixOf` s') . fst) $
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
 
+-- | An expression with no type annotations.
 type UncheckedTypeExp = TypeExp Name
 
 -- | A type declaration with no expanded type.

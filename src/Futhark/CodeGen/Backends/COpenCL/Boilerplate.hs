@@ -56,6 +56,8 @@ profilingEvent name =
                              &ctx->$id:(kernelRuns name),
                              &ctx->$id:(kernelRuntime name))|]
 
+-- | Called after most code has been generated to generate the bulk of
+-- the boilerplate.
 generateBoilerplate :: String -> String -> [String] -> M.Map KernelName Safety -> [PrimType]
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
