@@ -41,7 +41,7 @@ module Futhark.Pass.ExplicitAllocations
        )
 where
 
-import Debug.Trace
+-- import Debug.Trace
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
@@ -67,6 +67,9 @@ data AllocStm = SizeComputation VName (PrimExp VName)
               | Allocation VName SubExp Space
               | ArrayCopy VName VName
                     deriving (Eq, Ord, Show)
+
+trace :: a -> b -> b
+trace _ x = x
 
 bindAllocStm :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
                 AllocStm -> m ()
@@ -299,8 +302,8 @@ allocsForPattern sizeidents validents rts hints = do
           (patels, ixfn) <- instantiateExtIxFun ident extixfun
           tell (patels, [])
           -- TODO: This is probably not right
-          space <- lift $ lookupMemSpace $ trace (unwords ["Looking up mem space:", show mem]) mem
-          tell ([], [PatElem mem $ MemMem $ trace (unwords ["got it:", show mem, "  ", show space]) space])
+          -- space <- lift $ lookupMemSpace $ trace (unwords ["Looking up mem space:", show mem]) mem
+          -- tell ([], [PatElem mem $ MemMem $ trace (unwords ["got it:", show mem, "  ", show space]) space])
 
           return $
             trace (unwords ["\nident:", show ident,
@@ -462,17 +465,32 @@ allocInMergeParams merge m = do
         return (memargs, valargs)
 
   localScope summary $ m mem_params valparams mk_loop_res
-  where allocInMergeParam (mergeparam, Var v)
-          | Array bt shape u <- paramDeclType mergeparam = do
-              (mem, ixfun) <- lift $ lookupArraySummary v
-              return (mergeparam { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun },
-                      lift . ensureArrayIn (paramType mergeparam) mem ixfun)
+  where
+    allocInMergeParam :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                         (Param DeclType, SubExp) ->
+                         WriterT
+                         [FParam tolore]
+                         (AllocM fromlore tolore)
+                         (FParam tolore, SubExp -> WriterT [SubExp] (AllocM fromlore tolore) SubExp)
+    allocInMergeParam (mergeparam, Var v)
+      | Array bt shape u <- paramDeclType mergeparam = do
+          (mem, ixfun) <- lift $ lookupArraySummary v
 
-        allocInMergeParam (mergeparam, _) = doDefault mergeparam =<< lift askDefaultSpace
+          meminfo <- lift $ lookupMemInfo mem
+          space' <- case meminfo of
+                      MemMem space -> return $ Just space
+                      _ -> return Nothing
+          let space = fromMaybe DefaultSpace space'
+          tell [Param mem $ MemMem space]
 
-        doDefault mergeparam space = do
-          mergeparam' <- allocInFParam mergeparam space
-          return (mergeparam', linearFuncallArg (paramType mergeparam) space)
+          return (mergeparam { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun },
+                  lift . ensureArrayIn (paramType mergeparam) mem ixfun)
+
+    allocInMergeParam (mergeparam, _) = doDefault mergeparam =<< lift askDefaultSpace
+
+    doDefault mergeparam space = do
+      mergeparam' <- allocInFParam mergeparam space
+      return (mergeparam', linearFuncallArg (paramType mergeparam) space)
 
 ensureArrayIn :: (Allocable fromlore tolore,
                   Allocator tolore (AllocM fromlore tolore)) =>
@@ -638,7 +656,10 @@ allocInStm (Let (Pattern sizeElems valElems) _ e) = do
   e' <- allocInExp e
   let sizeidents = map patElemIdent sizeElems
       validents = map patElemIdent valElems
-  bnd <- allocsForStm sizeidents validents e'
+  et' <- expReturns e'
+  bnd <- allocsForStm sizeidents validents $ trace (unwords ["\ne':", show e',
+                                                           "\n\net':", show et',
+                                                           "\n"]) e'
   addStm bnd
 
 allocInExp :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
@@ -684,10 +705,37 @@ allocInExp (DoLoop ctx vals form body) =
           val' <- ensureDirect space val
           let space' = fromMaybe DefaultSpace space
           mem_ctx_r <- bodyReturnMemCtx val'
-          mem_param <- newParam "existential_param_4" $ MemMem space'
-          return $ (ctx_acc,
-                    mem_ctx_acc ++ zip [mem_param] mem_ctx_r,
-                    val_acc ++ [(param, val')])
+          vname <- newVName "existential_param_5"
+          let mem_param = Param vname $ MemMem space'
+              param' =
+                case paramAttr param of
+                  MemArray pt shape u (ArrayIn _ ixfn) ->
+                    param { paramAttr = MemArray pt shape u (ArrayIn vname ixfn) }
+                  _ -> param
+
+          -- Jeg skal hente memory blokken ud fra param og returnere den som mem_param?
+
+          -- let blabbab = Var $ paramName mem_param
+          --     blabbab' = fmap Free $ primExpFromSubExp int32 blabbab
+          -- let ixfun' = IxFun.substituteInIxFun (M.fromList $ zip (fmap Ext [0..]) $ blabbab') ixfun
+          -- mem_param' <- case paramDeclType /param of
+          --       Array pt shape u -> do
+          --         return $ param { paramAttr = MemArray pt shape u $ ArrayIn vname ixfun'' }
+          --       _ -> error "impossible in substituteInVal"
+
+          return $ trace (unwords ["\nsubstituteInVal.val':", show val',
+                                   "\n\nparam:", show param,
+                                   "\n\nparam_decl_type:", show $ paramDeclType param,
+                                   "\n\nspace':", show space',
+                                   "\n\nmem_ctx_r:", show mem_ctx_r,
+                                   "\n\nvname:", show vname,
+                                   "\n\nmem_param:", show mem_param,
+                                   "\n\nparam':", show param',
+                                   "\n"])
+            (ctx_acc,
+             mem_ctx_acc ++ zip [mem_param] mem_ctx_r
+            ,
+             val_acc ++ [(param', val')])
         Just (ixfun, m) -> do -- Generalizes
           let space' = fromMaybe DefaultSpace space
           vname <- newVName "existential_param_1"
