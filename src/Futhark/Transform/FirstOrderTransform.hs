@@ -8,14 +8,13 @@
 -- transformations in-place.
 module Futhark.Transform.FirstOrderTransform
   ( transformFunDef
-  , transformStms
+  , transformConsts
 
   , FirstOrderLore
   , Transformer
   , transformStmRecursively
   , transformLambda
   , transformSOAC
-  , transformBody
   )
   where
 
@@ -39,6 +38,8 @@ type FirstOrderLore lore =
    LParamInfo SOACS ~ LParamInfo lore,
    CanBeAliased (Op lore))
 
+-- | First-order-transform a single function, with the given scope
+-- provided by top-level constants.
 transformFunDef :: (MonadFreshNames m, FirstOrderLore tolore) =>
                    Scope tolore -> FunDef SOACS -> m (AST.FunDef tolore)
 transformFunDef consts_scope (FunDef entry fname rettype params body) = do
@@ -46,9 +47,10 @@ transformFunDef consts_scope (FunDef entry fname rettype params body) = do
   return $ FunDef entry fname rettype params body'
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
-transformStms :: (MonadFreshNames m, FirstOrderLore tolore) =>
+-- | First-order-transform these top-level constants.
+transformConsts :: (MonadFreshNames m, FirstOrderLore tolore) =>
                  Stms SOACS -> m (AST.Stms tolore)
-transformStms stms =
+transformConsts stms =
   fmap snd $ modifyNameSource $ runState $ runBinderT m mempty
   where m = mapM_ transformStmRecursively stms
 

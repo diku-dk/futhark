@@ -173,7 +173,7 @@ arrayOfRow :: ArrayShape (ShapeBase d) =>
 arrayOfRow t size = arrayOf t (Shape [size]) NoUniqueness
 
 -- | Construct an array whose rows are the given type, and the outer
--- size is the given 'Shape'.  This is just a convenient wrapper
+-- size is the given t'Shape'.  This is just a convenient wrapper
 -- around 'arrayOf'.
 arrayOfShape :: Type -> Shape -> Type
 arrayOfShape t shape = arrayOf t shape NoUniqueness
@@ -314,6 +314,7 @@ subtypesOf :: (Ord u, ArrayShape shape) =>
 subtypesOf xs ys = length xs == length ys &&
                    and (zipWith subtypeOf xs ys)
 
+-- | Add the given uniqueness information to the types.
 toDecl :: TypeBase shape NoUniqueness
        -> Uniqueness
        -> TypeBase shape Uniqueness
@@ -321,12 +322,14 @@ toDecl (Prim bt) _ = Prim bt
 toDecl (Array et shape _) u = Array et shape u
 toDecl (Mem space) _ = Mem space
 
+-- | Remove uniqueness information from the type.
 fromDecl :: TypeBase shape Uniqueness
          -> TypeBase shape NoUniqueness
 fromDecl (Prim bt) = Prim bt
 fromDecl (Array et shape _) = Array et shape NoUniqueness
 fromDecl (Mem space) = Mem space
 
+-- | If an existential, then return its existential index.
 isExt :: Ext a -> Maybe Int
 isExt (Ext i) = Just i
 isExt _ = Nothing
@@ -355,7 +358,7 @@ shapeContext = S.fromList
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
--- | If all dimensions of the given 'RetType' are statically known,
+-- | If all dimensions of the given 'ExtType' are statically known,
 -- return the corresponding list of 'Type'.
 hasStaticShape :: ExtType -> Maybe Type
 hasStaticShape (Prim bt) = Just $ Prim bt
@@ -437,21 +440,27 @@ dimMapping :: Monoid res =>
 dimMapping getDims1 getDims2 f comb ts1 ts2 =
   foldl' comb mempty $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
 
+-- | @IntType Int8@
 int8 :: PrimType
 int8 = IntType Int8
 
+-- | @IntType Int16@
 int16 :: PrimType
 int16 = IntType Int16
 
+-- | @IntType Int32@
 int32 :: PrimType
 int32 = IntType Int32
 
+-- | @IntType Int64@
 int64 :: PrimType
 int64 = IntType Int64
 
+-- | @FloatType Float32@
 float32 :: PrimType
 float32 = FloatType Float32
 
+-- | @FloatType Float64@
 float64 :: PrimType
 float64 = FloatType Float64
 

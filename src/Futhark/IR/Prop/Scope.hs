@@ -134,7 +134,7 @@ instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
 
 -- | The class of things that can provide a scope.  There is no
 -- overarching rule for what this means.  For a 'Stm', it is the
--- corresponding pattern.  For a 'Lambda', is is the parameters.
+-- corresponding pattern.  For a t'Lambda', is is the parameters.
 class Scoped lore a | a -> lore where
   scopeOf :: a -> Scope lore
 

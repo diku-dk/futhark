@@ -133,8 +133,8 @@ focusNth i xs
 unixEnvironment :: [(String,String)]
 unixEnvironment = unsafePerformIO getEnvironment
 
--- Is an environment variable set to 0 or 1?  If 0, return False; if 1, True;
--- otherwise the default value.
+-- | Is an environment variable set to 0 or 1?  If 0, return False; if
+-- 1, True; otherwise the default value.
 isEnvVarSet :: String -> Bool -> Bool
 isEnvVarSet name default_val = fromMaybe default_val $ do
   val <- lookup name unixEnvironment
@@ -262,10 +262,15 @@ pmapIO concurrency f elems = go elems []
 --
 -- (c) The University of Glasgow, 1997-2006
 
+-- | As the user typed it.
+type UserString = String
 
-type UserString = String        -- As the user typed it
-type EncodedString = String     -- Encoded form
+-- | Encoded form.
+type EncodedString = String
 
+-- | Z-encode a string using a slightly simplified variant of GHC
+-- Z-encoding.  The encoded string is a valid identifier in most
+-- programming languages.
 zEncodeString :: UserString -> EncodedString
 zEncodeString "" = ""
 zEncodeString (c:cs) = encodeDigitChar c ++ concatMap encodeChar cs

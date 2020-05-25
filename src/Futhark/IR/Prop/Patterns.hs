@@ -46,11 +46,11 @@ paramIdent param = Ident (paramName param) (typeOf param)
 patElemIdent :: Typed dec => PatElemT dec -> Ident
 patElemIdent pelem = Ident (patElemName pelem) (typeOf pelem)
 
--- | The type of a name bound by a 'PatElem'.
+-- | The type of a name bound by a t'PatElem'.
 patElemType :: Typed dec => PatElemT dec -> Type
 patElemType = typeOf
 
--- | Set the lore of a 'PatElem'.
+-- | Set the lore of a t'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
 setPatElemLore pe x = fmap (const x) pe
 

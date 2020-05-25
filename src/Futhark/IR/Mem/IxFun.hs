@@ -61,7 +61,7 @@ import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 -- irregular reshaping operation.
 --
 -- However, we expect that the common case is when the index function is one
--- LMAD -- we call this the 'nice' representation.
+-- LMAD -- we call this the "nice" representation.
 --
 -- Finally, the list of LMADs is kept in an @IxFun@ together with the shape of
 -- the original array, and a bit to indicate whether the index function is
@@ -242,8 +242,8 @@ lmadShape lmad = permuteInv (lmadPermutation lmad) $ lmadShapeBase lmad
 lmadShapeBase :: (Eq num, IntegralExp num) => LMAD num -> Shape num
 lmadShapeBase = map ldShape . lmadDims
 
--- | Compute the flat memory index for a complete set `inds` of array indices
--- and a certain element size `elem_size`.
+-- | Compute the flat memory index for a complete set @inds@ of array indices
+-- and a certain element size @elem_size@.
 index :: (IntegralExp num, Eq num) =>
           IxFun num -> Indices num -> num
 index = indexFromLMADs . ixfunLMADs
@@ -786,8 +786,6 @@ ixfunMonotonicityRots ignore_rots (IxFun (lmad :| lmads) _ _) =
 --   3. Most importantly, both index functions correspond to the same permutation
 --      (since the permutation is represented by INTs, this restriction cannot
 --       be relaxed, unless we move to a gated-LMAD representation!)
---
--- `k0` is the existential to use for the shape of the array.
 leastGeneralGeneralization :: Eq v => IxFun (PrimExp v) -> IxFun (PrimExp v) ->
                               Maybe (IxFun (PrimExp (Ext v)), [(PrimExp v, PrimExp v)])
 leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| []) oshp2 ctg2) = do

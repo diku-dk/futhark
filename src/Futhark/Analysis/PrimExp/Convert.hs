@@ -74,7 +74,7 @@ primExpFromExp f (BasicOp (ConvOp op x)) =
 primExpFromExp _ (BasicOp (SubExp (Constant v))) =
   return $ ValueExp v
 primExpFromExp f (Apply fname args ts _)
-  | isBuiltInFunction fname, [Prim t] <- retTypeValues ts =
+  | isBuiltInFunction fname, [Prim t] <- map declExtTypeOf ts =
       FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
