@@ -141,8 +141,8 @@ segmentedHist pat space histops kbody = do
     let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                     namesFromList (segFlat space : [n_segments])
     ts <- mapM lookupType freeVariables
-    let freeParams = zipWith toParam freeVariables ts
-        sched = decideScheduling fbody
+    freeParams <- zipWithM toParam freeVariables ts
+    let sched = decideScheduling fbody
     emit $ Imp.Op $ Imp.MCFunc freeParams ntasks n_segments sched mempty fbody (segFlat space)
 
   seq_code <- collect $
@@ -151,8 +151,8 @@ segmentedHist pat space histops kbody = do
   let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                     namesFromList (segFlat space : [n_segments])
   ts <- mapM lookupType freeVariables
-  let freeParams = zipWith toParam freeVariables ts
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product $ init ns') par_code seq_code (segFlat space)
+  freeParams <- zipWithM toParam freeVariables ts
+  emit $ Imp.Op $ Imp.ParLoop freeParams (product $ init ns') par_code seq_code (segFlat space) []
 
 
 renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
@@ -195,9 +195,9 @@ nonsegmentedHist pat space histops kbody = do
 
   let freeVariables = namesToList $ freeIn (par_code <> seq_code) `namesSubtract` namesFromList [flat_idx, segFlat space]
   ts <- mapM lookupType freeVariables
-  let freeParams = zipWith toParam freeVariables ts
+  freeParams <- zipWithM toParam freeVariables ts
 
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space)
+  emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space) []
 
   emit $ Imp.DebugPrint "Histogram end" Nothing
 -- Generates num_threads sub histograms of the size
@@ -293,8 +293,8 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
   let freeVariables = namesToList $ freeIn (prebody <> body) `namesSubtract`
                                     namesFromList (segFlat space : [flat_idx])
   ts <- mapM lookupType freeVariables
-  let freeParams = zipWith toParam freeVariables ts
-      sched = decideScheduling body
+  freeParams <- zipWithM toParam freeVariables ts
+  let sched = decideScheduling body
 
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32

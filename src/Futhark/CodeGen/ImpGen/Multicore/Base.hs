@@ -27,10 +27,16 @@ import Futhark.Transform.Rename
 type MulticoreGen = ImpM MCMem () Imp.Multicore
 
 
-toParam :: VName -> TypeBase shape u -> Imp.Param
-toParam name (Prim pt)   = Imp.ScalarParam name pt
-toParam name (Mem space) = Imp.MemParam name space
-toParam _     Array{}    = error "Cannot make Array into Imp.Param"
+toParam :: VName -> TypeBase shape u -> MulticoreGen Imp.Param
+toParam name (Prim pt)      = return $ Imp.ScalarParam name pt
+toParam name (Mem space)    = return $ Imp.MemParam name space
+toParam name Array{} = do
+  name_entry <- lookupVar name
+  case name_entry of
+    ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
+      return $ Imp.MemParam mem DefaultSpace
+    _ -> error $ "[toParam] Could not handle array for " ++ show name
+
 
 
 renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
@@ -65,6 +71,13 @@ compileThreadResult _ _ WriteReturns{} =
 
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
+
+
+
+
+sStackArray :: String -> PrimType -> ShapeBase SubExp -> Space -> MulticoreGen ()
+sStackArray name pt shape space =
+  return ()
 
 -- | Arrays for storing group results.
 --
@@ -148,11 +161,6 @@ extractAllocations segop_code = f segop_code
               (fa, fcode') = f fcode
           in (ta <> fa, Imp.If cond tcode' fcode')
         f (Imp.Op (Imp.MCFunc free n i sched prebody body tid)) =
-          -- We can't not extract allocations all the way out
-          -- a task, since it might contain (multiple) nested SegOp.
-          -- then threads might share the same mem struct
-          -- See segredomap/ez6.fut for example
-          -- ( I think my reasoning is OK? )
           let (body_allocs, body') = extractAllocations body
               (free_allocs, here_allocs) = f body_allocs
               free' = filter (not .
@@ -160,9 +168,11 @@ extractAllocations segop_code = f segop_code
                               Imp.paramName) free
           in (free_allocs, here_allocs <>
               Imp.Op (Imp.MCFunc free' n i sched prebody body' tid))
+
         f (Imp.Op (Imp.SeqCode i prebody body )) =
           let (body_allocs, body') = extractAllocations body
-          in (body_allocs,
+              (free_allocs, here_allocs) = f body_allocs
+          in (free_allocs, here_allocs <>
               Imp.Op (Imp.SeqCode i prebody body'))
         f code =
           (mempty, code)

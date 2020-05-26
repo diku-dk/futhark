@@ -50,8 +50,6 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
       zipWithM_ (writeResult is) (patternElements pat) kres
 
 
-
-
 compileSegMap :: Pattern MCMem
               -> SegSpace
               -> KernelBody MCMem
@@ -67,7 +65,7 @@ compileSegMap pat space kbody = do
     body <- compileSegMapBody flat_idx pat space kbody
     let freeVariables = namesToList (freeIn body `namesSubtract` namesFromList [segFlat space, flat_idx])
     ts <- mapM lookupType freeVariables
-    let freeParams = zipWith toParam freeVariables ts
+    freeParams <- zipWithM toParam freeVariables ts
     let (body_allocs, body') = extractAllocations body
 
     emit $ Imp.DebugPrint "SegMap parallel" Nothing
@@ -83,7 +81,7 @@ compileSegMap pat space kbody = do
 
   let freeVariables_task = namesToList $ freeIn (par_task_code <> seq_task_code) `namesSubtract` namesFromList [flat_idx]
   ts_task <- mapM lookupType freeVariables_task
-  let freeParams_task = zipWith toParam freeVariables_task ts_task
+  freeParams_task <- zipWithM toParam freeVariables_task ts_task
 
 
-  emit $ Imp.Op $ Imp.ParLoop freeParams_task (product ns') par_task_code seq_task_code (segFlat space)
+  emit $ Imp.Op $ Imp.ParLoop freeParams_task (product ns') par_task_code seq_task_code (segFlat space) []

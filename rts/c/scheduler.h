@@ -292,7 +292,7 @@ static inline int delegate_work(struct scheduler *scheduler,
 
   struct subtask *subtask = setup_subtask(task->par_fn, task->args,
                                           &mutex, &cond, &shared_counter,
-                                          0, task->iterations, task->granularity);
+                                          0, task->iterations, task->granularity );
   CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
 
   while(1) {
@@ -303,7 +303,6 @@ static inline int delegate_work(struct scheduler *scheduler,
 
     subtask = NULL;
     if (subtask_queue_dequeue(calling_worker, &subtask) == 0) {
-      if (subtask == NULL) continue;
       // Do work
       assert(subtask->par_fn != NULL);
       assert(subtask->args != NULL);

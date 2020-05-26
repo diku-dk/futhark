@@ -127,7 +127,7 @@ nonsegmentedScan pat space scan_ops kbody = do
                         namesFromList (segFlat space : [flat_idx])
 
     ts <- mapM lookupType freeVariables
-    let freeParams = zipWith toParam freeVariables ts
+    freeParams <- zipWithM toParam freeVariables ts
 
     ntasks <- dPrim "ntasks" $ IntType Int32
     ntasks' <- toExp $ Var ntasks
@@ -227,7 +227,7 @@ nonsegmentedScan pat space scan_ops kbody = do
     let freeVariables' = namesToList $ freeIn (stage_3_prebody <> stage_3_body) `namesSubtract`
                          namesFromList (segFlat space : [flat_idx])
     ts' <- mapM lookupType freeVariables'
-    let freeParams' = zipWith toParam freeVariables' ts'
+    freeParams' <- zipWithM toParam freeVariables' ts'
 
     emit $ Imp.Op $ Imp.MCFunc freeParams' ntasks flat_idx Imp.Static stage_3_prebody stage_3_body (segFlat space)
 
@@ -237,9 +237,9 @@ nonsegmentedScan pat space scan_ops kbody = do
 
   let freeVariables = namesToList $ freeIn par_code `namesSubtract` namesFromList [flat_idx, segFlat space]
   ts <- mapM lookupType freeVariables
-  let freeParams = zipWith toParam freeVariables ts
+  freeParams <- zipWithM toParam freeVariables ts
 
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space)
+  emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space) []
   emit $ Imp.DebugPrint "nonsegmentedScan End" Nothing
 
 segmentedScan :: Pattern MCMem
@@ -293,7 +293,7 @@ segmentedScan pat space scan_ops kbody = do
     let freeVariables = namesToList $ freeIn fbody `namesSubtract`
                                     namesFromList (segFlat space : [n_segments])
     ts <- mapM lookupType freeVariables
-    let freeParams = zipWith toParam freeVariables ts
+    freeParams <- zipWithM toParam freeVariables ts
     let sched = decideScheduling fbody
     emit $ Imp.Op $ Imp.MCFunc freeParams ntasks n_segments sched mempty fbody (segFlat space)
 
@@ -303,9 +303,9 @@ segmentedScan pat space scan_ops kbody = do
 
   let freeVariables = namesToList $ freeIn (seq_code <> par_code) `namesSubtract` namesFromList [n_segments]
   ts <- mapM lookupType freeVariables
-  let freeParams = zipWith toParam freeVariables ts
+  freeParams <- zipWithM toParam freeVariables ts
 
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product $ init ns') par_code seq_code (segFlat space)
+  emit $ Imp.Op $ Imp.ParLoop freeParams (product $ init ns') par_code seq_code (segFlat space) []
 
 sequentialScan :: VName
                -> Pattern MCMem
