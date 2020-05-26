@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 -- | Non-Futhark-specific utilities.  If you find yourself writing
 -- general functions on generic data structures, consider putting them
 -- here.

@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 -- |
 --
@@ -17,7 +18,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
-import Data.Loc
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
@@ -155,7 +155,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) (E.ValBind _ ofname _ (Inf
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
   params_fresh <- mapM allDimsFreshInPat params
-  let tparams = map (`E.TypeParamDim` noLoc) $ S.toList $
+  let tparams = map (`E.TypeParamDim` mempty) $ S.toList $
                 mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType $ anySizes rettype
@@ -577,7 +577,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
   return loop_res
 
   where
-    sparams' = map (`TypeParamDim` noLoc) sparams
+    sparams' = map (`TypeParamDim` mempty) sparams
 
     forLoop nested_mergepat shapepat mergeinit form' = do
       let mergepat' = concat nested_mergepat
@@ -1438,10 +1438,10 @@ isOverloadedFunction qname args loc = do
     -- Short-circuiting operators are magical.
     handleOps [x,y] "&&" = Just $ \desc ->
       internaliseExp desc $
-      E.If x y (E.Literal (E.BoolValue False) noLoc) (Info $ E.Scalar $ E.Prim E.Bool, Info []) noLoc
+      E.If x y (E.Literal (E.BoolValue False) mempty) (Info $ E.Scalar $ E.Prim E.Bool, Info []) mempty
     handleOps [x,y] "||" = Just $ \desc ->
         internaliseExp desc $
-        E.If x (E.Literal (E.BoolValue True) noLoc) y (Info $ E.Scalar $ E.Prim E.Bool, Info []) noLoc
+        E.If x (E.Literal (E.BoolValue True) mempty) y (Info $ E.Scalar $ E.Prim E.Bool, Info []) mempty
 
     -- Handle equality and inequality specially, to treat the case of
     -- arrays.

@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE Safe                       #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE Strict                     #-}
 -- | This is an ever-changing syntax representation for Futhark.  Some
@@ -96,7 +97,6 @@ import           Data.Bifoldable
 import           Data.Bifunctor
 import           Data.Bitraversable
 import           Data.Foldable
-import           Data.Loc
 import qualified Data.Map.Strict                  as M
 import           Data.Monoid                      hiding (Sum)
 import           Data.Ord
@@ -109,6 +109,7 @@ import           Futhark.IR.Primitive (FloatType (..),
                                                    FloatValue (..),
                                                    IntType (..), IntValue (..))
 import           Futhark.Util.Pretty
+import           Futhark.Util.Loc
 import           Language.Futhark.Core
 
 -- | Convenience class for deriving 'Show' instances for the AST.

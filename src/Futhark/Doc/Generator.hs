@@ -8,7 +8,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer hiding (Sum)
 import Data.List (sort, sortOn, intersperse, inits, tails, isPrefixOf, find, groupBy, partition)
 import Data.Char (isSpace, isAlpha, toUpper)
-import Data.Loc
 import Data.Maybe
 import Data.Ord
 import qualified Data.Map as M
@@ -660,7 +659,7 @@ identifierLinks loc (c:s') = (c:) <$> identifierLinks loc s'
 lookupName :: (Namespace, String, Maybe FilePath) -> DocM (Maybe VName)
 lookupName (namespace, name, file) = do
   current <- asks ctxCurrent
-  let file' = includeToString . flip (mkImportFrom (mkInitialImport current)) noLoc <$> file
+  let file' = includeToString . flip (mkImportFrom (mkInitialImport current)) mempty <$> file
   env <- lookupEnvForFile file'
   case M.lookup (namespace, nameFromString name) . envNameMap =<< env of
     Nothing -> return Nothing

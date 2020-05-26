@@ -32,7 +32,6 @@ import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.List.NonEmpty as NE
 import Data.Monoid hiding (Sum)
-import Data.Loc
 
 import Language.Futhark hiding (Value, matchDims)
 import qualified Language.Futhark as F
@@ -42,6 +41,7 @@ import qualified Language.Futhark.Semantic as T
 
 import Futhark.Util.Pretty hiding (apply, bool)
 import Futhark.Util (chunk, splitFromEnd, maybeHead)
+import Futhark.Util.Loc
 
 import Prelude hiding (mod, break)
 

@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE Safe #-}
 -- | Imperative intermediate language used as a stepping stone in code generation.
 --
 -- This is a generic representation parametrised on an extensible
@@ -57,7 +58,6 @@ module Futhark.CodeGen.ImpCode
   where
 
 import Data.List (intersperse)
-import Data.Loc
 import Data.Traversable
 import qualified Data.Map as M
 

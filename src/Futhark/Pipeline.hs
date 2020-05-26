@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.Pipeline
        ( Pipeline
        , PipelineConfig (..)

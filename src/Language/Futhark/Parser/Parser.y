@@ -1,6 +1,7 @@
 {
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
@@ -28,7 +29,6 @@ import qualified Data.Text as T
 import Codec.Binary.UTF8.String (encode)
 import Data.Char (ord)
 import Data.Maybe (fromMaybe, fromJust)
-import Data.Loc hiding (L) -- Lexer has replacements.
 import Data.List (genericLength)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
@@ -38,6 +38,7 @@ import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Prop
 import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
+import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
 
 }
 

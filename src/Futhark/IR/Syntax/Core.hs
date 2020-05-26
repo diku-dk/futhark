@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.IR.Syntax" in order for

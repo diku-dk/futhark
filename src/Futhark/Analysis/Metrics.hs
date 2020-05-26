@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Abstract Syntax Tree metrics.  This is used in the @futhark test@
 -- program, for the @structure@ stanzas.
 module Futhark.Analysis.Metrics

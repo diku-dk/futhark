@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances, DeriveFunctor #-}
 {-# Language TupleSections #-}
 {-# Language OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Facilities for type-checking Futhark terms.  Checking a term
 -- requires a little more context to track uniqueness and such.
 --
@@ -26,7 +27,6 @@ import Data.Char (isAscii)
 import Data.Either
 import Data.List (isPrefixOf, foldl', find, (\\), nub, transpose, sort, group)
 import qualified Data.List.NonEmpty as NE
-import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -592,7 +592,7 @@ checkTypeDecl tdecl = do
   mapM_ observeDim $ nestedDims $ unInfo $ expandedType tdecl'
   return tdecl'
   where observeDim (NamedDim v) =
-          observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int32) noLoc
+          observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int32) mempty
         observeDim _ = return ()
 
 -- | Instantiate a type scheme with fresh type variables for its type
@@ -1381,7 +1381,7 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body NoInfo lo
 
       -- We fake an ident here, but it's OK as it can't be a size
       -- anyway.
-      let fake_ident = Ident name' (Info $ fromStruct ftype) noLoc
+      let fake_ident = Ident name' (Info $ fromStruct ftype) mempty
       (body_t, _) <-
         unscopeType loc (M.singleton name' fake_ident) =<<
         expTypeFully body'
@@ -2046,7 +2046,7 @@ unmatched hole orig_ps
                         case col of
                           []           -> []
                           ((i, _):_) -> unmatched (wilder i pc) (map snd col)
-                      wilder i pc s = (`PatternParens` noLoc) <$> wildPattern pc i s
+                      wilder i pc s = (`PatternParens` mempty) <$> wildPattern pc i s
                   in concatMap findUnmatched transposed
                 _ -> unmatched'
             Scalar (Prim t) | not (any idOrWild ps') ->
@@ -2107,16 +2107,16 @@ unmatched hole orig_ps
         buildConstr m c =
           let t      = Scalar $ Sum m
               cs     = m M.! c
-              wildCS = map (\ct -> Wildcard (Info ct) noLoc) cs
+              wildCS = map (\ct -> Wildcard (Info ct) mempty) cs
           in if null wildCS
-               then PatternConstr c (Info t) [] noLoc
-               else PatternParens (PatternConstr c (Info t) wildCS noLoc) noLoc
+               then PatternConstr c (Info t) [] mempty
+               else PatternParens (PatternConstr c (Info t) wildCS mempty) mempty
         buildBool t b =
-          PatternLit (Literal (BoolValue b) noLoc) (Info (addSizes t)) noLoc
+          PatternLit (Literal (BoolValue b) mempty) (Info (addSizes t)) mempty
         buildId t n =
           -- The VName tag here will never be used since the value
           -- exists exclusively for printing warnings.
-          Id (VName (nameFromString n) (-1)) t noLoc
+          Id (VName (nameFromString n) (-1)) t mempty
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do

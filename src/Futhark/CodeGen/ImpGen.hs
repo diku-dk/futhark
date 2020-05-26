@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
