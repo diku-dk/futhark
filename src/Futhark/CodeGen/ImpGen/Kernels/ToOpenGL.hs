@@ -113,10 +113,9 @@ onShader shader = do
                                                  $ kernelBody shader
       s_state = GenericC.compUserState cstate
 
-      (use_params, uses) = unzip $ mapMaybe useAsParam $ kernelUses shader
+      (use_params_, uses_) = unzip $ mapMaybe useAsParam $ kernelUses shader
 
-      -- FIXME: None of this might be necessary
-      (local_memory_args, _, _) =
+      (local_memory_args, _, local_memory_init) =
         unzip3 $
         flip evalState (blankNameSource :: VNameSource) $
         mapM prepareLocalMemory $ shaderLocalMemory s_state
@@ -135,6 +134,10 @@ onShader shader = do
 
       --FIXME:
       params = perm_params -- ++ catMaybes local_memory_params ++ use_params
+
+      (cat_use_params, cat_uses) = unzip $ zip local_memory_init [AMemoryUse]
+
+      (use_params, uses) = (cat_use_params ++ use_params_, cat_uses ++ uses_)
 
       layoutQuals = concat $
                     map (\(i, k, u) -> case u of
