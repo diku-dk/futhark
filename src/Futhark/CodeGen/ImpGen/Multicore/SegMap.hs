@@ -9,8 +9,7 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
 import Futhark.CodeGen.ImpGen.Multicore.Base
-
-
+import Futhark.Transform.Rename
 
 writeResult :: [VName]
             -> PatElemT dec
@@ -43,10 +42,11 @@ compileSegMapBody :: VName
 compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
+  kstms' <- mapM renameStm kstms
   collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
-    compileStms (freeIn kres) kstms $
+    compileStms (freeIn kres) kstms' $
       zipWithM_ (writeResult is) (patternElements pat) kres
 
 
@@ -62,14 +62,14 @@ compileSegMap pat space kbody = do
 
   dPrimV_ (segFlat space) 0
   flat_idx <- dPrim "iter" int32
-  body <- compileSegMapBody flat_idx pat space kbody
-  let freeVariables = namesToList (freeIn body `namesSubtract` namesFromList [segFlat space, flat_idx])
-  ts <- mapM lookupType freeVariables
-  let freeParams = zipWith toParam freeVariables ts
-  let (body_allocs, body') = extractAllocations body
-
 
   par_task_code <- collect $ do
+    body <- compileSegMapBody flat_idx pat space kbody
+    let freeVariables = namesToList (freeIn body `namesSubtract` namesFromList [segFlat space, flat_idx])
+    ts <- mapM lookupType freeVariables
+    let freeParams = zipWith toParam freeVariables ts
+    let (body_allocs, body') = extractAllocations body
+
     emit $ Imp.DebugPrint "SegMap parallel" Nothing
     ntasks <- dPrim "num_tasks" $ IntType Int32
     let sched = decideScheduling body
@@ -77,6 +77,8 @@ compileSegMap pat space kbody = do
 
   seq_task_code <- collect $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
+    body <- compileSegMapBody flat_idx pat space kbody
+    let (body_allocs, body') = extractAllocations body
     emit $ Imp.Op $ Imp.SeqCode flat_idx body_allocs body'
 
   let freeVariables_task = namesToList $ freeIn (par_task_code <> seq_task_code) `namesSubtract` namesFromList [flat_idx]
