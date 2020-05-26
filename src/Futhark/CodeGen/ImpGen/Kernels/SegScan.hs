@@ -22,6 +22,10 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 -- import Futhark.Tools hiding (toExp)--(letSubExp)
 -- import Futhark.Construct  hiding (toExp)
 
+after_warpscan_area::Imp.Exp
+after_warpscan_area = 32
+
+
 compileSegScan :: Pattern ExplicitMemory
                -> SegLevel -- At which level the *body* of a SegOp executes.
                -> SegSpace -- Index space of a SegOp.
@@ -110,14 +114,14 @@ compileSegScan  (Pattern _ pes)
 
       -- TODO: reuse exchange.
 -- sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
-      block_id <- sAllocArray "block_id" int32 (Shape [intConst Int32 1]) (Space "local")
+      -- block_id <- sAllocArray "block_id" int32 (Shape [intConst Int32 1]) (Space "local")
 
       -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn (head exchange) $ IxFun.iota [1]
       -- m <- lookupArray $ head exchange
-      -- TODO: reuse exchange - comment in
+      -- TODO: reuse exchange - Fails at 4096 elements list at element 512
 -- sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
-      -- MemLocation m _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
-      -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn m $ IxFun.iota [1]
+      MemLocation m _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
+      block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn m $ IxFun.iota [1]
 
       -- Get dynamic block id
       sWhen (ltid .==. 0) $ do
@@ -336,10 +340,23 @@ compileSegScan  (Pattern _ pes)
         -- sWhen (Imp.var wG_ID int32 ./=. 0 .&&. ltid .<. kernelWaveSize) $ do
         sUnless (Imp.var wG_ID int32 .==. 0 .||. ltid .>=. waveSize) $ do
 
+        -- ITEM: reuse exchange memory for warpscan
           -- This local allocation does not reuse the memory.
           --   can be investigated at the optimization phase.
           --   Note: the Shape should have the size of the wave size not just the hard coded 32.
           warpscan <- sAllocArray "warpscan" int8 (Shape [intConst Int32 32]) (Space "local")
+
+          -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn (head exchange) $ IxFun.iota [1]
+          -- m <- lookupArray $ head exchange
+          -- TODO: warpscan reuse exchange -
+          -- sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
+          -- MemLocation m _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
+          -- warpscan <- sArray "warpscan" int8 (Shape [intConst Int32 32]) $ ArrayIn m $ IxFun.iota [32]
+
+
+
+
+
           sWhen (ltid .==. 0) $ do
             forM_ (zip aggregates acc) $ \(ag, ac) ->
               copyDWIMFix ag [Imp.var wG_ID int32] (Var ac) []
@@ -516,16 +533,21 @@ compileSegScan  (Pattern _ pes)
 
             sOp Imp.MemFenceGlobal
 
+            -- ITEM: reuse exchange memory for warpscan
+            -- We move the the index of the exchange to be outside the warpscan
+            -- work area with the after_warpscan_area constant
             copyDWIMFix statusflgs [Imp.var wG_ID int32] (intConst Int8 2) [] -- STATUS_P
             forM_ (zip exchange prefix) $ \(exc, pre) ->
-              copyDWIMFix exc [0] (Var pre) []
+              copyDWIMFix exc [after_warpscan_area] (Var pre) []
             forM_ (zip acc nes) $ \(a, ne) ->
               copyDWIMFix a [] ne []
 
         sUnless (Imp.var wG_ID int32 .==. 0) $ do
           sOp Imp.LocalBarrier
           forM_ (zip prefix exchange) $ \(pre,exc) ->
-            copyDWIMFix pre [] (Var exc) [0]
+            -- ITEM: reuse exchange memory for warpscan
+            -- work area with the after_warpscan_area constant
+            copyDWIMFix pre [] (Var exc) [after_warpscan_area]
           sOp Imp.LocalBarrier
 
       sComment "Read and add prefix to every element in this workgroup" $ do
