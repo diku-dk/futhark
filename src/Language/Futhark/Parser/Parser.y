@@ -531,8 +531,6 @@ QualName :: { (QualName Name, SrcLoc) }
 Exp :: { UncheckedExp }
      : Exp ':' TypeExpDecl { Ascript $1 $3 (srcspan $1 $>) }
      | Exp ':>' TypeExpDecl { Coerce $1 $3 (NoInfo,NoInfo) (srcspan $1 $>) }
-     | '#[' AttrInfo ']' Exp %prec bottom
-                           { Attr $2 $4 (srcspan $1 $>) }
      | Exp2 %prec ':'      { $1 }
 
 Exp2 :: { UncheckedExp }
