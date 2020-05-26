@@ -232,6 +232,7 @@ callShader opengl_code opengl_prelude shaders sizes
                                                        ++ opengl_code !! shader_idx)
   GC.stm $ (loadShader fragments) ((M.toList shaders) !! shader_idx)
   GC.stm [C.cstm|glUseProgram(ctx->opengl.program);|]
+  GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
   zipWithM_ setShaderArg [(0::Int)..] args
   num_workgroups' <- mapM (GC.compileExp GC.TargetHost) num_workgroups
   workgroup_size' <- mapM (GC.compileExp GC.TargetHost) workgroup_size
