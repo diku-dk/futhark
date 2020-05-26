@@ -16,9 +16,11 @@ import Futhark.Pass
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 
+-- | The pass for GPU kernels.
 unstreamKernels :: Pass Kernels Kernels
 unstreamKernels = unstream onHostOp
 
+-- | The pass for multicore.
 unstreamMC :: Pass MC MC
 unstreamMC = unstream onSegOp
 

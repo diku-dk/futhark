@@ -490,7 +490,7 @@ checkFun :: Checkable lore =>
 checkFun (FunDef _ fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
-               retTypeValues rettype,
+               map declExtTypeOf rettype,
                funParamsToNameInfos params) consumable $ do
       checkFunParams params
       checkRetType rettype
@@ -787,6 +787,14 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
   let merge = ctxmerge ++ valmerge
       (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
+
+  let val_free = freeIn $ map fst valmerge
+      usedInVal p = paramName p `nameIn` val_free
+  case find (not . usedInVal . fst) ctxmerge of
+    Just p ->
+      bad $ TypeError $ "Loop context parameter " ++ pretty p ++ " unused."
+    Nothing ->
+      return ()
 
   binding (scopeOf form) $ do
     case form of
@@ -1114,7 +1122,7 @@ class (ASTLore lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore
   checkLetBoundLore _ = checkType
 
   default checkRetType :: RetType lore ~ DeclExtType => [RetType lore] -> TypeM lore ()
-  checkRetType = mapM_ checkExtType . retTypeValues
+  checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
   default matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
   matchPattern pat = matchExtPattern pat <=< expExtType

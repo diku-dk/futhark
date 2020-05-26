@@ -37,7 +37,7 @@ jobs:
     displayName: Install MSYS2
 
   - bash: |
-      choco install -y ghc --version=$(GHC_VERSION)
+      choco install -y ghc --version=$(GHC_VERSION) --allow-downgrade
     displayName: Install GHC
 
   - task: Cache@2

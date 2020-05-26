@@ -23,7 +23,7 @@ module Futhark.Pass.FirstOrderTransform
   ( firstOrderTransform )
   where
 
-import Futhark.Transform.FirstOrderTransform (FirstOrderLore, transformFunDef, transformStms)
+import Futhark.Transform.FirstOrderTransform (FirstOrderLore, transformFunDef, transformConsts)
 import Futhark.IR.SOACS (SOACS, scopeOf)
 import Futhark.Pass
 
@@ -34,4 +34,4 @@ firstOrderTransform =
   "first order transform"
   "Transform all SOACs to for-loops." $
   intraproceduralTransformationWithConsts
-  transformStms (transformFunDef . scopeOf)
+  transformConsts (transformFunDef . scopeOf)

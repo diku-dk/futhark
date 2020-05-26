@@ -1,10 +1,9 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
--- | Converting back and forth between 'PrimExp's.
+-- | Converting back and forth between 'PrimExp's.  Use the 'ToExp'
+-- instance to convert to Futhark expressions.
 module Futhark.Analysis.PrimExp.Convert
   (
-    primExpToExp
-  , primExpFromExp
-  , primExpToSubExp
+    primExpFromExp
   , primExpFromSubExp
   , primExpFromSubExpM
   , replaceInPrimExp
@@ -25,42 +24,28 @@ import           Futhark.Analysis.PrimExp
 import           Futhark.Construct
 import           Futhark.IR
 
--- | Convert a 'PrimExp' to a Futhark expression.  The provided
--- function converts the leaves.
-primExpToExp :: MonadBinder m =>
-                (v -> m (Exp (Lore m))) -> PrimExp v -> m (Exp (Lore m))
-primExpToExp f (BinOpExp op x y) =
-  BasicOp <$> (BinOp op
-               <$> primExpToSubExp "binop_x" f x
-               <*> primExpToSubExp "binop_y" f y)
-primExpToExp f (CmpOpExp op x y) =
-  BasicOp <$> (CmpOp op
-               <$> primExpToSubExp "cmpop_x" f x
-               <*> primExpToSubExp "cmpop_y" f y)
-primExpToExp f (UnOpExp op x) =
-  BasicOp <$> (UnOp op <$> primExpToSubExp "unop_x" f x)
-primExpToExp f (ConvOpExp op x) =
-  BasicOp <$> (ConvOp op <$> primExpToSubExp "convop_x" f x)
-primExpToExp _ (ValueExp v) =
-  return $ BasicOp $ SubExp $ Constant v
-primExpToExp f (FunExp h args t) =
-  Apply (nameFromString h) <$> args' <*> pure [primRetType t] <*>
-  pure (Safe, noLoc, [])
-  where args' = zip <$> mapM (primExpToSubExp "apply_arg" f) args <*> pure (repeat Observe)
-primExpToExp f (LeafExp v _) =
-  f v
-
 instance ToExp v => ToExp (PrimExp v) where
-  toExp = primExpToExp toExp
-
-primExpToSubExp :: MonadBinder m =>
-                   String -> (v -> m (Exp (Lore m))) -> PrimExp v -> m SubExp
-primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
+  toExp (BinOpExp op x y) =
+    BasicOp <$> (BinOp op <$> toSubExp "binop_x" x <*> toSubExp "binop_y" y)
+  toExp (CmpOpExp op x y) =
+    BasicOp <$> (CmpOp op <$> toSubExp "cmpop_x" x <*> toSubExp "cmpop_y" y)
+  toExp (UnOpExp op x) =
+    BasicOp <$> (UnOp op <$> toSubExp "unop_x" x)
+  toExp (ConvOpExp op x) =
+    BasicOp <$> (ConvOp op <$> toSubExp "convop_x" x)
+  toExp (ValueExp v) =
+    return $ BasicOp $ SubExp $ Constant v
+  toExp (FunExp h args t) =
+    Apply (nameFromString h) <$> args' <*> pure [primRetType t] <*>
+    pure (Safe, noLoc, [])
+    where args' = zip <$> mapM (toSubExp "apply_arg") args <*> pure (repeat Observe)
+  toExp (LeafExp v _) =
+    toExp v
 
 -- | Convert an expression to a 'PrimExp'.  The provided function is
 -- used to convert expressions that are not trivially 'PrimExp's.
 -- This includes constants and variable names, which are passed as
--- 'SubExp's.
+-- t'SubExp's.
 primExpFromExp :: (Fail.MonadFail m, Decorations lore) =>
                   (VName -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
@@ -74,7 +59,7 @@ primExpFromExp f (BasicOp (ConvOp op x)) =
 primExpFromExp _ (BasicOp (SubExp (Constant v))) =
   return $ ValueExp v
 primExpFromExp f (Apply fname args ts _)
-  | isBuiltInFunction fname, [Prim t] <- retTypeValues ts =
+  | isBuiltInFunction fname, [Prim t] <- map declExtTypeOf ts =
       FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
@@ -107,6 +92,7 @@ replaceInPrimExpM f (ConvOpExp cop pe) =
 replaceInPrimExpM f (FunExp h args t) =
   FunExp h <$> mapM (replaceInPrimExpM f) args <*> pure t
 
+-- | As 'replaceInPrimExpM', but in the identity monad.
 replaceInPrimExp :: (a -> PrimType -> PrimExp b) ->
                     PrimExp a -> PrimExp b
 replaceInPrimExp f e = runIdentity $ replaceInPrimExpM f' e

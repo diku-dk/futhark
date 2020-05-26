@@ -1,10 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | Do various kernel optimisations - mostly related to coalescing.
-module Futhark.Pass.KernelBabysitting
-       ( babysitKernels
-       , nonlinearInMemory
-       )
+module Futhark.Pass.KernelBabysitting ( babysitKernels )
        where
 
 import Control.Arrow (first)
@@ -23,6 +20,7 @@ import Futhark.Tools
 import Futhark.Pass
 import Futhark.Util
 
+-- | The pass definition.
 babysitKernels :: Pass Kernels Kernels
 babysitKernels = Pass "babysit kernels"
                  "Transpose kernel input arrays for better performance." $
@@ -384,7 +382,7 @@ rearrangeSlice :: MonadBinder m =>
                   Int -> SubExp -> PrimExp VName -> VName
                -> m VName
 rearrangeSlice d w num_chunks arr = do
-  num_chunks' <- letSubExp "num_chunks" =<< toExp num_chunks
+  num_chunks' <- toSubExp "num_chunks" num_chunks
 
   (w_padded, padding) <- paddedScanReduceInput w num_chunks'
 

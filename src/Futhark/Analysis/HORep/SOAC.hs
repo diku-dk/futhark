@@ -109,7 +109,7 @@ instance Substitute ArrayTransform where
     Replicate (substituteNames substs cs) (substituteNames substs se)
 
 -- | A sequence of array transformations, heavily inspired by
--- "Data.Seq".  You can decompose it using 'viewF' and 'viewL', and
+-- "Data.Seq".  You can decompose it using 'viewf' and 'viewl', and
 -- grow it by using '|>' and '<|'.  These correspond closely to the
 -- similar operations for sequences, except that appending will try to
 -- normalise and simplify the transformation sequence.

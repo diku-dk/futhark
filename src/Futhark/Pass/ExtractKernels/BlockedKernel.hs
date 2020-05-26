@@ -62,7 +62,7 @@ prepareRedOrScan w map_lam arrs ispace inps = do
     mapM_ readKernelInput inps
     forM_ (zip (lambdaParams map_lam) arrs) $ \(p, arr) -> do
       arr_t <- lookupType arr
-      letBindNames_ [paramName p] $
+      letBindNames [paramName p] $
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody map_lam)
 
@@ -80,7 +80,7 @@ segRed :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
        -> m (Stms lore)
 segRed lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
   (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
-  letBind_ pat $ Op $ segOp $
+  letBind pat $ Op $ segOp $
     SegRed lvl kspace ops (lambdaReturnType map_lam) kbody
 
 segScan :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
@@ -94,7 +94,7 @@ segScan :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
         -> m (Stms lore)
 segScan lvl pat w ops map_lam arrs ispace inps = runBinder_ $ do
   (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
-  letBind_ pat $ Op $ segOp $
+  letBind pat $ Op $ segOp $
     SegScan lvl kspace ops (lambdaReturnType map_lam) kbody
 
 segMap :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
@@ -108,7 +108,7 @@ segMap :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
        -> m (Stms lore)
 segMap lvl pat w map_lam arrs ispace inps = runBinder_ $ do
   (kspace, kbody) <- prepareRedOrScan w map_lam arrs ispace inps
-  letBind_ pat $ Op $ segOp $
+  letBind pat $ Op $ segOp $
     SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim :: (MonadFreshNames m, MonadBinder m, DistLore (Lore m)) =>
@@ -129,7 +129,7 @@ dummyDim pat = do
   return (pat', ispace,
           forM_ (zip (patternNames pat') (patternNames pat)) $ \(from, to) -> do
              from_t <- lookupType from
-             letBindNames_ [to] $ BasicOp $ Index from $
+             letBindNames [to] $ BasicOp $ Index from $
                fullSlice from_t [DimFix $ intConst Int32 0])
 
 nonSegRed :: (MonadFreshNames m, DistLore lore, HasScope lore m) =>
@@ -163,11 +163,11 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBinder_ $ do
     mapM_ readKernelInput inps
     forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
       arr_t <- lookupType arr
-      letBindNames_ [paramName p] $
+      letBindNames [paramName p] $
         BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var gtid]
     map (Returns ResultMaySimplify) <$> bodyBind (lambdaBody lam)
 
-  letBind_ pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
+  letBind pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
 
 mapKernelSkeleton :: (DistLore lore, HasScope lore m, MonadFreshNames m) =>
                      [(VName, SubExp)] -> [KernelInput]
@@ -211,6 +211,6 @@ readKernelInput :: (DistLore (Lore m), MonadBinder m) =>
 readKernelInput inp = do
   let pe = PatElem (kernelInputName inp) $ kernelInputType inp
   arr_t <- lookupType $ kernelInputArray inp
-  letBind_ (Pattern [] [pe]) $
+  letBind (Pattern [] [pe]) $
     BasicOp $ Index (kernelInputArray inp) $
     fullSlice arr_t $ map DimFix $ kernelInputIndices inp

@@ -166,6 +166,7 @@ import Data.Foldable
 import Data.Loc
 import qualified Data.Sequence as Seq
 import Data.String
+import Data.Traversable (fmapDefault, foldMapDefault)
 
 import Language.Futhark.Core
 import Futhark.IR.Decorations
@@ -187,6 +188,7 @@ newtype Attrs = Attrs { unAttrs :: S.Set Attr }
 oneAttr :: Attr -> Attrs
 oneAttr = Attrs . S.singleton
 
+-- | Is the given attribute to be found in the attribute set?
 inAttrs :: Attr -> Attrs -> Bool
 inAttrs attr (Attrs attrs) = attr `S.member` attrs
 
@@ -202,14 +204,21 @@ data PatternT dec =
           }
   deriving (Ord, Show, Eq)
 
-instance Functor PatternT where
-  fmap f (Pattern ctx val) = Pattern (map (fmap f) ctx) (map (fmap f) val)
-
 instance Semigroup (PatternT dec) where
   Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 instance Monoid (PatternT dec) where
   mempty = Pattern [] []
+
+instance Functor PatternT where
+  fmap = fmapDefault
+
+instance Foldable PatternT where
+  foldMap = foldMapDefault
+
+instance Traversable PatternT where
+  traverse f (Pattern ctx vals) =
+    Pattern <$> traverse (traverse f) ctx <*> traverse (traverse f) vals
 
 -- | A type alias for namespace control.
 type Pattern lore = PatternT (LetDec lore)
@@ -220,6 +229,10 @@ data StmAux dec = StmAux { stmAuxCerts :: !Certificates
                          , stmAuxDec :: dec
                          }
                   deriving (Ord, Show, Eq)
+
+instance Semigroup dec => Semigroup (StmAux dec) where
+  StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
+    StmAux (cs1<>cs2) (attrs1<>attrs2) (dec1<>dec2)
 
 -- | A local variable binding.
 data Stm lore = Let { stmPattern :: Pattern lore
@@ -234,15 +247,19 @@ deriving instance Decorations lore => Eq (Stm lore)
 -- | A sequence of statements.
 type Stms lore = Seq.Seq (Stm lore)
 
+-- | A single statement.
 oneStm :: Stm lore -> Stms lore
 oneStm = Seq.singleton
 
+-- | Convert a statement list to a statement sequence.
 stmsFromList :: [Stm lore] -> Stms lore
 stmsFromList = Seq.fromList
 
+-- | Convert a statement sequence to a statement list.
 stmsToList :: Stms lore -> [Stm lore]
 stmsToList = toList
 
+-- | The first statement in the sequence, if any.
 stmsHead :: Stms lore -> Maybe (Stm lore, Stms lore)
 stmsHead stms = case Seq.viewl stms of stm Seq.:< stms' -> Just (stm, stms')
                                        Seq.EmptyL       -> Nothing
@@ -353,7 +370,7 @@ data BasicOp
   | Iota SubExp SubExp SubExp IntType
   -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@.
   --
-  -- The 'IntType' indicates the type of the array returned and the
+  -- The t'IntType' indicates the type of the array returned and the
   -- offset/stride arguments, but not the length argument.
 
   | Replicate Shape SubExp
@@ -386,9 +403,9 @@ data BasicOp
   -- length of this list must be equal to the rank of the array.
   deriving (Eq, Ord, Show)
 
--- | The root Futhark expression type.  The 'Op' constructor contains
+-- | The root Futhark expression type.  The v'Op' constructor contains
 -- a lore-specific operation.  Do-loops, branches and function calls
--- are special.  Everything else is a simple 'BasicOp'.
+-- are special.  Everything else is a simple t'BasicOp'.
 data ExpT lore
   = BasicOp BasicOp
     -- ^ A simple (non-recursive) operation.
@@ -428,19 +445,22 @@ data IfDec rt = IfDec { ifReturns :: [rt]
                       }
                  deriving (Eq, Show, Ord)
 
-data IfSort = IfNormal -- ^ An ordinary branch.
-            | IfFallback -- ^ A branch where the "true" case is what
-                         -- we are actually interested in, and the
-                         -- "false" case is only present as a fallback
-                         -- for when the true case cannot be safely
-                         -- evaluated.  the compiler is permitted to
-                         -- optimise away the branch if the true case
-                         -- contains only safe statements.
-            | IfEquiv -- ^ Both of these branches are semantically
-                      -- equivalent, and it is fine to eliminate one
-                      -- if it turns out to have problems
-                      -- (e.g. contain things we cannot generate code
-                      -- for).
+-- | What kind of branch is this?  This has no semantic meaning, but
+-- provides hints to simplifications.
+data IfSort = IfNormal
+              -- ^ An ordinary branch.
+            | IfFallback
+              -- ^ A branch where the "true" case is what we are
+              -- actually interested in, and the "false" case is only
+              -- present as a fallback for when the true case cannot
+              -- be safely evaluated.  the compiler is permitted to
+              -- optimise away the branch if the true case contains
+              -- only safe statements.
+            | IfEquiv
+              -- ^ Both of these branches are semantically equivalent,
+              -- and it is fine to eliminate one if it turns out to
+              -- have problems (e.g. contain things we cannot generate
+              -- code for).
             deriving (Eq, Show, Ord)
 
 -- | A type alias for namespace control.
@@ -459,8 +479,10 @@ deriving instance Decorations lore => Ord (LambdaT lore)
 -- | Type alias for namespacing reasons.
 type Lambda = LambdaT
 
+-- | A function and loop parameter.
 type FParam lore = Param (FParamInfo lore)
 
+-- | A lambda parameter.
 type LParam lore = Param (LParamInfo lore)
 
 -- | Function Declarations

@@ -107,6 +107,7 @@ module Futhark.Construct
   , simpleMkLetNames
 
   , ToExp(..)
+  , toSubExp
   )
 where
 
@@ -133,10 +134,10 @@ letExp _ (BasicOp (SubExp (Var v))) =
 letExp desc e = do
   n <- length <$> expExtType e
   vs <- replicateM n $ newVName desc
-  idents <- letBindNames vs e
-  case idents of
-    [ident] -> return $ identName ident
-    _       -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
+  letBindNames vs e
+  case vs of
+    [v] -> return v
+    _   -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
               String -> VName -> Slice SubExp -> Exp (Lore m)
@@ -157,7 +158,8 @@ letTupExp _ (BasicOp (SubExp (Var v))) =
 letTupExp name e = do
   numValues <- length <$> expExtType e
   names <- replicateM numValues $ newVName name
-  map identName <$> letBindNames names e
+  letBindNames names e
+  return names
 
 letTupExp' :: (MonadBinder m) =>
               String -> Exp (Lore m)
@@ -194,6 +196,14 @@ eIf' ce te fe if_sort = do
                         M.toList $ shapeExtMapping ts body_ts
           mkBodyM stms $ ctx_res++val_res
             where stmsscope = scopeOf stms
+
+-- The type of a body.  Watch out: this only works for the degenerate
+-- case where the body does not already return its context.
+bodyExtType :: (HasScope lore m, Monad m) => Body lore -> m [ExtType]
+bodyExtType (Body _ stms res) =
+  existentialiseExtTypes (M.keys stmsscope) . staticShapes <$>
+  extendedScope (traverse subExpType res) stmsscope
+  where stmsscope = scopeOf stms
 
 eBinOp :: MonadBinder m =>
           BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -255,7 +265,7 @@ eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [m (Exp (Lore m))] -> m [SubExp]
 eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
                       bodyBind $ lambdaBody lam
-  where bindParam param arg = letBindNames_ [paramName param] =<< arg
+  where bindParam param arg = letBindNames [paramName param] =<< arg
 
 -- | Note: unsigned division.
 eDivRoundingUp :: MonadBinder m =>
@@ -371,7 +381,7 @@ binOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
                BinOp -> PrimType -> m (Lambda (Lore m))
 binOpLambda bop t = binLambda (BinOp bop) t t
 
--- | As 'binOpLambda', but for 'CmpOp's.
+-- | As 'binOpLambda', but for t'CmpOp's.
 cmpOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
                CmpOp -> PrimType -> m (Lambda (Lore m))
 cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
@@ -516,3 +526,7 @@ instance ToExp SubExp where
 
 instance ToExp VName where
   toExp = return . BasicOp . SubExp . Var
+
+-- | A convenient composition of 'letSubExp' and 'toExp'.
+toSubExp :: (MonadBinder m, ToExp a) => String -> a -> m SubExp
+toSubExp s e = letSubExp s =<< toExp e

@@ -65,7 +65,7 @@ def get_version():
     # Get cabal file
     cabal_file = open('../futhark.cabal', 'r').read()
     # Extract version
-    return re.search('version:[ ]*([^ ]*)', cabal_file).group(1)
+    return re.search(r'^version:[ ]*([^ ]*)$', cabal_file, flags=re.MULTILINE).group(1)
 
 version = get_version()
 # The full version, including alpha/beta/rc tags.

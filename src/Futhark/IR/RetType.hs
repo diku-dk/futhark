@@ -4,9 +4,7 @@
 module Futhark.IR.RetType
        (
          IsBodyType (..)
-       , bodyTypeValues
        , IsRetType (..)
-       , retTypeValues
        , expectedTypes
        )
        where
@@ -22,9 +20,6 @@ import Futhark.IR.Prop.Types
 class (Show rt, Eq rt, Ord rt, ExtTyped rt) => IsBodyType rt where
   -- | Construct a body type from a primitive type.
   primBodyType :: PrimType -> rt
-
-bodyTypeValues :: IsBodyType rt => [rt] -> [ExtType]
-bodyTypeValues = map extTypeOf
 
 instance IsBodyType ExtType where
   primBodyType = Prim
@@ -45,9 +40,6 @@ class (Show rt, Eq rt, Ord rt, DeclExtTyped rt) => IsRetType rt where
                -> [Param dec]
                -> [(SubExp, Type)]
                -> Maybe [rt]
-
-retTypeValues :: IsRetType rt => [rt] -> [DeclExtType]
-retTypeValues = map declExtTypeOf
 
 -- | Given shape parameter names and value parameter types, produce the
 -- types of arguments accepted.

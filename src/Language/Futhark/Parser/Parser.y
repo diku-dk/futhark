@@ -551,6 +551,8 @@ Exp2 :: { UncheckedExp }
 
      | unsafe Exp2         { Unsafe $2 (srcspan $1 $>) }
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
+     | '#[' AttrInfo ']' Exp %prec bottom
+                           { Attr $2 $4 (srcspan $1 $>) }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }

@@ -58,7 +58,7 @@ instance TC.Checkable SeqMem where
   checkFParamLore = checkMemInfo
   checkLParamLore = checkMemInfo
   checkLetBoundLore = checkMemInfo
-  checkRetType = mapM_ TC.checkExtType . retTypeValues
+  checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = return $ Param name (MemPrim t)
   matchPattern = matchPatternToExp
   matchReturnType = matchFunctionReturnType

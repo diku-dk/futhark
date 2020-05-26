@@ -385,7 +385,7 @@ trace v = do
   -- actual call to 'implicits.trace' is going to be in the trace
   -- function in the prelude, which is not interesting.
   top <- fromMaybe noLoc . maybeHead . drop 1 <$> stacktrace
-  liftF $ ExtOpTrace top (pretty v) ()
+  liftF $ ExtOpTrace top (prettyOneLine v) ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =

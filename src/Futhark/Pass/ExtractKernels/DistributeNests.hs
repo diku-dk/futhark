@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Futhark.Pass.ExtractKernels.DistributeNests
   ( MapLoop(..)
   , mapLoopStm
@@ -54,6 +55,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.CopyPropagate
+import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -271,6 +273,15 @@ onTopLevelStms stms = do
 maybeDistributeStm :: (MonadFreshNames m, DistLore lore) =>
                       Stm SOACS -> DistAcc lore
                    -> DistNestT lore m (DistAcc lore)
+
+maybeDistributeStm stm acc
+  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
+      addStmToAcc stm acc
+
+maybeDistributeStm (Let pat aux (Op soac)) acc
+  | "sequential_outer" `inAttrs` stmAuxAttrs aux =
+      distributeMapBodyStms acc . fmap (certify (stmAuxCerts aux)) =<<
+      runBinder_ (FOT.transformSOAC pat soac)
 
 maybeDistributeStm stm@(Let pat _ (Op (Screma w form arrs))) acc
   | Just lam <- isMapSOAC form =
@@ -673,7 +684,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    letBind_ pat $ Op $ segOp k
+    letBind pat $ Op $ segOp k
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = error "Ill-typed nested scatter encountered."
@@ -704,7 +715,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     v' <- certifying cs $
           letSubExp "v" $ BasicOp $ Index v $ map (DimFix . Var) slice_gtids
     let pexp = primExpFromSubExp int32
-    slice_is <- traverse (letSubExp "index" <=< toExp) $
+    slice_is <- traverse (toSubExp "index") $
                 fixSlice (map (fmap pexp) slice) $ map (pexp . Var) slice_gtids
 
     let write_is = map (Var . fst) base_ispace ++ slice_is
@@ -725,7 +736,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    letBind_ pat $ Op $ segOp k
+    letBind pat $ Op $ segOp k
 
 segmentedHistKernel :: (MonadFreshNames m, DistLore lore) =>
                        KernelNest

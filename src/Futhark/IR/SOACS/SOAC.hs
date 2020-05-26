@@ -4,6 +4,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Definition of /Second-Order Array Combinators/ (SOACs), which are
+-- the main form of parallelism in the early stages of the compiler.
 module Futhark.IR.SOACS.SOAC
        ( SOAC(..)
        , StreamOrd(..)
@@ -18,7 +20,6 @@ module Futhark.IR.SOACS.SOAC
        , singleReduce
 
          -- * Utility
-       , getStreamOrder
        , getStreamAccums
        , scremaType
        , soacType
@@ -75,10 +76,11 @@ import qualified Futhark.Analysis.Range as Range
 import Futhark.Construct
 import Futhark.Util (maybeNth, chunks)
 
+-- | A second-order array combinator (SOAC).
 data SOAC lore =
     Stream SubExp (StreamForm lore) (Lambda lore) [VName]
   | Scatter SubExp (Lambda lore) [VName] [(SubExp, Int, VName)]
-    -- Scatter <cs> <length> <lambda> <original index and value arrays>
+    -- ^ @Scatter <cs> <length> <lambda> <original index and value arrays>@
     --
     -- <input/output arrays along with their sizes and number of
     -- values to write for that array>
@@ -94,19 +96,17 @@ data SOAC lore =
     --
     -- This must be consistent along all Scatter-related optimisations.
   | Hist SubExp [HistOp lore] (Lambda lore) [VName]
-    -- Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>
+    -- ^ @Hist <length> <dest-arrays-and-ops> <bucket fun> <input arrays>@
     --
     -- The first SubExp is the length of the input arrays. The first
-    -- list describes the operations to perform.  The 'Lambda' is the
+    -- list describes the operations to perform.  The t'Lambda' is the
     -- bucket function.  Finally comes the input images.
   | Screma SubExp (ScremaForm lore) [VName]
     -- ^ A combination of scan, reduction, and map.  The first
-    -- 'SubExp' is the size of the input arrays.  The first
-    -- 'Lambda'/'SubExp' pair is for scan and its neutral elements.
-    -- The second is for the reduction.  The final lambda is for the
-    -- map part, and finally comes the input arrays.
+    -- 'SubExp' is the size of the input arrays.
     deriving (Eq, Ord, Show)
 
+-- | Information about computing a single histogram.
 data HistOp lore = HistOp { histWidth :: SubExp
                           , histRaceFactor :: SubExp
                           -- ^ Race factor @RF@ means that only @1/RF@
@@ -124,6 +124,7 @@ data HistOp lore = HistOp { histWidth :: SubExp
 data StreamOrd  = InOrder | Disorder
                 deriving (Eq, Ord, Show)
 
+-- | What kind of stream is this?
 data StreamForm lore  =
     Parallel StreamOrd Commutativity (Lambda lore) [SubExp]
   | Sequential [SubExp]
@@ -147,6 +148,7 @@ singleBinOp lams =
   where xParams lam = take (length (lambdaReturnType lam)) (lambdaParams lam)
         yParams lam = drop (length (lambdaReturnType lam)) (lambdaParams lam)
 
+-- | How to compute a single scan result.
 data Scan lore = Scan { scanLambda :: Lambda lore
                       , scanNeutral :: [SubExp]
                       }
@@ -163,6 +165,7 @@ singleScan scans =
       scan_lam = singleBinOp $ map scanLambda scans
   in Scan scan_lam scan_nes
 
+-- | How to compute a single reduction result.
 data Reduce lore = Reduce { redComm :: Commutativity
                           , redLambda :: Lambda lore
                           , redNeutral :: [SubExp]
@@ -180,6 +183,8 @@ singleReduce reds =
       red_lam = singleBinOp $ map redLambda reds
   in Reduce (mconcat (map redComm reds)) red_lam red_nes
 
+-- | The types produced by a single 'Screma', given the size of the
+-- input array.
 scremaType :: SubExp -> ScremaForm lore -> [Type]
 scremaType w (ScremaForm scans reds map_lam) =
   scan_tps ++ red_tps ++ map (`arrayOfRow` w) map_tps
@@ -207,47 +212,62 @@ isIdentityLambda lam = bodyResult (lambdaBody lam) ==
 nilFn :: Bindable lore => Lambda lore
 nilFn = Lambda mempty (mkBody mempty mempty) mempty
 
+-- | Construct a Screma with possibly multiple scans, and
+-- the given map function.
 scanomapSOAC :: [Scan lore] -> Lambda lore -> ScremaForm lore
 scanomapSOAC scans = ScremaForm scans []
 
+-- | Construct a Screma with possibly multiple reductions, and
+-- the given map function.
 redomapSOAC :: [Reduce lore] -> Lambda lore -> ScremaForm lore
 redomapSOAC = ScremaForm []
 
+-- | Construct a Screma with possibly multiple scans, and identity map
+-- function.
 scanSOAC :: (Bindable lore, MonadFreshNames m) =>
             [Scan lore] -> m (ScremaForm lore)
 scanSOAC scans = scanomapSOAC scans <$> mkIdentityLambda ts
   where ts = concatMap (lambdaReturnType . scanLambda) scans
 
+-- | Construct a Screma with possibly multiple reductions, and
+-- identity map function.
 reduceSOAC :: (Bindable lore, MonadFreshNames m) =>
               [Reduce lore] -> m (ScremaForm lore)
 reduceSOAC reds = redomapSOAC reds <$> mkIdentityLambda ts
   where ts = concatMap (lambdaReturnType . redLambda) reds
 
+-- | Construct a Screma corresponding to a map.
 mapSOAC :: Lambda lore -> ScremaForm lore
 mapSOAC = ScremaForm [] []
 
+-- | Does this Screma correspond to a scan-map composition?
 isScanomapSOAC :: ScremaForm lore -> Maybe ([Scan lore], Lambda lore)
 isScanomapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null reds
   guard $ not $ null scans
   return (scans, map_lam)
 
+-- | Does this Screma correspond to pure scan?
 isScanSOAC :: ScremaForm lore -> Maybe [Scan lore]
 isScanSOAC form = do (scans, map_lam) <- isScanomapSOAC form
                      guard $ isIdentityLambda map_lam
                      return scans
 
+-- | Does this Screma correspond to a reduce-map composition?
 isRedomapSOAC :: ScremaForm lore -> Maybe ([Reduce lore], Lambda lore)
 isRedomapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null scans
   guard $ not $ null reds
   return (reds, map_lam)
 
+-- | Does this Screma correspond to a pure reduce?
 isReduceSOAC :: ScremaForm lore -> Maybe [Reduce lore]
 isReduceSOAC form = do (reds, map_lam) <- isRedomapSOAC form
                        guard $ isIdentityLambda map_lam
                        return reds
 
+-- | Does this Screma correspond to a simple map, without any
+-- reduction or scan results?
 isMapSOAC :: ScremaForm lore -> Maybe (Lambda lore)
 isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null scans
@@ -334,6 +354,7 @@ instance ASTLore lore => Rename (SOAC lore) where
   rename = mapSOACM renamer
     where renamer = SOACMapper rename rename rename
 
+-- | The type of a SOAC.
 soacType :: SOAC lore -> [Type]
 soacType (Stream outersize form lam _) =
   map (substNamesInType substs) rtp
@@ -508,6 +529,7 @@ instance Decorations lore => ST.IndexOp (SOAC lore) where
               | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
+-- | Type-check a SOAC.
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
 typeCheckSOAC (Stream size form lam arrexps) = do
   let accexps = getStreamAccums form
@@ -665,10 +687,6 @@ getStreamAccums :: StreamForm lore -> [SubExp]
 getStreamAccums (Parallel _ _ _ accs) = accs
 getStreamAccums (Sequential  accs) = accs
 
-getStreamOrder :: StreamForm lore -> StreamOrd
-getStreamOrder (Parallel o _ _ _) = o
-getStreamOrder (Sequential  _) = InOrder
-
 instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
   opMetrics (Stream _ _ lam _) =
     inside "Stream" $ lambdaMetrics lam
@@ -722,6 +740,7 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
 
   ppr (Screma w form arrs) = ppScrema w form arrs
 
+-- | Prettyprint the given Screma.
 ppScrema :: (PrettyLore lore, Pretty inp) =>
             SubExp -> ScremaForm lore -> [inp] -> Doc
 ppScrema w (ScremaForm scans reds map_lam) arrs =
@@ -745,6 +764,7 @@ instance PrettyLore lore => Pretty (Reduce lore) where
     ppComm comm <> ppr red_lam <> comma </>
     PP.braces (commasep $ map ppr red_nes)
 
+-- | Prettyprint the given histogram operation.
 ppHist :: (PrettyLore lore, Pretty inp) =>
           SubExp -> [HistOp lore] -> Lambda lore -> [inp] -> Doc
 ppHist len ops bucket_fun imgs =
