@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <string.h>
+
 static const char *fut_progname = "(some Futhark code)";
 
 static void futhark_panic(int eval, const char *fmt, ...) {

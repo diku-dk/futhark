@@ -80,7 +80,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     -- The group size is either the maximum of the minimum parallelism
     -- exploited, or the desired parallelism (bounded by the max group
     -- size) in case there is no minimum.
-    letBindNames_ [group_size] =<<
+    letBindNames [group_size] =<<
       if null ws_min
       then eBinOp (SMin Int32)
            (eSubExp =<< letSubExp "max_group_size" (Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup))
@@ -156,7 +156,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
       loopbody' <- intraGroupBody lvl loopbody
       certifying (stmAuxCerts aux) $
-        letBind_ pat $ DoLoop ctx val form' loopbody'
+        letBind pat $ DoLoop ctx val form' loopbody'
           where form' = case form of
                           ForLoop i it bound inps -> ForLoop i it bound inps
                           WhileLoop cond          -> WhileLoop cond
@@ -165,7 +165,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       tbody' <- intraGroupBody lvl tbody
       fbody' <- intraGroupBody lvl fbody
       certifying (stmAuxCerts aux) $
-        letBind_ pat $ If cond tbody' fbody' ifdec
+        letBind pat $ If cond tbody' fbody' ifdec
 
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
@@ -254,7 +254,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $ do
         let ts = map rowType $ patternTypes pat
             body = KernelBody () kstms krets
-        letBind_ pat $ Op $ SegOp $ SegMap lvl' space ts body
+        letBind pat $ Op $ SegOp $ SegMap lvl' space ts body
 
       parallelMin [w]
 

@@ -5,14 +5,10 @@ module Futhark.Binder.Class
   ( Bindable (..)
   , mkLet
   , MonadBinder (..)
-  , mkLetM
-  , bodyStms
   , insertStms
   , insertStm
   , letBind
-  , letBind_
   , letBindNames
-  , letBindNames_
   , collectStms_
   , bodyBind
   , attributing
@@ -22,7 +18,6 @@ module Futhark.Binder.Class
   )
 where
 
-import Control.Monad.Writer
 import qualified Data.Kind
 
 import Futhark.IR
@@ -50,7 +45,9 @@ class (ASTLore lore,
 -- | A monad that supports the creation of bindings from expressions
 -- and bodies from bindings, with a specific lore.  This is the main
 -- typeclass that a monad must implement in order for it to be useful
--- for generating or modifying Futhark code.
+-- for generating or modifying Futhark code.  Most importantly
+-- maintains a current state of 'Stms' (as well as a 'Scope') that
+-- have been added with 'addStm'.
 --
 -- Very important: the methods should not have any significant side
 -- effects!  They may be called more often than you think, and the
@@ -64,10 +61,20 @@ class (ASTLore (Lore m),
   mkExpDecM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpDec (Lore m))
   mkBodyM :: Stms (Lore m) -> Result -> m (Body (Lore m))
   mkLetNamesM :: [VName] -> Exp (Lore m) -> m (Stm (Lore m))
+
+  -- | Add a statement to the 'Stms' under construction.
   addStm      :: Stm (Lore m) -> m ()
   addStm      = addStms . oneStm
+
+  -- | Add multiple statements to the 'Stms' under construction.
   addStms     :: Stms (Lore m) -> m ()
+
+  -- | Obtain the statements constructed during a monadic action,
+  -- instead of adding them to the state.
   collectStms :: m a -> m (a, Stms (Lore m))
+
+  -- | Add the provided certificates to any statements added during
+  -- execution of the action.
   certifying :: Certificates -> m a -> m a
   certifying = censorStms . fmap . certify
 
@@ -96,49 +103,39 @@ auxing (StmAux cs attrs _) = censorStms $ fmap onStm
                            , stmAuxCerts = cs <> stmAuxCerts aux
                            }
 
-mkLetM :: MonadBinder m => Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
-mkLetM pat e = Let pat <$> (defAux <$> mkExpDecM pat e) <*> pure e
-
+-- | Add a statement with the given pattern and expression.
 letBind :: MonadBinder m =>
-           Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
-letBind pat e = do
-  bnd <- mkLetM pat e
-  addStm bnd
-  return $ patternValueIdents $ stmPattern bnd
-
-letBind_ :: MonadBinder m =>
             Pattern (Lore m) -> Exp (Lore m) -> m ()
-letBind_ pat e = void $ letBind pat e
+letBind pat e =
+  addStm =<< Let pat <$> (defAux <$> mkExpDecM pat e) <*> pure e
 
+-- | Construct a 'Stm' from identifiers for the context- and value
+-- part of the pattern, as well as the expression.
 mkLet :: Bindable lore => [Ident] -> [Ident] -> Exp lore -> Stm lore
 mkLet ctx val e =
   let pat = mkExpPat ctx val e
       dec = mkExpDec pat e
   in Let pat (defAux dec) e
 
-letBindNames :: MonadBinder m =>
-                [VName] -> Exp (Lore m) -> m [Ident]
-letBindNames names e = do
-  bnd <- mkLetNamesM names e
-  addStm bnd
-  return $ patternValueIdents $ stmPattern bnd
+-- | Add a statement with the given pattern element names and
+-- expression.
+letBindNames :: MonadBinder m => [VName] -> Exp (Lore m) -> m ()
+letBindNames names e = addStm =<< mkLetNamesM names e
 
-letBindNames_ :: MonadBinder m =>
-                [VName] -> Exp (Lore m) -> m ()
-letBindNames_ names e = void $ letBindNames names e
-
+-- | As 'collectStms', but throw away the ordinary result.
 collectStms_ :: MonadBinder m => m a -> m (Stms (Lore m))
 collectStms_ = fmap snd . collectStms
 
+-- | Add the statements of the body, then return the body result.
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
-bodyBind (Body _ bnds es) = do
-  addStms bnds
+bodyBind (Body _ stms es) = do
+  addStms stms
   return es
 
--- | Add several bindings at the outermost level of a 'Body'.
+-- | Add several bindings at the outermost level of a t'Body'.
 insertStms :: Bindable lore => Stms lore -> Body lore -> Body lore
-insertStms bnds1 (Body _ bnds2 res) = mkBody (bnds1<>bnds2) res
+insertStms stms1 (Body _ stms2 res) = mkBody (stms1<>stms2) res
 
--- | Add a single binding at the outermost level of a 'Body'.
+-- | Add a single binding at the outermost level of a t'Body'.
 insertStm :: Bindable lore => Stm lore -> Body lore -> Body lore
 insertStm = insertStms . oneStm

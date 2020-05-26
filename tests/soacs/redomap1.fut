@@ -17,5 +17,5 @@ let main(n: i32) (m: i32): ([][]i32, bool) =
                    map (+l*m) (iota(m))) (
                  iota(n))
   let ps = map2 (\(as: []i32) (i: i32): bool  ->
-                     unsafe as[i] % 2 == 0) ass (map (%m) (iota(n)))
+                     as[i] % 2 == 0) ass (map (%m) (iota(n)))
   in (ass, reduce (&&) true ps)

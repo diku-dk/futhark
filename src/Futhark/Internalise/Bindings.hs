@@ -171,7 +171,7 @@ unExistentialise tparam_names et t = do
   return $ t `I.setArrayShape` I.Shape new_dims
   where inspectDim (I.Free (I.Var v)) d
           | v `S.member` tparam_names = do
-              letBindNames_ [v] $ I.BasicOp $ I.SubExp d
+              letBindNames [v] $ I.BasicOp $ I.SubExp d
               return $ I.Free $ I.Var v
         inspectDim ed _ = return ed
 

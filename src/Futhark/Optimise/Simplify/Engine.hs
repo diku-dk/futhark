@@ -119,9 +119,6 @@ data SimpleOps lore =
             , mkBodyS :: ST.SymbolTable (Wise lore)
                       -> Stms (Wise lore) -> Result
                       -> SimpleM lore (Body (Wise lore))
-            , mkLetNamesS :: ST.SymbolTable (Wise lore)
-                          -> [VName] -> Exp (Wise lore)
-                          -> SimpleM lore (Stm (Wise lore), Stms (Wise lore))
             , protectHoistedOpS :: Protect (Binder (Wise lore))
               -- ^ Make a hoisted Op safe.  The SubExp is a boolean
               -- that is true when the value of the statement will
@@ -133,10 +130,9 @@ type SimplifyOp lore op = op -> SimpleM lore (OpWithWisdom op, Stms (Wise lore))
 
 bindableSimpleOps :: (SimplifiableLore lore, Bindable lore) =>
                      SimplifyOp lore (Op lore) -> SimpleOps lore
-bindableSimpleOps = SimpleOps mkExpDecS' mkBodyS' mkLetNamesS' protectHoistedOpS'
+bindableSimpleOps = SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS'
   where mkExpDecS' _ pat e = return $ mkExpDec pat e
         mkBodyS' _ bnds res = return $ mkBody bnds res
-        mkLetNamesS' _ name e = (,) <$> mkLetNames name e <*> pure mempty
         protectHoistedOpS' _ _ _ = Nothing
 
 newtype SimpleM lore a =
@@ -289,12 +285,12 @@ protectIf _ _ taken (Let pat aux
                      (If cond taken_body untaken_body (IfDec if_ts IfFallback))) = do
   cond' <- letSubExp "protect_cond_conj" $ BasicOp $ BinOp LogAnd taken cond
   auxing aux $
-    letBind_ pat $ If cond' taken_body untaken_body $
+    letBind pat $ If cond' taken_body untaken_body $
     IfDec if_ts IfFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
-  auxing aux $ letBind_ pat $ BasicOp $ Assert cond' msg loc
+  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
       auxing aux m
@@ -305,7 +301,7 @@ protectIf _ f taken (Let pat aux e)
                                   (patternValueTypes pat)
       if_ts <- expTypesFromPattern pat
       auxing aux $
-        letBind_ pat $ If taken taken_body untaken_body $
+        letBind pat $ If taken taken_body untaken_body $
         IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
@@ -546,7 +542,7 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
         hasPatName nms bnd = any (`nameIn` nms) $ patternNames $ stmPattern bnd
 
--- | Simplify a single 'Body'.  The @[Diet]@ only covers the value
+-- | Simplify a single body.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.
 simplifyBody :: SimplifiableLore lore =>
                 [Diet] -> Body lore -> SimpleM lore (SimplifiedBody lore Result)
@@ -883,6 +879,6 @@ simplifyFun :: SimplifiableLore lore =>
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
   params' <- mapM (traverse simplify) params
-  let ds = map diet (retTypeValues rettype')
+  let ds = map (diet . declExtTypeOf) rettype'
   body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
   return $ FunDef entry fname rettype' params' body'

@@ -26,6 +26,7 @@ import Futhark.Binder
 import Futhark.Construct
 import qualified Futhark.TypeCheck as TypeCheck
 
+-- | The phantom data type for the kernels representation.
 data Kernels
 
 instance Decorations Kernels where
@@ -47,9 +48,6 @@ instance Bindable Kernels where
   mkLetNames = simpleMkLetNames
 
 instance BinderOps Kernels where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Kernels where
 

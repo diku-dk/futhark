@@ -35,7 +35,7 @@ futhark_hlint() {
 # Run hlint on changed files.
 files=$(git diff-index --cached --name-only HEAD | egrep '\.l?hsc?$')
 if [ "$files" ]; then
-    futhark_hlint $files
+    futhark_hlint $files || exit 1
 fi
 
 if ! stack build; then

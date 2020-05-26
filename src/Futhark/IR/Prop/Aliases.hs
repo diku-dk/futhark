@@ -1,9 +1,16 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# Language FlexibleInstances, FlexibleContexts #-}
+-- | The IR tracks aliases, mostly to ensure the soundness of in-place
+-- updates, but it can also be used for other things (such as memory
+-- optimisations).  This module contains the raw building blocks for
+-- determining the aliases of the values produced by expressions.  It
+-- also contains some building blocks for inspecting consumption.
+--
+-- One important caveat is that all aliases computed here are /local/.
+-- Thus, they do not take aliases-of-aliases into account.  See
+-- "Futhark.Analysis.Alias" if this is not what you want.
 module Futhark.IR.Prop.Aliases
-       ( vnameAliases
-       , subExpAliases
-       , primOpAliases
+       ( subExpAliases
        , expAliases
        , patternAliases
        , Aliased (..)
@@ -27,53 +34,43 @@ import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Types
 import Futhark.IR.Prop.Names
 
+-- | The class of lores that contain aliasing information.
 class (Decorations lore, AliasedOp (Op lore),
        AliasesOf (LetDec lore)) => Aliased lore where
+  -- | The aliases of the body results.
   bodyAliases :: Body lore -> [Names]
+  -- | The variables consumed in the body.
   consumedInBody :: Body lore -> Names
 
 vnameAliases :: VName -> Names
 vnameAliases = oneName
 
+-- | The alises of a subexpression.
 subExpAliases :: SubExp -> Names
 subExpAliases Constant{} = mempty
 subExpAliases (Var v)    = vnameAliases v
 
-primOpAliases :: BasicOp -> [Names]
-primOpAliases (SubExp se) = [subExpAliases se]
-primOpAliases (Opaque se) = [subExpAliases se]
-primOpAliases (ArrayLit _ _) = [mempty]
-primOpAliases BinOp{} = [mempty]
-primOpAliases ConvOp{} = [mempty]
-primOpAliases CmpOp{} = [mempty]
-primOpAliases UnOp{} = [mempty]
-
-primOpAliases (Index ident _) =
-  [vnameAliases ident]
-primOpAliases Update{} =
-  [mempty]
-primOpAliases Iota{} =
-  [mempty]
-primOpAliases Replicate{} =
-  [mempty]
-primOpAliases (Repeat _ _ v) =
-  [vnameAliases v]
-primOpAliases Scratch{} =
-  [mempty]
-primOpAliases (Reshape _ e) =
-  [vnameAliases e]
-primOpAliases (Rearrange _ e) =
-  [vnameAliases e]
-primOpAliases (Rotate _ e) =
-  [vnameAliases e]
-primOpAliases Concat{} =
-  [mempty]
-primOpAliases Copy{} =
-  [mempty]
-primOpAliases Manifest{} =
-  [mempty]
-primOpAliases Assert{} =
-  [mempty]
+basicOpAliases :: BasicOp -> [Names]
+basicOpAliases (SubExp se) = [subExpAliases se]
+basicOpAliases (Opaque se) = [subExpAliases se]
+basicOpAliases (ArrayLit _ _) = [mempty]
+basicOpAliases BinOp{} = [mempty]
+basicOpAliases ConvOp{} = [mempty]
+basicOpAliases CmpOp{} = [mempty]
+basicOpAliases UnOp{} = [mempty]
+basicOpAliases (Index ident _) = [vnameAliases ident]
+basicOpAliases Update{} = [mempty]
+basicOpAliases Iota{} = [mempty]
+basicOpAliases Replicate{} = [mempty]
+basicOpAliases (Repeat _ _ v) = [vnameAliases v]
+basicOpAliases Scratch{} = [mempty]
+basicOpAliases (Reshape _ e) = [vnameAliases e]
+basicOpAliases (Rearrange _ e) = [vnameAliases e]
+basicOpAliases (Rotate _ e) = [vnameAliases e]
+basicOpAliases Concat{} = [mempty]
+basicOpAliases Copy{} = [mempty]
+basicOpAliases Manifest{} = [mempty]
+basicOpAliases Assert{} = [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
@@ -84,6 +81,7 @@ funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
+-- | The aliases of an expression, one per non-context value returned.
 expAliases :: (Aliased lore) => Exp lore -> [Names]
 expAliases (If _ tb fb dec) =
   drop (length all_aliases - length ts) all_aliases
@@ -91,14 +89,14 @@ expAliases (If _ tb fb dec) =
         all_aliases = ifAliases
                       (bodyAliases tb, consumedInBody tb)
                       (bodyAliases fb, consumedInBody fb)
-expAliases (BasicOp op) = primOpAliases op
+expAliases (BasicOp op) = basicOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
   map (`namesSubtract` merge_names) val_aliases
   where (_ctx_aliases, val_aliases) =
           splitAt (length ctxmerge) $ bodyAliases loopbody
         merge_names = namesFromList $ map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t _) =
-  funcallAliases args $ retTypeValues t
+  funcallAliases args $ map declExtTypeOf t
 expAliases (Op op) = opAliases op
 
 returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
@@ -117,9 +115,11 @@ maskAliases _   Consume = mempty
 maskAliases _   ObservePrim = mempty
 maskAliases als Observe = als
 
+-- | The variables consumed in this statement.
 consumedInStm :: Aliased lore => Stm lore -> Names
 consumedInStm = consumedInExp . stmExp
 
+-- | The variables consumed in this expression.
 consumedInExp :: (Aliased lore) => Exp lore -> Names
 consumedInExp (Apply _ args _ _) =
   mconcat (map (consumeArg . first subExpAliases) args)
@@ -134,9 +134,11 @@ consumedInExp (BasicOp (Update src _ _)) = oneName src
 consumedInExp (Op op) = consumedInOp op
 consumedInExp _ = mempty
 
+-- | The variables consumed by this lambda.
 consumedByLambda :: Aliased lore => Lambda lore -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
+-- | The aliases of each pattern element (including the context).
 patternAliases :: AliasesOf dec => PatternT dec -> [Names]
 patternAliases = map (aliasesOf . patElemDec) . patternElements
 
@@ -151,6 +153,8 @@ instance AliasesOf Names where
 instance AliasesOf dec => AliasesOf (PatElemT dec) where
   aliasesOf = aliasesOf . patElemDec
 
+-- | The class of operations that can produce aliasing and consumption
+-- information.
 class IsOp op => AliasedOp op where
   opAliases :: op -> [Names]
   consumedInOp :: op -> Names
@@ -159,9 +163,17 @@ instance AliasedOp () where
   opAliases () = []
   consumedInOp () = mempty
 
+-- | The class of operations that can be given aliasing information.
+-- This is a somewhat subtle concept that is only used in the
+-- simplifier and when using "lore adapters".
 class AliasedOp (OpWithAliases op) => CanBeAliased op where
+  -- | The op that results when we add aliases to this op.
   type OpWithAliases op :: Data.Kind.Type
+
+  -- | Remove aliases from this op.
   removeOpAliases :: OpWithAliases op -> op
+
+  -- | Add aliases to this op.
   addOpAliases :: op -> OpWithAliases op
 
 instance CanBeAliased () where

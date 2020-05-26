@@ -55,7 +55,7 @@ import Control.Monad.State
 import Data.Maybe
 import Data.String
 import qualified Data.Map.Strict as M
-import Data.Traversable
+import Data.Traversable (fmapDefault, foldMapDefault)
 
 import Language.Futhark.Core
 import Futhark.IR.Primitive
@@ -297,10 +297,9 @@ fixSlice (DimSlice orig_k _ orig_s:mis') (i:is') =
   (orig_k+i*orig_s) : fixSlice mis' is'
 fixSlice _ _ = []
 
--- | An element of a pattern - consisting of a name (essentially a
--- pair of the name and type) and an addditional parametric decoration.
--- This decoration is what is expected to contain the type of the
--- resulting variable.
+-- | An element of a pattern - consisting of a name and an addditional
+-- parametric decoration.  This decoration is what is expected to
+-- contain the type of the resulting variable.
 data PatElemT dec = PatElem { patElemName :: VName
                                -- ^ The name being bound.
                              , patElemDec :: dec
@@ -309,7 +308,14 @@ data PatElemT dec = PatElem { patElemName :: VName
                    deriving (Ord, Show, Eq)
 
 instance Functor PatElemT where
-  fmap f (PatElem name dec) = PatElem name (f dec)
+  fmap = fmapDefault
+
+instance Foldable PatElemT where
+  foldMap = foldMapDefault
+
+instance Traversable PatElemT where
+  traverse f (PatElem name dec) =
+    PatElem name <$> f dec
 
 -- | An error message is a list of error parts, which are concatenated
 -- to form the final message.

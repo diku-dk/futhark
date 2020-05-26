@@ -53,14 +53,8 @@ instance Bindable MC where
   mkLetNames = simpleMkLetNames
 
 instance BinderOps MC where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 instance BinderOps (Engine.Wise MC) where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore MC where
 

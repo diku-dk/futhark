@@ -393,6 +393,8 @@ runAlex' start_pos input__ (Alex f) =
                     , alex_scd = 0}) of Left msg -> Left msg
                                         Right ( _, a ) -> Right a
 
+-- | Given a starting position, produce tokens from the given text (or
+-- a lexer error).  Returns the final position.
 scanTokensText :: Pos -> T.Text -> Either String ([L Token], Pos)
 scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
 

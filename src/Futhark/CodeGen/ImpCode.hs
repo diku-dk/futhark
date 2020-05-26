@@ -73,9 +73,13 @@ import Futhark.Analysis.PrimExp
 import Futhark.Util.Pretty hiding (space)
 import Futhark.IR.Kernels.Sizes (Count(..))
 
+-- | The size of a memory block.
 type MemSize = SubExp
+
+-- | The size of an array.
 type DimSize = SubExp
 
+-- | The type of a parameter.
 data Type = Scalar PrimType | Mem Space
 
 -- | An ImpCode function parameter.
@@ -83,6 +87,7 @@ data Param = MemParam VName Space
            | ScalarParam VName PrimType
              deriving (Show)
 
+-- | The name of a parameter.
 paramName :: Param -> VName
 paramName (MemParam name _) = name
 paramName (ScalarParam name _) = name
@@ -159,12 +164,29 @@ data ArrayContents = ArrayValues [PrimValue]
                      -- ^ This many zeroes.
                      deriving (Show)
 
+-- | A block of imperative code.  Parameterised by an 'Op', which
+-- allows extensibility.  Concrete uses of this type will instantiate
+-- the type parameter with e.g. a construct for launching GPU kernels.
 data Code a = Skip
+              -- ^ No-op.  Crucial for the 'Monoid' instance.
             | Code a :>>: Code a
+              -- ^ Statement composition.  Crucial for the 'Semigroup' instance.
             | For VName IntType Exp (Code a)
+              -- ^ A for-loop iterating the given number of times.  The
+              -- loop parameter starts counting from zero and will have
+              -- the given type.  The bound is evaluated just once,
+              -- before the loop is entered.
             | While Exp (Code a)
+              -- ^ While loop.  The conditional is (of course)
+              -- re-evaluated before every iteration of the loop.
             | DeclareMem VName Space
+              -- ^ Declare a memory block variable that will point to
+              -- memory in the given memory space.  Note that this is
+              -- distinct from allocation.  The memory block must be the
+              -- target of either an 'Allocate' or a 'SetMem' before it
+              -- can be used for reading or writing.
             | DeclareScalar VName Volatility PrimType
+              -- ^ Declare a scalar variable with an initially undefined value.
             | DeclareArray VName Space PrimType ArrayContents
               -- ^ Create an array containing the given values.  The
               -- lifetime of the array will be the entire application.
@@ -187,12 +209,24 @@ data Code a = Skip
               -- space, source, offset in source, offset space, number
               -- of bytes.
             | Write VName (Count Elements Exp) PrimType Space Volatility Exp
+              -- ^ @Write mem i t space vol v@ writes the value @v@ to
+              -- @mem@ offset by @i@ elements of type @t@.  The
+              -- 'Space' argument is the memory space of @mem@
+              -- (technically redundant, but convenient).  Note that
+              -- /reading/ is done with an 'Exp' ('Index').
             | SetScalar VName Exp
+              -- ^ Set a scalar variable.
             | SetMem VName VName Space
               -- ^ Must be in same space.
             | Call [VName] Name [Arg]
+              -- ^ Function call.  The results are written to the
+              -- provided 'VName' variables.
             | If Exp (Code a) (Code a)
+              -- ^ Conditional execution.
             | Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
+              -- ^ Assert that something must be true.  Should it turn
+              -- out not to be true, then report a failure along with
+              -- the given error message.
             | Comment String (Code a)
               -- ^ Has the same semantics as the contained code, but
               -- the comment should show up in generated code for ease
@@ -205,6 +239,7 @@ data Code a = Skip
               -- debugging.  Code generators are free to ignore this
               -- statement.
             | Op a
+              -- ^ Perform an extensible operation.
             deriving (Show)
 
 -- | The volatility of a memory access or variable.  Feel free to
@@ -250,11 +285,19 @@ lexicalMemoryUsage func =
         set (SetMem x y _) = namesFromList [x,y]
         set x = go set x
 
+-- | The leaves of an 'Exp'.
 data ExpLeaf = ScalarVar VName
+               -- ^ A scalar variable.  The type is stored in the
+               -- 'LeafExp' constructor itself.
              | SizeOf PrimType
+               -- ^ The size of a primitive type.
              | Index VName (Count Elements Exp) PrimType Space Volatility
+               -- ^ Reading a value from memory.  The arguments have
+               -- the same meaning as with 'Write'.
            deriving (Eq, Show)
 
+-- | A side-effect free expression whose execution will produce a
+-- single primitive value.
 type Exp = PrimExp ExpLeaf
 
 -- | A function call argument.
@@ -268,9 +311,11 @@ data Elements
 -- | Phantom type for a count of bytes.
 data Bytes
 
+-- | This expression counts elements.
 elements :: Exp -> Count Elements Exp
 elements = Count
 
+-- | This expression counts bytes.
 bytes :: Exp -> Count Bytes Exp
 bytes = Count
 
@@ -280,6 +325,7 @@ withElemType :: Count Elements Exp -> PrimType -> Count Bytes Exp
 withElemType (Count e) t =
   bytes $ ConvOpExp (SExt Int32 Int64) e * LeafExp (SizeOf t) (IntType Int64)
 
+-- | Turn a 'VName' into a 'Imp.ScalarVar'.
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
@@ -287,6 +333,7 @@ var = LeafExp . ScalarVar
 vi32 :: VName -> Exp
 vi32 = flip var $ IntType Int32
 
+-- | Concise wrapper for using 'Index'.
 index :: VName -> Count Elements Exp -> PrimType -> Space -> Volatility -> Exp
 index arr i t s vol = LeafExp (Index arr i t s vol) t
 

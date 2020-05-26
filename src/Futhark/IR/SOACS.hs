@@ -74,8 +74,5 @@ instance Bindable SOACS where
   mkLetNames = simpleMkLetNames
 
 instance BinderOps SOACS where
-  mkExpDecB = bindableMkExpDecB
-  mkBodyB = bindableMkBodyB
-  mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore SOACS where

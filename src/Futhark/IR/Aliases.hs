@@ -357,6 +357,3 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
     in mkAliasedBody bodylore bnds res
 
 instance (ASTLore (Aliases lore), Bindable (Aliases lore)) => BinderOps (Aliases lore) where
-  mkBodyB = bindableMkBodyB
-  mkExpDecB = bindableMkExpDecB
-  mkLetNamesB = bindableMkLetNamesB

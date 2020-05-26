@@ -58,6 +58,7 @@ import Futhark.IR.Aliases
 import Futhark.IR.Ranges
 import Futhark.IR.Kernels
 import Futhark.IR.MC
+
 import Futhark.Pass
 
 -- We do not care about ranges, but in order to use ST.SymbolTable
@@ -216,6 +217,7 @@ sink onOp =
           pure $ fst $ optimiseStms onOp mempty mempty consts $
           namesFromList $ M.keys $ scopeOf consts
 
+-- | Sinking in GPU kernels.
 sinkKernels :: Pass Kernels Kernels
 sinkKernels = sink onHostOp
   where onHostOp :: Sinker (SinkLore Kernels) (Op (SinkLore Kernels))
@@ -223,6 +225,7 @@ sinkKernels = sink onHostOp
           first SegOp $ optimiseSegOp onHostOp vtable sinking op
         onHostOp _ _ op = (op, mempty)
 
+-- | Sinking for multicore.
 sinkMC :: Pass MC MC
 sinkMC = sink onSegOp
   where onSegOp :: Sinker (SinkLore MC) (Op (SinkLore MC))

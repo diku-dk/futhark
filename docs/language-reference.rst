@@ -14,8 +14,8 @@ full language.  The text describes how ambiguities are resolved in
 practice (for example by applying rules of operator precedence).
 
 This reference describes only the language itself.  Documentation for
-the basis library is `available elsewhere
-<https://futhark-lang.org/docs/>`_.
+the built-in prelude is `available elsewhere
+<https://futhark-lang.org/docs/prelude>`_.
 
 Identifiers and Keywords
 ------------------------
@@ -816,6 +816,8 @@ indexes), but you really do not want them there.  Make very sure that
 the code is correct; eliding such checks can lead to memory
 corruption.
 
+This construct is deprecated.  Use the ``#[unsafe]`` attribute instead.
+
 ``assert cond e``
 .................
 
@@ -1581,36 +1583,65 @@ Attributes
 .. productionlist::
    attr:   `id`
 
-An expression can be prefixed with an attribute.  This may affect how
-it is treated by the compiler or other tools.  In no case will
-attributes affect or change the *semantics* of a program, but it may
-affect how well it compiles (or in some cases, whether it compiles at
-all).  Unknown attributes are silently ignored.  Most have no effect
-in the interpreter.  The following expression attributes are
-supported.
+An expression can be prefixed with an attribute, written as
+``#[attr]``.  This may affect how it is treated by the compiler or
+other tools.  In no case will attributes affect or change the
+*semantics* of a program, but it may affect how well it compiles (or
+in some cases, whether it compiles at all).  Unknown attributes are
+silently ignored.  Most have no effect in the interpreter.
+
+Many attributes affect second-order array combinators (*SOACS*).
+These must be applied to a fully saturated function application or
+they will have no effect.  If two SOACs with contradictory attributes
+are combined through fusion, it is unspecified which attributes take
+precedence.
+
+The following expression attributes are supported.
 
 ``incremental_flattening_no_outer``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using incremental flattening, do not generalise the "only outer
-parallelism" version for this SOAC.
+When using incremental flattening, do not generate the "only outer
+parallelism" version for the attributed SOACs.
 
 ``incremental_flattening_no_intra``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using incremental flattening, do not generalise the "intra-group
-parallelism" version for this SOAC.
+When using incremental flattening, do not generate the "intra-group
+parallelism" version for the attributed SOACs.
+
+``incremental_flattening_only_inner``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When using incremental flattening, do not generate multiple versions
+for this SOAC, but do exploit inner parallelism (which may give rise
+to multiple versions at deeper levels).
 
 ``noinline``
 ~~~~~~~~~~~~
 
-When surrounding a function application, do not inline this
-application.  Otherwise has no effect.  If used within a parallel
-construct (e.g. ``map``), this will likely prevent the GPU backends
-from generating working code.
+Do not inline the attributed function application.  If used within a
+parallel construct (e.g. ``map``), this will likely prevent the GPU
+backends from generating working code.
+
+``sequential``
+~~~~~~~~~~~~~~
+
+*Fully* sequentialise the attributed SOAC.
+
+``sequential_outer``
+~~~~~~~~~~~~~~~~~~~~
+
+Turn the outer parallelism in the attributed SOAC sequential, but
+preserve any inner parallelism.
+
+``sequential_inner``
+~~~~~~~~~~~~~~~~~~~~
+
+Exploit only outer parallelism in the attributed SOAC.
 
 ``unsafe``
 ~~~~~~~~~~
 
 Do not perform any dynamic safety checks (such as bound checks) during
-execution of the expression.
+execution of the attributed expression.

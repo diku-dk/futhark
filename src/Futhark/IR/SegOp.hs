@@ -6,7 +6,9 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
--- | Segmented operations.
+-- | Segmented operations.  These correspond to perfect @map@ nests on
+-- top of /something/, except that the @map@s are conceptually only
+-- over @iota@s (so there will be explicit indexing inside them).
 module Futhark.IR.SegOp
   ( SegOp(..)
   , SegVirt(..)
@@ -37,7 +39,6 @@ module Futhark.IR.SegOp
   , mapSegOpM
 
     -- * Simplification
-  , simplifyKernelBody
   , simplifySegOp
   , HasSegOp(..)
   , segOpRules
@@ -120,7 +121,7 @@ data HistOp lore =
   deriving (Eq, Ord, Show)
 
 -- | The type of a histogram produced by a 'HistOp'.  This can be
--- different from the type of the 'HistDest's in case we are
+-- different from the type of the 'histDest's in case we are
 -- dealing with a segmented histogram.
 histType :: HistOp lore -> [Type]
 histType op = map ((`arrayOfRow` histWidth op) .
@@ -283,6 +284,7 @@ removeKernelBodyWisdom (KernelBody dec stms res) =
   let Body dec' stms' _ = removeBodyWisdom $ Body dec stms []
   in KernelBody dec' stms' res
 
+-- | The variables consumed in the kernel body.
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
 consumedInKernelBody (KernelBody dec stms res) =
@@ -331,7 +333,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
             TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
 
 kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
-kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
+kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody _ stms res) =
@@ -621,6 +623,7 @@ mapSegBinOp tv (SegBinOp comm red_op nes shape) =
   <*> mapM (mapOnSegOpSubExp tv) nes
   <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
 
+-- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM :: (Applicative m, Monad m) =>
              SegOpMapper lvl flore tlore m
           -> SegOp lvl flore -> m (SegOp lvl tlore)
@@ -912,6 +915,7 @@ simplifySegBinOp (SegBinOp comm lam nes shape) = do
   nes' <- mapM Engine.simplify nes
   return (SegBinOp comm lam' nes' shape', hoisted)
 
+-- | Simplify the given 'SegOp'.
 simplifySegOp :: (Engine.SimplifiableLore lore,
                   BodyDec lore ~ (),
                   Engine.Simplifiable lvl) =>
@@ -1027,7 +1031,7 @@ topDownSegOp vtable (Pattern [] kpes) dec (SegMap lvl space ts (KernelBody _ kst
         checkForInvarianceResult (_, pe, Returns rm se)
           | rm == ResultMaySimplify,
             isInvariant se = do
-              letBindNames_ [patElemName pe] $
+              letBindNames [patElemName pe] $
                 BasicOp $ Replicate (Shape $ segSpaceDims space) se
               return False
         checkForInvarianceResult _ =
@@ -1046,7 +1050,7 @@ topDownSegOp _ (Pattern [] pes) _ (SegRed lvl space ops ts kbody)
           pes' = red_pes' ++ map_pes
           ts' = red_ts' ++ map_ts
           kbody' = kbody { kernelBodyResult = red_res' ++ map_res }
-      letBind_ (Pattern [] pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
+      letBind (Pattern [] pes') $ Op $ segOp $ SegRed lvl space ops' ts' kbody'
   where (red_pes, map_pes) = splitAt (segBinOpResults ops) pes
         (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
         (red_res, map_res) = splitAt (segBinOpResults ops) $ kernelBodyResult kbody
@@ -1127,12 +1131,12 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (Kernel
                                        d
                                        (constant (1::Int32))) $
                             segSpaceDims space
-              index kpe' = letBind_ (Pattern [] [kpe']) $ BasicOp $ Index arr $
+              index kpe' = letBind (Pattern [] [kpe']) $ BasicOp $ Index arr $
                            outer_slice <> remaining_slice
           if patElemName kpe `UT.isConsumed` used
             then do precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
                     index kpe { patElemName = precopy }
-                    letBind_ (Pattern [] [kpe]) $ BasicOp $ Copy precopy
+                    letBind (Pattern [] [kpe]) $ BasicOp $ Copy precopy
             else index kpe
           return (kpes'', kts'', kres'',
                   if patElemName pe `nameIn` free_in_kstms
