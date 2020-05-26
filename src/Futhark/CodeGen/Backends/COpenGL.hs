@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.COpenGL
 
 import Control.Monad hiding (mapM)
 import Data.List
+import Data.Maybe
 import qualified Data.Map as M
 
 import qualified Language.C.Syntax as C
@@ -24,7 +25,8 @@ import qualified Futhark.CodeGen.ImpGen.OpenGL as ImpGen
 import Futhark.MonadFreshNames
 import Futhark.Util (chunk, zEncodeString)
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError GC.CParts)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory
+                                 -> m (Either InternalError GC.CParts)
 compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
@@ -40,13 +42,14 @@ compileProg prog = do
                                      shaders sizes)
                 include_opengl_h [Space "device", DefaultSpace]
                 cliOptions prog'
-  where operations :: String -> String
+  where operations :: [String] -> String
                    -> M.Map ShaderName Futhark.CodeGen.ImpCode.OpenGL.Safety
                    -> M.Map Name SizeClass
                    -> GC.Operations OpenGL ()
         operations opengl_code opengl_prelude shaders sizes =
                    GC.defaultOperations
-                     { GC.opsCompiler    = callShader opengl_code opengl_prelude shaders sizes
+                     { GC.opsCompiler    = callShader opengl_code opengl_prelude
+                                                      shaders sizes
                      , GC.opsWriteScalar = writeOpenGLScalar
                      , GC.opsReadScalar  = readOpenGLScalar
                      , GC.opsAllocate    = allocateOpenGLBuffer
@@ -198,7 +201,7 @@ staticOpenGLArray name "device" t vs = do
 staticOpenGLArray _ space _ _ =
   error $ "OpenGL backend cannot create static array in memory space '" ++ space ++ "'"
 
-callShader :: String -> String
+callShader :: [String] -> String
            -> M.Map ShaderName Futhark.CodeGen.ImpCode.OpenGL.Safety
            -> M.Map Name SizeClass
            -> GC.OpCompiler OpenGL ()
@@ -221,11 +224,12 @@ callShader opengl_code opengl_prelude shaders sizes
     GC.stm [C.cstm|
     OPENGL_SUCCEED(glGetError());
     |]
+  let shader_idx        = fromJust $ elemIndex name $ M.keys shaders
   let shader_size_value = pretty $ zipWith shaderSizeInit (M.keys  sizes)
                                                           (M.elems sizes)
   let fragments         = map (\s -> [C.cinit|$string:s|])
                           $ chunk 2000 (opengl_prelude ++ shader_size_value
-                                                       ++ opengl_code)
+                                                       ++ opengl_code !! shader_idx)
   mapM_ GC.stm $ map (loadShader fragments) (M.toList shaders)
   GC.stm [C.cstm|glUseProgram(ctx->opengl.program);|]
   zipWithM_ setShaderArg [(0::Int)..] args

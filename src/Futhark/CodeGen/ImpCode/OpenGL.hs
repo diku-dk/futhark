@@ -22,7 +22,7 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Util.Pretty
 
 -- | A program calling OpenGL shaders.
-data Program = Program { openGlProgram :: String
+data Program = Program { openGlProgram :: [String]
                        , openGlPrelude :: String
                          -- ^ Must be prepended to the program.
                        , openGlShaderNames :: M.Map ShaderName Safety

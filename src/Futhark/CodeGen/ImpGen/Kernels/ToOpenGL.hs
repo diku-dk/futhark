@@ -42,7 +42,7 @@ translateKernels (ImpKernels.Functions funs) = do
     flip runStateT initialOpenGL $ fmap Functions $ forM funs $ \(fname, fun) ->
     (fname,) <$> runReaderT (traverse (onHostOp fname) fun) fname
   let shaders'       = M.map fst shaders
-      opengl_code    = openGlCode $ concat $ map snd $ M.elems shaders
+      opengl_code    = openGlCode $ map snd $ M.elems shaders
       opengl_prelude = pretty $ genOpenGlPrelude used_types
   return $ ImpOpenGL.Program opengl_code opengl_prelude shaders'
     (S.toList used_types) (cleanSizes sizes) prog'
@@ -78,7 +78,7 @@ newShaderState = ShaderState mempty 0 False False
 errorLabel :: ShaderState -> String
 errorLabel = ("error_"++) . show . shaderNextSync
 
-data ToOpenGL = ToOpenGL { glShaders   :: M.Map ShaderName (Safety, [C.Definition])
+data ToOpenGL = ToOpenGL { glShaders   :: M.Map ShaderName (Safety, [[C.Definition]])
                          , glUsedTypes :: S.Set PrimType
                          , glSizes     :: M.Map Name SizeClass
                          }
@@ -167,7 +167,7 @@ onShader shader = do
 
   modify $ \s -> s
     { glShaders   =
-           M.insert name (safety, shader_code) $ glShaders s
+           M.insert name (safety, [shader_code]) $ glShaders s
     , glUsedTypes = typesInShader shader <> glUsedTypes s
     }
 
@@ -210,8 +210,8 @@ constDef (ConstUse v e) = Just [C.citem|$escstm:def|]
                            ++ " = " ++ pretty e' ++ ";"
 constDef _ = Nothing
 
-openGlCode :: [C.Definition] -> String
-openGlCode shaders = pretty shaders
+openGlCode :: [[[C.Definition]]] -> [String]
+openGlCode shaders = map pretty (concat shaders)
 
 genOpenGlPrelude :: S.Set PrimType -> [C.Definition]
 genOpenGlPrelude ts =

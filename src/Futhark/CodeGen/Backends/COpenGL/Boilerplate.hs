@@ -17,7 +17,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util (zEncodeString)
 
-generateBoilerplate :: String -> String
+generateBoilerplate :: [String] -> String
                     -> M.Map ShaderName Safety
                     -> M.Map Name SizeClass
                     -> GC.CompilerM OpenGL () ()
