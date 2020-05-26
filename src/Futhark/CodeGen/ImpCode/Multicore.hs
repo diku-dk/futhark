@@ -8,7 +8,6 @@ module Futhark.CodeGen.ImpCode.Multicore
        , MulticoreFunc(..)
        , SequentialFunc(..)
        , Scheduling(..)
-       , ValueType(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -38,8 +37,6 @@ data Multicore = ParLoop [Param] Imp.Exp Code Code VName [Param]
                | SeqCode VName Code Code
 
 type Granularity = Int32
-
-data ValueType = Prim | MemBlock | Other
 
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic
 -- or it is restainted to Static

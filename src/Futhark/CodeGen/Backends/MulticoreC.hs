@@ -198,27 +198,24 @@ closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
   nameFromString "retval_" <> nameFromString (pretty v)
 
+data ValueType = Prim | MemBlock | RawMem
 
 compileFreeStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
   where
     field name (ty, Prim) =
       [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
-    field name (_, MemBlock) =
-      [C.csdecl|$ty:(defaultMemBlockType) $id:(closureFreeStructField name);|]
-    field name (ty, Other) =
-      [C.csdecl|$ty:ty *$id:(closureFreeStructField name);|]
+    field name (_, _) =
+      [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
 
 
 compileRetvalStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileRetvalStructFields = zipWith field
   where
-    field name (_, MemBlock) =
-      [C.csdecl|$ty:(defaultMemBlockType) $id:(closureRetvalStructField name);|]
-    field name (ty, _) =
+    field name (ty, Prim) =
       [C.csdecl|$ty:ty *$id:(closureRetvalStructField name);|]
-
-
+    field name (_, _) =
+      [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
 
 compileSetStructValues :: C.ToIdent a =>
                           a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
@@ -228,53 +225,49 @@ compileSetStructValues struct = zipWith field
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
     field name (_, MemBlock) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name.mem;|]
-    field name (_, Other) =
-      [C.cstm|$id:struct.$id:(closureFreeStructField name)=&$id:name;|]
-
+    field name (_, RawMem) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
 
 compileSetRetvalStructValues :: C.ToIdent a =>
                           a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
 compileSetRetvalStructValues struct = zipWith field
   where
+    field name (_, Prim) =
+      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=&$id:name;|]
     field name (_, MemBlock) =
       [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
-    field name _ =
-      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=&$id:name;|]
+    field name (_, RawMem) =
+      [C.cstm|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
 compileGetRetvalStructVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
   where
-    field name (ty, MemBlock) =
-      let name' = baseString name ++ "_" ++ show (baseTag name)
-      in [C.cdecl|$ty:ty $id:name = {.desc = $string:name',
-                                     .mem = $id:struct->$id:(closureRetvalStructField name),
-                                     .size = 0, .references = NULL};|]
-    field name (ty, _) =
+    field name (ty, Prim) =
       [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureRetvalStructField name);|]
+    field name (ty, _) =
+      [C.cdecl|$ty:ty $id:name =
+                 {.desc = $string:(pretty name),
+                 .mem = $id:struct->$id:(closureRetvalStructField name),
+                 .size = 0, .references = NULL};|]
 compileGetStructVals :: C.ToIdent a =>
                         a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetStructVals struct = zipWith field
   where
     field name (ty, Prim) =
       [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureFreeStructField name);|]
-    field name (ty, MemBlock) =
-      let name' = baseString name ++ "_" ++ show (baseTag name)
-      in [C.cdecl|$ty:ty $id:name = {.desc = $string:name',
-                                     .mem = $id:struct->$id:(closureFreeStructField name),
-                                     .size = 0, .references = NULL};|]
-    field name (ty, Other) =
-      [C.cdecl|$ty:ty $id:name = *$id:struct->$id:(closureFreeStructField name);|]
+    field name (ty, _) =
+      [C.cdecl|$ty:ty $id:name =
+                 {.desc = $string:(pretty name),
+                  .mem = $id:struct->$id:(closureFreeStructField name),
+                  .size = 0, .references = NULL};|]
 
 compileWriteBackResVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
 compileWriteBackResVals struct = zipWith field
   where
-    field name (_, MemBlock) =
-      [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
-    field name _ =
+    field name (_, Prim) =
       [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $id:name;|]
-
-
-
+    field name (_, _) =
+      [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
 compileSchedulingVal :: Scheduling -> GC.CompilerM op s C.Exp
 compileSchedulingVal Static =  return [C.cexp|0|]
@@ -290,11 +283,10 @@ mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
 mcMemToCType v space = do
   refcount <- GC.fatMemory space
   cached <- isJust <$> GC.cacheMem v
-  if refcount && not cached
-     then return (GC.fatMemType space, MemBlock)
-     else do t <- GC.rawMemCType space
-             return (t, Other)
-
+  return (GC.fatMemType space,
+          if refcount && not cached
+          then MemBlock
+          else RawMem)
 
 functionRuntime :: String -> String
 functionRuntime = (++"_total_runtime")
@@ -411,7 +403,7 @@ generateFunction lexical basename code fstruct free retval tid = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreFunDef basename $ \s -> do
-    fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction True $
+    fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction False $
              GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do
       mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
@@ -488,7 +480,7 @@ compileOp (MCFunc free ntasks i sched prebody body tid) = do
                      };|]
   ftask <- multicoreFunDef "parloop" $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=<
-             GC.inNewFunction True $ GC.cachingMemory lexical $
+             GC.inNewFunction False $ GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do
       mapM_ GC.item
         [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
