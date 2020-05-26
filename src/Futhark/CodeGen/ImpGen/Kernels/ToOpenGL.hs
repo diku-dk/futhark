@@ -113,7 +113,7 @@ onShader shader = do
                                                  $ kernelBody shader
       s_state = GenericC.compUserState cstate
 
-      (use_params_, uses_) = unzip $ mapMaybe useAsParam $ kernelUses shader
+      (use_params', uses') = unzip $ mapMaybe useAsParam $ kernelUses shader
 
       (local_memory_args, _, local_memory_init) =
         unzip3 $
@@ -137,7 +137,7 @@ onShader shader = do
 
       (cat_use_params, cat_uses) = unzip $ zip local_memory_init [AMemoryUse]
 
-      (use_params, uses) = (cat_use_params ++ use_params_, cat_uses ++ uses_)
+      (use_params, uses) = (cat_use_params ++ use_params', cat_uses ++ uses')
 
       layoutQuals = concat $
                     map (\(i, k, u) -> case u of
