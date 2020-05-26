@@ -30,7 +30,6 @@ import Control.Monad.ST
 import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
-import Data.Binary.IEEE754
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Char (isSpace, ord, chr)
@@ -86,8 +85,8 @@ instance Binary Value where
   put (Word16Value shape vs) = putBinaryValue " u16" shape vs putWord16le
   put (Word32Value shape vs) = putBinaryValue " u32" shape vs putWord32le
   put (Word64Value shape vs) = putBinaryValue " u64" shape vs putWord64le
-  put (Float32Value shape vs) = putBinaryValue " f32" shape vs putFloat32le
-  put (Float64Value shape vs) = putBinaryValue " f64" shape vs putFloat64le
+  put (Float32Value shape vs) = putBinaryValue " f32" shape vs putFloatle
+  put (Float64Value shape vs) = putBinaryValue " f64" shape vs putDoublele
   put (BoolValue shape vs) = putBinaryValue "bool" shape vs $ putInt8 . boolToInt
     where boolToInt True = 1
           boolToInt False = 0
@@ -119,8 +118,8 @@ instance Binary Value where
       " u16" -> get' (Word16Value shape') getWord16le num_elems
       " u32" -> get' (Word32Value shape') getWord32le num_elems
       " u64" -> get' (Word64Value shape') getWord64le num_elems
-      " f32" -> get' (Float32Value shape') getFloat32le num_elems
-      " f64" -> get' (Float64Value shape') getFloat64le num_elems
+      " f32" -> get' (Float32Value shape') getFloatle num_elems
+      " f64" -> get' (Float64Value shape') getDoublele num_elems
       "bool" -> get' (BoolValue shape') getBool num_elems
       s      -> fail $ "Cannot parse binary values of type " ++ show s
     where getBool = (/=0) <$> getWord8
