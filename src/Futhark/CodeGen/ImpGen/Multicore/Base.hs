@@ -130,7 +130,7 @@ extractAllocations segop_code = f segop_code
   where declared = Imp.declaredIn segop_code
         f (Imp.DeclareMem name space) =
           -- Hoisting declarations out is always safe.
-          (Imp.DeclareMem name space, mempty
+          (Imp.DeclareMem name space, mempty)
         f (Imp.Allocate name size space)
           | not $ freeIn size `namesIntersect` declared =
               (Imp.Allocate name size space, mempty)
