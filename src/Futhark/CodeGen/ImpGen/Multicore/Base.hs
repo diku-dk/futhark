@@ -1,7 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
  ( toParam
  , compileKBody
- -- , extractAllocations
+ , extractAllocations
  , compileThreadResult
  , MulticoreGen
  , getNumThreads
@@ -122,48 +122,47 @@ sUnpauseProfiling :: MulticoreGen ()
 sUnpauseProfiling =
   emit $ Imp.Op $ Imp.MulticoreCall Nothing "futhark_context_unpause_profiling"
 
--- -- | Try to extract invariant allocations.  If we assume that the
--- -- given 'Code' is the body of a 'SegOp', then it is always safe to
--- -- move the allocations to the prebody.
--- extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
--- extractAllocations segop_code = f segop_code
---   where declared = Imp.declaredIn segop_code
---         f (Imp.DeclareMem name space) =
---           -- Hoisting declarations out is always safe.
---           (Imp.DeclareMem name space, mempty)
---         f (Imp.Allocate name size space)
---           | not $ freeIn size `namesIntersect` declared =
---               (Imp.Allocate name size space, mempty)
---         f (x Imp.:>>: y) = f x <> f y
---         f (Imp.While cond body) =
---           second (Imp.While cond) (f body)
---         f (Imp.For i it bound body) =
---           second (Imp.For i it bound) (f body)
---         f (Imp.Comment s code) =
---           second (Imp.Comment s) (f code)
---         f Imp.Free{} =
---           mempty
---         f (Imp.If cond tcode fcode) =
---           let (ta, tcode') = f tcode
---               (fa, fcode') = f fcode
---           in (ta <> fa, Imp.If cond tcode' fcode')
---         f (Imp.Op (Imp.ParLoop sched ntask i e free
---                    (Imp.MulticoreFunc par_prebody par_body n)
---                    (Imp.SequentialFunc seq_prebody seq_body))) =
---           -- We can't not extract allocations all the way out
---           -- a task, since it might contain (multiple) nested SegOp.
---           -- then threads might share the same mem struct
---           -- See segredomap/ez6.fut for example
---           -- ( I think my reasoning is OK? )
---           let (par_body_allocs, par_body') = extractAllocations par_body
---               (seq_body_allocs, seq_body') = extractAllocations seq_body
---               -- (free_allocs, here_allocs) = f body_allocs
---               -- free' = filter (not .
---               --                 (`nameIn` Imp.declaredIn body_allocs) .
---               --                 Imp.paramName) free
---           in (mempty,
---               Imp.Op (Imp.ParLoop sched ntask i e free
---                      (Imp.MulticoreFunc (par_body_allocs <> par_prebody) par_body' n)
---                      (Imp.SequentialFunc (seq_body_allocs <> seq_prebody) seq_body')))
---         f code =
---           (mempty, code)
+-- | Try to extract invariant allocations.  If we assume that the
+-- given 'Code' is the body of a 'SegOp', then it is always safe to
+-- move the allocations to the prebody.
+extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
+extractAllocations segop_code = f segop_code
+  where declared = Imp.declaredIn segop_code
+        f (Imp.DeclareMem name space) =
+          -- Hoisting declarations out is always safe.
+          (Imp.DeclareMem name space, mempty
+        f (Imp.Allocate name size space)
+          | not $ freeIn size `namesIntersect` declared =
+              (Imp.Allocate name size space, mempty)
+        f (x Imp.:>>: y) = f x <> f y
+        f (Imp.While cond body) =
+          second (Imp.While cond) (f body)
+        f (Imp.For i it bound body) =
+          second (Imp.For i it bound) (f body)
+        f (Imp.Comment s code) =
+          second (Imp.Comment s) (f code)
+        f Imp.Free{} =
+          mempty
+        f (Imp.If cond tcode fcode) =
+          let (ta, tcode') = f tcode
+              (fa, fcode') = f fcode
+          in (ta <> fa, Imp.If cond tcode' fcode')
+        f (Imp.Op (Imp.MCFunc free n i sched prebody body tid)) =
+          -- We can't not extract allocations all the way out
+          -- a task, since it might contain (multiple) nested SegOp.
+          -- then threads might share the same mem struct
+          -- See segredomap/ez6.fut for example
+          -- ( I think my reasoning is OK? )
+          let (body_allocs, body') = extractAllocations body
+              (free_allocs, here_allocs) = f body_allocs
+              free' = filter (not .
+                              (`nameIn` Imp.declaredIn body_allocs) .
+                              Imp.paramName) free
+          in (free_allocs, here_allocs <>
+              Imp.Op (Imp.MCFunc free' n i sched prebody body' tid))
+        f (Imp.Op (Imp.SeqCode i prebody body )) =
+          let (body_allocs, body') = extractAllocations body
+          in (body_allocs,
+              Imp.Op (Imp.SeqCode i prebody body'))
+        f code =
+          (mempty, code)

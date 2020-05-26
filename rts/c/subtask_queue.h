@@ -8,7 +8,7 @@
 #include <assert.h>
 
 
-typedef int (*task_fn)(void* args, int iterations);
+typedef int (*task_fn)(void* args, int iterations, int tid);
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
 
 /* A subtask that can be executed by a thread */

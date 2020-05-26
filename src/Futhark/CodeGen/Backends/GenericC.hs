@@ -558,11 +558,18 @@ defineMemorySpace space = do
   let unrefdef = [C.cedecl|static int $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
     *(block->references) -= 1;
-
+    if (ctx->detail_memory) {
+      fprintf(stderr, $string:("Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n"),
+                               desc, block->desc, $string:spacedesc, *(block->references));
+    }
     if (*(block->references) == 0) {
       ctx->$id:usagename -= block->size;
       $items:free
       free(block->references);
+      if (ctx->detail_memory) {
+        fprintf(stderr, "%lld bytes freed (now allocated: %lld bytes)\n",
+                (long long) block->size, (long long) ctx->$id:usagename);
+      }
     }
     block->references = NULL;
   }
@@ -580,10 +587,21 @@ defineMemorySpace space = do
   int ret = $id:(fatMemUnRef space)(ctx, block, desc);
 
   ctx->$id:usagename += size;
-
+  if (ctx->detail_memory) {
+    fprintf(stderr, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
+            (long long) size,
+            desc, $string:spacedesc,
+            (long long) ctx->$id:usagename);
+  }
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
+    if (ctx->detail_memory) {
+      fprintf(stderr, " (new peak).\n");
+    }
+  } else if (ctx->detail_memory) {
+    fprintf(stderr, ".\n");
   }
+
   $items:alloc
   block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
@@ -623,6 +641,7 @@ defineMemorySpace space = do
                 "cur_mem_usage_default",
                 "memblock",
                 "default space")
+
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do

@@ -39,23 +39,15 @@ compileSegMapBody :: VName
                   -> Pattern MCMem
                   -> SegSpace
                   -> KernelBody MCMem
-                  -> MulticoreGen (Imp.Code, Imp.Code)
+                  -> MulticoreGen Imp.Code
 compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
-
-
-  prebody <- collect $
-    dPrimV_ (segFlat space) 0
-
-  body <- collect $ do
+  collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     compileStms (freeIn kres) kstms $
       zipWithM_ (writeResult is) (patternElements pat) kres
-
-
-  return (prebody, body)
 
 
 
@@ -68,25 +60,28 @@ compileSegMap pat space kbody = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
 
+  dPrimV_ (segFlat space) 0
   flat_idx <- dPrim "iter" int32
-  (prebody, body) <- compileSegMapBody flat_idx pat space kbody
+  body <- compileSegMapBody flat_idx pat space kbody
   let freeVariables = namesToList (freeIn body `namesSubtract` namesFromList [segFlat space, flat_idx])
   ts <- mapM lookupType freeVariables
   let freeParams = zipWith toParam freeVariables ts
+  let (body_allocs, body') = extractAllocations body
+
 
   par_task_code <- collect $ do
     emit $ Imp.DebugPrint "SegMap parallel" Nothing
     ntasks <- dPrim "num_tasks" $ IntType Int32
     let sched = decideScheduling body
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks flat_idx sched mempty body (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks flat_idx sched body_allocs body' (segFlat space)
 
   seq_task_code <- collect $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
-    emit $ Imp.Op $ Imp.SeqCode flat_idx mempty body
+    emit $ Imp.Op $ Imp.SeqCode flat_idx body_allocs body'
 
-  let freeVariables_task = namesToList $ freeIn (prebody <> par_task_code <> seq_task_code) `namesSubtract` namesFromList [flat_idx]
+  let freeVariables_task = namesToList $ freeIn (par_task_code <> seq_task_code) `namesSubtract` namesFromList [flat_idx]
   ts_task <- mapM lookupType freeVariables_task
   let freeParams_task = zipWith toParam freeVariables_task ts_task
 
 
-  emit $ Imp.Op $ Imp.ParLoop freeParams_task (product ns') (prebody <> par_task_code) (prebody <> seq_task_code)
+  emit $ Imp.Op $ Imp.ParLoop freeParams_task (product ns') par_task_code seq_task_code (segFlat space)

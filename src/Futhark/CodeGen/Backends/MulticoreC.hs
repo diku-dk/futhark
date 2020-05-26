@@ -14,6 +14,8 @@ import Control.Monad
 import Data.Maybe
 import Data.FileEmbed
 
+
+import qualified Data.Map as M
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 import Futhark.IR.MCMem (Prog, MCMem)
@@ -354,19 +356,25 @@ multicoreFunDef s f = do
   GC.libDecl =<< f s'
   return s'
 
-generateFunction :: C.ToIdent a => String
+generateFunction :: C.ToIdent a => M.Map VName Space
+                  -> String
                   -> Code
                   -> a
                   -> [VName]
                   -> [(C.Type, ValueType)]
+                  -> VName
                   -> GC.CompilerM Multicore s String
-generateFunction basename code fstruct fargs fctypes =
+generateFunction lexical basename code fstruct fargs fctypes tid =
   multicoreFunDef basename $ \s -> do
-    fbody <- GC.blockScope $ do
+    fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction True $
+             GC.cachingMemory lexical $
+             \decl_cached free_cached -> GC.blockScope $ do
       mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
+      mapM_ GC.item decl_cached
       code' <- GC.blockScope $ GC.compileCode code
       mapM_ GC.item [C.citems|$items:code'|]
-    return [C.cedecl|int $id:s(void *args, int iterations) {
+      mapM_ GC.stm free_cached
+    return [C.cedecl|int $id:s(void *args, int iterations, int $id:tid) {
                            int err = 0;
                            struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                            struct futhark_context *ctx = $id:fstruct->ctx;
@@ -379,11 +387,14 @@ generateFunction basename code fstruct fargs fctypes =
 
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop params e par_code seq_code) = do
+compileOp (ParLoop params e par_code seq_code tid) = do
 
   fctypes <- mapM paramToCType params
   let fargs = map paramName params
   e' <- GC.compileExp e
+
+  let lexical_par = lexicalMemoryUsage $ Function False [] params par_code [] []
+  let lexical_seq = lexicalMemoryUsage $ Function False [] params seq_code [] []
 
   fstruct <- multicoreFunDef "task_struct" $ \s ->
     return [C.cedecl|struct $id:s {
@@ -391,8 +402,8 @@ compileOp (ParLoop params e par_code seq_code) = do
                        $sdecls:(compileStructFields fargs fctypes)
                      };|]
 
-  fpar_task <- generateFunction "par_task" par_code fstruct fargs fctypes
-  fseq_task <- generateFunction "seq_task" seq_code fstruct fargs fctypes
+  fpar_task <- generateFunction lexical_par "par_task" par_code fstruct fargs fctypes tid
+  fseq_task <- generateFunction lexical_seq "seq_task" seq_code fstruct fargs fctypes tid
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
@@ -405,6 +416,7 @@ compileOp (ParLoop params e par_code seq_code) = do
                         }|]
 
   mapM_ GC.item code'
+  mapM_ GC.profileReport $ multiCoreReport $ zip [fseq_task, fpar_task] [True, True]
 
 
 

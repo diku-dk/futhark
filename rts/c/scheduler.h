@@ -331,7 +331,7 @@ static inline int do_task_directly(task_fn seq_fn,
   fprintf(stderr, "[do_task_directly] doing task directly\n", iterations);
 #endif
   assert(seq_fn != NULL);
-  return seq_fn(args, iterations);
+  return seq_fn(args, iterations, (worker_local == NULL) ? 0 : worker_local->tid);
 }
 
 static inline int scheduler_do_task(void *args,
@@ -347,7 +347,7 @@ static inline int scheduler_do_task(void *args,
     return do_task_directly(seq_fn, args, iterations);
   }
 
-  return par_fn(args, iterations);
+  return par_fn(args, iterations, (worker_local == NULL) ? 0 : worker_local->tid);
 }
 
 
