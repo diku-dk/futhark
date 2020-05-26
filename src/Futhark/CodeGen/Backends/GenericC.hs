@@ -1,6 +1,7 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC

@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This module defines the concept of a simplification rule for
 -- bindings.  The intent is that you pass some context (such as symbol
 -- table) and a binding, and is given back a sequence of bindings that

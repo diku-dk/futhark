@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Safe #-}
 -- | A simple representation with SOACs and nested parallelism.
 module Futhark.IR.SOACS
        ( -- * The Lore definition

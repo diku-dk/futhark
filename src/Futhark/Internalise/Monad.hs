@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM

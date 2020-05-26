@@ -11,7 +11,6 @@ module Futhark.Optimise.InliningDeadFun
 import Control.Monad.Identity
 import Control.Monad.State
 import Data.List (partition)
-import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -137,7 +136,7 @@ inlineFunction pat aux args (safety,loc,locs) fun = do
 
         body_stms =
           stmsToList $
-          addLocations (stmAuxAttrs aux) safety (filter notNoLoc (loc:locs)) $
+          addLocations (stmAuxAttrs aux) safety (filter notmempty (loc:locs)) $
           bodyStms $ funDefBody fun
 
         reshapeIfNecessary dim_names ident se
@@ -148,7 +147,7 @@ inlineFunction pat aux args (safety,loc,locs) fun = do
           | otherwise =
               mkLet [] [ident] $ BasicOp $ SubExp se
 
-        notNoLoc = (/=NoLoc) . locOf
+        notmempty = (/=mempty) . locOf
 
 inlineInStms :: MonadFreshNames m =>
                 M.Map Name (FunDef SOACS) -> Stms SOACS -> m (Stms SOACS)

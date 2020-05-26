@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Safe #-}
 -- | The type checker checks whether the program is type-consistent
 -- and adds type annotations and various other elaborations.  The
 -- program does not need to have any particular properties for the
@@ -19,7 +20,6 @@ module Language.Futhark.TypeChecker
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.List (isPrefixOf)
-import Data.Loc
 import Data.Maybe
 import Data.Either
 import Data.Ord

@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Simple C runtime representation.
 module Futhark.CodeGen.Backends.SimpleRep
   ( tupleField

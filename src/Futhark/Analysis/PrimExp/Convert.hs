@@ -16,7 +16,6 @@ module Futhark.Analysis.PrimExp.Convert
 
 import qualified Control.Monad.Fail as Fail
 import           Control.Monad.Identity
-import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 
@@ -37,7 +36,7 @@ instance ToExp v => ToExp (PrimExp v) where
     return $ BasicOp $ SubExp $ Constant v
   toExp (FunExp h args t) =
     Apply (nameFromString h) <$> args' <*> pure [primRetType t] <*>
-    pure (Safe, noLoc, [])
+    pure (Safe, mempty, [])
     where args' = zip <$> mapM (toSubExp "apply_arg") args <*> pure (repeat Observe)
   toExp (LeafExp v _) =
     toExp v

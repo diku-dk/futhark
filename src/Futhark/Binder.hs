@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleInstances, MultiParamTypeClasses, UndecidableInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This module defines a convenience monad/typeclass for creating
 -- normalised programs.
 module Futhark.Binder

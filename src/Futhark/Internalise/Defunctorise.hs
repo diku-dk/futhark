@@ -1,6 +1,7 @@
 -- | Partially evaluate all modules away from a source Futhark
 -- program.  This is implemented as a source-to-source transformation.
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Defunctorise (transformProg) where
 
 import Control.Monad.RWS.Strict
@@ -9,7 +10,6 @@ import qualified Data.DList as DL
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.Loc
 
 import Prelude hiding (mod, abs)
 

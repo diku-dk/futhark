@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This module defines an efficient value representation as well as
 -- parsing and comparison functions.  This is because the standard
 -- Futhark parser is not able to cope with large values (like arrays
@@ -37,7 +38,6 @@ import Data.Vector.Binary
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import qualified Data.Vector.Unboxed as UVec
 import Data.Vector.Generic (freeze)
-import Data.Loc (Pos(..))
 
 import qualified Language.Futhark.Syntax as F
 import Language.Futhark.Pretty()
@@ -48,6 +48,7 @@ import Futhark.IR.Prop.Constants (IsValue(..))
 import Futhark.IR.Pretty ()
 import Futhark.Util.Pretty
 import Futhark.Util (maybeHead)
+import Futhark.Util.Loc (Pos(..))
 
 type STVector s = UMVec.STVector s
 

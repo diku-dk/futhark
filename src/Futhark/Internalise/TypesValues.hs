@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types

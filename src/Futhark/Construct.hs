@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Safe #-}
 -- | = Constructing Futhark ASTs
 --
 -- This module re-exports and defines a bunch of building blocks for
@@ -112,7 +113,6 @@ module Futhark.Construct
 where
 
 import qualified Data.Map.Strict as M
-import Data.Loc (SrcLoc)
 import Data.List (sortOn)
 import Control.Monad.Identity
 import Control.Monad.State

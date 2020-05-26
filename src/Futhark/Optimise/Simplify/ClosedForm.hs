@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Safe #-}
 -- | This module implements facilities for determining whether a
 -- reduction or fold can be expressed in a closed form (i.e. not as a
 -- SOAC).

@@ -1,6 +1,7 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 -- | = Definition of the Futhark core language IR
 --
 -- For actually /constructing/ ASTs, see "Futhark.Construct".
@@ -163,7 +164,6 @@ module Futhark.IR.Syntax
 
 import qualified Data.Set as S
 import Data.Foldable
-import Data.Loc
 import qualified Data.Sequence as Seq
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)

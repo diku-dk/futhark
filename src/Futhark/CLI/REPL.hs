@@ -10,7 +10,6 @@ import Control.Monad.Free.Church
 import Control.Exception
 import Data.Char
 import Data.List (intercalate, intersperse)
-import Data.Loc
 import Data.Maybe
 import Data.Version
 import Control.Monad
@@ -191,7 +190,7 @@ getPrompt = do
   return $ "[" ++ show i ++ "]> "
 
 mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc
+mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty
 
 -- The ExceptT part is more of a continuation, really.
 newtype FutharkiM a =

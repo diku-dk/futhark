@@ -9,8 +9,6 @@ module Futhark.Internalise.Lambdas
   )
   where
 
-import Data.Loc
-
 import Language.Futhark as E
 import Futhark.IR.SOACS as I
 import Futhark.MonadFreshNames

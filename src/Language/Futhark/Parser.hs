@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 -- | Interface to the Futhark parser.
 module Language.Futhark.Parser
   ( parseFuthark

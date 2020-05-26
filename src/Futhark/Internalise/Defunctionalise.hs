@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise
   ( transformProg ) where
@@ -11,7 +12,6 @@ import           Data.Bifunctor
 import           Data.Foldable
 import           Data.List (sortOn, nub, partition, tails)
 import qualified Data.List.NonEmpty as NE
-import           Data.Loc
 import           Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -189,13 +189,13 @@ defuncFun tparams pats e0 (closure, ret) loc = do
 
   where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
           let name = nameFromString $ pretty vn
-          in (RecordFieldExplicit name clsr_env noLoc, (vn, sv))
+          in (RecordFieldExplicit name clsr_env mempty, (vn, sv))
 
         closureFromDynamicFun (vn, sv) =
           let name = nameFromString $ pretty vn
               tp' = typeFromSV sv
           in (RecordFieldExplicit name
-               (Var (qualName vn) (Info tp') noLoc) noLoc, (vn, sv))
+               (Var (qualName vn) (Info tp') mempty) mempty, (vn, sv))
 
 -- | Defunctionalization of an expression. Returns the residual expression and
 -- the associated static value in the defunctionalization monad.
@@ -267,7 +267,7 @@ defuncExp e@(Var qn _ loc) = do
     -- can get rid of them.
     IntrinsicSV -> do
       (pats, body, tp) <- etaExpand (typeOf e) e
-      defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) noLoc
+      defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
     _ -> let tp = typeFromSV sv
          in return (Var qn (Info tp) loc, sv)
 
@@ -483,7 +483,7 @@ defuncSoacExp e
       (pats, body, tp) <- etaExpand (typeOf e) e
       let env = foldMap envFromPattern pats
       body' <- localEnv env $ defuncExp' body
-      return $ Lambda pats body' Nothing (Info (mempty, tp)) noLoc
+      return $ Lambda pats body' Nothing (Info (mempty, tp)) mempty
   | otherwise = defuncExp' e
 
 etaExpand :: PatternType -> Exp -> DefM ([Pattern], Exp, StructType)
@@ -492,11 +492,11 @@ etaExpand e_t e = do
   (pats, vars) <- fmap unzip . forM ps $ \(p, t) -> do
     x <- case p of Named x -> pure x
                    Unnamed -> newNameFromString "x"
-    return (Id x (Info t) noLoc,
-            Var (qualName x) (Info t) noLoc)
+    return (Id x (Info t) mempty,
+            Var (qualName x) (Info t) mempty)
   let e' = foldl' (\e1 (e2, t2, argtypes) ->
                      Apply e1 e2 (Info (diet t2, Nothing))
-                     (Info (foldFunType argtypes ret), Info []) noLoc)
+                     (Info (foldFunType argtypes ret), Info []) mempty)
            e $ zip3 vars (map snd ps) (drop 1 $ tails $ map snd ps)
   return (pats, e', toStruct ret)
 
@@ -523,10 +523,10 @@ defuncLet dims ps@(pat:pats) body rettype
           (pat_dims, rest_dims) = partition bound_by_pat dims
           env = envFromPattern pat <> envFromShapeParams pat_dims
       (rest_dims', pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body rettype
-      closure <- defuncFun dims ps body (mempty, rettype) noLoc
+      closure <- defuncFun dims ps body (mempty, rettype) mempty
       return (pat_dims ++ rest_dims', pat : pats', body', DynamicFun closure sv)
   | otherwise = do
-      (e, sv) <- defuncFun dims ps body (mempty, rettype) noLoc
+      (e, sv) <- defuncFun dims ps body (mempty, rettype) mempty
       return ([], [], e, sv)
 
 defuncLet _ [] body rettype = do
@@ -602,7 +602,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
                               (Info $ Scalar $ Arrow mempty Unnamed (fromStruct t2) rettype,
                                Info [])
                               loc)
-                      e2' d callret loc) noLoc, sv)
+                      e2' d callret loc) mempty, sv)
 
     -- If e1 is a dynamic function, we just leave the application in place,
     -- but we update the types since it may be partially applied or return
@@ -629,7 +629,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           if null argtypes
             then return (e', Dynamic $ typeOf e)
             else do (pats, body, tp) <- etaExpand (typeOf e') e'
-                    defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) noLoc
+                    defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
       | otherwise -> return (e', IntrinsicSV)
 
     _ -> error $ "Application of an expression that is neither a static lambda "
@@ -714,7 +714,7 @@ envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Scalar $ Prim $ Sign
 -- return type, list of parameters, and body expression.
 liftValDec :: VName -> PatternType -> [VName] -> [Pattern] -> Exp -> DefM ()
 liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
-  where dims' = map (`TypeParamDim` noLoc) dims
+  where dims' = map (`TypeParamDim` mempty) dims
         -- FIXME: this pass is still not correctly size-preserving, so
         -- forget those return sizes that we forgot to propagate along
         -- the way.  Hopefully the internaliser is conservative and
@@ -735,16 +735,16 @@ liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
           , valBindParams     = pats
           , valBindBody       = body
           , valBindDoc        = Nothing
-          , valBindLocation   = noLoc
+          , valBindLocation   = mempty
           }
 
 -- | Given a closure environment, construct a record pattern that
 -- binds the closed over variables.
 buildEnvPattern :: Env -> Pattern
-buildEnvPattern env = RecordPattern (map buildField $ M.toList env) noLoc
+buildEnvPattern env = RecordPattern (map buildField $ M.toList env) mempty
   where buildField (vn, sv) =
           (nameFromString (pretty vn),
-           Id vn (Info $ typeFromSV sv) noLoc)
+           Id vn (Info $ typeFromSV sv) mempty)
 
 -- | Given a closure environment pattern and the type of a term,
 -- construct the type of that term, where uniqueness is set to
@@ -918,7 +918,7 @@ freeVars expr = case expr of
 
   RecordLit fs _       -> foldMap freeVarsField fs
     where freeVarsField (RecordFieldExplicit _ e _)  = freeVars e
-          freeVarsField (RecordFieldImplicit vn t _) = ident $ Ident vn t noLoc
+          freeVarsField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
 
   ArrayLit es t _      -> foldMap freeVars es <>
                           names (typeDimNames $ unInfo t)

@@ -2,6 +2,7 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
