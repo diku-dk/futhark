@@ -409,7 +409,7 @@ allocInFParam :: (Allocable fromlore tolore) =>
               -> Space
               -> WriterT [FParam tolore]
                  (AllocM fromlore tolore) (FParam tolore)
-allocInFParam param pspace =
+allocInFParam param pspace = do
   case paramDeclType param of
     Array bt shape u -> do
       let memname = baseString (paramName param) <> "_mem"
