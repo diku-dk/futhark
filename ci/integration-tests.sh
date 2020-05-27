@@ -12,4 +12,4 @@ cd "$parent_path"
 export PATH=$HOME/.cabal/bin:$PATH
 
 echo "# Integration tests"
-futhark test --no-terminal ../tests examples --no-tuning
+futhark test --no-terminal ../tests ../examples --no-tuning
