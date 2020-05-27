@@ -51,7 +51,6 @@ data SegBinOpSlug =
   SegBinOpSlug
   { slugOp :: SegBinOp MCMem
   , slugAccs :: [(VName, [Imp.Exp])]
-    -- ^ Places to store accumulator in stage 1 reduction.
   }
 
 
@@ -191,13 +190,6 @@ nonsegmentedReduction pat space reds kbody = do
 
 
   emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space) retval_params
-
-
-  -- sComment "Write result out" $
-  --   forM_ (zip reds res_arrs) $ \(red, res_arr) ->
-  --     sLoopNest (segBinOpShape red) $ \vec_is ->
-  --     forM_ (zip (patternElements pat) res_arr) $
-  --       \(pe, res) -> copyDWIMFix (patElemName pe) vec_is (Var res) vec_is
 
   emit $ Imp.DebugPrint "SegRed end\n" Nothing
 
