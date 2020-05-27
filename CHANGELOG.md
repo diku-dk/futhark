@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.16.0]
+## [0.15.8]
 
 ### Added
 
@@ -16,12 +16,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     be tagged with attributes that provide hints or directions to the
     compiler.  This is an expert-level feature, but it is sometimes
     useful.
-
-### Removed
-
-### Changed
-
-### Fixed
 
 ## [0.15.7]
 
