@@ -225,11 +225,12 @@ callShader opengl_code opengl_prelude shaders sizes
     OPENGL_SUCCEED(glGetError());
     |]
   let shader_idx        = fromJust $ elemIndex name $ M.keys shaders
+  let shader_code       = opengl_code !! shader_idx
   let shader_size_value = pretty $ zipWith shaderSizeInit (M.keys  sizes)
                                                           (M.elems sizes)
   let fragments         = map (\s -> [C.cinit|$string:s|])
                           $ chunk 2000 (opengl_prelude ++ shader_size_value
-                                                       ++ opengl_code !! shader_idx)
+                                                       ++ shader_code)
   GC.stm $ (loadShader fragments) ((M.toList shaders) !! shader_idx)
   GC.stm [C.cstm|glUseProgram(ctx->opengl.program);|]
   GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
@@ -279,9 +280,13 @@ callShader opengl_code opengl_prelude shaders sizes
           return [C.cexp|$exp:cur + $exp:num_bytes'|]
         localBytes cur _ = return cur
 
-        shaderSizeInit k size = [C.cedecl|const int $id:k = $int:val;|]
-           where val = case size of SizeBespoke _ x -> x
-                                    _               -> 0
+        shaderSizeInit k size = [C.cedecl|int $id:k = $exp:val;|]
+           where n_sizes = nameToString k
+                 val = case sizeName n_sizes of
+                   "group_size" -> [C.cexp|int32_t(gl_LocalGroupSizeARB[0])|]
+                   "num_groups" -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
+                   -- This will generate an error that is easy to debug.
+                   _            -> [C.cexp|$id:n_sizes|]
 
 launchShader :: C.ToExp a =>
                 String -> [a] -> [a] -> a -> GC.CompilerM op s ()
@@ -348,3 +353,10 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
             map (printKernelDim work_size) [0..shader_rank-1]
           printKernelDim global_work_size i =
             [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
+
+-- | Identifies the base of a given size variable.
+sizeName :: String -> String
+sizeName n =
+  if isInfixOf "group_size" n then "group_size"
+  else if isInfixOf "num_groups" n then "num_groups"
+  else n
