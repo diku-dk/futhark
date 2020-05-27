@@ -103,7 +103,7 @@ data SOAC lore =
     -- bucket function.  Finally comes the input images.
   | Screma SubExp (ScremaForm lore) [VName]
     -- ^ A combination of scan, reduction, and map.  The first
-    -- 'SubExp' is the size of the input arrays.
+    -- t'SubExp' is the size of the input arrays.
     deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.

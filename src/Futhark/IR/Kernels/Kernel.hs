@@ -44,7 +44,7 @@ import Futhark.IR.Kernels.Sizes
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 
--- | At which level the *body* of a 'SegOp' executes.
+-- | At which level the *body* of a t'SegOp' executes.
 data SegLevel = SegThread { segNumGroups :: Count NumGroups SubExp
                           , segGroupSize :: Count GroupSize SubExp
                           , segVirt :: SegVirt }

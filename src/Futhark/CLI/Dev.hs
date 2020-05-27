@@ -192,7 +192,7 @@ typedPassOption getProg putProg pass short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform s config = do
           prog <- getProg (passName pass) s
-          putProg <$> runPasses (onePass pass) config prog
+          putProg <$> runPipeline (onePass pass) config prog
 
         long = [passLongOption pass]
 
@@ -214,15 +214,15 @@ simplifyOption :: String -> FutharkOption
 simplifyOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (SOACS prog) config =
-          SOACS <$> runPasses (onePass simplifySOACS) config prog
+          SOACS <$> runPipeline (onePass simplifySOACS) config prog
         perform (Kernels prog) config =
-          Kernels <$> runPasses (onePass simplifyKernels) config prog
+          Kernels <$> runPipeline (onePass simplifyKernels) config prog
         perform (Seq prog) config =
-          Seq <$> runPasses (onePass simplifySeq) config prog
+          Seq <$> runPipeline (onePass simplifySeq) config prog
         perform (SeqMem prog) config =
-          SeqMem <$> runPasses (onePass simplifySeqMem) config prog
+          SeqMem <$> runPipeline (onePass simplifySeqMem) config prog
         perform (KernelsMem prog) config =
-          KernelsMem <$> runPasses (onePass simplifyKernelsMem) config prog
+          KernelsMem <$> runPipeline (onePass simplifyKernelsMem) config prog
 
         long = [passLongOption pass]
         pass = simplifySOACS
@@ -232,10 +232,10 @@ allocateOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (Kernels prog) config =
           KernelsMem <$>
-          runPasses (onePass Kernels.explicitAllocations) config prog
+          runPipeline (onePass Kernels.explicitAllocations) config prog
         perform (Seq prog) config =
           SeqMem <$>
-          runPasses (onePass Seq.explicitAllocations) config prog
+          runPipeline (onePass Seq.explicitAllocations) config prog
         perform s _ =
           externalErrorS $
           "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
@@ -248,10 +248,10 @@ iplOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (Kernels prog) config =
           Kernels <$>
-          runPasses (onePass inPlaceLoweringKernels) config prog
+          runPipeline (onePass inPlaceLoweringKernels) config prog
         perform (Seq prog) config =
           Seq <$>
-          runPasses (onePass inPlaceLoweringSeq) config prog
+          runPipeline (onePass inPlaceLoweringSeq) config prog
         perform s _ =
           externalErrorS $
           "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
@@ -263,15 +263,15 @@ cseOption :: String -> FutharkOption
 cseOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (SOACS prog) config =
-          SOACS <$> runPasses (onePass $ performCSE True) config prog
+          SOACS <$> runPipeline (onePass $ performCSE True) config prog
         perform (Kernels prog) config =
-          Kernels <$> runPasses (onePass $ performCSE True) config prog
+          Kernels <$> runPipeline (onePass $ performCSE True) config prog
         perform (Seq prog) config =
-          Seq <$> runPasses (onePass $ performCSE True) config prog
+          Seq <$> runPipeline (onePass $ performCSE True) config prog
         perform (SeqMem prog) config =
-          SeqMem <$> runPasses (onePass $ performCSE False) config prog
+          SeqMem <$> runPipeline (onePass $ performCSE False) config prog
         perform (KernelsMem prog) config =
-          KernelsMem <$> runPasses (onePass $ performCSE False) config prog
+          KernelsMem <$> runPipeline (onePass $ performCSE False) config prog
 
         long = [passLongOption pass]
         pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
@@ -289,7 +289,7 @@ pipelineOption getprog repdesc repf desc pipeline =
   where pipelinePass rep config =
           case getprog rep of
             Just prog ->
-              repf <$> runPasses pipeline config prog
+              repf <$> runPipeline pipeline config prog
             Nothing   ->
               externalErrorS $ "Expected " ++ repdesc ++ " representation, but got " ++
               representation rep

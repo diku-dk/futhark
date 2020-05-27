@@ -2,7 +2,10 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
--- | Perform horizontal and vertical fusion of SOACs.
+-- | Perform horizontal and vertical fusion of SOACs.  See the paper
+-- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
+-- extensions discussed in /Design and GPGPU Performance of Futhark’s
+-- Redomap Construct/).
 module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
@@ -172,6 +175,7 @@ runFusionGatherM (FusionGM a) env =
 ---    and fuse them in a second pass!                               ---
 ------------------------------------------------------------------------
 
+-- | The pass definition.
 fuseSOACs :: Pass SOACS SOACS
 fuseSOACs =
   Pass { passName = "Fuse SOACs"

@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes, FlexibleContexts #-}
+-- | Code generation for C with OpenCL.
 module Futhark.CodeGen.Backends.COpenCL
   ( compileProg
   , GC.CParts(..)
@@ -22,6 +23,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
+-- | Compile the program to C with calls to OpenCL.
 compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
 compileProg prog = do
   (Program opencl_code opencl_prelude kernels

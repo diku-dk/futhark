@@ -19,8 +19,6 @@ module Futhark.TypeCheck
   , CheckableOp (..)
   , lookupVar
   , lookupAliases
-  , Occurences
-  , collectOccurences
   , checkOpWith
 
     -- * Checkers

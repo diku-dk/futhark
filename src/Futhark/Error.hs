@@ -13,6 +13,7 @@ module Futhark.Error
   , compilerBugS
   , compilerLimitation
   , compilerLimitationS
+  , internalErrorS
   )
 where
 
@@ -41,13 +42,18 @@ instance Show CompilerError where
   show (ExternalError s) = pretty s
   show (InternalError s _ _) = T.unpack s
 
--- | Raise an 'ExternalError based on a prettyprinting result.
+-- | Raise an 'ExternalError' based on a prettyprinting result.
 externalError :: MonadError CompilerError m => Doc -> m a
 externalError = throwError . ExternalError
 
--- | Raise an 'ExternalError based on a string.
+-- | Raise an 'ExternalError' based on a string.
 externalErrorS :: MonadError CompilerError m => String -> m a
 externalErrorS = externalError . text
+
+-- | Raise an v'InternalError' based on a prettyprinting result.
+internalErrorS :: MonadError CompilerError m => String -> Doc -> m a
+internalErrorS s d =
+  throwError $ InternalError (T.pack s) (prettyText d) CompilerBug
 
 -- | An error that is not the users fault, but a bug (or limitation)
 -- in the compiler.  Compiler passes should only ever report this

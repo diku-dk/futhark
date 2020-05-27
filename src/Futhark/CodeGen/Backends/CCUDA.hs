@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
+-- | Code generation for CUDA.
 module Futhark.CodeGen.Backends.CCUDA
   ( compileProg
   , GC.CParts(..)
