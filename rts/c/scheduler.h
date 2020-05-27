@@ -305,7 +305,7 @@ static inline int delegate_work(struct scheduler *scheduler,
 
   while(1) {
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    fprintf(stderr, "tid %d shared counter %d\n", calling_worker->tid, shared_counter);
+    /* fprintf(stderr, "tid %d shared counter %d\n", calling_worker->tid, shared_counter); */
     if (shared_counter == 0) break;
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
 
@@ -320,9 +320,10 @@ static inline int delegate_work(struct scheduler *scheduler,
       }
       CHECK_ERR(pthread_mutex_lock(subtask_ptr->mutex), "pthread_mutex_lock");
       (*subtask_ptr->counter)--;
-      CHECK_ERR(pthread_cond_broadcast(subtask_ptr->cond), "pthread_cond_broadcast");
       CHECK_ERR(pthread_mutex_unlock(subtask_ptr->mutex), "pthread_mutex_unlock");
-      free(subtask_ptr);
+      if (subtask_ptr != &subtask) {
+        free(subtask_ptr);
+      }
     }
   }
 
