@@ -784,7 +784,8 @@ sliceSlice (DimSlice j _ s:js') (DimFix i:is') = do
 sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
   s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32 OverflowWrap) s0 i
   j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32 OverflowWrap) j s0_t_i
-  (DimSlice j_p_s0_t_i n s1:) <$> sliceSlice js' is'
+  s2 <- toSubExp "s0_t_s1" $ primExpFromSubExp int32 s0 * primExpFromSubExp int32 s1
+  (DimSlice j_p_s0_t_i n s2:) <$> sliceSlice js' is'
 sliceSlice _ _ = return []
 
 
