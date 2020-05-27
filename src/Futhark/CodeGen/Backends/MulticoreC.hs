@@ -439,7 +439,7 @@ compileOp (ParLoop params e par_code seq_code tid retvals) = do
   let lexical_par = lexicalMemoryUsage $ Function False [] params par_code [] []
   let lexical_seq = lexicalMemoryUsage $ Function False [] params seq_code [] []
 
-  fstruct <- multicoreFunDef "task_struct" $ \s ->
+  fstruct <- multicoreFunDef "task" $ \s ->
     return [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
@@ -454,8 +454,15 @@ compileOp (ParLoop params e par_code seq_code tid retvals) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
   GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct retval_args retval_ctypes)|]
 
+  let ftask_name = fstruct ++ "_task"
+  GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
+  GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fpar_task;|]
+  GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fseq_task;|]
+  GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
+
   let ftask_err = fpar_task ++ "_err"
-  let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&$id:fstruct, $id:fpar_task, $id:fseq_task, $exp:e');
+  let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&$id:ftask_name);
                         if ($id:ftask_err != 0) {
                           futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                         }|]
@@ -510,9 +517,9 @@ compileOp (MCFunc free ntasks i sched prebody body tid) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
 
   let ftask_name = ftask ++ "_task"
-  GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
+  GC.decl [C.cdecl|struct scheduler_parallel_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
-  GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:ftask;|]
+  GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = iterations;|]
   GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]

@@ -13,7 +13,7 @@ typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
 
 /* A subtask that can be executed by a thread */
 struct subtask {
-  sub_task_fn par_fn;
+  sub_task_fn fn;
   void* args;
   int start, end;
   // How much of a task to take a the time
@@ -27,7 +27,6 @@ struct subtask {
 };
 
 
-
 struct scheduler {
   struct worker *workers;
   int num_threads;
@@ -35,13 +34,20 @@ struct scheduler {
 
 /* A task for the scheduler to execute */
 struct scheduler_task {
+  void *args;
+  task_fn par_fn;
+  task_fn seq_fn;
+  long int iterations;
+};
+
+
+struct scheduler_parallel_task {
   const char* name;
-  sub_task_fn par_fn;
+  sub_task_fn fn;
   void* args;
   long int iterations;
   int granularity;
 };
-
 
 struct subtask_queue {
   int capacity; // Size of the buffer.
@@ -75,7 +81,7 @@ struct worker {
 };
 
 
-static inline struct subtask* setup_subtask(sub_task_fn par_fn,
+static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             void* args,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
@@ -88,7 +94,7 @@ static inline struct subtask* setup_subtask(sub_task_fn par_fn,
     assert(!"malloc failed in setup_subtask");
     return  NULL;
   }
-  subtask->par_fn  = par_fn;
+  subtask->fn      = fn;
   subtask->args    = args;
   subtask->mutex   = mutex;
   subtask->cond    = cond;
@@ -261,7 +267,7 @@ static inline int subtask_queue_steal(struct worker *worker,
 
 
 /* Ask for a random subtask from another worker */
-const int MAX_NUM_TRIES = 10;
+const int MAX_NUM_TRIES = 5;
 static inline int query_a_subtask(struct scheduler* scheduler,
                                   int tid,
                                   struct worker *worker)
@@ -303,8 +309,6 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
   assert(worker != NULL);
   struct subtask_queue *subtask_queue = &worker->q;
 
-  // I don't want to measure time waiting from initial initailization of queue
-  // until first task so we use a little hack here
   uint64_t start = get_wall_time();
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
@@ -325,6 +329,7 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
       CHECK_ERR(retval, "steal_a_subtask");
     }
   }
+
 
   if (subtask_queue->dead) {
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
