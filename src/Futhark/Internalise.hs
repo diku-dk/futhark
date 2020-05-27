@@ -970,6 +970,17 @@ internaliseDimIndex w (E.DimFix i) = do
                    I.CmpOp (I.CmpSlt I.Int32) i' w
   ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
   return (I.DimFix i', ok, [ErrorInt32 i'])
+
+-- Special-case an important common case that otherwise leads to horrible code.
+internaliseDimIndex w (E.DimSlice Nothing Nothing
+                       (Just (E.Negate (E.IntLit 1 _ _) _))) = do
+  w_minus_1 <- letSubExp "w_minus_1" $
+               BasicOp $ I.BinOp (Sub Int32 I.OverflowWrap) w one
+  return (I.DimSlice w_minus_1 w $ intConst Int32 (-1),
+          constant True,
+          mempty)
+  where one = constant (1::Int32)
+
 internaliseDimIndex w (E.DimSlice i j s) = do
   s' <- maybe (return one) (fmap fst . internaliseDimExp "s") s
   s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
