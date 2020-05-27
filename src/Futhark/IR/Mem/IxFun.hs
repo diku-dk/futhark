@@ -46,6 +46,22 @@ import Futhark.Util.Pretty
 import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 
+type Shape num   = [num]
+type Indices num = [num]
+type Permutation = [Int]
+
+data Monotonicity = Inc | Dec | Unknown
+               -- ^ monotonously increasing, decreasing or unknown
+             deriving (Show, Eq)
+
+data LMADDim num = LMADDim { ldStride :: num
+                           , ldRotate :: num
+                           , ldShape :: num
+                           , ldPerm :: Int
+                           , ldMon :: Monotonicity
+                           }
+                 deriving (Show, Eq)
+
 -- | LMAD's representation consists of a general offset and for each dimension a
 -- stride, rotate factor, number of elements (or shape), permutation, and
 -- monotonicity. Note that the permutation is not strictly necessary in that the
@@ -72,27 +88,19 @@ import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 --
 --   \{ o + \Sigma_{j=0}^{k} ((i_j+r_j) `mod` n_j)*s_j,
 --      \forall i_j such that 0<=i_j<n_j, j=1..k \}
-type Shape num   = [num]
-type Indices num = [num]
-type Permutation = [Int]
-
-data Monotonicity = Inc | Dec | Unknown
-               -- ^ monotonously increasing, decreasing or unknown
-             deriving (Show, Eq)
-
-data LMADDim num = LMADDim { ldStride :: num
-                           , ldRotate :: num
-                           , ldShape :: num
-                           , ldPerm :: Int
-                           , ldMon :: Monotonicity
-                           }
-                 deriving (Show, Eq)
-
 data LMAD num = LMAD { lmadOffset :: num
                      , lmadDims :: [LMADDim num]
                      }
                 deriving (Show, Eq)
 
+-- | An index function is a mapping from a multidimensional array
+-- index space (the domain) to a one-dimensional memory index space.
+-- Essentially, it explains where the element at position @[i,j,p]@ of
+-- some array is stored inside the flat one-dimensional array that
+-- constitutes its memory.  For example, we can use this to
+-- distinguish row-major and column-major representations.
+--
+-- An index function is represented as a sequence of 'LMAD's.
 data IxFun num = IxFun { ixfunLMADs :: NonEmpty (LMAD num)
                        , base :: Shape num
                        , ixfunContig :: Bool
@@ -543,6 +551,7 @@ reshape (IxFun (lmad0 :| lmad0s) oshp cg) new_shape =
     IxFun (lmad :| []) _ _ -> IxFun (lmad :| lmad0 : lmad0s) oshp cg
     _ -> error "reshape: reached impossible case"
 
+-- | The number of dimensions in the domain of the input function.
 rank :: IntegralExp num =>
         IxFun num -> Int
 rank (IxFun (LMAD _ sss :| _) _ _) = length sss
@@ -723,6 +732,7 @@ rearrangeWithOffset (IxFun (lmad :| []) oshp cg) elem_size = do
   return (offset, zip perm (permuteFwd perm (lmadShapeBase lmad)))
 rearrangeWithOffset _ _ = Nothing
 
+-- | Is this a row-major array starting at offset zero?
 isLinear :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isLinear = (== Just 0) . flip linearWithOffset 1
 

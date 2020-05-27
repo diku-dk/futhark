@@ -1,6 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
+-- | An interpreter operating on type-checked source Futhark terms.
+-- Relatively slow.
 module Language.Futhark.Interpreter
   ( Ctx(..)
   , Env
@@ -331,6 +333,7 @@ data TermBinding = TermValue (Maybe T.BoundV) Value
 data Module = Module Env
             | ModuleFun (Module -> EvalM Module)
 
+-- | The actual type- and value environment.
 data Env = Env { envTerm :: M.Map VName TermBinding
                , envType :: M.Map VName T.TypeBinding
                , envShapes :: M.Map VName ValueShape
@@ -345,6 +348,9 @@ instance Semigroup Env where
   Env vm1 tm1 sm1 <> Env vm2 tm2 sm2 =
     Env (vm1 <> vm2) (tm1 <> tm2) (sm1 <> sm2)
 
+-- | An error occurred during interpretation due to an error in the
+-- user program.  Actual interpreter errors will be signaled with an
+-- IO exception ('error').
 newtype InterpreterError = InterpreterError String
 
 valEnv :: M.Map VName (Maybe T.BoundV, Value) -> Env
@@ -1091,6 +1097,9 @@ evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
         wrapInLambda [p] = ModLambda p ret body loc
         wrapInLambda (p:ps') = ModLambda p Nothing (wrapInLambda ps') loc
 
+-- | The interpreter context.  All evaluation takes place with respect
+-- to a context, and it can be extended with more definitions, which
+-- is how the REPL works.
 data Ctx = Ctx { ctxEnv :: Env
                , ctxImports :: M.Map FilePath Env
                }

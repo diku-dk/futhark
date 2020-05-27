@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+-- | An unstructured grab-bag of various tools and inspection
+-- functions that didn't really fit anywhere else.
 module Futhark.Tools
   (
     module Futhark.Construct
@@ -9,7 +11,6 @@ module Futhark.Tools
   , sequentialStreamWholeArray
 
   , partitionChunkedFoldParameters
-  , partitionChunkedKernelFoldParameters
 
   -- * Primitive expressions
   , module Futhark.Analysis.PrimExp.Convert
@@ -96,6 +97,8 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
   scan <- scanSOAC scans
   letBindNames scan_res $ Op $ Screma w scan to_scan
 
+-- | Turn a stream SOAC into statements that apply the stream lambda
+-- to the entire input.
 sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
                               Pattern (Lore m)
                            -> SubExp -> [SubExp]
@@ -133,6 +136,10 @@ sequentialStreamWholeArray pat w nes lam arrs = do
             letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
       _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
+-- | Split the parameters of a stream reduction lambda into the chunk
+-- size parameter, the accumulator parameters, and the input chunk
+-- parameters.  The integer argument is how many accumulators are
+-- used.
 partitionChunkedFoldParameters :: Int -> [Param dec]
                                -> (Param dec, [Param dec], [Param dec])
 partitionChunkedFoldParameters _ [] =
@@ -140,11 +147,3 @@ partitionChunkedFoldParameters _ [] =
 partitionChunkedFoldParameters num_accs (chunk_param : params) =
   let (acc_params, arr_params) = splitAt num_accs params
   in (chunk_param, acc_params, arr_params)
-
-partitionChunkedKernelFoldParameters :: Int -> [Param dec]
-                                     -> (VName, Param dec, [Param dec], [Param dec])
-partitionChunkedKernelFoldParameters num_accs (i_param : chunk_param : params) =
-  let (acc_params, arr_params) = splitAt num_accs params
-  in (paramName i_param, chunk_param, acc_params, arr_params)
-partitionChunkedKernelFoldParameters _ _ =
-  error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"

@@ -236,8 +236,11 @@ instance Semigroup dec => Semigroup (StmAux dec) where
 
 -- | A local variable binding.
 data Stm lore = Let { stmPattern :: Pattern lore
+                      -- ^ Pattern.
                     , stmAux :: StmAux (ExpDec lore)
+                      -- ^ Auxiliary information statement.
                     , stmExp :: Exp lore
+                      -- ^ Expression.
                     }
 
 deriving instance Decorations lore => Ord (Stm lore)

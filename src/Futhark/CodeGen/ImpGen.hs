@@ -105,7 +105,7 @@ import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util
 
--- | How to compile an 'Op'.
+-- | How to compile an t'Op'.
 type OpCompiler lore r op = Pattern lore -> Op lore -> ImpM lore r op ()
 
 -- | How to compile some 'Stms'.

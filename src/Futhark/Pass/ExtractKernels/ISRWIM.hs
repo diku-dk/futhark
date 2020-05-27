@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+-- | Interchanging scans with inner maps.
 module Futhark.Pass.ExtractKernels.ISRWIM
        ( iswim
        , irwim
@@ -114,6 +115,8 @@ irwim res_pat w comm red_fun red_input
         Op $ Screma map_w (mapSOAC map_fun') arrs'
   | otherwise = Nothing
 
+-- | Does this reduce operator contain an inner map, and if so, what
+-- does that map look like?
 rwimPossible :: Lambda
              -> Maybe (Pattern, Certificates, SubExp, Lambda)
 rwimPossible fun

@@ -55,18 +55,19 @@ primExpFromExp f (BasicOp (UnOp op x)) =
   UnOpExp op <$> primExpFromSubExpM f x
 primExpFromExp f (BasicOp (ConvOp op x)) =
   ConvOpExp op <$> primExpFromSubExpM f x
-primExpFromExp _ (BasicOp (SubExp (Constant v))) =
-  return $ ValueExp v
+primExpFromExp f (BasicOp (SubExp se)) =
+  primExpFromSubExpM f se
 primExpFromExp f (Apply fname args ts _)
   | isBuiltInFunction fname, [Prim t] <- map declExtTypeOf ts =
       FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
+-- | Like 'primExpFromExp', but for a t'SubExp'.
 primExpFromSubExpM :: Applicative m => (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
 primExpFromSubExpM f (Var v) = f v
 primExpFromSubExpM _ (Constant v) = pure $ ValueExp v
 
--- | Convert 'SubExp's of a given type.
+-- | Convert t'SubExp's of a given type.
 primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
 primExpFromSubExp t (Var v)      = LeafExp v t
 primExpFromSubExp _ (Constant v) = ValueExp v
