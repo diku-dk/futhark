@@ -2,5 +2,18 @@
 with nixpkgs;
 stdenv.mkDerivation {
   name = "futhark";
-  buildInputs = [ zlib zlib.out pkgconfig haskell.compiler.ghc8101 cabal-install opencl-headers ocl-icd hlint file ];
+  buildInputs = [
+    cabal-install
+    cacert
+    curl
+    file
+    git
+    haskell.compiler.ghc8101
+    hlint
+    ocl-icd
+    opencl-headers
+    pkgconfig
+    zlib
+    zlib.out
+  ];
 }
