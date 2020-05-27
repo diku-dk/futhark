@@ -25,12 +25,6 @@ jobs:
         path: ~/.cabal
         key: ${{ runner.os }}-test-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
 
-    - name: Style check
-      run: nix-shell --pure --run "tools/style-check.sh src"
-
-    - name: Unit tests
-      run: nix-shell --pure --run "cabal update && cabal test"
-
     - name: Integration and library tests
       run: nix-shell --pure --run "./run-tests.sh"
 
