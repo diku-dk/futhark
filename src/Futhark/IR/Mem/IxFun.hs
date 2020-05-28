@@ -5,7 +5,6 @@ module Futhark.IR.Mem.IxFun
        ( IxFun(..)
        , index
        , iota
-       , offsetIndex
        , permute
        , rotate
        , reshape
@@ -695,16 +694,6 @@ rebase new_base@(IxFun lmads_base shp_base cg_base) ixfun@(IxFun lmads shp cg)
 
 ixfunMonotonicity :: (Eq num, IntegralExp num) => IxFun num -> Monotonicity
 ixfunMonotonicity = ixfunMonotonicityRots False
-
--- | Offset index.  Results in the index function corresponding to indexing with
--- @i@ on the outermost dimension.
-offsetIndex :: (Eq num, IntegralExp num) =>
-               IxFun num -> num -> IxFun num
-offsetIndex ixfun i | i == 0 = ixfun
-offsetIndex ixfun i =
-  case shape ixfun of
-    d : ds -> slice ixfun (DimSlice i (d - i) 1 : map (unitSlice 0) ds)
-    [] -> error "offsetIndex: underlying index function has rank zero"
 
 -- | If the memory support of the index function is contiguous and row-major
 -- (i.e., no transpositions, repetitions, rotates, etc.), then this should
