@@ -865,8 +865,7 @@ finaliseSOAC new_soac =
 
 simplifyAndFuseInLambda :: Lambda -> FusionGM Lambda
 simplifyAndFuseInLambda lam = do
-  let args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simplifyLambda lam args
+  lam' <- simplifyLambda lam
   (_, nfres) <- fusionGatherLam (mempty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   bindRes nfres' $ fuseInLambda lam'

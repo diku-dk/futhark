@@ -199,32 +199,22 @@ usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 enterLoop :: SimpleM lore a -> SimpleM lore a
 enterLoop = localVtable ST.deepen
 
-bindFParams :: SimplifiableLore lore =>
-               [FParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindFParams :: [FParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
 bindFParams params =
   localVtable $ ST.insertFParams params
 
-bindLParams :: SimplifiableLore lore =>
-               [LParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindLParams :: [LParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
 bindLParams params =
-  localVtable $ \vtable ->
-    foldr ST.insertLParam vtable params
+  localVtable $ \vtable -> foldr ST.insertLParam vtable params
 
-bindArrayLParams :: SimplifiableLore lore =>
-                    [(LParam (Wise lore),Maybe VName)] -> SimpleM lore a
+bindArrayLParams :: [LParam (Wise lore)] -> SimpleM lore a
                  -> SimpleM lore a
 bindArrayLParams params =
-  localVtable $ \vtable ->
-    foldr (uncurry ST.insertArrayLParam) vtable params
+  localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
 
-bindLoopVar :: SimplifiableLore lore =>
-               VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
+bindLoopVar :: VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
 bindLoopVar var it bound =
-  localVtable $ clampUpper . clampVar
-  where clampVar = ST.insertLoopVar var it bound
-        -- If we enter the loop, then 'bound' is at least one.
-        clampUpper = case bound of Var v -> ST.isAtLeast v 1
-                                   _     -> id
+  localVtable $ ST.insertLoopVar var it bound
 
 -- | We are willing to hoist potentially unsafe statements out of
 -- branches, but they most be protected by adding a branch on top of
@@ -640,8 +630,8 @@ simplifyExp (If cond tbranch fbranch (IfDec ts ifsort)) = do
   -- (or else, If expressions should indicate explicitly the diet of
   -- their return types).
   let ds = map (const Consume) ts
-  tbranch' <- localVtable (ST.updateBounds True cond) $ simplifyBody ds tbranch
-  fbranch' <- localVtable (ST.updateBounds False cond) $ simplifyBody ds fbranch
+  tbranch' <- simplifyBody ds tbranch
+  fbranch' <- simplifyBody ds fbranch
   (tbranch'',fbranch'', hoisted) <- hoistCommon cond' ifsort tbranch' fbranch'
   return (If cond' tbranch'' fbranch'' $ IfDec ts' ifsort, hoisted)
 
@@ -666,7 +656,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
               namesFromList (loopvar : map paramName loop_params') <> fparamnames,
               bindLoopVar loopvar it boundexp' .
               protectLoopHoisted ctx' val' form' .
-              bindArrayLParams (zip loop_params' (map Just loop_arrs')))
+              bindArrayLParams loop_params')
     WhileLoop cond -> do
       cond' <- simplify cond
       return (WhileLoop cond',
@@ -820,32 +810,26 @@ instance Simplifiable d => Simplifiable (DimIndex d) where
 
 simplifyLambda :: SimplifiableLore lore =>
                   Lambda lore
-               -> [Maybe VName]
                -> SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
-simplifyLambda lam arrs = do
+simplifyLambda lam = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  simplifyLambdaMaybeHoist par_blocker lam arrs
+  simplifyLambdaMaybeHoist par_blocker lam
 
 simplifyLambdaNoHoisting :: SimplifiableLore lore =>
                             Lambda lore
-                         -> [Maybe VName]
                          -> SimpleM lore (Lambda (Wise lore))
-simplifyLambdaNoHoisting lam arr =
-  fst <$> simplifyLambdaMaybeHoist (isFalse False) lam arr
+simplifyLambdaNoHoisting lam =
+  fst <$> simplifyLambdaMaybeHoist (isFalse False) lam
 
 simplifyLambdaMaybeHoist :: SimplifiableLore lore =>
                             BlockPred (Wise lore) -> Lambda lore
-                         -> [Maybe VName]
                          -> SimpleM lore (Lambda (Wise lore), Stms (Wise lore))
-simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) arrs = do
+simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) = do
   params' <- mapM (traverse simplify) params
-  let (nonarrayparams, arrayparams) =
-        splitAt (length params' - length arrs) params'
-      paramnames = namesFromList $ boundByLambda lam
+  let paramnames = namesFromList $ boundByLambda lam
   ((lamstms, lamres), hoisted) <-
     enterLoop $
-    bindLParams nonarrayparams $
-    bindArrayLParams (zip arrayparams arrs) $
+    bindLParams params' $
     blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
       simplifyBody (map (const Observe) rettype) body
   body' <- constructBody lamstms lamres
