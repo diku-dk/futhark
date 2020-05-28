@@ -115,6 +115,7 @@ onShader shader = do
 
       (use_params', uses') = unzip $ mapMaybe useAsParam $ kernelUses shader
 
+      --FIXME: `local_memory_params` might be used as global arrays.
       (local_memory_args, _, local_memory_init) =
         unzip3 $
         flip evalState (blankNameSource :: VNameSource) $
@@ -132,10 +133,12 @@ onShader shader = do
       -- We do not account for safety within shaders.
       safety = SafetyNone
 
-      --FIXME:
+      --FIXME: These might be used as global arrays.
       params = perm_params -- ++ catMaybes local_memory_params ++ use_params
 
-      (cat_use_params, cat_uses) = unzip $ zip local_memory_init [AMemoryUse]
+      (cat_use_params, cat_uses) =
+        unzip $ zip local_memory_init $ replicate (length local_memory_init)
+                                                  AMemoryUse
 
       (use_params, uses) = (cat_use_params ++ use_params', cat_uses ++ uses')
 
