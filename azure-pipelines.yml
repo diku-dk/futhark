@@ -98,14 +98,6 @@ jobs:
       ~/.ghcup/bin/ghcup install-cabal
     displayName: Install GHC and cabal
 
-  - task: Cache@2
-    inputs:
-      key: 'cabal | "$(Agent.OS)" | azure-pipelines.yml | "$(GHC_VERSION)" | futhark.cabal'
-      restoreKeys: |
-        cabal | "$(Agent.OS)"
-      path: "/home/vsts/.cabal"
-    displayName: Cache cabal packages
-
   - script: |
       set -e
       export PATH=$HOME/.ghcup/bin:$PATH
