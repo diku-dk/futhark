@@ -93,8 +93,7 @@ import Futhark.IR.Prop (isBuiltInFunction)
 
 
 data CompilerState s = CompilerState {
-    compTypeStructs :: [([Type], (C.Type, C.Definition))]
-  , compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))]
+    compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))]
   , compOpaqueStructs :: [(String, (C.Type, [C.Definition]))]
   , compEarlyDecls :: DL.DList C.Definition
   , compInit :: [C.Stm]
@@ -108,8 +107,7 @@ data CompilerState s = CompilerState {
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
-newCompilerState src s = CompilerState { compTypeStructs = []
-                                       , compArrayStructs = []
+newCompilerState src s = CompilerState { compArrayStructs = []
                                        , compOpaqueStructs = []
                                        , compEarlyDecls = mempty
                                        , compInit = []
@@ -286,8 +284,7 @@ envStaticArray = opsStaticArray . envOperations
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
 
-tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
-tupleDefinitions = map (snd . snd) . compTypeStructs
+arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 arrayDefinitions = concatMap (snd . snd) . compArrayStructs
 opaqueDefinitions = concatMap (snd . snd) . compOpaqueStructs
 
@@ -1520,8 +1517,6 @@ $edecls:early_decls
 $edecls:prototypes
 
 $edecls:lib_decls
-
-$edecls:(tupleDefinitions endstate)
 
 $edecls:(map funcToDef definitions)
 
