@@ -325,10 +325,6 @@ commandLineOptions =
     (NoArg $ Right $ \opts ->
        opts { futharkAction = KernelsMemAction kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
-  , Option [] ["range-analysis"]
-    (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions rangeAction rangeAction rangeAction rangeAction rangeAction })
-    "Print the program with range annotations added."
   , Option "p" ["print"]
     (NoArg $ Right $ \opts ->
         opts { futharkAction = PolyAction $ AllActions printAction printAction printAction printAction printAction })

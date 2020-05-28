@@ -71,7 +71,7 @@ simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
-                  Lambda -> [Maybe VName] -> m Lambda
+                  Lambda -> m Lambda
 simplifyLambda =
   Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
 
@@ -93,12 +93,11 @@ simplifySOAC (Stream outerdim form lam arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form
   arr' <- mapM Engine.simplify arr
-  (lam', lam_hoisted) <- Engine.simplifyLambda lam (map Just arr)
+  (lam', lam_hoisted) <- Engine.simplifyLambda lam
   return (Stream outerdim' form' lam' arr', form_hoisted <> lam_hoisted)
   where simplifyStreamForm (Parallel o comm lam0 acc) = do
           acc'  <- mapM Engine.simplify acc
-          (lam0', hoisted) <- Engine.simplifyLambda lam0 $
-                              replicate (length $ lambdaParams lam0) Nothing
+          (lam0', hoisted) <- Engine.simplifyLambda lam0
           return (Parallel o comm lam0' acc', hoisted)
         simplifyStreamForm (Sequential acc) = do
           acc' <- mapM Engine.simplify acc
@@ -106,7 +105,7 @@ simplifySOAC (Stream outerdim form lam arr) = do
 
 simplifySOAC (Scatter len lam ivs as) = do
   len' <- Engine.simplify len
-  (lam', hoisted) <- Engine.simplifyLambda lam $ map Just ivs
+  (lam', hoisted) <- Engine.simplifyLambda lam
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
   return (Scatter len' lam' ivs' as', hoisted)
@@ -118,24 +117,24 @@ simplifySOAC (Hist w ops bfun imgs) = do
     rf' <- Engine.simplify rf
     dests' <- Engine.simplify dests
     nes' <- mapM Engine.simplify nes
-    (op', hoisted) <- Engine.simplifyLambda op $ replicate (length $ lambdaParams op) Nothing
+    (op', hoisted) <- Engine.simplifyLambda op
     return (HistOp dests_w' rf' dests' nes' op', hoisted)
   imgs'  <- mapM Engine.simplify imgs
-  (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun $ map Just imgs
+  (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun
   return (Hist w' ops' bfun' imgs', mconcat hoisted <> bfun_hoisted)
 
 simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
   (scans', scans_hoisted) <- fmap unzip $ forM scans $ \(Scan lam nes) -> do
-    (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length nes) Nothing
+    (lam', hoisted) <- Engine.simplifyLambda lam
     nes' <- Engine.simplify nes
     return (Scan lam' nes', hoisted)
 
   (reds', reds_hoisted) <- fmap unzip $ forM reds $ \(Reduce comm lam nes) -> do
-    (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length nes) Nothing
+    (lam', hoisted) <- Engine.simplifyLambda lam
     nes' <- Engine.simplify nes
     return (Reduce comm lam' nes', hoisted)
 
-  (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam $ map Just arrs
+  (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam
 
   (,) <$> (Screma <$> Engine.simplify w <*>
            pure (ScremaForm scans' reds' map_lam') <*>

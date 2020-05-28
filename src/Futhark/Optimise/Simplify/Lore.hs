@@ -31,12 +31,10 @@ import qualified Data.Kind
 import qualified Data.Map.Strict as M
 
 import Futhark.IR
-import Futhark.IR.Prop.Ranges
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.Aliases
   (unNames, Names' (..), VarAliases, ConsumedInExp)
 import qualified Futhark.IR.Aliases as Aliases
-import qualified Futhark.IR.Ranges as Ranges
 import Futhark.Binder
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -45,20 +43,18 @@ import Futhark.Analysis.Rephrase
 data Wise lore
 
 -- | The wisdom of the let-bound variable.
-data VarWisdom = VarWisdom { varWisdomAliases :: VarAliases
-                           , varWisdomRange :: Range
-                           }
+newtype VarWisdom = VarWisdom { varWisdomAliases :: VarAliases }
                   deriving (Eq, Ord, Show)
 
 instance Rename VarWisdom where
   rename = substituteRename
 
 instance Substitute VarWisdom where
-  substituteNames substs (VarWisdom als range) =
-    VarWisdom (substituteNames substs als) (substituteNames substs range)
+  substituteNames substs (VarWisdom als) =
+    VarWisdom (substituteNames substs als)
 
 instance FreeIn VarWisdom where
-  freeIn' (VarWisdom als range) = freeIn' als <> freeIn' range
+  freeIn' (VarWisdom als) = freeIn' als
 
 -- | Wisdom about an expression.
 data ExpWisdom = ExpWisdom { _expWisdomConsumed :: ConsumedInExp
@@ -84,7 +80,6 @@ instance Rename ExpWisdom where
 -- | Wisdom about a body.
 data BodyWisdom = BodyWisdom { bodyWisdomAliases :: [VarAliases]
                              , bodyWisdomConsumed :: ConsumedInExp
-                             , bodyWisdomRanges :: [Range]
                              , bodyWisdomFree :: Names'
                              }
                   deriving (Eq, Ord, Show)
@@ -93,16 +88,15 @@ instance Rename BodyWisdom where
   rename = substituteRename
 
 instance Substitute BodyWisdom where
-  substituteNames substs (BodyWisdom als cons rs free) =
+  substituteNames substs (BodyWisdom als cons free) =
     BodyWisdom
     (substituteNames substs als)
     (substituteNames substs cons)
-    (substituteNames substs rs)
     (substituteNames substs free)
 
 instance FreeIn BodyWisdom where
-  freeIn' (BodyWisdom als cons rs free) =
-    freeIn' als <> freeIn' cons <> freeIn' rs <> freeIn' free
+  freeIn' (BodyWisdom als cons free) =
+    freeIn' als <> freeIn' cons <> freeIn' free
 
 instance FreeDec BodyWisdom where
   precomputed = const . fvNames . unNames . bodyWisdomFree
@@ -138,12 +132,6 @@ instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
 instance AliasesOf (VarWisdom, dec) where
   aliasesOf = unNames . varWisdomAliases . fst
 
-instance RangeOf (VarWisdom, dec) where
-  rangeOf = varWisdomRange . fst
-
-instance RangesOf (BodyWisdom, dec) where
-  rangesOf = bodyWisdomRanges . fst
-
 instance (ASTLore lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
   bodyAliases = map unNames . bodyWisdomAliases . fst . bodyDec
   consumedInBody = unNames . bodyWisdomConsumed . fst . bodyDec
@@ -168,7 +156,7 @@ removeScopeWisdom = M.map unAlias
 
 addScopeWisdom :: Scope lore -> Scope (Wise lore)
 addScopeWisdom = M.map alias
-  where alias (LetName dec) = LetName (VarWisdom mempty unknownRange, dec)
+  where alias (LetName dec) = LetName (VarWisdom mempty, dec)
         alias (FParamName dec) = FParamName dec
         alias (LParamName dec) = LParamName dec
         alias (IndexName it) = IndexName it
@@ -196,22 +184,17 @@ addWisdomToPattern :: (ASTLore lore, CanBeWise (Op lore)) =>
                    -> Exp (Wise lore)
                    -> Pattern (Wise lore)
 addWisdomToPattern pat e =
-  Pattern
-  (map (`addRanges` unknownRange) ctxals)
-  (zipWith addRanges valals ranges)
-  where (ctxals, valals) = Aliases.mkPatternAliases pat e
-        addRanges patElem range =
-          let (als, innerlore) = patElemDec patElem
-          in patElem `setPatElemLore` (VarWisdom als range, innerlore)
-        ranges = expRanges e
+  Pattern (map f ctx) (map f val)
+  where (ctx, val) = Aliases.mkPatternAliases pat e
+        f pe = let (als, dec) = patElemDec pe
+               in pe `setPatElemLore` (VarWisdom als, dec)
 
 mkWiseBody :: (ASTLore lore, CanBeWise (Op lore)) =>
               BodyDec lore -> Stms (Wise lore) -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
-  Body (BodyWisdom aliases consumed ranges (Names' $ freeIn $ freeInStmsAndRes bnds res),
+  Body (BodyWisdom aliases consumed (Names' $ freeIn $ freeInStmsAndRes bnds res),
         innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
-        ranges = Ranges.mkBodyRanges bnds res
 
 mkWiseLetStm :: (ASTLore lore, CanBeWise (Op lore)) =>
                 Pattern lore
@@ -249,7 +232,6 @@ instance (Bindable lore,
     in mkWiseBody bodylore bnds res
 
 class (AliasedOp (OpWithWisdom op),
-       RangedOp (OpWithWisdom op),
        IsOp (OpWithWisdom op)) => CanBeWise op where
   type OpWithWisdom op :: Data.Kind.Type
   removeOpWisdom :: OpWithWisdom op -> op
