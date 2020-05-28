@@ -744,7 +744,7 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
   (oshp, m2) <- generalize m1 oshp1 oshp2
   (dstd, m3) <- generalize m2 (lmadDSrd lmad1) (lmadDSrd lmad2)
   (drot, m4) <- generalize m3 (lmadDRot lmad1) (lmadDRot lmad2)
-  (offt, m5) <- PEG.leastGeneralGeneralization m4 (lmadOffset lmad1) (lmadOffset lmad2)
+  let (offt, m5) = PEG.leastGeneralGeneralization m4 (lmadOffset lmad1) (lmadOffset lmad2)
   let lmad_dims = map (\(a,b,c,d,e) -> LMADDim a b c d e) $
         zip5 dstd drot dshp dperm dmon
       lmad = LMAD offt lmad_dims
@@ -755,7 +755,7 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
         lmadDRot = map ldRotate . lmadDims
         generalize m l1 l2 =
           foldM (\(l_acc, m') (pe1,pe2) -> do
-                    (e, m'') <- PEG.leastGeneralGeneralization m' pe1 pe2
+                    let (e, m'') = PEG.leastGeneralGeneralization m' pe1 pe2
                     return (l_acc++[e], m'')
                 ) ([], m) (zip l1 l2)
 leastGeneralGeneralization _ _ = Nothing
