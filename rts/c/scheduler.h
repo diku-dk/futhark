@@ -3,99 +3,6 @@
 #ifndef _SCHEDULER_H_
 #define _SCHEDULER_H_
 
-#define MULTICORE
-/* #define MCDEBUG */
-/* #define MCPROFILE */
-
-#ifdef _WIN32
-#include <windows.h>
-#elif __APPLE__
-#include <sys/sysctl.h>
-// For getting cpu usage of threads
-#include <mach/mach.h>
-#include <sys/resource.h>
-#else // Linux
-#include <sys/sysinfo.h>
-#include <sys/resource.h>
-#endif
-
-#ifdef MCDEBUG
-static long int ran_iter, start_iter = 0;
-#endif
-
-static int scheduler_error = 0;
-
-
-/* A wrapper for getting rusage on Linux and MacOS */
-/* TODO maybe figure out this for windows */
-static inline int getrusage_thread(struct rusage *rusage)
-{
-  int err = -1;
-#ifdef __APPLE__
-    thread_basic_info_data_t info = { 0 };
-    mach_msg_type_number_t info_count = THREAD_BASIC_INFO_COUNT;
-    kern_return_t kern_err;
-
-    kern_err = thread_info(mach_thread_self(),
-                           THREAD_BASIC_INFO,
-                           (thread_info_t)&info,
-                           &info_count);
-    if (kern_err == KERN_SUCCESS) {
-        memset(rusage, 0, sizeof(struct rusage));
-        rusage->ru_utime.tv_sec = info.user_time.seconds;
-        rusage->ru_utime.tv_usec = info.user_time.microseconds;
-        rusage->ru_stime.tv_sec = info.system_time.seconds;
-        rusage->ru_stime.tv_usec = info.system_time.microseconds;
-        err = 0;
-    } else {
-        errno = EINVAL;
-    }
-#else // Linux
-    err = getrusage(RUSAGE_THREAD, rusage);
-#endif
-    return err;
-}
-
-static inline void output_thread_usage(struct worker *worker)
-{
-  struct rusage usage;
-  CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
-  struct timeval user_cpu_time = usage.ru_utime;
-  struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %2d - work time %llu - user time: %llu us - sys: %10llu us - dequeue: (%8llu/%8llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
-          worker->tid,
-          worker->time_spent_working,
-          (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
-          (uint64_t)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec),
-          worker->q.time_dequeue,
-          worker->q.n_dequeues,
-          worker->q.time_dequeue / (worker->q.n_dequeues == 0 ? 1 : worker->q.n_dequeues),
-          worker->q.time_enqueue,
-          worker->q.n_dequeues,
-          worker->q.time_enqueue / (worker->q.n_enqueues == 0 ? 1 : worker->q.n_enqueues));
-}
-
-/* returns the number of logical cores */
-static int num_processors()
-{
-#ifdef _WIN32
-/* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
-    SYSTEM_INFO sysinfo;
-    GetSystemInfo(&sysinfo);
-    int ncores = sysinfo.dwNumberOfProcessors;
-    fprintf(stdout, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
-    return ncores;
-#elif __APPLE__
-    int ncores;
-    size_t ncores_size = sizeof(ncores);
-    CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0),
-                "sysctlbyname (hw.logicalcpu)");
-    return ncores;
-#else // If Linux
-  return get_nprocs();
-#endif
-}
-
 
 
 __thread struct worker* worker_local = NULL;
@@ -276,13 +183,11 @@ static inline int delegate_work(struct scheduler *scheduler,
                                 int *ntask,
                                 struct worker* calling_worker)
 {
-
 #ifdef MCDEBUG
   fprintf(stderr, "[delegate_work] tid %d\n", calling_worker->tid);
   fprintf(stderr, "[delegate_work] granularity %d\n", task->granularity);
   fprintf(stderr, "[delegate_work] iterations %ld\n", task->iterations);
 #endif
-
 
 
   pthread_mutex_t mutex;
@@ -364,8 +269,6 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_parallel] starting task %s with %ld iterations \n", task->name, task->iterations);
 #endif
-
-
   assert(scheduler != NULL);
   assert(task != NULL);
 

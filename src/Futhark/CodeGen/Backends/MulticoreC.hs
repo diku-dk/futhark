@@ -35,8 +35,10 @@ compileProg =
 
           let subtask_queue_h  = $(embedStringFile "rts/c/subtask_queue.h")
               scheduler_h = $(embedStringFile "rts/c/scheduler.h")
+              multicore_h = $(embedStringFile "rts/c/multicore_defs.h")
 
           mapM_ GC.earlyDecl [C.cunit|
+                              $esc:multicore_h
                               $esc:subtask_queue_h
                               $esc:scheduler_h
                              |]
