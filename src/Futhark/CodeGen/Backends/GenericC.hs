@@ -470,6 +470,22 @@ contextType = do
   name <- publicName "context"
   return [C.cty|struct $id:name|]
 
+typeToSharedMem :: C.Type -> C.Type
+typeToSharedMem [C.cty|bool|]              = [C.cty|typename shared_bool|]
+typeToSharedMem [C.cty|int|]               = [C.cty|typename shared_int|]
+typeToSharedMem [C.cty|float|]             = [C.cty|typename shared_float|]
+typeToSharedMem [C.cty|double|]            = [C.cty|typename shared_double|]
+typeToSharedMem [C.cty|typename int8_t|]   = [C.cty|typename shared_int|]
+typeToSharedMem [C.cty|typename int16_t|]  = [C.cty|typename shared_int|]
+typeToSharedMem [C.cty|typename int32_t|]  = [C.cty|typename shared_int|]
+typeToSharedMem [C.cty|typename int64_t|]  = [C.cty|typename shared_int64_t|]
+typeToSharedMem [C.cty|typename uint8_t|]  = [C.cty|typename shared_uint|]
+typeToSharedMem [C.cty|typename uint16_t|] = [C.cty|typename shared_uint|]
+typeToSharedMem [C.cty|typename uint32_t|] = [C.cty|typename shared_uint|]
+typeToSharedMem [C.cty|typename uint64_t|] = [C.cty|typename shared_uint64_t|]
+-- Should never happen.
+typeToSharedMem t                          = t
+
 -- FIXME: `fatMemType` uses incompatible GLSL composite data type.
 memToCType :: BackendTarget -> Space -> CompilerM op s C.Type
 memToCType target space = do
@@ -630,40 +646,12 @@ declMem name space = do
 -- FIXME: This needs to be able to handle all types.
 declMemShader :: VName -> Space -> CompilerM op s ()
 declMemShader name space = do
-  ty <- memToCType TargetShader space
+  ty' <- memToCType TargetShader space
+  let ty = typeToSharedMem ty'
   case space of
-    ScalarSpace{} -> decl [C.cdecl|$ty:ty $id:name[];|]
+    ScalarSpace{} -> decl [C.cdecl|$ty:ty' $id:name[];|]
                      -- FIXME: Determine the array size without hardcoding.
-    _             -> case ty of
-                       [C.cty|bool|] ->
-                         decl [C.cdecl|typename shared_bool $id:name[256];|]
-                       [C.cty|int|] ->
-                         decl [C.cdecl|typename shared_int $id:name[256];|]
-                       [C.cty|float|] ->
-                         decl [C.cdecl|typename shared_float $id:name[256];|]
-                       [C.cty|double|] ->
-                         decl [C.cdecl|typename shared_double $id:name[256];|]
-
-                       [C.cty|typename int8_t|]  ->
-                         decl [C.cdecl|typename shared_int $id:name[256];|]
-                       [C.cty|typename int16_t|] ->
-                         decl [C.cdecl|typename shared_int $id:name[256];|]
-                       [C.cty|typename int32_t|] ->
-                         decl [C.cdecl|typename shared_int $id:name[256];|]
-                       [C.cty|typename int64_t|] ->
-                         decl [C.cdecl|typename shared_int64_t $id:name[256];|]
-
-                       [C.cty|typename uint8_t|]  ->
-                         decl [C.cdecl|typename shared_uint $id:name[256];|]
-                       [C.cty|typename uint16_t|] ->
-                         decl [C.cdecl|typename shared_uint $id:name[256];|]
-                       [C.cty|typename uint32_t|] ->
-                         decl [C.cdecl|typename shared_uint $id:name[256];|]
-                       [C.cty|typename uint64_t|] ->
-                         decl [C.cdecl|typename shared_uint64_t $id:name[256];|]
-
-                       _ ->
-                         decl [C.cdecl|$ty:ty $id:name[256];|]
+    _             -> decl [C.cdecl|$ty:ty $id:name[256];|]
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
