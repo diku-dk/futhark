@@ -183,10 +183,10 @@ will not result in a double free.
 Entry points
 ------------
 
-Entry points are mapped 1:1 to C functions.  Return value are handled
-with "out"-parameters.
+Entry points are mapped 1:1 to C functions.  Return values are handled
+with *out*-parameters.
 
-For example, the following entry point::
+For example, this Futhark entry point::
 
   entry sum = i32.sum
 
