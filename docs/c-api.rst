@@ -216,7 +216,7 @@ The following API functions are available when using the ``opencl`` or
 Exotic
 ~~~~~~
 
-The following functions are not going to interesting to most users.
+The following functions are not interesting to most users.
 
 .. c:function:: void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size)
 
