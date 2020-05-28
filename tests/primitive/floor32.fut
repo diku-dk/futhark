@@ -1,6 +1,5 @@
 -- Rounding down floats to whole numbers.
 -- ==
--- tags { no_csharp }
 -- input { 1.0000001192092896f32 } output { 1f32 }
 -- input { -0.9999999403953552f32 } output { -1f32 }
 -- input { 0f32 } output { 0f32 }

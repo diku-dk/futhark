@@ -86,8 +86,8 @@ OPTIONS
   directly, but instead the indicated *program* is run with its first
   argument being the path to the compiled Futhark program.  This is
   useful for compilation targets that cannot be executed directly (as
-  with :ref:`futhark-csharp(1)`), or when you wish to run the program
-  on a remote machine.
+  with :ref:`futhark-pyopencl(1)` on some platforms), or when you wish
+  to run the program on a remote machine.
 
 --runs=count
 

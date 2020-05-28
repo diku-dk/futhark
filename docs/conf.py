@@ -266,8 +266,6 @@ man_pages = [
     ('man/futhark-cuda', 'futhark-cuda', 'compile Futhark to CUDA', [], 1),
     ('man/futhark-python', 'futhark-python', 'compile Futhark to sequential Python', [], 1),
     ('man/futhark-pyopencl', 'futhark-pyopencl', 'compile Futhark to Python and OpenCL', [], 1),
-    ('man/futhark-csharp', 'futhark-csharp', 'compile Futhark to sequential C#', [], 1),
-    ('man/futhark-csopencl', 'futhark-csopencl', 'compile Futhark to C# and OpenCL', [], 1),
     ('man/futhark-run', 'futhark-run', 'interpret Futhark program', [], 1),
     ('man/futhark-repl', 'futhark-repl', 'interactive Futhark read-eval-print-loop', [], 1),
     ('man/futhark-test', 'futhark-test', 'test Futhark programs', [], 1),

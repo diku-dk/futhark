@@ -1,5 +1,4 @@
 -- ==
--- tags { no_csharp }
 -- input { 1.0 } output { 1f32 1f64 }
 -- input { 4.0 } output { 6f32 6f64 }
 
