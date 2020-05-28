@@ -35,7 +35,6 @@ license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     rts/c/*.h
-    rts/csharp/*.cs
     rts/futhark-doc/*.css
     rts/python/*.py
     prelude/*.fut
@@ -76,8 +75,6 @@ library
       Futhark.CLI.Autotune
       Futhark.CLI.Bench
       Futhark.CLI.C
-      Futhark.CLI.CSOpenCL
-      Futhark.CLI.CSharp
       Futhark.CLI.CUDA
       Futhark.CLI.Check
       Futhark.CLI.Datacmp
@@ -97,14 +94,8 @@ library
       Futhark.CodeGen.Backends.CCUDA.Boilerplate
       Futhark.CodeGen.Backends.COpenCL
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
-      Futhark.CodeGen.Backends.CSOpenCL
-      Futhark.CodeGen.Backends.CSOpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.Options
-      Futhark.CodeGen.Backends.GenericCSharp
-      Futhark.CodeGen.Backends.GenericCSharp.AST
-      Futhark.CodeGen.Backends.GenericCSharp.Definitions
-      Futhark.CodeGen.Backends.GenericCSharp.Options
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Definitions
@@ -112,7 +103,6 @@ library
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
       Futhark.CodeGen.Backends.SequentialC
-      Futhark.CodeGen.Backends.SequentialCSharp
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
