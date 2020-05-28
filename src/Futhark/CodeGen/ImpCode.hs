@@ -22,7 +22,6 @@ module Futhark.CodeGen.ImpCode
   , SubExp(..)
   , MemSize
   , DimSize
-  , Type (..)
   , Space (..)
   , SpaceId
   , Code (..)
@@ -77,9 +76,6 @@ type MemSize = SubExp
 
 -- | The size of an array.
 type DimSize = SubExp
-
--- | The type of a parameter.
-data Type = Scalar PrimType | Mem Space
 
 -- | An ImpCode function parameter.
 data Param = MemParam VName Space
