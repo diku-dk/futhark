@@ -50,16 +50,12 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.Range as Range
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR.Aliases
-import Futhark.IR.Ranges
 import Futhark.IR.Kernels
 import Futhark.Pass
 
--- We do not care about ranges, but in order to use ST.SymbolTable
--- (which is a convenient way to handle aliases), we need range information.
-type SinkLore = Ranges (Aliases Kernels)
+type SinkLore = Aliases Kernels
 type SymbolTable = ST.SymbolTable SinkLore
 type Sinking = M.Map VName (Stm SinkLore)
 type Sunk = S.Set VName
@@ -177,9 +173,9 @@ optimiseKernelBody vtable sinking (KernelBody dec stms res) =
 -- | The pass definition.
 sink :: Pass Kernels Kernels
 sink = Pass "sink" "move memory loads closer to their uses" $
-       fmap (removeProgAliases . removeProgRanges) .
+       fmap removeProgAliases .
        intraproceduralTransformationWithConsts onConsts onFun .
-       Range.rangeAnalysis . Alias.aliasAnalysis
+       Alias.aliasAnalysis
   where onFun _ fd = do
           let vtable = ST.insertFParams (funDefParams fd) mempty
               (body, _) = optimiseBody vtable mempty $ funDefBody fd

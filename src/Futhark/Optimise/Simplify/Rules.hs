@@ -385,9 +385,14 @@ simplifyBinOp _ _ (BinOp op (Constant v1) (Constant v2))
   | Just res <- doBinOp op v1 v2 =
       constRes res
 
-simplifyBinOp _ _ (BinOp Add{} e1 e2)
+simplifyBinOp look _ (BinOp Add{} e1 e2)
   | isCt0 e1 = subExpRes e2
   | isCt0 e2 = subExpRes e1
+
+  -- x+(y-x) => y
+  | Var v2 <- e2,
+    Just (BasicOp (BinOp Sub{} e2_a e2_b), cs) <- look v2,
+    e2_b == e1 = Just (SubExp e2_a, cs)
 
 simplifyBinOp _ _ (BinOp FAdd{} e1 e2)
   | isCt0 e1 = subExpRes e2
@@ -1241,6 +1246,20 @@ ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
       v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
       certifying cs_y $ auxing aux $
         letBind pat $ BasicOp $ Update arr_x slice_x' $ Var v'
+
+-- Simplify away 0<i when 'i' is from a loop of form 'for i < n'.
+ruleBasicOp vtable pat aux (CmpOp (CmpSle Int32) x y)
+  | Constant (IntValue (Int32Value 0)) <- x,
+    Var v <- y,
+    Just _ <- ST.lookupLoopVar v vtable =
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True
+
+-- Simplify away i<n when 'i' is from a loop of form 'for i < n'.
+ruleBasicOp vtable pat aux (CmpOp (CmpSlt Int32) x y)
+  | Var v <- x,
+    Just n <- ST.lookupLoopVar v vtable,
+    n == y =
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True
 
 ruleBasicOp _ _ _ _ =
   Skip

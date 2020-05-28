@@ -36,7 +36,7 @@ simplifyKernels =
   Simplify.simplifyProg simpleKernels kernelRules Simplify.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope Kernels m, MonadFreshNames m) =>
-                  Lambda Kernels -> [Maybe VName] -> m (Lambda Kernels)
+                  Lambda Kernels -> m (Lambda Kernels)
 simplifyLambda =
   Simplify.simplifyLambda simpleKernels kernelRules Engine.noExtraHoistBlockers
 

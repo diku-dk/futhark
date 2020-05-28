@@ -65,14 +65,11 @@ import Futhark.IR.Prop.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Lore
-import Futhark.IR.Ranges (Ranges, removeLambdaRanges)
-import Futhark.IR.Prop.Ranges
 import Futhark.IR.Aliases (Aliases, removeLambdaAliases)
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
-import qualified Futhark.Analysis.Range as Range
 import Futhark.Construct
 import Futhark.Util (maybeNth, chunks)
 
@@ -451,40 +448,6 @@ substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
   M.findWithDefault (Var idd) idd subs
-
-instance (Ranged inner) => RangedOp (SOAC inner) where
-  opRanges op = replicate (length $ soacType op) unknownRange
-
-instance (ASTLore lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) where
-  type OpWithRanges (SOAC lore) = SOAC (Ranges lore)
-
-  removeOpRanges = runIdentity . mapSOACM remove
-    where remove = SOACMapper return (return . removeLambdaRanges) return
-  addOpRanges (Stream w form lam arr) =
-    Stream w
-    (Range.runRangeM $ analyseStreamForm form)
-    (Range.runRangeM $ Range.analyseLambda lam)
-    arr
-    where analyseStreamForm (Sequential acc) =
-            return $ Sequential acc
-          analyseStreamForm (Parallel o comm lam0 acc) = do
-              lam0' <- Range.analyseLambda lam0
-              return $ Parallel o comm lam0' acc
-  addOpRanges (Scatter len lam ivs as) =
-    Scatter len (Range.runRangeM $ Range.analyseLambda lam) ivs as
-  addOpRanges (Hist len ops bucket_fun imgs) =
-    Hist len (map (mapHistOp $ Range.runRangeM . Range.analyseLambda) ops)
-    (Range.runRangeM $ Range.analyseLambda bucket_fun) imgs
-  addOpRanges (Screma w (ScremaForm scans reds map_lam) arrs) =
-    Screma w (ScremaForm
-                (map onScan scans)
-                (map onRed reds)
-                (Range.runRangeM $ Range.analyseLambda map_lam))
-               arrs
-    where onRed red =
-            red { redLambda = Range.runRangeM $ Range.analyseLambda $ redLambda red }
-          onScan red =
-            red { scanLambda = Range.runRangeM $ Range.analyseLambda $ scanLambda red }
 
 instance (ASTLore lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)

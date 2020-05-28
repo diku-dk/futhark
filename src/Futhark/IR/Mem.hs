@@ -128,7 +128,6 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Lore
 import Futhark.IR.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
-import Futhark.IR.Prop.Ranges
 import qualified Futhark.Analysis.SymbolTable as ST
 
 type LetDecMem = MemInfo SubExp NoUniqueness MemBind
@@ -190,20 +189,6 @@ instance CanBeAliased inner => CanBeAliased (MemOp inner) where
 
   addOpAliases (Alloc se space) = Alloc se space
   addOpAliases (Inner k) = Inner $ addOpAliases k
-
-instance RangedOp inner => RangedOp (MemOp inner) where
-  opRanges (Alloc _ _) =
-    [unknownRange]
-  opRanges (Inner k) =
-    opRanges k
-
-instance CanBeRanged inner => CanBeRanged (MemOp inner) where
-  type OpWithRanges (MemOp inner) = MemOp (OpWithRanges inner)
-  removeOpRanges (Alloc size space) = Alloc size space
-  removeOpRanges (Inner k) = Inner $ removeOpRanges k
-
-  addOpRanges (Alloc size space) = Alloc size space
-  addOpRanges (Inner k) = Inner $ addOpRanges k
 
 instance Rename inner => Rename (MemOp inner) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space

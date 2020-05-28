@@ -24,7 +24,6 @@ module Futhark.IR.Kernels.Kernel
 where
 
 import Futhark.IR
-import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
@@ -33,12 +32,8 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Lore
 import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.IR.Ranges
-  (Ranges)
-import Futhark.IR.Prop.Ranges
 import Futhark.IR.Prop.Aliases
-import Futhark.IR.Aliases
-  (Aliases)
+import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.SegOp
 import Futhark.IR.Kernels.Sizes
 import qualified Futhark.TypeCheck as TC
@@ -172,12 +167,6 @@ instance AliasedOp SizeOp where
   opAliases _ = [mempty]
   consumedInOp _ = mempty
 
-instance RangedOp SizeOp where
-  opRanges (SplitSpace _ _ _ elems_per_thread) =
-    [(Just (ScalarBound 0),
-      Just (ScalarBound (SE.subExpToScalExp elems_per_thread int32)))]
-  opRanges _ = [unknownRange]
-
 instance FreeIn SizeOp where
   freeIn' (SplitSpace o w i elems_per_thread) =
     freeIn' o <> freeIn' [w, i, elems_per_thread]
@@ -268,11 +257,6 @@ instance (Aliased lore, AliasedOp op, ASTLore lore) => AliasedOp (HostOp lore op
   consumedInOp (OtherOp op) = consumedInOp op
   consumedInOp (SizeOp op) = consumedInOp op
 
-instance (ASTLore lore, RangedOp op) => RangedOp (HostOp lore op) where
-  opRanges (SegOp op) = opRanges op
-  opRanges (OtherOp op) = opRanges op
-  opRanges (SizeOp op) = opRanges op
-
 instance (ASTLore lore, FreeIn op) => FreeIn (HostOp lore op) where
   freeIn' (SegOp op) = freeIn' op
   freeIn' (OtherOp op) = freeIn' op
@@ -288,17 +272,6 @@ instance (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) => CanBeAliased
   removeOpAliases (SegOp op) = SegOp $ removeOpAliases op
   removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
   removeOpAliases (SizeOp op) = SizeOp op
-
-instance (CanBeRanged (Op lore), CanBeRanged op, ASTLore lore) => CanBeRanged (HostOp lore op) where
-  type OpWithRanges (HostOp lore op) = HostOp (Ranges lore) (OpWithRanges op)
-
-  addOpRanges (SegOp op) = SegOp $ addOpRanges op
-  addOpRanges (OtherOp op) = OtherOp $ addOpRanges op
-  addOpRanges (SizeOp op) = SizeOp op
-
-  removeOpRanges (SegOp op) = SegOp $ removeOpRanges op
-  removeOpRanges (OtherOp op) = OtherOp $ removeOpRanges op
-  removeOpRanges (SizeOp op) = SizeOp op
 
 instance (CanBeWise (Op lore), CanBeWise op, ASTLore lore) => CanBeWise (HostOp lore op) where
   type OpWithWisdom (HostOp lore op) = HostOp (Wise lore) (OpWithWisdom op)

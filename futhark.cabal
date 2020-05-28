@@ -53,7 +53,6 @@ source-repository head
 library
   exposed-modules:
       Futhark.Actions
-      Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
       Futhark.Analysis.DataDependencies
@@ -64,9 +63,7 @@ library
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize
       Futhark.Analysis.PrimExp.Simplify
-      Futhark.Analysis.Range
       Futhark.Analysis.Rephrase
-      Futhark.Analysis.ScalExp
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -148,13 +145,11 @@ library
       Futhark.IR.Prop.Constants
       Futhark.IR.Prop.Names
       Futhark.IR.Prop.Patterns
-      Futhark.IR.Prop.Ranges
       Futhark.IR.Prop.Rearrange
       Futhark.IR.Prop.Reshape
       Futhark.IR.Prop.Scope
       Futhark.IR.Prop.TypeOf
       Futhark.IR.Prop.Types
-      Futhark.IR.Ranges
       Futhark.IR.RetType
       Futhark.IR.SOACS
       Futhark.IR.SOACS.SOAC
@@ -210,7 +205,6 @@ library
       Futhark.Pass.ExtractKernels.ToKernels
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
-      Futhark.Pass.ResolveAssertions
       Futhark.Pass.Simplify
       Futhark.Passes
       Futhark.Pipeline
@@ -323,9 +317,7 @@ test-suite unit
   type: exitcode-stdio-1.0
   main-is: futhark_tests.hs
   other-modules:
-      Futhark.Analysis.ScalExpTests
       Futhark.BenchTests
-      Futhark.Optimise.AlgSimplifyTests
       Futhark.Pkg.SolveTests
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests

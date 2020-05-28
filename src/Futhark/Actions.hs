@@ -5,7 +5,6 @@ module Futhark.Actions
   ( printAction
   , impCodeGenAction
   , kernelImpCodeGenAction
-  , rangeAction
   , metricsAction
   )
 where
@@ -15,14 +14,12 @@ import Control.Monad.IO.Class
 
 import Futhark.Pipeline
 import Futhark.Analysis.Alias
-import Futhark.Analysis.Range
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.KernelsMem (KernelsMem)
 import Futhark.IR.SeqMem (SeqMem)
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
-import Futhark.IR.Prop.Ranges (CanBeRanged)
 import Futhark.Analysis.Metrics
 
 -- | Print the result to stdout, with alias annotations.
@@ -32,14 +29,6 @@ printAction =
          , actionDescription = "Prettyprint the resulting internal representation on standard output."
          , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
          }
-
--- | Print the result to stdout, with range annotations.
-rangeAction :: (ASTLore lore, CanBeRanged (Op lore)) => Action lore
-rangeAction =
-    Action { actionName = "Range analysis"
-           , actionDescription = "Print the program with range annotations added."
-           , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis
-           }
 
 -- | Print metrics about AST node counts to stdout.
 metricsAction :: OpMetrics (Op lore) => Action lore

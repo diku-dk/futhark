@@ -68,16 +68,12 @@ import Futhark.Util.Pretty
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Lore
-import Futhark.IR.Ranges
-  (Ranges, removeLambdaRanges, removeStmRanges, mkBodyRanges)
-import Futhark.IR.Prop.Ranges
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.Aliases
   (Aliases, removeLambdaAliases, removeStmAliases)
 import Futhark.IR.Mem
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
-import qualified Futhark.Analysis.Range as Range
 import Futhark.Util (maybeNth, chunks)
 import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Optimise.Simplify.Engine as Engine
@@ -265,18 +261,6 @@ removeKernelBodyAliases :: CanBeAliased (Op lore) =>
                            KernelBody (Aliases lore) -> KernelBody lore
 removeKernelBodyAliases (KernelBody (_, dec) stms res) =
   KernelBody dec (fmap removeStmAliases stms) res
-
-addKernelBodyRanges :: (ASTLore lore, CanBeRanged (Op lore)) =>
-                       KernelBody lore -> Range.RangeM (KernelBody (Ranges lore))
-addKernelBodyRanges (KernelBody dec stms res) =
-  Range.analyseStms stms $ \stms' -> do
-  let dec' = (mkBodyRanges stms $ map kernelResultSubExp res, dec)
-  return $ KernelBody dec' stms' res
-
-removeKernelBodyRanges :: CanBeRanged (Op lore) =>
-                          KernelBody (Ranges lore) -> KernelBody lore
-removeKernelBodyRanges (KernelBody (_, dec) stms res) =
-  KernelBody dec (fmap removeStmRanges stms) res
 
 removeKernelBodyWisdom :: CanBeWise (Op lore) =>
                           KernelBody (Wise lore) -> KernelBody lore
@@ -753,21 +737,6 @@ instance (PrettyLore lore, PP.Pretty lvl) => PP.Pretty (SegOp lvl lore) where
             ppr shape <> PP.comma </>
             ppr op
 
-instance (ASTLore inner, ASTConstraints lvl) =>
-         RangedOp (SegOp lvl inner) where
-  opRanges op = replicate (length $ segOpType op) unknownRange
-
-instance (ASTLore lore, CanBeRanged (Op lore), ASTConstraints lvl) =>
-         CanBeRanged (SegOp lvl lore) where
-  type OpWithRanges (SegOp lvl lore) = SegOp lvl (Ranges lore)
-
-  removeOpRanges = runIdentity . mapSegOpM remove
-    where remove = SegOpMapper return (return . removeLambdaRanges)
-                   (return . removeKernelBodyRanges) return return
-  addOpRanges = Range.runRangeM . mapSegOpM add
-    where add = SegOpMapper return Range.analyseLambda
-                addKernelBodyRanges return return
-
 instance (ASTLore lore, ASTLore (Aliases lore),
           CanBeAliased (Op lore), ASTConstraints lvl) =>
          CanBeAliased (SegOp lvl lore) where
@@ -901,8 +870,13 @@ simplifyKernelBody space (KernelBody _ stms res) = do
 
   return (mkWiseKernelBody () body_stms body_res, hoisted)
 
-  where scope_vtable = ST.fromScope $ scopeOfSegSpace space
+  where scope_vtable = segSpaceSymbolTable space
         bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+
+segSpaceSymbolTable :: SegSpace -> ST.SymbolTable lore
+segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
+  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int32) gtids_and_dims
+  where f vtable (gtid, dim) = ST.insertLoopVar gtid Int32 dim vtable
 
 simplifySegBinOp :: Engine.SimplifiableLore lore =>
                     SegBinOp lore
@@ -910,7 +884,7 @@ simplifySegBinOp :: Engine.SimplifiableLore lore =>
 simplifySegBinOp (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable { ST.simplifyMemory = True }) $
-    Engine.simplifyLambda lam $ replicate (length nes * 2) Nothing
+    Engine.simplifyLambda lam
   shape' <- Engine.simplify shape
   nes' <- mapM Engine.simplify nes
   return (SegBinOp comm lam' nes' shape', hoisted)
@@ -962,8 +936,7 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
       (lam', op_hoisted) <-
         Engine.localVtable (<>scope_vtable) $
         Engine.localVtable (\vtable -> vtable { ST.simplifyMemory = True }) $
-        Engine.simplifyLambda lam $
-        replicate (length nes * 2) Nothing
+        Engine.simplifyLambda lam
       return (HistOp w' rf' arrs' nes' dims' lam',
               op_hoisted)
 

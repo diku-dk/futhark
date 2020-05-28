@@ -5,5 +5,5 @@
 -- structure { Screma 1 }
 
 let main [n] (xs: [n]i32) =
-  let ys = map (\i -> xs[i]) (iota n)
+  let ys = map (\i -> #[unsafe] xs[i]) (iota n)
   in map (\i -> ys[i] * xs[i]) (iota n)
