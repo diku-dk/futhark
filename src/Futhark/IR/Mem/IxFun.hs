@@ -18,6 +18,7 @@ module Futhark.IR.Mem.IxFun
        , isLinear
        , substituteInIxFun
        , leastGeneralGeneralization
+       , existentialize
        , closeEnough
        )
        where
@@ -29,6 +30,7 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Data.Function (on)
 import Data.Maybe (isJust)
 import Control.Monad.Identity
+import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 
@@ -759,6 +761,42 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
                     return (l_acc++[e], m'')
                 ) ([], m) (zip l1 l2)
 leastGeneralGeneralization _ _ = Nothing
+
+isSequential :: [Int] -> Bool
+isSequential xs =
+  all (uncurry (==)) $ zip xs [0..]
+
+-- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
+existentialize :: (Eq v, Pretty v) =>
+                  IxFun (PrimExp v) -> State [PrimExp v] (Maybe (IxFun (PrimExp (Ext v))))
+existentialize (IxFun (lmad :| []) oshp True)
+  | all ((== 0) . ldRotate) (lmadDims lmad),
+    length (lmadShape lmad) == length oshp,
+    isSequential (map ldPerm $ lmadDims lmad) = do
+      oshp' <- mapM PEG.existentialize oshp
+      lmadOffset' <- PEG.existentialize $ lmadOffset lmad
+      lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
+      let lmad' = LMAD lmadOffset' lmadDims'
+      return $ Just $ IxFun (lmad' :| []) oshp' True
+        where
+          existentializeLMADDim :: LMADDim (PrimExp v) -> State [PrimExp v] (LMADDim (PrimExp (Ext v)))
+          existentializeLMADDim (LMADDim str rot shp perm mon) = do
+            stride' <- PEG.existentialize str
+            shape' <- PEG.existentialize shp
+            return $ LMADDim stride' (fmap Free rot) shape' perm mon
+
+    -- oshp' = LeafExp (Ext 0)
+    -- lmad' = LMAD lmadOffset' lmadDims'
+    -- lmadOffset' = LeafExp (Ext 1)
+    -- (_, lmadDims', lmadDimSubsts) = foldr generalizeDim (2, [], []) $ lmadDims lmad
+    -- substs = oshp : lmadOffset lmad' : lmadDimSubsts
+
+    -- generalizeDim :: (Int, [LMADDim num]) -> LMADDim num -> (Int, [LMADDim num])
+    -- generalizeDim (i, acc) (LMADDim stride rotate shape perm mon) =
+    --   (i + 3,
+    --    LMADDim (LeafExp $ Ext i) (LeafExp $ Ext $ i + 1) (LeafExp $ Ext $ i + 2) perm mon,
+    --    [stride, rotate, shape])
+existentialize _ = return Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,
 -- we may run into problems caused by the simplifier. As index functions can be
