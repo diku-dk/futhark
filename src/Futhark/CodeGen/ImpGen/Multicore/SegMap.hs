@@ -63,15 +63,12 @@ compileSegMap pat space kbody = do
 
   par_task_code <- collect $ do
     body <- compileSegMapBody flat_idx pat space kbody
-    let freeVariables = namesToList (freeIn body `namesSubtract` namesFromList [segFlat space, flat_idx])
-    ts <- mapM lookupType freeVariables
-    freeParams <- zipWithM toParam freeVariables ts
+    free_params <- freeParams body [segFlat space, flat_idx]
     let (body_allocs, body') = extractAllocations body
-
+        sched = decideScheduling body'
     emit $ Imp.DebugPrint "SegMap parallel" Nothing
     ntasks <- dPrim "num_tasks" $ IntType Int32
-    let sched = decideScheduling body
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks flat_idx sched body_allocs body' (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc free_params ntasks flat_idx sched body_allocs body' (segFlat space)
 
   seq_task_code <- collect $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
@@ -79,9 +76,5 @@ compileSegMap pat space kbody = do
     let (body_allocs, body') = extractAllocations body
     emit $ Imp.Op $ Imp.SeqCode flat_idx body_allocs body'
 
-  let freeVariables_task = namesToList $ freeIn (par_task_code <> seq_task_code) `namesSubtract` namesFromList [flat_idx]
-  ts_task <- mapM lookupType freeVariables_task
-  freeParams_task <- zipWithM toParam freeVariables_task ts_task
-
-
-  emit $ Imp.Op $ Imp.ParLoop freeParams_task (product ns') par_task_code seq_task_code (segFlat space) []
+  free_params_task <- freeParams (par_task_code <> seq_task_code) [flat_idx]
+  emit $ Imp.Op $ Imp.ParLoop free_params_task (product ns') par_task_code seq_task_code (segFlat space) []

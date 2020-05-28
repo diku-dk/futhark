@@ -138,11 +138,7 @@ nonsegmentedReduction pat space reds kbody = do
                   forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
                     \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
-
-    let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                      namesFromList (segFlat space : [flat_idx])
-    ts <- mapM lookupType freeVariables
-    freeParams <- zipWithM toParam freeVariables ts
+    free_params <- freeParams fbody (segFlat space : [flat_idx])
     let scheduling = case slugsComm slugs of
                      Commutative -> decideScheduling fbody
                      Noncommutative -> Imp.Static
@@ -150,7 +146,7 @@ nonsegmentedReduction pat space reds kbody = do
     ntasks <- dPrim "num_tasks" $ IntType Int32
     ntasks' <- toExp $ Var ntasks
 
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks flat_idx scheduling mempty fbody (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc free_params ntasks flat_idx scheduling mempty fbody (segFlat space)
 
     reds' <- renameSegBinOp reds
     slugs' <- mapM (segBinOpOpSlug tid') $ zip reds' stage_one_red_arrs
@@ -184,12 +180,8 @@ nonsegmentedReduction pat space reds kbody = do
   retval_params <- zipWithM toParam retvals retvals_ts
   let retval_names = map Imp.paramName retval_params
 
-  let freeVariables = namesToList $ freeIn (par_code <> seq_code) `namesSubtract` namesFromList ([flat_idx, segFlat space] ++ retval_names)
-  ts <- mapM lookupType freeVariables
-  freeParams <- zipWithM toParam freeVariables ts
-
-
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space) retval_params
+  free_params <- freeParams (par_code <> seq_code) ([flat_idx, segFlat space] ++ retval_names)
+  emit $ Imp.Op $ Imp.ParLoop free_params (product ns') par_code seq_code (segFlat space) retval_params
 
   emit $ Imp.DebugPrint "SegRed end\n" Nothing
 
@@ -252,22 +244,16 @@ segmentedReduction pat space reds kbody = do
         flat_idx <-- flat_idx' + 1
 
   par_code <- collect $ do
-    ntasks <- dPrim "num_tasks" $ IntType Int32
-    let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                    namesFromList (segFlat space : [n_segments])
-    ts <- mapM lookupType freeVariables
-    freeParams <- zipWithM toParam freeVariables ts
+    ntasks      <- dPrim "num_tasks" $ IntType Int32
+    free_params <- freeParams fbody  (segFlat space : [n_segments])
     let sched = decideScheduling fbody
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks n_segments sched mempty fbody (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc free_params ntasks n_segments sched mempty fbody (segFlat space)
 
   seq_code <- collect $
     emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
 
-  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                    namesFromList (segFlat space : [n_segments])
-  ts <- mapM lookupType freeVariables
-  freeParams <- zipWithM toParam freeVariables ts
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product $ init ns') par_code seq_code (segFlat space) []
+  free_task_params <- freeParams fbody  (segFlat space : [n_segments])
+  emit $ Imp.Op $ Imp.ParLoop free_task_params (product $ init ns') par_code seq_code (segFlat space) []
 
 
 sequentialRed :: Pattern MCMem

@@ -11,6 +11,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , groupResultArrays
  , renameSegBinOp
  , resultArrays
+ , freeParams
  )
  where
 
@@ -74,13 +75,18 @@ compileThreadResult _ _ TileReturns{} =
 
 
 
+freeVariables :: Imp.Code -> [VName] -> [VName]
+freeVariables code names  =
+  namesToList $ freeIn code `namesSubtract` namesFromList names
 
-sStackArray :: String -> PrimType -> ShapeBase SubExp -> Space -> MulticoreGen ()
-sStackArray name pt shape space =
-  return ()
+
+freeParams :: Imp.Code -> [VName] -> MulticoreGen [Imp.Param]
+freeParams code names = do
+  let freeVars = freeVariables code names
+  ts <- mapM lookupType freeVars
+  zipWithM toParam freeVars ts
 
 -- | Arrays for storing group results.
---
 resultArrays :: [SegBinOp MCMem] -> MulticoreGen [[VName]]
 resultArrays reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
@@ -90,8 +96,7 @@ resultArrays reds =
     sAllocArray "res_arr" pt full_shape DefaultSpace
 
 
--- | Arrays for storing group results.
---
+-- | Arrays for storing group results shared between threads
 groupResultArrays :: SubExp
                   -> [SegBinOp MCMem]
                   -> MulticoreGen [[VName]]

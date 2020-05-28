@@ -138,21 +138,15 @@ segmentedHist pat space histops kbody = do
 
   par_code <- collect $ do
     ntasks <- dPrim "num_tasks" $ IntType Int32
-    let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                    namesFromList (segFlat space : [n_segments])
-    ts <- mapM lookupType freeVariables
-    freeParams <- zipWithM toParam freeVariables ts
+    free_params <- freeParams fbody [segFlat space, n_segments]
     let sched = decideScheduling fbody
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks n_segments sched mempty fbody (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc free_params ntasks n_segments sched mempty fbody (segFlat space)
 
   seq_code <- collect $
     emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
 
-  let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                    namesFromList (segFlat space : [n_segments])
-  ts <- mapM lookupType freeVariables
-  freeParams <- zipWithM toParam freeVariables ts
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product $ init ns') par_code seq_code (segFlat space) []
+  free_params <- freeParams fbody [segFlat space, n_segments]
+  emit $ Imp.Op $ Imp.ParLoop free_params (product $ init ns') par_code seq_code (segFlat space) []
 
 
 renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
@@ -193,12 +187,8 @@ nonsegmentedHist pat space histops kbody = do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
     emit $ Imp.Op $ Imp.SeqCode flat_idx mempty seq_body
 
-  let freeVariables = namesToList $ freeIn (par_code <> seq_code) `namesSubtract` namesFromList [flat_idx, segFlat space]
-  ts <- mapM lookupType freeVariables
-  freeParams <- zipWithM toParam freeVariables ts
-
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space) []
-
+  free_params <- freeParams (par_code <> seq_code)  [flat_idx, segFlat space]
+  emit $ Imp.Op $ Imp.ParLoop free_params (product ns') par_code seq_code (segFlat space) []
   emit $ Imp.DebugPrint "Histogram end" Nothing
 -- Generates num_threads sub histograms of the size
 -- of the destination histogram
@@ -290,17 +280,12 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
                  copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
                do_op (bucket_is ++ is')
 
-  let freeVariables = namesToList $ freeIn (prebody <> body) `namesSubtract`
-                                    namesFromList (segFlat space : [flat_idx])
-  ts <- mapM lookupType freeVariables
-  freeParams <- zipWithM toParam freeVariables ts
+  free_params <- freeParams (prebody <> body) (segFlat space : [flat_idx])
   let sched = decideScheduling body
 
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32
-
-  emit $ Imp.Op $ Imp.MCFunc freeParams num_histos flat_idx sched mempty body (segFlat space)
-
+  emit $ Imp.Op $ Imp.MCFunc free_params num_histos flat_idx sched mempty body (segFlat space)
   emit $ Imp.DebugPrint "nonsegmented hist stage 2"  Nothing
   let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
   forM_ (zip3 pes_per_op histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
@@ -392,10 +377,8 @@ largeDestHistogram pat space histops kbody = do
                sLoopNest shape $ \is' -> do
                  forM_ (zip vs_params vs') $ \(p, res) ->
                    copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-                 -- sComment "bind lhs" $
                  forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
                    copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
-                 -- sComment "execute operation" $
                  compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
                    forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
                      \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []

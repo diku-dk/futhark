@@ -28,15 +28,6 @@ compileSegScan pat space reds kbody
       segmentedScan pat space reds kbody
 
 
-accumulatorArray :: [SegBinOp MCMem]
-                 -> MulticoreGen [[VName]]
-accumulatorArray reds =
-  forM reds $ \(SegBinOp _ lam _ shape) ->
-    forM (lambdaReturnType lam) $ \t -> do
-    let pt = elemType t
-        full_shape = shape <> arrayShape t
-    sAllocArray "accum_arr" pt full_shape DefaultSpace
-
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
 xParams scan =
   take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
@@ -123,16 +114,11 @@ nonsegmentedScan pat space scan_ops kbody = do
               forM_ (zip pes (bodyResult $ lamBody scan_op)) $
                 \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
 
-    let freeVariables = namesToList $ freeIn (stage_1_prebody <> stage_1_body) `namesSubtract`
-                        namesFromList (segFlat space : [flat_idx])
 
-    ts <- mapM lookupType freeVariables
-    freeParams <- zipWithM toParam freeVariables ts
-
+    free_params <- freeParams (stage_1_prebody <> stage_1_body) (segFlat space : [flat_idx])
     ntasks <- dPrim "ntasks" $ IntType Int32
     ntasks' <- toExp $ Var ntasks
-
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks flat_idx Imp.Static stage_1_prebody stage_1_body (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc free_params ntasks flat_idx Imp.Static stage_1_prebody stage_1_body (segFlat space)
 
     emit $ Imp.DebugPrint "nonsegmentedScan stage 2" Nothing
     scan_ops2 <- renameSegBinOp scan_ops
@@ -153,7 +139,7 @@ nonsegmentedScan pat space scan_ops kbody = do
     offset_index' <- toExp $ Var offset_index
 
     sWhen (ntasks' .>. 0) $ do
-      accs <- accumulatorArray scan_ops2
+      accs <- resultArrays scan_ops2
       forM_ (zip scan_ops2 accs) $ \(scan_op, acc) ->
         sLoopNest (segBinOpShape scan_op) $ \vec_is ->
         forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
@@ -182,8 +168,8 @@ nonsegmentedScan pat space scan_ops kbody = do
                   \(acc', pe, se) -> do copyDWIMFix (patElemName pe) ((offset_index'-1) : vec_is) se []
                                         copyDWIMFix acc' vec_is se []
 
-      -- Stage 3 : Finally each thread partially scans a chunk of the input
-      --           reading it's corresponding carry-in
+    -- Stage 3 : Finally each thread partially scans a chunk of the input
+    --           reading it's corresponding carry-in
     scan_ops3 <- renameSegBinOp scan_ops
     accs' <- groupResultArrays (Var num_threads) scan_ops3
     stage_3_prebody <- collect $ do
@@ -224,22 +210,16 @@ nonsegmentedScan pat space scan_ops kbody = do
                   copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
                   copyDWIMFix acc' (tid' : vec_is) se []
 
-    let freeVariables' = namesToList $ freeIn (stage_3_prebody <> stage_3_body) `namesSubtract`
-                         namesFromList (segFlat space : [flat_idx])
-    ts' <- mapM lookupType freeVariables'
-    freeParams' <- zipWithM toParam freeVariables' ts'
 
-    emit $ Imp.Op $ Imp.MCFunc freeParams' ntasks flat_idx Imp.Static stage_3_prebody stage_3_body (segFlat space)
+    free_params' <- freeParams  (stage_3_prebody <> stage_3_body)  (segFlat space : [flat_idx])
+    emit $ Imp.Op $ Imp.MCFunc free_params' ntasks flat_idx Imp.Static stage_3_prebody stage_3_body (segFlat space)
 
   seq_code <- collect $ do
     seq_code_body <- sequentialScan flat_idx pat space scan_ops kbody
     emit $ Imp.Op $ Imp.SeqCode flat_idx mempty seq_code_body
 
-  let freeVariables = namesToList $ freeIn par_code `namesSubtract` namesFromList [flat_idx, segFlat space]
-  ts <- mapM lookupType freeVariables
-  freeParams <- zipWithM toParam freeVariables ts
-
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product ns') par_code seq_code (segFlat space) []
+  free_task_params <- freeParams (par_code <> seq_code) [flat_idx, segFlat space]
+  emit $ Imp.Op $ Imp.ParLoop free_task_params (product ns') par_code seq_code (segFlat space) []
   emit $ Imp.DebugPrint "nonsegmentedScan End" Nothing
 
 segmentedScan :: Pattern MCMem
@@ -290,22 +270,15 @@ segmentedScan pat space scan_ops kbody = do
 
   par_code <- collect $ do
     ntasks <- dPrim "num_tasks" $ IntType Int32
-    let freeVariables = namesToList $ freeIn fbody `namesSubtract`
-                                    namesFromList (segFlat space : [n_segments])
-    ts <- mapM lookupType freeVariables
-    freeParams <- zipWithM toParam freeVariables ts
+    free_params <- freeParams fbody  (segFlat space : [n_segments])
     let sched = decideScheduling fbody
-    emit $ Imp.Op $ Imp.MCFunc freeParams ntasks n_segments sched mempty fbody (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc free_params ntasks n_segments sched mempty fbody (segFlat space)
 
   seq_code <- collect $
     emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
 
-
-  let freeVariables = namesToList $ freeIn (seq_code <> par_code) `namesSubtract` namesFromList [n_segments]
-  ts <- mapM lookupType freeVariables
-  freeParams <- zipWithM toParam freeVariables ts
-
-  emit $ Imp.Op $ Imp.ParLoop freeParams (product $ init ns') par_code seq_code (segFlat space) []
+  free_task_params <- freeParams (seq_code <> par_code) [n_segments]
+  emit $ Imp.Op $ Imp.ParLoop free_task_params (product $ init ns') par_code seq_code (segFlat space) []
 
 sequentialScan :: VName
                -> Pattern MCMem
@@ -350,5 +323,3 @@ sequentialScan flat_idx pat space scan_ops kbody = do
         compileStms mempty (bodyStms $ lamBody scan_op) $
           forM_ (zip pes (bodyResult $ lamBody scan_op)) $
             \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
-
-  -- return body
