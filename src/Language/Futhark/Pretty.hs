@@ -327,7 +327,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
   pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> (stack . map ppr) (NE.toList cs)
   pprPrec _ (Attr attr e _) =
-    text "#[" <> ppr attr <> text "]" <+/> pprPrec (-1) e
+    text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e
 
 instance Pretty AttrInfo where
   ppr (AttrInfo attr) = ppr attr
