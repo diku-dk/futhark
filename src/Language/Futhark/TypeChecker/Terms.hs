@@ -2280,9 +2280,10 @@ returnType (Scalar (TypeVar _ Unique t targs)) _ _ =
 returnType (Scalar (TypeVar als Nonunique t targs)) d arg =
   Scalar $ TypeVar (als<>arg_als) Unique t targs -- Intentional!
   where arg_als = aliases $ maskAliases arg d
-returnType (Scalar (Arrow _ v t1 t2)) d arg =
+returnType (Scalar (Arrow old_als v t1 t2)) d arg =
   Scalar $ Arrow als v (t1 `setAliases` mempty) (t2 `setAliases` als)
-  where als = aliases $ maskAliases arg d
+  -- Make sure to propagate the aliases of an existing closure.
+  where als = old_als <> aliases (maskAliases arg d)
 returnType (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType et d arg) cs
 
