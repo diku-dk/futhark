@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix bug in slice simplification (#992).
 
+  * Fixed a typer checker bug for tracking the aliases of closures
+    (#995).
+
 ## [0.15.8]
 
 ### Added
