@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The C# backend has been removed (#984).
 
+  * The `unsafe` keyword has been removed.  Use `#[unsafe]` instead.
+
 ### Changed
 
 ### Fixed

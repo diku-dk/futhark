@@ -150,7 +150,6 @@ keyword s =
     "entry"        -> ENTRY
     "module"       -> MODULE
     "while"        -> WHILE
-    "unsafe"       -> UNSAFE
     "assert"       -> ASSERT
     "match"        -> MATCH
     "case"         -> CASE
@@ -363,7 +362,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | UNSAFE
            | ASSERT
            | TRUE
            | FALSE
