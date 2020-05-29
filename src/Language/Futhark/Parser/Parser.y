@@ -154,7 +154,6 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      unsafe          { L $$ UNSAFE }
       assert          { L $$ ASSERT }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
@@ -169,7 +168,7 @@ import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
       doc             { L _  (DOC _) }
 
 %left bottom
-%left ifprec letprec unsafe caseprec typeprec enumprec sumprec
+%left ifprec letprec caseprec typeprec enumprec sumprec
 %left ',' case id constructor '(' '{'
 %right ':' ':>'
 %right '...' '..<' '..>' '..'
@@ -548,7 +547,6 @@ Exp2 :: { UncheckedExp }
 
      | MatchExp { $1 }
 
-     | unsafe Exp2         { Unsafe $2 (srcspan $1 $>) }
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
      | '#[' AttrInfo ']' Exp %prec bottom
                            { Attr $2 $4 (srcspan $1 $>) }
@@ -888,7 +886,6 @@ maybeAscription(p) : ':' p { Just $2 }
 
 AttrInfo :: { AttrInfo }
          : id { let L _ (ID s) = $1 in AttrInfo s }
-         | unsafe { AttrInfo "unsafe" } -- HACK
 
 Value :: { Value }
 Value : IntValue { $1 }
