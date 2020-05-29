@@ -18,23 +18,22 @@ static inline void *scheduler_worker(void* arg)
 #ifdef MCPROFILE
       int64_t start = get_wall_time();
 #endif
+      worker->cur_working = 1;
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, worker->tid);
 #ifdef MCPROFILE
       int64_t end = get_wall_time();
       worker->time_spent_working += end - start;
 #endif
-
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
-#ifdef MCDEBUG
-      ran_iter += (subtask->end-subtask->start);
-#endif
-      // Only one error can be returned at the time now
-      // Maybe we can provide a stack like structure for pushing errors onto
-      // if we wish to backpropagte multiple errors
+
+      /* Only one error can be returned at the time now
+         Maybe we can provide a stack like structure for pushing errors onto
+         if we wish to backpropagte multiple errors */
       if (err != 0) {
         scheduler_error = err;
       }
       (*subtask->counter)--;
+      worker->cur_working = 0;
       CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
@@ -46,7 +45,6 @@ static inline void *scheduler_worker(void* arg)
       break;
     }
   }
-
   return NULL;
 }
 
@@ -65,16 +63,14 @@ static inline int scheduler_task(struct scheduler *scheduler,
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
   int max_num_tasks = scheduler->num_threads;
-
-  int subtask_id = 0;
   int iter_pr_subtask = task->iterations / max_num_tasks;
   int remainder = task->iterations % max_num_tasks;
 
   int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
   int shared_counter = nsubtasks;
 
-  int chunks = 0;
   /* Each subtasks is processed in chunks */
+  int chunks = 0;
   if (task->granularity > 0) {
     chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
   }
@@ -112,6 +108,8 @@ static inline int scheduler_task(struct scheduler *scheduler,
   return scheduler_error;
 }
 
+
+
 static inline int scheduler_nested(struct scheduler *scheduler,
                                    struct scheduler_parallel_task* task,
                                    int *ntask,
@@ -122,7 +120,6 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   fprintf(stderr, "[scheduler_nested] granularity %d\n", task->granularity);
   fprintf(stderr, "[scheduler_nested] iterations %ld\n", task->iterations);
 #endif
-
 
   pthread_mutex_t mutex;
   CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
@@ -170,6 +167,19 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   return 0;
 }
 
+// TODO find a better data structure to query if any workers are free
+// (and maybe which ones)
+static inline int find_free_workers(struct scheduler *scheduler) {
+
+  int free_workers = 0;
+  for (int i = 0; i < scheduler->num_threads; i++) {
+    if (!scheduler->workers[i].cur_working) {
+      free_workers++;
+    }
+  }
+  return free_workers;
+}
+
 static inline int do_task_directly(task_fn seq_fn,
                                    void *args,
                                    int iterations)
@@ -181,7 +191,8 @@ static inline int do_task_directly(task_fn seq_fn,
   return seq_fn(args, iterations, (worker_local == NULL) ? 0 : worker_local->tid);
 }
 
-static inline int scheduler_do_task(struct scheduler_task *task)
+static inline int scheduler_do_task(struct scheduler* scheduler,
+                                    struct scheduler_task *task)
 {
   assert(task != NULL);
 #ifdef MCDEBUG
@@ -189,6 +200,15 @@ static inline int scheduler_do_task(struct scheduler_task *task)
 #endif
   /* Run task directly if below some threshold */
   if (task->iterations < 50) {
+    return do_task_directly(task->seq_fn, task->args, task->iterations);
+  }
+
+  // If there are no free workers, we just run the
+  // sequential version as it assumed that it's faster
+  // than the parallel algorithm, when both are executed using
+  // a single thread.
+  if (!find_free_workers(scheduler)) {
+    fprintf(stderr, "[scheduler_do_task] Found no free workers\n");
     return do_task_directly(task->seq_fn, task->args, task->iterations);
   }
 
@@ -211,12 +231,13 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
     return 0;
   }
 
-  // This case indicates that we inside a nested parallel operation
+  // This case indicates that we are inside a nested parallel operation
   // so we handle this differently
   if (worker_local != NULL) {
     CHECK_ERR(scheduler_nested(scheduler, task, ntask, worker_local), "scheduler_nested");
     return 0;
   }
+
   return scheduler_task(scheduler, task, ntask);
 }
 

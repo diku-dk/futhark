@@ -302,13 +302,13 @@ functionIter = (++"_iter")
 
 multiCoreReport :: [(String, Bool)] -> [C.BlockItem]
 multiCoreReport names = report_kernels
-  where longest_name = foldl max 0 $ map (length . fst) names
-        report_kernels = concatMap reportKernel names
+  where report_kernels = concatMap reportKernel names
+        max_name_len_pad = 30
         format_string name True =
-          let padding = replicate (longest_name - length name) ' '
+          let padding = replicate (max_name_len_pad - length name) ' '
           in unwords ["tid %2d -", name ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
         format_string name False =
-          let padding = replicate (longest_name - length name) ' '
+          let padding = replicate (max_name_len_pad - length name) ' '
           in unwords ["        ", name ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
         reportKernel (name, is_array) =
           let runs = functionRuns name
@@ -464,7 +464,7 @@ compileOp (ParLoop params e par_code seq_code tid retvals) = do
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
 
   let ftask_err = fpar_task ++ "_err"
-  let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&$id:ftask_name);
+  let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name);
                         if ($id:ftask_err != 0) {
                           futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                         }|]
