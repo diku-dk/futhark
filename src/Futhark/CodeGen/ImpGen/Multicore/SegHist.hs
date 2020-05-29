@@ -140,7 +140,10 @@ segmentedHist pat space histops kbody = do
     ntasks <- dPrim "num_tasks" $ IntType Int32
     free_params <- freeParams fbody [segFlat space, n_segments]
     let sched = decideScheduling fbody
-    emit $ Imp.Op $ Imp.MCFunc free_params ntasks n_segments sched mempty fbody (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc n_segments mempty fbody free_params $
+      Imp.MulticoreInfo ntasks sched (segFlat space)
+
+
 
   seq_code <- collect $
     emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
@@ -285,7 +288,10 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
 
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32
-  emit $ Imp.Op $ Imp.MCFunc free_params num_histos flat_idx sched mempty body (segFlat space)
+  emit $ Imp.Op $ Imp.MCFunc flat_idx mempty body free_params $
+      Imp.MulticoreInfo num_histos sched (segFlat space)
+
+
   emit $ Imp.DebugPrint "nonsegmented hist stage 2"  Nothing
   let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
   forM_ (zip3 pes_per_op histograms histops) $ \(red_pes, (hists,_,_),  op) -> do

@@ -165,14 +165,14 @@ extractAllocations segop_code = f segop_code
           let (ta, tcode') = f tcode
               (fa, fcode') = f fcode
           in (ta <> fa, Imp.If cond tcode' fcode')
-        f (Imp.Op (Imp.MCFunc free n i sched prebody body tid)) =
+        f (Imp.Op (Imp.MCFunc i prebody body free info)) =
           let (body_allocs, body') = extractAllocations body
               (free_allocs, here_allocs) = f body_allocs
               free' = filter (not .
                               (`nameIn` Imp.declaredIn body_allocs) .
                               Imp.paramName) free
           in (free_allocs, here_allocs <>
-              Imp.Op (Imp.MCFunc free' n i sched prebody body' tid))
+              Imp.Op (Imp.MCFunc i prebody body' free' info))
 
         f (Imp.Op (Imp.SeqCode i prebody body )) =
           let (body_allocs, body') = extractAllocations body

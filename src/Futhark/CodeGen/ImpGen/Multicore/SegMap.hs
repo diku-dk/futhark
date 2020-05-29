@@ -68,7 +68,8 @@ compileSegMap pat space kbody = do
         sched = decideScheduling body'
     emit $ Imp.DebugPrint "SegMap parallel" Nothing
     ntasks <- dPrim "num_tasks" $ IntType Int32
-    emit $ Imp.Op $ Imp.MCFunc free_params ntasks flat_idx sched body_allocs body' (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs body' free_params $
+      Imp.MulticoreInfo ntasks sched (segFlat space)
 
   seq_task_code <- collect $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing

@@ -5,9 +5,8 @@ module Futhark.CodeGen.ImpCode.Multicore
        , FunctionT (Function)
        , Code
        , Multicore(..)
-       , MulticoreFunc(..)
-       , SequentialFunc(..)
        , Scheduling(..)
+       , Info(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -25,16 +24,16 @@ type Function = Imp.Function Multicore
 -- | A piece of imperative code, with multicore operations inside.
 type Code = Imp.Code Multicore
 
--- | A function
-data MulticoreFunc = MulticoreFunc Code Code VName
 
-data SequentialFunc = SequentialFunc Code Code
 
--- | A parallel operation.
+data Info = MulticoreInfo VName Scheduling VName
+-- MulticoreInfo ntasks Sched tid
+
+-- | A multicore operation.
 data Multicore = ParLoop [Param] Imp.Exp Code Code VName [Param]
-               | MulticoreCall (Maybe VName) String
-               | MCFunc [Param] VName VName Scheduling Code Code VName
                | SeqCode VName Code Code
+               | MCFunc VName Code Code [Param] Info
+               | MulticoreCall (Maybe VName) String
 
 type Granularity = Int32
 
@@ -44,18 +43,16 @@ type Granularity = Int32
 data Scheduling = Dynamic Granularity
                 | Static
 
-instance Pretty MulticoreFunc where
-  ppr (MulticoreFunc prebody body _ ) =
-    ppr prebody <+>
-    langle <+>
-    nestedBlock "{" "}" (ppr body)
+instance Pretty Scheduling where
+  ppr (Dynamic granularity) =
+    text "Dynamic" <+> ppr granularity
+  ppr Static =
+    text "Static"
 
-instance Pretty SequentialFunc where
-  ppr (SequentialFunc prebody body) =
-    ppr prebody <+>
-    langle <+>
-    nestedBlock "{" "}" (ppr body)
 
+instance Pretty Info where
+  ppr (MulticoreInfo _ sched _) =
+    text "MulticoreInfo" <+> ppr sched
 
 instance Pretty Multicore where
   ppr (ParLoop free e par_code seq_code i retval) =
@@ -65,9 +62,11 @@ instance Pretty Multicore where
     text "seq_code" <+> nestedBlock "{" "}" (ppr seq_code) <+>
     text "retvals" <+> ppr retval
 
-  ppr (MCFunc _ _ i _ prebody body _) =
+  ppr (MCFunc i prebody body params info) =
     text "parfunc" <+> ppr i <+>
     ppr prebody <+>
+    ppr params <+>
+    ppr info <+>
     langle <+>
     nestedBlock "{" "}" (ppr body)
 
@@ -79,18 +78,10 @@ instance Pretty Multicore where
     ppr dests <+> ppr f
 
 
-instance FreeIn SequentialFunc where
-  freeIn' (SequentialFunc prebody body) =
-    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
-
-instance FreeIn MulticoreFunc where
-  freeIn' (MulticoreFunc prebody body _) =
-    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
-
 instance FreeIn Multicore where
   freeIn' (ParLoop _ e par_code seq_code _ _) =
     freeIn' e <> freeIn' par_code <> freeIn' seq_code
-  freeIn' (MCFunc _ _ _ _ prebody body _) =
+  freeIn' (MCFunc _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (SeqCode _ prebody body) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)

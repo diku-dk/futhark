@@ -474,7 +474,7 @@ compileOp (ParLoop params e par_code seq_code tid retvals) = do
 
 
 
-compileOp (MCFunc free ntasks i sched prebody body tid) = do
+compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
   granularity <- compileSchedulingVal sched
