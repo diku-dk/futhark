@@ -303,7 +303,6 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "=" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
   pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
   pprPrec p (Lambda params body rettype _ _) =
     parensIf (p /= -1) $

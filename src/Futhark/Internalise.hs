@@ -715,11 +715,6 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
           return $ bef ++ src'' ++ aft
         replace _ _ ve' _ = return ve'
 
-internaliseExp desc (E.Unsafe e _) =
-  local mkUnsafe $ internaliseExp desc e
-  where mkUnsafe env | envSafe env = env
-                     | otherwise = env { envDoBoundsChecks = False }
-
 internaliseExp desc (E.Attr (AttrInfo attr) e _) =
   local f $ internaliseExp desc e
   where f env | attr == "unsafe",

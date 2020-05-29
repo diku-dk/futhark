@@ -720,12 +720,6 @@ data ExpBase f vn =
 
             | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
 
-            | Unsafe (ExpBase f vn) SrcLoc
-            -- ^ Explore the Danger Zone and elide safety checks on
-            -- array operations and other assertions during execution
-            -- of this expression.  Make really sure the code is
-            -- correct.
-
             | Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
             -- ^ Fail if the first expression does not return true,
             -- and return the value of the second expression if it
@@ -777,7 +771,6 @@ instance Located (ExpBase f vn) where
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
   locOf (DoLoop _ _ _ _ _ _ loc)       = locOf loc
-  locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (Constr _ _ _ loc)             = locOf loc
   locOf (Match _ _ _ loc)              = locOf loc

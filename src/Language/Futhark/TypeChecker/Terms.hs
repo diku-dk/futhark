@@ -1481,12 +1481,6 @@ checkExp (Index e idxes _ loc) = do
 
   return $ Index e' idxes' (Info t'', Info retext) loc
 
-checkExp (Unsafe e loc) = do
-  warn loc $
-    "The \"unsafe\" keyword is deprecated and will be removed very soon.\n" ++
-    "Remove \"unsafe\" or replace with #[unsafe]."
-  Unsafe <$> checkExp e <*> pure loc
-
 checkExp (Assert e1 e2 NoInfo loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2

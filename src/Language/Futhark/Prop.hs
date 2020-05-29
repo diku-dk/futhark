@@ -541,7 +541,6 @@ typeOf (LetWith _ _ _ _ _ (Info t) _) = t
 typeOf (Index _ _ (Info t, _) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
-typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (DoLoop _ _ _ _ _ (Info (t, _)) _) = t
 typeOf (Lambda params _ _ (Info (als, t)) _) =

@@ -388,9 +388,6 @@ transformExp (RecordUpdate e1 fs e2 t loc) =
   RecordUpdate <$> transformExp e1 <*> pure fs
                <*> transformExp e2 <*> pure t <*> pure loc
 
-transformExp (Unsafe e1 loc) =
-  Unsafe <$> transformExp e1 <*> pure loc
-
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 
