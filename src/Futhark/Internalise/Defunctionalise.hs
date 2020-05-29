@@ -402,10 +402,6 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
           staticField (svFromType t) sv2 fs'
         staticField _ sv2 _ = sv2
 
-defuncExp (Unsafe e1 loc) = do
-  (e1', sv) <- defuncExp e1
-  return (Unsafe e1' loc, sv)
-
 defuncExp (Assert e1 e2 desc loc) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2
@@ -967,7 +963,6 @@ freeVars expr = case expr of
   Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
   RecordUpdate e1 _ e2 _ _ -> freeVars e1 <> freeVars e2
 
-  Unsafe e _          -> freeVars e
   Assert e1 e2 _ _    -> freeVars e1 <> freeVars e2
   Constr _ es _ _     -> foldMap freeVars es
   Attr _ e _          -> freeVars e

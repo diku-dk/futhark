@@ -969,8 +969,6 @@ eval env (Project f e _ _) = do
     ValueRecord fs | Just v' <- M.lookup f fs -> return v'
     _ -> error "Value does not have expected field."
 
-eval env (Unsafe e _) = eval env e
-
 eval env (Assert what e (Info s) loc) = do
   cond <- asBool <$> eval env what
   unless cond $ bad loc env s
