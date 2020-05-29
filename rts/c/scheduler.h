@@ -4,7 +4,6 @@
 #define _SCHEDULER_H_
 
 
-
 __thread struct worker* worker_local = NULL;
 
 static inline void *scheduler_worker(void* arg)
@@ -52,12 +51,12 @@ static inline void *scheduler_worker(void* arg)
 }
 
 
-static inline int scheduler_dynamic(struct scheduler *scheduler,
-                                    struct scheduler_parallel_task *task,
-                                    int *ntask)
+static inline int scheduler_task(struct scheduler *scheduler,
+                                 struct scheduler_parallel_task *task,
+                                 int *ntask)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_dynamic] Performing dynamic scheduling\n");
+  fprintf(stderr, "[scheduler_task] Performing scheduling with granularity %d\n", task->granularity);
 #endif
 
   pthread_mutex_t mutex;
@@ -74,8 +73,11 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
   int shared_counter = nsubtasks;
 
+  int chunks = 0;
   /* Each subtasks is processed in chunks */
-  int chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
+  if (task->granularity > 0) {
+    chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
+  }
 
   int start = 0;
   int end = iter_pr_subtask + (int)(remainder != 0);
@@ -87,8 +89,7 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads], subtask),
               "subtask_queue_enqueue");
 #ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_dynamic] pushed %d iterations onto %d's q\n", (end - start), subtask_id%scheduler->num_threads);
-
+    fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), subtask_id%scheduler->num_threads);
 #endif
     // Update range params
     start = end;
@@ -111,82 +112,15 @@ static inline int scheduler_dynamic(struct scheduler *scheduler,
   return scheduler_error;
 }
 
-
-
-/* Performs static scheduling of a task */
-/* Divides the number of iterations into num_threads equal sized chunks */
-/* Any remainders is divided evenly out among threads  */
-static inline int scheduler_static(struct scheduler *scheduler,
-                                   struct scheduler_parallel_task *task,
-                                   int *ntask)
+static inline int scheduler_nested(struct scheduler *scheduler,
+                                   struct scheduler_parallel_task* task,
+                                   int *ntask,
+                                   struct worker* calling_worker)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_static] Performing static scheduling\n");
-#endif
-
-  pthread_mutex_t mutex;
-  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
-  pthread_cond_t cond;
-  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
-
-  int subtask_id = 0;
-  int iter_pr_subtask = task->iterations / scheduler->num_threads;
-  int remainder = task->iterations % scheduler->num_threads;
-
-
-  int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
-  int shared_counter = nsubtasks;
-
-  int start = 0;
-  int end = iter_pr_subtask + (int)(remainder != 0);
-
-#ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_static] nsubtasks %d - remainder %d - iter_pr_subtask %d", nsubtasks, remainder, iter_pr_subtask);
-#endif
-
-  for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
-                                            &mutex, &cond, &shared_counter,
-                                            start, end, 0);
-    assert(subtask != NULL);
-    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id], subtask),
-              "subtask_queue_enqueue");
-#ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_static] iter_pr_subtask %d - exp %d\n",
-            iter_pr_subtask, subtask_id < remainder);
-    fprintf(stderr, "[scheduler_static] pushed start %d - end %d (%d) iterations onto %d's q\n",
-            start, end, end-start, subtask_id%scheduler->num_threads);
-#endif
-
-    // Update range params
-    start = end;
-    end += iter_pr_subtask + ((subtask_id + 1) < remainder);
-
-  }
-
-  // Join (wait for subtasks to finish)
-  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-  while (shared_counter != 0) {
-    CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
-  }
-
-  if (ntask != NULL) {
-    *ntask = nsubtasks;
-  }
-
-  return scheduler_error;
-}
-
-
-static inline int delegate_work(struct scheduler *scheduler,
-                                struct scheduler_parallel_task* task,
-                                int *ntask,
-                                struct worker* calling_worker)
-{
-#ifdef MCDEBUG
-  fprintf(stderr, "[delegate_work] tid %d\n", calling_worker->tid);
-  fprintf(stderr, "[delegate_work] granularity %d\n", task->granularity);
-  fprintf(stderr, "[delegate_work] iterations %ld\n", task->iterations);
+  fprintf(stderr, "[scheduler_nested] tid %d\n", calling_worker->tid);
+  fprintf(stderr, "[scheduler_nested] granularity %d\n", task->granularity);
+  fprintf(stderr, "[scheduler_nested] iterations %ld\n", task->iterations);
 #endif
 
 
@@ -273,23 +207,17 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   assert(task != NULL);
 
   if (task->iterations == 0) {
-    if (ntask != NULL)  *ntask = 0;
+    if (ntask != NULL) *ntask = 0;
     return 0;
   }
 
+  // This case indicates that we inside a nested parallel operation
+  // so we handle this differently
   if (worker_local != NULL) {
-    CHECK_ERR(delegate_work(scheduler, task, ntask, worker_local), "delegate_work");
+    CHECK_ERR(scheduler_nested(scheduler, task, ntask, worker_local), "scheduler_nested");
     return 0;
   }
-
-  // TODO reevaluate if you really need two functions
-  switch(task->granularity)
-  {
-  case 0:
-    return scheduler_static(scheduler, task, ntask);
-  default:
-    return scheduler_dynamic(scheduler, task, ntask);
-  }
+  return scheduler_task(scheduler, task, ntask);
 }
 
 #endif
