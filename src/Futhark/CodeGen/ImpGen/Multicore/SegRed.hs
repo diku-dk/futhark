@@ -181,7 +181,7 @@ nonsegmentedReduction pat space reds kbody = do
   let retval_names = map Imp.paramName retval_params
 
   free_params <- freeParams (par_code <> seq_code) ([flat_idx, segFlat space] ++ retval_names)
-  emit $ Imp.Op $ Imp.ParLoop free_params (product ns') par_code seq_code (segFlat space) retval_params
+  emit $ Imp.Op $ Imp.Task free_params (product ns') par_code seq_code (segFlat space) retval_params
 
   emit $ Imp.DebugPrint "SegRed end\n" Nothing
 
@@ -283,4 +283,4 @@ segmentedReduction pat space reds kbody = do
     emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
 
   free_task_params <- freeParams fbody  (segFlat space : [n_segments])
-  emit $ Imp.Op $ Imp.ParLoop free_task_params (product $ init ns') par_code seq_code (segFlat space) []
+  emit $ Imp.Op $ Imp.Task free_task_params (product $ init ns') par_code seq_code (segFlat space) []

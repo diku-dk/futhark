@@ -149,7 +149,7 @@ segmentedHist pat space histops kbody = do
     emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
 
   free_params <- freeParams fbody [segFlat space, n_segments]
-  emit $ Imp.Op $ Imp.ParLoop free_params (product $ init ns') par_code seq_code (segFlat space) []
+  emit $ Imp.Op $ Imp.Task free_params (product $ init ns') par_code seq_code (segFlat space) []
 
 
 renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
@@ -191,7 +191,7 @@ nonsegmentedHist pat space histops kbody = do
     emit $ Imp.Op $ Imp.SeqCode flat_idx mempty seq_body
 
   free_params <- freeParams (par_code <> seq_code)  [flat_idx, segFlat space]
-  emit $ Imp.Op $ Imp.ParLoop free_params (product ns') par_code seq_code (segFlat space) []
+  emit $ Imp.Op $ Imp.Task free_params (product ns') par_code seq_code (segFlat space) []
   emit $ Imp.DebugPrint "Histogram end" Nothing
 -- Generates num_threads sub histograms of the size
 -- of the destination histogram
@@ -399,7 +399,7 @@ largeDestHistogram pat space histops kbody = do
   -- -- How many subtasks was used by scheduler
   -- num_subtasks <- dPrim "num_histos" $ IntType Int32
 
-  -- emit $ Imp.Op $ Imp.ParLoop Imp.Static num_subtasks flat_idx (product ns')
+  -- emit $ Imp.Op $ Imp.Task Imp.Static num_subtasks flat_idx (product ns')
   --                             (Imp.MulticoreFunc params mempty body' thread_id)
 
 

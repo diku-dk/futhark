@@ -24,13 +24,13 @@ type Function = Imp.Function Multicore
 -- | A piece of imperative code, with multicore operations inside.
 type Code = Imp.Code Multicore
 
-
+type Cost = Int32
 
 data Info = MulticoreInfo VName Scheduling VName
 -- MulticoreInfo ntasks Sched tid
 
 -- | A multicore operation.
-data Multicore = ParLoop [Param] Imp.Exp Code Code VName [Param]
+data Multicore = Task [Param] Imp.Exp Code Code VName [Param]
                | SeqCode VName Code Code
                | MCFunc VName Code Code [Param] Info
                | MulticoreCall (Maybe VName) String

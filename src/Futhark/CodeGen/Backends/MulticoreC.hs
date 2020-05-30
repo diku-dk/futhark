@@ -426,7 +426,7 @@ generateFunction lexical basename code fstruct free retval tid = do
 
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (ParLoop params e par_code seq_code tid retvals) = do
+compileOp (Task params e par_code seq_code tid retvals) = do
 
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
