@@ -7,11 +7,11 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , getNumThreads
  , getNumThreads'
  , decideScheduling
- , sUnpauseProfiling
  , groupResultArrays
  , renameSegBinOp
  , resultArrays
  , freeParams
+ , estimateCost
  )
  where
 
@@ -136,10 +136,6 @@ decideScheduling code  =
   else
     Imp.Dynamic 10
 
-sUnpauseProfiling :: MulticoreGen ()
-sUnpauseProfiling =
-  emit $ Imp.Op $ Imp.MulticoreCall Nothing "futhark_context_unpause_profiling"
-
 -- | Try to extract invariant allocations.  If we assume that the
 -- given 'Code' is the body of a 'SegOp', then it is always safe to
 -- move the allocations to the prebody.
@@ -181,3 +177,9 @@ extractAllocations segop_code = f segop_code
               Imp.Op (Imp.SeqCode i prebody body'))
         f code =
           (mempty, code)
+
+
+estimateCost :: Imp.Code -> Int
+estimateCost code =  f code
+  where f Imp.DeclareMem{} = 1
+        f _  = 10

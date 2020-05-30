@@ -62,7 +62,7 @@ static inline int getrusage_thread(struct rusage *rusage)
 }
 
 /* returns the number of logical cores */
-static int num_processors()
+static const int num_processors()
 {
 #ifdef _WIN32
 /* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */

@@ -55,7 +55,7 @@ instance Pretty Info where
     text "MulticoreInfo" <+> ppr sched
 
 instance Pretty Multicore where
-  ppr (ParLoop free e par_code seq_code i retval) =
+  ppr (Task free e par_code seq_code i retval) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     ppr free <+>
     text "par_code" <+> nestedBlock "{" "}" (ppr par_code) <+>
@@ -79,7 +79,7 @@ instance Pretty Multicore where
 
 
 instance FreeIn Multicore where
-  freeIn' (ParLoop _ e par_code seq_code _ _) =
+  freeIn' (Task _ e par_code seq_code _ _) =
     freeIn' e <> freeIn' par_code <> freeIn' seq_code
   freeIn' (MCFunc _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)

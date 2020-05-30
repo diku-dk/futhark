@@ -4,6 +4,8 @@
 #define _SCHEDULER_H_
 
 
+static int free_workers;
+
 __thread struct worker* worker_local = NULL;
 
 static inline void *scheduler_worker(void* arg)
@@ -18,7 +20,6 @@ static inline void *scheduler_worker(void* arg)
 #ifdef MCPROFILE
       int64_t start = get_wall_time();
 #endif
-      worker->cur_working = 1;
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, worker->tid);
 #ifdef MCPROFILE
       int64_t end = get_wall_time();
@@ -33,7 +34,6 @@ static inline void *scheduler_worker(void* arg)
         scheduler_error = err;
       }
       (*subtask->counter)--;
-      worker->cur_working = 0;
       CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
@@ -67,6 +67,8 @@ static inline int scheduler_task(struct scheduler *scheduler,
   int remainder = task->iterations % max_num_tasks;
 
   int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
+  free_workers -= nsubtasks;
+
   int shared_counter = nsubtasks;
 
   /* Each subtasks is processed in chunks */
@@ -76,8 +78,9 @@ static inline int scheduler_task(struct scheduler *scheduler,
   }
 
   int start = 0;
+  int subtask_id = 0;
   int end = iter_pr_subtask + (int)(remainder != 0);
-  for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
+  for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks);
@@ -105,6 +108,7 @@ static inline int scheduler_task(struct scheduler *scheduler,
     *ntask = scheduler->num_threads;
   }
 
+  free_workers += nsubtasks;
   return scheduler_error;
 }
 
@@ -167,18 +171,6 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   return 0;
 }
 
-// TODO find a better data structure to query if any workers are free
-// (and maybe which ones)
-static inline int find_free_workers(struct scheduler *scheduler) {
-
-  int free_workers = 0;
-  for (int i = 0; i < scheduler->num_threads; i++) {
-    if (!scheduler->workers[i].cur_working) {
-      free_workers++;
-    }
-  }
-  return free_workers;
-}
 
 static inline int do_task_directly(task_fn seq_fn,
                                    void *args,
@@ -198,17 +190,18 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_do_task] starting task with %d iterations\n", task->iterations);
 #endif
-  /* Run task directly if below some threshold */
-  if (task->iterations < 50) {
-    return do_task_directly(task->seq_fn, task->args, task->iterations);
-  }
 
   // If there are no free workers, we just run the
   // sequential version as it assumed that it's faster
   // than the parallel algorithm, when both are executed using
   // a single thread.
-  if (!find_free_workers(scheduler)) {
-    fprintf(stderr, "[scheduler_do_task] Found no free workers\n");
+  if (!free_workers) {
+    return do_task_directly(task->seq_fn, task->args, task->iterations);
+  }
+
+
+  /* Run task directly if below some threshold */
+  if (task->iterations < 50) {
     return do_task_directly(task->seq_fn, task->args, task->iterations);
   }
 
