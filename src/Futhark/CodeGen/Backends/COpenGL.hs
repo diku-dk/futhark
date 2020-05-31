@@ -17,6 +17,7 @@ import qualified Language.C.Quote.C as C
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.Backends.COpenGL.Boilerplate
+import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import qualified Futhark.CodeGen.Backends.SimpleRepresentation as SR
 import Futhark.CodeGen.Backends.GenericC.Options
