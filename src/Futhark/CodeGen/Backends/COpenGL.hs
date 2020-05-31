@@ -71,9 +71,47 @@ copyScalarFromDev = "copy_scalar_from_dev"
 
 cliOptions :: [Option]
 cliOptions =
-  [
+  commonOptions ++
+  [ Option { optionLongName  = "dump-opengl"
+           , optionShortName = Nothing
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    =
+               [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
+                        entry_point = NULL;}|]
+           }
+  , Option { optionLongName  = "load-opengl"
+           , optionShortName = Nothing
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    =
+               [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+           }
+  , Option { optionLongName  = "dump-opengl-binary"
+           , optionShortName = Nothing
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    =
+               [C.cstm|{futhark_context_config_dump_binary_to(cfg, optarg);
+                        entry_point = NULL;}|]
+           }
+  , Option { optionLongName  = "load-opengl-binary"
+           , optionShortName = Nothing
+           , optionArgument  = RequiredArgument "FILE"
+           , optionAction    =
+               [C.cstm|futhark_context_config_load_binary_from(cfg, optarg);|]
+           }
+  , Option { optionLongName  = "build-option"
+           , optionShortName = Nothing
+           , optionArgument  = RequiredArgument "OPT"
+           , optionAction    =
+               [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
+           }
 
-  ] --TODO
+  , Option { optionLongName  = "profile"
+           , optionShortName = Just 'P'
+           , optionArgument  = NoArgument
+           , optionAction    =
+               [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+           }
+  ]
 
 writeOpenGLScalar :: GC.WriteScalar OpenGL ()
 writeOpenGLScalar mem i t "device" _ val = do
