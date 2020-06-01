@@ -322,7 +322,7 @@ callShader opengl_code opengl_prelude shaders sizes
         shaderSizeInit k size = [C.cedecl|int $id:k = $exp:val;|]
            where n_sizes = nameToString k
                  val = case sizeName n_sizes of
-                   "group_size" -> [C.cexp|256|]
+                   "group_size" -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
                    "num_groups" -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
                    -- This will generate an error that is easy to debug.
                    _            -> [C.cexp|$id:n_sizes|]

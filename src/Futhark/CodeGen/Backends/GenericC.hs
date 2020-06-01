@@ -651,7 +651,7 @@ declMemShader name space = do
   case space of
     ScalarSpace{} -> decl [C.cdecl|$ty:ty' $id:name[];|]
                      -- FIXME: Determine the array size without hardcoding.
-    _             -> decl [C.cdecl|$ty:ty $id:name[256];|]
+    _             -> decl [C.cdecl|$ty:ty $id:name[int32_t(gl_WorkGroupSize[0])];|]
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
