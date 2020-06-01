@@ -143,7 +143,9 @@ nonsegmentedReduction pat space reds kbody = do
     ntasks <- dPrim "num_tasks" $ IntType Int32
     ntasks' <- toExp $ Var ntasks
 
-    emit $ Imp.Op $ Imp.MCFunc flat_idx mempty fbody free_params $
+    let (body_allocs, fbody') = extractAllocations fbody
+
+    emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs fbody' free_params $
       Imp.MulticoreInfo ntasks scheduling (segFlat space)
 
 
@@ -173,7 +175,8 @@ nonsegmentedReduction pat space reds kbody = do
 
   seq_code <- collect $ do
     seq_code_body <- sequentialRed pat flat_idx space reds kbody
-    emit $ Imp.Op $ Imp.SeqCode flat_idx mempty seq_code_body
+    let (body_allocs, seq_code_body') = extractAllocations seq_code_body
+    emit $ Imp.Op $ Imp.SeqCode flat_idx body_allocs seq_code_body'
 
   let retvals = map patElemName $ patternElements pat
   retvals_ts <- mapM lookupType retvals
