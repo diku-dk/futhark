@@ -34,7 +34,8 @@ static inline void *scheduler_worker(void* arg)
         scheduler_error = err;
       }
       (*subtask->counter)--;
-      CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
+      if (*subtask->counter == 0)
+        CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
       CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
       free(subtask);
       subtask = NULL;
