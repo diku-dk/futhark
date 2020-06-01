@@ -347,12 +347,6 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
       if($id:global_work_size[2] == NULL) {
         $id:global_work_size[2] = 1;
       }
-      if($id:local_work_size[1] == NULL) {
-        $id:local_work_size[1] = 1;
-      }
-      if($id:local_work_size[2] == NULL) {
-        $id:local_work_size[2] = 1;
-      }
       typename int64_t $id:time_start = 0, $id:time_end = 0;
     if (ctx->debugging) {
       fprintf(stderr, "Launching %s with global work size [", $string:shader_name);
