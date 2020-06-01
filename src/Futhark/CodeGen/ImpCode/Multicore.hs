@@ -6,7 +6,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Code
        , Multicore(..)
        , Scheduling(..)
-       , Info(..)
+       , MulticoreInfo(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -26,13 +26,13 @@ type Code = Imp.Code Multicore
 
 type Cost = Int32
 
-data Info = MulticoreInfo VName Scheduling VName
+data MulticoreInfo = MulticoreInfo VName Scheduling VName
 -- MulticoreInfo ntasks Sched tid
 
 -- | A multicore operation.
 data Multicore = Task [Param] Imp.Exp Code Code VName [Param]
                | SeqCode VName Code Code
-               | MCFunc VName Code Code [Param] Info
+               | MCFunc VName Code Code [Param] MulticoreInfo
                | MulticoreCall (Maybe VName) String
 
 type Granularity = Int32
@@ -50,7 +50,7 @@ instance Pretty Scheduling where
     text "Static"
 
 
-instance Pretty Info where
+instance Pretty MulticoreInfo where
   ppr (MulticoreInfo _ sched _) =
     text "MulticoreInfo" <+> ppr sched
 
