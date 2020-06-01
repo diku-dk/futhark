@@ -189,6 +189,7 @@ onShader shader = do
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|uint $id:param|],
+                  -- FIXME: Make the array type generic
                   [C.citem|typename shared_int $id:mem[];|])
 
 useAsParam :: KernelUse -> Maybe (C.BlockItem, ParamUse)
@@ -222,10 +223,9 @@ openGlCode shaders = map pretty (concat shaders)
 genOpenGlPrelude :: S.Set PrimType -> [C.Definition]
 genOpenGlPrelude ts =
   [ [C.cedecl|$esc:("#version 450")|]
-  , [C.cedecl|$esc:("#extension GL_ARB_compute_variable_group_size : enable")|]
   , [C.cedecl|$esc:("#extension GL_ARB_gpu_shader_int64 : enable")|]
   , [C.cedecl|$esc:("#extension GL_ARB_gpu_shader_fp64 : enable")|]
-  , [C.cedecl|$esc:("layout (local_size_variable) in;")|]
+  , [C.cedecl|$esc:("layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;")|]
   , [C.cedecl|$esc:("#define int8_t int")|]
   , [C.cedecl|$esc:("#define int16_t int")|]
   , [C.cedecl|$esc:("#define int32_t int")|]
@@ -292,7 +292,7 @@ inShaderOperations body =
         shaderOps (GetLocalId v i) =
           GenericC.stm [C.cstm|$id:v = int32_t(gl_LocalInvocationID[$int:i]);|]
         shaderOps (GetLocalSize v i) =
-          GenericC.stm [C.cstm|$id:v = int32_t(gl_LocalGroupSizeARB[$int:i]);|]
+          GenericC.stm [C.cstm|$id:v = 256;|]
         shaderOps (GetGlobalId v i) =
           GenericC.stm [C.cstm|$id:v = int32_t(gl_GlobalInvocationID[$int:i]);|]
         shaderOps (GetGlobalSize v i) =

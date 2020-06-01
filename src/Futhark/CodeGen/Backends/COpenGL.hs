@@ -322,7 +322,7 @@ callShader opengl_code opengl_prelude shaders sizes
         shaderSizeInit k size = [C.cedecl|int $id:k = $exp:val;|]
            where n_sizes = nameToString k
                  val = case sizeName n_sizes of
-                   "group_size" -> [C.cexp|int32_t(gl_LocalGroupSizeARB[0])|]
+                   "group_size" -> [C.cexp|256|]
                    "num_groups" -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
                    -- This will generate an error that is easy to debug.
                    _            -> [C.cexp|$id:n_sizes|]
@@ -335,6 +335,8 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
   time_end         <- newVName "time_end"
   time_diff        <- newVName "time_diff"
   local_work_size  <- newVName "local_work_size"
+  dispatch_buffer  <- newVName "dispatch_buffer"
+  dispatch_params  <- newVName "dispatch_params"
   GC.stm [C.cstm|
     if ($exp:total_elements != 0) {
       typename GLuint $id:global_work_size[3] = {$inits:shader_dims'};
@@ -360,11 +362,19 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
       fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
       $id:time_start = get_wall_time();
     }
+    typename GLuint $id:dispatch_buffer;
+    glGenBuffers(1, &$id:dispatch_buffer);
+    glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, $id:dispatch_buffer);
     OPENGL_SUCCEED(glGetError());
-    glDispatchComputeGroupSizeARB($id:global_work_size[0], $id:global_work_size[1],
-                                  $id:global_work_size[2], $id:local_work_size[0],
-                                  $id:local_work_size[1],  $id:local_work_size[2]
-                                 );
+    typename GLuint $id:dispatch_params[3] = { $id:global_work_size[0],
+                                               $id:global_work_size[1],
+                                               $id:global_work_size[2]
+                                             };
+    glBufferData(GL_DISPATCH_INDIRECT_BUFFER, sizeof($id:dispatch_params),
+                 $id:dispatch_params, GL_STREAM_READ);
+    OPENGL_SUCCEED(glGetError());
+    glDispatchComputeIndirect(0);
+    OPENGL_SUCCEED(glGetError());
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
     OPENGL_SUCCEED(glGetError());
     glDeleteProgram(ctx->opengl.program);
