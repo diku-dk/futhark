@@ -28,6 +28,19 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
 }
 
 
+static inline int grow_queue(struct subtask_queue *subtask_queue) {
+
+  int new_capacity = 2 * subtask_queue->capacity;
+  struct subtask **new_buffer = calloc(new_capacity, sizeof(struct subtask*));
+  memcpy(new_buffer, subtask_queue->buffer, subtask_queue->capacity * sizeof(struct subtask*));
+
+  free(subtask_queue->buffer);
+  subtask_queue->buffer = new_buffer;
+  subtask_queue->capacity = new_capacity;
+
+  return 0;
+}
+
 static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *subtask_queue, int from_end)
 {
   struct subtask *cur_head = subtask_queue->buffer[subtask_queue->first];
