@@ -106,7 +106,7 @@ static inline int scheduler_task(struct scheduler *scheduler,
   // we are being safe with returning
   // an upper bound on the number of tasks
   if (ntask != NULL) {
-    *ntask = scheduler->num_threads;
+    *ntask = (task->granularity > 0) ? scheduler->num_threads : nsubtasks;
   }
 
   free_workers += nsubtasks;
