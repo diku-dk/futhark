@@ -9,7 +9,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             pthread_cond_t *cond,
                                             int* counter,
                                             int start, int end,
-                                            int chunk)
+                                            int chunk, int subtask_id)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
@@ -24,8 +24,12 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->start   = start;
   subtask->end     = end;
   subtask->chunk   = chunk;
+  subtask->id      = subtask_id;
   return subtask;
 }
+
+
+static struct subtask_queue global_queue;
 
 
 static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *subtask_queue, int from_end)
@@ -108,10 +112,9 @@ static inline int subtask_queue_destroy(struct subtask_queue *subtask_queue)
 // subtask_queue is full (its size is equal to its capacity).  Returns
 // non-zero on error.  It is an error to push a job onto a queue that
 // has been destroyed.
-static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *subtask )
+static inline int subtask_queue_enqueue(struct subtask_queue *subtask_queue, struct subtask *subtask )
 {
-  assert(worker != NULL);
-  struct subtask_queue *subtask_queue = &worker->q;
+  assert(subtask_queue != NULL);
   uint64_t start = get_wall_time();
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
@@ -140,6 +143,50 @@ static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *s
   return 0;
 }
 
+
+/* Like subtask_queue_dequeue, but returns immediately if there is no tasks queued,
+   as we dont' want to block on another workers queue */
+static inline int subtask_queue_steal_global(struct subtask_queue *subtask_queue,
+                                             struct subtask **subtask)
+{
+  assert(subtask_queue != NULL);
+  if (subtask_queue->initialized != 1)  {
+    return 1;
+  }
+
+  uint64_t start = get_wall_time();
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+
+  if (subtask_queue->num_used == 0) {
+    CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return 1;
+  }
+
+  if (subtask_queue->dead) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return -1;
+  }
+
+  *subtask = jobqueue_get_subtask_chunk(subtask_queue, 0);
+  // Set subtask ID to it's own to avoid data race condition
+  // on shared structures
+  // in other words, take owenership of task
+  if (*subtask == NULL) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
+    return -1;
+  }
+
+  uint64_t end = get_wall_time();
+  subtask_queue->time_dequeue += (end - start);
+  subtask_queue->n_dequeues++;
+
+  // Broadcast a writer (if any) that there is now room for more.
+  CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+
+  return 0;
+}
 
 
 /* Like subtask_queue_dequeue, but returns immediately if there is no tasks queued,
@@ -174,6 +221,7 @@ static inline int subtask_queue_steal(struct worker *worker,
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
     return -1;
   }
+  (*subtask)->id = worker->tid;
 
   uint64_t end = get_wall_time();
   subtask_queue->time_dequeue += (end - start);
@@ -186,6 +234,11 @@ static inline int subtask_queue_steal(struct worker *worker,
   return 0;
 }
 
+/* TODO: Do I need to acquire locks here? */
+static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
+{
+  return ((volatile int)subtask_queue->num_used) == 0 && !subtask_queue->dead;
+}
 
 
 /* Ask for a random subtask from another worker */
@@ -194,9 +247,18 @@ static inline int query_a_subtask(struct scheduler* scheduler,
                                   int tid,
                                   struct worker *worker)
 {
+
+  struct subtask *subtask = NULL;
+  int err = subtask_queue_steal_global(&global_queue, &subtask);
+  if (err == 0) { /* we found some work */
+
+    goto enqueue;
+  } else if (err != 1) { /* Queue was not ready or no work found */
+    return err;
+  }
+
   assert(scheduler != NULL);
   int num_tries = 0;
-  struct subtask *subtask = NULL;
   while (subtask == NULL && num_tries < MAX_NUM_TRIES) {
     int worker_idx = rand() % scheduler->num_threads;
     if (worker_idx == tid) continue;
@@ -211,9 +273,9 @@ static inline int query_a_subtask(struct scheduler* scheduler,
       return err;
     }
   }
-
   if (subtask != NULL && num_tries != MAX_NUM_TRIES) {
-    CHECK_ERR(subtask_queue_enqueue(worker, subtask), "subtask_queue_enqueue");
+enqueue:
+    CHECK_ERR(subtask_queue_enqueue(&worker->q, subtask), "subtask_queue_enqueue");
     return 0;
   }
   return 1;
@@ -276,11 +338,6 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
   return 0;
 }
 
-/* TODO: Do I need to acquire locks here? */
-static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
-{
-  return ((volatile int)subtask_queue->num_used) == 0 && !subtask_queue->dead;
-}
 #endif
 
 // End of subtask_queue.h

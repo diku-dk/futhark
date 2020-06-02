@@ -56,7 +56,6 @@ nonsegmentedScan pat space scan_ops kbody = do
   flat_idx' <- toExp $ Var flat_idx
 
   num_threads <- getNumThreads
-  num_threads' <- toExp $ Var num_threads
 
   let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res            = segBinOpChunks scan_ops all_scan_res
@@ -128,9 +127,6 @@ nonsegmentedScan pat space scan_ops kbody = do
     scan_ops2 <- renameSegBinOp scan_ops
     -- |
     -- Begin stage two of scan
-    let iter_pr_subtask = product ns' `quot` num_threads'
-        remainder       = product ns' `rem` num_threads'
-
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops2
 
     offset <- dPrimV "offset" 0
@@ -140,6 +136,8 @@ nonsegmentedScan pat space scan_ops kbody = do
     offset_index' <- toExp $ Var offset_index
 
     sWhen (ntasks' .>. 0) $ do
+      let iter_pr_subtask = product ns' `quot` ntasks'
+          remainder       = product ns' `rem` ntasks'
       accs <- resultArrays scan_ops2
       forM_ (zip scan_ops2 accs) $ \(scan_op, acc) ->
         sLoopNest (segBinOpShape scan_op) $ \vec_is ->
@@ -172,9 +170,9 @@ nonsegmentedScan pat space scan_ops kbody = do
     -- Stage 3 : Finally each thread partially scans a chunk of the input
     --           reading it's corresponding carry-in
     scan_ops3 <- renameSegBinOp scan_ops
-    accs' <- groupResultArrays (Var num_threads) scan_ops3
+    accs' <- groupResultArrays (Var ntasks) scan_ops3
     stage_3_prebody <- collect $ do
-      num_threads <-- num_threads'
+      ntasks <-- ntasks'
       zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops3
       -- Read carry in

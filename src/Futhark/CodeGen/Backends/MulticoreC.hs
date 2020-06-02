@@ -121,6 +121,8 @@ compileProg =
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
 
+                 CHECK_ERR(subtask_queue_init(&global_queue, 32),
+                           "failed to init global jobqueue");
                  free_workers = ctx->scheduler.num_threads;
                  $stms:init_fields
 
@@ -132,6 +134,7 @@ compileProg =
                    cur_worker->tid = i;
                    cur_worker->time_spent_working = 0;
                    cur_worker->cur_working = 0;
+                   cur_worker->nested = 1;
                    cur_worker->scheduler = &ctx->scheduler;
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 32),
                              "failed to init jobqueue for worker %d\n", i);

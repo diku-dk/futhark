@@ -149,7 +149,6 @@ nonsegmentedReduction pat space reds kbody = do
       Imp.MulticoreInfo ntasks scheduling (segFlat space)
 
 
-
     reds' <- renameSegBinOp reds
     slugs' <- mapM (segBinOpOpSlug tid') $ zip reds' stage_one_red_arrs
 

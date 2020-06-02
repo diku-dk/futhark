@@ -12,6 +12,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , resultArrays
  , freeParams
  , estimateCost
+ , containsNestedTask
  )
  where
 
@@ -177,6 +178,19 @@ extractAllocations segop_code = f segop_code
               Imp.Op (Imp.SeqCode i prebody body'))
         f code =
           (mempty, code)
+
+
+
+containsNestedTask :: Imp.Code -> Bool
+containsNestedTask (Imp.Op Imp.Task{}) = True
+containsNestedTask (a Imp.:>>: b)      = containsNestedTask a || containsNestedTask b
+containsNestedTask (Imp.For _ _ _ a)   = containsNestedTask a
+containsNestedTask (Imp.If _ a b)      = containsNestedTask a || containsNestedTask b
+containsNestedTask (Imp.Comment _ a)   = containsNestedTask a
+containsNestedTask (Imp.While _ a)     = containsNestedTask a
+containsNestedTask _ = False
+
+
 
 
 estimateCost :: Imp.Code -> Int
