@@ -109,8 +109,9 @@ callKernelRules = standardRules <>
                             RuleIf unExistentialiseMemory] []
 
 -- | If a branch is returning some existential memory, but the size of
--- the array is not existential, then we can create a block of the
--- proper size and always return there.
+-- the array is not existential, and the index function of the array
+-- does not refer to any names in the pattern, then we can create a
+-- block of the proper size and always return there.
 unExistentialiseMemory :: SimplifyMemory lore => TopDownRuleIf (Wise lore)
 unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
   | ST.simplifyMemory vtable,
@@ -162,6 +163,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
             Just fse <- maybeNth j $ bodyResult fbranch,
             mem `onlyUsedIn` patElemName pat_elem,
             all knownSize (shapeDims shape),
+            not $ freeIn ixfun `namesIntersect` namesFromList (patternNames pat),
             fse /= tse =
               let mem_size =
                     ConvOpExp (SExt Int32 Int64) $
