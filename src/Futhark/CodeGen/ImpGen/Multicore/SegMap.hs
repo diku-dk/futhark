@@ -71,11 +71,16 @@ compileSegMap pat space kbody = do
     emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs body' free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
-  seq_task_code <- collect $ do
+  seq_task_code <- collect $ localMode ModeSequential $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
     body <- compileSegMapBody flat_idx pat space kbody
     let (body_allocs, body') = extractAllocations body
     emit $ Imp.Op $ Imp.SeqCode flat_idx body_allocs body'
 
-  free_params_task <- freeParams (par_task_code <> seq_task_code) [flat_idx]
-  emit $ Imp.Op $ Imp.Task free_params_task (product ns') par_task_code seq_task_code (segFlat space) []
+  mode <- askEnv
+
+  if mode == ModeSequential
+    then emit seq_task_code
+    else do
+    free_params_task <- freeParams (par_task_code <> seq_task_code) [flat_idx]
+    emit $ Imp.Op $ Imp.Task free_params_task (product ns') par_task_code seq_task_code (segFlat space) []
