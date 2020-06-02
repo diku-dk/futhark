@@ -216,12 +216,17 @@ nonsegmentedScan pat space scan_ops kbody = do
     emit $ Imp.Op $ Imp.MCFunc flat_idx stage_3_prebody stage_3_body free_params' $
       Imp.MulticoreInfo ntasks Imp.Static (segFlat space)
 
-  seq_code <- collect $ do
+  seq_code <- collect $ localMode ModeSequential $ do
     seq_code_body <- sequentialScan flat_idx pat space scan_ops kbody
     emit $ Imp.Op $ Imp.SeqCode flat_idx mempty seq_code_body
 
-  free_task_params <- freeParams (par_code <> seq_code) [flat_idx, segFlat space]
-  emit $ Imp.Op $ Imp.Task free_task_params (product ns') par_code seq_code (segFlat space) []
+  mode <- askEnv
+
+  if mode == ModeSequential
+    then emit seq_code
+    else do free_task_params <- freeParams (par_code <> seq_code) [flat_idx, segFlat space]
+            emit $ Imp.Op $ Imp.Task free_task_params (product ns') par_code seq_code (segFlat space) []
+
   emit $ Imp.DebugPrint "nonsegmentedScan End" Nothing
 
 sequentialScan :: VName
@@ -321,8 +326,12 @@ segmentedScan pat space scan_ops kbody = do
     emit $ Imp.Op $ Imp.MCFunc n_segments mempty fbody free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
-  seq_code <- collect $
+  seq_code <- collect $ localMode ModeSequential $
     emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
 
-  free_task_params <- freeParams (seq_code <> par_code) [n_segments]
-  emit $ Imp.Op $ Imp.Task free_task_params (product $ init ns') par_code seq_code (segFlat space) []
+  mode <- askEnv
+
+  if mode == ModeSequential
+    then emit seq_code
+    else do free_task_params <- freeParams (seq_code <> par_code) [n_segments]
+            emit $ Imp.Op $ Imp.Task free_task_params (product $ init ns') par_code seq_code (segFlat space) []

@@ -3,7 +3,9 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , compileKBody
  , extractAllocations
  , compileThreadResult
+ , Mode(..)
  , MulticoreGen
+ , localMode
  , getNumThreads
  , getNumThreads'
  , decideScheduling
@@ -25,8 +27,18 @@ import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
 import Futhark.Transform.Rename
 
-type MulticoreGen = ImpM MCMem () Imp.Multicore
+-- | The current compilation mode.
+data Mode
+  = ModeParallel
+    -- ^ Generate both sequential and parallel code for 'SegOp's.
+  | ModeSequential
+    -- ^ Generate only sequential code for 'SegOp'.
+  deriving (Show, Eq)
 
+type MulticoreGen = ImpM MCMem Mode Imp.Multicore
+
+localMode :: Mode -> MulticoreGen a -> MulticoreGen a
+localMode m = localEnv (const m)
 
 toParam :: VName -> TypeBase shape u -> MulticoreGen Imp.Param
 toParam name (Prim pt)      = return $ Imp.ScalarParam name pt

@@ -9,6 +9,7 @@ import Prelude hiding (quot, rem)
 
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 
+import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegMap
 import Futhark.CodeGen.ImpGen.Multicore.SegRed
 import Futhark.CodeGen.ImpGen.Multicore.SegScan
@@ -20,13 +21,13 @@ import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog MCMem
             -> m (Imp.Definitions Imp.Multicore)
-compileProg = Futhark.CodeGen.ImpGen.compileProg () ops Imp.DefaultSpace
+compileProg = Futhark.CodeGen.ImpGen.compileProg ModeParallel ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
         opCompiler dest (Alloc e space) = compileAlloc dest e space
         opCompiler dest (Inner op) = compileSegOp dest op
 
 compileSegOp :: Pattern MCMem -> SegOp () MCMem
-             -> ImpM MCMem () Imp.Multicore ()
+             -> ImpM MCMem Mode Imp.Multicore ()
 compileSegOp pat  (SegHist _ space histops _ kbody) =
   compileSegHist pat space histops kbody
 
