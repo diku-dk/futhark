@@ -93,7 +93,6 @@ nonsegmentedReduction pat space reds kbody = do
   num_threads' <- toExp $ Var num_threads
 
   dPrimV_ (segFlat space) 0
-  flat_idx <- dPrim "iter" int32
 
   sComment "neutral-initialise the output" $
     forM_ reds $ \red ->
@@ -102,6 +101,7 @@ nonsegmentedReduction pat space reds kbody = do
           copyDWIMFix (patElemName pe) vec_is ne []
 
   par_code <- collect $ do
+    flat_idx <- dPrim "iter" int32
     emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
     stage_one_red_arrs <- groupResultArrays (Var num_threads) reds
 
@@ -147,9 +147,6 @@ nonsegmentedReduction pat space reds kbody = do
 
     emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs fbody' free_params $
       Imp.MulticoreInfo ntasks scheduling (segFlat space)
-
-
-
     reds' <- renameSegBinOp reds
     slugs' <- mapM (segBinOpOpSlug tid') $ zip reds' stage_one_red_arrs
 
@@ -174,9 +171,13 @@ nonsegmentedReduction pat space reds kbody = do
 
 
   seq_code <- collect $ localMode ModeSequential $ do
-    seq_code_body <- sequentialRed pat flat_idx space reds kbody
+    flat_seq_idx <- dPrimV "seq_iter" 0
+    seq_code_body <- sequentialRed pat flat_seq_idx space reds kbody
     let (body_allocs, seq_code_body') = extractAllocations seq_code_body
-    emit $ Imp.Op $ Imp.SeqCode flat_idx body_allocs seq_code_body'
+    emit body_allocs
+    sFor "i" (product ns') $ \i -> do
+      flat_seq_idx <-- i
+      emit seq_code_body'
 
   let retvals = map patElemName $ patternElements pat
   retvals_ts <- mapM lookupType retvals
@@ -187,7 +188,7 @@ nonsegmentedReduction pat space reds kbody = do
 
   if mode == ModeSequential
     then emit seq_code
-    else do free_params <- freeParams (par_code <> seq_code) ([flat_idx, segFlat space] ++ retval_names)
+    else do free_params <- freeParams (par_code <> seq_code) (segFlat space : retval_names)
             emit $ Imp.Op $ Imp.Task free_params (product ns') par_code seq_code (segFlat space) retval_params
 
   emit $ Imp.DebugPrint "SegRed end\n" Nothing
@@ -220,27 +221,22 @@ sequentialRed pat flat_idx space reds kbody = do
                 forM_ (zip (patternElements pat) (bodyResult $ (lambdaBody . segBinOpLambda) red)) $
                   \(pe, se) -> copyDWIMFix (patElemName pe) vec_is se []
 
--- Each thread reduces over the number of segments
--- each of which is done sequentially
--- Maybe we should select the work of the inner loop
--- based on n_segments and dimensions etc.
-segmentedReduction :: Pattern MCMem
-                   -> SegSpace
-                   -> [SegBinOp MCMem]
-                   -> DoSegBody
-                   -> MulticoreGen ()
-segmentedReduction pat space reds kbody = do
-  emit $ Imp.DebugPrint "segmented segBinOp " Nothing
 
+
+compileSegRedBody :: VName
+                  -> Pattern MCMem
+                  -> SegSpace
+                  -> [SegBinOp MCMem]
+                  -> DoSegBody
+                  -> MulticoreGen Imp.Code
+compileSegRedBody n_segments pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
   let inner_bound = last ns'
 
-  n_segments <- dPrim "segment_iter" $ IntType Int32
   n_segments' <- toExp $ Var n_segments
-
   -- Perform sequential reduce on inner most dimension
-  fbody <- collect $ do
+  collect $ do
     emit $ Imp.DebugPrint "segmented segBinOp stage 1" Nothing
     flat_idx <- dPrimV "flat_idx" (n_segments' * inner_bound)
     flat_idx' <- toExp $ Var flat_idx
@@ -278,16 +274,38 @@ segmentedReduction pat space reds kbody = do
                   \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) se' []
         flat_idx <-- flat_idx' + 1
 
+
+-- Each thread reduces over the number of segments
+-- each of which is done sequentially
+-- Maybe we should select the work of the inner loop
+-- based on n_segments and dimensions etc.
+segmentedReduction :: Pattern MCMem
+                   -> SegSpace
+                   -> [SegBinOp MCMem]
+                   -> DoSegBody
+                   -> MulticoreGen ()
+segmentedReduction pat space reds kbody = do
+  emit $ Imp.DebugPrint "segmented segBinOp " Nothing
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
+
   par_code <- collect $ do
+    n_par_segments <- dPrim "segment_iter" $ IntType Int32
+    par_body    <- compileSegRedBody n_par_segments pat space reds kbody
     ntasks      <- dPrim "num_tasks" $ IntType Int32
-    free_params <- freeParams fbody (segFlat space : [n_segments])
-    let sched = decideScheduling fbody
-    emit $ Imp.Op $ Imp.MCFunc n_segments mempty fbody free_params $
+    free_params <- freeParams par_body (segFlat space : [n_par_segments])
+    let sched = decideScheduling par_body
+    emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty par_body free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
 
-  seq_code <- collect $ localMode ModeSequential $
-    emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
+  seq_code <- collect $ localMode ModeSequential $ do
+    n_seq_segments <- dPrim "segment_iter" $ IntType Int32
+    seq_body   <- compileSegRedBody n_seq_segments pat space reds kbody
+    sFor "i" (product $ init ns') $ \i -> do
+      n_seq_segments <-- i
+      emit seq_body
 
-  free_task_params <- freeParams fbody  (segFlat space : [n_segments])
+  free_task_params <- freeParams (seq_code <> par_code) [segFlat space]
   emit $ Imp.Op $ Imp.Task free_task_params (product $ init ns') par_code seq_code (segFlat space) []

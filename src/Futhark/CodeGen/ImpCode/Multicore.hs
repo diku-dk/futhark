@@ -31,7 +31,6 @@ data MulticoreInfo = MulticoreInfo VName Scheduling VName
 
 -- | A multicore operation.
 data Multicore = Task [Param] Imp.Exp Code Code VName [Param]
-               | SeqCode VName Code Code
                | MCFunc VName Code Code [Param] MulticoreInfo
                | MulticoreCall (Maybe VName) String
 
@@ -70,10 +69,6 @@ instance Pretty Multicore where
     langle <+>
     nestedBlock "{" "}" (ppr body)
 
-  ppr (SeqCode i prebody body) =
-    text "seq_func" <+> ppr i <+>
-    ppr prebody <+> ppr body
-
   ppr (MulticoreCall dests f) =
     ppr dests <+> ppr f
 
@@ -82,7 +77,5 @@ instance FreeIn Multicore where
   freeIn' (Task _ e par_code seq_code _ _) =
     freeIn' e <> freeIn' par_code <> freeIn' seq_code
   freeIn' (MCFunc _ prebody body _ _) =
-    freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
-  freeIn' (SeqCode _ prebody body) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests

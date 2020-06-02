@@ -52,9 +52,6 @@ nonsegmentedScan pat space scan_ops kbody = do
   dPrimV_ (segFlat space) 0
   tid' <- toExp $ Var $ segFlat space
 
-  flat_idx <- dPrimV "iter" 0
-  flat_idx' <- toExp $ Var flat_idx
-
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
 
@@ -63,10 +60,13 @@ nonsegmentedScan pat space scan_ops kbody = do
       per_scan_pes            = segBinOpChunks scan_ops $ patternValueElements pat
 
   par_code <- collect $ do
+    flat_par_idx <- dPrimV "iter" 0
+    flat_par_idx' <- toExp $ Var flat_par_idx
+
     -- Stage 1 : each thread partially scans a chunk of the input
     -- Writes directly to the resulting array
     stage_1_prebody <- collect $ do
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_par_idx
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
       compileStms mempty (kernelBodyStms kbody) $
         sComment "write mapped values results to memory" $ do
@@ -88,10 +88,10 @@ nonsegmentedScan pat space scan_ops kbody = do
               forM_ (zip pes (bodyResult $ lamBody scan_op)) $
                 \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
 
-      flat_idx <-- flat_idx' + 1
+      flat_par_idx <-- flat_par_idx' + 1
 
     stage_1_body <- collect $ do
-      forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 flat_idx) $ uncurry (<--)
+      forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 flat_par_idx) $ uncurry (<--)
       sComment "stage 1 scan body" $
         compileStms mempty (kernelBodyStms kbody) $ do
           sComment "write mapped values results to memory" $ do
@@ -104,7 +104,7 @@ nonsegmentedScan pat space scan_ops kbody = do
             -- Read accum value
             sComment "Read accum value" $
               forM_ (zip (xParams scan_op) pes) $ \(p, pe) ->
-                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (flat_idx' - 1 : vec_is)
+                copyDWIMFix (paramName p) [] (Var $ patElemName pe) (flat_par_idx' - 1 : vec_is)
 
             -- Read next value
             sComment "Read next values" $
@@ -116,10 +116,10 @@ nonsegmentedScan pat space scan_ops kbody = do
                 \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
 
 
-    free_params <- freeParams (stage_1_prebody <> stage_1_body) (segFlat space : [flat_idx])
+    free_params <- freeParams (stage_1_prebody <> stage_1_body) (segFlat space : [flat_par_idx])
     ntasks <- dPrim "ntasks" $ IntType Int32
     ntasks' <- toExp $ Var ntasks
-    emit $ Imp.Op $ Imp.MCFunc flat_idx stage_1_prebody stage_1_body free_params $
+    emit $ Imp.Op $ Imp.MCFunc flat_par_idx stage_1_prebody stage_1_body free_params $
       Imp.MulticoreInfo ntasks Imp.Static (segFlat space)
 
 
@@ -175,23 +175,23 @@ nonsegmentedScan pat space scan_ops kbody = do
     accs' <- groupResultArrays (Var num_threads) scan_ops3
     stage_3_prebody <- collect $ do
       num_threads <-- num_threads'
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_par_idx
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops3
       -- Read carry in
       let read_carry_in = forM_ (zip3 scan_ops3 accs' per_scan_pes) $ \(scan_op, acc, pes) ->
                             sLoopNest (segBinOpShape scan_op) $ \vec_is ->
                               forM_ (zip acc pes) $ \(acc', pe) ->
-                                copyDWIMFix acc' (tid' : vec_is) (Var $ patElemName pe) (flat_idx' - 1 : vec_is)
+                                copyDWIMFix acc' (tid' : vec_is) (Var $ patElemName pe) (flat_par_idx' - 1 : vec_is)
 
           read_neutral = forM_ (zip scan_ops3 accs') $ \(scan_op, acc) ->
                            sLoopNest (segBinOpShape scan_op) $ \vec_is ->
                              forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
                                copyDWIMFix acc' (tid' : vec_is) ne []
 
-      sIf (flat_idx' .==. 0) read_neutral read_carry_in
+      sIf (flat_par_idx' .==. 0) read_neutral read_carry_in
 
     stage_3_body <- collect $ do
-      forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 flat_idx) $ uncurry (<--)
+      forM_  (zip is $ unflattenIndex ns' $ Imp.vi32 flat_par_idx) $ uncurry (<--)
       sComment "stage 3 scan body" $
         compileStms mempty (kernelBodyStms kbody) $
           forM_ (zip4 per_scan_pes scan_ops3 per_scan_res accs') $ \(pes, scan_op, scan_res, acc) ->
@@ -212,19 +212,22 @@ nonsegmentedScan pat space scan_ops kbody = do
                   copyDWIMFix acc' (tid' : vec_is) se []
 
 
-    free_params' <- freeParams  (stage_3_prebody <> stage_3_body)  (segFlat space : [flat_idx])
-    emit $ Imp.Op $ Imp.MCFunc flat_idx stage_3_prebody stage_3_body free_params' $
+    free_params' <- freeParams  (stage_3_prebody <> stage_3_body)  (segFlat space : [flat_par_idx])
+    emit $ Imp.Op $ Imp.MCFunc flat_par_idx stage_3_prebody stage_3_body free_params' $
       Imp.MulticoreInfo ntasks Imp.Static (segFlat space)
 
   seq_code <- collect $ localMode ModeSequential $ do
-    seq_code_body <- sequentialScan flat_idx pat space scan_ops kbody
-    emit $ Imp.Op $ Imp.SeqCode flat_idx mempty seq_code_body
+    flat_seq_idx <- dPrimV "seq_iter" 0
+    seq_code_body <- sequentialScan flat_seq_idx pat space scan_ops kbody
+    sFor "i" (product ns') $ \i -> do
+      flat_seq_idx <-- i
+      emit seq_code_body
 
   mode <- askEnv
 
   if mode == ModeSequential
     then emit seq_code
-    else do free_task_params <- freeParams (par_code <> seq_code) [flat_idx, segFlat space]
+    else do free_task_params <- freeParams (par_code <> seq_code) [segFlat space]
             emit $ Imp.Op $ Imp.Task free_task_params (product ns') par_code seq_code (segFlat space) []
 
   emit $ Imp.DebugPrint "nonsegmentedScan End" Nothing
@@ -235,7 +238,7 @@ sequentialScan :: VName
                -> [SegBinOp MCMem]
                -> KernelBody MCMem
                -> MulticoreGen Imp.Code
-sequentialScan flat_idx pat space scan_ops kbody = do
+sequentialScan flat_par_idx pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -245,7 +248,7 @@ sequentialScan flat_idx pat space scan_ops kbody = do
 
   collect $ do
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_par_idx
     compileStms mempty (kernelBodyStms kbody) $ do
       sComment "write mapped values results to memory" $ do
         let map_arrs = drop (segBinOpResults scan_ops) $ patternElements pat
@@ -274,24 +277,19 @@ sequentialScan flat_idx pat space scan_ops kbody = do
             \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 is ++ vec_is) se []
 
 
-segmentedScan :: Pattern MCMem
-              -> SegSpace
-              -> [SegBinOp MCMem]
-              -> KernelBody MCMem
-              -> MulticoreGen ()
-segmentedScan pat space scan_ops kbody = do
-  emit $ Imp.DebugPrint "segmented segScan" Nothing
-
+compileSegScanBody :: VName
+                   -> Pattern MCMem
+                   -> SegSpace
+                   -> [SegBinOp MCMem]
+                   -> KernelBody MCMem
+                   -> MulticoreGen Imp.Code
+compileSegScanBody idx pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  flat_idx <- dPrim "iter" int32
-
-  -- iteration variable
-  n_segments <- dPrim "segment_iter" $ IntType Int32
-  n_segments' <- toExp $ Var n_segments
-
-  fbody <- collect $ do
+  flat_par_idx <- dPrim "iter" int32
+  idx' <- toExp $ Var idx
+  collect $ do
     emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
     forM_ scan_ops $ \scan_op -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
@@ -302,8 +300,8 @@ segmentedScan pat space scan_ops kbody = do
 
       let inner_bound = last ns'
       sFor "i" inner_bound $ \i -> do
-        dPrimV_ flat_idx (n_segments' * inner_bound + i)
-        zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+        dPrimV_ flat_par_idx (idx' * inner_bound + i)
+        zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_par_idx
         compileStms mempty (kernelBodyStms kbody) $ do
           let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody
           sComment "write to-scan values to parameters" $
@@ -319,19 +317,40 @@ segmentedScan pat space scan_ops kbody = do
               copyDWIMFix (patElemName pe) (map Imp.vi32 is)  se []
               copyDWIMFix (paramName p) [] se []
 
+
+
+
+segmentedScan :: Pattern MCMem
+              -> SegSpace
+              -> [SegBinOp MCMem]
+              -> KernelBody MCMem
+              -> MulticoreGen ()
+segmentedScan pat space scan_ops kbody = do
+  emit $ Imp.DebugPrint "segmented segScan" Nothing
+
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
   par_code <- collect $ do
+    n_par_segments <- dPrim "segment_iter" $ IntType Int32
+    -- iteration variable
+    fbody <- compileSegScanBody n_par_segments pat space scan_ops kbody
     ntasks <- dPrim "num_tasks" $ IntType Int32
-    free_params <- freeParams fbody  (segFlat space : [n_segments])
+    free_params <- freeParams fbody  (segFlat space : [n_par_segments])
     let sched = decideScheduling fbody
-    emit $ Imp.Op $ Imp.MCFunc n_segments mempty fbody free_params $
+    emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty fbody free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
-  seq_code <- collect $ localMode ModeSequential $
-    emit $ Imp.Op $ Imp.SeqCode n_segments mempty fbody
+  seq_code <- collect $ localMode ModeSequential $ do
+    n_seq_segments <- dPrim "segment_iter" $ IntType Int32
+    fbody <- compileSegScanBody n_seq_segments pat space scan_ops kbody
+    sFor "i" (product $ init ns') $ \i -> do
+      n_seq_segments <-- i
+      emit fbody
 
   mode <- askEnv
 
   if mode == ModeSequential
     then emit seq_code
-    else do free_task_params <- freeParams (seq_code <> par_code) [n_segments]
+    else do free_task_params <- freeParams (seq_code <> par_code) mempty
             emit $ Imp.Op $ Imp.Task free_task_params (product $ init ns') par_code seq_code (segFlat space) []

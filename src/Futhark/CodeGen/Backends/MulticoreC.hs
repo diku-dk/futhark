@@ -537,15 +537,6 @@ compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_name] [True, False]
 
-
-compileOp (SeqCode i prebody body) = do
-  GC.decl [C.cdecl|int $id:i = 0;|]
-  GC.compileCode prebody
-  body' <- GC.blockScope $ GC.compileCode body
-  GC.stm [C.cstm|for (; $id:i < iterations; $id:i++) {
-                       $items:body'
-                     }|]
-
 compileOp (MulticoreCall Nothing f) =
   GC.stm [C.cstm|$id:f(ctx);|]
 

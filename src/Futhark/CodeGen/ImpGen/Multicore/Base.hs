@@ -182,11 +182,6 @@ extractAllocations segop_code = f segop_code
           in (free_allocs, here_allocs <>
               Imp.Op (Imp.MCFunc i prebody body' free' info))
 
-        f (Imp.Op (Imp.SeqCode i prebody body )) =
-          let (body_allocs, body') = extractAllocations body
-              (free_allocs, here_allocs) = f body_allocs
-          in (free_allocs, here_allocs <>
-              Imp.Op (Imp.SeqCode i prebody body'))
         f code =
           (mempty, code)
 

@@ -58,29 +58,33 @@ compileSegMap pat space kbody = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
 
+  mode <- askEnv
+
   dPrimV_ (segFlat space) 0
-  flat_idx <- dPrim "iter" int32
 
   par_task_code <- collect $ do
-    body <- compileSegMapBody flat_idx pat space kbody
-    free_params <- freeParams body [segFlat space, flat_idx]
+    flat_par_idx <- dPrim "iter" int32
+    body <- compileSegMapBody flat_par_idx pat space kbody
+    free_params <- freeParams body [segFlat space, flat_par_idx]
     let (body_allocs, body') = extractAllocations body
         sched = decideScheduling body'
     emit $ Imp.DebugPrint "SegMap parallel" Nothing
     ntasks <- dPrim "num_tasks" $ IntType Int32
-    emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs body' free_params $
-      Imp.MulticoreInfo ntasks sched (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc flat_par_idx body_allocs body' free_params $ Imp.MulticoreInfo ntasks sched (segFlat space)
 
   seq_task_code <- collect $ localMode ModeSequential $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
-    body <- compileSegMapBody flat_idx pat space kbody
+    flat_seq_idx <- dPrim "seq_iter" int32
+    body <- compileSegMapBody flat_seq_idx pat space kbody
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.SeqCode flat_idx body_allocs body'
+    emit body_allocs
+    sFor "i" (product ns') $ \i -> do
+      flat_seq_idx <-- i
+      emit body'
 
-  mode <- askEnv
 
   if mode == ModeSequential
     then emit seq_task_code
     else do
-    free_params_task <- freeParams (par_task_code <> seq_task_code) [flat_idx]
+    free_params_task <- freeParams (par_task_code <> seq_task_code) mempty
     emit $ Imp.Op $ Imp.Task free_params_task (product ns') par_task_code seq_task_code (segFlat space) []
