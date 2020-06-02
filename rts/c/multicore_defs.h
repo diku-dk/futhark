@@ -43,6 +43,7 @@ struct subtask {
   // How much of a task to take a the time
   // If it's zero , then the subtasks is not stealable
   int chunk;
+  int id;
 
   // Shared variables across subtasks
   int *counter; // Counter for ongoing subtasks

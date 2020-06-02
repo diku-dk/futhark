@@ -9,7 +9,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             pthread_cond_t *cond,
                                             int* counter,
                                             int start, int end,
-                                            int chunk)
+                                            int chunk, int id)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
@@ -24,10 +24,12 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->start   = start;
   subtask->end     = end;
   subtask->chunk   = chunk;
+  subtask->id      = id;
   return subtask;
 }
 
 
+/* Doubles the size of the queue */
 static inline int grow_queue(struct subtask_queue *subtask_queue) {
 
   int new_capacity = 2 * subtask_queue->capacity;
@@ -41,7 +43,9 @@ static inline int grow_queue(struct subtask_queue *subtask_queue) {
   return 0;
 }
 
-static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *subtask_queue, int from_end)
+static inline struct subtask* jobqueue_get_subtask_chunk(struct worker *worker,
+                                                         struct subtask_queue *subtask_queue,
+                                                         int from_end)
 {
   struct subtask *cur_head = subtask_queue->buffer[subtask_queue->first];
 
@@ -61,6 +65,7 @@ static inline struct subtask* jobqueue_get_subtask_chunk(struct subtask_queue *s
       new_subtask->end = cur_head->start + cur_head->chunk;
       cur_head->start += cur_head->chunk;
     }
+    new_subtask->id = worker->tid;
     CHECK_ERR(pthread_mutex_lock(cur_head->mutex), "pthread_mutex_lock");
     (*cur_head->counter)++;
     CHECK_ERR(pthread_cond_broadcast(cur_head->cond), "pthread_cond_signal");
@@ -171,7 +176,7 @@ static inline int subtask_queue_steal(struct worker *worker,
 
   // chunk == 0 indicates that task is not stealable
   // so we just return also
-  if (subtask_queue->num_used == 0 || subtask_queue->buffer[subtask_queue->first]->chunk == 0) {
+  if (subtask_queue->num_used == 0) {
     CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
     return 1;
@@ -182,7 +187,7 @@ static inline int subtask_queue_steal(struct worker *worker,
     return -1;
   }
 
-  *subtask = jobqueue_get_subtask_chunk(subtask_queue, 1);
+  *subtask = jobqueue_get_subtask_chunk(worker, subtask_queue, 1);
   if (*subtask == NULL) {
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
     return -1;
@@ -265,13 +270,12 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
     }
   }
 
-
   if (subtask_queue->dead) {
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
     return -1;
   }
 
-  *subtask = jobqueue_get_subtask_chunk(subtask_queue, 0);
+  *subtask = jobqueue_get_subtask_chunk(worker, subtask_queue, 0);
   if (*subtask == NULL) {
     assert(!"got NULL ptr");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");

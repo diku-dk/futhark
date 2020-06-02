@@ -20,7 +20,7 @@ static inline void *scheduler_worker(void* arg)
 #ifdef MCPROFILE
       int64_t start = get_wall_time();
 #endif
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, worker->tid);
+      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
 #ifdef MCPROFILE
       int64_t end = get_wall_time();
       worker->time_spent_working += end - start;
@@ -84,7 +84,7 @@ static inline int scheduler_task(struct scheduler *scheduler,
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args,
                                             &mutex, &cond, &shared_counter,
-                                            start, end, chunks);
+                                            start, end, chunks, subtask_id);
     assert(subtask != NULL);
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads], subtask),
               "subtask_queue_enqueue");
@@ -142,6 +142,7 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   subtask.chunk = task->granularity;
   subtask.start = 0;
   subtask.end = task->iterations;
+  subtask.id = 0;
   CHECK_ERR(subtask_queue_enqueue(calling_worker, &subtask), "subtask_queue_enqueue");
 
   while(1) {
@@ -199,7 +200,6 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
   if (!free_workers) {
     return do_task_directly(task->seq_fn, task->args, task->iterations);
   }
-
 
   /* Run task directly if below some threshold */
   if (task->iterations < 50) {
