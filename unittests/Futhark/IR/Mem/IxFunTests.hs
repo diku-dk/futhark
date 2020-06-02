@@ -4,7 +4,7 @@ module Futhark.IR.Mem.IxFunTests
   )
 where
 
-import Prelude hiding (span, repeat)
+import Prelude hiding (span)
 import qualified Prelude as P
 import qualified Data.List as DL
 
@@ -83,7 +83,6 @@ tests = testGroup "IxFunTests"
         , test_slice_iota
         , test_reshape_slice_iota1
         , test_permute_slice_iota
-        , test_repeat_slice_iota
         , test_rotate_rotate_permute_slice_iota
         , test_slice_rotate_permute_slice_iota1
         , test_slice_rotate_permute_slice_iota2
@@ -95,12 +94,10 @@ tests = testGroup "IxFunTests"
         , test_reshape_slice_iota3
         , test_complex1
         , test_complex2
-        , test_complex3
         , test_rebase1
         , test_rebase2
         , test_rebase3
         , test_rebase4_5
-        , test_rebase6
         ]
 
 singleton :: TestTree -> [TestTree]
@@ -122,10 +119,6 @@ test_reshape_slice_iota1 = singleton $ testCase "reshape . slice . iota 1" $ com
 test_permute_slice_iota :: [TestTree]
 test_permute_slice_iota = singleton $ testCase "permute . slice . iota" $ compareOps $
   permute (slice (iota [n, n, n]) slice3) [1, 0]
-
-test_repeat_slice_iota :: [TestTree]
-test_repeat_slice_iota = singleton $ testCase "repeat . slice . iota" $ compareOps $
-  repeat (slice (iota [n, n, n]) slice3) [[2, 3], [3, 2]] [4, 4]
 
 test_rotate_rotate_permute_slice_iota :: [TestTree]
 test_rotate_rotate_permute_slice_iota =
@@ -266,28 +259,6 @@ test_complex2 =
       ixfun' = reshape (rotate (slice ixfun slice1) [1, 0, 0, 2]) newdims
   in ixfun'
 
-test_complex3 :: [TestTree]
-test_complex3 =
-  singleton $ testCase "reshape . permute . rotate . slice . permute . slice . iota 3" $ compareOps $
-  let newdims = [ DimCoercion 1
-                , DimCoercion n
-                , DimNew (n*n)
-                , DimCoercion 2
-                , DimCoercion ((n `P.div` 3) - 2)
-                ]
-      slc3 = [ DimFix (n `P.div` 2)
-             , DimSlice (n-1) (n `P.div` 3) (-1)
-             , DimSlice (n-1) n (-1)
-             , DimSlice (n-1) n (-1)
-             , DimSlice 0 n 1
-             ]
-      ixfun = permute (slice (iota [n, n, n, n, n]) slc3) [3, 1, 2, 0]
-      m = n `P.div` 3
-      slice1 = [DimSlice 0 n 1, DimSlice (n-1) n (-1), DimSlice (n-1) n (-1), DimSlice 1 (m-2) (-1)]
-      repeats = [[1],[],[],[2]]
-      ixfun' = reshape (repeat (rotate (slice ixfun slice1) [1, 0, 0, 2]) repeats []) newdims
-  in ixfun'
-
 test_rebase1 :: [TestTree]
 test_rebase1 =
   singleton $ testCase "rebase 1" $ compareOps $
@@ -347,25 +318,4 @@ test_rebase4_5 =
       ixfn_orig = rotate (permute (slice (iota [n3, n2]) slice_orig) [1, 0]) [1, 2]
   in [ testCase "rebase mixed monotonicities" $ compareOps $
        rebase ixfn_base ixfn_orig
-
-     , testCase "rebase repetitions and mixed monotonicities 1" $ compareOps $
-       let ixfn_orig' = repeat ixfn_orig [[2, 2], [3, 3]] [2, 3]
-       in rebase ixfn_base ixfn_orig'
      ]
-
-test_rebase6 :: [TestTree]
-test_rebase6 =
-  singleton $ testCase "rebase repetitions and mixed monotonicities 2" $ compareOps $
-  let n2 = (n-2) `P.div` 3
-      n3 = (n-3) `P.div` 2
-      slice_base = [ DimFix (n `P.div` 2)
-                   , DimSlice (n-1) n2 (-3)
-                   ]
-      slice_orig = [ DimSlice (n3-1) n3 (-1)
-                   , DimSlice 0 n2 1
-                   ]
-      ixfn_base = permute (repeat (rotate (slice (iota [n, n]) slice_base) [1]) [[], []] [n3]) [1, 0]
-      ixfn_orig = rotate (permute (slice (iota [n3, n2]) slice_orig) [1, 0]) [1, 2]
-      ixfn_orig' = repeat ixfn_orig [[2, 2],[3, 3]] [2, 3]
-      ixfn_rebase = rebase ixfn_base ixfn_orig'
-  in ixfn_rebase

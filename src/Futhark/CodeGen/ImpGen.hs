@@ -754,9 +754,6 @@ defCompileBasicOp _ Rotate{} =
 defCompileBasicOp _ Reshape{} =
   return ()
 
-defCompileBasicOp _ Repeat{} =
-  return ()
-
 defCompileBasicOp pat e =
   error $ "ImpGen.defCompileBasicOp: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
