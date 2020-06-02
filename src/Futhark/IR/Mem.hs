@@ -417,7 +417,7 @@ instance PP.Pretty MemReturn where
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
-  freeIn' _                        = mempty
+  freeIn' (ReturnsNewBlock space _ ixfun) = freeIn' space <> freeIn' ixfun
 
 instance Engine.Simplifiable MemReturn where
   simplify (ReturnsNewBlock space i ixfun) =
