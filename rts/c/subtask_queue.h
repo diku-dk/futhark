@@ -30,15 +30,22 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
 
 
 /* Doubles the size of the queue */
-static inline int grow_queue(struct subtask_queue *subtask_queue) {
+static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) {
+
+#ifdef MCDEBUG
+  fprintf(stderr, "Growing queue to %d\n", subtask_queue->capacity * 2);
+#endif
 
   int new_capacity = 2 * subtask_queue->capacity;
   struct subtask **new_buffer = calloc(new_capacity, sizeof(struct subtask*));
-  memcpy(new_buffer, subtask_queue->buffer, subtask_queue->capacity * sizeof(struct subtask*));
+  for (int i = 0; i < subtask_queue->num_used; i++) {
+    new_buffer[i] = subtask_queue->buffer[(subtask_queue->first + i) % subtask_queue->capacity];
+  }
 
   free(subtask_queue->buffer);
   subtask_queue->buffer = new_buffer;
   subtask_queue->capacity = new_capacity;
+  subtask_queue->first = 0;
 
   return 0;
 }
@@ -135,6 +142,10 @@ static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *s
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Wait until there is room in the subtask_queue.
   while (subtask_queue->num_used == subtask_queue->capacity && !subtask_queue->dead) {
+    if (subtask_queue->num_used == subtask_queue->capacity) {
+      CHECK_ERR(subtask_queue_grow_queue(subtask_queue), "subtask_queue_grow_queue");
+      continue;
+    }
     CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
   }
 

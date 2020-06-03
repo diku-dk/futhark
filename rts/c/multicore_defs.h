@@ -10,7 +10,7 @@
 
 #define MULTICORE
 /* #define MCDEBUG */
-/* #define MCPROFILE */
+#define MCPROFILE
 
 #ifdef _WIN32
 #include <windows.h>
@@ -65,7 +65,7 @@ struct scheduler_task {
   long int iterations;
 };
 
-
+/* Parallel task  */
 struct scheduler_parallel_task {
   const char* name;
   sub_task_fn fn;

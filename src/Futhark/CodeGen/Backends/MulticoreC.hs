@@ -133,7 +133,7 @@ compileProg =
                    cur_worker->time_spent_working = 0;
                    cur_worker->cur_working = 0;
                    cur_worker->scheduler = &ctx->scheduler;
-                   CHECK_ERR(subtask_queue_init(&cur_worker->q, 32),
+                   CHECK_ERR(subtask_queue_init(&cur_worker->q, 2),
                              "failed to init jobqueue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
                                             cur_worker),

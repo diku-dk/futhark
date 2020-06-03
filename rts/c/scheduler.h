@@ -124,6 +124,7 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   fprintf(stderr, "[scheduler_nested] tid %d\n", calling_worker->tid);
   fprintf(stderr, "[scheduler_nested] granularity %d\n", task->granularity);
   fprintf(stderr, "[scheduler_nested] iterations %ld\n", task->iterations);
+  fprintf(stderr, "[scheduler_nested] free workers %d\n", free_workers);
 #endif
 
   pthread_mutex_t mutex;
@@ -131,45 +132,66 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   pthread_cond_t cond;
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
-  int shared_counter = 1;
+  assert(free_workers != 0);
+  int max_num_tasks = free_workers;
+  int iter_pr_subtask = task->iterations / max_num_tasks;
+  int remainder = task->iterations % max_num_tasks;
 
-  struct subtask subtask;
-  subtask.fn = task->fn;
-  subtask.args = task->args;
-  subtask.mutex = &mutex;
-  subtask.cond = &cond;
-  subtask.counter = &shared_counter;
-  subtask.chunk = task->granularity;
-  subtask.start = 0;
-  subtask.end = task->iterations;
-  subtask.id = 0;
-  CHECK_ERR(subtask_queue_enqueue(calling_worker, &subtask), "subtask_queue_enqueue");
+  int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
+  int shared_counter = nsubtasks;
 
+  int chunks = 0;
+  if (task->granularity > 0) {
+    chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
+  }
+  long int start = 0;
+  long int subtask_id = 0;
+  int end = iter_pr_subtask + (long int)(remainder != 0);
+  for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
+    struct subtask *subtask = setup_subtask(task->fn, task->args,
+                                            &mutex, &cond, &shared_counter,
+                                            start, end, chunks, subtask_id);
+    assert(subtask != NULL);
+    CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
+#ifdef MCDEBUG
+    fprintf(stderr, "[scheduler_nested] pushed %ld iterations onto q %d\n", (end - start), calling_worker->tid);
+#endif
+    // Update range params
+    start = end;
+    end += iter_pr_subtask + ((subtask_id + 1) < remainder);
+  }
+
+
+  struct subtask *subtask = NULL;
   while(1) {
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    /* fprintf(stderr, "tid %d shared counter %d\n", calling_worker->tid, shared_counter); */
     if (shared_counter == 0) break;
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
 
-    struct subtask *subtask_ptr = NULL;
-    if (subtask_queue_dequeue(calling_worker, &subtask_ptr) == 0) {
+    int err = subtask_queue_steal(calling_worker, &subtask);
+    if (err == 0) {
       // Do work
-      assert(subtask_ptr->fn != NULL);
-      assert(subtask_ptr->args != NULL);
-      int err = subtask_ptr->fn(subtask_ptr->args, subtask_ptr->start, subtask_ptr->end, calling_worker->tid);
+      assert(subtask->fn != NULL);
+      assert(subtask->args != NULL);
+      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
       if (err != 0) {
         return err;
       }
-      CHECK_ERR(pthread_mutex_lock(subtask_ptr->mutex), "pthread_mutex_lock");
-      (*subtask_ptr->counter)--;
-      CHECK_ERR(pthread_mutex_unlock(subtask_ptr->mutex), "pthread_mutex_unlock");
-      if (subtask_ptr != &subtask) {
-        free(subtask_ptr);
-      }
+      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+      (*subtask->counter)--;
+      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+      free(subtask);
+    } else if (err == 1){
+      continue;
+    } else {
+      fprintf(stderr, "[scheduler_nested] Got error %d from \n", err);
+      assert(0);
     }
   }
 
-  *ntask = scheduler->num_threads;
+  if (ntask != NULL) {
+    *ntask = (task->granularity > 0) ? scheduler->num_threads : nsubtasks;
+  }
   return 0;
 }
 
