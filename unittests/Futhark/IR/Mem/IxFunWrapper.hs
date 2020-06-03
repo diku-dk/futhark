@@ -8,11 +8,8 @@ module Futhark.IR.Mem.IxFunWrapper
   , reshape
   , slice
   , rebase
-  , repeat
   )
 where
-
-import Prelude hiding (repeat)
 
 import Futhark.Util.IntegralExp
 import Futhark.IR.Syntax (ShapeChange, Slice)
@@ -37,10 +34,6 @@ permute (l, a) x = (I.permute l x, IA.permute a x)
 rotate :: (Eq num, IntegralExp num) =>
           IxFun num -> Indices num -> IxFun num
 rotate (l, a) x = (I.rotate l x, IA.rotate a x)
-
-repeat :: (Eq num, IntegralExp num) =>
-          IxFun num -> [Shape num] -> Shape num -> IxFun num
-repeat (l, a) x y = (I.repeat l x y, IA.repeat a x y)
 
 reshape :: (Eq num, IntegralExp num) =>
            IxFun num -> ShapeChange num -> IxFun num
