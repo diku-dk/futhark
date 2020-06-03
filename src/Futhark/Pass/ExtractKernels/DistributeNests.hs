@@ -526,8 +526,8 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
       addStmToAcc stm acc
 
   where segmentedConcat nest =
-          isSegmentedOp nest [0] w mempty mempty [] (x:xs) $
-          \pat _ _ _ (x':xs') _ ->
+          isSegmentedOp nest [0] mempty mempty [] (x:xs) $
+          \pat _ _ _ (x':xs') ->
             let d' = d + length (snd nest) + 1
             in addStm $ Let pat aux $ BasicOp $ Concat d' x' xs' w
 
@@ -542,44 +542,25 @@ distributeSingleUnaryStm acc bnd f =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | res == map Var (patternNames $ stmPattern bnd),
-        (outer, inners) <- nest,
+        (outer, _) <- nest,
         [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
         boundInKernelNest nest `namesIntersection` freeIn bnd
-        == oneName (paramName arr_p) -> do
+        == oneName (paramName arr_p),
+        perfectlyMapped arr nest -> do
           addPostStms kernels
           let outerpat = loopNestingPattern $ fst nest
           localScope (typeEnvFromDistAcc acc') $ do
-            (arr', pre_stms) <- repeatMissing arr (outer:inners)
-            f_stms <- inScopeOf pre_stms $ f nest outerpat arr'
-            postStm $ pre_stms <> f_stms
+            postStm =<< f nest outerpat arr
             return acc'
     _ -> addStmToAcc bnd acc
-  where -- | For an imperfectly mapped array, repeat the missing
-        -- dimensions to make it look like it was in fact perfectly
-        -- mapped.
-        repeatMissing arr inners = do
-          arr_t <- lookupType arr
-          let shapes = determineRepeats arr arr_t inners
-          if all (==Shape []) shapes then return (arr, mempty)
-            else do
-            let (outer_shapes, inner_shape) = repeatShapes shapes arr_t
-                arr_t' = repeatDims outer_shapes inner_shape arr_t
-            arr' <- newVName $ baseString arr
-            return (arr', oneStm $ Let (Pattern [] [PatElem arr' arr_t']) (defAux ()) $
-                          BasicOp $ Repeat outer_shapes inner_shape arr)
 
-        determineRepeats arr arr_t nests
-          | (skipped, arr_nest:nests') <- break (hasInput arr) nests,
-            [(arr_p, _)] <- loopNestingParamsAndArrs arr_nest =
-              Shape (map loopNestingWidth skipped) :
-              determineRepeats (paramName arr_p) (rowType arr_t) nests'
+  where perfectlyMapped arr (outer, nest)
+          | [(p, arr')] <- loopNestingParamsAndArrs outer,
+            arr == arr' =
+              case nest of [] -> True
+                           x:xs -> perfectlyMapped (paramName p) (x, xs)
           | otherwise =
-              Shape (map loopNestingWidth nests) : replicate (arrayRank arr_t) (Shape [])
-
-        hasInput arr nest
-          | [(_, arr')] <- loopNestingParamsAndArrs nest, arr' == arr = True
-          | otherwise = False
-
+              False
 
 distribute :: (MonadFreshNames m, DistLore lore) => DistAcc lore -> DistNestT lore m (DistAcc lore)
 distribute acc =
@@ -838,8 +819,8 @@ segmentedScanomapKernel :: (MonadFreshNames m, DistLore lore) =>
                         -> DistNestT lore m (Maybe (Stms lore))
 segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
-  isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
-    \pat ispace inps nes' _ _ -> do
+  isSegmentedOp nest perm (freeIn lam) (freeIn map_lam) nes [] $
+    \pat ispace inps nes' _ -> do
     let scan_op = SegBinOp Noncommutative lam nes' mempty
     lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
     addStms =<< traverse renameStm =<<
@@ -854,8 +835,8 @@ regularSegmentedRedomapKernel :: (MonadFreshNames m, DistLore lore) =>
                               -> DistNestT lore m (Maybe (Stms lore))
 regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
-  isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
-    \pat ispace inps nes' _ _ -> do
+  isSegmentedOp nest perm (freeIn lam) (freeIn map_lam) nes [] $
+    \pat ispace inps nes' _ -> do
       let red_op = SegBinOp comm lam nes' mempty
       lvl <- mk_lvl (segment_size : map snd ispace) "segred" $ NoRecommendation SegNoVirt
       addStms =<< traverse renameStm =<<
@@ -864,16 +845,15 @@ regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
 isSegmentedOp :: (MonadFreshNames m, DistLore lore) =>
                  KernelNest
               -> [Int]
-              -> SubExp
               -> Names -> Names
               -> [SubExp] -> [VName]
               -> (PatternT Type
                   -> [(VName, SubExp)]
                   -> [KernelInput]
-                  -> [SubExp] -> [VName]  -> [VName]
+                  -> [SubExp] -> [VName]
                   -> BinderT lore m ())
               -> DistNestT lore m (Maybe (Stms lore))
-isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
+isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
   -- We must verify that array inputs to the operation are inputs to
   -- the outermost loop nesting or free in the loop nest.  Nothing
   -- free in the op may be bound by the nest.  Furthermore, the
@@ -900,8 +880,6 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
           Just inp
             | kernelInputIndices inp == map Var indices ->
                 return $ return $ kernelInputArray inp
-            | not (kernelInputArray inp `nameIn` bound_by_nest) ->
-                return $ replicateMissing ispace inp
           Nothing | not (arr `nameIn` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
@@ -910,7 +888,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
                       letExp (baseString arr ++ "_repd")
                       (BasicOp $ Replicate (Shape $ map snd ispace) $ Var arr)
           _ ->
-            fail "Input not free or outermost."
+            fail "Input not free, perfectly mapped, or outermost."
 
   nes' <- mapM prepareNe nes
 
@@ -918,42 +896,12 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
   scope <- lift askScope
 
   lift $ lift $ flip runBinderT_ scope $ do
-    -- We must make sure all inputs are of size
-    -- segment_size*nesting_size.
-    total_num_elements <-
-      letSubExp "total_num_elements" =<<
-      foldBinOp (Mul Int32 OverflowUndef) segment_size (map snd ispace)
-
-    let flatten arr = do
-          arr_shape <- arrayShape <$> lookupType arr
-          -- CHECKME: is the length the right thing here?  We want to
-          -- reproduce the parameter type.
-          let reshape = reshapeOuter [DimNew total_num_elements]
-                        (2+length (snd nest)) arr_shape
-          letExp (baseString arr ++ "_flat") $
-            BasicOp $ Reshape reshape arr
-
     nested_arrs <- sequence mk_arrs
-    arrs' <- mapM flatten nested_arrs
 
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    m pat ispace kernel_inps nes' nested_arrs arrs'
-
-  where replicateMissing ispace inp = do
-          t <- lookupType $ kernelInputArray inp
-          let inp_is = kernelInputIndices inp
-              shapes = determineRepeats ispace inp_is
-              (outer_shapes, inner_shape) = repeatShapes shapes t
-          letExp "repeated" $ BasicOp $
-            Repeat outer_shapes inner_shape $ kernelInputArray inp
-
-        determineRepeats ispace (i:is)
-          | (skipped_ispace, ispace') <- span ((/=i) . Var . fst) ispace =
-              Shape (map snd skipped_ispace) : determineRepeats (drop 1 ispace') is
-        determineRepeats ispace _ =
-          [Shape $ map snd ispace]
+    m pat ispace kernel_inps nes' nested_arrs
 
 permutationAndMissing :: PatternT Type -> [SubExp] -> Maybe ([Int], [PatElemT Type])
 permutationAndMissing pat res = do

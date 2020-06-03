@@ -10,7 +10,6 @@ module Futhark.IR.Mem.IxFun
        , reshape
        , slice
        , rebase
-       , repeat
        , shape
        , rank
        , linearWithOffset
@@ -23,7 +22,7 @@ module Futhark.IR.Mem.IxFun
        )
        where
 
-import Prelude hiding (mod, repeat)
+import Prelude hiding (mod)
 import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty(..))
@@ -67,9 +66,9 @@ data LMADDim num = LMADDim { ldStride :: num
 -- permutation can be performed directly on LMAD dimensions, but then it is
 -- difficult to extract the permutation back from an LMAD.
 --
--- LMAD algebra is closed under composition w.r.t. operators such as permute,
--- repeat, index and slice.  However, other operations, such as reshape, cannot
--- always be represented inside the LMAD algebra.
+-- LMAD algebra is closed under composition w.r.t. operators such as
+-- permute, index and slice.  However, other operations, such as
+-- reshape, cannot always be represented inside the LMAD algebra.
 --
 -- It follows that the general representation of an index function is a list of
 -- LMADS, in which each following LMAD in the list implicitly corresponds to an
@@ -285,27 +284,6 @@ permute (IxFun (lmad :| lmads) oshp cg) perm_new =
       perm = map (perm_cur !!) perm_new
   in IxFun (setLMADPermutation perm lmad :| lmads) oshp cg
 
--- | Repeat dimensions.
-repeat :: (Eq num, IntegralExp num) =>
-          IxFun num -> [Shape num] -> Shape num -> IxFun num
-repeat (IxFun (lmad@(LMAD off dims) :| lmads) oshp _) shps shp =
-  let perm = lmadPermutation lmad
-      -- inverse permute the shapes and update the permutation
-      lens = map (\s -> 1 + length s) shps
-      (shps', lens') = unzip $ permuteInv perm $ zip shps lens
-      scn = drop 1 $ scanl (+) 0 lens'
-      perm' = concatMap (\(p, l) -> map (\i-> (scn !! p) - l + i) [0..l-1])
-                        $ zip perm lens
-      tmp = length perm'
-      perm'' = perm' ++ [tmp..tmp-1+length shp]
-
-      dims' = concatMap (\(shp_k, srnp) ->
-                            map fakeDim shp_k ++ [srnp]
-                        ) $ zip shps' dims
-      lmad' = setLMADPermutation perm'' $ LMAD off (dims' ++ map fakeDim shp)
-  in IxFun (lmad' :| lmads) oshp False -- XXX: Can we be less conservative?
-  where fakeDim x = LMADDim 0 0 x 0 Unknown
-
 -- | Rotate an index function.
 rotate :: (Eq num, IntegralExp num) =>
           IxFun num -> Indices num -> IxFun num
@@ -513,7 +491,7 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) _ cg) newshape = do
                   (False, False, _) ->
                       ( (ip, (0, newDim shpdim)) : sup, rpt )
                       -- already checked that the reshaped
-                      -- dims cannot be repeats or rotates
+                      -- dims cannot be rotates
                   _ -> error "reshape: reached impossible case"
               ) ([], []) $ reverse $ zip3 iota_shape newshape perm'
 
@@ -586,8 +564,7 @@ rebaseNice :: (Eq num, IntegralExp num) =>
 rebaseNice
   new_base@(IxFun (lmad_base :| lmads_base) _ cg_base)
   ixfun@(IxFun lmads shp cg) = do
-  let (lmad_full :| lmads') = NE.reverse lmads
-      ((outer_shapes, inner_shape), lmad) = shaveoffRepeats lmad_full
+  let (lmad :| lmads') = NE.reverse lmads
       dims = lmadDims lmad
       perm = lmadPermutation lmad
       perm_base = lmadPermutation lmad_base
@@ -642,40 +619,9 @@ rebaseNice
             (LMAD (off_base + ldStride (last dims_base) * lmadOffset lmad)
              dims_base')
       new_base' = IxFun (lmad_base'' :| lmads_base) shp cg_base
-      IxFun lmads_base' _ _ = if all null outer_shapes && null inner_shape
-                              then new_base'
-                              else repeat new_base' outer_shapes inner_shape
+      IxFun lmads_base' _ _ = new_base'
       lmads'' = lmads' ++@ lmads_base'
   return $ IxFun lmads'' shp (cg && cg_base)
-  where shaveoffRepeats :: (Eq num, IntegralExp num) =>
-                           LMAD num -> (([Shape num], Shape num), LMAD num)
-        shaveoffRepeats lmad =
-        -- Given an input lmad, this function computes a repetition @r@ and a new lmad
-        -- @res@, such that @repeat r res@ is identical to the input lmad.
-          let perm = lmadPermutation lmad
-              dims = lmadDims lmad
-              -- compute the Repeat:
-              resacc= foldl (\acc (LMADDim s _ n _ _) ->
-                              case acc of
-                                rpt : acc0 ->
-                                    if s == 0 then (n : rpt) : acc0
-                                    else [] : (rpt : acc0)
-                                _ -> error "shaveoffRepeats: empty accumulator"
-                            ) [[]] $ reverse $ permuteFwd perm dims
-              last_shape = last resacc
-              shapes = take (length resacc - 1) resacc
-              -- update permutation and lmad:
-              howManyRepLT k =
-                foldl (\i (LMADDim s _ _ p _) ->
-                         if s == 0 && p < k then i + 1 else i
-                      ) 0 dims
-              dims' = foldl (\acc (LMADDim s r n p info) ->
-                               if s == 0 then acc
-                               else let p' = p - howManyRepLT p
-                                    in LMADDim s r n p' info : acc
-                             ) [] $ reverse dims
-              lmad' = LMAD (lmadOffset lmad) dims'
-          in ((shapes, last_shape), lmad')
 
 -- | Rebase an index function on top of a new base.
 rebase :: (Eq num, IntegralExp num) =>

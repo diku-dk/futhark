@@ -849,15 +849,6 @@ expReturns (BasicOp (SubExp (Var v))) =
 expReturns (BasicOp (Opaque (Var v))) =
   pure <$> varReturns v
 
-expReturns (BasicOp (Repeat outer_shapes inner_shape v)) = do
-  t <- repeatDims outer_shapes inner_shape <$> lookupType v
-  (et, _, mem, ixfun) <- arrayVarReturns v
-  let outer_shapes' = map (map (primExpFromSubExp int32) . shapeDims) outer_shapes
-      inner_shape' = map (primExpFromSubExp int32) $ shapeDims inner_shape
-  return [MemArray et (Shape $ map Free $ arrayDims t) NoUniqueness $
-          Just $ ReturnsInBlock mem $ existentialiseIxFun [] $
-          IxFun.repeat ixfun outer_shapes' inner_shape']
-
 expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   return [MemArray et (Shape $ map (Free . newDim) newshape) NoUniqueness $

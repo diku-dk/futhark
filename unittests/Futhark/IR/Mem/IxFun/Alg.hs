@@ -9,13 +9,12 @@ module Futhark.IR.Mem.IxFun.Alg
   , reshape
   , slice
   , rebase
-  , repeat
   , shape
   , index
   )
 where
 
-import Prelude hiding (repeat, mod)
+import Prelude hiding (mod)
 
 import Futhark.IR.Syntax
   (ShapeChange, DimChange(..), Slice, sliceDims, DimIndex(..), unitSlice)
@@ -33,7 +32,6 @@ data IxFun num = Direct (Shape num)
                | Rotate (IxFun num) (Indices num)
                | Index (IxFun num) (Slice num)
                | Reshape (IxFun num) (ShapeChange num)
-               | Repeat (IxFun num) [Shape num] (Shape num)
                | OffsetIndex (IxFun num) num
                | Rebase (IxFun num) (IxFun num)
                deriving (Eq, Show)
@@ -47,8 +45,6 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Reshape fun oldshape) =
     ppr fun <> text "->reshape" <>
     parens (commasep (map ppr oldshape))
-  ppr (Repeat fun outer_shapes inner_shape) =
-    ppr fun <> text "->repeat" <> parens (commasep (map ppr $ outer_shapes++ [inner_shape]))
   ppr (OffsetIndex fun i) =
     ppr fun <> text "->offset_index" <> parens (ppr i)
   ppr (Rebase new_base fun) =
@@ -66,9 +62,6 @@ permute = Permute
 
 rotate :: IxFun num -> Indices num -> IxFun num
 rotate = Rotate
-
-repeat :: IxFun num -> [Shape num] -> Shape num -> IxFun num
-repeat = Repeat
 
 slice :: IxFun num -> Slice num -> IxFun num
 slice = Index
@@ -91,9 +84,6 @@ shape (Index _ how) =
   sliceDims how
 shape (Reshape _ dims) =
   map newDim dims
-shape (Repeat ixfun outer_shapes inner_shape) =
-  concat (zipWith repeated outer_shapes (shape ixfun)) ++ inner_shape
-  where repeated outer_ds d = outer_ds ++ [d]
 shape (OffsetIndex ixfun _) =
   shape ixfun
 shape (Rebase _ ixfun) =
@@ -118,13 +108,6 @@ index (Index fun js) is =
 index (Reshape fun newshape) is =
   let new_indices = reshapeIndex (shape fun) (newDims newshape) is
   in index fun new_indices
-index (Repeat fun outer_shapes _) is =
-  -- Discard those indices that are just repeats.  It is intentional
-  -- that we cut off those indices that correspond to the innermost
-  -- repeated dimensions.
-  index fun is'
-  where flags dims = replicate (length dims) True ++ [False]
-        is' = map snd $ filter (not . fst) $ zip (concatMap flags outer_shapes) is
 index (OffsetIndex fun i) is =
   case shape fun of
     d : ds ->
@@ -144,8 +127,6 @@ index (Rebase new_base fun) is =
                  slice (rebase new_base ixfun) iis
                Reshape ixfun new_shape ->
                  reshape (rebase new_base ixfun) new_shape
-               Repeat ixfun outer_shapes inner_shape ->
-                 repeat (rebase new_base ixfun) outer_shapes inner_shape
                OffsetIndex ixfun s ->
                  offsetIndex (rebase new_base ixfun) s
                r@Rebase{} ->
