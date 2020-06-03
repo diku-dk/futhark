@@ -75,6 +75,10 @@ data Ext a = Ext Int
            | Free a
            deriving (Eq, Ord, Show)
 
+instance Functor Ext where
+  fmap _ (Ext i) = Ext i
+  fmap f (Free a) = Free $ f a
+
 -- | The size of this dimension.
 type ExtSize = Ext SubExp
 
