@@ -89,6 +89,7 @@ module Futhark.IR.Mem
        , matchBranchReturnType
        , matchPatternToExp
        , matchFunctionReturnType
+       , matchLoopResultMem
        , bodyReturnsFromPattern
        , checkMemInfo
 
@@ -107,7 +108,7 @@ import Control.Monad.Reader
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Foldable (traverse_, toList)
-import Data.List (find)
+import Data.List (elemIndex, find)
 import qualified Data.Set as S
 
 import Futhark.Analysis.Metrics
@@ -477,12 +478,17 @@ funReturnsToExpReturns = noUniquenessReturns . maybeReturns
 bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
-matchFunctionReturnType :: Mem lore =>
-                           [FunReturns] -> Result -> TC.TypeM lore ()
-matchFunctionReturnType rettype result = do
+matchRetTypeToResult :: Mem lore =>
+                        [FunReturns] -> Result -> TC.TypeM lore ()
+matchRetTypeToResult rettype result = do
   scope <- askScope
   result_ts <- runReaderT (mapM subExpMemInfo result) $ removeScopeAliases scope
   matchReturnType rettype result result_ts
+
+matchFunctionReturnType :: Mem lore =>
+                           [FunReturns] -> Result -> TC.TypeM lore ()
+matchFunctionReturnType rettype result = do
+  matchRetTypeToResult rettype result
   mapM_ checkResultSubExp result
   where checkResultSubExp Constant{} =
           return ()
@@ -499,6 +505,36 @@ matchFunctionReturnType rettype result = do
                   "Array " ++ pretty v ++
                   " returned by function, but has nontrivial index function " ++
                   pretty ixfun
+
+matchLoopResultMem :: Mem lore =>
+                      [FParam (Aliases lore)] -> [FParam (Aliases lore)]
+                   -> [SubExp] -> TC.TypeM lore ()
+matchLoopResultMem ctx val = matchRetTypeToResult rettype
+  where ctx_names = map paramName ctx
+
+        -- Invent a ReturnType so we can pretend that the loop body is
+        -- actually returning from a function.
+        rettype = map (toRet . paramDec) val
+
+        toExtV v
+          | Just i <- v `elemIndex` ctx_names = Ext i
+          | otherwise                         = Free v
+
+        toExtSE (Var v) = Var <$> toExtV v
+        toExtSE (Constant v) = Free $ Constant v
+
+        toRet (MemPrim t) =
+          MemPrim t
+        toRet (MemMem space) =
+          MemMem space
+        toRet (MemArray pt shape u (ArrayIn mem ixfun))
+          | Just i <- mem `elemIndex` ctx_names,
+            Param _ (MemMem space) : _ <- drop i ctx =
+              MemArray pt shape' u $ ReturnsNewBlock space i ixfun'
+          | otherwise =
+              MemArray pt shape' u $ ReturnsInBlock mem ixfun'
+          where shape' = fmap toExtSE shape
+                ixfun' = existentialiseIxFun ctx_names ixfun
 
 matchBranchReturnType :: Mem lore =>
                          [BodyReturns]

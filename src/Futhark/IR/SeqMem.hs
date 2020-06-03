@@ -63,6 +63,7 @@ instance TC.Checkable SeqMem where
   matchPattern = matchPatternToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
+  matchLoopResult = matchLoopResultMem
 
 instance BinderOps SeqMem where
   mkExpDecB _ _ = return ()
