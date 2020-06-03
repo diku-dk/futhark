@@ -353,7 +353,7 @@ instance Substitute MemBind where
 
 instance PP.Pretty MemBind where
   ppr (ArrayIn mem ixfun) =
-    PP.text "@" <> PP.ppr mem <> PP.text "->" <> PP.ppr ixfun
+    PP.text "@" <> PP.ppr mem <> PP.text "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemBind where
   freeIn' (ArrayIn mem ixfun) = freeIn' mem <> freeIn' ixfun
@@ -411,9 +411,9 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
 
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
-    PP.parens $ PP.text (pretty v) <> PP.text "->" <> PP.ppr ixfun
+    PP.parens $ PP.text (pretty v) <> PP.text "->" PP.</> PP.ppr ixfun
   ppr (ReturnsNewBlock space i ixfun) =
-    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" <> PP.ppr ixfun
+    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
@@ -602,13 +602,12 @@ matchReturnType rettype res ts = do
                               "but array returned in", pretty y]
 
       bad :: String -> TC.TypeM lore a
-      bad s = TC.bad $ TC.TypeError $
-              unlines [ "Return type"
-                      , "  " ++ prettyTuple rettype
-                      , "cannot match returns of results"
-                      , "  " ++ prettyTuple ts
-                      , s
-                      ]
+      bad s = TC.bad $ TC.TypeError $ PP.pretty $
+              "Return type" PP.</>
+              PP.indent 2 (ppTuple' rettype) PP.</>
+              "cannot match returns of results" PP.</>
+              PP.indent 2 (ppTuple' ts) PP.</>
+              PP.text s
 
   unless (length (S.unions $ map extsInMemInfo rettype)  == length ctx_res) $
     TC.bad $ TC.TypeError $ "Too many context parameters for the number of " ++
