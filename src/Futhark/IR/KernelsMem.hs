@@ -69,6 +69,7 @@ instance TC.Checkable KernelsMem where
   matchPattern = matchPatternToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
+  matchLoopResult = matchLoopResultMem
 
 instance BinderOps KernelsMem where
   mkExpDecB _ _ = return ()
