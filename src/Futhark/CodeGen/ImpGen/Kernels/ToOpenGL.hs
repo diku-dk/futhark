@@ -123,9 +123,9 @@ onShader shader = do
 
       (perm_params, block_dim_init) =
         (mempty,
-         [[C.citem|const int block_dim0 = 0;|],
-          [C.citem|const int block_dim1 = 1;|],
-          [C.citem|const int block_dim2 = 2;|]]
+         [[C.citem|const typename int32_t block_dim0 = 0;|],
+          [C.citem|const typename int32_t block_dim1 = 1;|],
+          [C.citem|const typename int32_t block_dim2 = 2;|]]
         )
 
       const_defs = mapMaybe constDef $ kernelUses shader
