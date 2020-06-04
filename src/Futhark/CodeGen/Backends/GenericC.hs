@@ -472,22 +472,6 @@ contextType = do
   name <- publicName "context"
   return [C.cty|struct $id:name|]
 
-typeToSharedMem :: C.Type -> C.Type
-typeToSharedMem [C.cty|bool|]              = [C.cty|typename shared_bool|]
-typeToSharedMem [C.cty|int|]               = [C.cty|typename shared_int|]
-typeToSharedMem [C.cty|float|]             = [C.cty|typename shared_float|]
-typeToSharedMem [C.cty|double|]            = [C.cty|typename shared_double|]
-typeToSharedMem [C.cty|typename int8_t|]   = [C.cty|typename shared_int|]
-typeToSharedMem [C.cty|typename int16_t|]  = [C.cty|typename shared_int|]
-typeToSharedMem [C.cty|typename int32_t|]  = [C.cty|typename shared_int|]
-typeToSharedMem [C.cty|typename int64_t|]  = [C.cty|typename shared_int64_t|]
-typeToSharedMem [C.cty|typename uint8_t|]  = [C.cty|typename shared_uint|]
-typeToSharedMem [C.cty|typename uint16_t|] = [C.cty|typename shared_uint|]
-typeToSharedMem [C.cty|typename uint32_t|] = [C.cty|typename shared_uint|]
-typeToSharedMem [C.cty|typename uint64_t|] = [C.cty|typename shared_uint64_t|]
--- Should never happen.
-typeToSharedMem t                          = t
-
 -- FIXME: `fatMemType` uses incompatible GLSL composite data type.
 memToCType :: BackendTarget -> Space -> CompilerM op s C.Type
 memToCType target space = do
