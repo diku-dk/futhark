@@ -484,6 +484,8 @@ rawMemCType :: BackendTarget -> Space -> CompilerM op s C.Type
 rawMemCType TargetShader DefaultSpace = return defaultMemBlockTypeGLSL
 rawMemCType _ DefaultSpace = return defaultMemBlockType
 rawMemCType _ (Space sid) = join $ asks envMemoryType <*> pure sid
+rawMemCType TargetShader (ScalarSpace [] t) =
+  return [C.cty|$ty:(primTypeToCType t)|]
 rawMemCType _ (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)[1]|]
 rawMemCType _ (ScalarSpace ds t) =
