@@ -9,10 +9,12 @@ import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
+import Data.IORef
 import Data.Maybe
 import Data.List (foldl', sortBy)
 import Data.Ord
 import qualified Data.Text as T
+import System.Console.ANSI (clearLine)
 import System.Console.GetOpt
 import System.Directory
 import System.Environment
@@ -23,7 +25,7 @@ import Text.Regex.TDFA
 
 import Futhark.Bench
 import Futhark.Test
-import Futhark.Util (pmapIO)
+import Futhark.Util (fancyTerminal, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 
@@ -150,23 +152,57 @@ runBenchmark opts (program, cases) = mapM forInputOutputs $ filter relevant case
 
         pad_to = foldl max 0 $ concatMap (map (length . runDescription) . iosTestRuns) cases
 
+runOptions :: (Int -> IO ()) -> BenchOptions -> RunOptions
+runOptions f opts =
+  RunOptions { runRunner = optRunner opts
+             , runRuns = optRuns opts
+             , runExtraOptions = optExtraOptions opts
+             , runTimeout = optTimeout opts
+             , runVerbose = optVerbose opts
+             , runResultAction = Just f
+             }
+
+progressBar :: Int -> Int -> Int -> String
+progressBar cur bound steps =
+  "[" ++
+  replicate (cur `div` step_size) (char 9) ++
+  [char (cur `mod` step_size `div` (step_size `div'` 10))] ++
+  replicate (bound `div` step_size - cur `div` step_size - 1) ' '
+  ++ "] " ++ show cur ++ "/" ++ show bound
+  where step_size = bound `div` steps
+        chars = " ▏▎▍▍▌▋▊▉█"
+        char :: Int -> Char
+        char i = fromMaybe '█' $ maybeNth i chars
+        div' x y = (x + y - 1) `div` y
+
+descString :: String -> Int -> String
+descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
+
+mkProgressPrompt :: Int -> Int -> String -> IO (Maybe Int -> IO ())
+mkProgressPrompt runs pad_to dataset_desc
+  | fancyTerminal = do
+      count <- newIORef (0::Int)
+      return $ \us -> do
+        putStr "\r" -- Go to start of line.
+        i <- readIORef count
+        let i' = if isJust us then i+1 else i
+        writeIORef count i'
+        putStr $ descString dataset_desc pad_to ++ progressBar i' runs 10
+        putStr " " -- Just to move the cursor away from the progress bar.
+        hFlush stdout
+
+  | otherwise = do
+      putStr $ descString dataset_desc pad_to
+      hFlush stdout
+      return $ const $ return ()
+
 reportResult :: [RunResult] -> IO ()
-reportResult [] =
-  print (0::Int)
 reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / fromIntegral (length runtimes)
       rsd = stddevp runtimes / mean runtimes :: Double
   putStrLn $ printf "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
     avg rsd ((minimum runtimes / avg - 1) * 100) ((maximum runtimes / avg - 1) * 100)
-
-runOptions :: BenchOptions -> RunOptions
-runOptions opts = RunOptions { runRunner = optRunner opts
-                             , runRuns = optRuns opts
-                             , runExtraOptions = optExtraOptions opts
-                             , runTimeout = optTimeout opts
-                             , runVerbose = optVerbose opts
-                             }
 
 runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
                  -> IO (Maybe DataResult)
@@ -176,19 +212,28 @@ runBenchmarkCase opts _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       return Nothing
 runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
+  prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc
+
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
-  putStr $ dataset_desc ++ ": " ++
-    replicate (pad_to - length dataset_desc) ' '
-  hFlush stdout
+  prompt Nothing
 
-  res <- benchmarkDataset (runOptions opts) program entry input_spec expected_spec
+  res <- benchmarkDataset (runOptions (prompt . Just) opts)
+         program entry input_spec expected_spec
          (testRunReferenceOutput program entry tr)
+
+  when fancyTerminal $ do
+    clearLine
+    putStr "\r"
+
   case res of
     Left err -> do
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
+      when fancyTerminal $
+        putStr $ descString dataset_desc pad_to
+
       reportResult runtimes
       return $ Just $ DataResult dataset_desc $ Right (runtimes, errout)
 

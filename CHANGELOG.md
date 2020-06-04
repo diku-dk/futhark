@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Better code generation for `reverse` (and the equivalent explicit
     slice).
 
+  * `futhark bench` now prints progress bars.
+
 ### Removed
 
   * The C# backend has been removed (#984).
