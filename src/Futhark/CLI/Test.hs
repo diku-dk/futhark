@@ -402,10 +402,11 @@ runTests config paths = do
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar . excludeCases config) included
   isTTY <- (&& not (configLineOutput config)) <$> hIsTerminalDevice stdout
+  isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
 
-  let report | isTTY = reportTable
+  let report | isTTY && not isDumb = reportTable
              | otherwise = reportText
-      clear | isTTY = clearFromCursorToScreenEnd
+      clear | isTTY && not isDumb = clearFromCursorToScreenEnd
             |otherwise = putStr "\n"
 
       numTestCases tc =
@@ -421,7 +422,7 @@ runTests config paths = do
           msg <- takeMVar reportmvar
           case msg of
             TestStarted test -> do
-              unless isTTY $
+              unless (isTTY && not isDumb) $
                 putStr $ "Started testing " <> testCaseProgram test <> " "
               getResults $ ts {testStatusRun = test : testStatusRun ts}
             TestDone test res -> do
@@ -435,14 +436,14 @@ runTests config paths = do
                   let ts'' = ts' { testStatusRunPass =
                                      testStatusRunPass ts' + numTestCases test
                                  }
-                  unless isTTY $
+                  unless (isTTY && not isDumb) $
                     putStr $ "Finished testing " <> testCaseProgram test <> " "
                   getResults $ ts'' { testStatusPass = testStatusPass ts + 1}
                 Failure s -> do
-                  when isTTY moveCursorToTableTop
+                  when (isTTY && not isDumb) moveCursorToTableTop
                   clear
                   T.putStr $ (T.pack (inRed $ testCaseProgram test) <> ":\n") <> T.unlines s
-                  when isTTY spaceTable
+                  when (isTTY && not isDumb) spaceTable
                   getResults $ ts' { testStatusFail = testStatusFail ts' + 1
                                    , testStatusRunPass = testStatusRunPass ts'
                                                          + numTestCases test - length s
@@ -451,7 +452,7 @@ runTests config paths = do
                                                          + length s
                                    }
 
-  when isTTY spaceTable
+  when (isTTY && not isDumb) spaceTable
 
   ts <- getResults TestStatus { testStatusRemain = included
                               , testStatusRun    = []
@@ -465,7 +466,7 @@ runTests config paths = do
                               }
 
   -- Removes "Now testing" output.
-  when isTTY $ cursorUpLine 1 >> clearLine
+  when (isTTY && not isDumb) $ cursorUpLine 1 >> clearLine
 
   let excluded_str | null excluded = ""
                    | otherwise = " (" ++ show (length excluded) ++ " program(s) excluded).\n"
