@@ -1222,6 +1222,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   long int elapsed_usec = t_end - t_start;
                   if (time_runs && runtime_file != NULL) {
                     fprintf(runtime_file, "%lld\n", (long long) elapsed_usec);
+                    fflush(runtime_file);
                   }
                   $stms:free_input
                 |]
