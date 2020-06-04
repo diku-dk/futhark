@@ -236,13 +236,6 @@ genOpenGlPrelude ts =
   , [C.cedecl|$esc:("#define float32 float")|]
   , [C.cedecl|$esc:("#define float64 double")|]
   , [C.cedecl|$esc:("#define boolean bool")|]
-  , [C.cedecl|$esc:("#define shared_int shared int")|]
-  , [C.cedecl|$esc:("#define shared_float shared float")|]
-  , [C.cedecl|$esc:("#define shared_double shared double")|]
-  , [C.cedecl|$esc:("#define shared_bool shared bool")|]
-  , [C.cedecl|$esc:("#define shared_uint shared uint")|]
-  , [C.cedecl|$esc:("#define shared_int64_t shared int64_t")|]
-  , [C.cedecl|$esc:("#define shared_uint64_t shared uint64_t")|]
   ] ++ glIntOps  ++ glFloat32Ops  ++ glFloat32Funs ++
     (if uses_float64 then glFloat64Ops ++ glFloat64Funs ++ glFloatConvOps
      else [])
