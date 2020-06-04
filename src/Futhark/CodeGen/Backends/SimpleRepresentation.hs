@@ -561,12 +561,14 @@ glIntOps = concatMap (`map` [minBound..maxBound]) ops
                              return res;
                   }|]
 
-        mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+        mkSExt from_t to_t =
+            macro name [C.cexp|$esc:(pretty to_ct)($esc:(pretty from_ct)(x))|]
           where name    = "sext_"++pretty from_t++"_"++pretty to_t
                 from_ct = intTypeToCType from_t
                 to_ct   = intTypeToCType to_t
 
-        mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+        mkZExt from_t to_t =
+            macro name [C.cexp|$esc:(pretty to_ct)($esc:(pretty from_ct)(x))|]
           where name    = "zext_"++pretty from_t++"_"++pretty to_t
                 from_ct = uintTypeToCType from_t
                 to_ct   = uintTypeToCType to_t
