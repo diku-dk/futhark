@@ -324,6 +324,7 @@ callShader opengl_code opengl_prelude shaders sizes
                  val = case sizeName n_sizes of
                    "group_size" -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
                    "num_groups" -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
+                   "tile_size"  -> [C.cexp|1|]
                    -- This will generate an error that is easy to debug.
                    _            -> [C.cexp|$id:n_sizes|]
 
@@ -402,4 +403,5 @@ sizeName :: String -> String
 sizeName n =
   if isInfixOf "group_size" n then "group_size"
   else if isInfixOf "num_groups" n then "num_groups"
+  else if isInfixOf "tile_size" n then "tile_size"
   else n
