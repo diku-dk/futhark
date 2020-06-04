@@ -186,11 +186,12 @@ onShader shader = do
         group_size = kernelGroupSize shader
 
         prepareLocalMemory (mem, size) = do
+          let stm = "shared int32_t " ++ pretty mem ++ "[];"
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
-                  Just [C.cparam|uint $id:param|],
+                  Just [C.cparam|typename uint32_t $id:param|],
                   -- FIXME: Make the array type generic
-                  [C.citem|typename shared_int $id:mem[];|])
+                  [C.citem|$escstm:(stm)|])
 
 useAsParam :: KernelUse -> Maybe (C.BlockItem, ParamUse)
 useAsParam (ScalarUse name bt) =
@@ -335,28 +336,28 @@ inShaderOperations body =
                                                 $esc:(pretty ty)($exp:val'));|]
 
         atomicOps s (AtomicAdd old arr ind val) =
-          doAtomic s old arr ind val "atomicAdd" [C.cty|int|]
+          doAtomic s old arr ind val "atomicAdd" [C.cty|typename int32_t|]
 
         atomicOps s (AtomicSMax old arr ind val) =
-          doAtomic s old arr ind val "atomicMax" [C.cty|int|]
+          doAtomic s old arr ind val "atomicMax" [C.cty|typename int32_t|]
 
         atomicOps s (AtomicSMin old arr ind val) =
-          doAtomic s old arr ind val "atomicMin" [C.cty|int|]
+          doAtomic s old arr ind val "atomicMin" [C.cty|typename int32_t|]
 
         atomicOps s (AtomicUMax old arr ind val) =
-          doAtomic s old arr ind val "atomicMax" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicMax" [C.cty|typename uint32_t|]
 
         atomicOps s (AtomicUMin old arr ind val) =
-          doAtomic s old arr ind val "atomicMin" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicMin" [C.cty|typename uint32_t|]
 
         atomicOps s (AtomicAnd old arr ind val) =
-          doAtomic s old arr ind val "atomicAnd" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicAnd" [C.cty|typename uint32_t|]
 
         atomicOps s (AtomicOr old arr ind val) =
-          doAtomic s old arr ind val "atomicOr" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicOr" [C.cty|typename uint32_t|]
 
         atomicOps s (AtomicXor old arr ind val) =
-          doAtomic s old arr ind val "atomicXor" [C.cty|uint|]
+          doAtomic s old arr ind val "atomicXor" [C.cty|typename uint32_t|]
 
         atomicOps s (AtomicCmpXchg old arr ind cmp val) = do
           ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
