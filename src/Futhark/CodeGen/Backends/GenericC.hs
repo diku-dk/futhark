@@ -648,12 +648,13 @@ declMem name space = do
 -- FIXME: This needs to be able to handle all types.
 declMemShader :: VName -> Space -> CompilerM op s ()
 declMemShader name space = do
-  ty' <- memToCType TargetShader space
-  let ty = typeToSharedMem ty'
+  ty <- memToCType TargetShader space
+  let dec = "shared " ++ pretty ty ++ " " ++ pretty name
+            ++ "[int32_t(gl_WorkGroupSize[0])];"
   case space of
-    ScalarSpace{} -> decl [C.cdecl|$ty:ty' $id:name[];|]
+    ScalarSpace{} -> decl [C.cdecl|$ty:ty $id:name[];|]
                      -- FIXME: Determine the array size without hardcoding.
-    _             -> decl [C.cdecl|$ty:ty $id:name[int32_t(gl_WorkGroupSize[0])];|]
+    _             -> item [C.citem|$escstm:(dec)|]
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
