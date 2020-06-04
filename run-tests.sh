@@ -15,7 +15,7 @@ export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt
 cabal install --install-method=copy --overwrite-policy=always --installdir=$HOME/.cabal/bin
 
 echo "# Integration tests"
-futhark test --no-terminal tests examples --no-tuning
+futhark test tests examples --no-tuning
 
 echo "# Library tests"
 make -C libtests/c

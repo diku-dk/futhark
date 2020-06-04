@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed a typer checker bug for tracking the aliases of closures
     (#995).
 
+  * Fixed handling of dumb terminals in futhark test (#1000).
+
 ## [0.15.8]
 
 ### Added
