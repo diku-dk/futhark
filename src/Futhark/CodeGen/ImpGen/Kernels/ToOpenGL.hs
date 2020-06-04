@@ -443,3 +443,68 @@ typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
 typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
 typesInExp (LeafExp (SizeOf t) _)  = S.singleton t
+
+suggestArrayLeastAccessSize :: VName -> Int -> GenericC.CompilerM op s ()
+suggestArrayLeastAccessSize vn size = do
+  s <- get
+  let n = case (M.!?) (GenericC.compArrayLeastAccessSize s) vn of
+            Just _  -> M.adjust (min size) vn $ GenericC.compArrayLeastAccessSize s
+            Nothing -> M.insert vn size $ GenericC.compArrayLeastAccessSize s
+  modify $ \s_n -> s_n { GenericC.compArrayLeastAccessSize = n }
+
+analyzeExpArrayAccessSizes :: Exp -> GenericC.CompilerM op s ()
+analyzeExpArrayAccessSizes (LeafExp (Index src _ restype _ _) _) =
+  let size = primByteSize restype
+  in suggestArrayLeastAccessSize src size
+analyzeExpArrayAccessSizes _ = return ()
+
+atomicOpArrayAndExp :: AtomicOp -> (VName, Exp, Maybe Exp)
+atomicOpArrayAndExp (AtomicAdd _ rname _ e)  = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicSMax _ rname _ e) = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicSMin _ rname _ e) = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicUMax _ rname _ e) = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicUMin _ rname _ e) = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicAnd _ rname _ e)  = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicOr _ rname _ e)   = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicXor _ rname _ e)  = (rname, e, Nothing)
+atomicOpArrayAndExp (AtomicCmpXchg _ rname _ le re) = (rname, le, Just re)
+atomicOpArrayAndExp (AtomicXchg _ rname _ e) = (rname, e, Nothing)
+
+analyzeCodeArrayAccessSizes :: ImpKernels.KernelCode
+                            -> GenericC.CompilerM op s ()
+analyzeCodeArrayAccessSizes (Op (Atomic op s)) = do
+  let (arr, e, me) = atomicOpArrayAndExp s
+  suggestArrayLeastAccessSize arr 4
+  analyzeExpArrayAccessSizes e
+  maybe (return ()) analyzeExpArrayAccessSizes me
+analyzeCodeArrayAccessSizes (lc :>>: rc) = do
+  analyzeCodeArrayAccessSizes lc
+  analyzeCodeArrayAccessSizes rc
+analyzeCodeArrayAccessSizes (Comment _ c) =
+  analyzeCodeArrayAccessSizes c
+analyzeCodeArrayAccessSizes (Copy _ (Count destoffset) _ _
+                             (Count srcoffset) _ (Count size)) = do
+  analyzeExpArrayAccessSizes destoffset
+  analyzeExpArrayAccessSizes srcoffset
+  analyzeExpArrayAccessSizes size
+analyzeCodeArrayAccessSizes (Write dest (Count idx) elemtype _ _ elemexp) = do
+  analyzeExpArrayAccessSizes elemexp
+  analyzeExpArrayAccessSizes idx
+  let size = primByteSize elemtype
+  suggestArrayLeastAccessSize dest size
+analyzeCodeArrayAccessSizes (DeclareArray name _ t _) =
+  let size = primByteSize t
+  in suggestArrayLeastAccessSize name size
+analyzeCodeArrayAccessSizes (SetScalar _ src) =
+  analyzeExpArrayAccessSizes src
+analyzeCodeArrayAccessSizes (If cond tbranch fbranch) = do
+  analyzeExpArrayAccessSizes cond
+  analyzeCodeArrayAccessSizes tbranch
+  analyzeCodeArrayAccessSizes fbranch
+analyzeCodeArrayAccessSizes (While cond body) = do
+  analyzeExpArrayAccessSizes cond
+  analyzeCodeArrayAccessSizes body
+analyzeCodeArrayAccessSizes (For _ _ bound body) = do
+  analyzeExpArrayAccessSizes bound
+  analyzeCodeArrayAccessSizes body
+analyzeCodeArrayAccessSizes _ = return ()

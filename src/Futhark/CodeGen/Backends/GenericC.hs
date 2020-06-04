@@ -32,7 +32,7 @@ module Futhark.CodeGen.Backends.GenericC
 
   -- * Monadic compiler interface
   , CompilerM
-  , CompilerState (compUserState)
+  , CompilerState (compUserState, compArrayLeastAccessSize)
   , getUserState
   , modifyUserState
   , contextContents
@@ -106,6 +106,7 @@ data CompilerState s = CompilerState {
   , compCtxFields     :: DL.DList (String, C.Type, Maybe C.Exp)
   , compProfileItems  :: DL.DList C.BlockItem
   , compDeclaredMem   :: [(VName,Space)]
+  , compArrayLeastAccessSize :: M.Map VName Int
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -121,6 +122,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
                                        , compCtxFields = mempty
                                        , compProfileItems = mempty
                                        , compDeclaredMem = mempty
+                                       , compArrayLeastAccessSize = M.empty
                                        }
 
 -- | In which part of the header file we put the declaration.  This is
