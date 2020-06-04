@@ -177,17 +177,20 @@ follow f fname = go 0
   where go i = do
           i' <- withFile fname ReadMode $ \h -> do
             hSeek h AbsoluteSeek i
-            res <- tryIOError $ hGetLine h
-            case res of
-              Left e | isEOFError e -> do
-                         threadDelay followDelayMicroseconds
-                         pure i
-                     | otherwise -> ioError e
-              Right l -> do f l
-                            hTell h
+            goH h i
           go i'
 
-        triesPerSecond = 60
+        goH h i = do
+          res <- tryIOError $ hGetLine h
+          case res of
+            Left e | isEOFError e -> do
+                       threadDelay followDelayMicroseconds
+                       pure i
+                   | otherwise -> ioError e
+            Right l -> do f l
+                          goH h =<< hTell h
+
+        triesPerSecond = 10
         followDelayMicroseconds = 1000000 `div` triesPerSecond
 
 -- | Run the benchmark program on the indicated dataset.
