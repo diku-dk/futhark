@@ -644,7 +644,9 @@ setMem dest src space = do
                                                $string:src_s) != 0) {
                        return 1;
                      }|]
-    else stm [C.cstm|$exp:dest = $exp:src;|]
+    else case space of
+           ScalarSpace{} -> stm [C.cstm|$exp:dest[0] = $exp:src[0];|]
+           _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do

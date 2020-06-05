@@ -811,7 +811,6 @@ existentialize _ = return Nothing
 closeEnough :: IxFun num -> IxFun num -> Bool
 closeEnough ixf1 ixf2 =
   (length (base ixf1) == length (base ixf2)) &&
-  (ixfunContig ixf1 == ixfunContig ixf2) &&
   (NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2)) &&
   all closeEnoughLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
   where
