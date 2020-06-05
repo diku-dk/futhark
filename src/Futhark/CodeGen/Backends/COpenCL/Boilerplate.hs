@@ -5,11 +5,11 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   , profilingEvent
   , copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev
 
-  , kernelRuntime
-  , kernelRuns
-
   , commonOptions
   , failureSwitch
+  , costCentreReport
+  , kernelRuntime
+  , kernelRuns
   ) where
 
 import Data.FileEmbed
@@ -41,7 +41,6 @@ failureSwitch failures =
         zipWith onFailure [(0::Int)..] failures
   in [C.cstm|switch (failure_idx) { $stms:failure_cases }|]
 
-
 copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
 copyDevToDev = "copy_dev_to_dev"
 copyDevToHost = "copy_dev_to_host"
@@ -62,11 +61,11 @@ generateBoilerplate :: String -> String -> [String] -> M.Map KernelName Safety -
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types sizes failures = do
+generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes failures = do
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls profiling_centres kernels opencl_code opencl_prelude
+        openClDecls cost_centres kernels opencl_code opencl_prelude
 
   mapM_ GC.earlyDecl top_decls
 
@@ -441,11 +440,11 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                }|])
 
   GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
-  mapM_ GC.profileReport $ openClReport profiling_centres
+  mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
 
 openClDecls :: [String] -> M.Map KernelName Safety -> String -> String
             -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls profiling_centres kernels opencl_program opencl_prelude =
+openClDecls cost_centres kernels opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where opencl_program_fragments =
           -- Some C compilers limit the size of literal strings, so
@@ -462,7 +461,7 @@ openClDecls profiling_centres kernels opencl_program opencl_prelude =
           [ [ [C.csdecl|typename int64_t $id:(kernelRuntime name);|]
             , [C.csdecl|int $id:(kernelRuns name);|]
             ]
-          | name <- profiling_centres ]
+          | name <- cost_centres ++ M.keys kernels ]
 
         ctx_inits =
           [ [C.cstm|ctx->total_runs = 0;|],
@@ -471,7 +470,7 @@ openClDecls profiling_centres kernels opencl_program opencl_prelude =
           [ [ [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
             , [C.cstm|ctx->$id:(kernelRuns name) = 0;|]
             ]
-          | name <- profiling_centres ]
+          | name <- cost_centres ++ M.keys kernels ]
 
         openCL_load = [
           [C.cedecl|
@@ -520,8 +519,8 @@ kernelRuntime = (++"_total_runtime")
 kernelRuns :: String -> String
 kernelRuns = (++"_runs")
 
-openClReport :: [String] -> [C.BlockItem]
-openClReport names = report_kernels ++ [report_total]
+costCentreReport :: [String] -> [C.BlockItem]
+costCentreReport names = report_kernels ++ [report_total]
   where longest_name = foldl max 0 $ map length names
         report_kernels = concatMap reportKernel names
         format_string name =
