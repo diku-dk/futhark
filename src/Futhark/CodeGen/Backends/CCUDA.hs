@@ -194,9 +194,8 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
       shared_offsets_sc = mkOffsets shared_sizes
       shared_args = zip shared_offsets shared_offsets_sc
       shared_tot = last shared_offsets_sc
-  mapM_ (\(arg,offset) ->
-           GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
-        ) shared_args
+  forM_ shared_args $ \(arg,offset) ->
+    GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
 
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
   (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
