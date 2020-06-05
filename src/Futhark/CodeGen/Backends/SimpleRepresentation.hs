@@ -1074,7 +1074,7 @@ glFloatConvOps :: [C.Definition]
       from <- [minBound..maxBound],
       to   <- [minBound..maxBound] ]
   )
-  where taggedF s Float32 = s
+  where taggedF s Float32 = s ++ "32"
         taggedF s Float64 = s ++ "64"
         convOp  s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
