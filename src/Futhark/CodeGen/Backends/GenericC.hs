@@ -645,7 +645,15 @@ setMem dest src space = do
                        return 1;
                      }|]
     else case space of
-           ScalarSpace{} -> stm [C.cstm|$exp:dest[0] = $exp:src[0];|]
+           ScalarSpace ds _ -> do
+             i' <- newVName "i"
+             let i = C.toIdent i'
+                 it = primTypeToCType $ IntType Int32
+                 ds' = map (`C.toExp` noLoc) ds
+                 bound = cproduct ds'
+             stm [C.cstm|for ($ty:it $id:i = 0; $id:i < $exp:bound; $id:i++) {
+                            $exp:dest[$id:i] = $exp:src[$id:i];
+                  }|]
            _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
