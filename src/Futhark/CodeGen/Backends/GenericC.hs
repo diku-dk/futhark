@@ -1996,10 +1996,6 @@ compileCode target (SetScalar dest src) = do
 compileCode _ (SetMem dest src space) =
   setMem dest src space
 
--- FIXME:
-compileCode TargetShader (Call dests fname args) =
-  undefined
-
 compileCode target (Call dests fname args) = do
   args' <- mapM compileArg args
   let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
