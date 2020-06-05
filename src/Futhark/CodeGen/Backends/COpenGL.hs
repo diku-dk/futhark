@@ -322,11 +322,12 @@ callShader opengl_code opengl_prelude shaders sizes
         shaderSizeInit k size = [C.cedecl|int $id:k = $exp:val;|]
            where n_sizes = nameToString k
                  val = case sizeName n_sizes of
-                   "group_size" -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
-                   "num_groups" -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
-                   "tile_size"  -> [C.cexp|1|]
+                   "group_size"   -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
+                   "num_groups"   -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
+                   "tile_size"    -> [C.cexp|1|]
+                   "local_memory" -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
                    -- This will generate an error that is easy to debug.
-                   _            -> [C.cexp|$id:n_sizes|]
+                   _              -> [C.cexp|$id:n_sizes|]
 
 launchShader :: C.ToExp a =>
                 String -> [a] -> [a] -> a -> GC.CompilerM op s ()
@@ -401,7 +402,8 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
 -- | Identifies the base of a given size variable.
 sizeName :: String -> String
 sizeName n =
-  if isInfixOf "group_size" n then "group_size"
-  else if isInfixOf "num_groups" n then "num_groups"
-  else if isInfixOf "tile_size" n then "tile_size"
+  if      isInfixOf "group_size"   n then "group_size"
+  else if isInfixOf "num_groups"   n then "num_groups"
+  else if isInfixOf "tile_size"    n then "tile_size"
+  else if isInfixOf "local_memory" n then "local_memory"
   else n
