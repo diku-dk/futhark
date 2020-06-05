@@ -277,6 +277,7 @@ inShaderOperations body =
   , GenericC.opsCopy        = copyInShader
   , GenericC.opsStaticArray = noStaticArrays
   , GenericC.opsFatMemory   = False
+  , GenericC.opsError       = errorInShader
   }
   where has_communication = hasCommunication body
 
@@ -393,6 +394,9 @@ inShaderOperations body =
 
         shaderReadScalar =
           GenericC.readScalarShader
+
+        errorInShader msg@(ErrorMsg parts) backtrace = do
+          return ()
 
 -- Checking requirements
 
