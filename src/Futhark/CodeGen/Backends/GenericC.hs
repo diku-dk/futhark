@@ -488,6 +488,8 @@ rawMemCType TargetShader (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)|]
 rawMemCType _ (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)[1]|]
+rawMemCType TargetShader (ScalarSpace ds t) =
+  return [C.cty|$ty:(primTypeToCType t)|]
 rawMemCType _ (ScalarSpace ds t) =
   return [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
   where ds' = map (`C.toExp` noLoc) ds
