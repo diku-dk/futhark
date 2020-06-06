@@ -448,17 +448,33 @@ typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
 typesInExp (LeafExp (SizeOf t) _)  = S.singleton t
 
--- -- | The size of a value of a given floating-point type in bits.
-floatbitSize :: Num a => FloatType -> a
-floatbitSize Float32 = 32
-floatbitSize Float64 = 64
+sizeToType :: Int -> String
+sizeToType v =
+  case v of
+    1  -> "bool"
+    8  -> "int64_t"
+    32 -> "float"
+    64 -> "double"
+    _  -> "int32_t"
 
--- -- | The size of a value of a given primitive type in eight-bit bytes for
---      `Int` types and in bits for `float` types. This ensures no overlapping
---      values during the analysis of sizes phase.
+-- | The size of a GLSL value of a given integer type in bits.
+intbitSize :: Num a => IntType -> a
+intbitSize Int8  = 4
+intbitSize Int16 = 4
+intbitSize Int32 = 4
+intbitSize Int64 = 8
+
+-- | The size of a value of a given floating-point type in bits.
+floatBitSize :: Num a => FloatType -> a
+floatBitSize Float32 = 32
+floatBitSize Float64 = 64
+
+-- | The size of a value of a given primitive type in eight-bit bytes for
+--   `Int` types and in bits for `float` types. This ensures no overlapping
+--   values during the analysis of sizes phase.
 primSize :: Num a => PrimType -> a
-primSize (IntType t)   = intByteSize t
-primSize (FloatType t) = floatbitSize t
+primSize (IntType t)   = intbitSize   t
+primSize (FloatType t) = floatBitSize t
 primSize Bool          = 1
 primSize Cert          = 1
 
