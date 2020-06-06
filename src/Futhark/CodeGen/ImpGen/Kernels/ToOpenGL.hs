@@ -455,17 +455,17 @@ primSize (FloatType t) = floatbitSize t
 primSize Bool          = 1
 primSize Cert          = 1
 
-atomicOpArrayAndExp :: AtomicOp -> (VName, Exp, Maybe Exp)
-atomicOpArrayAndExp (AtomicAdd _ rname _ e)  = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicSMax _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicSMin _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicUMax _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicUMin _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicAnd _ rname _ e)  = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicOr _ rname _ e)   = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicXor _ rname _ e)  = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicCmpXchg _ rname _ le re) = (rname, le, Just re)
-atomicOpArrayAndExp (AtomicXchg _ rname _ e) = (rname, e, Nothing)
+atomicOpExpr :: AtomicOp -> (VName, Exp, Maybe Exp)
+atomicOpExpr (AtomicAdd _ rname _ e)  = (rname, e, Nothing)
+atomicOpExpr (AtomicSMax _ rname _ e) = (rname, e, Nothing)
+atomicOpExpr (AtomicSMin _ rname _ e) = (rname, e, Nothing)
+atomicOpExpr (AtomicUMax _ rname _ e) = (rname, e, Nothing)
+atomicOpExpr (AtomicUMin _ rname _ e) = (rname, e, Nothing)
+atomicOpExpr (AtomicAnd _ rname _ e)  = (rname, e, Nothing)
+atomicOpExpr (AtomicOr _ rname _ e)   = (rname, e, Nothing)
+atomicOpExpr (AtomicXor _ rname _ e)  = (rname, e, Nothing)
+atomicOpExpr (AtomicCmpXchg _ rname _ le re) = (rname, le, Just re)
+atomicOpExpr (AtomicXchg _ rname _ e) = (rname, e, Nothing)
 
 analyzeExprSizes :: Exp -> Maybe (VName, Int)
 analyzeExprSizes (LeafExp (Index src _ restype _ _) _) =
@@ -476,10 +476,10 @@ analyzeExprSizes _ = Nothing
 -- FIXME: Not all arrays are considered.
 analyzeSizes :: ImpKernels.KernelCode -> [Maybe (VName, Int)]
 analyzeSizes (Op (Atomic op s)) = do
-  let (arr, e, me) = atomicOpArrayAndExp s
-  case me of
-    Nothing -> [analyzeExprSizes e]
-    _       -> analyzeExprSizes e : [analyzeExprSizes $ fromJust me]
+  let (arr, expr, mexpr) = atomicOpExpr s
+  case mexpr of
+    Nothing -> [analyzeExprSizes expr]
+    _       -> analyzeExprSizes expr : [analyzeExprSizes $ fromJust mexpr]
 analyzeSizes (lc :>>: rc) = do
   analyzeSizes lc ++ analyzeSizes rc
 analyzeSizes (Comment _ c) =
