@@ -198,7 +198,6 @@ onShader shader = do
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|typename uint32_t $id:param|],
-                  -- FIXME: Make the array type generic
                   [C.citem|$escstm:(stm)|])
 
 useAsParam :: [(VName, Int)]
@@ -210,7 +209,6 @@ useAsParam _ (ScalarUse name bt) =
         _    -> GenericC.primTypeToCType bt
   in Just ([C.citem|$ty:ctp $id:name;|], AScalarUse)
 useAsParam vsizes (MemoryUse name) =
--- FIXME: Make the array type generic
   let vsize = lookup name vsizes
       ty = case vsize of
         Nothing -> [C.cty|typename int32_t|]
