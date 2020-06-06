@@ -105,16 +105,17 @@ onHostOp _ (ImpKernels.GetSizeMax v size_class) =
 
 onShader :: Kernel -> OnShaderM OpenGL
 onShader shader = do
-  let (shader_body, cstate) =
+  let vname_sizes =
+        S.toList $ S.fromList $ catMaybes $ analyzeSizes $ kernelBody shader
+
+      (shader_body, cstate) =
         GenericC.runCompilerM mempty (inShaderOperations (kernelBody shader))
         blankNameSource
         newShaderState $
         GenericC.blockScope $ GenericC.compileCode GenericC.TargetShader
+                                                   Nothing
                                                  $ kernelBody shader
       s_state = GenericC.compUserState cstate
-
-      vname_sizes =
-        S.toList $ S.fromList $ catMaybes $ analyzeSizes $ kernelBody shader
 
       (use_params', uses') =
         unzip $ mapMaybe (useAsParam vname_sizes) $ kernelUses shader

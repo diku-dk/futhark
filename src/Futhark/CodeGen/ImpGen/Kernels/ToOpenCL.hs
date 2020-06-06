@@ -123,6 +123,7 @@ onKernel target kernel = do
         blankNameSource
         (newKernelState failures) $
         GenericC.blockScope $ GenericC.compileCode GenericC.TargetKernel
+                                                   Nothing
                                                  $ kernelBody kernel
       kstate = GenericC.compUserState cstate
 

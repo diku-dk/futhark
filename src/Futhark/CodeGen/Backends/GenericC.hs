@@ -1791,21 +1791,21 @@ compilePrimExp target f (FunExp h args _) = do
   args' <- mapM (compilePrimExp target f) args
   return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
-compileCode :: BackendTarget -> Code op -> CompilerM op s ()
+compileCode :: BackendTarget -> Maybe Int -> Code op -> CompilerM op s ()
 
-compileCode _ (Op op) =
+compileCode _ _ (Op op) =
   join $ asks envOpCompiler <*> pure op
 
-compileCode _ Skip = return ()
+compileCode _ _ Skip = return ()
 
-compileCode target (Comment s code) = do
-  items <- blockScope $ compileCode target code
+compileCode target _ (Comment s code) = do
+  items <- blockScope $ compileCode target Nothing code
   let comment = "// " ++ s
   stm [C.cstm|$comment:comment
               { $items:items }
              |]
 
-compileCode target (DebugPrint s (Just e)) = do
+compileCode target _ (DebugPrint s (Just e)) = do
   e' <- compileExp target e
   stm [C.cstm|if (ctx->debugging) {
           fprintf(stderr, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
@@ -1816,12 +1816,12 @@ compileCode target (DebugPrint s (Just e)) = do
                        _ -> ("d", [C.cty|int|])
         fmtstr = "%s: %" ++ fmt ++ "%c"
 
-compileCode _ (DebugPrint s Nothing) =
+compileCode _ _ (DebugPrint s Nothing) =
   stm [C.cstm|if (ctx->debugging) {
           fprintf(stderr, "%s\n", $exp:s);
        }|]
 
-compileCode target c
+compileCode target _ c
   | Just (name, vol, t, e, c') <- declareAndSet c = do
     let ct = primTypeToCType t
     e' <- compileExp target e
@@ -1830,41 +1830,42 @@ compileCode target c
         item [C.citem|$ty:ct $id:name = $exp:e';|]
       _            ->
         item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-    compileCode target c'
+    compileCode target Nothing c'
 
-compileCode target (c1 :>>: c2) = compileCode target c1 >> compileCode target c2
+compileCode target _ (c1 :>>: c2) =
+  compileCode target Nothing c1 >> compileCode target Nothing c2
 
-compileCode target (Assert e msg (loc, locs)) = do
+compileCode target _ (Assert e msg (loc, locs)) = do
   e' <- compileExp target e
   err <- collect $ join $
          asks (opsError . envOperations) <*> pure msg <*> pure stacktrace
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where stacktrace = prettyStacktrace 0 $ map locStr $ loc:locs
 
-compileCode _ (Allocate _ _ ScalarSpace{}) =
+compileCode _ _ (Allocate _ _ ScalarSpace{}) =
   -- Handled by the declaration of the memory block, which is
   -- translated to an actual array.
   return ()
 
-compileCode target (Allocate name (Count e) space) = do
+compileCode target _ (Allocate name (Count e) space) = do
   size <- compileExp target e
   allocMem name size space [C.cstm|return 1;|]
 
-compileCode _ (Free name space) =
+compileCode _ _ (Free name space) =
   unRefMem name space
 
-compileCode target (For i it bound body) = do
+compileCode target _ (For i it bound body) = do
   let i'  = C.toIdent i
       it' = primTypeToCType $ IntType it
   bound'  <- compileExp target bound
-  body'   <- blockScope $ compileCode target body
+  body'   <- blockScope $ compileCode target Nothing body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 
-compileCode target (While cond body) = do
+compileCode target _ (While cond body) = do
   cond' <- compileExp target cond
-  body' <- blockScope $ compileCode target body
+  body' <- blockScope $ compileCode target Nothing body
   case target of
     TargetShader ->
       stm [C.cstm|while (boolean($exp:cond')) {
@@ -1875,10 +1876,10 @@ compileCode target (While cond body) = do
                 $items:body'
               }|]
 
-compileCode target (If cond tbranch fbranch) = do
+compileCode target _ (If cond tbranch fbranch) = do
   cond'    <- compileExp target cond
-  tbranch' <- blockScope $ compileCode target tbranch
-  fbranch' <- blockScope $ compileCode target fbranch
+  tbranch' <- blockScope $ compileCode target Nothing tbranch
+  fbranch' <- blockScope $ compileCode target Nothing fbranch
   case target of
     TargetShader ->
       stm $ case (tbranch', fbranch') of
@@ -1898,8 +1899,9 @@ compileCode target (If cond tbranch fbranch) = do
         _ ->
           [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
-compileCode target (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset)
-               DefaultSpace (Count size)) = do
+compileCode target _
+            (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset)
+             DefaultSpace (Count size)) = do
   destoffset' <- compileExp target destoffset
   srcoffset'  <- compileExp target srcoffset
   size'       <- compileExp target size
@@ -1909,8 +1911,9 @@ compileCode target (Copy dest (Count destoffset) DefaultSpace src (Count srcoffs
                       $exp:src' + $exp:srcoffset',
                       $exp:size');|]
 
-compileCode target (Copy dest (Count destoffset) destspace src (Count srcoffset)
-               srcspace (Count size)) = do
+compileCode target _
+            (Copy dest (Count destoffset) destspace src (Count srcoffset)
+             srcspace (Count size)) = do
   copy <- asks envCopy
   join $ copy
     <$> rawMem dest <*> compileExp target destoffset <*> pure destspace
@@ -1918,10 +1921,12 @@ compileCode target (Copy dest (Count destoffset) destspace src (Count srcoffset)
     <*> compileExp target size
 
 -- FIXME:
-compileCode TargetShader (Write dest (Count idx) elemtype DefaultSpace vol elemexp) =
+compileCode TargetShader _ (Write dest (Count idx) elemtype
+                            DefaultSpace vol elemexp) =
   undefined
 
-compileCode target (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
+compileCode target _ (Write dest (Count idx) elemtype
+                      DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
            <$> compileExp target idx
@@ -1929,12 +1934,13 @@ compileCode target (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = 
   elemexp' <- compileExp target elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
-compileCode target (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
+compileCode target _ (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
   idx' <- compileExp target idx
   elemexp' <- compileExp target elemexp
   stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 
-compileCode target (Write dest (Count idx) elemtype (Space space) vol elemexp) =
+compileCode target _ (Write dest (Count idx) elemtype
+                      (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
     <*> compileExp target idx
@@ -1943,28 +1949,28 @@ compileCode target (Write dest (Count idx) elemtype (Space space) vol elemexp) =
     <*> pure vol
     <*> compileExp target elemexp
 
-compileCode TargetShader (DeclareMem name space) =
+compileCode TargetShader _ (DeclareMem name space) =
   declMemShader name space
 
-compileCode _ (DeclareMem name space) =
+compileCode _ _ (DeclareMem name space) =
   declMem name space
 
-compileCode TargetShader (DeclareScalar name vol t) = do
+compileCode TargetShader _ (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$ty:ct $id:name;|]
 
-compileCode _ (DeclareScalar name vol t) = do
+compileCode _ sizes (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 
-compileCode _ (DeclareArray name ScalarSpace{} _ _) =
+compileCode _ _ (DeclareArray name ScalarSpace{} _ _) =
   error $ "Cannot declare array " ++ pretty name ++ " in scalar space."
 
 -- FIXME:
-compileCode TargetShader (DeclareArray name DefaultSpace t vs) =
+compileCode TargetShader _ (DeclareArray name DefaultSpace t vs) =
   undefined
 
-compileCode target (DeclareArray name DefaultSpace t vs) = do
+compileCode target _ (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
   let ct = primTypeToCType t
   case vs of
@@ -1979,26 +1985,26 @@ compileCode target (DeclareArray name DefaultSpace t vs) = do
     Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]
 
-compileCode _ (DeclareArray name (Space space) t vs) =
+compileCode _ _ (DeclareArray name (Space space) t vs) =
   join $ asks envStaticArray <*>
   pure name <*> pure space <*> pure t <*> pure vs
 
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no
 -- effect on performance.
-compileCode target (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
+compileCode target _ (SetScalar dest (BinOpExp op (LeafExp (ScalarVar x) _) y))
   | dest == x, Just f <- assignmentOperator op = do
       y' <- compileExp target y
       stm [C.cstm|$exp:(f dest y');|]
 
-compileCode target (SetScalar dest src) = do
+compileCode target _ (SetScalar dest src) = do
   src' <- compileExp target src
   stm [C.cstm|$id:dest = $exp:src';|]
 
-compileCode _ (SetMem dest src space) =
+compileCode _ _ (SetMem dest src space) =
   setMem dest src space
 
-compileCode target (Call dests fname args) = do
+compileCode target _ (Call dests fname args) = do
   args' <- mapM compileArg args
   let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
       args'' | isBuiltInFunction fname = args'
@@ -2035,7 +2041,7 @@ compileFunBody :: BackendTarget
                -> CompilerM op s ()
 compileFunBody target output_ptrs outputs code = do
   mapM_ declareOutput outputs
-  compileCode target code
+  compileCode target Nothing code
   zipWithM_ setRetVal' output_ptrs outputs
   where declareOutput (MemParam name space) =
           declMem name space
