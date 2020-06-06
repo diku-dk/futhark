@@ -113,7 +113,7 @@ onShader shader = do
         blankNameSource
         newShaderState $
         GenericC.blockScope $ GenericC.compileCode GenericC.TargetShader
-                                                   Nothing
+                                                   (Just vname_sizes)
                                                  $ kernelBody shader
       s_state = GenericC.compUserState cstate
 
