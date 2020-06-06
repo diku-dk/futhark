@@ -441,20 +441,6 @@ typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
 typesInExp (LeafExp (SizeOf t) _)  = S.singleton t
 
-suggestArrayLeastAccessSize :: VName -> Int -> GenericC.CompilerM op s ()
-suggestArrayLeastAccessSize vn size = do
-  s <- get
-  let n = case (M.!?) (GenericC.compArrayLeastAccessSize s) vn of
-            Just _  -> M.adjust (min size) vn $ GenericC.compArrayLeastAccessSize s
-            Nothing -> M.insert vn size $ GenericC.compArrayLeastAccessSize s
-  modify $ \s_n -> s_n { GenericC.compArrayLeastAccessSize = n }
-
-analyzeExpArrayAccessSizes :: Exp -> GenericC.CompilerM op s ()
-analyzeExpArrayAccessSizes (LeafExp (Index src _ restype _ _) _) =
-  let size = primByteSize restype
-  in suggestArrayLeastAccessSize src size
-analyzeExpArrayAccessSizes _ = return ()
-
 atomicOpArrayAndExp :: AtomicOp -> (VName, Exp, Maybe Exp)
 atomicOpArrayAndExp (AtomicAdd _ rname _ e)  = (rname, e, Nothing)
 atomicOpArrayAndExp (AtomicSMax _ rname _ e) = (rname, e, Nothing)
@@ -467,41 +453,37 @@ atomicOpArrayAndExp (AtomicXor _ rname _ e)  = (rname, e, Nothing)
 atomicOpArrayAndExp (AtomicCmpXchg _ rname _ le re) = (rname, le, Just re)
 atomicOpArrayAndExp (AtomicXchg _ rname _ e) = (rname, e, Nothing)
 
-analyzeCodeArrayAccessSizes :: ImpKernels.KernelCode
-                            -> GenericC.CompilerM op s ()
-analyzeCodeArrayAccessSizes (Op (Atomic op s)) = do
+analyzeExprSizes :: Exp -> Maybe (VName, Int)
+analyzeExprSizes (LeafExp (Index src _ restype _ _) _) =
+  let size = primByteSize restype
+  in Just (src, size)
+analyzeExprSizes _ = Nothing
+
+-- FIXME: Not all arrays are considered.
+analyzeSizes :: ImpKernels.KernelCode -> [Maybe (VName, Int)]
+analyzeSizes (Op (Atomic op s)) = do
   let (arr, e, me) = atomicOpArrayAndExp s
-  suggestArrayLeastAccessSize arr 4
-  analyzeExpArrayAccessSizes e
-  maybe (return ()) analyzeExpArrayAccessSizes me
-analyzeCodeArrayAccessSizes (lc :>>: rc) = do
-  analyzeCodeArrayAccessSizes lc
-  analyzeCodeArrayAccessSizes rc
-analyzeCodeArrayAccessSizes (Comment _ c) =
-  analyzeCodeArrayAccessSizes c
-analyzeCodeArrayAccessSizes (Copy _ (Count destoffset) _ _
-                             (Count srcoffset) _ (Count size)) = do
-  analyzeExpArrayAccessSizes destoffset
-  analyzeExpArrayAccessSizes srcoffset
-  analyzeExpArrayAccessSizes size
-analyzeCodeArrayAccessSizes (Write dest (Count idx) elemtype _ _ elemexp) = do
-  analyzeExpArrayAccessSizes elemexp
-  analyzeExpArrayAccessSizes idx
+  case me of
+    Nothing -> [analyzeExprSizes e]
+    _       -> analyzeExprSizes e : [analyzeExprSizes $ fromJust me]
+analyzeSizes (lc :>>: rc) = do
+  analyzeSizes lc ++ analyzeSizes rc
+analyzeSizes (Comment _ c) =
+  analyzeSizes c
+analyzeSizes (Copy _ (Count destoffset) _ _ (Count srcoffset) _ (Count size)) = do
+  analyzeExprSizes destoffset : analyzeExprSizes srcoffset  : [analyzeExprSizes size]
+analyzeSizes (Write dest (Count idx) elemtype _ _ elemexp) = do
   let size = primByteSize elemtype
-  suggestArrayLeastAccessSize dest size
-analyzeCodeArrayAccessSizes (DeclareArray name _ t _) =
+  analyzeExprSizes elemexp : analyzeExprSizes idx : [Just (dest, size)]
+analyzeSizes (DeclareArray name _ t _) =
   let size = primByteSize t
-  in suggestArrayLeastAccessSize name size
-analyzeCodeArrayAccessSizes (SetScalar _ src) =
-  analyzeExpArrayAccessSizes src
-analyzeCodeArrayAccessSizes (If cond tbranch fbranch) = do
-  analyzeExpArrayAccessSizes cond
-  analyzeCodeArrayAccessSizes tbranch
-  analyzeCodeArrayAccessSizes fbranch
-analyzeCodeArrayAccessSizes (While cond body) = do
-  analyzeExpArrayAccessSizes cond
-  analyzeCodeArrayAccessSizes body
-analyzeCodeArrayAccessSizes (For _ _ bound body) = do
-  analyzeExpArrayAccessSizes bound
-  analyzeCodeArrayAccessSizes body
-analyzeCodeArrayAccessSizes _ = return ()
+  in [Just (name, size)]
+analyzeSizes (SetScalar _ src) =
+  [analyzeExprSizes src]
+analyzeSizes (If cond tbranch fbranch) = do
+  analyzeExprSizes cond : (analyzeSizes tbranch ++ analyzeSizes fbranch)
+analyzeSizes (While cond body) = do
+  analyzeExprSizes cond : analyzeSizes body
+analyzeSizes (For _ _ bound body) = do
+  analyzeExprSizes bound : analyzeSizes body
+analyzeSizes _ = [Nothing]
