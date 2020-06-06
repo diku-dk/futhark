@@ -472,6 +472,15 @@ contextType = do
   name <- publicName "context"
   return [C.cty|struct $id:name|]
 
+memGLSLtype :: Int -> C.Type
+memGLSLtype size =
+  case size of
+    1  -> [C.cty|bool|]
+    8  -> [C.cty|typename int64_t|]
+    32 -> [C.cty|float|]
+    64 -> [C.cty|double|]
+    _  -> [C.cty|typename int32_t|]
+
 -- FIXME: `fatMemType` uses incompatible GLSL composite data type.
 memToCType :: BackendTarget -> Maybe Int -> Space -> CompilerM op s C.Type
 memToCType target size space = do
@@ -482,8 +491,10 @@ memToCType target size space = do
 
 rawMemCType :: BackendTarget -> Maybe Int -> Space -> CompilerM op s C.Type
 rawMemCType TargetShader size DefaultSpace =
-  return defaultMemBlockTypeGLSL
+  return $ memGLSLtype $ fromJust size
 rawMemCType _ _ DefaultSpace = return defaultMemBlockType
+rawMemCType  TargetShader size (Space sid) =
+  return $ memGLSLtype $ fromJust size
 rawMemCType _ _ (Space sid) = join $ asks envMemoryType <*> pure sid
 rawMemCType TargetShader _ (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)|]
@@ -1799,8 +1810,8 @@ compileCode _ _ (Op op) =
 
 compileCode _ _ Skip = return ()
 
-compileCode target _ (Comment s code) = do
-  items <- blockScope $ compileCode target Nothing code
+compileCode target sizes (Comment s code) = do
+  items <- blockScope $ compileCode target sizes code
   let comment = "// " ++ s
   stm [C.cstm|$comment:comment
               { $items:items }
@@ -1822,7 +1833,7 @@ compileCode _ _ (DebugPrint s Nothing) =
           fprintf(stderr, "%s\n", $exp:s);
        }|]
 
-compileCode target _ c
+compileCode target sizes c
   | Just (name, vol, t, e, c') <- declareAndSet c = do
     let ct = primTypeToCType t
     e' <- compileExp target e
@@ -1831,10 +1842,10 @@ compileCode target _ c
         item [C.citem|$ty:ct $id:name = $exp:e';|]
       _            ->
         item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $exp:e';|]
-    compileCode target Nothing c'
+    compileCode target sizes c'
 
-compileCode target _ (c1 :>>: c2) =
-  compileCode target Nothing c1 >> compileCode target Nothing c2
+compileCode target sizes (c1 :>>: c2) =
+  compileCode target sizes c1 >> compileCode target sizes c2
 
 compileCode target _ (Assert e msg (loc, locs)) = do
   e' <- compileExp target e
@@ -1855,18 +1866,18 @@ compileCode target _ (Allocate name (Count e) space) = do
 compileCode _ _ (Free name space) =
   unRefMem name space
 
-compileCode target _ (For i it bound body) = do
+compileCode target sizes (For i it bound body) = do
   let i'  = C.toIdent i
       it' = primTypeToCType $ IntType it
   bound'  <- compileExp target bound
-  body'   <- blockScope $ compileCode target Nothing body
+  body'   <- blockScope $ compileCode target sizes body
   stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 
-compileCode target _ (While cond body) = do
+compileCode target sizes (While cond body) = do
   cond' <- compileExp target cond
-  body' <- blockScope $ compileCode target Nothing body
+  body' <- blockScope $ compileCode target sizes body
   case target of
     TargetShader ->
       stm [C.cstm|while (boolean($exp:cond')) {
@@ -1877,10 +1888,10 @@ compileCode target _ (While cond body) = do
                 $items:body'
               }|]
 
-compileCode target _ (If cond tbranch fbranch) = do
+compileCode target sizes (If cond tbranch fbranch) = do
   cond'    <- compileExp target cond
-  tbranch' <- blockScope $ compileCode target Nothing tbranch
-  fbranch' <- blockScope $ compileCode target Nothing fbranch
+  tbranch' <- blockScope $ compileCode target sizes tbranch
+  fbranch' <- blockScope $ compileCode target sizes fbranch
   case target of
     TargetShader ->
       stm $ case (tbranch', fbranch') of
