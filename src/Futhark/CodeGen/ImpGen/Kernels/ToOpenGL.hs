@@ -447,7 +447,7 @@ floatbitSize Float32 = 32
 floatbitSize Float64 = 64
 
 -- -- | The size of a value of a given primitive type in eight-bit bytes for
---      `Int` types and in bits for `float` types. This ensure no overlapping
+--      `Int` types and in bits for `float` types. This ensures no overlapping
 --      values during the analysis of sizes phase.
 primSize :: Num a => PrimType -> a
 primSize (IntType t)   = intByteSize t
@@ -469,7 +469,7 @@ atomicOpArrayAndExp (AtomicXchg _ rname _ e) = (rname, e, Nothing)
 
 analyzeExprSizes :: Exp -> Maybe (VName, Int)
 analyzeExprSizes (LeafExp (Index src _ restype _ _) _) =
-  let size = primByteSize restype
+  let size = primSize restype
   in Just (src, size)
 analyzeExprSizes _ = Nothing
 
@@ -487,10 +487,10 @@ analyzeSizes (Comment _ c) =
 analyzeSizes (Copy _ (Count destoffset) _ _ (Count srcoffset) _ (Count size)) = do
   analyzeExprSizes destoffset : analyzeExprSizes srcoffset  : [analyzeExprSizes size]
 analyzeSizes (Write dest (Count idx) elemtype _ _ elemexp) = do
-  let size = primByteSize elemtype
+  let size = primSize elemtype
   analyzeExprSizes elemexp : analyzeExprSizes idx : [Just (dest, size)]
 analyzeSizes (DeclareArray name _ t _) =
-  let size = primByteSize t
+  let size = primSize t
   in [Just (name, size)]
 analyzeSizes (SetScalar _ src) =
   [analyzeExprSizes src]
