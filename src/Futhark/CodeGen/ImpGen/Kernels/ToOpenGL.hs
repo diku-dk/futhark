@@ -191,7 +191,10 @@ onShader shader = do
 
         prepareLocalMemory vsizes (mem, size) = do
           let vsize = lookup mem vsizes
-          let stm = "shared int32_t " ++ pretty mem ++ "[];"
+          let stm = case vsize of
+                Nothing -> "shared int32_t " ++ pretty mem ++ "[];"
+                _       -> let (ty, _) = sizeToType $ fromJust vsize
+                           in "shared " ++ ty ++ " " ++ pretty mem ++ "[];"
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
                   Just [C.cparam|typename uint32_t $id:param|],
@@ -206,9 +209,14 @@ useAsParam _ (ScalarUse name bt) =
         Bool -> [C.cty|bool|]
         _    -> GenericC.primTypeToCType bt
   in Just ([C.citem|$ty:ctp $id:name;|], AScalarUse)
-useAsParam sizes (MemoryUse name) =
+useAsParam vsizes (MemoryUse name) =
 -- FIXME: Make the array type generic
-  Just ([C.citem|typename int32_t $id:name[];|], AMemoryUse)
+  let vsize = lookup name vsizes
+      ty = case vsize of
+        Nothing -> [C.cty|typename int32_t|]
+        _       -> let (_, ty') = sizeToType $ fromJust vsize
+                   in [C.cty|$ty:ty'|]
+  in Just ([C.citem|$ty:ty $id:name[];|], AMemoryUse)
 useAsParam _ ConstUse{} =
   Nothing
 
@@ -448,14 +456,14 @@ typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
 typesInExp (LeafExp (SizeOf t) _)  = S.singleton t
 
-sizeToType :: Int -> String
+sizeToType :: Int -> (String, C.Type)
 sizeToType v =
   case v of
-    1  -> "bool"
-    8  -> "int64_t"
-    32 -> "float"
-    64 -> "double"
-    _  -> "int32_t"
+    1  -> ("bool", [C.cty|bool|])
+    8  -> ("int64_t", [C.cty|typename int64_t|])
+    32 -> ("float", [C.cty|float|])
+    64 -> ("double", [C.cty|double|])
+    _  -> ("int32_t", [C.cty|typename int32_t|])
 
 -- | The size of a GLSL value of a given integer type in bits.
 intbitSize :: Num a => IntType -> a
