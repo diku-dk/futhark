@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark bench` now prints progress bars.
 
+  * The `cuda` backend now supports similar profiling as the `opencl`
+    option, although it is likely slightly less accurate in the
+    presence of concurrent operations.
+
 ### Removed
 
   * The C# backend has been removed (#984).

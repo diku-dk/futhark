@@ -9,7 +9,6 @@ module Futhark.CodeGen.Backends.COpenCL
 
 import Control.Monad hiding (mapM)
 import Data.List (intercalate)
-import qualified Data.Map as M
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -31,7 +30,6 @@ compileProg prog = do
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
-        ++ M.keys kernels
   GC.compileProg operations
     (generateBoilerplate opencl_code opencl_prelude
      cost_centres kernels types sizes failures)
@@ -98,7 +96,6 @@ cliOptions =
            , optionArgument = RequiredArgument "OPT"
            , optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
            }
-
   , Option { optionLongName = "profile"
            , optionShortName = Just 'P'
            , optionArgument = NoArgument
