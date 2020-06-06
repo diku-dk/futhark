@@ -82,21 +82,36 @@ static void free_list_insert(struct free_list *l, size_t size, fl_mem_t mem, con
   l->used++;
 }
 
-/* Find and remove a memory block of at least the desired size and
-   tag.  Returns 0 on success.  */
-static int free_list_find(struct free_list *l, const char *tag, size_t *size_out, fl_mem_t *mem_out) {
+/* Find and remove a memory block of the indicated tag, or if that
+   does not exist, another memory block with exactly the desired size.
+   Returns 0 on success. */
+static int free_list_find(struct free_list *l, const char *tag, size_t size,
+                          size_t *size_out, fl_mem_t *mem_out) {
+  int size_match = -1;
   int i;
   for (i = 0; i < l->capacity; i++) {
-    if (l->entries[i].valid && l->entries[i].tag == tag) {
-      l->entries[i].valid = 0;
-      *size_out = l->entries[i].size;
-      *mem_out = l->entries[i].mem;
-      l->used--;
-      return 0;
+    if (l->entries[i].valid) {
+      if (l->entries[i].tag == tag) {
+        break;
+      } else if (size == l->entries[i].size) {
+        size_match = i;
+      }
     }
   }
 
-  return 1;
+  if (i == l->capacity && size_match >= 0) {
+    i = size_match;
+  }
+
+  if (i != l->capacity) {
+    l->entries[i].valid = 0;
+    *size_out = l->entries[i].size;
+    *mem_out = l->entries[i].mem;
+    l->used--;
+    return 0;
+  } else {
+    return 1;
+  }
 }
 
 /* Remove the first block in the free list.  Returns 0 if a block was
