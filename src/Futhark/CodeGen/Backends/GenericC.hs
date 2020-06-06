@@ -473,24 +473,25 @@ contextType = do
   return [C.cty|struct $id:name|]
 
 -- FIXME: `fatMemType` uses incompatible GLSL composite data type.
-memToCType :: BackendTarget -> Space -> CompilerM op s C.Type
-memToCType target space = do
+memToCType :: BackendTarget -> Maybe Int -> Space -> CompilerM op s C.Type
+memToCType target size space = do
   refcount <- fatMemory space
   if refcount
      then return $ fatMemType space
-     else rawMemCType target space
+     else rawMemCType target size space
 
-rawMemCType :: BackendTarget -> Space -> CompilerM op s C.Type
-rawMemCType TargetShader DefaultSpace = return defaultMemBlockTypeGLSL
-rawMemCType _ DefaultSpace = return defaultMemBlockType
-rawMemCType _ (Space sid) = join $ asks envMemoryType <*> pure sid
-rawMemCType TargetShader (ScalarSpace [] t) =
+rawMemCType :: BackendTarget -> Maybe Int -> Space -> CompilerM op s C.Type
+rawMemCType TargetShader size DefaultSpace =
+  return defaultMemBlockTypeGLSL
+rawMemCType _ _ DefaultSpace = return defaultMemBlockType
+rawMemCType _ _ (Space sid) = join $ asks envMemoryType <*> pure sid
+rawMemCType TargetShader _ (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)|]
-rawMemCType _ (ScalarSpace [] t) =
+rawMemCType _ _ (ScalarSpace [] t) =
   return [C.cty|$ty:(primTypeToCType t)[1]|]
-rawMemCType TargetShader (ScalarSpace ds t) =
+rawMemCType TargetShader _ (ScalarSpace ds t) =
   return [C.cty|$ty:(primTypeToCType t)|]
-rawMemCType _ (ScalarSpace ds t) =
+rawMemCType _ _ (ScalarSpace ds t) =
   return [C.cty|$ty:(primTypeToCType t)[$exp:(cproduct ds')]|]
   where ds' = map (`C.toExp` noLoc) ds
 
@@ -522,7 +523,7 @@ rawMem' False e = [C.cexp|$exp:e|]
 
 defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem)
 defineMemorySpace space = do
-  rm <- rawMemCType TargetGeneric space
+  rm <- rawMemCType TargetGeneric Nothing space
   let structdef =
         [C.cedecl|struct $id:sname { int *references;
                                      $ty:rm mem;
@@ -628,15 +629,15 @@ defineMemorySpace space = do
 
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
-  ty <- memToCType TargetGeneric space
+  ty <- memToCType TargetGeneric Nothing space
   decl [C.cdecl|$ty:ty $id:name;|]
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
 -- FIXME: This needs to be able to handle all types.
-declMemShader :: VName -> Space -> CompilerM op s ()
-declMemShader name space = do
-  ty <- memToCType TargetShader space
+declMemShader :: VName -> Maybe Int -> Space -> CompilerM op s ()
+declMemShader name size space = do
+  ty <- memToCType TargetShader size space
   let dec = "shared " ++ pretty ty ++ " " ++ pretty name
             ++ "[int32_t(gl_WorkGroupSize[0])];"
   case space of
@@ -773,7 +774,7 @@ arrayLibraryFunctions space pt signed shape = do
   copy <- asks envCopy
 
   arr_raw_mem <- rawMem [C.cexp|arr->mem|]
-  memty       <- rawMemCType TargetGeneric space
+  memty       <- rawMemCType TargetGeneric Nothing space
 
   let prepare_new = do
         resetMem [C.cexp|arr->mem|] space
@@ -906,7 +907,7 @@ valueDescToCType (ArrayValue _ space pt signed shape) = do
   case exists of
     Just (cty, _) -> return cty
     Nothing -> do
-      memty <- memToCType TargetGeneric space
+      memty <- memToCType TargetGeneric Nothing space
       name  <- publicName $ arrayName pt signed rank
       let struct = [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
           stype  = [C.cty|struct $id:name|]
@@ -1604,7 +1605,7 @@ compileFun target (fname, Function _ outputs inputs body _ _) = do
           let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
         compileInput (MemParam name space) = do
-          ty <- memToCType TargetGeneric space
+          ty <- memToCType TargetGeneric Nothing space
           return [C.cparam|$ty:ty $id:name|]
 
         compileOutput (ScalarParam name bt) = do
@@ -1612,7 +1613,7 @@ compileFun target (fname, Function _ outputs inputs body _ _) = do
           p_name <- newVName $ "out_" ++ baseString name
           return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
         compileOutput (MemParam name space) = do
-          ty <- memToCType TargetGeneric space
+          ty <- memToCType TargetGeneric Nothing space
           p_name <- newVName $ baseString name ++ "_p"
           return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
@@ -1791,7 +1792,7 @@ compilePrimExp target f (FunExp h args _) = do
   args' <- mapM (compilePrimExp target f) args
   return [C.cexp|$id:(funName (nameFromString h))($args:args')|]
 
-compileCode :: BackendTarget -> Maybe Int -> Code op -> CompilerM op s ()
+compileCode :: BackendTarget -> Maybe [(VName, Int)] -> Code op -> CompilerM op s ()
 
 compileCode _ _ (Op op) =
   join $ asks envOpCompiler <*> pure op
@@ -1949,8 +1950,11 @@ compileCode target _ (Write dest (Count idx) elemtype
     <*> pure vol
     <*> compileExp target elemexp
 
-compileCode TargetShader _ (DeclareMem name space) =
-  declMemShader name space
+compileCode TargetShader sizes (DeclareMem name space) =
+  let size = lookup name $ fromJust sizes
+  in case size of
+    Nothing -> declMemShader name (Just 4) space
+    _       -> declMemShader name size space
 
 compileCode _ _ (DeclareMem name space) =
   declMem name space
@@ -1959,7 +1963,7 @@ compileCode TargetShader _ (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$ty:ct $id:name;|]
 
-compileCode _ sizes (DeclareScalar name vol t) = do
+compileCode _ _ (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]
 
