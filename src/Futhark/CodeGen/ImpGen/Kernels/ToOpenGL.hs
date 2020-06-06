@@ -113,13 +113,17 @@ onShader shader = do
                                                  $ kernelBody shader
       s_state = GenericC.compUserState cstate
 
-      (use_params', uses') = unzip $ mapMaybe useAsParam $ kernelUses shader
+      vname_sizes =
+        S.toList $ S.fromList $ catMaybes $ analyzeSizes $ kernelBody shader
+
+      (use_params', uses') =
+        unzip $ mapMaybe (useAsParam vname_sizes) $ kernelUses shader
 
       --FIXME: `local_memory_params` might be used as global arrays.
       (local_memory_args, _, local_memory_init) =
         unzip3 $
         flip evalState (blankNameSource :: VNameSource) $
-        mapM prepareLocalMemory $ shaderLocalMemory s_state
+        mapM (prepareLocalMemory vname_sizes) $ shaderLocalMemory s_state
 
       (perm_params, block_dim_init) =
         (mempty,
@@ -185,7 +189,8 @@ onShader shader = do
         num_groups = kernelNumGroups shader
         group_size = kernelGroupSize shader
 
-        prepareLocalMemory (mem, size) = do
+        prepareLocalMemory vsizes (mem, size) = do
+          let vsize = lookup mem vsizes
           let stm = "shared int32_t " ++ pretty mem ++ "[];"
           param <- newVName $ baseString mem ++ "_offset"
           return (Just $ SharedMemoryKArg size,
@@ -193,16 +198,18 @@ onShader shader = do
                   -- FIXME: Make the array type generic
                   [C.citem|$escstm:(stm)|])
 
-useAsParam :: KernelUse -> Maybe (C.BlockItem, ParamUse)
-useAsParam (ScalarUse name bt) =
+useAsParam :: [(VName, Int)]
+           -> KernelUse
+           -> Maybe (C.BlockItem, ParamUse)
+useAsParam _ (ScalarUse name bt) =
   let ctp = case bt of
         Bool -> [C.cty|bool|]
         _    -> GenericC.primTypeToCType bt
   in Just ([C.citem|$ty:ctp $id:name;|], AScalarUse)
-useAsParam (MemoryUse name) =
+useAsParam sizes (MemoryUse name) =
 -- FIXME: Make the array type generic
   Just ([C.citem|typename int32_t $id:name[];|], AMemoryUse)
-useAsParam ConstUse{} =
+useAsParam _ ConstUse{} =
   Nothing
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
