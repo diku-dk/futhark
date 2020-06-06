@@ -441,6 +441,20 @@ typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
 typesInExp (LeafExp (SizeOf t) _)  = S.singleton t
 
+-- -- | The size of a value of a given floating-point type in bits.
+floatbitSize :: Num a => FloatType -> a
+floatbitSize Float32 = 32
+floatbitSize Float64 = 64
+
+-- -- | The size of a value of a given primitive type in eight-bit bytes for
+--      `Int` types and in bits for `float` types. This ensure no overlapping
+--      values during the analysis of sizes phase.
+primSize :: Num a => PrimType -> a
+primSize (IntType t)   = intByteSize t
+primSize (FloatType t) = floatbitSize t
+primSize Bool          = 1
+primSize Cert          = 1
+
 atomicOpArrayAndExp :: AtomicOp -> (VName, Exp, Maybe Exp)
 atomicOpArrayAndExp (AtomicAdd _ rname _ e)  = (rname, e, Nothing)
 atomicOpArrayAndExp (AtomicSMax _ rname _ e) = (rname, e, Nothing)
