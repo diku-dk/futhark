@@ -326,8 +326,8 @@ callShader opengl_code opengl_prelude shaders sizes
                    "num_groups"   -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
                    "tile_size"    -> [C.cexp|1|]
                    "local_memory" -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
-                   -- This will generate an error that is easy to debug.
-                   _              -> [C.cexp|$id:n_sizes|]
+                   -- This will generate a compile error that is easy to debug.
+                   _              -> [C.cexp|256|]
 
 launchShader :: C.ToExp a =>
                 String -> [a] -> [a] -> a -> GC.CompilerM op s ()
