@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+-- | Facilities for converting a 'Kernels' program to 'KernelsMem'.
 module Futhark.Pass.ExplicitAllocations.Kernels
        ( explicitAllocations
        , explicitAllocationsInStms
@@ -11,9 +12,9 @@ where
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import qualified Futhark.Representation.Mem.IxFun as IxFun
-import Futhark.Representation.KernelsMem
-import Futhark.Representation.Kernels
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
+import Futhark.IR.Kernels
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
@@ -80,7 +81,7 @@ kernelExpHints (Op (Inner (SegOp (SegMap lvl@SegThread{} space ts body)))) =
 
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@SegThread{} space reds ts body)))) =
   (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint lvl space) (drop num_reds ts) map_res
-  where num_reds = segRedResults reds
+  where num_reds = segBinOpResults reds
         (red_res, map_res) = splitAt num_reds $ kernelBodyResult body
 
 kernelExpHints e =
@@ -161,9 +162,11 @@ inThreadExpHints e = do
         semiStatic _ Constant{} = True
         semiStatic consts (Var v) = v `S.member` consts
 
+-- | The pass from 'Kernels' to 'KernelsMem'.
 explicitAllocations :: Pass Kernels KernelsMem
 explicitAllocations = explicitAllocationsGeneric handleHostOp kernelExpHints
 
+-- | Convert some 'Kernels' stms to 'KernelsMem'.
 explicitAllocationsInStms :: (MonadFreshNames m, HasScope KernelsMem m) =>
                              Stms Kernels -> m (Stms KernelsMem)
 explicitAllocationsInStms = explicitAllocationsInStmsGeneric handleHostOp kernelExpHints

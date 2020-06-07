@@ -1,7 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
--- | Definition of a polymorphic (generic) pass that can work with programs of any
--- lore.
+{-# LANGUAGE Strict #-}
+-- | Definition of a polymorphic (generic) pass that can work with
+-- programs of any lore.
 module Futhark.Pass
        ( PassM
        , runPassM
@@ -23,7 +24,7 @@ import Data.Either
 import Prelude hiding (log)
 
 import Futhark.Error
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Util.Log
 import Futhark.MonadFreshNames
 
@@ -91,6 +92,11 @@ parPass f as = do
           let ((x', log), src') = runState (runPassM (f a)) src
           in (x', log, src')
 
+-- | Apply some operation to the top-level constants.  Then applies an
+-- operation to all the function function definitions, which are also
+-- given the transformed constants so they can be brought into scope.
+-- The function definition transformations are run in parallel (with
+-- 'parPass'), since they cannot affect each other.
 intraproceduralTransformationWithConsts :: (Stms fromlore -> PassM (Stms tolore))
                                         -> (Stms tolore -> FunDef fromlore -> PassM (FunDef tolore))
                                         -> Prog fromlore -> PassM (Prog tolore)
@@ -99,6 +105,8 @@ intraproceduralTransformationWithConsts ct ft (Prog consts funs) = do
   funs' <- parPass (ft consts') funs
   return $ Prog consts' funs'
 
+-- | Like 'intraproceduralTransformationWithConsts', but do not change
+-- the top-level constants, and simply pass along their 'Scope'.
 intraproceduralTransformation :: (Scope lore -> Stms lore -> PassM (Stms lore))
                               -> Prog lore
                               -> PassM (Prog lore)

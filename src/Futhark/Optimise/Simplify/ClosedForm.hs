@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Safe #-}
 -- | This module implements facilities for determining whether a
 -- reduction or fold can be expressed in a closed form (i.e. not as a
 -- SOAC).
@@ -18,7 +19,7 @@ import Data.Maybe
 import qualified Data.Map.Strict as M
 
 import Futhark.Construct
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplify.Rule
 
@@ -41,7 +42,7 @@ Motivation:
 
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
-foldClosedForm :: (Attributes lore, BinderOps lore) =>
+foldClosedForm :: (ASTLore lore, BinderOps lore) =>
                   VarLookup lore
                -> Pattern lore
                -> Lambda lore
@@ -58,17 +59,17 @@ foldClosedForm look pat lam accs arrs = do
                 (map paramName (lambdaParams lam))
                 (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
-  letBindNames_ [isEmpty] $
+  letBindNames [isEmpty] $
     BasicOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
-  letBind_ pat =<< (If (Var isEmpty)
+  letBind pat =<< (If (Var isEmpty)
                     <$> resultBodyM accs
                     <*> renameBody closedBody
-                    <*> pure (IfAttr [primBodyType t] IfNormal))
+                    <*> pure (IfDec [primBodyType t] IfNormal))
   where knownBnds = determineKnownBindings look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
-loopClosedForm :: (Attributes lore, BinderOps lore) =>
+loopClosedForm :: (ASTLore lore, BinderOps lore) =>
                   Pattern lore
                -> [(FParam lore,SubExp)]
                -> Names -> SubExp -> Body lore
@@ -80,13 +81,13 @@ loopClosedForm pat merge i bound body = do
   closedBody <- checkResults mergenames bound i knownBnds
                 (map identName mergeidents) body mergeexp
   isEmpty <- newVName "bound_is_zero"
-  letBindNames_ [isEmpty] $
+  letBindNames [isEmpty] $
     BasicOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
 
-  letBind_ pat =<< (If (Var isEmpty)
+  letBind pat =<< (If (Var isEmpty)
                     <$> resultBodyM mergeexp
                     <*> renameBody closedBody
-                    <*> pure (IfAttr [primBodyType t] IfNormal))
+                    <*> pure (IfDec [primBodyType t] IfNormal))
   where (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
         mergenames = map paramName mergepat
@@ -126,15 +127,15 @@ checkResults pat size untouchable knownBnds params body accs = do
 
           case bop of
               LogAnd ->
-                letBindNames_ [p] $ BasicOp $ BinOp LogAnd this el
+                letBindNames [p] $ BasicOp $ BinOp LogAnd this el
               Add t w | Just properly_typed_size <- properIntSize t -> do
                           size' <- properly_typed_size
-                          letBindNames_ [p] =<<
+                          letBindNames [p] =<<
                             eBinOp (Add t w) (eSubExp this)
                             (pure $ BasicOp $ BinOp (Mul t w) el size')
               FAdd t | Just properly_typed_size <- properFloatSize t -> do
                         size' <- properly_typed_size
-                        letBindNames_ [p] =<<
+                        letBindNames [p] =<<
                           eBinOp (FAdd t) (eSubExp this)
                           (pure $ BasicOp $ BinOp (FMul t) el size')
               _ -> cannotSimplify -- Um... sorry.

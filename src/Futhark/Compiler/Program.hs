@@ -15,7 +15,6 @@ module Futhark.Compiler.Program
        )
 where
 
-import Data.Loc
 import Control.Exception
 import Control.Monad
 import Control.Monad.Reader
@@ -130,7 +129,7 @@ readImportFile include = do
    where prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
          not_found =
-           "Error at " ++ E.locStr (srclocOf include) ++
+           "Error at " ++ E.locStr (E.srclocOf include) ++
            ": could not find import '" ++ includeToString include ++ "'."
 
 -- | Read Futhark files from some basis, and printing log messages if
@@ -190,4 +189,4 @@ prependRoots roots (E.Prog doc ds) =
   where mkImport fp =
           -- We do not use ImportDec here, because we do not want the
           -- type checker to issue a warning about a redundant import.
-          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) noLoc) noLoc
+          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo mempty) mempty) mempty

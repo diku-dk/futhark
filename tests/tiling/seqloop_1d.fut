@@ -5,4 +5,4 @@
 -- structure distributed { SegMap/DoLoop/DoLoop/SegMap 2 }
 
 let main (ns: []i32) (xs: [][]i32) (ys: []i32) =
-  map (\n -> map (\y -> loop y for i < n do i32.sum (map (+y) (unsafe xs[i]))) ys) ns
+  map (\n -> map (\y -> loop y for i < n do i32.sum (map (+y) (#[unsafe] xs[i]))) ys) ns

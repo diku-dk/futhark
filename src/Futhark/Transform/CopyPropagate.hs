@@ -12,7 +12,7 @@ where
 
 import Futhark.Pass
 import Futhark.MonadFreshNames
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Optimise.Simplify
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplify.Lore (Wise)

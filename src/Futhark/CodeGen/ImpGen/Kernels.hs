@@ -2,6 +2,10 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Compile a 'KernelsMem' program to imperative code with kernels.
+-- This is mostly (but not entirely) the same process no matter if we
+-- are targeting OpenCL or CUDA.  The important distinctions (the host
+-- level code) are introduced later.
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProgOpenCL
   , compileProgCUDA
@@ -16,7 +20,7 @@ import Prelude hiding (quot)
 
 import Futhark.Error
 import Futhark.MonadFreshNames
-import Futhark.Representation.KernelsMem
+import Futhark.IR.KernelsMem
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import Futhark.CodeGen.ImpGen hiding (compileProg)
@@ -27,7 +31,7 @@ import Futhark.CodeGen.ImpGen.Kernels.SegRed
 import Futhark.CodeGen.ImpGen.Kernels.SegScan
 import Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
 
@@ -124,8 +128,8 @@ segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
 segOpCompiler pat (SegRed lvl@SegThread{} space reds _ kbody) =
   compileSegRed pat lvl space reds kbody
-segOpCompiler pat (SegScan lvl@SegThread{} space scan_op nes _ kbody) =
-  compileSegScan pat lvl space scan_op nes kbody
+segOpCompiler pat (SegScan lvl@SegThread{} space scans _ kbody) =
+  compileSegScan pat lvl space scans kbody
 segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody) =
   compileSegHist pat num_groups group_size space ops kbody
 segOpCompiler pat segop =

@@ -32,15 +32,11 @@ futhark_hlint() {
     hlint -i "Use import/export shortcut" -i "Use const" -i "Use tuple-section" -i "Too strict maybe" "$@"
 }
 
-# Run hlint on changed files.
-for file in $(git diff-index --cached --name-only HEAD | egrep '\.l?hsc?$'); do
-    if [ -f $file ]; then
-        echo "Checking $file with hlint:"
-        if ! futhark_hlint "$file"; then
-            fail
-        fi
-    fi
-done
+# Run hlint on changed (but not deleted) Haskell source files.
+files=$(git diff-index --cached --name-status HEAD | awk '$1 != "D" && /\.l?hsc?$/ { print $2 }')
+if [ "$files" ]; then
+    futhark_hlint $files || exit 1
+fi
 
 if ! stack build; then
     fail

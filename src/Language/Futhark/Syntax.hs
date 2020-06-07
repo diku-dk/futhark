@@ -1,14 +1,13 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE Safe                       #-}
 {-# LANGUAGE StandaloneDeriving         #-}
-{-# LANGUAGE StrictData                 #-}
 {-# LANGUAGE Strict                     #-}
--- | This is an ever-changing syntax representation for Futhark.  Some
--- types, such as @Exp@, are parametrised by type and name
--- representation.  See the @https://futhark.readthedocs.org@ for a
--- language reference, or this module may be a little hard to
--- understand.
+-- | The Futhark source language AST definition.  Many types, such as
+-- 'ExpBase'@, are parametrised by type and name representation.  See
+-- the @https://futhark.readthedocs.org@ for a language reference, or
+-- this module may be a little hard to understand.
 module Language.Futhark.Syntax
   (
    module Language.Futhark.Core
@@ -48,6 +47,7 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
+  , AttrInfo(..)
   , BinOp (..)
   , IdentBase (..)
   , Inclusiveness(..)
@@ -96,7 +96,6 @@ import           Data.Bifoldable
 import           Data.Bifunctor
 import           Data.Bitraversable
 import           Data.Foldable
-import           Data.Loc
 import qualified Data.Map.Strict                  as M
 import           Data.Monoid                      hiding (Sum)
 import           Data.Ord
@@ -105,10 +104,11 @@ import           Data.Traversable
 import qualified Data.List.NonEmpty               as NE
 import           Prelude
 
-import           Futhark.Representation.Primitive (FloatType (..),
+import           Futhark.IR.Primitive (FloatType (..),
                                                    FloatValue (..),
                                                    IntType (..), IntValue (..))
 import           Futhark.Util.Pretty
+import           Futhark.Util.Loc
 import           Language.Futhark.Core
 
 -- | Convenience class for deriving 'Show' instances for the AST.
@@ -168,6 +168,8 @@ data PrimValue = SignedValue !IntValue
                | BoolValue !Bool
                deriving (Eq, Ord, Show)
 
+-- | A class for converting ordinary Haskell values to primitive
+-- Futhark values.
 class IsPrimValue v where
   primValue :: v -> PrimValue
 
@@ -201,6 +203,11 @@ instance IsPrimValue Double where
 instance IsPrimValue Bool where
   primValue = BoolValue
 
+-- | The payload of an attribute.
+newtype AttrInfo = AttrInfo Name
+  deriving (Eq, Ord, Show)
+
+-- | A type class for things that can be array dimensions.
 class Eq dim => ArrayDim dim where
   -- | @unifyDims x y@ combines @x@ and @y@ to contain their maximum
   -- common information, and fails if they conflict.
@@ -295,9 +302,11 @@ instance Eq TypeName where
 instance Ord TypeName where
   TypeName _ x `compare` TypeName _ y = x `compare` y
 
+-- | Convert a 'QualName' to a 'TypeName'.
 typeNameFromQualName :: QualName VName -> TypeName
 typeNameFromQualName (QualName qs x) = TypeName qs x
 
+-- | Convert a 'TypeName' to a 'QualName'.
 qualNameFromTypeName :: TypeName -> QualName VName
 qualNameFromTypeName (TypeName qs x) = QualName qs x
 
@@ -361,6 +370,7 @@ instance Bifunctor TypeBase where
 instance Bifoldable TypeBase where
   bifoldMap = bifoldMapDefault
 
+-- | An argument passed to a type constructor.
 data TypeArg dim = TypeArgDim dim SrcLoc
                  | TypeArgType (TypeBase dim ()) SrcLoc
              deriving (Eq, Ord, Show)
@@ -414,6 +424,7 @@ deriving instance Ord (DimExp VName)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
+-- These are used to construct 'TypeBase's in the type checker.
 data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TETuple [TypeExp vn] SrcLoc
                 | TERecord [(Name, TypeExp vn)] SrcLoc
@@ -438,6 +449,7 @@ instance Located (TypeExp vn) where
   locOf (TEArrow _ _ _ loc) = locOf loc
   locOf (TESum _ loc)      = locOf loc
 
+-- | A type argument expression passed to a type constructor.
 data TypeArgExp vn = TypeArgExpDim (DimExp vn) SrcLoc
                    | TypeArgExpType (TypeExp vn)
                 deriving (Show)
@@ -708,12 +720,6 @@ data ExpBase f vn =
 
             | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatternType) SrcLoc
 
-            | Unsafe (ExpBase f vn) SrcLoc
-            -- ^ Explore the Danger Zone and elide safety checks on
-            -- array operations and other assertions during execution
-            -- of this expression.  Make really sure the code is
-            -- correct.
-
             | Assert (ExpBase f vn) (ExpBase f vn) (f String) SrcLoc
             -- ^ Fail if the first expression does not return true,
             -- and return the value of the second expression if it
@@ -725,6 +731,10 @@ data ExpBase f vn =
             | Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn))
               (f PatternType, f [VName]) SrcLoc
             -- ^ A match expression.
+
+            | Attr AttrInfo (ExpBase f vn) SrcLoc
+            -- ^ An attribute applied to the following expression.
+
 deriving instance Showable f vn => Show (ExpBase f vn)
 deriving instance Eq (ExpBase NoInfo VName)
 deriving instance Ord (ExpBase NoInfo VName)
@@ -761,10 +771,10 @@ instance Located (ExpBase f vn) where
   locOf (ProjectSection _ _ loc)       = locOf loc
   locOf (IndexSection _ _ loc)         = locOf loc
   locOf (DoLoop _ _ _ _ _ _ loc)       = locOf loc
-  locOf (Unsafe _ loc)                 = locOf loc
   locOf (Assert _ _ _ loc)             = locOf loc
   locOf (Constr _ _ _ loc)             = locOf loc
   locOf (Match _ _ _ loc)              = locOf loc
+  locOf (Attr _ _ loc)                 = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
@@ -891,10 +901,12 @@ data Liftedness
     -- ^ May be instantiated with a functional type.
   deriving (Eq, Ord, Show)
 
-data TypeParamBase vn = TypeParamDim vn SrcLoc
-                        -- ^ A type parameter that must be a size.
-                      | TypeParamType Liftedness vn SrcLoc
-                        -- ^ A type parameter that must be a type.
+-- | A type parameter.
+data TypeParamBase vn
+  = TypeParamDim vn SrcLoc
+    -- ^ A type parameter that must be a size.
+  | TypeParamType Liftedness vn SrcLoc
+    -- ^ A type parameter that must be a type.
   deriving (Eq, Ord, Show)
 
 instance Functor TypeParamBase where
@@ -911,20 +923,24 @@ instance Located (TypeParamBase vn) where
   locOf (TypeParamDim _ loc)    = locOf loc
   locOf (TypeParamType _ _ loc) = locOf loc
 
+-- | The name of a type parameter.
 typeParamName :: TypeParamBase vn -> vn
 typeParamName (TypeParamDim v _)    = v
 typeParamName (TypeParamType _ v _) = v
 
-data SpecBase f vn = ValSpec  { specName       :: vn
-                              , specTypeParams :: [TypeParamBase vn]
-                              , specType       :: TypeDeclBase f vn
-                              , specDoc        :: Maybe DocComment
-                              , specLocation   :: SrcLoc
-                              }
-                   | TypeAbbrSpec (TypeBindBase f vn)
-                   | TypeSpec Liftedness vn [TypeParamBase vn] (Maybe DocComment) SrcLoc -- ^ Abstract type.
-                   | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
-                   | IncludeSpec (SigExpBase f vn) SrcLoc
+-- | A spec is a component of a module type.
+data SpecBase f vn
+  = ValSpec  { specName       :: vn
+             , specTypeParams :: [TypeParamBase vn]
+             , specType       :: TypeDeclBase f vn
+             , specDoc        :: Maybe DocComment
+             , specLocation   :: SrcLoc
+             }
+  | TypeAbbrSpec (TypeBindBase f vn)
+  | TypeSpec Liftedness vn [TypeParamBase vn] (Maybe DocComment) SrcLoc
+    -- ^ Abstract type.
+  | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
+  | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
@@ -934,11 +950,13 @@ instance Located (SpecBase f vn) where
   locOf (ModSpec _ _ _ loc)    = locOf loc
   locOf (IncludeSpec _ loc)    = locOf loc
 
-data SigExpBase f vn = SigVar (QualName vn) (f (M.Map VName VName)) SrcLoc
-                     | SigParens (SigExpBase f vn) SrcLoc
-                     | SigSpecs [SpecBase f vn] SrcLoc
-                     | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
-                     | SigArrow (Maybe vn) (SigExpBase f vn) (SigExpBase f vn) SrcLoc
+-- | A module type expression.
+data SigExpBase f vn
+  = SigVar (QualName vn) (f (M.Map VName VName)) SrcLoc
+  | SigParens (SigExpBase f vn) SrcLoc
+  | SigSpecs [SpecBase f vn] SrcLoc
+  | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
+  | SigArrow (Maybe vn) (SigExpBase f vn) (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SigExpBase f vn)
 
 -- | A type refinement.
@@ -955,6 +973,7 @@ instance Located (SigExpBase f vn) where
   locOf (SigWith _ _ loc)    = locOf loc
   locOf (SigArrow _ _ _ loc) = locOf loc
 
+-- | Module type binding.
 data SigBindBase f vn = SigBind { sigName :: vn
                                 , sigExp  :: SigExpBase f vn
                                 , sigDoc  :: Maybe DocComment
@@ -965,18 +984,20 @@ deriving instance Showable f vn => Show (SigBindBase f vn)
 instance Located (SigBindBase f vn) where
   locOf = locOf . sigLoc
 
-data ModExpBase f vn = ModVar (QualName vn) SrcLoc
-                     | ModParens (ModExpBase f vn) SrcLoc
-                     | ModImport FilePath (f FilePath) SrcLoc
-                       -- ^ The contents of another file as a module.
-                     | ModDecs [DecBase f vn] SrcLoc
-                     | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
-                       -- ^ Functor application.
-                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
-                     | ModLambda (ModParamBase f vn)
-                                 (Maybe (SigExpBase f vn, f (M.Map VName VName)))
-                                 (ModExpBase f vn)
-                                 SrcLoc
+-- | Module expression.
+data ModExpBase f vn
+  = ModVar (QualName vn) SrcLoc
+  | ModParens (ModExpBase f vn) SrcLoc
+  | ModImport FilePath (f FilePath) SrcLoc
+    -- ^ The contents of another file as a module.
+  | ModDecs [DecBase f vn] SrcLoc
+  | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
+    -- ^ Functor application.
+  | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
+  | ModLambda (ModParamBase f vn)
+    (Maybe (SigExpBase f vn, f (M.Map VName VName)))
+    (ModExpBase f vn)
+    SrcLoc
 deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
@@ -988,6 +1009,7 @@ instance Located (ModExpBase f vn) where
   locOf (ModAscript _ _ _ loc) = locOf loc
   locOf (ModLambda _ _ _ loc)  = locOf loc
 
+-- | A module binding.
 data ModBindBase f vn =
   ModBind { modName      :: vn
           , modParams    :: [ModParamBase f vn]
@@ -1001,6 +1023,7 @@ deriving instance Showable f vn => Show (ModBindBase f vn)
 instance Located (ModBindBase f vn) where
   locOf = locOf . modLocation
 
+-- | A module parameter.
 data ModParamBase f vn = ModParam { modParamName     :: vn
                                   , modParamType     :: SigExpBase f vn
                                   , modParamAbs      :: f [VName]

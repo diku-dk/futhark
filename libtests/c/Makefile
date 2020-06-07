@@ -16,9 +16,10 @@ endif
 
 .PHONY: test clean
 
-test: test_a test_b
+test: test_a test_b test_c
 	./test_a
 	./test_b
+	./test_c
 
 test_%: test_%.c %.o
 	gcc -o $@ $^ -Wall -Wextra -pedantic -std=c99 $(LDFLAGS)
@@ -26,3 +27,6 @@ test_%: test_%.c %.o
 %.o: %.fut
 	futhark $(FUTHARK_BACKEND) --library $^
 	gcc $*.c -c $(CFLAGS)
+
+clean:
+	rm -rf test_? ?.c ?.h ?.o

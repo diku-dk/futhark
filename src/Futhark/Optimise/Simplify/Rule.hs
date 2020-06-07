@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This module defines the concept of a simplification rule for
 -- bindings.  The intent is that you pass some context (such as symbol
 -- table) and a binding, and is given back a sequence of bindings that
@@ -58,7 +59,7 @@ import Control.Monad.Except
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Binder
 
 data RuleError = CannotSimplify
@@ -73,15 +74,14 @@ newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource (Except RuleError
 instance Fail.MonadFail (RuleM lore) where
   fail = throwError . OtherError
 
-instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
+instance (ASTLore lore, BinderOps lore) => MonadBinder (RuleM lore) where
   type Lore (RuleM lore) = lore
-  mkExpAttrM pat e = RuleM $ mkExpAttrM pat e
+  mkExpDecM pat e = RuleM $ mkExpDecM pat e
   mkBodyM bnds res = RuleM $ mkBodyM bnds res
   mkLetNamesM pat e = RuleM $ mkLetNamesM pat e
 
   addStms = RuleM . addStms
   collectStms (RuleM m) = RuleM $ collectStms m
-  certifying cs (RuleM m) = RuleM $ certifying cs m
 
 -- | Execute a 'RuleM' action.  If succesful, returns the result and a
 -- list of new bindings.  Even if the action fail, there may still be
@@ -108,17 +108,17 @@ data Rule lore = Simplify (RuleM lore ()) -- ^ Give it a shot.
                | Skip -- ^ Don't bother.
 
 type RuleGeneric lore a = a -> Stm lore -> Rule lore
-type RuleBasicOp lore a = (a -> Pattern lore -> StmAux (ExpAttr lore) ->
+type RuleBasicOp lore a = (a -> Pattern lore -> StmAux (ExpDec lore) ->
                            BasicOp -> Rule lore)
-type RuleIf lore a = a -> Pattern lore -> StmAux (ExpAttr lore) ->
+type RuleIf lore a = a -> Pattern lore -> StmAux (ExpDec lore) ->
                      (SubExp, BodyT lore, BodyT lore,
-                      IfAttr (BranchType lore)) ->
+                      IfDec (BranchType lore)) ->
                      Rule lore
-type RuleDoLoop lore a = a -> Pattern lore -> StmAux (ExpAttr lore) ->
+type RuleDoLoop lore a = a -> Pattern lore -> StmAux (ExpDec lore) ->
                          ([(FParam lore, SubExp)], [(FParam lore, SubExp)],
                           LoopForm lore, BodyT lore) ->
                          Rule lore
-type RuleOp lore a = a -> Pattern lore -> StmAux (ExpAttr lore) ->
+type RuleOp lore a = a -> Pattern lore -> StmAux (ExpDec lore) ->
                      Op lore -> Rule lore
 
 -- | A simplification rule takes some argument and a statement, and

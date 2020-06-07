@@ -1,6 +1,7 @@
 {
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -w #-}
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
@@ -14,7 +15,6 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Char (ord, toLower)
-import Data.Loc hiding (L)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Bits
@@ -25,8 +25,9 @@ import Data.Monoid
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
                               Name, nameFromText, nameToText)
-import Language.Futhark.Attributes (leadingOperator)
+import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
+import Futhark.Util.Loc hiding (L)
 
 }
 
@@ -84,6 +85,7 @@ tokens :-
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
   "'~"                     { tokenC APOSTROPHE_THEN_TILDE }
   "`"                      { tokenC BACKTICK }
+  "#["                     { tokenC HASH_LBRACKET }
   "..<"                    { tokenC TWO_DOTS_LT }
   "..>"                    { tokenC TWO_DOTS_GT }
   "..."                    { tokenC THREE_DOTS }
@@ -148,7 +150,6 @@ keyword s =
     "entry"        -> ENTRY
     "module"       -> MODULE
     "while"        -> WHILE
-    "unsafe"       -> UNSAFE
     "assert"       -> ASSERT
     "match"        -> MATCH
     "case"         -> CASE
@@ -328,6 +329,7 @@ data Token = ID Name
            | APOSTROPHE_THEN_HAT
            | APOSTROPHE_THEN_TILDE
            | BACKTICK
+           | HASH_LBRACKET
            | TWO_DOTS
            | TWO_DOTS_LT
            | TWO_DOTS_GT
@@ -360,7 +362,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | UNSAFE
            | ASSERT
            | TRUE
            | FALSE
@@ -391,6 +392,8 @@ runAlex' start_pos input__ (Alex f) =
                     , alex_scd = 0}) of Left msg -> Left msg
                                         Right ( _, a ) -> Right a
 
+-- | Given a starting position, produce tokens from the given text (or
+-- a lexer error).  Returns the final position.
 scanTokensText :: Pos -> T.Text -> Either String ([L Token], Pos)
 scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
 

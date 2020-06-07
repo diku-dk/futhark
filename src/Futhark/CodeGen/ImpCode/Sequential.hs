@@ -11,7 +11,6 @@ module Futhark.CodeGen.ImpCode.Sequential
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.Representation.AST.Attributes.Names
 
 import Futhark.Util.Pretty
 

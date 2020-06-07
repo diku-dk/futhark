@@ -1,6 +1,5 @@
 -- Rounding floats to whole numbers.
 -- ==
--- tags { no_csharp }
 -- input { 1.0000000000000002f64 } output { 2f64 }
 -- input { -0.9999999999999999f64 } output { 0f64 }
 -- input { -0.5000000000000001f64 } output { -0f64 }

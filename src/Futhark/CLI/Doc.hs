@@ -2,6 +2,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+-- | @futhark doc@
 module Futhark.CLI.Doc (main) where
 
 import Control.Monad.State
@@ -23,6 +24,7 @@ import Language.Futhark.Syntax (progDoc, DocComment(..))
 import Futhark.Util.Options
 import Futhark.Util (directoryContents, trim)
 
+-- | Run @futhark doc@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir programs..." f
   where f [dir] config = Just $ do

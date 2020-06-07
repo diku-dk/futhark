@@ -10,7 +10,7 @@ let brownian_bridge [num_dates] (gauss: [num_dates]f64): [num_dates]f64 =
 
   let bbrow = loop (bbrow)
     for i < num_dates-1 do
-    unsafe
+    #[unsafe]
     let bbrow[i] = bbrow[i+1]*1.5 + gauss[i+1]
     in  bbrow
 

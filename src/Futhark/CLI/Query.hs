@@ -1,13 +1,15 @@
+-- | @futhark query@
 module Futhark.CLI.Query (main) where
 
 import Text.Read (readMaybe)
 
-import Data.Loc
 import Futhark.Compiler
 import Futhark.Util.Options
+import Futhark.Util.Loc
 import Language.Futhark.Query
 import Language.Futhark.Syntax
 
+-- | Run @futhark query@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "program line:col" $ \args () ->
   case args of

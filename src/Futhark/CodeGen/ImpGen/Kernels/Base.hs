@@ -44,8 +44,8 @@ import Prelude hiding (quot, rem)
 import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Representation.KernelsMem
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
@@ -284,7 +284,7 @@ compileGroupOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
-compileGroupOp pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
+compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   compileGroupSpace lvl space
   let (ltids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
@@ -300,27 +300,30 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scan_op _ _ body))) = do
 
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
-  groupScan (Just crossesSegment) (product dims') (product dims') scan_op $
-    patternNames pat
+
+  forM_ scans $ \scan -> do
+    let scan_op = segBinOpLambda scan
+    groupScan (Just crossesSegment) (product dims') (product dims') scan_op $
+      patternNames pat
 
 compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   compileGroupSpace lvl space
 
   let (ltids, dims) = unzip $ unSegSpace space
       (red_pes, map_pes) =
-        splitAt (segRedResults ops) $ patternElements pat
+        splitAt (segBinOpResults ops) $ patternElements pat
 
   dims' <- mapM toExp dims
 
   let mkTempArr t =
         sAllocArray "red_arr" (elemType t) (Shape dims <> arrayShape t) $ Space "local"
-  tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segRedLambda) ops
-  let tmps_for_ops = chunks (map (length . segRedNeutral) ops) tmp_arrs
+  tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
+  let tmps_for_ops = chunks (map (length . segBinOpNeutral) ops) tmp_arrs
 
   whenActive lvl space $
     compileStms mempty (kernelBodyStms body) $ do
     let (red_res, map_res) =
-          splitAt (segRedResults ops) $ kernelBodyResult body
+          splitAt (segBinOpResults ops) $ kernelBodyResult body
     forM_ (zip tmp_arrs red_res) $ \(dest, res) ->
       copyDWIMFix dest (map (`Imp.var` int32) ltids) (kernelResultSubExp res) []
     zipWithM_ (compileThreadResult space) map_pes map_res
@@ -332,7 +335,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
     -- handle directly with a group-level reduction.
     [dim'] -> do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
-        groupReduce dim' (segRedLambda op) tmps
+        groupReduce dim' (segBinOpLambda op) tmps
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -362,7 +365,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
         tmps_flat <- mapM flatten tmps
         groupScan (Just crossesSegment) (product dims') (product dims')
-          (segRedLambda op) tmps_flat
+          (segBinOpLambda op) tmps_flat
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -457,13 +460,12 @@ data AtomicUpdate lore r
   | AtomicLocking (Locking -> DoAtomicUpdate lore r)
     -- ^ Requires explicit locking.
 
--- | Is there an atomic 'BinOp' corresponding to this 'BinOp'?
+-- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
   BinOp ->
   Maybe (VName -> VName -> Count Imp.Elements Imp.Exp -> Imp.Exp -> Imp.AtomicOp)
 
--- | 'atomicUpdate', but where it is explicitly visible whether a
--- locking strategy is necessary.
+-- | Do an atomic update corresponding to a binary operator lambda.
 atomicUpdateLocking :: AtomicBinOp -> Lambda KernelsMem
                     -> AtomicUpdate KernelsMem KernelEnv
 
@@ -618,7 +620,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
       (run_loop <-- 0)
 
 -- | Horizontally fission a lambda that models a binary operator.
-splitOp :: Attributes lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
+splitOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
 splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where n = length $ lambdaReturnType lam
         splitStm (Var res) = do
@@ -1462,12 +1464,15 @@ compileThreadResult _ pe (ConcatReturns (SplitStrided stride) _ _ what) = do
 compileThreadResult _ pe (WriteReturns rws _arr dests) = do
   constants <- kernelConstants <$> askEnv
   rws' <- mapM toExp rws
-  forM_ dests $ \(is, e) -> do
-    is' <- mapM toExp is
-    let condInBounds i rw = 0 .<=. i .&&. i .<. rw
+  forM_ dests $ \(slice, e) -> do
+    slice' <- mapM (traverse toExp) slice
+    let condInBounds (DimFix i) rw =
+          0 .<=. i .&&. i .<. rw
+        condInBounds (DimSlice i n s) rw =
+          0 .<=. i .&&. i+n*s .<. rw
         write = foldl (.&&.) (kernelThreadActive constants) $
-                zipWith condInBounds is' rws'
-    sWhen write $ copyDWIMFix (patElemName pe) (map (toExp' int32) is) e []
+                zipWith condInBounds slice' rws'
+    sWhen write $ copyDWIM (patElemName pe) slice' e []
 
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."

@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
@@ -25,7 +26,7 @@ import qualified Data.Set as S
 import Data.Maybe
 
 import qualified Language.Futhark as E
-import Futhark.Representation.SOACS as I
+import Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness

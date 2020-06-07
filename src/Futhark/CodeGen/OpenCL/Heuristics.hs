@@ -1,3 +1,14 @@
+-- | Some OpenCL platforms have a SIMD/warp/wavefront-based execution
+-- model that execute groups of threads in lockstep, permitting us to
+-- perform cross-thread synchronisation within each such group without
+-- the use of barriers.  Unfortunately, there seems to be no reliable
+-- way to query these sizes at runtime.  Instead, we use builtin
+-- tables to figure out which size we should use for a specific
+-- platform and device.  If nothing matches here, the wave size should
+-- be set to one.
+--
+-- We also use this to select reasonable default group sizes and group
+-- counts.
 module Futhark.CodeGen.OpenCL.Heuristics
        ( SizeHeuristic (..)
        , DeviceType (..)
@@ -6,18 +17,6 @@ module Futhark.CodeGen.OpenCL.Heuristics
        , sizeHeuristicsTable
        )
        where
-
--- Some OpenCL platforms have a SIMD/warp/wavefront-based execution
--- model that execute groups of threads in lockstep, permitting us to
--- perform cross-thread synchronisation within each such group without
--- the use of barriers.  Unfortunately, there seems to be no reliable
--- way to query these sizes at runtime.  Instead, we use this table to
--- figure out which size we should use for a specific platform and
--- device.  If nothing matches here, the wave size should be set to
--- one.
---
--- We also use this to select reasonable default group sizes and group
--- counts.
 
 -- | The type of OpenCL device that this heuristic applies to.
 data DeviceType = DeviceCPU | DeviceGPU

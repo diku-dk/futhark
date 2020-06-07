@@ -25,14 +25,13 @@ import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
-import Futhark.Pass.ResolveAssertions
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
-import Futhark.Representation.KernelsMem (KernelsMem)
-import Futhark.Representation.SeqMem (SeqMem)
-import Futhark.Representation.Kernels (Kernels)
-import Futhark.Representation.Seq (Seq)
-import Futhark.Representation.SOACS (SOACS)
+import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.SeqMem (SeqMem)
+import Futhark.IR.Kernels (Kernels)
+import Futhark.IR.Seq (Seq)
+import Futhark.IR.SOACS (SOACS)
 
 standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
@@ -48,7 +47,6 @@ standardPipeline =
          , fuseSOACs
          , performCSE True
          , simplifySOACS
-         , resolveAssertions
          , removeDeadFunctions
          ]
 

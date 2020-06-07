@@ -20,12 +20,12 @@ import Futhark.Compiler
 import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
 import Futhark.Pipeline
-import qualified Futhark.Representation.SOACS as SOACS
-import qualified Futhark.Representation.Kernels as Kernels
-import qualified Futhark.Representation.Seq as Seq
-import qualified Futhark.Representation.KernelsMem as KernelsMem
-import qualified Futhark.Representation.SeqMem as SeqMem
-import Futhark.Representation.AST (Prog, pretty)
+import qualified Futhark.IR.SOACS as SOACS
+import qualified Futhark.IR.Kernels as Kernels
+import qualified Futhark.IR.Seq as Seq
+import qualified Futhark.IR.KernelsMem as KernelsMem
+import qualified Futhark.IR.SeqMem as SeqMem
+import Futhark.IR (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 
@@ -48,6 +48,7 @@ import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Passes
+import Futhark.Util.Log
 
 -- | What to do with the program after it has been read.
 data FutharkPipeline = PrettyPrint
@@ -191,7 +192,7 @@ typedPassOption getProg putProg pass short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform s config = do
           prog <- getProg (passName pass) s
-          putProg <$> runPasses (onePass pass) config prog
+          putProg <$> runPipeline (onePass pass) config prog
 
         long = [passLongOption pass]
 
@@ -213,15 +214,15 @@ simplifyOption :: String -> FutharkOption
 simplifyOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (SOACS prog) config =
-          SOACS <$> runPasses (onePass simplifySOACS) config prog
+          SOACS <$> runPipeline (onePass simplifySOACS) config prog
         perform (Kernels prog) config =
-          Kernels <$> runPasses (onePass simplifyKernels) config prog
+          Kernels <$> runPipeline (onePass simplifyKernels) config prog
         perform (Seq prog) config =
-          Seq <$> runPasses (onePass simplifySeq) config prog
+          Seq <$> runPipeline (onePass simplifySeq) config prog
         perform (SeqMem prog) config =
-          SeqMem <$> runPasses (onePass simplifySeqMem) config prog
+          SeqMem <$> runPipeline (onePass simplifySeqMem) config prog
         perform (KernelsMem prog) config =
-          KernelsMem <$> runPasses (onePass simplifyKernelsMem) config prog
+          KernelsMem <$> runPipeline (onePass simplifyKernelsMem) config prog
 
         long = [passLongOption pass]
         pass = simplifySOACS
@@ -231,10 +232,10 @@ allocateOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (Kernels prog) config =
           KernelsMem <$>
-          runPasses (onePass Kernels.explicitAllocations) config prog
+          runPipeline (onePass Kernels.explicitAllocations) config prog
         perform (Seq prog) config =
           SeqMem <$>
-          runPasses (onePass Seq.explicitAllocations) config prog
+          runPipeline (onePass Seq.explicitAllocations) config prog
         perform s _ =
           externalErrorS $
           "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
@@ -242,19 +243,35 @@ allocateOption short =
         long = [passLongOption pass]
         pass = Seq.explicitAllocations
 
+iplOption :: String -> FutharkOption
+iplOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where perform (Kernels prog) config =
+          Kernels <$>
+          runPipeline (onePass inPlaceLoweringKernels) config prog
+        perform (Seq prog) config =
+          Seq <$>
+          runPipeline (onePass inPlaceLoweringSeq) config prog
+        perform s _ =
+          externalErrorS $
+          "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+        long = [passLongOption pass]
+        pass = inPlaceLoweringSeq
+
 cseOption :: String -> FutharkOption
 cseOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (SOACS prog) config =
-          SOACS <$> runPasses (onePass $ performCSE True) config prog
+          SOACS <$> runPipeline (onePass $ performCSE True) config prog
         perform (Kernels prog) config =
-          Kernels <$> runPasses (onePass $ performCSE True) config prog
+          Kernels <$> runPipeline (onePass $ performCSE True) config prog
         perform (Seq prog) config =
-          Seq <$> runPasses (onePass $ performCSE True) config prog
+          Seq <$> runPipeline (onePass $ performCSE True) config prog
         perform (SeqMem prog) config =
-          SeqMem <$> runPasses (onePass $ performCSE False) config prog
+          SeqMem <$> runPipeline (onePass $ performCSE False) config prog
         perform (KernelsMem prog) config =
-          KernelsMem <$> runPasses (onePass $ performCSE False) config prog
+          KernelsMem <$> runPipeline (onePass $ performCSE False) config prog
 
         long = [passLongOption pass]
         pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
@@ -272,7 +289,7 @@ pipelineOption getprog repdesc repf desc pipeline =
   where pipelinePass rep config =
           case getprog rep of
             Just prog ->
-              repf <$> runPasses pipeline config prog
+              repf <$> runPipeline pipeline config prog
             Nothing   ->
               externalErrorS $ "Expected " ++ repdesc ++ " representation, but got " ++
               representation rep
@@ -308,10 +325,6 @@ commandLineOptions =
     (NoArg $ Right $ \opts ->
        opts { futharkAction = KernelsMemAction kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
-  , Option [] ["range-analysis"]
-    (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions rangeAction rangeAction rangeAction rangeAction rangeAction })
-    "Print the program with range annotations added."
   , Option "p" ["print"]
     (NoArg $ Right $ \opts ->
         opts { futharkAction = PolyAction $ AllActions printAction printAction printAction printAction printAction })
@@ -338,13 +351,13 @@ commandLineOptions =
   , typedPassOption soacsProg Seq firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineFunctions []
-  , kernelsPassOption inPlaceLoweringKernels []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
   , kernelsPassOption unstream []
   , kernelsPassOption sink []
   , typedPassOption soacsProg Kernels extractKernels []
 
+  , iplOption []
   , allocateOption "a"
 
   , kernelsMemPassOption doubleBuffer []
@@ -432,6 +445,7 @@ runPolyPasses :: Config -> Prog SOACS.SOACS -> FutharkM ()
 runPolyPasses config initial_prog = do
     end_prog <- foldM (runPolyPass pipeline_config) (SOACS initial_prog)
                 (getFutharkPipeline config)
+    logMsg $ "Running action " ++ untypedActionName (futharkAction config)
     case (end_prog, futharkAction config) of
       (SOACS prog, SOACSAction action) ->
         actionProcedure action prog
@@ -458,6 +472,7 @@ runPolyPasses config initial_prog = do
         untypedActionName action <>
         " expects " ++ representation action ++ " representation, but got " ++
         representation end_prog ++ "."
+    logMsg ("Done." :: String)
   where pipeline_config =
           PipelineConfig { pipelineVerbose = fst (futharkVerbose $ futharkConfig config) > NotVerbose
                          , pipelineValidate = True

@@ -3,13 +3,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+-- | @futhark repl@
 module Futhark.CLI.REPL (main) where
 
 import Control.Monad.Free.Church
 import Control.Exception
 import Data.Char
 import Data.List (intercalate, intersperse)
-import Data.Loc
 import Data.Maybe
 import Data.Version
 import Control.Monad
@@ -48,6 +48,7 @@ banner = unlines [
   "|   |   \\ |   |   | \\  \\"
   ]
 
+-- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options..." run
   where run []     _      = Just repl
@@ -189,7 +190,7 @@ getPrompt = do
   return $ "[" ++ show i ++ "]> "
 
 mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc
+mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty
 
 -- The ExceptT part is more of a continuation, really.
 newtype FutharkiM a =
@@ -241,7 +242,7 @@ getIt = do
 onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
   (imports, src, tenv, ienv) <- getIt
-  cur_import <- T.mkInitialImport . fromMaybe "." <$> gets futharkiLoaded
+  cur_import <- gets $ T.mkInitialImport . fromMaybe "." . futharkiLoaded
 
   -- Most of the complexity here concerns the dealing with the fact
   -- that 'import "foo"' is a declaration.  We have to involve a lot
@@ -379,7 +380,7 @@ mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
 unbreakCommand :: Command
 unbreakCommand _ = do
-  top <- fmap (NE.head . breakingStack) <$> gets futharkiBreaking
+  top <- gets $ fmap (NE.head . breakingStack) . futharkiBreaking
   case top of
     Nothing -> liftIO $ putStrLn "Not currently stopped at a breakpoint."
     Just top' -> do modify $ \s -> s { futharkiSkipBreaks = locOf top' : futharkiSkipBreaks s }
@@ -387,7 +388,7 @@ unbreakCommand _ = do
 
 frameCommand :: Command
 frameCommand which = do
-  maybe_stack <- fmap breakingStack <$> gets futharkiBreaking
+  maybe_stack <- gets $ fmap breakingStack . futharkiBreaking
   case (maybe_stack, readMaybe $ T.unpack which) of
     (Just stack, Just i)
       | frame:_ <- NE.drop i stack -> do

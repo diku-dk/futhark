@@ -9,11 +9,66 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Better code generation for `reverse` (and the equivalent explicit
+    slice).
+
+  * `futhark bench` now prints progress bars.
+
+  * The `cuda` backend now supports similar profiling as the `opencl`
+    option, although it is likely slightly less accurate in the
+    presence of concurrent operations.
+
 ### Removed
+
+  * The C# backend has been removed (#984).
+
+  * The `unsafe` keyword has been removed.  Use `#[unsafe]` instead.
 
 ### Changed
 
 ### Fixed
+
+  * Fix bug in slice simplification (#992).
+
+  * Fixed a typer checker bug for tracking the aliases of closures
+    (#995).
+
+  * Fixed handling of dumb terminals in futhark test (#1000).
+
+## [0.15.8]
+
+### Added
+
+
+  * Warnings for overflowing literals, such as `1000 : u8`.
+
+  * Futhark now supports an attribute system, whereby expressions can
+    be tagged with attributes that provide hints or directions to the
+    compiler.  This is an expert-level feature, but it is sometimes
+    useful.
+
+## [0.15.7]
+
+### Added
+
+  * Faster index calculations for very tight GPU kernels (such as the
+    ones corresponding to 2D tiling).
+
+  * `scan` with vectorised operators (e.g. `map2 (+)`) is now faster
+    in some cases.
+
+  * The C API has now been documented and stabilized, including
+    obtaining profiling information (although this is still
+    unstructured).
+
+### Fixed
+
+  * Fixed some cases of missing fusion (#953).
+
+  * Context deinitialisation is now more complete, and should not leak
+    memory (or at least not nearly as much, if any).  This makes it
+    viable to repeatedly create and free Futhark contexts in the same
+    process (although this can still be quite slow).
 
 ## [0.15.6]
 

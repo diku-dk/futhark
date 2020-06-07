@@ -21,9 +21,9 @@ import Data.List (mapAccumL)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 
-import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import qualified Futhark.Analysis.HORep.SOAC as SOAC
 
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.Binder (Bindable(..), insertStm, insertStms, mkLet)
 import Futhark.Construct (mapResult)
 import Futhark.Util (splitAt3, takeLast, dropLast)
@@ -203,7 +203,7 @@ fuseRedomap unfus_nms outVars p_lam p_scan_nes p_red_nes p_inparr outPairs
 
 mergeReduceOps :: Lambda lore -> Lambda lore -> Lambda lore
 mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
-  let body' = Body (bodyAttr bdy1)
+  let body' = Body (bodyDec bdy1)
                    (bodyStms bdy1 <> bodyStms bdy2)
                    (bodyResult bdy1 ++ bodyResult   bdy2)
       (len1, len2) = (length rtp1, length rtp2)

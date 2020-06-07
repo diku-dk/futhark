@@ -1,6 +1,7 @@
 -- | Partially evaluate all modules away from a source Futhark
 -- program.  This is implemented as a source-to-source transformation.
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Defunctorise (transformProg) where
 
 import Control.Monad.RWS.Strict
@@ -9,7 +10,6 @@ import qualified Data.DList as DL
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.Loc
 
 import Prelude hiding (mod, abs)
 
@@ -255,8 +255,8 @@ transformTypeDecl (TypeDecl dt (Info et)) =
 transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te doc loc) = do
   name' <- transformName name
-  emit =<< TypeDec <$> (TypeBind name' l <$> traverse transformNames tparams
-                        <*> transformTypeDecl te <*> pure doc <*> pure loc)
+  emit . TypeDec =<< (TypeBind name' l <$> traverse transformNames tparams
+                      <*> transformTypeDecl te <*> pure doc <*> pure loc)
 
 transformModBind :: ModBind -> TransformM Scope
 transformModBind mb = do
@@ -318,6 +318,7 @@ transformImports ((name,imp):imps) = do
                       else Nothing  }
     maybeHideEntryPoint d = d
 
+-- | Perform defunctorisation.
 transformProg :: MonadFreshNames m => Imports -> m [Dec]
 transformProg prog = modifyNameSource $ \namesrc ->
   let ((), namesrc', prog') = runTransformM namesrc $ transformImports prog

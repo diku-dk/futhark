@@ -38,3 +38,7 @@ core.*
 
 # Ignore temporary backup directories.
 *-backup
+
+# Ignore directories often created by testing
+data/
+lib/

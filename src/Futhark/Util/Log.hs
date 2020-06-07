@@ -18,6 +18,7 @@ import qualified Control.Monad.RWS.Lazy
 import qualified Data.Text as T
 import qualified Data.DList as DL
 
+-- | An efficiently catenable sequence of log entries.
 newtype Log = Log { unLog :: DL.DList T.Text }
 
 instance Semigroup Log where

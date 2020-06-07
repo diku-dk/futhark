@@ -12,7 +12,7 @@ module Futhark.Analysis.PrimExp
   , false
   , constFoldPrimExp
 
-  , module Futhark.Representation.Primitive
+  , module Futhark.IR.Primitive
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
@@ -21,8 +21,8 @@ import           Data.Traversable
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import           Futhark.Representation.AST.Attributes.Names
-import           Futhark.Representation.Primitive
+import           Futhark.IR.Prop.Names
+import           Futhark.IR.Primitive
 import           Futhark.Util.IntegralExp
 import           Futhark.Util.Pretty
 
@@ -358,6 +358,8 @@ instance Pretty v => Pretty (PrimExp v) where
   ppr (UnOpExp op x)    = ppr op <+> parens (ppr x)
   ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)
 
+-- | Produce a mapping from the leaves of the 'PrimExp' to their
+-- designated types.
 leafExpTypes :: Ord a => PrimExp a -> S.Set (a, PrimType)
 leafExpTypes (LeafExp x ptp) = S.singleton (x, ptp)
 leafExpTypes (ValueExp _) = S.empty

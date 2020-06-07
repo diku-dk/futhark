@@ -30,6 +30,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    installation.rst
    usage.rst
    language-reference.rst
+   c-api.rst
    package-management.rst
    c-porting-guide.rst
    versus-other-languages.rst
@@ -44,8 +45,6 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-autotune.rst
    man/futhark-bench.rst
    man/futhark-c.rst
-   man/futhark-csharp.rst
-   man/futhark-csopencl.rst
    man/futhark-cuda.rst
    man/futhark-dataset.rst
    man/futhark-doc.rst

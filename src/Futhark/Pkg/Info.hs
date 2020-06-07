@@ -72,7 +72,7 @@ instance Eq (GetManifest m) where
 data PkgRevInfo m = PkgRevInfo { pkgRevZipballUrl :: T.Text
                                , pkgRevZipballDir :: FilePath
                                  -- ^ The directory inside the zipball
-                                 -- containing the 'lib' directory, in
+                                 -- containing the @lib@ directory, in
                                  -- which the package files themselves
                                  -- are stored (Based on the package
                                  -- path).
@@ -102,9 +102,12 @@ memoiseGetManifest (GetManifest m) = do
                 liftIO $ writeIORef ref $ Just v'
                 return v'
 
+-- | Download the zip archive corresponding to a specific package
+-- version.
 downloadZipball :: (MonadLogger m, MonadIO m, MonadFail m) =>
-                   T.Text -> m Zip.Archive
-downloadZipball url = do
+                   PkgRevInfo m -> m Zip.Archive
+downloadZipball info = do
+  let url = pkgRevZipballUrl info
   logMsg $ "Downloading " <> T.unpack url
 
   let bad = fail . (("When downloading " <> T.unpack url <> ": ")<>)
@@ -124,6 +127,7 @@ data PkgInfo m = PkgInfo { pkgVersions :: M.Map SemVer (PkgRevInfo m)
                            -- commit, or HEAD in case of Nothing.
                          }
 
+-- | Lookup information about a given version of a package.
 lookupPkgRev :: SemVer -> PkgInfo m -> Maybe (PkgRevInfo m)
 lookupPkgRev v = M.lookup v . pkgVersions
 
@@ -292,6 +296,7 @@ class (MonadIO m, MonadLogger m, MonadFail m) => MonadPkgRegistry m where
   modifyPkgRegistry :: (PkgRegistry m -> PkgRegistry m) -> m ()
   modifyPkgRegistry f = putPkgRegistry . f =<< getPkgRegistry
 
+-- | Given a package path, look up information about that package.
 lookupPackage :: MonadPkgRegistry m =>
                  PkgPath -> m (PkgInfo m)
 lookupPackage p = do

@@ -90,7 +90,6 @@
       <keyword>concat</keyword>
       <keyword>zip</keyword>
       <keyword>unzip</keyword>
-      <keyword>unsafe</keyword>
     </context>
 
     <context id="builtin-functionlikes" style-ref="builtin-functionlikes">

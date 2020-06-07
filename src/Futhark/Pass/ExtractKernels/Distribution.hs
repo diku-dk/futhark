@@ -31,6 +31,7 @@ module Futhark.Pass.ExtractKernels.Distribution
        , KernelNest
        , ppKernelNest
        , newKernel
+       , innermostKernelNesting
        , pushKernelNesting
        , pushInnerKernelNesting
        , kernelNestLoops
@@ -52,8 +53,8 @@ import Data.Foldable
 import Data.Maybe
 import Data.List (elemIndex, sortOn)
 
-import Futhark.Representation.AST
-import Futhark.Representation.SegOp
+import Futhark.IR
+import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util
@@ -114,7 +115,7 @@ targetsScope :: DistLore lore => Targets -> Scope lore
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting { loopNestingPattern :: PatternT Type
-                              , loopNestingCertificates :: Certificates
+                              , loopNestingAux :: StmAux ()
                               , loopNestingWidth :: SubExp
                               , loopNestingParamsAndArrs :: [(Param Type, VName)]
                               }
@@ -133,9 +134,9 @@ loopNestingParams :: LoopNesting -> [Param Type]
 loopNestingParams  = map fst . loopNestingParamsAndArrs
 
 instance FreeIn LoopNesting where
-  freeIn' (MapNesting pat cs w params_and_arrs) =
+  freeIn' (MapNesting pat aux w params_and_arrs) =
     freeIn' pat <>
-    freeIn' cs <>
+    freeIn' aux <>
     freeIn' w <>
     freeIn' params_and_arrs
 
@@ -184,6 +185,11 @@ type KernelNest = (LoopNesting, [LoopNesting])
 ppKernelNest :: KernelNest -> String
 ppKernelNest (nesting, nestings) =
   unlines $ map ppLoopNesting $ nesting : nestings
+
+-- | Retrieve the innermost kernel nesting.
+innermostKernelNesting :: KernelNest -> LoopNesting
+innermostKernelNesting (nest, nests) =
+  fromMaybe nest $ maybeHead $ reverse nests
 
 -- | Add new outermost nesting, pushing the current outermost to the
 -- list, also taking care to swap patterns if necessary.
@@ -234,8 +240,8 @@ constructKernel :: (DistLore lore, MonadFreshNames m, LocalScope lore m) =>
                 -> m (Stm lore, Stms lore)
 constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
-  let cs = loopNestingCertificates first_nest
-      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexInfo Int32
+  let aux = loopNestingAux first_nest
+      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int32
       pat = loopNestingPattern first_nest
       rts = map (stripArray (length ispace)) $ patternTypes pat
 
@@ -248,7 +254,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
 
   addStms aux_stms
 
-  return $ Let pat (StmAux cs ()) $ Op $ segOp segop
+  return $ Let pat aux $ Op $ segOp segop
   where
     first_nest = fst kernel_nest
     inputIsUsed input = kernelInputName input `nameIn` freeIn inner_body
@@ -299,7 +305,7 @@ data DistributionBody = DistributionBody {
 distributionInnerPattern :: DistributionBody -> PatternT Type
 distributionInnerPattern = fst . innerTarget . distributionTarget
 
-distributionBodyFromStms :: Attributes lore =>
+distributionBodyFromStms :: ASTLore lore =>
                             Targets -> Stms lore -> (DistributionBody, Result)
 distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
   let bound_by_stms = namesFromList $ M.keys $ scopeOf stms
@@ -313,7 +319,7 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
       },
       inner_res')
 
-distributionBodyFromStm :: Attributes lore =>
+distributionBodyFromStm :: ASTLore lore =>
                            Targets -> Stm lore -> (DistributionBody, Result)
 distributionBodyFromStm targets bnd =
   distributionBodyFromStms targets $ oneStm bnd
@@ -353,7 +359,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
           identity_map
           inner_returned_arrs
           addTarget = do
-          let nest'@(MapNesting _ cs w params_and_arrs) =
+          let nest'@(MapNesting _ aux w params_and_arrs) =
                 removeUnusedNestingParts free_in_kernel nest
               (params,arrs) = unzip params_and_arrs
               param_names = namesFromList $ map paramName params
@@ -397,7 +403,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
               nest'' =
                 removeUnusedNestingParts free_in_kernel $
-                MapNesting pat cs w $ zip actual_params actual_arrs
+                MapNesting pat aux w $ zip actual_params actual_arrs
 
               free_in_kernel'' =
                 (freeIn nest'' <> free_in_kernel) `namesSubtract` actual_param_names
@@ -441,8 +447,8 @@ createKernelNest (inner_nest, nests) distrib_body = do
             ((`pushOuterTarget` kernel_targets) . expand_target)
 
 removeUnusedNestingParts :: Names -> LoopNesting -> LoopNesting
-removeUnusedNestingParts used (MapNesting pat cs w params_and_arrs) =
-  MapNesting pat cs w $ zip used_params used_arrs
+removeUnusedNestingParts used (MapNesting pat aux w params_and_arrs) =
+  MapNesting pat aux w $ zip used_params used_arrs
   where (params,arrs) = unzip params_and_arrs
         (used_params, used_arrs) =
           unzip $
@@ -508,7 +514,7 @@ tryDistribute mk_lvl nest targets stms =
       return Nothing
   where (dist_body, inner_body_res) = distributionBodyFromStms targets stms
 
-tryDistributeStm :: (MonadFreshNames m, HasScope t m, Attributes lore) =>
+tryDistributeStm :: (MonadFreshNames m, HasScope t m, ASTLore lore) =>
                     Nestings -> Targets -> Stm lore
                  -> m (Maybe (Result, Targets, KernelNest))
 tryDistributeStm nest targets bnd =

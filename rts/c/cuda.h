@@ -84,6 +84,13 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->size_classes = size_classes;
 }
 
+// A record of something that happened.
+struct profiling_record {
+  cudaEvent_t *events; // Points to two events.
+  int *runs;
+  int64_t *runtime;
+};
+
 struct cuda_context {
   CUdevice dev;
   CUcontext cu_ctx;
@@ -101,6 +108,10 @@ struct cuda_context {
   size_t max_bespoke;
 
   size_t lockstep_width;
+
+  struct profiling_record *profiling_records;
+  int profiling_records_capacity;
+  int profiling_records_used;
 };
 
 #define CU_DEV_ATTR(x) (CU_DEVICE_ATTRIBUTE_##x)
@@ -392,63 +403,36 @@ static void cuda_size_setup(struct cuda_context *ctx)
   }
 }
 
-static void dump_string_to_file(const char *file, const char *buf) {
-  FILE *f = fopen(file, "w");
-  assert(f != NULL);
-  assert(fputs(buf, f) != EOF);
-  assert(fclose(f) == 0);
-}
-
-static void load_string_from_file(const char *file, char **obuf, size_t *olen) {
-  char *buf;
-  size_t len;
-  FILE *f = fopen(file, "r");
-
-  assert(f != NULL);
-  assert(fseek(f, 0, SEEK_END) == 0);
-  len = ftell(f);
-  assert(fseek(f, 0, SEEK_SET) == 0);
-
-  buf = (char*) malloc(len + 1);
-  assert(fread(buf, 1, len, f) == len);
-  buf[len] = 0;
-  *obuf = buf;
-  if (olen != NULL) {
-    *olen = len;
-  }
-
-  assert(fclose(f) == 0);
-}
-
 static void cuda_module_setup(struct cuda_context *ctx,
                               const char *src_fragments[],
                               const char *extra_opts[]) {
   char *ptx = NULL, *src = NULL;
 
-  if (ctx->cfg.load_ptx_from == NULL && ctx->cfg.load_program_from == NULL) {
+  if (ctx->cfg.load_program_from == NULL) {
     src = concat_fragments(src_fragments);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
-  } else if (ctx->cfg.load_ptx_from == NULL) {
-    load_string_from_file(ctx->cfg.load_program_from, &src, NULL);
-    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
   } else {
+    src = slurp_file(ctx->cfg.load_program_from, NULL);
+  }
+
+  if (ctx->cfg.load_ptx_from) {
     if (ctx->cfg.load_program_from != NULL) {
       fprintf(stderr,
-              "WARNING: Loading PTX from %s instead of C code from %s\n",
+              "WARNING: Using PTX from %s instead of C code from %s\n",
               ctx->cfg.load_ptx_from, ctx->cfg.load_program_from);
     }
-
-    load_string_from_file(ctx->cfg.load_ptx_from, &ptx, NULL);
+    ptx = slurp_file(ctx->cfg.load_ptx_from, NULL);
   }
 
   if (ctx->cfg.dump_program_to != NULL) {
-    if (src == NULL) {
-      src = concat_fragments(src_fragments);
-    }
-    dump_string_to_file(ctx->cfg.dump_program_to, src);
+    dump_file(ctx->cfg.dump_program_to, src, strlen(src));
   }
+
+  if (ptx == NULL) {
+    ptx = cuda_nvrtc_build(ctx, src, extra_opts);
+  }
+
   if (ctx->cfg.dump_ptx_to != NULL) {
-    dump_string_to_file(ctx->cfg.dump_ptx_to, ptx);
+    dump_file(ctx->cfg.dump_ptx_to, ptx, strlen(ptx));
   }
 
   CUDA_SUCCEED(cuModuleLoadData(&ctx->module, ptx));
@@ -481,10 +465,62 @@ static void cuda_setup(struct cuda_context *ctx, const char *src_fragments[], co
   cuda_module_setup(ctx, src_fragments, extra_opts);
 }
 
+// Count up the runtime all the profiling_records that occured during execution.
+// Also clears the buffer of profiling_records.
+static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
+  cudaError_t err;
+  for (int i = 0; i < ctx->profiling_records_used; i++) {
+    struct profiling_record record = ctx->profiling_records[i];
+
+    float ms;
+    if ((err = cudaEventElapsedTime(&ms, record.events[0], record.events[1])) != CUDA_SUCCESS) {
+      return err;
+    }
+
+    // CUDA provides milisecond resolution, but we want microseconds.
+    *record.runs += 1;
+    *record.runtime += ms*1000;
+
+    if ((err = cudaEventDestroy(record.events[0])) != CUDA_SUCCESS) {
+      return err;
+    }
+    if ((err = cudaEventDestroy(record.events[1])) != CUDA_SUCCESS) {
+      return err;
+    }
+
+    free(record.events);
+  }
+
+  ctx->profiling_records_used = 0;
+
+  return CUDA_SUCCESS;
+}
+
+// Returns pointer to two events.
+static cudaEvent_t* cuda_get_events(struct cuda_context *ctx, int *runs, int64_t *runtime) {
+    if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
+      ctx->profiling_records_capacity *= 2;
+      ctx->profiling_records =
+        realloc(ctx->profiling_records,
+                ctx->profiling_records_capacity *
+                sizeof(struct profiling_record));
+    }
+    cudaEvent_t *events = calloc(2, sizeof(cudaEvent_t));
+    cudaEventCreate(&events[0]);
+    cudaEventCreate(&events[1]);
+    ctx->profiling_records[ctx->profiling_records_used].events = events;
+    ctx->profiling_records[ctx->profiling_records_used].runs = runs;
+    ctx->profiling_records[ctx->profiling_records_used].runtime = runtime;
+    ctx->profiling_records_used++;
+    return events;
+}
+
 static CUresult cuda_free_all(struct cuda_context *ctx);
 
 static void cuda_cleanup(struct cuda_context *ctx) {
   CUDA_SUCCEED(cuda_free_all(ctx));
+  (void)cuda_tally_profiling_records(ctx);
+  free(ctx->profiling_records);
   CUDA_SUCCEED(cuModuleUnload(ctx->module));
   CUDA_SUCCEED(cuCtxDestroy(ctx->cu_ctx));
 }
@@ -496,7 +532,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   }
 
   size_t size;
-  if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, tag, min_size, &size, mem_out) == 0) {
     if (size >= min_size) {
       return CUDA_SUCCESS;
     } else {
@@ -530,7 +566,7 @@ static CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
   CUdeviceptr existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->free_list, tag, -1, &size, &existing_mem) == 0) {
     CUresult res = cuMemFree(existing_mem);
     if (res != CUDA_SUCCESS) {
       return res;

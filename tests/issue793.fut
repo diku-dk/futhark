@@ -61,9 +61,9 @@ let render [nspheres] [nlights]
 
             -- return color
             in if (min.prim == P_SPHERE)
-            then unsafe (spheres[min.index].color)
+            then (spheres[min.index].color)
             else if (min.prim == P_LIGHT)
-            then unsafe (lights[min.index].color)
+            then (lights[min.index].color)
             else [0:u8, 0:u8, 0:u8, 0:u8]
         ) pixIndices
 

@@ -33,14 +33,15 @@ import           Data.Maybe
 import           Data.List (find)
 
 import           Futhark.Construct
-import           Futhark.Representation.AST
+import           Futhark.IR
 import           Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
 import           Futhark.Pass.ExplicitAllocations.Kernels ()
-import qualified Futhark.Representation.Mem.IxFun as IxFun
-import           Futhark.Representation.KernelsMem
+import qualified Futhark.IR.Mem.IxFun as IxFun
+import           Futhark.IR.KernelsMem
 import           Futhark.Pass
 import           Futhark.Util (maybeHead)
 
+-- | The double buffering pass definition.
 doubleBuffer :: Pass KernelsMem KernelsMem
 doubleBuffer =
   Pass { passName = "Double buffer"
@@ -172,7 +173,7 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
             Nothing ->
               Just (Var v, True)
 
-        sizeForMem mem = maybeHead $ mapMaybe (arrayInMem . paramAttr) val_params
+        sizeForMem mem = maybeHead $ mapMaybe (arrayInMem . paramDec) val_params
           where arrayInMem (MemArray pt shape _ (ArrayIn arraymem ixfun))
                   | IxFun.isDirect ixfun,
                     Just (dims, b) <-
@@ -191,7 +192,7 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop =
                 modify $ M.insert (paramName fparam) (bufname, b)
                 return $ BufferAlloc bufname size space b
           Array {}
-            | MemArray _ _ _ (ArrayIn mem ixfun) <- paramAttr fparam -> do
+            | MemArray _ _ _ (ArrayIn mem ixfun) <- paramDec fparam -> do
                 buffered <- gets $ M.lookup mem
                 case buffered of
                   Just (bufname, b) -> do
@@ -206,8 +207,8 @@ allocStms :: [(FParam KernelsMem, SubExp)] -> [DoubleBuffer]
 allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           stms <- lift $ runBinder_ $ do
-            size' <- letSubExp "double_buffer_size" =<< toExp size
-            letBindNames_ [name] $ Op $ Alloc size' space
+            size' <- toSubExp "double_buffer_size" size
+            letBindNames [name] $ Op $ Alloc size' space
           tell $ stmsToList stms
           if b then return (Param pname $ MemMem space, Var name)
                else return m

@@ -24,8 +24,6 @@ import qualified Futhark.CLI.OpenCL as OpenCL
 import qualified Futhark.CLI.CUDA as CCUDA
 import qualified Futhark.CLI.Python as Python
 import qualified Futhark.CLI.PyOpenCL as PyOpenCL
-import qualified Futhark.CLI.CSharp as CSharp
-import qualified Futhark.CLI.CSOpenCL as CSOpenCL
 import qualified Futhark.CLI.Test as Test
 import qualified Futhark.CLI.Bench as Bench
 import qualified Futhark.CLI.Check as Check
@@ -54,9 +52,6 @@ commands = sortOn fst
 
            , ("python", (Python.main, "Compile to sequential Python."))
            , ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL."))
-
-           , ("csharp", (CSharp.main, "Compile to sequential C#."))
-           , ("csopencl", (CSOpenCL.main, "Compile to C# calling OpenCL."))
 
            , ("test", (Test.main, "Test Futhark programs."))
            , ("bench", (Bench.main, "Benchmark Futhark programs."))

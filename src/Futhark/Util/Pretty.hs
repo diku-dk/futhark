@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | A re-export of the prettyprinting library, along with some convenience functions.
 module Futhark.Util.Pretty

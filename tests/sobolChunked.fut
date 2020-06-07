@@ -62,7 +62,7 @@ let sobolRecI [len][num_bits] (sob_dir_vs: [len][num_bits]i32, prev: []i32, n: i
 
 let recM [len][num_bits] (sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map (\(row: []i32): i32 -> unsafe row[bit]) (sob_dirs )
+  map (\(row: []i32): i32 -> row[bit]) (sob_dirs )
 
 -- computes sobol numbers: n,..,n+chunk-1
 let sobolChunk [len] [num_bits] (dir_vs: [len][num_bits]i32) (n: i32) (chunk: i32): [chunk][len]f64 =

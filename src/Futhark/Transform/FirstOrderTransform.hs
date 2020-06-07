@@ -8,14 +8,13 @@
 -- transformations in-place.
 module Futhark.Transform.FirstOrderTransform
   ( transformFunDef
-  , transformStms
+  , transformConsts
 
   , FirstOrderLore
   , Transformer
   , transformStmRecursively
   , transformLambda
   , transformSOAC
-  , transformBody
   )
   where
 
@@ -24,21 +23,23 @@ import Control.Monad.State
 import qualified Data.Map.Strict as M
 import Data.List (zip4)
 
-import qualified Futhark.Representation.AST as AST
-import Futhark.Representation.SOACS
+import qualified Futhark.IR as AST
+import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR.Prop.Aliases
 import Futhark.Util (chunks, splitAt3)
 
 -- | The constraints that must hold for a lore in order to be the
 -- target of first-order transformation.
 type FirstOrderLore lore =
   (Bindable lore, BinderOps lore,
-   LetAttr SOACS ~ LetAttr lore,
-   LParamAttr SOACS ~ LParamAttr lore,
+   LetDec SOACS ~ LetDec lore,
+   LParamInfo SOACS ~ LParamInfo lore,
    CanBeAliased (Op lore))
 
+-- | First-order-transform a single function, with the given scope
+-- provided by top-level constants.
 transformFunDef :: (MonadFreshNames m, FirstOrderLore tolore) =>
                    Scope tolore -> FunDef SOACS -> m (AST.FunDef tolore)
 transformFunDef consts_scope (FunDef entry fname rettype params body) = do
@@ -46,9 +47,10 @@ transformFunDef consts_scope (FunDef entry fname rettype params body) = do
   return $ FunDef entry fname rettype params body'
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
-transformStms :: (MonadFreshNames m, FirstOrderLore tolore) =>
-                   Stms SOACS -> m (AST.Stms tolore)
-transformStms stms =
+-- | First-order-transform these top-level constants.
+transformConsts :: (MonadFreshNames m, FirstOrderLore tolore) =>
+                 Stms SOACS -> m (AST.Stms tolore)
+transformConsts stms =
   fmap snd $ modifyNameSource $ runState $ runBinderT m mempty
   where m = mapM_ transformStmRecursively stms
 
@@ -56,18 +58,18 @@ transformStms stms =
 -- first-order transformation.
 type Transformer m = (MonadBinder m, LocalScope (Lore m) m,
                       Bindable (Lore m), BinderOps (Lore m),
-                      LParamAttr SOACS ~ LParamAttr (Lore m),
+                      LParamInfo SOACS ~ LParamInfo (Lore m),
                       CanBeAliased (Op (Lore m)))
 
-transformBody :: (Transformer m, LetAttr (Lore m) ~ LetAttr SOACS) =>
+transformBody :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                  Body -> m (AST.Body (Lore m))
 transformBody (Body () bnds res) = insertStmsM $ do
   mapM_ transformStmRecursively bnds
   return $ resultBody res
 
--- | First transform any nested 'Body' or 'Lambda' elements, then
+-- | First transform any nested t'Body' or t'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
-transformStmRecursively :: (Transformer m, LetAttr (Lore m) ~ LetAttr SOACS) =>
+transformStmRecursively :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                            Stm -> m ()
 
 transformStmRecursively (Let pat aux (Op soac)) =
@@ -77,7 +79,7 @@ transformStmRecursively (Let pat aux (Op soac)) =
 
 transformStmRecursively (Let pat aux e) =
   certifying (stmAuxCerts aux) $
-  letBind_ pat =<< mapExpM transform e
+  letBind pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
                                    , mapOnBranchType = return
@@ -132,7 +134,7 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
 
     forM_ (zip (lambdaParams map_lam) arrs) $ \(p, arr) -> do
       arr_t <- lookupType arr
-      letBindNames_ [paramName p] $ BasicOp $ Index arr $
+      letBindNames [paramName p] $ BasicOp $ Index arr $
         fullSlice arr_t [DimFix $ Var i]
 
     -- Insert the statements of the lambda.  We have taken care to
@@ -165,7 +167,7 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
   -- bound in the original pattern.
   names <- (++patternNames pat)
            <$> replicateM (length scanacc_params) (newVName "discard")
-  letBindNames_ names $ DoLoop [] merge loopform loop_body
+  letBindNames names $ DoLoop [] merge loopform loop_body
 
 transformSOAC pat (Stream w form lam arrs) =
   sequentialStreamWholeArray pat w nes lam arrs
@@ -183,7 +185,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
   -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map Var as_vs
   loopBody <- runBodyBinder $
-    localScope (M.insert iter (IndexInfo Int32) $
+    localScope (M.insert iter (IndexName Int32) $
                 scopeOfFParams $ map fst merge) $ do
     ivs' <- forM ivs $ \iv -> do
       iv_t <- lookupType iv
@@ -199,7 +201,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
       foldM saveInArray arr $ zip indexes' values'
     return $ resultBody (map Var ress)
-  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
+  letBind pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 
 transformSOAC pat (Hist len ops bucket_fun imgs) = do
   iter <- newVName "iter"
@@ -211,7 +213,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
 
   -- Bind lambda-bodies for operators.
   loopBody <- runBodyBinder $
-    localScope (M.insert iter (IndexInfo Int32) $
+    localScope (M.insert iter (IndexName Int32) $
                 scopeOfFParams $ map fst merge) $ do
 
     -- Bind images to parameters of bucket function.
@@ -256,14 +258,14 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
     return $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
-  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
+  letBind pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
                     Bindable lore, BinderOps lore,
                     LocalScope somelore m,
                     SameScope somelore lore,
-                    LetAttr lore ~ LetAttr SOACS,
+                    LetDec lore ~ LetDec SOACS,
                     CanBeAliased (Op lore)) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda params body rettype) = do

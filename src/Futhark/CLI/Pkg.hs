@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+-- | @futhark pkg@
 module Futhark.CLI.Pkg (main) where
 
 import Control.Monad.IO.Class
@@ -61,7 +62,7 @@ installInDir (BuildList bl) dir = do
 
   forM_ (M.toList bl) $ \(p, v) -> do
     info <- lookupPackageRev p v
-    a <- downloadZipball $ pkgRevZipballUrl info
+    a <- downloadZipball info
     m <- getManifest $ pkgRevGetManifest info
 
     -- Compute the directory in the zipball that should contain the
@@ -91,32 +92,32 @@ installInDir (BuildList bl) dir = do
 libDir, libNewDir, libOldDir :: FilePath
 (libDir, libNewDir, libOldDir) = ("lib", "lib~new", "lib~old")
 
--- | Install the packages listed in the build list in the 'lib'
+-- | Install the packages listed in the build list in the @lib@
 -- directory of the current working directory.  Since we are touching
 -- the file system, we are going to be very paranoid.  In particular,
--- we want to avoid corrupting the 'lib' directory if something fails
+-- we want to avoid corrupting the @lib@ directory if something fails
 -- along the way.
 --
 -- The procedure is as follows:
 --
--- 1) Create a directory 'lib~new'.  Delete an existing 'lib~new' if
+-- 1) Create a directory @lib~new@.  Delete an existing @lib~new@ if
 -- necessary.
 --
--- 2) Populate 'lib~new' based on the build list.
+-- 2) Populate @lib~new@ based on the build list.
 --
--- 3) Rename 'lib' to 'lib~old'.  Delete an existing 'lib~old' if
+-- 3) Rename @lib@ to @lib~old@.  Delete an existing @lib~old@ if
 -- necessary.
 --
--- 4) Rename 'lib~new' to 'lib'
+-- 4) Rename @lib~new@ to @lib@
 --
--- 5) If the current package has package path 'p', move 'lib~old/p' to
--- 'lib~new/p'.
+-- 5) If the current package has package path @p@, move @lib~old/p@ to
+-- @lib~new/p@.
 --
--- 6) Delete 'lib~old'.
+-- 6) Delete @lib~old@.
 --
 -- Since POSIX at least guarantees atomic renames, the only place this
 -- can fail is between steps 3, 4, and 5.  In that case, at least the
--- 'lib~old' will still exist and can be put back by the user.
+-- @lib~old@ will still exist and can be put back by the user.
 installBuildList :: Maybe PkgPath -> BuildList -> PkgM ()
 installBuildList p bl = do
   libdir_exists <- liftIO $ doesDirectoryExist libDir
@@ -356,6 +357,7 @@ doVersions = cmdMain "PKGPATH" $ \args cfg ->
           mapM_ (liftIO . T.putStrLn . prettySemVer) . M.keys . pkgVersions
           <=< lookupPackage
 
+-- | Run @futhark pkg@.
 main :: String -> [String] -> IO ()
 main prog args = do
   -- Avoid Git asking for credentials.  We prefer failure.

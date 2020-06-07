@@ -17,8 +17,8 @@ import System.IO
 
 import Futhark.Pipeline
 import Futhark.Compiler
-import Futhark.Representation.AST (Prog)
-import Futhark.Representation.SOACS (SOACS)
+import Futhark.IR (Prog)
+import Futhark.IR.SOACS (SOACS)
 import Futhark.Util.Options
 
 -- | Run a parameterised Futhark compiler, where @cfg@ is a user-given

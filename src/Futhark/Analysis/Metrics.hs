@@ -1,7 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
--- | Abstract Syntax Tree metrics.  This is used in the @futhark-test@ program.
+{-# LANGUAGE Trustworthy #-}
+-- | Abstract Syntax Tree metrics.  This is used in the @futhark test@
+-- program, for the @structure@ stanzas.
 module Futhark.Analysis.Metrics
        ( AstMetrics(..)
        , progMetrics
@@ -11,20 +13,20 @@ module Futhark.Analysis.Metrics
        , seen
        , inside
        , MetricsM
-       , bodyMetrics
-       , bindingMetrics
+       , stmMetrics
        , lambdaMetrics
        ) where
 
 import Control.Monad.Writer
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.String
 import Data.List (tails)
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST
+import Futhark.IR
 
+-- | AST metrics are simply a collection from identifiable node names
+-- to the number of times that node appears.
 newtype AstMetrics = AstMetrics (M.Map Text Int)
 
 instance Show AstMetrics where
@@ -39,6 +41,7 @@ instance Read AstMetrics where
                        _ -> Nothing
           success m = [(AstMetrics $ M.fromList m, "")]
 
+-- | Compute the metrics for some operation.
 class OpMetrics op where
   opMetrics :: op -> MetricsM ()
 
@@ -60,32 +63,41 @@ actualMetrics (CountMetrics metrics) =
           [ (T.intercalate "/" (ctx' ++ [k]), 1)
           | ctx' <- tails $ "" : ctx ]
 
+-- | This monad is used for computing metrics.  It internally keeps
+-- track of what we've seen so far.  Use 'seen' to add more stuff.
 newtype MetricsM a = MetricsM { runMetricsM :: Writer CountMetrics a }
-                   deriving (Monad, Applicative, Functor, MonadWriter CountMetrics)
+                   deriving (Monad, Applicative, Functor,
+                             MonadWriter CountMetrics)
 
+-- | Add this node to the current tally.
 seen :: Text -> MetricsM ()
 seen k = tell $ CountMetrics [([], k)]
 
+-- | Enclose a metrics counting operation.  Most importantly, this
+-- prefixes the name of the context to all the metrics computed in the
+-- enclosed operation.
 inside :: Text -> MetricsM () -> MetricsM ()
 inside what m = seen what >> censor addWhat m
   where addWhat (CountMetrics metrics) =
           CountMetrics (map addWhat' metrics)
         addWhat' (ctx, k) = (what : ctx, k)
 
+-- | Compute the metrics for a program.
 progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
 progMetrics prog =
   actualMetrics $ execWriter $ runMetricsM $ do
   mapM_ funDefMetrics $ progFuns prog
-  mapM_ bindingMetrics $ progConsts prog
+  mapM_ stmMetrics $ progConsts prog
 
 funDefMetrics :: OpMetrics (Op lore) => FunDef lore -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
 bodyMetrics :: OpMetrics (Op lore) => Body lore -> MetricsM ()
-bodyMetrics = mapM_ bindingMetrics . bodyStms
+bodyMetrics = mapM_ stmMetrics . bodyStms
 
-bindingMetrics :: OpMetrics (Op lore) => Stm lore -> MetricsM ()
-bindingMetrics = expMetrics . stmExp
+-- | Compute metrics for this statement.
+stmMetrics :: OpMetrics (Op lore) => Stm lore -> MetricsM ()
+stmMetrics = expMetrics . stmExp
 
 expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()
 expMetrics (BasicOp op) =
@@ -98,8 +110,8 @@ expMetrics (If _ tb fb _) =
   inside "If" $ do
     inside "True" $ bodyMetrics tb
     inside "False" $ bodyMetrics fb
-expMetrics (Apply fname _ _ _) =
-  seen $ "Apply" <> fromString (nameToString fname)
+expMetrics Apply{} =
+  seen "Apply"
 expMetrics (Op op) =
   opMetrics op
 
@@ -119,11 +131,11 @@ primOpMetrics Copy{} = seen "Copy"
 primOpMetrics Manifest{} = seen "Manifest"
 primOpMetrics Iota{} = seen "Iota"
 primOpMetrics Replicate{} = seen "Replicate"
-primOpMetrics Repeat{} = seen "Repeat"
 primOpMetrics Scratch{} = seen "Scratch"
 primOpMetrics Reshape{} = seen "Reshape"
 primOpMetrics Rearrange{} = seen "Rearrange"
 primOpMetrics Rotate{} = seen "Rotate"
 
+-- | Compute metrics for this lambda.
 lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

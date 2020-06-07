@@ -37,7 +37,7 @@ jobs:
     displayName: Install MSYS2
 
   - bash: |
-      choco install -y ghc --version=$(GHC_VERSION)
+      choco install -y ghc --version=$(GHC_VERSION) --allow-downgrade
     displayName: Install GHC
 
   - task: Cache@2
@@ -97,14 +97,6 @@ jobs:
       ~/.ghcup/bin/ghcup set $(GHC_VERSION)
       ~/.ghcup/bin/ghcup install-cabal
     displayName: Install GHC and cabal
-
-  - task: Cache@2
-    inputs:
-      key: 'cabal | "$(Agent.OS)" | azure-pipelines.yml | "$(GHC_VERSION)" | futhark.cabal'
-      restoreKeys: |
-        cabal | "$(Agent.OS)"
-      path: "/home/vsts/.cabal"
-    displayName: Cache cabal packages
 
   - script: |
       set -e
@@ -217,9 +209,9 @@ jobs:
     inputs:
       gitHubConnection: 'release'
       repositoryName: 'diku-dk/futhark'
-      action: 'edit'
-      tagSource: 'Git tag'
-      tag: '$(githubTag)'
       assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
-      assetUploadMode: 'replace'
+      action: 'edit'
+      target: '$(Build.SourceVersion)'
+      tag: '$(githubTag)'
       addChangeLog: false
+      assetUploadMode: 'replace'

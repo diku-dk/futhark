@@ -3,7 +3,7 @@ let flatten_to [n][m] 't (k: i32) (xs: [n][m]t): [k]t =
 
 let main [n] (as: [100]i32) (bs: [100]i32) (is: [4]i32) (xsss : [][n][]f32) =
   let m = 9 * n in
-  unsafe
+  #[unsafe]
   map(\xss ->
         let (ysss, zsss) =
           unzip <|

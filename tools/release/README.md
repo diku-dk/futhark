@@ -38,8 +38,8 @@ corresponds exactly to the state of the Git repository at some point.
    release notes from `CHANGELOG.md`.
 
 You're done!  Congratulations!  Increment the version number in
-`package.yaml` (such that Z=0) and make room for a new release in
-`CHANGELOG.md` and go hack some more on the compiler.
+`futhark.cabal` (such that Z=0), make room for a new release in
+`CHANGELOG.md`, and go hack some more on the compiler.
 
 The following steps are for making the release available elsewhere.
 Some of them are supposed to be automatic.

@@ -65,7 +65,7 @@ def get_version():
     # Get cabal file
     cabal_file = open('../futhark.cabal', 'r').read()
     # Extract version
-    return re.search('version:[ ]*([^ ]*)', cabal_file).group(1)
+    return re.search(r'^version:[ ]*([^ ]*)$', cabal_file, flags=re.MULTILINE).group(1)
 
 version = get_version()
 # The full version, including alpha/beta/rc tags.
@@ -108,7 +108,7 @@ class FutharkLexer(RegexLexer):
 
     tokens = {
         'root': [
-            (r'(if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|while|unsafe|module)\b', token.Keyword),
+            (r'(if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|while|module)\b', token.Keyword),
             (r"[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
             (r"-- .*", token.Comment),
             (r'.', token.Text)
@@ -266,8 +266,6 @@ man_pages = [
     ('man/futhark-cuda', 'futhark-cuda', 'compile Futhark to CUDA', [], 1),
     ('man/futhark-python', 'futhark-python', 'compile Futhark to sequential Python', [], 1),
     ('man/futhark-pyopencl', 'futhark-pyopencl', 'compile Futhark to Python and OpenCL', [], 1),
-    ('man/futhark-csharp', 'futhark-csharp', 'compile Futhark to sequential C#', [], 1),
-    ('man/futhark-csopencl', 'futhark-csopencl', 'compile Futhark to C# and OpenCL', [], 1),
     ('man/futhark-run', 'futhark-run', 'interpret Futhark program', [], 1),
     ('man/futhark-repl', 'futhark-repl', 'interactive Futhark read-eval-print-loop', [], 1),
     ('man/futhark-test', 'futhark-test', 'test Futhark programs', [], 1),

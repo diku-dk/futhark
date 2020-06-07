@@ -21,7 +21,7 @@ import Data.List (find)
 
 import Futhark.Pass.ExtractKernels.Distribution
   (LoopNesting(..), KernelNest, kernelNestLoops)
-import Futhark.Representation.SOACS
+import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Tools
@@ -40,7 +40,7 @@ interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
 interchangeLoop
   isMapParameter
   (SeqLoop perm loop_pat merge form body)
-  (MapNesting pat cs w params_and_arrs) = do
+  (MapNesting pat aux w params_and_arrs) = do
     merge_expanded <-
       localScope (scopeOfLParams $ map fst params_and_arrs) $
       mapM expand merge
@@ -64,7 +64,7 @@ interchangeLoop
     body' <- mkDummyStms (params'<>new_params) body
 
     let lam = Lambda (params'<>new_params) body' rettype
-        map_bnd = Let loop_pat_expanded (StmAux cs ()) $
+        map_bnd = Let loop_pat_expanded aux $
                   Op $ Screma w (mapSOAC lam) $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
@@ -118,7 +118,7 @@ interchangeLoop
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
 -- statements - one of these will be the loop, which will then contain
--- statements with 'Map' expressions.
+-- statements with @map@ expressions.
 interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                     KernelNest -> SeqLoop
                  -> m (Stms SOACS)
@@ -131,7 +131,7 @@ interchangeLoops nest loop = do
           fmap snd $ find ((==v) . paramName . fst) $
           concatMap loopNestingParamsAndArrs $ kernelNestLoops nest
 
-data Branch = Branch [Int] Pattern SubExp Body Body (IfAttr (BranchType SOACS))
+data Branch = Branch [Int] Pattern SubExp Body Body (IfDec (BranchType SOACS))
 
 branchStm :: Branch -> Stm
 branchStm (Branch _ pat cond tbranch fbranch ret) =
@@ -140,8 +140,8 @@ branchStm (Branch _ pat cond tbranch fbranch ret) =
 interchangeBranch1 :: (MonadBinder m, LocalScope SOACS m) =>
                       Branch -> LoopNesting -> m Branch
 interchangeBranch1
-  (Branch perm branch_pat cond tbranch fbranch (IfAttr ret if_sort))
-  (MapNesting pat cs w params_and_arrs) = do
+  (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
+  (MapNesting pat aux w params_and_arrs) = do
     let ret' = map (`arrayOfRow` Free w) ret
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
@@ -161,16 +161,16 @@ interchangeBranch1
             resultBody <$> (mapM (dummyBindIfNotIn bound_in_branch) =<< bodyBind branch)
           let lam = Lambda params branch' lam_ret
               res = map Var $ patternNames branch_pat'
-              map_bnd = Let branch_pat' (StmAux cs ()) $ Op $ Screma w (mapSOAC lam) arrs
+              map_bnd = Let branch_pat' aux $ Op $ Screma w (mapSOAC lam) arrs
           return $ mkBody (oneStm map_bnd) res
 
     tbranch' <- mkBranch tbranch
     fbranch' <- mkBranch fbranch
     return $ Branch [0..patternSize pat-1] pat' cond tbranch' fbranch' $
-      IfAttr ret' if_sort
+      IfDec ret' if_sort
   where dummyBind se = do
           dummy <- newVName "dummy"
-          letBindNames_ [dummy] (BasicOp $ SubExp se)
+          letBindNames [dummy] (BasicOp $ SubExp se)
           return $ Var dummy
 
         dummyBindIfNotIn bound_in_branch se

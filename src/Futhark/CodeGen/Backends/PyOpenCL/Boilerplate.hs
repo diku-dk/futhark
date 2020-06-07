@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+-- | Various boilerplate definitions for the PyOpenCL backend.
 module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   ( openClInit
   , openClPrelude
