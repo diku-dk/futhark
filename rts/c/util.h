@@ -20,7 +20,7 @@ static char* msgprintf(const char *s, ...) {
   va_start(vl, s);
   size_t needed = 1 + (size_t)vsnprintf(NULL, 0, s, vl);
   char *buffer = (char*) malloc(needed);
-  va_start(vl, s); /* Must re-init. */
+  va_start(vl, s); // Must re-init.
   vsnprintf(buffer, needed, s, vl);
   return buffer;
 }
@@ -92,7 +92,7 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
     b->str = realloc(b->str, b->capacity);
   }
 
-  va_start(vl, s); /* Must re-init. */
+  va_start(vl, s); // Must re-init.
   vsnprintf(b->str+b->used, b->capacity-b->used, s, vl);
   b->used += needed;
 }

@@ -277,11 +277,11 @@ static int read_str_array(int64_t elem_size, str_reader elem_reader,
   }
 
 static int read_str_i8(char *buf, void* dest) {
-  /* Some platforms (WINDOWS) does not support scanf %hhd or its
-     cousin, %SCNi8.  Read into int first to avoid corrupting
-     memory.
-
-     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
+  // Some platforms (WINDOWS) does not support scanf %hhd or its
+  // cousin, %SCNi8.  Read into int first to avoid corrupting
+  // memory.
+  //
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417
   remove_underscores(buf);
   int j, x;
   if (sscanf(buf, "%i%n", &x, &j) == 1) {
@@ -293,11 +293,11 @@ static int read_str_i8(char *buf, void* dest) {
 }
 
 static int read_str_u8(char *buf, void* dest) {
-  /* Some platforms (WINDOWS) does not support scanf %hhd or its
-     cousin, %SCNu8.  Read into int first to avoid corrupting
-     memory.
-
-     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
+  // Some platforms (WINDOWS) does not support scanf %hhd or its
+  // cousin, %SCNu8.  Read into int first to avoid corrupting
+  // memory.
+  //
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417
   remove_underscores(buf);
   int j, x;
   if (sscanf(buf, "%i%n", &x, &j) == 1) {

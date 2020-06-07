@@ -15,7 +15,7 @@ static int64_t get_wall_time(void) {
 }
 
 #else
-/* Assuming POSIX */
+// Assuming POSIX
 
 #include <time.h>
 #include <sys/time.h>
