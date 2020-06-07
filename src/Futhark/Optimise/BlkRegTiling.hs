@@ -43,7 +43,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
     -- check that the code fits the pattern having:
     -- some `code1`, followed by one Screma SOAC, followed by some `code2`
-    (code1, Just screma_stmt, code2)   <- matchCodeStreamCode kstms,
+    (code1, Just screma_stmt, code2) <- matchCodeStreamCode kstms,
 
     Let pat_redomap _ (Op _) <- screma_stmt,
 
@@ -66,6 +66,8 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     Just (code2', _) <- foldl (processIndirections (namesFromList arrs) res_red_var)
                                      (Just (Seq.empty, M.empty)) code1,
 
+    null code2 && null code2', -- TODO: remove the need for these assumptions !
+
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
     (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims <- reverse $ unSegSpace seg_space,
@@ -73,9 +75,9 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     null rem_outer_dims, -- TODO: remove the need for this assumption !
 
     -- sanity check that the reduce part is not missing
-    not (null red_nes) = do
-      let load_A : load_B : _ = stmsToList code1 -- TODO: not safe in general, since first two
-                                                 --       elements of code1 may be something else
+    not $ null red_nes = do
+      let load_A : load_B : _ = stmsToList code1 -- TODO: unsafe in general, since first two
+                                                 --       elements of code1 may be something else.
       let inp_A  : inp_B  : _ = arrs
       let map_t1 : map_t2 : _ = map (elemType . paramAttr) (lambdaParams map_lam)
       let red_ne : _ = red_nes
@@ -103,7 +105,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
         a_loc_sz   <- letSubExp "a_loc_sz" =<<
                          toExp (primFromSe ty * primFromSe ry * primFromSe tk)
-                   
+
         b_loc_sz   <- letSubExp "b_loc_sz" =<<
                         toExp (primFromSe tk * primFromSe tx * primFromSe rx)
 
@@ -123,9 +125,8 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
           iii <- letExp "iii" =<< toExp (LeafExp gid_y int32 * primFromSe ty_ry)
           jjj <- letExp "jjj" =<< toExp (LeafExp gid_x int32 * primFromSe tx_rx)
 
-          -- initialize register mem with neutral elements
-          cssss_list <- segMap2D "cssss" segthd_lvl ResultPrivate
-                          (ty, tx) $ \_ -> do
+          -- initialize register mem with neutral elements.
+          cssss_list <- segMap2D "cssss" segthd_lvl ResultPrivate (ty, tx) $ \_ -> do
             css_init <- scratch "css_init" (elemType red_t) [ry, rx]
             css <- forLoop ry [css_init] $ \i [css_merge] -> do
               css' <- forLoop rx [css_merge] $ \j [css_merge'] -> do
@@ -172,7 +173,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                    resultBodyM $ map Var scatter_a_loc
                  resultBodyM [Var loop_a_loc]
 
-               -- Cosmin: copy B from global to shared memory
+               -- copy B from global to shared memory
                b_loc <- forLoop tk_div_ty [b_loc_init'] $ \k0 [b_loc_merge] -> do
                  loop_b_loc <- forLoop rx [b_loc_merge] $ \j0 [b_loc_merge'] -> do
                    scatter_b_loc <- segScatter2D "B_glb2loc" b_loc_sz b_loc_merge'
@@ -205,7 +206,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                    resultBodyM $ map Var scatter_b_loc
                  resultBodyM [Var loop_b_loc]
 
-               -- inner loop updating this thread's accumulator (loop k in mmm_kernels)
+               -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
                thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] -> do
                  resultBodyM =<< letTupExp' "foo" =<<
                    eIf (toExp $ if epilogue then LeafExp kk int32 + LeafExp k int32
@@ -217,27 +218,29 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                              bsss_init <- scratch "bsss_init" map_t2 [rx]
 
                              asss <- forLoop ry [asss_init] $ \i [asss_merge] -> do
-                               -- COSMIN re-wrote this
+
                                a_loc_ind <- letExp "a_loc_ind" =<< toExp (LeafExp k int32 +
                                               (LeafExp ltid_y int32 * primFromSe ry +
                                                LeafExp i int32) * primFromSe tk)
 
-                               asss <- update "asss" asss_merge [i] =<< index "A_loc_elem" a_loc [a_loc_ind]
+                               asss <- index "A_loc_elem" a_loc [a_loc_ind]
+                                         >>= update "asss" asss_merge [i]
                                resultBodyM [Var asss]
 
                              bsss <- forLoop rx [bsss_init] $ \j [bsss_merge] -> do
-                               -- COSMIN re-wrote this
+
                                b_loc_ind <- letExp "b_loc_ind" =<< toExp (LeafExp j int32 +
                                               LeafExp k int32 * primFromSe tx_rx +
                                               LeafExp ltid_x int32 * primFromSe rx)
 
-                               bsss <- update "bsss" bsss_merge [j] =<< index "B_loc_elem" b_loc [b_loc_ind]
+                               bsss <- index "B_loc_elem" b_loc [b_loc_ind]
+                                         >>= update "bsss" bsss_merge [j]
                                resultBodyM [Var bsss]
                              return $ map Var [asss, bsss]
 
                            let [asss, bsss] = reg_mem
 
-                           -- the actual redomap
+                           -- the actual redomap.
                            redomap_res <- segMap2D "redomap_res" segthd_lvl
                                             ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
 
@@ -266,13 +269,12 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                                resultBodyM [Var css]
                              return [Var css]
 
-                           -- TODO: where to put code2..? ie. code following the redomap
                            resultBodyM $ map Var redomap_res
                        )
                        (resultBodyM [Var acc_merge])
                return [thd_acc, a_loc, b_loc]
 
-          -- build prologue
+          -- build prologue.
           full_tiles <- letExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
           prologue_res_list <-
             forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
@@ -285,21 +287,29 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
           let prologue_res : a_loc_reuse : b_loc_reuse : _ = prologue_res_list
 
-          -- build epilogue
-          final_res_list <- kkLoopBody full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
+          -- build epilogue.
+          epilogue_res_list <- kkLoopBody full_tiles (prologue_res, a_loc_reuse, b_loc_reuse) True
 
-          let final_res : _ = final_res_list
+          let epilogue_res : _ = redomap_res_list
 
+          -- TODO: to support gemm and other programs with non-empty code2 and/or
+          -- TODO: code2', this should be implemented here with something like:
+          -- TODO: segmap (ltid_y < ty, ltid_x < tx) {
+          -- TODO:   for i < ry do
+          -- TODO:     for j < rx do
+          -- TODO:       addStms code2 <> code2'
+          -- TODO:       final_res <- some function of epilogue_res
+          -- TODO:       return final_res
 
-          -- TODO: RegTileReturns still missing boundary check
-          return [RegTileReturns [(height_A, ty, ry), (width_B, tx, rx)] final_res]
+          -- TODO: RegTileReturns is still missing boundary checks.
+          return [RegTileReturns [(height_A, ty, ry), (width_B, tx, rx)] epilogue_res]
 
         let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
             space' = SegSpace gid_flat [(gid_y, gridDim_y), (gid_x, gridDim_x)]
             kbody' = KernelBody () stms_seggroup ret_seggroup
         return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
 
-      trace ("old_kbody:\n" ++ pretty old_kbody ++ "\ncode1:\n" ++ pretty code1 ++ "\ncode2:\n" ++ pretty code2 ++ "\ncode2':\n" ++ pretty code2') $ return $ Just (host_stms, new_kernel)
+      return $ Just (host_stms, new_kernel)
 
 mm_BlkRegTiling _ = do return Nothing
 
@@ -439,7 +449,7 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
           let variant_to       = M.findWithDefault mempty arr variance
               branch_invariant = not $ nameIn j branch_variant ||
                                        nameIn i branch_variant
-          if not branch_invariant then Nothing     -- if i or j in branch_variant; return nothing
+          if not branch_invariant then Nothing -- if i or j in branch_variant; return nothing
           else if nameIn i variant_to && not (nameIn j variant_to) then Just 0
           else if nameIn j variant_to && not (nameIn i variant_to) then Just 1
           else Nothing
@@ -447,10 +457,6 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
 
 varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
 varianceInStms = foldl varianceInStm
-
--- variantToOuterDim :: VarianceTable -> VName -> VName -> Bool
--- variantToOuterDim variance gid_outer nm =
---   gid_outer == nm || (nameIn gid_outer $ M.findWithDefault mempty nm variance)
 
 -- just in case you need the Screma being treated differently than
 -- by default; previously Cosmin had to enhance it when dealing with stream.
