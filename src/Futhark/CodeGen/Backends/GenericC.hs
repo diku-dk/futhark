@@ -1635,6 +1635,24 @@ compilePrimValue _ (IntValue (Int16Value k)) = [C.cexp|$int:k|]
 compilePrimValue _ (IntValue (Int32Value k)) = [C.cexp|$int:k|]
 compilePrimValue _ (IntValue (Int64Value k)) = [C.cexp|$int:k|]
 
+compilePrimValue TargetShader (FloatValue (Float64Value x))
+  | isInfinite x =
+      if x > 0 then [C.cexp|float64(uintBitsToFloat(0x7F800000))|]
+        else [C.cexp|float64(uintBitsToFloat(0xFF800000))|]
+  | isNaN x =
+      [C.cexp|($double:x)/0.0|]
+  | otherwise =
+      [C.cexp|$double:x|]
+compilePrimValue TargetShader (FloatValue (Float32Value x))
+  | isInfinite x =
+      if x > 0 then [C.cexp|uintBitsToFloat(0x7F800000)|]
+        else [C.cexp|uintBitsToFloat(0xFF800000)|]
+  | isNaN x =
+      [C.cexp|($float:x)/0.0|]
+  | otherwise =
+      [C.cexp|$float:x|]
+
+
 compilePrimValue _ (FloatValue (Float64Value x))
   | isInfinite x =
       if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
