@@ -645,7 +645,6 @@ declMem name space = do
   resetMem name space
   modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
--- FIXME: This needs to be able to handle all types.
 declMemShader :: VName -> Maybe Int -> Space -> CompilerM op s ()
 declMemShader name size space = do
   ty <- memToCType TargetShader size space
