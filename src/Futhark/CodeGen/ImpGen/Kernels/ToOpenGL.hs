@@ -228,7 +228,8 @@ compilePrimExp e = runIdentity $ GenericC.compilePrimExp
 constDef :: KernelUse -> Maybe C.BlockItem
 constDef (ConstUse v e) = Just [C.citem|$escstm:def|]
   where e' = compilePrimExp e
-        def = "const int " ++ pretty (C.toIdent v mempty)
+        (ty, _) = sizeToType $ primSize $ primExpType e
+        def = "const " ++ ty ++ " " ++ pretty (C.toIdent v mempty)
                            ++ " = " ++ pretty e' ++ ";"
 constDef _ = Nothing
 
