@@ -1652,7 +1652,6 @@ compilePrimValue TargetShader (FloatValue (Float32Value x))
   | otherwise =
       [C.cexp|$float:x|]
 
-
 compilePrimValue _ (FloatValue (Float64Value x))
   | isInfinite x =
       if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
@@ -1761,6 +1760,14 @@ compilePrimExp target f (UnOpExp Not{} x) = do
 compilePrimExp target f (UnOpExp Abs{} x) = do
   x' <- compilePrimExp target f x
   return [C.cexp|abs($exp:x')|]
+
+compilePrimExp TargetShader f (UnOpExp (FAbs Float32) x) = do
+  x' <- compilePrimExp TargetShader f x
+  return [C.cexp|float32(abs($exp:x'))|]
+
+compilePrimExp TargetShader f (UnOpExp (FAbs Float64) x) = do
+  x' <- compilePrimExp TargetShader f x
+  return [C.cexp|float64(abs($exp:x'))|]
 
 compilePrimExp target f (UnOpExp (FAbs Float32) x) = do
   x' <- compilePrimExp target f x
