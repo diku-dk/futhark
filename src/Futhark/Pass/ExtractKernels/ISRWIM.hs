@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+-- | Interchanging scans with inner maps.
 module Futhark.Pass.ExtractKernels.ISRWIM
        ( iswim
        , irwim
@@ -11,7 +12,7 @@ import Control.Arrow (first)
 import Control.Monad.State
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.SOACS
+import Futhark.IR.SOACS
 import Futhark.Tools
 
 -- | Interchange Scan With Inner Map. Tries to turn a @scan(map)@ into a
@@ -53,7 +54,7 @@ iswim res_pat w scan_fun scan_input
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
-      addStm $ Let res_pat' (StmAux map_cs ()) $ Op $ Screma map_w
+      addStm $ Let res_pat' (StmAux map_cs mempty ()) $ Op $ Screma map_w
         (mapSOAC map_fun') map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
@@ -110,9 +111,12 @@ irwim res_pat w comm red_fun red_input
 
       let map_fun' = Lambda map_params map_body map_rettype
 
-      addStm $ Let res_pat (StmAux map_cs ()) $ Op $ Screma map_w (mapSOAC map_fun') arrs'
+      addStm $ Let res_pat (StmAux map_cs mempty ()) $
+        Op $ Screma map_w (mapSOAC map_fun') arrs'
   | otherwise = Nothing
 
+-- | Does this reduce operator contain an inner map, and if so, what
+-- does that map look like?
 rwimPossible :: Lambda
              -> Maybe (Pattern, Certificates, SubExp, Lambda)
 rwimPossible fun
@@ -136,12 +140,12 @@ transposedArrays arrs = forM arrs $ \arr -> do
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =
   let t = rowType $ paramType param
-  in param { paramAttr = t }
+  in param { paramDec = t }
 
 setParamOuterDimTo :: SubExp -> LParam -> LParam
 setParamOuterDimTo w param =
   let t = setOuterDimTo w $ paramType param
-  in param { paramAttr = t }
+  in param { paramDec = t }
 
 setIdentOuterDimTo :: SubExp -> Ident -> Ident
 setIdentOuterDimTo w ident =

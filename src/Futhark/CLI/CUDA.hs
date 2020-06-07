@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | @futhark cuda@
 module Futhark.CLI.CUDA (main) where
 
 import Control.Monad.IO.Class
@@ -11,6 +12,7 @@ import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import Futhark.Util
 import Futhark.Compiler.CLI
 
+-- | Run @futhark cuda@.
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile CUDA" "Generate CUDA/C code from optimised Futhark program."
@@ -19,6 +21,7 @@ main = compilerMain () []
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
              extra_options = [ "-lcuda"
+                             , "-lcudart"
                              , "-lnvrtc"
                              ]
          case mode of

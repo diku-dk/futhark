@@ -1,20 +1,20 @@
 // Start of lock.h.
 
-/* A very simple cross-platform implementation of locks.  Uses
-   pthreads on Unix and some Windows thing there.  Futhark's
-   host-level code is not multithreaded, but user code may be, so we
-   need some mechanism for ensuring atomic access to API functions.
-   This is that mechanism.  It is not exposed to user code at all, so
-   we do not have to worry about name collisions. */
+// A very simple cross-platform implementation of locks.  Uses
+// pthreads on Unix and some Windows thing there.  Futhark's
+// host-level code is not multithreaded, but user code may be, so we
+// need some mechanism for ensuring atomic access to API functions.
+// This is that mechanism.  It is not exposed to user code at all, so
+// we do not have to worry about name collisions.
 
 #ifdef _WIN32
 
 typedef HANDLE lock_t;
 
 static lock_t create_lock(lock_t *lock) {
-  *lock = CreateMutex(NULL,  /* Default security attributes. */
-                      FALSE, /* Initially unlocked. */
-                      NULL); /* Unnamed. */
+  *lock = CreateMutex(NULL,  // Default security attributes.
+                      FALSE, // Initially unlocked.
+                      NULL); // Unnamed.
 }
 
 static void lock_lock(lock_t *lock) {
@@ -30,7 +30,7 @@ static void free_lock(lock_t *lock) {
 }
 
 #else
-/* Assuming POSIX */
+// Assuming POSIX
 
 #include <pthread.h>
 
@@ -52,7 +52,7 @@ static void lock_unlock(lock_t *lock) {
 }
 
 static void free_lock(lock_t *lock) {
-  /* Nothing to do for pthreads. */
+  // Nothing to do for pthreads.
   (void)lock;
 }
 

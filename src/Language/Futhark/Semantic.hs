@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 -- | Definitions of various semantic objects (*not* the Futhark
 -- semantics themselves).
 module Language.Futhark.Semantic
@@ -22,7 +23,6 @@ module Language.Futhark.Semantic
   )
 where
 
-import Data.Loc
 import qualified Data.Map.Strict as M
 import qualified System.FilePath.Posix as Posix
 import qualified System.FilePath as Native
@@ -32,6 +32,7 @@ import Prelude hiding (mod)
 import Language.Futhark
 import Futhark.Util (dropLast, toPOSIX, fromPOSIX)
 import Futhark.Util.Pretty
+import Futhark.Util.Loc
 
 -- | Canonical reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  This is most often a path relative to the
@@ -122,6 +123,8 @@ data TypeBinding = TypeAbbr Liftedness [TypeParam] StructType
 data BoundV = BoundV [TypeParam] StructType
                 deriving (Show)
 
+-- | A mapping from names (which always exist in some namespace) to a
+-- unique (tagged) name.
 type NameMap = M.Map (Namespace, Name) (QualName VName)
 
 -- | Modules produces environment with this representation.

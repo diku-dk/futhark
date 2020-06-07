@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Futhark.Pass.ExtractKernels.DistributeNests
   ( MapLoop(..)
   , mapLoopStm
@@ -44,16 +45,17 @@ import Control.Monad.Trans.Maybe
 import Data.Maybe
 import Data.List (find, partition, tails)
 
-import Futhark.Representation.AST
-import qualified Futhark.Representation.SOACS as SOACS
-import Futhark.Representation.SOACS.SOAC hiding (HistOp, histDest)
-import Futhark.Representation.SOACS (SOACS)
-import Futhark.Representation.SOACS.Simplify (simpleSOACS)
-import Futhark.Representation.SegOp
+import Futhark.IR
+import qualified Futhark.IR.SOACS as SOACS
+import Futhark.IR.SOACS.SOAC hiding (HistOp, histDest)
+import Futhark.IR.SOACS (SOACS)
+import Futhark.IR.SOACS.Simplify (simpleSOACS)
+import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.CopyPropagate
+import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -64,10 +66,11 @@ import Futhark.Util.Log
 scopeForSOACs :: SameScope lore SOACS => Scope lore -> Scope SOACS
 scopeForSOACs = castScope
 
-data MapLoop = MapLoop SOACS.Pattern Certificates SubExp SOACS.Lambda [VName]
+data MapLoop = MapLoop SOACS.Pattern (StmAux ()) SubExp SOACS.Lambda [VName]
 
 mapLoopStm :: MapLoop -> Stm SOACS
-mapLoopStm (MapLoop pat cs w lam arrs) = Let pat (StmAux cs ()) $ Op $ Screma w (mapSOAC lam) arrs
+mapLoopStm (MapLoop pat aux w lam arrs) =
+  Let pat aux $ Op $ Screma w (mapSOAC lam) arrs
 
 data DistEnv lore m =
   DistEnv { distNest :: Nestings
@@ -139,10 +142,10 @@ instance MonadFreshNames m => MonadFreshNames (DistNestT lore m) where
   getNameSource = DistNestT $ lift getNameSource
   putNameSource = DistNestT . lift . putNameSource
 
-instance (Monad m, Attributes lore) => HasScope lore (DistNestT lore m) where
+instance (Monad m, ASTLore lore) => HasScope lore (DistNestT lore m) where
   askScope = asks distScope
 
-instance (Monad m, Attributes lore) => LocalScope lore (DistNestT lore m) where
+instance (Monad m, ASTLore lore) => LocalScope lore (DistNestT lore m) where
   localScope types = local $ \env ->
     env { distScope = types <> distScope env }
 
@@ -193,15 +196,15 @@ withStm stm = local $ \env ->
   where provided = namesFromList $ patternNames $ stmPattern stm
 
 mapNesting :: (Monad m, DistLore lore) =>
-              PatternT Type -> Certificates -> SubExp -> Lambda SOACS -> [VName]
+              PatternT Type -> StmAux () -> SubExp -> Lambda SOACS -> [VName]
            -> DistNestT lore m a
            -> DistNestT lore m a
-mapNesting pat cs w lam arrs = local $ \env ->
+mapNesting pat aux w lam arrs = local $ \env ->
   env { distNest = pushInnerNesting nest $ distNest env
       , distScope =  castScope (scopeOf lam) <> distScope env
       }
   where nest = Nesting mempty $
-               MapNesting pat cs w $
+               MapNesting pat aux w $
                zip (lambdaParams lam) arrs
 
 inNesting :: (Monad m, DistLore lore) =>
@@ -243,7 +246,7 @@ distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = return acc
 
-    onStms acc (Let pat (StmAux cs _) (Op (Stream w (Sequential accs) lam arrs)):stms) = do
+    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w (Sequential accs) lam arrs)):stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
@@ -271,13 +274,22 @@ maybeDistributeStm :: (MonadFreshNames m, DistLore lore) =>
                       Stm SOACS -> DistAcc lore
                    -> DistNestT lore m (DistAcc lore)
 
-maybeDistributeStm bnd@(Let pat _ (Op (Screma w form arrs))) acc
+maybeDistributeStm stm acc
+  | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
+      addStmToAcc stm acc
+
+maybeDistributeStm (Let pat aux (Op soac)) acc
+  | "sequential_outer" `inAttrs` stmAuxAttrs aux =
+      distributeMapBodyStms acc . fmap (certify (stmAuxCerts aux)) =<<
+      runBinder_ (FOT.transformSOAC pat soac)
+
+maybeDistributeStm stm@(Let pat _ (Op (Screma w form arrs))) acc
   | Just lam <- isMapSOAC form =
   -- Only distribute inside the map if we can distribute everything
   -- following the map.
   distributeIfPossible acc >>= \case
-    Nothing -> addStmToAcc bnd acc
-    Just acc' -> distribute =<< onInnerMap (MapLoop pat (stmCerts bnd) w lam arrs) acc'
+    Nothing -> addStmToAcc stm acc
+    Just acc' -> distribute =<< onInnerMap (MapLoop pat (stmAux stm) w lam arrs) acc'
 
 maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
   | null (patternContextElements pat), bodyContainsParallelism body =
@@ -321,15 +333,15 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
       _ ->
         addStmToAcc stm acc
 
-maybeDistributeStm (Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+maybeDistributeStm (Let pat aux (Op (Screma w form arrs))) acc
   | Just [Reduce comm lam nes] <- isReduceSOAC form,
     Just m <- irwim pat w comm lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
-      (_, bnds) <- runBinderT (certifying cs m) types
+      (_, bnds) <- runBinderT (auxing aux m) types
       distributeMapBodyStms acc bnds
 
 -- Parallelise segmented scatters.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) acc =
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Scatter w lam ivs as))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -343,7 +355,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Scatter w lam ivs as))) acc =
       addStmToAcc bnd acc
 
 -- Parallelise segmented Hist.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Hist w ops lam as))) acc =
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Hist w ops lam as))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -361,7 +373,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Hist w ops lam as))) acc =
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
   | Just (scans, map_lam) <- isScanomapSOAC form,
     Scan lam nes <- singleScan scans =
   distributeSingleStm acc bnd >>= \case
@@ -384,7 +396,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
   | Just (reds, map_lam) <- isRedomapSOAC form,
     Reduce comm lam nes <- singleReduce reds,
     isIdentityLambda map_lam || incrementalFlattening =
@@ -407,7 +419,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
     _ ->
       addStmToAcc bnd acc
 
-maybeDistributeStm (Let pat (StmAux cs _) (Op (Screma w form arrs))) acc
+maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
   | incrementalFlattening || isNothing (isRedomapSOAC form) = do
   -- This with-loop is too complicated for us to immediately do
   -- anything, so split it up and try again.
@@ -514,8 +526,8 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
       addStmToAcc stm acc
 
   where segmentedConcat nest =
-          isSegmentedOp nest [0] w mempty mempty [] (x:xs) $
-          \pat _ _ _ (x':xs') _ ->
+          isSegmentedOp nest [0] mempty mempty [] (x:xs) $
+          \pat _ _ _ (x':xs') ->
             let d' = d + length (snd nest) + 1
             in addStm $ Let pat aux $ BasicOp $ Concat d' x' xs' w
 
@@ -530,44 +542,25 @@ distributeSingleUnaryStm acc bnd f =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | res == map Var (patternNames $ stmPattern bnd),
-        (outer, inners) <- nest,
+        (outer, _) <- nest,
         [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
         boundInKernelNest nest `namesIntersection` freeIn bnd
-        == oneName (paramName arr_p) -> do
+        == oneName (paramName arr_p),
+        perfectlyMapped arr nest -> do
           addPostStms kernels
           let outerpat = loopNestingPattern $ fst nest
           localScope (typeEnvFromDistAcc acc') $ do
-            (arr', pre_stms) <- repeatMissing arr (outer:inners)
-            f_stms <- inScopeOf pre_stms $ f nest outerpat arr'
-            postStm $ pre_stms <> f_stms
+            postStm =<< f nest outerpat arr
             return acc'
     _ -> addStmToAcc bnd acc
-  where -- | For an imperfectly mapped array, repeat the missing
-        -- dimensions to make it look like it was in fact perfectly
-        -- mapped.
-        repeatMissing arr inners = do
-          arr_t <- lookupType arr
-          let shapes = determineRepeats arr arr_t inners
-          if all (==Shape []) shapes then return (arr, mempty)
-            else do
-            let (outer_shapes, inner_shape) = repeatShapes shapes arr_t
-                arr_t' = repeatDims outer_shapes inner_shape arr_t
-            arr' <- newVName $ baseString arr
-            return (arr', oneStm $ Let (Pattern [] [PatElem arr' arr_t']) (defAux ()) $
-                          BasicOp $ Repeat outer_shapes inner_shape arr)
 
-        determineRepeats arr arr_t nests
-          | (skipped, arr_nest:nests') <- break (hasInput arr) nests,
-            [(arr_p, _)] <- loopNestingParamsAndArrs arr_nest =
-              Shape (map loopNestingWidth skipped) :
-              determineRepeats (paramName arr_p) (rowType arr_t) nests'
+  where perfectlyMapped arr (outer, nest)
+          | [(p, arr')] <- loopNestingParamsAndArrs outer,
+            arr == arr' =
+              case nest of [] -> True
+                           x:xs -> perfectlyMapped (paramName p) (x, xs)
           | otherwise =
-              Shape (map loopNestingWidth nests) : replicate (arrayRank arr_t) (Shape [])
-
-        hasInput arr nest
-          | [(_, arr')] <- loopNestingParamsAndArrs nest, arr' == arr = True
-          | otherwise = False
-
+              False
 
 distribute :: (MonadFreshNames m, DistLore lore) => DistAcc lore -> DistNestT lore m (DistAcc lore)
 distribute acc =
@@ -633,8 +626,10 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- First, pretend that the scatter is also part of the nesting.  The
   -- KernelNest we produce here is technically not sensible, but it's
   -- good enough for flatKernel to work.
-  let nest' = pushInnerKernelNesting (scatter_pat, bodyResult $ lambdaBody lam)
-              (MapNesting scatter_pat cs scatter_w $ zip (lambdaParams lam) ivs) nest
+  let nesting =
+        MapNesting scatter_pat (StmAux cs mempty ()) scatter_w $ zip (lambdaParams lam) ivs
+      nest' =
+        pushInnerKernelNesting (scatter_pat, bodyResult $ lambdaBody lam) nesting nest
   (ispace, kernel_inps) <- flatKernel nest'
 
   let (as_ws, as_ns, as) = unzip3 dests
@@ -670,14 +665,14 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    letBind_ pat $ Op $ segOp k
+    letBind pat $ Op $ segOp k
   where findInput kernel_inps a =
           maybe bad return $ find ((==a) . kernelInputName) kernel_inps
         bad = error "Ill-typed nested scatter encountered."
 
         inPlaceReturn ispace (aw, inp, is_vs) =
           WriteReturns (init ws++[aw]) (kernelInputArray inp)
-          [ (map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
+          [ (map DimFix $ map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
           where (gtids,ws) = unzip ispace
 
 segmentedUpdateKernel :: (MonadFreshNames m, DistLore lore) =>
@@ -701,7 +696,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     v' <- certifying cs $
           letSubExp "v" $ BasicOp $ Index v $ map (DimFix . Var) slice_gtids
     let pexp = primExpFromSubExp int32
-    slice_is <- traverse (letSubExp "index" <=< toExp) $
+    slice_is <- traverse (toSubExp "index") $
                 fixSlice (map (fmap pexp) slice) $ map (pexp . Var) slice_gtids
 
     let write_is = map (Var . fst) base_ispace ++ slice_is
@@ -710,7 +705,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     arr_t <- lookupType arr'
     v_t <- subExpType v'
     return (v_t,
-            WriteReturns (arrayDims arr_t) arr' [(write_is, v')])
+            WriteReturns (arrayDims arr_t) arr' [(map DimFix write_is, v')])
 
   mk_lvl <- mkSegLevel
   (k, prestms) <- mapKernel mk_lvl ispace kernel_inps [res_t] $
@@ -722,7 +717,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    letBind_ pat $ Op $ segOp k
+    letBind pat $ Op $ segOp k
 
 segmentedHistKernel :: (MonadFreshNames m, DistLore lore) =>
                        KernelNest
@@ -824,11 +819,12 @@ segmentedScanomapKernel :: (MonadFreshNames m, DistLore lore) =>
                         -> DistNestT lore m (Maybe (Stms lore))
 segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
-  isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
-    \pat ispace inps nes' _ _ -> do
+  isSegmentedOp nest perm (freeIn lam) (freeIn map_lam) nes [] $
+    \pat ispace inps nes' _ -> do
+    let scan_op = SegBinOp Noncommutative lam nes' mempty
     lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
     addStms =<< traverse renameStm =<<
-      segScan lvl pat segment_size lam nes' map_lam arrs ispace inps
+      segScan lvl pat segment_size [scan_op] map_lam arrs ispace inps
 
 regularSegmentedRedomapKernel :: (MonadFreshNames m, DistLore lore) =>
                                  KernelNest
@@ -839,9 +835,9 @@ regularSegmentedRedomapKernel :: (MonadFreshNames m, DistLore lore) =>
                               -> DistNestT lore m (Maybe (Stms lore))
 regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
-  isSegmentedOp nest perm segment_size (freeIn lam) (freeIn map_lam) nes arrs $
-    \pat ispace inps nes' _ _ -> do
-      let red_op = SegRedOp comm lam nes' mempty
+  isSegmentedOp nest perm (freeIn lam) (freeIn map_lam) nes [] $
+    \pat ispace inps nes' _ -> do
+      let red_op = SegBinOp comm lam nes' mempty
       lvl <- mk_lvl (segment_size : map snd ispace) "segred" $ NoRecommendation SegNoVirt
       addStms =<< traverse renameStm =<<
         segRed lvl pat segment_size [red_op] map_lam arrs ispace inps
@@ -849,16 +845,15 @@ regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
 isSegmentedOp :: (MonadFreshNames m, DistLore lore) =>
                  KernelNest
               -> [Int]
-              -> SubExp
               -> Names -> Names
               -> [SubExp] -> [VName]
               -> (PatternT Type
                   -> [(VName, SubExp)]
                   -> [KernelInput]
-                  -> [SubExp] -> [VName]  -> [VName]
+                  -> [SubExp] -> [VName]
                   -> BinderT lore m ())
               -> DistNestT lore m (Maybe (Stms lore))
-isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
+isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
   -- We must verify that array inputs to the operation are inputs to
   -- the outermost loop nesting or free in the loop nest.  Nothing
   -- free in the op may be bound by the nest.  Furthermore, the
@@ -885,8 +880,6 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
           Just inp
             | kernelInputIndices inp == map Var indices ->
                 return $ return $ kernelInputArray inp
-            | not (kernelInputArray inp `nameIn` bound_by_nest) ->
-                return $ replicateMissing ispace inp
           Nothing | not (arr `nameIn` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
@@ -895,7 +888,7 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
                       letExp (baseString arr ++ "_repd")
                       (BasicOp $ Replicate (Shape $ map snd ispace) $ Var arr)
           _ ->
-            fail "Input not free or outermost."
+            fail "Input not free, perfectly mapped, or outermost."
 
   nes' <- mapM prepareNe nes
 
@@ -903,42 +896,12 @@ isSegmentedOp nest perm segment_size free_in_op _free_in_fold_op nes arrs m = ru
   scope <- lift askScope
 
   lift $ lift $ flip runBinderT_ scope $ do
-    -- We must make sure all inputs are of size
-    -- segment_size*nesting_size.
-    total_num_elements <-
-      letSubExp "total_num_elements" =<<
-      foldBinOp (Mul Int32 OverflowUndef) segment_size (map snd ispace)
-
-    let flatten arr = do
-          arr_shape <- arrayShape <$> lookupType arr
-          -- CHECKME: is the length the right thing here?  We want to
-          -- reproduce the parameter type.
-          let reshape = reshapeOuter [DimNew total_num_elements]
-                        (2+length (snd nest)) arr_shape
-          letExp (baseString arr ++ "_flat") $
-            BasicOp $ Reshape reshape arr
-
     nested_arrs <- sequence mk_arrs
-    arrs' <- mapM flatten nested_arrs
 
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
 
-    m pat ispace kernel_inps nes' nested_arrs arrs'
-
-  where replicateMissing ispace inp = do
-          t <- lookupType $ kernelInputArray inp
-          let inp_is = kernelInputIndices inp
-              shapes = determineRepeats ispace inp_is
-              (outer_shapes, inner_shape) = repeatShapes shapes t
-          letExp "repeated" $ BasicOp $
-            Repeat outer_shapes inner_shape $ kernelInputArray inp
-
-        determineRepeats ispace (i:is)
-          | (skipped_ispace, ispace') <- span ((/=i) . Var . fst) ispace =
-              Shape (map snd skipped_ispace) : determineRepeats (drop 1 ispace') is
-        determineRepeats ispace _ =
-          [Shape $ map snd ispace]
+    m pat ispace kernel_inps nes' nested_arrs
 
 permutationAndMissing :: PatternT Type -> [SubExp] -> Maybe ([Int], [PatElemT Type])
 permutationAndMissing pat res = do
@@ -969,7 +932,7 @@ expandKernelNest pes (outer_nest, inner_nests) = do
         expandPatElemWith dims pe = do
           name <- newVName $ baseString $ patElemName pe
           return pe { patElemName = name
-                    , patElemAttr = patElemType pe `arrayOfShape` Shape dims
+                    , patElemDec = patElemType pe `arrayOfShape` Shape dims
                     }
 
 kernelOrNot :: (MonadFreshNames m, DistLore lore) =>
@@ -986,10 +949,10 @@ kernelOrNot cs _ _ kernels acc' (Just bnds) = do
 distributeMap :: (MonadFreshNames m, DistLore lore) =>
                  MapLoop -> DistAcc lore
               -> DistNestT lore m (DistAcc lore)
-distributeMap (MapLoop pat cs w lam arrs) acc =
+distributeMap (MapLoop pat aux w lam arrs) acc =
   distribute =<<
   leavingNesting =<<
-  mapNesting pat cs w lam arrs
+  mapNesting pat aux w lam arrs
   (distribute =<< distributeMapBodyStms acc' lam_bnds)
 
   where acc' = DistAcc { distTargets = pushInnerTarget

@@ -1,10 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Futhark.Internalise.AccurateSizes
-  ( shapeBody
-  , argShapes
+  ( argShapes
   , ensureResultShape
   , ensureResultExtShape
-  , ensureResultExtShapeNoCtx
   , ensureExtShape
   , ensureShape
   , ensureArgShapes
@@ -12,21 +10,11 @@ module Futhark.Internalise.AccurateSizes
   where
 
 import Control.Monad
-import Data.Loc
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Futhark.Construct
-import Futhark.Representation.AST
-
-shapeBody :: (HasScope lore m, MonadFreshNames m, BinderOps lore, Bindable lore) =>
-             [VName] -> [Type] -> Body lore
-          -> m (Body lore)
-shapeBody shapenames ts body =
-  runBodyBinder $ do
-    ses <- bodyBind body
-    sets <- mapM subExpType ses
-    resultBodyM $ argShapes shapenames ts sets
+import Futhark.IR
 
 argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
 argShapes shapes valts valargts =

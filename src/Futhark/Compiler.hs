@@ -1,5 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Safe #-}
+{-# LANGUAGE Strict #-}
+-- | High-level API for invoking the Futhark compiler.
 module Futhark.Compiler
        (
          runPipelineOnProgram
@@ -27,13 +30,17 @@ import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Internalise
 import Futhark.Pipeline
 import Futhark.MonadFreshNames
-import Futhark.Representation.AST
-import qualified Futhark.Representation.SOACS as I
+import Futhark.IR
+import qualified Futhark.IR.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Compiler.Program
 import Futhark.Util.Log
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (prettyText, ppr)
 
+-- | The compiler configuration.  This only contains options related
+-- to core compiler functionality, such as reading the initial program
+-- and running passes.  Options related to code generation are handled
+-- elsewhere.
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: (Verbosity, Maybe FilePath)
                      , futharkWarn :: Bool -- ^ Warn if True.
@@ -41,6 +48,7 @@ data FutharkConfig = FutharkConfig
                      , futharkSafe :: Bool -- ^ If True, ignore @unsafe@.
                      }
 
+-- | The default compiler configuration.
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = (NotVerbose, Nothing)
                                  , futharkWarn = True
@@ -48,6 +56,9 @@ newFutharkConfig = FutharkConfig { futharkVerbose = (NotVerbose, Nothing)
                                  , futharkSafe = False
                                  }
 
+-- | Print a compiler error to stdout.  The 'FutharkConfig' controls
+-- to which degree auxiliary information (e.g. the failing program) is
+-- also printed.
 dumpError :: FutharkConfig -> CompilerError -> IO ()
 dumpError config err =
   case err of
@@ -69,6 +80,8 @@ dumpError config err =
             maybe (T.hPutStr stderr) T.writeFile
             (snd (futharkVerbose config)) $ info <> "\n"
 
+-- | Read a program from the given 'FilePath', run the given
+-- 'Pipeline', and finish up with the given 'Action'.
 runCompilerOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS lore
                      -> Action lore
@@ -90,6 +103,8 @@ runCompilerOnProgram config pipeline action file = do
           when ((>NotVerbose) . fst $ futharkVerbose config) $
             logMsg ("Done." :: String)
 
+-- | Read a program from the given 'FilePath', run the given
+-- 'Pipeline', and return it.
 runPipelineOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS tolore
                      -> FilePath
@@ -111,7 +126,7 @@ runPipelineOnProgram config pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Type-checking internalised program" :: String)
   typeCheckInternalProgram int_prog
-  runPasses pipeline pipeline_config int_prog
+  runPipeline pipeline pipeline_config int_prog
   where pipeline_config =
           PipelineConfig { pipelineVerbose = fst (futharkVerbose config) > NotVerbose
                          , pipelineValidate = True
@@ -120,7 +135,7 @@ runPipelineOnProgram config pipeline file = do
 typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()
 typeCheckInternalProgram prog =
   case I.checkProg prog' of
-    Left err -> internalErrorS ("After internalisation:\n" ++ show err) (Just prog')
+    Left err -> internalErrorS ("After internalisation:\n" ++ show err) (ppr prog')
     Right () -> return ()
   where prog' = Alias.aliasAnalysis prog
 

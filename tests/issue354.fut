@@ -2,7 +2,7 @@
 -- structure { Screma 6 }
 
 let linerp2D (image: [][]f32) (p: [2]i32): f32 =
-  unsafe
+  #[unsafe]
   let a = p[0]
   let b = p[1]
   in image[a,b]

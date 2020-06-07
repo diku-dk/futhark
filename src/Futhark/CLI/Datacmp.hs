@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+-- | @futhark datacmp@
 module Futhark.CLI.Datacmp (main) where
 
 import qualified Data.ByteString.Lazy.Char8 as BS
@@ -7,6 +8,7 @@ import System.Exit
 import Futhark.Test.Values
 import Futhark.Util.Options
 
+-- | Run @futhark datacmp@
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "<file> <file>" f
   where f [file_a, file_b] () = Just $ do

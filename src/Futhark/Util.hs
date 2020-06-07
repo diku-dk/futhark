@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 -- | Non-Futhark-specific utilities.  If you find yourself writing
 -- general functions on generic data structures, consider putting them
 -- here.
@@ -21,6 +22,7 @@ module Futhark.Util
         focusNth,
         unixEnvironment,
         isEnvVarSet,
+        fancyTerminal,
         runProgramWithExitCode,
         directoryContents,
         roundFloat, ceilFloat, floorFloat,
@@ -49,6 +51,7 @@ import Data.List (genericDrop, genericSplitAt)
 import Data.Either
 import Data.Maybe
 import System.Environment
+import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Unsafe
 import qualified System.Directory.Tree as Dir
 import System.Process.ByteString
@@ -56,7 +59,7 @@ import System.Exit
 import qualified System.FilePath.Posix as Posix
 import qualified System.FilePath as Native
 
--- | Like 'mapAccumL', but monadic.
+-- | Like 'Data.Traversable.mapAccumL', but monadic.
 mapAccumLM :: Monad m =>
               (acc -> x -> m (acc, y)) -> acc -> [x] -> m (acc, [y])
 mapAccumLM _ acc [] = return (acc, [])
@@ -133,8 +136,8 @@ focusNth i xs
 unixEnvironment :: [(String,String)]
 unixEnvironment = unsafePerformIO getEnvironment
 
--- Is an environment variable set to 0 or 1?  If 0, return False; if 1, True;
--- otherwise the default value.
+-- | Is an environment variable set to 0 or 1?  If 0, return False; if
+-- 1, True; otherwise the default value.
 isEnvVarSet :: String -> Bool -> Bool
 isEnvVarSet name default_val = fromMaybe default_val $ do
   val <- lookup name unixEnvironment
@@ -142,6 +145,15 @@ isEnvVarSet name default_val = fromMaybe default_val $ do
     "0" -> return False
     "1" -> return True
     _ -> Nothing
+
+{-# NOINLINE fancyTerminal #-}
+-- | Are we running in a terminal capable of fancy commands and
+-- visualisation?
+fancyTerminal :: Bool
+fancyTerminal = unsafePerformIO $ do
+  isTTY <- hIsTerminalDevice stdout
+  isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
+  return $ isTTY && not isDumb
 
 -- | Like 'readProcessWithExitCode', but also wraps exceptions when
 -- the indicated binary cannot be launched, or some other exception is
@@ -152,8 +164,8 @@ runProgramWithExitCode exe args inp =
   (Right . postprocess <$> readProcessWithExitCode exe args inp)
   `catch` \e -> return (Left e)
   where decode = T.unpack . T.decodeUtf8With T.lenientDecode
-        postprocess (err, stdout, stderr) =
-          (err, decode stdout, decode stderr)
+        postprocess (code, out, err) =
+          (code, decode out, decode err)
 
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]
@@ -238,6 +250,8 @@ fork f x = do cell <- newEmptyMVar
                                  putMVar cell result
               return cell
 
+-- | Run various 'IO' actions concurrently, possibly with a bound on
+-- the number of threads.
 pmapIO :: Maybe Int -> (a -> IO b) -> [a] -> IO [b]
 pmapIO concurrency f elems = go elems []
   where
@@ -260,10 +274,15 @@ pmapIO concurrency f elems = go elems []
 --
 -- (c) The University of Glasgow, 1997-2006
 
+-- | As the user typed it.
+type UserString = String
 
-type UserString = String        -- As the user typed it
-type EncodedString = String     -- Encoded form
+-- | Encoded form.
+type EncodedString = String
 
+-- | Z-encode a string using a slightly simplified variant of GHC
+-- Z-encoding.  The encoded string is a valid identifier in most
+-- programming languages.
 zEncodeString :: UserString -> EncodedString
 zEncodeString "" = ""
 zEncodeString (c:cs) = encodeDigitChar c ++ concatMap encodeChar cs

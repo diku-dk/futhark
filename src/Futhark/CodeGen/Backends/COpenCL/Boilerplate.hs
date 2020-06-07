@@ -5,11 +5,11 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   , profilingEvent
   , copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev
 
-  , kernelRuntime
-  , kernelRuns
-
   , commonOptions
   , failureSwitch
+  , costCentreReport
+  , kernelRuntime
+  , kernelRuns
   ) where
 
 import Data.FileEmbed
@@ -41,7 +41,6 @@ failureSwitch failures =
         zipWith onFailure [(0::Int)..] failures
   in [C.cstm|switch (failure_idx) { $stms:failure_cases }|]
 
-
 copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
 copyDevToDev = "copy_dev_to_dev"
 copyDevToHost = "copy_dev_to_host"
@@ -56,15 +55,17 @@ profilingEvent name =
                              &ctx->$id:(kernelRuns name),
                              &ctx->$id:(kernelRuntime name))|]
 
+-- | Called after most code has been generated to generate the bulk of
+-- the boilerplate.
 generateBoilerplate :: String -> String -> [String] -> M.Map KernelName Safety -> [PrimType]
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types sizes failures = do
+generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes failures = do
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls profiling_centres kernels opencl_code opencl_prelude
+        openClDecls cost_centres kernels opencl_code opencl_prelude
 
   mapM_ GC.earlyDecl top_decls
 
@@ -345,6 +346,9 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                      // Clear the free list of any deallocations that occurred while initialising constants.
                      OPENCL_SUCCEED_OR_RETURN(opencl_free_all(&ctx->opencl));
 
+                     // The program will be properly freed after all the kernels have also been freed.
+                     OPENCL_SUCCEED_OR_RETURN(clReleaseProgram(prog));
+
                      return futhark_context_sync(ctx);
   }|]
 
@@ -390,12 +394,12 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                                  free_constants(ctx);
                                  free_lock(&ctx->lock);
-                                 opencl_tally_profiling_records(&ctx->opencl);
-                                 free(ctx->opencl.profiling_records);
+                                 $stms:(map releaseKernel (M.toList kernels))
+                                 teardown_opencl(&ctx->opencl);
                                  free(ctx);
                                }|])
 
-  GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                  // Check for any delayed error.
@@ -428,27 +432,7 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                  return 0;
                }|])
 
-  GC.publicDef_ "context_get_error" GC.InitDecl $ \s ->
-    ([C.cedecl|char* $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|char* $id:s(struct $id:ctx* ctx) {
-                         char* error = ctx->error;
-                         ctx->error = NULL;
-                         return error;
-                       }|])
-
-  GC.publicDef_ "context_pause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 ctx->profiling_paused = 1;
-               }|])
-
-  GC.publicDef_ "context_unpause_profiling" GC.InitDecl $ \s ->
-    ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|void $id:s(struct $id:ctx* ctx) {
-                 ctx->profiling_paused = 0;
-               }|])
-
-  GC.publicDef_ "context_clear_caches" GC.InitDecl $ \s ->
+  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
     ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                          ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
@@ -462,11 +446,11 @@ generateBoilerplate opencl_code opencl_prelude profiling_centres kernels types s
                }|])
 
   GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
-  mapM_ GC.profileReport $ openClReport profiling_centres
+  mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
 
 openClDecls :: [String] -> M.Map KernelName Safety -> String -> String
             -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls profiling_centres kernels opencl_program opencl_prelude =
+openClDecls cost_centres kernels opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where opencl_program_fragments =
           -- Some C compilers limit the size of literal strings, so
@@ -483,7 +467,7 @@ openClDecls profiling_centres kernels opencl_program opencl_prelude =
           [ [ [C.csdecl|typename int64_t $id:(kernelRuntime name);|]
             , [C.csdecl|int $id:(kernelRuns name);|]
             ]
-          | name <- profiling_centres ]
+          | name <- cost_centres ++ M.keys kernels ]
 
         ctx_inits =
           [ [C.cstm|ctx->total_runs = 0;|],
@@ -492,7 +476,7 @@ openClDecls profiling_centres kernels opencl_program opencl_prelude =
           [ [ [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
             , [C.cstm|ctx->$id:(kernelRuns name) = 0;|]
             ]
-          | name <- profiling_centres ]
+          | name <- cost_centres ++ M.keys kernels ]
 
         openCL_load = [
           [C.cedecl|
@@ -532,14 +516,17 @@ loadKernel (name, safety) = [C.cstm|{
                      SafetyCheap -> [set_global_failure]
                      SafetyFull -> [set_global_failure, set_global_failure_args]
 
+releaseKernel :: (KernelName, Safety) -> C.Stm
+releaseKernel (name, _) = [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseKernel(ctx->$id:name));|]
+
 kernelRuntime :: String -> String
 kernelRuntime = (++"_total_runtime")
 
 kernelRuns :: String -> String
 kernelRuns = (++"_runs")
 
-openClReport :: [String] -> [C.BlockItem]
-openClReport names = report_kernels ++ [report_total]
+costCentreReport :: [String] -> [C.BlockItem]
+costCentreReport names = report_kernels ++ [report_total]
   where longest_name = foldl max 0 $ map length names
         report_kernels = concatMap reportKernel names
         format_string name =
@@ -550,20 +537,18 @@ openClReport names = report_kernels ++ [report_total]
           let runs = kernelRuns name
               total_runtime = kernelRuntime name
           in [[C.citem|
-               fprintf(stderr,
-                       $string:(format_string name),
-                       ctx->$id:runs,
-                       (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
-                       (long int) ctx->$id:total_runtime);
+               str_builder(&builder,
+                           $string:(format_string name),
+                           ctx->$id:runs,
+                           (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
+                           (long int) ctx->$id:total_runtime);
               |],
               [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
               [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
         report_total = [C.citem|
-                          if (ctx->profiling) {
-                            fprintf(stderr, "%d operations with cumulative runtime: %6ldus\n",
-                                    ctx->total_runs, ctx->total_runtime);
-                          }
+                          str_builder(&builder, "%d operations with cumulative runtime: %6ldus\n",
+                                      ctx->total_runs, ctx->total_runtime);
                         |]
 
 sizeHeuristicsCode :: SizeHeuristic -> C.Stm

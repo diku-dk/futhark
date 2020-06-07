@@ -1,7 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
+-- | An interpreter operating on type-checked source Futhark terms.
+-- Relatively slow.
 module Language.Futhark.Interpreter
   ( Ctx(..)
   , Env
@@ -33,16 +34,16 @@ import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.List.NonEmpty as NE
 import Data.Monoid hiding (Sum)
-import Data.Loc
 
 import Language.Futhark hiding (Value, matchDims)
 import qualified Language.Futhark as F
-import Futhark.Representation.Primitive (intValue, floatValue)
-import qualified Futhark.Representation.Primitive as P
+import Futhark.IR.Primitive (intValue, floatValue)
+import qualified Futhark.IR.Primitive as P
 import qualified Language.Futhark.Semantic as T
 
 import Futhark.Util.Pretty hiding (apply, bool)
 import Futhark.Util (chunk, splitFromEnd, maybeHead)
+import Futhark.Util.Loc
 
 import Prelude hiding (mod, break)
 
@@ -332,6 +333,7 @@ data TermBinding = TermValue (Maybe T.BoundV) Value
 data Module = Module Env
             | ModuleFun (Module -> EvalM Module)
 
+-- | The actual type- and value environment.
 data Env = Env { envTerm :: M.Map VName TermBinding
                , envType :: M.Map VName T.TypeBinding
                , envShapes :: M.Map VName ValueShape
@@ -346,6 +348,9 @@ instance Semigroup Env where
   Env vm1 tm1 sm1 <> Env vm2 tm2 sm2 =
     Env (vm1 <> vm2) (tm1 <> tm2) (sm1 <> sm2)
 
+-- | An error occurred during interpretation due to an error in the
+-- user program.  Actual interpreter errors will be signaled with an
+-- IO exception ('error').
 newtype InterpreterError = InterpreterError String
 
 valEnv :: M.Map VName (Maybe T.BoundV, Value) -> Env
@@ -386,7 +391,7 @@ trace v = do
   -- actual call to 'implicits.trace' is going to be in the trace
   -- function in the prelude, which is not interesting.
   top <- fromMaybe noLoc . maybeHead . drop 1 <$> stacktrace
-  liftF $ ExtOpTrace top (pretty v) ()
+  liftF $ ExtOpTrace top (prettyOneLine v) ()
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -964,8 +969,6 @@ eval env (Project f e _ _) = do
     ValueRecord fs | Just v' <- M.lookup f fs -> return v'
     _ -> error "Value does not have expected field."
 
-eval env (Unsafe e _) = eval env e
-
 eval env (Assert what e (Info s) loc) = do
   cond <- asBool <$> eval env what
   unless cond $ bad loc env s
@@ -986,6 +989,8 @@ eval env (Match e cs (Info ret, Info retext) _) = do
           case c' of
             Just v' -> return v'
             Nothing -> match v cs'
+
+eval env (Attr _ e _) = eval env e
 
 evalCase :: Value -> Env -> CaseBase Info VName
          -> EvalM (Maybe Value)
@@ -1090,6 +1095,9 @@ evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
         wrapInLambda [p] = ModLambda p ret body loc
         wrapInLambda (p:ps') = ModLambda p Nothing (wrapInLambda ps') loc
 
+-- | The interpreter context.  All evaluation takes place with respect
+-- to a context, and it can be extended with more definitions, which
+-- is how the REPL works.
 data Ctx = Ctx { ctxEnv :: Env
                , ctxImports :: M.Map FilePath Env
                }

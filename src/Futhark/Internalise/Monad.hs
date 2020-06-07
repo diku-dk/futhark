@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
@@ -45,7 +46,7 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.SOACS
+import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util (takeLast)
@@ -69,6 +70,7 @@ data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
   , envSafe :: Bool
+  , envAttrs :: Attrs
   }
 
 data InternaliseState = InternaliseState {
@@ -107,13 +109,12 @@ instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) wh
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
-  mkExpAttrM pat e = InternaliseM $ mkExpAttrM pat e
+  mkExpDecM pat e = InternaliseM $ mkExpDecM pat e
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
   addStms = InternaliseM . addStms
   collectStms (InternaliseM m) = InternaliseM $ collectStms m
-  certifying cs (InternaliseM m) = InternaliseM $ certifying cs m
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> InternaliseM ()
@@ -127,6 +128,7 @@ runInternaliseM safe (InternaliseM m) =
                    envSubsts = mempty
                  , envDoBoundsChecks = True
                  , envSafe = safe
+                 , envAttrs = mempty
                  }
         newState src =
           InternaliseState { stateNameSource = src
@@ -226,4 +228,4 @@ withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
 withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }
 
 lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
-lookupDim name = M.lookup name <$> asks typeEnvDims
+lookupDim name = asks $ M.lookup name . typeEnvDims

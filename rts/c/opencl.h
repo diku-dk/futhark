@@ -125,10 +125,10 @@ struct opencl_device_option {
   char *device_name;
 };
 
-/* This function must be defined by the user.  It is invoked by
-   setup_opencl() after the platform and device has been found, but
-   before the program is loaded.  Its intended use is to tune
-   constants based on the selected platform and device. */
+// This function must be defined by the user.  It is invoked by
+// setup_opencl() after the platform and device has been found, but
+// before the program is loaded.  Its intended use is to tune
+// constants based on the selected platform and device.
 static void post_opencl_setup(struct opencl_context*, struct opencl_device_option*);
 
 static char *strclone(const char *str) {
@@ -140,30 +140,6 @@ static char *strclone(const char *str) {
 
   memcpy(copy, str, size);
   return copy;
-}
-
-// Read a file into a NUL-terminated string; returns NULL on error.
-static char* slurp_file(const char *filename, size_t *size) {
-  char *s;
-  FILE *f = fopen(filename, "rb"); // To avoid Windows messing with linebreaks.
-  if (f == NULL) return NULL;
-  fseek(f, 0, SEEK_END);
-  size_t src_size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  s = (char*) malloc(src_size + 1);
-  if (fread(s, 1, src_size, f) != src_size) {
-    free(s);
-    s = NULL;
-  } else {
-    s[src_size] = '\0';
-  }
-  fclose(f);
-
-  if (size) {
-    *size = src_size;
-  }
-
-  return s;
 }
 
 static const char* opencl_error_string(cl_int err)
@@ -491,8 +467,8 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
   return build_status;
 }
 
-/* Fields in a bitmask indicating which types we must be sure are
-   available. */
+// Fields in a bitmask indicating which types we must be sure are
+// available.
 enum opencl_required_type { OPENCL_F64 = 1 };
 
 // We take as input several strings representing the program, because
@@ -652,10 +628,8 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       if (ctx->cfg.debugging) {
         fprintf(stderr, "Dumping OpenCL source to %s...\n", ctx->cfg.dump_program_to);
       }
-      FILE *f = fopen(ctx->cfg.dump_program_to, "w");
-      assert(f != NULL);
-      fputs(fut_opencl_src, f);
-      fclose(f);
+
+      dump_file(ctx->cfg.dump_program_to, fut_opencl_src, strlen(fut_opencl_src));
     }
 
     if (ctx->cfg.debugging) {
@@ -733,10 +707,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     OPENCL_SUCCEED_FATAL(clGetProgramInfo(prog, CL_PROGRAM_BINARIES,
                                           sizeof(unsigned char*), binaries, NULL));
 
-    FILE *f = fopen(ctx->cfg.dump_binary_to, "w");
-    assert(f != NULL);
-    fwrite(binary, sizeof(char), binary_size, f);
-    fclose(f);
+    dump_file(ctx->cfg.dump_binary_to, binary, binary_size);
   }
 
   return prog;
@@ -867,7 +838,7 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
 
   size_t size;
 
-  if (free_list_find(&ctx->free_list, tag, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, tag, min_size, &size, mem_out) == 0) {
     // Successfully found a free block.  Is it big enough?
     //
     // FIXME: we might also want to check whether the block is *too
@@ -926,7 +897,7 @@ static int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) 
   cl_mem existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->free_list, tag, -1, &size, &existing_mem) == 0) {
     int error = clReleaseMemObject(existing_mem);
     if (error != CL_SUCCESS) {
       return error;
@@ -953,6 +924,16 @@ static int opencl_free_all(struct opencl_context *ctx) {
   }
 
   return CL_SUCCESS;
+}
+
+// Free everything that belongs to 'ctx', but do not free 'ctx'
+// itself.
+static void teardown_opencl(struct opencl_context *ctx) {
+  (void)opencl_tally_profiling_records(ctx);
+  free(ctx->profiling_records);
+  (void)opencl_free_all(ctx);
+  (void)clReleaseCommandQueue(ctx->queue);
+  (void)clReleaseContext(ctx->ctx);
 }
 
 // End of opencl.h.

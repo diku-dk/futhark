@@ -19,8 +19,8 @@ let main(m: i32): [][]i32 =
     let ps = replicate 10 0
     let (_,_,ps) = loop (i,c,ps) = (2,0,ps) while c < 10 do
       if kprime(i,k) then
-        unsafe let ps[c] = i
-               in (i+1, c+1, ps)
+        let ps[c] = i
+        in (i+1, c+1, ps)
       else (i+1, c, ps)
     in ps
   in map f (1...m)

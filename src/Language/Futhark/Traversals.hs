@@ -51,6 +51,7 @@ identityMapper = ASTMapper { mapOnExp = return
                            , mapOnPatternType = return
                            }
 
+-- | The class of things that we can map an 'ASTMapper' across.
 class ASTMappable x where
   -- | Map a monadic action across the immediate children of an
   -- object.  Importantly, the 'astMap' action is not invoked for
@@ -131,8 +132,6 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Index arr idxexps (t, ext) loc) =
     Index <$> mapOnExp tv arr <*> mapM (astMap tv) idxexps <*>
     ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext) <*> pure loc
-  astMap tv (Unsafe e loc) =
-    Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Assert e1 e2 desc loc) =
     Assert <$> mapOnExp tv e1 <*> mapOnExp tv e2 <*> pure desc <*> pure loc
   astMap tv (Lambda params body ret t loc) =
@@ -170,6 +169,8 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Match e cases (t, ext) loc) =
     Match <$> mapOnExp tv e <*> astMap tv cases
           <*> ((,) <$> traverse (mapOnPatternType tv) t <*> pure ext) <*> pure loc
+  astMap tv (Attr attr e loc) =
+    Attr attr <$> mapOnExp tv e <*> pure loc
 
 instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
@@ -400,7 +401,6 @@ bareExp (RecordUpdate src fs v _ loc) =
 bareExp (Project field e _ loc) = Project field (bareExp e) NoInfo loc
 bareExp (Index arr slice _ loc) =
   Index (bareExp arr) (map bareDimIndex slice) (NoInfo, NoInfo) loc
-bareExp (Unsafe e loc) = Unsafe (bareExp e) loc
 bareExp (Assert e1 e2 _ loc) = Assert (bareExp e1) (bareExp e2) NoInfo loc
 bareExp (Lambda params body ret _ loc) =
   Lambda (map barePat params) (bareExp body) ret NoInfo loc
@@ -419,3 +419,5 @@ bareExp (Constr name es _ loc) =
   Constr name (map bareExp es) NoInfo loc
 bareExp (Match e cases _ loc) =
   Match (bareExp e) (fmap bareCase cases) (NoInfo,NoInfo) loc
+bareExp (Attr attr e loc) =
+  Attr attr (bareExp e) loc

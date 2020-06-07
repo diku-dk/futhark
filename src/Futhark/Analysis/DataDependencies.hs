@@ -9,7 +9,7 @@ module Futhark.Analysis.DataDependencies
 
 import qualified Data.Map.Strict as M
 
-import Futhark.Representation.AST
+import Futhark.IR
 
 -- | A mapping from a variable name @v@, to those variables on which
 -- the value of @v@ is dependent.  The intuition is that we could
@@ -18,10 +18,10 @@ import Futhark.Representation.AST
 type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: Attributes lore => Body lore -> Dependencies
+dataDependencies :: ASTLore lore => Body lore -> Dependencies
 dataDependencies = dataDependencies' M.empty
 
-dataDependencies' :: Attributes lore =>
+dataDependencies' :: ASTLore lore =>
                      Dependencies -> Body lore -> Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where grow deps (Let pat _ (If c tb fb _)) =
@@ -50,7 +50,13 @@ depsOf deps (Var v)   = depsOfVar deps v
 depsOfVar :: Dependencies -> VName -> Names
 depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 
-findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
+-- | @findNecessaryForReturned p merge deps@ computes which of the
+-- loop parameters (@merge@) are necessary for the result of the loop,
+-- where @p@ given a loop parameter indicates whether the final value
+-- of that parameter is live after the loop.  @deps@ is the data
+-- dependencies of the loop body.  This is computed by straightforward
+-- fixpoint iteration.
+findNecessaryForReturned :: (Param dec -> Bool) -> [(Param dec, SubExp)]
                          -> M.Map VName Names
                          -> Names
 findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =

@@ -32,7 +32,7 @@ import           Futhark.Util.Pretty
 import           Futhark.Util
 
 import           Language.Futhark.Syntax
-import           Language.Futhark.Attributes
+import           Language.Futhark.Prop
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
@@ -59,12 +59,13 @@ instance IsName VName where
 instance IsName Name where
   pprName = ppr
 
+-- | Prettyprint a name to a string.
 prettyName :: IsName v => v -> String
 prettyName = prettyDoc 80 . pprName
 
 -- | Class for type constructors that represent annotations.  Used in
 -- the prettyprinter to either print the original AST, or the computed
--- attribute.
+-- decoration.
 class Annot f where
   -- | Extract value, if any.
   unAnnot :: f a -> Maybe a
@@ -272,6 +273,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
                         LetWith{}   -> True
                         If{}        -> True
                         Match{}     -> True
+                        Attr{}      -> True
                         ArrayLit{}  -> False
                         _           -> hasArrayLit e
   pprPrec _ (LetFun fname (tparams, params, retdecl, rettype, e) body _ _) =
@@ -301,7 +303,6 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "=" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
   pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
   pprPrec p (Lambda params body rettype _ _) =
     parensIf (p /= -1) $
@@ -325,6 +326,11 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     indent 2 (ppr loopbody)
   pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
   pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> (stack . map ppr) (NE.toList cs)
+  pprPrec _ (Attr attr e _) =
+    text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e
+
+instance Pretty AttrInfo where
+  ppr (AttrInfo attr) = ppr attr
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e

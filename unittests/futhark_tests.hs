@@ -2,13 +2,11 @@ module Main (main) where
 
 import qualified Language.Futhark.SyntaxTests
 import qualified Futhark.BenchTests
-import qualified Futhark.Representation.AST.Syntax.CoreTests
-import qualified Futhark.Representation.AST.AttributesTests
-import qualified Futhark.Representation.Mem.IxFunTests
-import qualified Futhark.Optimise.AlgSimplifyTests
+import qualified Futhark.IR.Syntax.CoreTests
+import qualified Futhark.IR.PropTests
+import qualified Futhark.IR.Mem.IxFunTests
 import qualified Futhark.Pkg.SolveTests
-import qualified Futhark.Representation.PrimitiveTests
-import qualified Futhark.Analysis.ScalExpTests
+import qualified Futhark.IR.PrimitiveTests
 
 import Test.Tasty
 
@@ -17,13 +15,11 @@ allTests =
   testGroup ""
   [ Language.Futhark.SyntaxTests.tests
   , Futhark.BenchTests.tests
-  , Futhark.Representation.AST.AttributesTests.tests
-  , Futhark.Optimise.AlgSimplifyTests.tests
-  , Futhark.Representation.AST.Syntax.CoreTests.tests
+  , Futhark.IR.PropTests.tests
+  , Futhark.IR.Syntax.CoreTests.tests
   , Futhark.Pkg.SolveTests.tests
-  , Futhark.Representation.Mem.IxFunTests.tests
-  , Futhark.Representation.PrimitiveTests.tests
-  , Futhark.Analysis.ScalExpTests.tests
+  , Futhark.IR.Mem.IxFunTests.tests
+  , Futhark.IR.PrimitiveTests.tests
   ]
 
 main :: IO ()

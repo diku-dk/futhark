@@ -1,8 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
--- | Randomly generate Futhark input files containing values of a
--- specified type and shape.
+-- | @futhark dataset@
 module Futhark.CLI.Dataset (main) where
 
 import Control.Monad
@@ -22,13 +20,14 @@ import System.Random.PCG (initialize, Variate, uniformR)
 
 import Language.Futhark.Syntax hiding
   (Value, ValueType, PrimValue(..), IntValue(..), FloatValue(..))
-import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
+import Language.Futhark.Prop (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 
 import Futhark.Test.Values
 import Futhark.Util.Options
 
+-- | Run @futhark dataset@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialDataOptions commandLineOptions "options..." f
   where f [] config

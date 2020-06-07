@@ -1,3 +1,7 @@
+{-# LANGUAGE Safe #-}
+-- | A very simple representation of collections of warnings.
+-- Warnings have a position (so they can be ordered), and their
+-- 'Show'-instance produces a human-readable string.
 module Language.Futhark.Warnings
   ( Warnings
   , singleWarning
@@ -5,11 +9,11 @@ module Language.Futhark.Warnings
 
 import Data.Monoid
 import Data.List (sortOn, intercalate)
-import Data.Loc
 
 import Prelude
 
 import Language.Futhark.Core (locStr)
+import Futhark.Util.Loc
 
 -- | The warnings produced by the compiler.  The 'Show' instance
 -- produces a human-readable description.
@@ -32,5 +36,6 @@ instance Show Warnings where
             "Warning at " ++ locStr loc ++ ":\n" ++
             intercalate "\n" (map ("  "<>) $ lines w)
 
+-- | A single warning at the given location.
 singleWarning :: SrcLoc -> String -> Warnings
 singleWarning loc problem = Warnings [(loc, problem)]

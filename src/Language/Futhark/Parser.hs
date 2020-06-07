@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 -- | Interface to the Futhark parser.
 module Language.Futhark.Parser
   ( parseFuthark
@@ -21,7 +22,7 @@ module Language.Futhark.Parser
 import qualified Data.Text as T
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes
+import Language.Futhark.Prop
 import Language.Futhark.Parser.Parser
 import Language.Futhark.Parser.Lexer
 

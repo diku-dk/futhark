@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | @futhark c@
 module Futhark.CLI.C (main) where
 
 import Control.Monad.IO.Class
@@ -11,6 +12,7 @@ import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Compiler.CLI
 import Futhark.Util
 
+-- | Run @futhark c@
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile sequential C" "Generate sequential C code from optimised Futhark program."

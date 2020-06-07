@@ -1,7 +1,8 @@
+-- | Carefully optimised implementations of GPU transpositions.
+-- Written in ImpCode so we can compile it to both CUDA and OpenCL.
 module Futhark.CodeGen.ImpGen.Kernels.Transpose
   ( TransposeType(..)
   , TransposeArgs
-  , mapTranspose
   , mapTransposeKernel
   )
   where
@@ -9,8 +10,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Transpose
 import Prelude hiding (quot, rem)
 
 import Futhark.CodeGen.ImpCode.Kernels
-import Futhark.Representation.AST.Attributes.Types
-import Futhark.Representation.AST.Attributes.Names (freeIn, namesToList)
+import Futhark.IR.Prop.Types
 import Futhark.Util.IntegralExp (IntegralExp, quot, rem, quotRoundingUp)
 
 -- | Which form of transposition to generate code for.
@@ -21,6 +21,7 @@ data TransposeType = TransposeNormal
                                     -- benefit from coalescing.
                    deriving (Eq, Ord, Show)
 
+-- | The types of the arguments accepted by a transposition function.
 type TransposeArgs = (VName, Exp,
                       VName, Exp,
                       Exp, Exp, Exp, Exp,
@@ -30,33 +31,6 @@ type TransposeArgs = (VName, Exp,
 elemsPerThread :: IntegralExp a => a
 elemsPerThread = 4
 
--- | Generate a transpose kernel.  There is special support to handle
--- input arrays with low width, low height, or both.
---
--- Normally when transposing a @[2][n]@ array we would use a @FUT_BLOCK_DIM x
--- FUT_BLOCK_DIM@ group to process a @[2][FUT_BLOCK_DIM]@ slice of the input
--- array. This would mean that many of the threads in a group would be inactive.
--- We try to remedy this by using a special kernel that will process a larger
--- part of the input, by using more complex indexing. In our example, we could
--- use all threads in a group if we are processing @(2/FUT_BLOCK_DIM)@ as large
--- a slice of each rows per group. The variable 'mulx' contains this factor for
--- the kernel to handle input arrays with low height.
---
--- See issue #308 on GitHub for more details.
---
--- These kernels are optimized to ensure all global reads and writes
--- are coalesced, and to avoid bank conflicts in shared memory.  Each
--- thread group transposes a 2D tile of block_dim*2 by block_dim*2
--- elements. The size of a thread group is block_dim/2 by
--- block_dim*2, meaning that each thread will process 4 elements in a
--- 2D tile.  The shared memory array containing the 2D tile consists
--- of block_dim*2 by block_dim*2+1 elements. Padding each row with
--- an additional element prevents bank conflicts from occuring when
--- the tile is accessed column-wise.
---
--- Note that input_size and output_size may not equal width*height if
--- we are dealing with a truncated array - this happens sometimes for
--- coalescing optimisations.
 mapTranspose :: Exp -> TransposeArgs -> PrimType -> TransposeType -> KernelCode
 mapTranspose block_dim args t kind =
   case kind of
@@ -210,6 +184,33 @@ mapTranspose block_dim args t kind =
             t (Space "local") Nonvolatile
           ]
 
+-- | Generate a transpose kernel.  There is special support to handle
+-- input arrays with low width, low height, or both.
+--
+-- Normally when transposing a @[2][n]@ array we would use a @FUT_BLOCK_DIM x
+-- FUT_BLOCK_DIM@ group to process a @[2][FUT_BLOCK_DIM]@ slice of the input
+-- array. This would mean that many of the threads in a group would be inactive.
+-- We try to remedy this by using a special kernel that will process a larger
+-- part of the input, by using more complex indexing. In our example, we could
+-- use all threads in a group if we are processing @(2/FUT_BLOCK_DIM)@ as large
+-- a slice of each rows per group. The variable @mulx@ contains this factor for
+-- the kernel to handle input arrays with low height.
+--
+-- See issue #308 on GitHub for more details.
+--
+-- These kernels are optimized to ensure all global reads and writes
+-- are coalesced, and to avoid bank conflicts in shared memory.  Each
+-- thread group transposes a 2D tile of block_dim*2 by block_dim*2
+-- elements. The size of a thread group is block_dim/2 by
+-- block_dim*2, meaning that each thread will process 4 elements in a
+-- 2D tile.  The shared memory array containing the 2D tile consists
+-- of block_dim*2 by block_dim*2+1 elements. Padding each row with
+-- an additional element prevents bank conflicts from occuring when
+-- the tile is accessed column-wise.
+--
+-- Note that input_size and output_size may not equal width*height if
+-- we are dealing with a truncated array - this happens sometimes for
+-- coalescing optimisations.
 mapTransposeKernel :: String -> Integer -> TransposeArgs -> PrimType -> TransposeType
                    -> Kernel
 mapTransposeKernel desc block_dim_int args t kind =

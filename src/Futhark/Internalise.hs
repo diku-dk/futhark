@@ -2,6 +2,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Safe #-}
+{-# LANGUAGE Strict #-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -16,15 +18,14 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
-import Data.Loc
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
-import Futhark.Representation.SOACS as I hiding (stmPattern)
+import Futhark.IR.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.IR.Prop.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util (splitAt3)
 
@@ -154,7 +155,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) (E.ValBind _ ofname _ (Inf
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
   params_fresh <- mapM allDimsFreshInPat params
-  let tparams = map (`E.TypeParamDim` noLoc) $ S.toList $
+  let tparams = map (`E.TypeParamDim` mempty) $ S.toList $
                 mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \shapeparams params' -> do
     entry_rettype <- internaliseEntryReturnType $ anySizes rettype
@@ -321,7 +322,10 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       arr_t_ext <- internaliseReturnType $ E.toStruct arr_t
       es' <- mapM (internaliseExp "arr_elem") es
 
-      let typeFromElements =
+      rowtypes <-
+        case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
+          Just ts -> pure ts
+          Nothing ->
             -- XXX: the monomorphiser may create single-element array
             -- literals with an unknown row type.  In those cases we
             -- need to look at the types of the actual elements.
@@ -330,10 +334,6 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
             case es' of
               [] -> error $ "internaliseExp ArrayLit: existential type: " ++ pretty arr_t
               e':_ -> mapM subExpType e'
-
-      rowtypes <-
-        maybe typeFromElements pure $
-        mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext
 
       let arraylit ks rt = do
             ks' <- mapM (ensureShape asserting
@@ -577,7 +577,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
   return loop_res
 
   where
-    sparams' = map (`TypeParamDim` noLoc) sparams
+    sparams' = map (`TypeParamDim` mempty) sparams
 
     forLoop nested_mergepat shapepat mergeinit form' = do
       let mergepat' = concat nested_mergepat
@@ -638,10 +638,10 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
 
         (loop_initial_cond, init_loop_cond_bnds) <- collectStms $ do
           forM_ (zip shapepat shapeinit) $ \(p, se) ->
-            letBindNames_ [paramName p] $ BasicOp $ SubExp se
+            letBindNames [paramName p] $ BasicOp $ SubExp se
           forM_ (zip (concat nested_mergepat) mergeinit) $ \(p, se) ->
             unless (se == I.Var (paramName p)) $
-            letBindNames_ [paramName p] $ BasicOp $
+            letBindNames [paramName p] $ BasicOp $
             case se of I.Var v | not $ primType $ paramType p ->
                                    Reshape (map DimCoercion $ arrayDims $ paramType p) v
                        _ -> SubExp se
@@ -662,10 +662,10 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
           loop_end_cond_body <- renameBody <=< insertStmsM $ do
             forM_ (zip shapepat shapeargs) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
-              letBindNames_ [paramName p] $ BasicOp $ SubExp se
+              letBindNames [paramName p] $ BasicOp $ SubExp se
             forM_ (zip (concat nested_mergepat) ses) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
-              letBindNames_ [paramName p] $ BasicOp $
+              letBindNames [paramName p] $ BasicOp $
               case se of I.Var v | not $ primType $ paramType p ->
                                      Reshape (map DimCoercion $ arrayDims $ paramType p) v
                          _ -> SubExp se
@@ -715,10 +715,13 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
           return $ bef ++ src'' ++ aft
         replace _ _ ve' _ = return ve'
 
-internaliseExp desc (E.Unsafe e _) =
-  local mkUnsafe $ internaliseExp desc e
-  where mkUnsafe env | envSafe env = env
-                     | otherwise = env { envDoBoundsChecks = False }
+internaliseExp desc (E.Attr (AttrInfo attr) e _) =
+  local f $ internaliseExp desc e
+  where f env | attr == "unsafe",
+                not $ envSafe env =
+                  env { envDoBoundsChecks = False }
+              | otherwise =
+                  env { envAttrs = oneAttr (AttrAtom attr) <> envAttrs env }
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
@@ -728,7 +731,7 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   certifying c $ mapM rebind =<< internaliseExp desc e2
   where rebind v = do
           v' <- newVName "assert_res"
-          letBindNames_ [v'] $ I.BasicOp $ I.SubExp v
+          letBindNames [v'] $ I.BasicOp $ I.SubExp v
           return $ I.Var v'
 
 internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
@@ -848,7 +851,7 @@ internaliseArg :: String -> (E.Exp, Maybe VName) -> InternaliseM [SubExp]
 internaliseArg desc (arg, argdim) = do
   arg' <- internaliseExp desc arg
   case (arg', argdim) of
-    ([se], Just d) -> letBindNames_ [d] $ BasicOp $ SubExp se
+    ([se], Just d) -> letBindNames [d] $ BasicOp $ SubExp se
     _ -> return ()
   return arg'
 
@@ -935,7 +938,7 @@ internalisePat' p ses body loc m = do
   stmPattern p t $ \pat_names match -> do
     ses' <- match loc ses
     forM_ (zip pat_names ses') $ \(v,se) ->
-      letBindNames_ [v] $ I.BasicOp $ I.SubExp se
+      letBindNames [v] $ I.BasicOp $ I.SubExp se
     m body
 
 internaliseSlice :: SrcLoc
@@ -962,6 +965,17 @@ internaliseDimIndex w (E.DimFix i) = do
                    I.CmpOp (I.CmpSlt I.Int32) i' w
   ok <- letSubExp "bounds_check" =<< eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
   return (I.DimFix i', ok, [ErrorInt32 i'])
+
+-- Special-case an important common case that otherwise leads to horrible code.
+internaliseDimIndex w (E.DimSlice Nothing Nothing
+                       (Just (E.Negate (E.IntLit 1 _ _) _))) = do
+  w_minus_1 <- letSubExp "w_minus_1" $
+               BasicOp $ I.BinOp (Sub Int32 I.OverflowWrap) w one
+  return (I.DimSlice w_minus_1 w $ intConst Int32 (-1),
+          constant True,
+          mempty)
+  where one = constant (1::Int32)
+
 internaliseDimIndex w (E.DimSlice i j s) = do
   s' <- maybe (return one) (fmap fst . internaliseDimExp "s") s
   s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
@@ -1124,10 +1138,10 @@ internaliseStreamRed desc o comm lam0 lam arr = do
 
   -- Synthesize neutral elements by applying the fold function
   -- to an empty chunk.
-  letBindNames_ [I.paramName chunk_param] $
+  letBindNames [I.paramName chunk_param] $
     I.BasicOp $ I.SubExp $ constant (0::Int32)
   forM_ lam_val_params $ \p ->
-    letBindNames_ [I.paramName p] $
+    letBindNames [I.paramName p] $
     I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
     I.arrayDims $ I.paramType p
   accs <- bodyBind =<< renameBody lam_body
@@ -1430,10 +1444,10 @@ isOverloadedFunction qname args loc = do
     -- Short-circuiting operators are magical.
     handleOps [x,y] "&&" = Just $ \desc ->
       internaliseExp desc $
-      E.If x y (E.Literal (E.BoolValue False) noLoc) (Info $ E.Scalar $ E.Prim E.Bool, Info []) noLoc
+      E.If x y (E.Literal (E.BoolValue False) mempty) (Info $ E.Scalar $ E.Prim E.Bool, Info []) mempty
     handleOps [x,y] "||" = Just $ \desc ->
         internaliseExp desc $
-        E.If x (E.Literal (E.BoolValue True) noLoc) y (Info $ E.Scalar $ E.Prim E.Bool, Info []) noLoc
+        E.If x (E.Literal (E.BoolValue True) mempty) y (Info $ E.Scalar $ E.Prim E.Bool, Info []) mempty
 
     -- Handle equality and inequality specially, to treat the case of
     -- arrays.
@@ -1732,7 +1746,8 @@ funcall desc (QualName _ fname) args loc = do
                "\nFunction has parameters\n " ++ pretty fun_params
     Just ts -> do
       safety <- askSafety
-      ses <- letTupExp' desc $
+      attrs <- asks envAttrs
+      ses <- attributing attrs $ letTupExp' desc $
              I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
@@ -1754,7 +1769,7 @@ bindExtSizes ret retext ses = do
       combine' _ _ = mempty
 
   forM_ (M.toList $ mconcat $ zipWith combine ts ses_ts) $ \(v, se) ->
-    letBindNames_ [v] $ BasicOp $ SubExp se
+    letBindNames [v] $ BasicOp $ SubExp se
 
 askSafety :: InternaliseM Safety
 askSafety = do check <- asks envDoBoundsChecks

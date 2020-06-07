@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes, FlexibleContexts #-}
+-- | Code generation for C with OpenCL.
 module Futhark.CodeGen.Backends.COpenCL
   ( compileProg
   , GC.CParts(..)
@@ -8,12 +9,11 @@ module Futhark.CodeGen.Backends.COpenCL
 
 import Control.Monad hiding (mapM)
 import Data.List (intercalate)
-import qualified Data.Map as M
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Representation.KernelsMem
+import Futhark.IR.KernelsMem
   hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
@@ -22,6 +22,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
+-- | Compile the program to C with calls to OpenCL.
 compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
 compileProg prog = do
   (Program opencl_code opencl_prelude kernels
@@ -29,7 +30,6 @@ compileProg prog = do
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
-        ++ M.keys kernels
   GC.compileProg operations
     (generateBoilerplate opencl_code opencl_prelude
      cost_centres kernels types sizes failures)
@@ -96,7 +96,6 @@ cliOptions =
            , optionArgument = RequiredArgument "OPT"
            , optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
            }
-
   , Option { optionLongName = "profile"
            , optionShortName = Just 'P'
            , optionArgument = NoArgument

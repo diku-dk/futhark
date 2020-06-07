@@ -17,21 +17,25 @@ module Futhark.CodeGen.ImpCode.Kernels
   , Kernel (..)
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
-  , module Futhark.Representation.Kernels.Sizes
+  , module Futhark.IR.Kernels.Sizes
   )
   where
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.Representation.Kernels.Sizes
-import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Pretty ()
+import Futhark.IR.Kernels.Sizes
+import Futhark.IR.Pretty ()
 import Futhark.Util.Pretty
 
+-- | A program that calls kernels.
 type Program = Imp.Definitions HostOp
+
+-- | A function that calls kernels.
 type Function = Imp.Function HostOp
+
 -- | Host-level code that can call kernels.
 type Code = Imp.Code HostOp
+
 -- | Code inside a kernel.
 type KernelCode = Imp.Code KernelOp
 
@@ -42,6 +46,7 @@ newtype KernelConst = SizeConst Name
 -- | An expression whose variables are kernel constants.
 type KernelConstExp = PrimExp KernelConst
 
+-- | An operation that runs on the host (CPU).
 data HostOp = CallKernel Kernel
             | GetSize VName Name SizeClass
             | CmpSizeLe VName Name SizeClass Imp.Exp
@@ -71,6 +76,9 @@ data Kernel = Kernel
               }
             deriving (Show)
 
+-- | Information about a host-level variable that is used inside this
+-- kernel.  When generating the actual kernel code, this is used to
+-- deduce which parameters are needed.
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName
                | ConstUse VName KernelConstExp
@@ -128,6 +136,7 @@ instance Pretty Kernel where
 data Fence = FenceLocal | FenceGlobal
            deriving (Show)
 
+-- | An operation that occurs within a kernel body.
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int
               | GetLocalSize VName Int
@@ -147,8 +156,9 @@ data KernelOp = GetGroupId VName Int
                 -- control flow or similar.
               deriving (Show)
 
--- Atomic operations return the value stored before the update.
--- This value is stored in the first VName.
+-- | Atomic operations return the value stored before the update.
+-- This old value is stored in the first 'VName'.  The second 'VName'
+-- is the memory block to update.  The 'Exp' is the new value.
 data AtomicOp = AtomicAdd IntType VName VName (Count Elements Imp.Exp) Exp
               | AtomicFAdd FloatType VName VName (Count Elements Imp.Exp) Exp
               | AtomicSMax IntType VName VName (Count Elements Imp.Exp) Exp

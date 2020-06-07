@@ -23,8 +23,7 @@ local let ensure_pow_2 [n] 't ((<=): t -> t -> bool) (xs: [n]t): (*[]t, i32) =
 
 local let kernel_par [n] 't ((<=): t -> t -> bool) (a: *[n]t) (p: i32) (q: i32) : *[n]t =
   let d = 1 << (p-q) in
-  map (\i -> unsafe
-             let a_i = a[i]
+  map (\i -> let a_i = a[i]
              let up1 = ((i >> p) & 2) == 0
              in
              if (i & d) == 0
@@ -50,7 +49,7 @@ let merge_sort [n] 't ((<=): t -> t -> bool) (xs: [n]t): *[n]t =
 let merge_sort_by_key [n] 't 'k (key: t -> k) ((<=): k -> k -> bool) (xs: [n]t): [n]t =
   zip (map key xs) (iota n)
   |> merge_sort (\(x, _) (y, _) -> x <= y)
-  |> map (\(_, i) -> unsafe xs[i])
+  |> map (\(_, i) -> xs[i])
 
 -- ==
 -- entry: sort_i32

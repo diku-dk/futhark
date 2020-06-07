@@ -1,6 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, FlexibleInstances, MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
@@ -72,7 +74,7 @@ module Futhark.CodeGen.ImpGen
   , sIf, sWhen, sUnless
   , sOp
   , sDeclareMem, sAlloc, sAlloc_
-  , sArray, sAllocArray, sAllocArrayPerm, sStaticArray
+  , sArray, sArrayInMem, sAllocArray, sAllocArrayPerm, sStaticArray
   , sWrite, sUpdate
   , sLoopNest
   , (<--)
@@ -81,13 +83,12 @@ module Futhark.CodeGen.ImpGen
   )
   where
 
-import Control.Monad.RWS    hiding (mapM, forM)
-import Control.Monad.State  hiding (mapM, forM, State)
-import Control.Monad.Writer hiding (mapM, forM)
+import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad.Writer
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
-import Data.Traversable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
@@ -97,14 +98,14 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
   (Count, Bytes, Elements,
    bytes, elements, withElemType)
-import Futhark.Representation.Mem
-import Futhark.Representation.SOACS (SOACS)
-import qualified Futhark.Representation.Mem.IxFun as IxFun
+import Futhark.IR.Mem
+import Futhark.IR.SOACS (SOACS)
+import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util
 
--- | How to compile an 'Op'.
+-- | How to compile an t'Op'.
 type OpCompiler lore r op = Pattern lore -> Op lore -> ImpM lore r op ()
 
 -- | How to compile some 'Stms'.
@@ -129,7 +130,7 @@ data Operations lore r op = Operations { opsExpCompiler :: ExpCompiler lore r op
                                      }
 
 -- | An operations set for which the expression compiler always
--- returns 'CompileExp'.
+-- returns 'defCompileExp'.
 defaultOperations :: (Mem lore, FreeIn op) =>
                      OpCompiler lore r op -> Operations lore r op
 defaultOperations opc = Operations { opsExpCompiler = defCompileExp
@@ -217,19 +218,21 @@ newEnv r ops ds =
 -- | The symbol table used during compilation.
 type VTable lore = M.Map VName (VarEntry lore)
 
-data State lore r op = State { stateVTable :: VTable lore
-                           , stateFunctions :: Imp.Functions op
-                           , stateNameSource :: VNameSource
-                           }
+data ImpState lore r op =
+  ImpState { stateVTable :: VTable lore
+           , stateFunctions :: Imp.Functions op
+           , stateCode :: Imp.Code op
+           , stateNameSource :: VNameSource
+           }
 
-newState :: VNameSource -> State lore r op
-newState = State mempty mempty
+newState :: VNameSource -> ImpState lore r op
+newState = ImpState mempty mempty mempty
 
-newtype ImpM lore r op a = ImpM (RWS (Env lore r op) (Imp.Code op) (State lore r op) a)
+newtype ImpM lore r op a =
+  ImpM (ReaderT (Env lore r op) (State (ImpState lore r op)) a)
   deriving (Functor, Applicative, Monad,
-            MonadState (State lore r op),
-            MonadReader (Env lore r op),
-            MonadWriter (Imp.Code op))
+            MonadState (ImpState lore r op),
+            MonadReader (Env lore r op))
 
 instance MonadFreshNames (ImpM lore r op) where
   getNameSource = gets stateNameSource
@@ -238,7 +241,7 @@ instance MonadFreshNames (ImpM lore r op) where
 -- Cannot be an KernelsMem scope because the index functions have
 -- the wrong leaves (VName instead of Imp.Exp).
 instance HasScope SOACS (ImpM lore r op) where
-  askScope = M.map (LetInfo . entryType) <$> gets stateVTable
+  askScope = gets $ M.map (LetName . entryType) . stateVTable
     where entryType (MemVar _ memEntry) =
             Mem (entryMemSpace memEntry)
           entryType (ArrayVar _ arrayEntry) =
@@ -250,9 +253,9 @@ instance HasScope SOACS (ImpM lore r op) where
             Prim $ entryScalarType scalarEntry
 
 runImpM :: ImpM lore r op a
-        -> r -> Operations lore r op -> Imp.Space -> State lore r op
-        -> (a, State lore r op, Imp.Code op)
-runImpM (ImpM m) r ops space = runRWS m $ newEnv r ops space
+        -> r -> Operations lore r op -> Imp.Space -> ImpState lore r op
+        -> (a, ImpState lore r op)
+runImpM (ImpM m) r ops space = runState (runReaderT m $ newEnv r ops space)
 
 subImpM_ :: r' -> Operations lore r' op' -> ImpM lore r' op' a
          -> ImpM lore r op (Imp.Code op')
@@ -263,30 +266,37 @@ subImpM :: r' -> Operations lore r' op' -> ImpM lore r' op' a
 subImpM r ops (ImpM m) = do
   env <- ask
   s <- get
-  let (x, s', code) =
-        runRWS m env { envExpCompiler = opsExpCompiler ops
-                     , envStmsCompiler = opsStmsCompiler ops
-                     , envCopyCompiler = opsCopyCompiler ops
-                     , envOpCompiler = opsOpCompiler ops
-                     , envAllocCompilers = opsAllocCompilers ops
-                     , envEnv = r
-                     }
-                 s { stateVTable = stateVTable s
-                   , stateFunctions = mempty }
-  putNameSource $ stateNameSource s'
-  return (x, code)
+
+  let env' = env { envExpCompiler = opsExpCompiler ops
+                 , envStmsCompiler = opsStmsCompiler ops
+                 , envCopyCompiler = opsCopyCompiler ops
+                 , envOpCompiler = opsOpCompiler ops
+                 , envAllocCompilers = opsAllocCompilers ops
+                 , envEnv = r
+                 }
+      s' = ImpState { stateVTable = stateVTable s
+                    , stateFunctions = mempty
+                    , stateCode = mempty
+                    , stateNameSource = stateNameSource s
+                    }
+      (x, s'') = runState (runReaderT m env') s'
+
+  putNameSource $ stateNameSource s''
+  return (x, stateCode s'')
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
 collect :: ImpM lore r op () -> ImpM lore r op (Imp.Code op)
-collect m = pass $ do
-  ((), code) <- listen m
-  return (code, const mempty)
+collect = fmap snd . collect'
 
 collect' :: ImpM lore r op a -> ImpM lore r op (a, Imp.Code op)
-collect' m = pass $ do
-  (x, code) <- listen m
-  return ((x, code), const mempty)
+collect' m = do
+  prev_code <- gets stateCode
+  modify $ \s -> s { stateCode = mempty }
+  x <- m
+  new_code <- gets stateCode
+  modify $ \s -> s { stateCode = prev_code }
+  return (x, new_code)
 
 -- | Execute a code generation action, wrapping the generated code
 -- within a 'Imp.Comment' with the given description.
@@ -296,7 +306,7 @@ comment desc m = do code <- collect m
 
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM lore r op ()
-emit = tell
+emit code = modify $ \s -> s { stateCode = stateCode s <> code }
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM lore r op ()
@@ -313,15 +323,15 @@ constsVTable :: Mem lore => Stms lore -> VTable lore
 constsVTable = foldMap stmVtable
   where stmVtable (Let pat _ e) =
           foldMap (peVtable e) $ patternElements pat
-        peVtable e (PatElem name attr) =
-          M.singleton name $ memBoundToVarEntry (Just e) attr
+        peVtable e (PatElem name dec) =
+          M.singleton name $ memBoundToVarEntry (Just e) dec
 
 compileProg :: (Mem lore, FreeIn op, MonadFreshNames m) =>
                r -> Operations lore r op -> Imp.Space
             -> Prog lore -> m (Imp.Definitions op)
 compileProg r ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-  let (consts', s', _) =
+  let (consts', s') =
         runImpM compile r ops space
         (newState src) { stateVTable = constsVTable consts }
   in (Imp.Definitions consts' (stateFunctions s'),
@@ -356,7 +366,7 @@ compileConsts used_consts stms = do
 
 compileInParam :: Mem lore =>
                   FParam lore -> ImpM lore r op (Either Imp.Param ArrayDecl)
-compileInParam fparam = case paramAttr fparam of
+compileInParam fparam = case paramDec fparam of
   MemPrim bt ->
     return $ Left $ Imp.ScalarParam name bt
   MemMem space ->
@@ -368,7 +378,7 @@ compileInParam fparam = case paramAttr fparam of
 
 data ArrayDecl = ArrayDecl VName PrimType MemLocation
 
-fparamSizes :: Typed attr => Param attr -> S.Set VName
+fparamSizes :: Typed dec => Param dec -> S.Set VName
 fparamSizes = S.fromList . subExpVars . arrayDims . paramType
 
 compileInParams :: Mem lore =>
@@ -383,7 +393,7 @@ compileInParams params orig_epts = do
 
       summaries = M.fromList $ mapMaybe memSummary params
         where memSummary param
-                | MemMem space <- paramAttr param =
+                | MemMem space <- paramDec param =
                     Just (paramName param, space)
                 | otherwise =
                     Nothing
@@ -454,9 +464,9 @@ compileOutParams orig_rts orig_epts = do
           out <- imp $ newVName "scalar_out"
           tell ([Imp.ScalarParam out t], mempty)
           return (Imp.ScalarValue t ept out, ScalarDestination out)
-        mkParam (MemArray t shape _ attr) ept = do
+        mkParam (MemArray t shape _ dec) ept = do
           space <- asks envDefaultSpace
-          memout <- case attr of
+          memout <- case dec of
             ReturnsNewBlock _ x _ixfun -> do
               memout <- imp $ newVName "out_mem"
               tell ([Imp.MemParam memout space],
@@ -508,12 +518,12 @@ compileBody pat (Body _ bnds ses) = do
   compileStms (freeIn ses) bnds $
     forM_ (zip dests ses) $ \(d, se) -> copyDWIMDest d [] se []
 
-compileBody' :: [Param attr] -> Body lore -> ImpM lore r op ()
+compileBody' :: [Param dec] -> Body lore -> ImpM lore r op ()
 compileBody' params (Body _ bnds ses) =
   compileStms (freeIn ses) bnds $
     forM_ (zip params ses) $ \(param, se) -> copyDWIM (paramName param) [] se []
 
-compileLoopBody :: Typed attr => [Param attr] -> Body lore -> ImpM lore r op ()
+compileLoopBody :: Typed dec => [Param dec] -> Body lore -> ImpM lore r op ()
 compileLoopBody mergeparams (Body _ bnds ses) = do
   -- We cannot write the results to the merge parameters immediately,
   -- as some of the results may actually *be* merge parameters, and
@@ -744,9 +754,6 @@ defCompileBasicOp _ Rotate{} =
 defCompileBasicOp _ Reshape{} =
   return ()
 
-defCompileBasicOp _ Repeat{} =
-  return ()
-
 defCompileBasicOp pat e =
   error $ "ImpGen.defCompileBasicOp: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
@@ -767,7 +774,7 @@ addFParams :: Mem lore => [FParam lore] -> ImpM lore r op ()
 addFParams = mapM_ addFParam
   where addFParam fparam =
           addVar (paramName fparam) $
-          memBoundToVarEntry Nothing $ noUniquenessReturns $ paramAttr fparam
+          memBoundToVarEntry Nothing $ noUniquenessReturns $ paramDec fparam
 
 -- | Another hack.
 addLoopVar :: VName -> IntType -> ImpM lore r op ()
@@ -825,19 +832,19 @@ memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
                            , entryArrayElemType = bt
                            }
 
-infoAttr :: Mem lore =>
+infoDec :: Mem lore =>
             NameInfo lore
          -> MemInfo SubExp NoUniqueness MemBind
-infoAttr (LetInfo attr) = attr
-infoAttr (FParamInfo attr) = noUniquenessReturns attr
-infoAttr (LParamInfo attr) = attr
-infoAttr (IndexInfo it) = MemPrim $ IntType it
+infoDec (LetName dec) = dec
+infoDec (FParamName dec) = noUniquenessReturns dec
+infoDec (LParamName dec) = dec
+infoDec (IndexName it) = MemPrim $ IntType it
 
 dInfo :: Mem lore =>
          Maybe (Exp lore) -> VName -> NameInfo lore
       -> ImpM lore r op ()
 dInfo e name info = do
-  let entry = memBoundToVarEntry e $ infoAttr info
+  let entry = memBoundToVarEntry e $ infoDec info
   case entry of
     MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
@@ -1016,9 +1023,9 @@ defaultCopy bt dest destslice src srcslice
   | otherwise =
       copyElementWise bt dest destslice src srcslice
   where bt_size = primByteSize bt
-        num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
+        num_elems = Imp.elements $ product $ sliceDims srcslice
         MemLocation destmem _ destIxFun = dest
-        MemLocation srcmem srcshape srcIxFun = src
+        MemLocation srcmem _ srcIxFun = src
         isScalarSpace ScalarSpace{} = True
         isScalarSpace _ = False
 
@@ -1277,6 +1284,12 @@ sArray name bt shape membind = do
   name' <- newVName name
   dArray name' bt shape membind
   return name'
+
+-- | Declare an array in row-major order in the given memory block.
+sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM lore r op VName
+sArrayInMem name pt shape mem =
+  sArray name pt shape $ ArrayIn mem $
+  IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore r op VName

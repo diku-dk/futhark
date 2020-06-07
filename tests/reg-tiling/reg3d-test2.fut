@@ -21,8 +21,8 @@ let pred (x : f32) : bool = x < 9.0
 
 let dotprod_filt [n] (vct: [n]f32) (xs: [n]f32) (ys: [n]f32) (k : i32) : f32 =
   let s = f32.sum (map3 (\v x y -> let z = x*y in let f = f32.bool (pred v) in z*f) vct xs ys)
-  let var_term = 2.0 * unsafe vct[k]
-  let inv_term = 3.0 * unsafe xs[k]
+  let var_term = 2.0 * #[unsafe] vct[k]
+  let inv_term = 3.0 * #[unsafe] xs[k]
   in  s + inv_term + var_term
 
 let matmul_filt [n][p][m] (xss: [n][p]f32) (yss: [p][m]f32) (vct: [p]f32) : [n][m]f32 =

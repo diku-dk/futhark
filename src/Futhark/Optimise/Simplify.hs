@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE Strict #-}
 module Futhark.Optimise.Simplify
   ( simplifyProg
   , simplifySomething
@@ -21,7 +22,7 @@ module Futhark.Optimise.Simplify
   where
 
 import Data.Bifunctor (second)
-import Futhark.Representation.AST
+import Futhark.IR
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -97,18 +98,18 @@ simplifyFun :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
              -> m (FunDef lore)
 simplifyFun = simplifySomething Engine.simplifyFun removeFunDefWisdom
 
--- | Simplify just a single 'Lambda'.
+-- | Simplify just a single t'Lambda'.
 simplifyLambda :: (MonadFreshNames m, HasScope lore m,
                    Engine.SimplifiableLore lore) =>
                   Engine.SimpleOps lore
                -> RuleBook (Engine.Wise lore)
                -> Engine.HoistBlockers lore
-               -> Lambda lore -> [Maybe VName]
+               -> Lambda lore
                -> m (Lambda lore)
-simplifyLambda simpl rules blockers orig_lam args = do
+simplifyLambda simpl rules blockers orig_lam = do
   vtable <- ST.fromScope . addScopeWisdom <$> askScope
-  simplifySomething f removeLambdaWisdom simpl rules blockers vtable orig_lam
-  where f lam' = Engine.simplifyLambdaNoHoisting lam' args
+  simplifySomething Engine.simplifyLambdaNoHoisting
+    removeLambdaWisdom simpl rules blockers vtable orig_lam
 
 -- | Simplify a list of 'Stm's.
 simplifyStms :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>

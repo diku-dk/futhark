@@ -15,8 +15,8 @@ import Data.List ()
 import Prelude hiding (quot)
 
 import Futhark.Analysis.PrimExp
-import Futhark.Representation.AST
-import Futhark.Representation.Kernels
+import Futhark.IR
+import Futhark.IR.Kernels
        hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -59,7 +59,7 @@ splitArrays :: (MonadBinder m, Lore m ~ Kernels) =>
             -> SplitOrdering -> SubExp -> SubExp -> SubExp -> [VName]
             -> m ()
 splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
-  letBindNames_ [chunk_size] $ Op $ SizeOp $ SplitSpace ordering w i elems_per_i
+  letBindNames [chunk_size] $ Op $ SizeOp $ SplitSpace ordering w i elems_per_i
   case ordering of
     SplitContiguous     -> do
       offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) i elems_per_i
@@ -68,13 +68,20 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
   where contiguousSlice offset slice_name arr = do
           arr_t <- lookupType arr
           let slice = fullSlice arr_t [DimSlice offset (Var chunk_size) (constant (1::Int32))]
-          letBindNames_ [slice_name] $ BasicOp $ Index arr slice
+          letBindNames [slice_name] $ BasicOp $ Index arr slice
 
         stridedSlice stride slice_name arr = do
           arr_t <- lookupType arr
           let slice = fullSlice arr_t [DimSlice i (Var chunk_size) stride]
-          letBindNames_ [slice_name] $ BasicOp $ Index arr slice
+          letBindNames [slice_name] $ BasicOp $ Index arr slice
 
+partitionChunkedKernelFoldParameters :: Int -> [Param dec]
+                                     -> (VName, Param dec, [Param dec], [Param dec])
+partitionChunkedKernelFoldParameters num_accs (i_param : chunk_param : params) =
+  let (acc_params, arr_params) = splitAt num_accs params
+  in (paramName i_param, chunk_param, acc_params, arr_params)
+partitionChunkedKernelFoldParameters _ _ =
+  error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"
 
 blockedPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
                     VName -> SubExp -> KernelSize -> StreamOrd -> Lambda (Lore m)
@@ -194,8 +201,8 @@ streamRed mk_lvl pat w comm red_lam fold_lam nes arrs = runBinderT'_ $ do
   (_, kspace, ts, kbody) <- prepareStream size ispace w comm fold_lam nes arrs
 
   lvl <- mk_lvl [w] "stream_red" $ NoRecommendation SegNoVirt
-  letBind_ pat' $ Op $ SegOp $ SegRed lvl kspace
-    [SegRedOp comm red_lam nes mempty] ts kbody
+  letBind pat' $ Op $ SegOp $ SegRed lvl kspace
+    [SegBinOp comm red_lam nes mempty] ts kbody
 
   read_dummy
 
@@ -217,7 +224,7 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
 
   let pat = Pattern [] $ redout_pes ++ mapout_pes
   lvl <- mk_lvl [w] "stream_map" $ NoRecommendation SegNoVirt
-  letBind_ pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
+  letBind pat $ Op $ SegOp $ SegMap lvl kspace ts kbody
 
   return (threads, map patElemName redout_pes)
 

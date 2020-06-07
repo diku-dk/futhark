@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Safe #-}
+-- | Type checker building blocks that do not involve unification.
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp
   , checkTypeDecl
@@ -28,7 +30,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl', sort, nub)
-import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
 
@@ -98,6 +99,7 @@ subuniqueOf :: Uniqueness -> Uniqueness -> Bool
 subuniqueOf Nonunique Unique = False
 subuniqueOf _ _              = True
 
+-- | Use 'checkTypeExp' to check a type declaration.
 checkTypeDecl :: MonadTypeChecker m =>
                  TypeDeclBase NoInfo Name
               -> m (TypeDeclBase Info VName, Liftedness)
@@ -106,6 +108,9 @@ checkTypeDecl (TypeDecl t NoInfo) = do
   (t', st, l) <- checkTypeExp t
   return (TypeDecl t' $ Info st, l)
 
+-- | Type-check a single 'TypeExp', returning the checked 'TypeExp',
+-- its fully expanded type (modulo yet-unelaborated type variables),
+-- and whether it is potentially higher-order.
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
              -> m (TypeExp VName, StructType, Liftedness)
@@ -288,6 +293,9 @@ checkForDuplicateNamesInType = check mempty
         check _ TEArray{} = return ()
         check _ TEVar{} = return ()
 
+-- | @checkTypeParams ps m@ checks the type parameters @ps@, then
+-- invokes the continuation @m@ with the checked parameters, while
+-- extending the monadic name map with @ps@.
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]
                 -> ([TypeParamBase VName] -> m a)
@@ -321,12 +329,15 @@ typeParamToArg (TypeParamDim v ploc) =
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (typeName v) []) ploc
 
+-- | A substitution for when using 'substituteTypes'.
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
              deriving (Show)
 
+-- | A collection of type substitutions.
 type TypeSubs = M.Map VName TypeSub
 
+-- | Apply type substitutions to the given type.
 substituteTypes :: Monoid als => TypeSubs -> TypeBase (DimDecl VName) als -> TypeBase (DimDecl VName) als
 substituteTypes substs ot = case ot of
   Array als u at shape ->

@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+-- | @futhark run@
 module Futhark.CLI.Run (main) where
 
 import Control.Monad.Free.Church
 import Control.Exception
-import Data.Loc
 import Data.Maybe
 import qualified Data.Map as M
 import Control.Monad
@@ -30,6 +30,7 @@ import Futhark.Util (toPOSIX)
 
 import qualified Language.Futhark.Interpreter as I
 
+-- | Run @futhark run@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options... program" run
   where run [prog] config = Just $ interpret config prog
@@ -124,7 +125,7 @@ newFutharkiState cfg file = runExceptT $ do
         badOnLeft p (Left err) = throwError $ p err
 
 mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc
+mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreter' m = runF m (return . Right) intOp

@@ -1,6 +1,7 @@
 {
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
@@ -28,16 +29,16 @@ import qualified Data.Text as T
 import Codec.Binary.UTF8.String (encode)
 import Data.Char (ord)
 import Data.Maybe (fromMaybe, fromJust)
-import Data.Loc hiding (L) -- Lexer has replacements.
 import Data.List (genericLength)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Monoid
 
 import Language.Futhark.Syntax hiding (ID)
-import Language.Futhark.Attributes
+import Language.Futhark.Prop
 import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
+import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
 
 }
 
@@ -138,6 +139,7 @@ import Language.Futhark.Parser.Lexer
       '}'             { L $$ RCURLY }
       '['             { L $$ LBRACKET }
       ']'             { L $$ RBRACKET }
+      '#['            { L $$ HASH_LBRACKET }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '\\'            { L $$ BACKSLASH }
@@ -152,7 +154,6 @@ import Language.Futhark.Parser.Lexer
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      unsafe          { L $$ UNSAFE }
       assert          { L $$ ASSERT }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
@@ -167,7 +168,7 @@ import Language.Futhark.Parser.Lexer
       doc             { L _  (DOC _) }
 
 %left bottom
-%left ifprec letprec unsafe caseprec typeprec enumprec sumprec
+%left ifprec letprec caseprec typeprec enumprec sumprec
 %left ',' case id constructor '(' '{'
 %right ':' ':>'
 %right '...' '..<' '..>' '..'
@@ -546,8 +547,9 @@ Exp2 :: { UncheckedExp }
 
      | MatchExp { $1 }
 
-     | unsafe Exp2     { Unsafe $2 (srcspan $1 $>) }
      | assert Atom Atom    { Assert $2 $3 NoInfo (srcspan $1 $>) }
+     | '#[' AttrInfo ']' Exp %prec bottom
+                           { Attr $2 $4 (srcspan $1 $>) }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }
@@ -881,6 +883,9 @@ FieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
+
+AttrInfo :: { AttrInfo }
+         : id { let L _ (ID s) = $1 in AttrInfo s }
 
 Value :: { Value }
 Value : IntValue { $1 }
