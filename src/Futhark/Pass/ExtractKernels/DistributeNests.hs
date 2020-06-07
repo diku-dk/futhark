@@ -195,17 +195,46 @@ withStm stm = local $ \env ->
       }
   where provided = namesFromList $ patternNames $ stmPattern stm
 
-mapNesting :: (Monad m, DistLore lore) =>
+leavingNesting :: (MonadFreshNames m, DistLore lore) =>
+                  DistAcc lore -> DistNestT lore m (DistAcc lore)
+leavingNesting acc =
+  case popInnerTarget $ distTargets acc of
+   Nothing ->
+     error "The kernel targets list is unexpectedly small"
+   Just ((pat, res), newtargets) -> do
+     -- Any results left over correspond to a Replicate or a Copy in
+     -- the parent nesting, depending on whether the argument is a
+     -- parameter of the innermost nesting.
+     (Nesting _ inner_nesting, _) <- asks distNest
+     let w = loopNestingWidth inner_nesting
+         aux = loopNestingAux inner_nesting
+         inps = loopNestingParamsAndArrs inner_nesting
+
+         remnantStm pe (Var v)
+           | Just (_, arr) <- find ((==v) . paramName . fst) inps =
+               Let (Pattern [] [pe]) aux $
+               BasicOp $ Copy arr
+         remnantStm pe se =
+           Let (Pattern [] [pe]) aux $
+           BasicOp $ Replicate (Shape [w]) se
+
+         stms =
+           stmsFromList $ zipWith remnantStm (patternElements pat) res
+
+     return $ addStmsToAcc stms acc { distTargets = newtargets }
+
+mapNesting :: (MonadFreshNames m, DistLore lore) =>
               PatternT Type -> StmAux () -> SubExp -> Lambda SOACS -> [VName]
-           -> DistNestT lore m a
-           -> DistNestT lore m a
-mapNesting pat aux w lam arrs = local $ \env ->
-  env { distNest = pushInnerNesting nest $ distNest env
-      , distScope =  castScope (scopeOf lam) <> distScope env
-      }
+           -> DistNestT lore m (DistAcc lore)
+           -> DistNestT lore m (DistAcc lore)
+mapNesting pat aux w lam arrs m =
+  local extend $ leavingNesting =<< m
   where nest = Nesting mempty $
                MapNesting pat aux w $
                zip (lambdaParams lam) arrs
+        extend env = env { distNest = pushInnerNesting nest $ distNest env
+                         , distScope =  castScope (scopeOf lam) <> distScope env
+                         }
 
 inNesting :: (Monad m, DistLore lore) =>
              KernelNest -> DistNestT lore m a -> DistNestT lore m a
@@ -231,15 +260,6 @@ lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 -- slower in practice.  Caveat emptor (and you are the emptor).
 incrementalFlattening :: Bool
 incrementalFlattening = isJust $ lookup "FUTHARK_INCREMENTAL_FLATTENING" unixEnvironment
-
-leavingNesting :: MonadFreshNames m =>
-                  DistAcc lore -> DistNestT lore m (DistAcc lore)
-leavingNesting acc =
-  case popInnerTarget $ distTargets acc of
-   Nothing ->
-     error "The kernel targets list is unexpectedly small"
-   Just (_, newtargets) ->
-     return acc { distTargets = newtargets }
 
 distributeMapBodyStms :: (MonadFreshNames m, DistLore lore) => DistAcc lore -> Stms SOACS -> DistNestT lore m (DistAcc lore)
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
@@ -429,9 +449,6 @@ maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
 
 maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
   | [t] <- patternTypes pat = do
-      -- XXX: We need a temporary dummy binding to prevent an empty
-      -- map body.  The kernel extractor does not like empty map
-      -- bodies.
       tmp <- newVName "tmp"
       let rowt = rowType t
           newbnd = Let pat aux $ Op $ Screma d (mapSOAC lam) []
@@ -951,7 +968,6 @@ distributeMap :: (MonadFreshNames m, DistLore lore) =>
               -> DistNestT lore m (DistAcc lore)
 distributeMap (MapLoop pat aux w lam arrs) acc =
   distribute =<<
-  leavingNesting =<<
   mapNesting pat aux w lam arrs
   (distribute =<< distributeMapBodyStms acc' lam_bnds)
 
