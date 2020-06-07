@@ -123,10 +123,10 @@ struct opencl_device_option {
   char *device_name;
 };
 
-/* This function must be defined by the user.  It is invoked by
-   setup_opencl() after the platform and device has been found, but
-   before the program is loaded.  Its intended use is to tune
-   constants based on the selected platform and device. */
+// This function must be defined by the user.  It is invoked by
+// setup_opencl() after the platform and device has been found, but
+// before the program is loaded.  Its intended use is to tune
+// constants based on the selected platform and device.
 static void post_opencl_setup(struct opencl_context*, struct opencl_device_option*);
 
 static char *strclone(const char *str) {
@@ -465,8 +465,8 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
   return build_status;
 }
 
-/* Fields in a bitmask indicating which types we must be sure are
-   available. */
+// Fields in a bitmask indicating which types we must be sure are
+// available.
 enum opencl_required_type { OPENCL_F64 = 1 };
 
 // We take as input several strings representing the program, because
