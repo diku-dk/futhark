@@ -104,21 +104,21 @@ onHostOp _ (ImpKernels.GetSizeMax v size_class) =
  return $ ImpOpenGL.GetSizeMax v size_class
 
 onShader :: Kernel -> OnShaderM OpenGL
-onShader shader = do
+onShader kernel = do
   let vname_sizes =
-        S.toList $ S.fromList $ catMaybes $ analyzeSizes $ kernelBody shader
+        S.toList $ S.fromList $ catMaybes $ analyzeSizes $ kernelBody kernel
 
       (shader_body, cstate) =
-        GenericC.runCompilerM mempty (inShaderOperations (kernelBody shader))
+        GenericC.runCompilerM mempty (inShaderOperations (kernelBody kernel))
         blankNameSource
         newShaderState $
         GenericC.blockScope $ GenericC.compileCode GenericC.TargetShader
                                                    (Just vname_sizes)
-                                                 $ kernelBody shader
+                                                 $ kernelBody kernel
       s_state = GenericC.compUserState cstate
 
       (use_params', uses') =
-        unzip $ mapMaybe (useAsParam vname_sizes) $ kernelUses shader
+        unzip $ mapMaybe (useAsParam vname_sizes) $ kernelUses kernel
 
       --FIXME: `local_memory_params` might be used as global arrays.
       (local_memory_args, _, local_memory_init) =
@@ -133,7 +133,7 @@ onShader shader = do
           [C.citem|const typename int32_t block_dim2 = 2;|]]
         )
 
-      const_defs = mapMaybe constDef $ kernelUses shader
+      const_defs = mapMaybe constDef $ kernelUses kernel
 
       -- We do not account for safety within shaders.
       safety = SafetyNone
@@ -179,16 +179,16 @@ onShader shader = do
   modify $ \s -> s
     { glShaders   =
            M.insert name (safety, [shader_code]) $ glShaders s
-    , glUsedTypes = typesInShader shader <> glUsedTypes s
+    , glUsedTypes = typesInShader kernel <> glUsedTypes s
     }
 
   let args = catMaybes local_memory_args ++
-             kernelArgs shader
+             kernelArgs kernel
 
   return $ LaunchShader safety name args num_groups group_size
-  where name = nameToString $ kernelName shader
-        num_groups = kernelNumGroups shader
-        group_size = kernelGroupSize shader
+  where name = nameToString $ kernelName kernel
+        num_groups = kernelNumGroups kernel
+        group_size = kernelGroupSize kernel
 
         prepareLocalMemory vsizes (mem, size) = do
           let vsize = lookup mem vsizes
@@ -321,7 +321,7 @@ inShaderOperations body =
         shaderOps (LocalAlloc name size) = do
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.modifyUserState $ \s ->
-            s { shaderLocalMemory = (name', size) : shaderLocalMemory s }
+            s { shaderLocalMemory = (name, size) : shaderLocalMemory s }
         shaderOps (ErrorSync f) = do
           label   <- nextErrorLabel
           pending <- shaderSyncPending <$> GenericC.getUserState
