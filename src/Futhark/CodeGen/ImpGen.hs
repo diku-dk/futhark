@@ -1146,7 +1146,8 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
       | otherwise ->
           error $
-          unwords ["copyDWIMDest: prim-typed target and array-typed source", pretty src,
+          unwords ["copyDWIMDest: prim-typed target", pretty name,
+                   "and array-typed source", pretty src,
                    "with slice", pretty src_slice]
 
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
