@@ -86,7 +86,6 @@ module Futhark.CodeGen.ImpGen
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Control.Parallel.Strategies
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
@@ -332,25 +331,19 @@ compileProg :: (Mem lore, FreeIn op, MonadFreshNames m) =>
             -> Prog lore -> m (Imp.Definitions op)
 compileProg r ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-    let (_, ss) =
-          unzip $ parMap rpar (compileFunDef' src) funs
-        free_in_funs =
-          freeIn $ mconcat $ map stateFunctions ss
-        (consts', s') =
-          runImpM (compileConsts free_in_funs consts) r ops space $
-          combineStates ss
+  let (consts', s') =
+        runImpM compile r ops space
+        (newState src) { stateVTable = constsVTable consts }
   in (Imp.Definitions consts' (stateFunctions s'),
       stateNameSource s')
-  where compileFunDef' src fdef =
-          runImpM (compileFunDef fdef) r ops space
-          (newState src) { stateVTable = constsVTable consts }
+  where compile = do
+          mapM_ compileFunDef' funs
+          free_in_funs <- gets (freeIn . stateFunctions)
+          compileConsts free_in_funs consts
 
-        combineStates ss =
-          let Imp.Functions funs' = mconcat $ map stateFunctions ss
-              src = mconcat (map stateNameSource ss)
-          in (newState src) { stateFunctions =
-                                Imp.Functions $ M.toList $ M.fromList funs'
-                            }
+        compileFunDef' fdef =
+          local (\env -> env { envFunction = Just $ funDefName fdef }) $
+          compileFunDef fdef
 
 compileConsts :: Names -> Stms lore -> ImpM lore r op (Imp.Constants op)
 compileConsts used_consts stms = do
@@ -502,8 +495,7 @@ compileOutParams orig_rts orig_epts = do
 compileFunDef :: Mem lore =>
                  FunDef lore
               -> ImpM lore r op ()
-compileFunDef (FunDef entry fname rettype params body) =
-  local (\env -> env { envFunction = Just fname }) $ do
+compileFunDef (FunDef entry fname rettype params body) = do
   ((outparams, inparams, results, args), body') <- collect' compile
   emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args
   where params_entry = maybe (replicate (length params) TypeDirect) fst entry
