@@ -301,10 +301,24 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
+  -- groupScan needs to treat the output as a one-dimensional array of
+  -- scan elements, so we invent some new flattened arrays here.  XXX:
+  -- this assumes that the original index function is just row-major,
+  -- but does not actually verify it.
+  dims_flat <- dPrimV "dims_flat" $ product dims'
+  let flattened pe = do
+        MemLocation mem _ _ <-
+          entryArrayLocation <$> lookupArray (patElemName pe)
+        let pe_t = typeOf pe
+            arr_dims = Var dims_flat : drop (length dims') (arrayDims pe_t)
+        sArray (baseString (patElemName pe) ++ "_flat")
+          (elemType pe_t) (Shape arr_dims) $
+          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) dims
+  arrs_flat <- mapM flattened $ patternElements pat
+
   forM_ scans $ \scan -> do
     let scan_op = segBinOpLambda scan
-    groupScan (Just crossesSegment) (product dims') (product dims') scan_op $
-      patternNames pat
+    groupScan (Just crossesSegment) (product dims') (product dims') scan_op arrs_flat
 
 compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   compileGroupSpace lvl space
