@@ -215,7 +215,7 @@ hoistCertificates _ _ _ _ =
   Skip
 
 liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
-liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
+liftIdentityMapping (_, usages) pat aux (Screma w form arrs)
   | Just fun <- isMapSOAC form = do
   let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
       free = freeIn $ lambdaBody fun
@@ -252,7 +252,8 @@ liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames (map patElemName pat') $ Op $ Screma w (mapSOAC fun') arrs
+      auxing aux $
+        letBindNames (map patElemName pat') $ Op $ Screma w (mapSOAC fun') arrs
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
@@ -296,10 +297,10 @@ removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
-removeReplicateWrite vtable pat _ (Scatter len lam ivs as)
+removeReplicateWrite vtable pat aux (Scatter len lam ivs as)
   | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
       forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
-      letBind pat $ Op $ Scatter len lam' ivs' as
+      auxing aux $ letBind pat $ Op $ Scatter len lam' ivs' as
 removeReplicateWrite _ _ _ _ = Skip
 
 removeReplicateInput :: Aliased lore =>
@@ -479,7 +480,7 @@ removeDeadReduction _ _ _ _ = Skip
 
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: BottomUpRuleOp (Wise SOACS)
-removeDeadWrite (_, used) pat _ (Scatter w fun arrs dests) =
+removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
   let (i_ses, v_ses) = splitAt (length dests) $ bodyResult $ lambdaBody fun
       (i_ts, v_ts) = splitAt (length dests) $ lambdaReturnType fun
       isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
@@ -490,7 +491,8 @@ removeDeadWrite (_, used) pat _ (Scatter w fun arrs dests) =
                  , lambdaReturnType = i_ts' ++ v_ts'
                  }
   in if pat /= Pattern [] pat'
-     then Simplify $ letBind (Pattern [] pat') $ Op $ Scatter w fun' arrs dests'
+     then Simplify $ auxing aux $
+          letBind (Pattern [] pat') $ Op $ Scatter w fun' arrs dests'
      else Skip
 removeDeadWrite _ _ _ _ = Skip
 
@@ -649,7 +651,8 @@ replaceArrayOps substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
   where onStm (Let pat aux e) =
           let (cs', e') = onExp (stmAuxCerts aux) e
-          in certify cs' $ mkLet (patternContextIdents pat) (patternValueIdents pat) e'
+          in certify cs' $
+             mkLet' (patternContextIdents pat) (patternValueIdents pat) aux e'
         onExp cs e
           | Just op <- isArrayOp cs e,
             Just op' <- M.lookup op substs =
