@@ -1956,11 +1956,6 @@ compileCode target _
     <*> rawMem src  <*> compileExp target srcoffset  <*> pure srcspace
     <*> compileExp target size
 
--- FIXME:
-compileCode TargetShader _ (Write dest (Count idx) elemtype
-                            DefaultSpace vol elemexp) =
-  undefined
-
 compileCode target _ (Write dest (Count idx) elemtype
                       DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
@@ -2004,10 +1999,6 @@ compileCode _ _ (DeclareScalar name vol t) = do
 
 compileCode _ _ (DeclareArray name ScalarSpace{} _ _) =
   error $ "Cannot declare array " ++ pretty name ++ " in scalar space."
-
--- FIXME:
-compileCode TargetShader _ (DeclareArray name DefaultSpace t vs) =
-  undefined
 
 compileCode target _ (DeclareArray name DefaultSpace t vs) = do
   name_realtype <- newVName $ baseString name ++ "_realtype"
