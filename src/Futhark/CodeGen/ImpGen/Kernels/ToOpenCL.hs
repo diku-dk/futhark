@@ -230,7 +230,7 @@ onKernel target kernel = do
              kernelArgs kernel
 
   return $ LaunchKernel safety name args num_groups group_size
-  where name = nameToString $ kernelName kernel
+  where name = kernelName kernel
         num_groups = kernelNumGroups kernel
         group_size = kernelGroupSize kernel
 

@@ -257,7 +257,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       void *$id:args_arr[] = { $inits:args'' };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(stderr, "Launching %s with grid size (", $string:kernel_name);
+        fprintf(stderr, "Launching %s with grid size (", $string:(pretty kernel_name));
         $stms:(printSizes [grid_x, grid_y, grid_z])
         fprintf(stderr, ") and block size (");
         $stms:(printSizes [block_x, block_y, block_z])
@@ -276,7 +276,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
         CUDA_SUCCEED(cuCtxSynchronize());
         $id:time_end = get_wall_time();
         fprintf(stderr, "Kernel %s runtime: %ldus\n",
-                $string:kernel_name, $id:time_end - $id:time_start);
+                $string:(pretty kernel_name), $id:time_end - $id:time_start);
       }
     }|]
 

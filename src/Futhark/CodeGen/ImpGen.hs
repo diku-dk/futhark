@@ -1338,10 +1338,11 @@ sLoopNest = sLoopNest' [] . shapeDims
 x <-- e = emit $ Imp.SetScalar x e
 infixl 3 <--
 
--- | Constructing a non-entry point function.
+-- | Constructing an ad-hoc function that does not correspond to any
+-- of the IR functions in the input program.
 function :: [Imp.Param] -> [Imp.Param] -> ImpM lore r op ()
          -> ImpM lore r op (Imp.Function op)
-function outputs inputs m = do
+function outputs inputs m = local noFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
@@ -1350,3 +1351,4 @@ function outputs inputs m = do
           addVar name $ MemVar Nothing $ MemEntry space
         addParam (Imp.ScalarParam name bt) =
           addVar name $ ScalarVar Nothing $ ScalarEntry bt
+        noFunction env = env { envFunction = Nothing }
