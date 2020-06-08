@@ -313,7 +313,7 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
             arr_dims = Var dims_flat : drop (length dims') (arrayDims pe_t)
         sArray (baseString (patElemName pe) ++ "_flat")
           (elemType pe_t) (Shape arr_dims) $
-          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) dims
+          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) arr_dims
   arrs_flat <- mapM flattened $ patternElements pat
 
   forM_ scans $ \scan -> do
