@@ -303,7 +303,7 @@ callShader opengl_code opengl_prelude shaders sizes
           ssbo       <- newVName "ssbo"
           GC.libDecl [C.cedecl|typename GLuint $id:ssbo;|]
           GC.stm [C.cstm|opengl_alloc(&ctx->opengl, $exp:num_bytes',
-                                      $esc:(pretty ssbo), &$id:ssbo);|]
+                                      $string:(pretty ssbo), &$id:ssbo);|]
           GC.stm [C.cstm|glBindBufferBase(GL_SHADER_STORAGE_BUFFER, $int:i,
                                           $id:ssbo);|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
