@@ -364,7 +364,7 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
     OPENGL_SUCCEED(glGetError());
     glDispatchComputeIndirect(0);
     OPENGL_SUCCEED(glGetError());
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
     OPENGL_SUCCEED(glGetError());
     glDeleteProgram(ctx->opengl.program);
     if (ctx->debugging) {
