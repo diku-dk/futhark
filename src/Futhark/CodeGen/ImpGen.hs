@@ -21,7 +21,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , localDefaultSpace, askFunction
+  , localDefaultSpace, askFunction, newVNameForFun
   , askEnv, localEnv
   , localOps
   , VTable
@@ -730,7 +730,7 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
       dest_mem <- entryArrayLocation <$> lookupArray (patElemName pe)
       dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
       let t = primValueType v
-      static_array <- newVName "static_array"
+      static_array <- newVNameForFun "static_array"
       emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
       let static_src = MemLocation static_array [intConst Int32 $ fromIntegral $ length es] $
                        IxFun.iota [fromIntegral $ length es]
@@ -910,6 +910,12 @@ localDefaultSpace space = local (\env -> env { envDefaultSpace = space })
 
 askFunction :: ImpM lore r op (Maybe Name)
 askFunction = asks envFunction
+
+-- | Generate a 'VName', prefixed with 'askFunction' if it exists.
+newVNameForFun :: String -> ImpM lore r op VName
+newVNameForFun s = do
+  fname <- fmap nameToString <$> askFunction
+  newVName $ maybe "" (++".") fname ++ s
 
 askEnv :: ImpM lore r op r
 askEnv = asks envEnv
@@ -1310,7 +1316,7 @@ sStaticArray name space pt vs = do
   let num_elems = case vs of Imp.ArrayValues vs' -> length vs'
                              Imp.ArrayZeros n -> fromIntegral n
       shape = Shape [intConst Int32 $ toInteger num_elems]
-  mem <- newVName $ name ++ "_mem"
+  mem <- newVNameForFun $ name ++ "_mem"
   emit $ Imp.DeclareArray mem space pt vs
   addVar mem $ MemVar Nothing $ MemEntry space
   sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
