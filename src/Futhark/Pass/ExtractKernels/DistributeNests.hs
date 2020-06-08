@@ -14,7 +14,6 @@ module Futhark.Pass.ExtractKernels.DistributeNests
   , bodyContainsParallelism
   , lambdaContainsParallelism
   , determineReduceOp
-  , incrementalFlattening
   , histKernel
 
   , DistEnv (..)
@@ -249,17 +248,15 @@ inNesting (outer, nests) = local $ \env ->
         asNesting = Nesting mempty
 
 bodyContainsParallelism :: Body SOACS -> Bool
-bodyContainsParallelism = any (isMap . stmExp) . bodyStms
-  where isMap Op{} = True
+bodyContainsParallelism = any isParallelStm . bodyStms
+  where isParallelStm stm =
+          isMap (stmExp stm) &&
+          not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
+        isMap Op{} = True
         isMap _ = False
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
-
--- Enable if you want the cool new versioned code.  Beware: may be
--- slower in practice.  Caveat emptor (and you are the emptor).
-incrementalFlattening :: Bool
-incrementalFlattening = isJust $ lookup "FUTHARK_INCREMENTAL_FLATTENING" unixEnvironment
 
 distributeMapBodyStms :: (MonadFreshNames m, DistLore lore) => DistAcc lore -> Stms SOACS -> DistNestT lore m (DistAcc lore)
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
@@ -418,8 +415,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
 -- sequentialised in the default case for this function.
 maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
   | Just (reds, map_lam) <- isRedomapSOAC form,
-    Reduce comm lam nes <- singleReduce reds,
-    isIdentityLambda map_lam || incrementalFlattening =
+    Reduce comm lam nes <- singleReduce reds =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -439,9 +435,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
     _ ->
       addStmToAcc bnd acc
 
-maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
-  | incrementalFlattening || isNothing (isRedomapSOAC form) = do
-  -- This with-loop is too complicated for us to immediately do
+maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc = do
+  -- This Screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   distributeMapBodyStms acc . fmap (certify cs) . snd =<<

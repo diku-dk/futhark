@@ -23,4 +23,5 @@ let find_nearest_point [k] (pts: [k]point) (pt: point): i32 =
 let main [n] (xs: [n]f32) (ys: [n]f32) =
   let points = zip xs ys
   let cluster_centres = take 10 points
-  in map (find_nearest_point cluster_centres) points
+  in #[sequential_inner]
+     map (find_nearest_point cluster_centres) points
