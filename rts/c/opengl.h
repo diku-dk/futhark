@@ -83,6 +83,7 @@ struct opengl_context {
   size_t max_tile_size;
   size_t max_threshold;
   size_t max_local_memory;
+  size_t max_block_size;
 
   size_t lockstep_width;
 
@@ -205,6 +206,7 @@ static void setup_size_opengl(struct opengl_context *ctx) {
    int max_local_memory;
    int max_num_groups;
    int max_group_size;
+   size_t max_block_size;
 
    glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE,
                  &max_local_memory);
@@ -212,6 +214,8 @@ static void setup_size_opengl(struct opengl_context *ctx) {
                  &max_num_groups);
    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0,
                    &max_group_size);
+   glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE,
+                   &max_block_size);
    OPENGL_SUCCEED(glGetError());
 
    ctx->program           = 0;
@@ -219,6 +223,7 @@ static void setup_size_opengl(struct opengl_context *ctx) {
    ctx->max_local_memory  = max_local_memory;
    ctx->max_num_groups    = max_num_groups;
    ctx->max_group_size    = max_group_size;
+   ctx->max_block_size    = max_block_size;
 
   // Go through all the sizes, clamp them to the valid range,
   // or set them to the default.
@@ -455,6 +460,12 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
         return error;
       }
     }
+  }
+
+  if(min_size < 0 || min_size > ctx->max_block_size) {
+    printf("Requested memory block size: %zu exceeds maximum block size: %zu\n",
+            min_size, ctx->max_block_size);
+    exit(1);
   }
 
   GLuint ssbo;
