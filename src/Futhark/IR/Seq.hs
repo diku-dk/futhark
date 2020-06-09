@@ -28,6 +28,7 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Optimise.Simplify as Simplify
 import Futhark.Optimise.Simplify.Rules
 
+-- | The phantom type for the Seq representation.
 data Seq
 
 instance Decorations Seq where
@@ -56,6 +57,7 @@ instance BinderOps (Engine.Wise Seq) where
 simpleSeq :: Simplify.SimpleOps Seq
 simpleSeq = Simplify.bindableSimpleOps (const $ pure ((), mempty))
 
+-- | Simplify a sequential program.
 simplifyProg :: Prog Seq -> PassM (Prog Seq)
 simplifyProg = Simplify.simplifyProg simpleSeq standardRules blockers
   where blockers = Engine.noExtraHoistBlockers

@@ -3,9 +3,9 @@ module Futhark.CLI.Query (main) where
 
 import Text.Read (readMaybe)
 
-import Data.Loc
 import Futhark.Compiler
 import Futhark.Util.Options
+import Futhark.Util.Loc
 import Language.Futhark.Query
 import Language.Futhark.Syntax
 

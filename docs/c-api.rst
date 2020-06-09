@@ -8,9 +8,9 @@ A Futhark program ``futlib.fut`` compiled to a C library with the
 ``futlib.h``.  The API provided in the ``.h`` file is documented in
 the following.
 
-Usaging the API revolves around creating a *configuration object*,
-which can then be used to obtain a *context object*, which must be
-passed whenever entry points are called.
+Using the API requires creating a *configuration object*, which is
+then used to obtain a *context object*, which is then used to perform
+most other operations, such as calling Futhark functions.
 
 Most functions that can fail return an integer: 0 on success and a
 non-zero value on error.  Others return a ``NULL`` pointer.  Use
@@ -183,10 +183,10 @@ will not result in a double free.
 Entry points
 ------------
 
-Entry points are mapped 1:1 to C functions.  Return value are handled
-with "out"-parameters.
+Entry points are mapped 1:1 to C functions.  Return values are handled
+with *out*-parameters.
 
-For example, the following entry point::
+For example, this Futhark entry point::
 
   entry sum = i32.sum
 
@@ -216,7 +216,7 @@ The following API functions are available when using the ``opencl`` or
 Exotic
 ~~~~~~
 
-The following functions are not going to interesting to most users.
+The following functions are not interesting to most users.
 
 .. c:function:: void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size)
 

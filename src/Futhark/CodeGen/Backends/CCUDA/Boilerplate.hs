@@ -4,13 +4,19 @@
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   (
     generateBoilerplate
+  , profilingEnclosure
+  , module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ) where
 
+import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.ImpCode.OpenCL
-import Futhark.CodeGen.Backends.COpenCL.Boilerplate (failureSwitch)
+import Futhark.CodeGen.Backends.COpenCL.Boilerplate
+  (failureSwitch, kernelRuntime, kernelRuns, costCentreReport,
+   copyDevToDev, copyDevToHost, copyHostToDev,
+   copyScalarToDev, copyScalarFromDev)
 import Futhark.Util (chunk, zEncodeString)
 
 import qualified Data.Map as M
@@ -19,13 +25,31 @@ import Data.FileEmbed (embedStringFile)
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
+-- | Block items to put before and after a thing to be profiled.
+profilingEnclosure :: Name -> ([C.BlockItem], [C.BlockItem])
+profilingEnclosure name =
+  ([C.citems|
+      typename cudaEvent_t *pevents = NULL;
+      if (ctx->profiling && !ctx->profiling_paused) {
+        pevents = cuda_get_events(&ctx->cuda,
+                                  &ctx->$id:(kernelRuns name),
+                                  &ctx->$id:(kernelRuntime name));
+        CUDA_SUCCEED(cudaEventRecord(pevents[0], 0));
+      }
+      |],
+   [C.citems|
+      if (pevents != NULL) {
+        CUDA_SUCCEED(cudaEventRecord(pevents[1], 0));
+      }
+      |])
+
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
-generateBoilerplate :: String -> String -> M.Map KernelName Safety
+generateBoilerplate :: String -> String -> [Name] -> M.Map KernelName Safety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate cuda_program cuda_prelude kernels sizes failures = do
+generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failures = do
   mapM_ GC.earlyDecl [C.cunit|
       $esc:("#include <cuda.h>")
       $esc:("#include <nvrtc.h>")
@@ -37,7 +61,11 @@ generateBoilerplate cuda_program cuda_prelude kernels sizes failures = do
 
   generateSizeFuns sizes
   cfg <- generateConfigFuns sizes
-  generateContextFuns cfg kernels sizes failures
+  generateContextFuns cfg cost_centres kernels sizes failures
+
+  GC.profileReport [C.citem|CUDA_SUCCEED(cuda_tally_profiling_records(&ctx->cuda));|]
+  mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
+
   where
     cuda_h = $(embedStringFile "rts/c/cuda.h")
     free_list_h = $(embedStringFile "rts/c/free_list.h")
@@ -81,6 +109,7 @@ generateConfigFuns sizes = do
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
      [C.cedecl|struct $id:s { struct cuda_config cu_cfg;
+                              int profiling;
                               size_t sizes[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
@@ -98,6 +127,7 @@ generateConfigFuns sizes = do
                            return NULL;
                          }
 
+                         cfg->profiling = 0;
                          cfg->num_nvrtc_opts = 0;
                          cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
                          cfg->nvrtc_opts[0] = NULL;
@@ -128,6 +158,12 @@ generateConfigFuns sizes = do
     ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
      [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
                          cfg->cu_cfg.logging = cfg->cu_cfg.debugging = flag;
+                       }|])
+
+  GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
+    ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+     [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
+                         cfg->profiling = flag;
                        }|])
 
   GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
@@ -227,15 +263,31 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
-generateContextFuns :: String -> M.Map KernelName Safety
+generateContextFuns :: String -> [Name] -> M.Map KernelName Safety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
-generateContextFuns cfg kernels sizes failures = do
+generateContextFuns cfg cost_centres kernels sizes failures = do
   final_inits <- GC.contextFinalInits
   (fields, init_fields) <- GC.contextContents
-  let kernel_fields = map (\k -> [C.csdecl|typename CUfunction $id:k;|]) $
-                          M.keys kernels
+  let forCostCentre name =
+        [([C.csdecl|typename int64_t $id:(kernelRuntime name);|],
+          [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]),
+         ([C.csdecl|int $id:(kernelRuns name);|],
+          [C.cstm|ctx->$id:(kernelRuns name) = 0;|])]
+
+      forKernel name =
+        ([C.csdecl|typename CUfunction $id:name;|],
+         [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
+                                &ctx->$id:name,
+                                ctx->cuda.module,
+                                $string:(pretty (C.toIdent name mempty))));|])
+        : forCostCentre name
+
+      (kernel_fields, init_kernel_fields) =
+        unzip $
+        concatMap forKernel (M.keys kernels) ++
+        concatMap forCostCentre cost_centres
 
   ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:s;|],
@@ -254,6 +306,9 @@ generateContextFuns cfg kernels sizes failures = do
                          struct sizes sizes;
                          // True if a potentially failing kernel has been enqueued.
                          typename int32_t failure_is_an_option;
+
+                         int total_runs;
+                         long int total_runtime;
                        };|])
 
   let set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
@@ -268,13 +323,22 @@ generateContextFuns cfg kernels sizes failures = do
                  if (ctx == NULL) {
                    return NULL;
                  }
-                 ctx->profiling = ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
+                 ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
+                 ctx->profiling = cfg->profiling;
+                 ctx->profiling_paused = 0;
                  ctx->error = NULL;
+                 ctx->cuda.profiling_records_capacity = 200;
+                 ctx->cuda.profiling_records_used = 0;
+                 ctx->cuda.profiling_records =
+                   malloc(ctx->cuda.profiling_records_capacity *
+                          sizeof(struct profiling_record));
 
                  ctx->cuda.cfg = cfg->cu_cfg;
                  create_lock(&ctx->lock);
 
                  ctx->failure_is_an_option = 0;
+                 ctx->total_runs = 0;
+                 ctx->total_runtime = 0;
                  $stms:init_fields
 
                  cuda_setup(&ctx->cuda, cuda_program, cfg->nvrtc_opts);
@@ -285,7 +349,7 @@ generateContextFuns cfg kernels sizes failures = do
                  // The +1 is to avoid zero-byte allocations.
                  CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure_args, sizeof(int32_t)*($int:max_failure_args+1)));
 
-                 $stms:(map loadKernel (M.toList kernels))
+                 $stms:init_kernel_fields
 
                  $stms:final_inits
                  $stms:set_sizes
@@ -343,8 +407,3 @@ generateContextFuns cfg kernels sizes failures = do
                          CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
                          return 0;
                        }|])
-
-  where
-    loadKernel (name, _) =
-      [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(&ctx->$id:name,
-                ctx->cuda.module, $string:name));|]

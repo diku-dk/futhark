@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE Safe #-}
+{-# LANGUAGE Strict #-}
 -- | Imperative intermediate language used as a stepping stone in code generation.
 --
 -- This is a generic representation parametrised on an extensible
@@ -21,7 +23,6 @@ module Futhark.CodeGen.ImpCode
   , SubExp(..)
   , MemSize
   , DimSize
-  , Type (..)
   , Space (..)
   , SpaceId
   , Code (..)
@@ -58,7 +59,6 @@ module Futhark.CodeGen.ImpCode
   where
 
 import Data.List (intersperse)
-import Data.Loc
 import Data.Traversable
 import qualified Data.Map as M
 
@@ -78,9 +78,6 @@ type MemSize = SubExp
 
 -- | The size of an array.
 type DimSize = SubExp
-
--- | The type of a parameter.
-data Type = Scalar PrimType | Mem Space
 
 -- | An ImpCode function parameter.
 data Param = MemParam VName Space

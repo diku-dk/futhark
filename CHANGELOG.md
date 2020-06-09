@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Better code generation for `reverse` (and the equivalent explicit
+    slice).
+
+  * `futhark bench` now prints progress bars.
+
+  * The `cuda` backend now supports similar profiling as the `opencl`
+    option, although it is likely slightly less accurate in the
+    presence of concurrent operations.
+
+### Removed
+
+  * The C# backend has been removed (#984).
+
+  * The `unsafe` keyword has been removed.  Use `#[unsafe]` instead.
+
+### Changed
+
+### Fixed
+
+  * Fix bug in slice simplification (#992).
+
+  * Fixed a typer checker bug for tracking the aliases of closures
+    (#995).
+
+  * Fixed handling of dumb terminals in futhark test (#1000).
+
+## [0.15.8]
+
+### Added
+
 
   * Warnings for overflowing literals, such as `1000 : u8`.
 
@@ -16,12 +46,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     be tagged with attributes that provide hints or directions to the
     compiler.  This is an expert-level feature, but it is sometimes
     useful.
-
-### Removed
-
-### Changed
-
-### Fixed
 
 ## [0.15.7]
 

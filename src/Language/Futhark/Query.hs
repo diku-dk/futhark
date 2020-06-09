@@ -15,10 +15,10 @@ module Language.Futhark.Query
 import Control.Monad
 import Control.Monad.State
 import Data.List (find)
-import Data.Loc (Pos(..), Located(..), Loc(..))
 import qualified Data.Map as M
 import qualified System.FilePath.Posix as Posix
 
+import Futhark.Util.Loc (Pos(..), Loc(..))
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals

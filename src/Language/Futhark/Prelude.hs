@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TemplateHaskell #-}
 -- | The Futhark Prelude Library embedded embedded as strings read
 -- during compilation of the Futhark compiler.  The advantage is that

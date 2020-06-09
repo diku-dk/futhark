@@ -16,7 +16,6 @@ module Futhark.Analysis.PrimExp.Convert
 
 import qualified Control.Monad.Fail as Fail
 import           Control.Monad.Identity
-import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 
@@ -37,7 +36,7 @@ instance ToExp v => ToExp (PrimExp v) where
     return $ BasicOp $ SubExp $ Constant v
   toExp (FunExp h args t) =
     Apply (nameFromString h) <$> args' <*> pure [primRetType t] <*>
-    pure (Safe, noLoc, [])
+    pure (Safe, mempty, [])
     where args' = zip <$> mapM (toSubExp "apply_arg") args <*> pure (repeat Observe)
   toExp (LeafExp v _) =
     toExp v
@@ -56,18 +55,19 @@ primExpFromExp f (BasicOp (UnOp op x)) =
   UnOpExp op <$> primExpFromSubExpM f x
 primExpFromExp f (BasicOp (ConvOp op x)) =
   ConvOpExp op <$> primExpFromSubExpM f x
-primExpFromExp _ (BasicOp (SubExp (Constant v))) =
-  return $ ValueExp v
+primExpFromExp f (BasicOp (SubExp se)) =
+  primExpFromSubExpM f se
 primExpFromExp f (Apply fname args ts _)
   | isBuiltInFunction fname, [Prim t] <- map declExtTypeOf ts =
       FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
+-- | Like 'primExpFromExp', but for a t'SubExp'.
 primExpFromSubExpM :: Applicative m => (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
 primExpFromSubExpM f (Var v) = f v
 primExpFromSubExpM _ (Constant v) = pure $ ValueExp v
 
--- | Convert 'SubExp's of a given type.
+-- | Convert t'SubExp's of a given type.
 primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
 primExpFromSubExp t (Var v)      = LeafExp v t
 primExpFromSubExp _ (Constant v) = ValueExp v

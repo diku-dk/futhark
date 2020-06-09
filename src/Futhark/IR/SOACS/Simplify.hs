@@ -71,7 +71,7 @@ simplifyFun =
   Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
-                  Lambda -> [Maybe VName] -> m Lambda
+                  Lambda -> m Lambda
 simplifyLambda =
   Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
 
@@ -93,12 +93,11 @@ simplifySOAC (Stream outerdim form lam arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form
   arr' <- mapM Engine.simplify arr
-  (lam', lam_hoisted) <- Engine.simplifyLambda lam (map Just arr)
+  (lam', lam_hoisted) <- Engine.simplifyLambda lam
   return (Stream outerdim' form' lam' arr', form_hoisted <> lam_hoisted)
   where simplifyStreamForm (Parallel o comm lam0 acc) = do
           acc'  <- mapM Engine.simplify acc
-          (lam0', hoisted) <- Engine.simplifyLambda lam0 $
-                              replicate (length $ lambdaParams lam0) Nothing
+          (lam0', hoisted) <- Engine.simplifyLambda lam0
           return (Parallel o comm lam0' acc', hoisted)
         simplifyStreamForm (Sequential acc) = do
           acc' <- mapM Engine.simplify acc
@@ -106,7 +105,7 @@ simplifySOAC (Stream outerdim form lam arr) = do
 
 simplifySOAC (Scatter len lam ivs as) = do
   len' <- Engine.simplify len
-  (lam', hoisted) <- Engine.simplifyLambda lam $ map Just ivs
+  (lam', hoisted) <- Engine.simplifyLambda lam
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
   return (Scatter len' lam' ivs' as', hoisted)
@@ -118,24 +117,24 @@ simplifySOAC (Hist w ops bfun imgs) = do
     rf' <- Engine.simplify rf
     dests' <- Engine.simplify dests
     nes' <- mapM Engine.simplify nes
-    (op', hoisted) <- Engine.simplifyLambda op $ replicate (length $ lambdaParams op) Nothing
+    (op', hoisted) <- Engine.simplifyLambda op
     return (HistOp dests_w' rf' dests' nes' op', hoisted)
   imgs'  <- mapM Engine.simplify imgs
-  (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun $ map Just imgs
+  (bfun', bfun_hoisted) <- Engine.simplifyLambda bfun
   return (Hist w' ops' bfun' imgs', mconcat hoisted <> bfun_hoisted)
 
 simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
   (scans', scans_hoisted) <- fmap unzip $ forM scans $ \(Scan lam nes) -> do
-    (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length nes) Nothing
+    (lam', hoisted) <- Engine.simplifyLambda lam
     nes' <- Engine.simplify nes
     return (Scan lam' nes', hoisted)
 
   (reds', reds_hoisted) <- fmap unzip $ forM reds $ \(Reduce comm lam nes) -> do
-    (lam', hoisted) <- Engine.simplifyLambda lam $ replicate (length nes) Nothing
+    (lam', hoisted) <- Engine.simplifyLambda lam
     nes' <- Engine.simplify nes
     return (Reduce comm lam' nes', hoisted)
 
-  (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam $ map Just arrs
+  (map_lam', map_lam_hoisted) <- Engine.simplifyLambda map_lam
 
   (,) <$> (Screma <$> Engine.simplify w <*>
            pure (ScremaForm scans' reds' map_lam') <*>
@@ -198,7 +197,7 @@ hoistCertificates :: TopDownRuleOp (Wise SOACS)
 hoistCertificates vtable pat aux soac
   | (soac', hoisted) <- runState (mapSOACM mapper soac) mempty,
     hoisted /= mempty =
-      Simplify $ certifying (hoisted <> stmAuxCerts aux) $ letBind pat $ Op soac'
+      Simplify $ auxing aux $ certifying hoisted $ letBind pat $ Op soac'
   where mapper = identitySOACMapper { mapOnSOACLambda = onLambda }
         onLambda lam = do
           stms' <- mapM onStm $ bodyStms $ lambdaBody lam
@@ -216,7 +215,7 @@ hoistCertificates _ _ _ _ =
   Skip
 
 liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
-liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
+liftIdentityMapping (_, usages) pat aux (Screma w form arrs)
   | Just fun <- isMapSOAC form = do
   let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
       free = freeIn $ lambdaBody fun
@@ -253,11 +252,12 @@ liftIdentityMapping (_, usages) pat _ (Screma w form arrs)
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames (map patElemName pat') $ Op $ Screma w (mapSOAC fun') arrs
+      auxing aux $
+        letBindNames (map patElemName pat') $ Op $ Screma w (mapSOAC fun') arrs
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
-liftIdentityStreaming _ (Pattern [] pes) _ (Stream w form lam arrs)
+liftIdentityStreaming _ (Pattern [] pes) aux (Stream w form lam arrs)
   | (variant_map, invariant_map) <-
       partitionEithers $ map isInvariantRes $ zip3 map_ts map_pes map_res,
     not $ null invariant_map = Simplify $ do
@@ -269,7 +269,7 @@ liftIdentityStreaming _ (Pattern [] pes) _ (Stream w form lam arrs)
           lam' = lam { lambdaBody = (lambdaBody lam) { bodyResult = fold_res ++ variant_map_res }
                      , lambdaReturnType = fold_ts ++ variant_map_ts }
 
-      letBind (Pattern [] $ fold_pes ++ variant_map_pes) $
+      auxing aux $ letBind (Pattern [] $ fold_pes ++ variant_map_pes) $
         Op $ Stream w form lam' arrs
   where num_folds = length $ getStreamAccums form
         (fold_pes, map_pes) = splitAt num_folds pes
@@ -288,19 +288,19 @@ liftIdentityStreaming _ _ _ _ = Skip
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping :: TopDownRuleOp (Wise SOACS)
-removeReplicateMapping vtable pat _ (Screma w form arrs)
+removeReplicateMapping vtable pat aux (Screma w form arrs)
   | Just fun <- isMapSOAC form,
     Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
       forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
-      letBind pat $ Op $ Screma w (mapSOAC fun') arrs'
+      auxing aux $ letBind pat $ Op $ Screma w (mapSOAC fun') arrs'
 removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
-removeReplicateWrite vtable pat _ (Scatter len lam ivs as)
+removeReplicateWrite vtable pat aux (Scatter len lam ivs as)
   | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
       forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
-      letBind pat $ Op $ Scatter len lam' ivs' as
+      auxing aux $ letBind pat $ Op $ Scatter len lam' ivs' as
 removeReplicateWrite _ _ _ _ = Skip
 
 removeReplicateInput :: Aliased lore =>
@@ -335,19 +335,19 @@ removeReplicateInput vtable fun arrs
 
 -- | Remove inputs that are not used inside the SOAC.
 removeUnusedSOACInput :: TopDownRuleOp (Wise SOACS)
-removeUnusedSOACInput _ pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
+removeUnusedSOACInput _ pat aux (Screma w (ScremaForm scan reduce map_lam) arrs)
   | (used,unused) <- partition usedInput params_and_arrs,
     not (null unused) = Simplify $ do
       let (used_params, used_arrs) = unzip used
           map_lam' = map_lam { lambdaParams = used_params }
-      letBind pat $ Op $ Screma w (ScremaForm scan reduce map_lam') used_arrs
+      auxing aux $ letBind pat $ Op $ Screma w (ScremaForm scan reduce map_lam') used_arrs
   where params_and_arrs = zip (lambdaParams map_lam) arrs
         used_in_body = freeIn $ lambdaBody map_lam
         usedInput (param, _) = paramName param `nameIn` used_in_body
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
-removeDeadMapping (_, used) pat _ (Screma w form arrs)
+removeDeadMapping (_, used) pat aux (Screma w form arrs)
   | Just fun <- isMapSOAC form =
   let ses = bodyResult $ lambdaBody fun
       isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
@@ -357,12 +357,13 @@ removeDeadMapping (_, used) pat _ (Screma w form arrs)
                  , lambdaReturnType = ts'
                  }
   in if pat /= Pattern [] pat'
-     then Simplify $ letBind (Pattern [] pat') $ Op $ Screma w (mapSOAC fun') arrs
+     then Simplify $ auxing aux $
+          letBind (Pattern [] pat') $ Op $ Screma w (mapSOAC fun') arrs
      else Skip
 removeDeadMapping _ _ _ _ = Skip
 
 removeDuplicateMapOutput :: BottomUpRuleOp (Wise SOACS)
-removeDuplicateMapOutput (_, used) pat _ (Screma w form arrs)
+removeDuplicateMapOutput (_, used) pat aux (Screma w form arrs)
   | Just fun <- isMapSOAC form =
   let ses = bodyResult $ lambdaBody fun
       ts = lambdaReturnType fun
@@ -376,7 +377,7 @@ removeDuplicateMapOutput (_, used) pat _ (Screma w form arrs)
            pat' = Pattern [] pes'
            fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = ses' }
                       , lambdaReturnType = ts' }
-       letBind pat' $ Op $ Screma w (mapSOAC fun') arrs
+       auxing aux $ letBind pat' $ Op $ Screma w (mapSOAC fun') arrs
        forM_ copies $ \(from,to) ->
          if UT.isConsumed (patElemName to) used then
            letBind (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
@@ -479,7 +480,7 @@ removeDeadReduction _ _ _ _ = Skip
 
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: BottomUpRuleOp (Wise SOACS)
-removeDeadWrite (_, used) pat _ (Scatter w fun arrs dests) =
+removeDeadWrite (_, used) pat aux (Scatter w fun arrs dests) =
   let (i_ses, v_ses) = splitAt (length dests) $ bodyResult $ lambdaBody fun
       (i_ts, v_ts) = splitAt (length dests) $ lambdaReturnType fun
       isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
@@ -490,7 +491,8 @@ removeDeadWrite (_, used) pat _ (Scatter w fun arrs dests) =
                  , lambdaReturnType = i_ts' ++ v_ts'
                  }
   in if pat /= Pattern [] pat'
-     then Simplify $ letBind (Pattern [] pat') $ Op $ Scatter w fun' arrs dests'
+     then Simplify $ auxing aux $
+          letBind (Pattern [] pat') $ Op $ Scatter w fun' arrs dests'
      else Skip
 removeDeadWrite _ _ _ _ = Skip
 
@@ -649,7 +651,8 @@ replaceArrayOps substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
   where onStm (Let pat aux e) =
           let (cs', e') = onExp (stmAuxCerts aux) e
-          in certify cs' $ mkLet (patternContextIdents pat) (patternValueIdents pat) e'
+          in certify cs' $
+             mkLet' (patternContextIdents pat) (patternValueIdents pat) aux e'
         onExp cs e
           | Just op <- isArrayOp cs e,
             Just op' <- M.lookup op substs =
@@ -676,7 +679,7 @@ replaceArrayOps substs (Body _ stms res) =
 -- complex situations (rotate or whatnot), consider turning it into a
 -- separate compiler pass instead.
 simplifyMapIota :: TopDownRuleOp (Wise SOACS)
-simplifyMapIota vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
+simplifyMapIota vtable pat aux (Screma w (ScremaForm scan reduce map_lam) arrs)
   | Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <- filter (indexesWith (paramName p)) $ map snd $ S.toList $
                  arrayOps $ lambdaBody map_lam,
@@ -690,7 +693,9 @@ simplifyMapIota vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
                              , lambdaBody = replaceArrayOps substs $
                                             lambdaBody map_lam
                              }
-      letBind pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
+
+      auxing aux $
+        letBind pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
   where isIota (_, arr) = case ST.lookupBasicOp arr vtable of
                             Just (Iota _ (Constant o) (Constant s) _, _) ->
                               zeroIsh o && oneIsh s
@@ -723,7 +728,7 @@ simplifyMapIota  _ _ _ _ = Skip
 -- corresponding to that transformation performed on the rows of the
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
-moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arrs)
+moveTransformToInput vtable pat aux (Screma w (ScremaForm scan reduce map_lam) arrs)
   | ops <- map snd $ filter arrayIsMapParam $ S.toList $ arrayOps $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
       (more_arrs, more_params, replacements) <-
@@ -737,7 +742,8 @@ moveTransformToInput vtable pat _ (Screma w (ScremaForm scan reduce map_lam) arr
                                             lambdaBody map_lam
                              }
 
-      letBind pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
+      auxing aux $
+        letBind pat $ Op $ Screma w (ScremaForm scan reduce map_lam') (arrs <> more_arrs)
 
   where map_param_names = map paramName (lambdaParams map_lam)
         topLevelPattern = (`elem` fmap stmPattern (bodyStms (lambdaBody map_lam)))

@@ -177,7 +177,7 @@ unstreamLambda attrs nes lam = do
                        }
 
   soacs_scope <- castScope <$> askScope
-  map_lam' <- runReaderT (SOACS.simplifyLambda map_lam []) soacs_scope
+  map_lam' <- runReaderT (SOACS.simplifyLambda map_lam) soacs_scope
 
   if "sequential_inner" `inAttrs` attrs
     then FOT.transformLambda map_lam'

@@ -27,6 +27,7 @@ import Text.Regex.TDFA
 
 import Futhark.Analysis.Metrics
 import Futhark.Test
+import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Console
@@ -401,12 +402,13 @@ runTests config paths = do
 
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar . excludeCases config) included
-  isTTY <- (&& not (configLineOutput config)) <$> hIsTerminalDevice stdout
 
-  let report | isTTY = reportTable
+  let fancy = not (configLineOutput config) && fancyTerminal
+
+      report | fancy = reportTable
              | otherwise = reportText
-      clear | isTTY = clearFromCursorToScreenEnd
-            |otherwise = putStr "\n"
+      clear | fancy = clearFromCursorToScreenEnd
+            | otherwise = putStr "\n"
 
       numTestCases tc =
         case testAction $ testCaseTest tc of
@@ -421,7 +423,7 @@ runTests config paths = do
           msg <- takeMVar reportmvar
           case msg of
             TestStarted test -> do
-              unless isTTY $
+              unless fancy $
                 putStr $ "Started testing " <> testCaseProgram test <> " "
               getResults $ ts {testStatusRun = test : testStatusRun ts}
             TestDone test res -> do
@@ -435,14 +437,14 @@ runTests config paths = do
                   let ts'' = ts' { testStatusRunPass =
                                      testStatusRunPass ts' + numTestCases test
                                  }
-                  unless isTTY $
+                  unless fancy $
                     putStr $ "Finished testing " <> testCaseProgram test <> " "
                   getResults $ ts'' { testStatusPass = testStatusPass ts + 1}
                 Failure s -> do
-                  when isTTY moveCursorToTableTop
+                  when fancy moveCursorToTableTop
                   clear
                   T.putStr $ (T.pack (inRed $ testCaseProgram test) <> ":\n") <> T.unlines s
-                  when isTTY spaceTable
+                  when fancy spaceTable
                   getResults $ ts' { testStatusFail = testStatusFail ts' + 1
                                    , testStatusRunPass = testStatusRunPass ts'
                                                          + numTestCases test - length s
@@ -451,7 +453,7 @@ runTests config paths = do
                                                          + length s
                                    }
 
-  when isTTY spaceTable
+  when fancy spaceTable
 
   ts <- getResults TestStatus { testStatusRemain = included
                               , testStatusRun    = []
@@ -465,7 +467,7 @@ runTests config paths = do
                               }
 
   -- Removes "Now testing" output.
-  when isTTY $ cursorUpLine 1 >> clearLine
+  when fancy $ cursorUpLine 1 >> clearLine
 
   let excluded_str | null excluded = ""
                    | otherwise = " (" ++ show (length excluded) ++ " program(s) excluded).\n"

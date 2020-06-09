@@ -1,6 +1,7 @@
 {
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -w #-}
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
@@ -14,7 +15,6 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Char (ord, toLower)
-import Data.Loc hiding (L)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Bits
@@ -27,6 +27,7 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Name, nameFromText, nameToText)
 import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
+import Futhark.Util.Loc hiding (L)
 
 }
 
@@ -149,7 +150,6 @@ keyword s =
     "entry"        -> ENTRY
     "module"       -> MODULE
     "while"        -> WHILE
-    "unsafe"       -> UNSAFE
     "assert"       -> ASSERT
     "match"        -> MATCH
     "case"         -> CASE
@@ -362,7 +362,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | UNSAFE
            | ASSERT
            | TRUE
            | FALSE

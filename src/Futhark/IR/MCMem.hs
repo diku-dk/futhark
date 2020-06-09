@@ -63,6 +63,7 @@ instance TC.Checkable MCMem where
   matchPattern = matchPatternToExp
   matchReturnType = matchFunctionReturnType
   matchBranchType = matchBranchReturnType
+  matchLoopResult = matchLoopResultMem
 
 instance BinderOps MCMem where
   mkExpDecB _ _ = return ()

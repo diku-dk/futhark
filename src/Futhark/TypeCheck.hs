@@ -2,6 +2,7 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -18,8 +19,6 @@ module Futhark.TypeCheck
   , CheckableOp (..)
   , lookupVar
   , lookupAliases
-  , Occurences
-  , collectOccurences
   , checkOpWith
 
     -- * Checkers
@@ -707,12 +706,6 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int32]) dims
   void $ checkSubExp valexp
 
-checkBasicOp (Repeat shapes innershape v) = do
-  v_t <- lookupType v
-  mapM_ (mapM_ (require [Prim int32]) . shapeDims) $ innershape : shapes
-  unless (length shapes == arrayRank v_t) $
-    bad $ TypeError "Incorrect number of shapes in repeat."
-
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 
@@ -763,6 +756,24 @@ checkBasicOp (Manifest perm arr) =
 
 checkBasicOp (Assert e _ _) =
   require [Prim Bool] e
+
+matchLoopResultExt :: Checkable lore =>
+                      [Param DeclType] -> [Param DeclType]
+                   -> [SubExp] -> TypeM lore ()
+matchLoopResultExt ctx val loopres = do
+  let rettype_ext =
+        existentialiseExtTypes (map paramName ctx) $
+        staticShapes $ map typeOf $ ctx ++ val
+
+  bodyt <- mapM subExpType loopres
+
+  case instantiateShapes (`maybeNth` loopres) rettype_ext of
+    Nothing -> bad $ ReturnTypeError (nameFromString "<loop body>")
+               rettype_ext (staticShapes bodyt)
+    Just rettype' ->
+      unless (bodyt `subtypesOf` rettype') $
+      bad $ ReturnTypeError (nameFromString "<loop body>")
+      (staticShapes rettype') (staticShapes bodyt)
 
 checkExp :: Checkable lore =>
             Exp (Aliases lore) -> TypeM lore ()
@@ -843,23 +854,19 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                  staticShapes rettype,
                  funParamsToNameInfos mergepat) consumable $ do
           checkFunParams mergepat
-          loopbody_aliases <- checkBody loopbody
+          checkBodyLore $ snd $ bodyDec loopbody
 
-          let rettype_ext = existentialiseExtTypes (map paramName mergepat) $
-                            staticShapes $ map fromDecl rettype
+          checkStms (bodyStms loopbody) $ do
+            checkResult $ bodyResult loopbody
 
-          bodyt <- extendedScope (traverse subExpType $ bodyResult loopbody) $
-                   scopeOf $ bodyStms loopbody
+            context "When matching result of body with loop parameters" $
+              matchLoopResult (map fst ctxmerge) (map fst valmerge) $
+              bodyResult loopbody
 
-          case instantiateShapes (`maybeNth` bodyResult loopbody) rettype_ext of
-            Nothing -> bad $ ReturnTypeError (nameFromString "<loop body>")
-                       (staticShapes $ map fromDecl rettype) (staticShapes bodyt)
-            Just rettype' ->
-              unless (bodyt `subtypesOf` rettype') $
-              bad $ ReturnTypeError (nameFromString "<loop body>")
-              (staticShapes rettype') (staticShapes bodyt)
-
-          return loopbody_aliases
+            let bound_here = namesFromList $ M.keys $
+                             scopeOf $ bodyStms loopbody
+            map (`namesSubtract` bound_here) <$>
+              mapM subExpAliasesM (bodyResult loopbody)
 
 checkExp (Op op) = do checker <- asks envCheckOp
                       checker op
@@ -1105,6 +1112,8 @@ class (ASTLore lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore
   primFParam :: VName -> PrimType -> TypeM lore (FParam (Aliases lore))
   matchReturnType :: [RetType lore] -> Result -> TypeM lore ()
   matchBranchType :: [BranchType lore] -> Body (Aliases lore) -> TypeM lore ()
+  matchLoopResult :: [FParam (Aliases lore)] -> [FParam (Aliases lore)]
+                  -> [SubExp] -> TypeM lore ()
 
   default checkExpLore :: ExpDec lore ~ () => ExpDec lore -> TypeM lore ()
   checkExpLore = return
@@ -1135,3 +1144,8 @@ class (ASTLore lore, CanBeAliased (Op lore), CheckableOp lore) => Checkable lore
 
   default matchBranchType :: BranchType lore ~ ExtType => [BranchType lore] -> Body (Aliases lore) -> TypeM lore ()
   matchBranchType = matchExtBranchType
+
+  default matchLoopResult :: FParamInfo lore ~ DeclType =>
+                             [FParam (Aliases lore)] -> [FParam (Aliases lore)]
+                          -> [SubExp] -> TypeM lore ()
+  matchLoopResult = matchLoopResultExt

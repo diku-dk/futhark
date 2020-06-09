@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Implementation of unification and other core type system building
 -- blocks.
 module Language.Futhark.TypeChecker.Unify
@@ -44,7 +45,6 @@ import Control.Monad.RWS.Strict hiding (Sum)
 import Control.Monad.State
 import Data.Bifoldable (biany)
 import Data.List (intersect)
-import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S

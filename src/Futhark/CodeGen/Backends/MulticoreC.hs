@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.
 module Futhark.CodeGen.Backends.MulticoreC
@@ -291,26 +292,27 @@ mcMemToCType v space = do
           then MemBlock
           else RawMem)
 
-functionRuntime :: String -> String
-functionRuntime = (++"_total_runtime")
+functionRuntime :: Name -> C.Id
+functionRuntime = (`C.toIdent` mempty) . (<>"_total_runtime")
 
-functionRuns :: String -> String
-functionRuns = (++"_runs")
+functionRuns :: Name -> C.Id
+functionRuns = (`C.toIdent` mempty) . (<>"_runs")
 
-functionIter :: String -> String
-functionIter = (++"_iter")
+functionIter :: Name -> C.Id
+functionIter = (`C.toIdent` mempty) . (<>"_iter")
 
-
-multiCoreReport :: [(String, Bool)] -> [C.BlockItem]
+multiCoreReport :: [(Name, Bool)] -> [C.BlockItem]
 multiCoreReport names = report_kernels
   where report_kernels = concatMap reportKernel names
         max_name_len_pad = 30
         format_string name True =
-          let padding = replicate (max_name_len_pad - length name) ' '
-          in unwords ["tid %2d -", name ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
+          let name_s = nameToString name
+              padding = replicate (max_name_len_pad - length name_s) ' '
+          in unwords ["tid %2d -", name_s ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
         format_string name False =
-          let padding = replicate (max_name_len_pad - length name) ' '
-          in unwords ["        ", name ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
+          let name_s = nameToString name
+              padding = replicate (max_name_len_pad - length name_s) ' '
+          in unwords ["        ", name_s ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
         reportKernel (name, is_array) =
           let runs = functionRuns name
               total_runtime = functionRuntime name
@@ -344,7 +346,7 @@ multiCoreReport names = report_kernels
                    [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
 
-addBenchmarkFields :: String -> Maybe VName -> GC.CompilerM op s ()
+addBenchmarkFields :: Name -> Maybe VName -> GC.CompilerM op s ()
 addBenchmarkFields name (Just _) = do
   GC.contextField (functionRuntime name) [C.cty|typename int64_t*|] $ Just [C.cexp|calloc(sizeof(typename int64_t), ctx->scheduler.num_threads)|]
   GC.contextField (functionRuns name) [C.cty|int*|] $ Just [C.cexp|calloc(sizeof(int), ctx->scheduler.num_threads)|]
@@ -355,7 +357,7 @@ addBenchmarkFields name Nothing = do
   GC.contextField (functionIter name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
 
-benchmarkCode :: String -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
+benchmarkCode :: Name -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
   return [C.citems|
@@ -372,8 +374,8 @@ benchmarkCode name tid code = do
      }
      |]
 
-  where start = name ++ "_start"
-        end = name ++ "_end"
+  where start = name <> "_start"
+        end = name <> "_end"
         -- This case should be mutex protected
         updateFields Nothing    = [C.citems|ctx->$id:(functionRuns name)++;
                                             ctx->$id:(functionRuntime name) += elapsed;
@@ -383,12 +385,12 @@ benchmarkCode name tid code = do
                                             ctx->$id:(functionIter name)[$id:tid'] += iterations;|]
 
 
-multicoreName :: String -> GC.CompilerM op s String
+multicoreName :: String -> GC.CompilerM op s Name
 multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
-  return $ baseString s' ++ "_" ++ show (baseTag s')
+  return $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
-multicoreFunDef :: String -> (String -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s String
+multicoreFunDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
 multicoreFunDef s f = do
   s' <- multicoreName s
   GC.libDecl =<< f s'
@@ -401,7 +403,7 @@ generateFunction :: C.ToIdent a => M.Map VName Space
                   -> [(VName, (C.Type, ValueType))]
                   -> [(VName, (C.Type, ValueType))]
                   -> VName
-                  -> GC.CompilerM Multicore s String
+                  -> GC.CompilerM Multicore s Name
 generateFunction lexical basename code fstruct free retval tid = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
@@ -457,14 +459,14 @@ compileOp (Task params e par_code seq_code tid retvals) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
   GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct retval_args retval_ctypes)|]
 
-  let ftask_name = fstruct ++ "_task"
+  let ftask_name = fstruct <> "_task"
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fpar_task;|]
   GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fseq_task;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
 
-  let ftask_err = fpar_task ++ "_err"
+  let ftask_err = fpar_task <> "_err"
   let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name);
                         if ($id:ftask_err != 0) {
                           futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
@@ -519,15 +521,15 @@ compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
 
-  let ftask_name = ftask ++ "_task"
+  let ftask_name = ftask <> "_task"
   GC.decl [C.cdecl|struct scheduler_parallel_task $id:ftask_name;|]
-  GC.stm  [C.cstm|$id:ftask_name.name = $string:ftask;|]
+  GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
   GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = iterations;|]
   GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
 
-  let ftask_err = ftask ++ "_err"
+  let ftask_err = ftask <> "_err"
   code' <- benchmarkCode ftask_name Nothing
     [C.citems|int $id:ftask_err = scheduler_parallel(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
               if ($id:ftask_err != 0) {

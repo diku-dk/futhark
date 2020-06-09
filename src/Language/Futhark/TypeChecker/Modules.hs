@@ -1,5 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Safe #-}
 -- | Implementation of the Futhark module system (at least most of it;
 -- some is scattered elsewhere in the type checker).
 module Language.Futhark.TypeChecker.Modules
@@ -12,7 +13,6 @@ module Language.Futhark.TypeChecker.Modules
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
 import Data.List (intersect)
-import Data.Loc
 import Data.Maybe
 import Data.Either
 import Data.Ord

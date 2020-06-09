@@ -89,6 +89,7 @@ module Futhark.IR.Mem
        , matchBranchReturnType
        , matchPatternToExp
        , matchFunctionReturnType
+       , matchLoopResultMem
        , bodyReturnsFromPattern
        , checkMemInfo
 
@@ -107,7 +108,7 @@ import Control.Monad.Reader
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Foldable (traverse_, toList)
-import Data.List (find)
+import Data.List (elemIndex, find)
 import qualified Data.Set as S
 
 import Futhark.Analysis.Metrics
@@ -128,7 +129,6 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Lore
 import Futhark.IR.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
-import Futhark.IR.Prop.Ranges
 import qualified Futhark.Analysis.SymbolTable as ST
 
 type LetDecMem = MemInfo SubExp NoUniqueness MemBind
@@ -190,20 +190,6 @@ instance CanBeAliased inner => CanBeAliased (MemOp inner) where
 
   addOpAliases (Alloc se space) = Alloc se space
   addOpAliases (Inner k) = Inner $ addOpAliases k
-
-instance RangedOp inner => RangedOp (MemOp inner) where
-  opRanges (Alloc _ _) =
-    [unknownRange]
-  opRanges (Inner k) =
-    opRanges k
-
-instance CanBeRanged inner => CanBeRanged (MemOp inner) where
-  type OpWithRanges (MemOp inner) = MemOp (OpWithRanges inner)
-  removeOpRanges (Alloc size space) = Alloc size space
-  removeOpRanges (Inner k) = Inner $ removeOpRanges k
-
-  addOpRanges (Alloc size space) = Alloc size space
-  addOpRanges (Inner k) = Inner $ addOpRanges k
 
 instance Rename inner => Rename (MemOp inner) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
@@ -368,7 +354,7 @@ instance Substitute MemBind where
 
 instance PP.Pretty MemBind where
   ppr (ArrayIn mem ixfun) =
-    PP.text "@" <> PP.ppr mem <> PP.text "->" <> PP.ppr ixfun
+    PP.text "@" <> PP.ppr mem <> PP.text "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemBind where
   freeIn' (ArrayIn mem ixfun) = freeIn' mem <> freeIn' ixfun
@@ -426,13 +412,13 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
 
 instance PP.Pretty MemReturn where
   ppr (ReturnsInBlock v ixfun) =
-    PP.parens $ PP.text (pretty v) <> PP.text "->" <> PP.ppr ixfun
+    PP.parens $ PP.text (pretty v) <> PP.text "->" PP.</> PP.ppr ixfun
   ppr (ReturnsNewBlock space i ixfun) =
-    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" <> PP.ppr ixfun
+    PP.text ("?" ++ show i) <> PP.ppr space <> PP.text "->" PP.</> PP.ppr ixfun
 
 instance FreeIn MemReturn where
   freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
-  freeIn' _                        = mempty
+  freeIn' (ReturnsNewBlock space _ ixfun) = freeIn' space <> freeIn' ixfun
 
 instance Engine.Simplifiable MemReturn where
   simplify (ReturnsNewBlock space i ixfun) =
@@ -492,12 +478,17 @@ funReturnsToExpReturns = noUniquenessReturns . maybeReturns
 bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
-matchFunctionReturnType :: Mem lore =>
-                           [FunReturns] -> Result -> TC.TypeM lore ()
-matchFunctionReturnType rettype result = do
+matchRetTypeToResult :: Mem lore =>
+                        [FunReturns] -> Result -> TC.TypeM lore ()
+matchRetTypeToResult rettype result = do
   scope <- askScope
   result_ts <- runReaderT (mapM subExpMemInfo result) $ removeScopeAliases scope
   matchReturnType rettype result result_ts
+
+matchFunctionReturnType :: Mem lore =>
+                           [FunReturns] -> Result -> TC.TypeM lore ()
+matchFunctionReturnType rettype result = do
+  matchRetTypeToResult rettype result
   mapM_ checkResultSubExp result
   where checkResultSubExp Constant{} =
           return ()
@@ -514,6 +505,36 @@ matchFunctionReturnType rettype result = do
                   "Array " ++ pretty v ++
                   " returned by function, but has nontrivial index function " ++
                   pretty ixfun
+
+matchLoopResultMem :: Mem lore =>
+                      [FParam (Aliases lore)] -> [FParam (Aliases lore)]
+                   -> [SubExp] -> TC.TypeM lore ()
+matchLoopResultMem ctx val = matchRetTypeToResult rettype
+  where ctx_names = map paramName ctx
+
+        -- Invent a ReturnType so we can pretend that the loop body is
+        -- actually returning from a function.
+        rettype = map (toRet . paramDec) val
+
+        toExtV v
+          | Just i <- v `elemIndex` ctx_names = Ext i
+          | otherwise                         = Free v
+
+        toExtSE (Var v) = Var <$> toExtV v
+        toExtSE (Constant v) = Free $ Constant v
+
+        toRet (MemPrim t) =
+          MemPrim t
+        toRet (MemMem space) =
+          MemMem space
+        toRet (MemArray pt shape u (ArrayIn mem ixfun))
+          | Just i <- mem `elemIndex` ctx_names,
+            Param _ (MemMem space) : _ <- drop i ctx =
+              MemArray pt shape' u $ ReturnsNewBlock space i ixfun'
+          | otherwise =
+              MemArray pt shape' u $ ReturnsInBlock mem ixfun'
+          where shape' = fmap toExtSE shape
+                ixfun' = existentialiseIxFun ctx_names ixfun
 
 matchBranchReturnType :: Mem lore =>
                          [BodyReturns]
@@ -602,10 +623,7 @@ matchReturnType rettype res ts = do
             "\nixfun of return type: ", pretty x_ixfun,
             "\nand context elements: ", pretty ctx_res]
         case x_mem_type of
-          MemMem y_space -> do
-            unless (x_mem == Var y_mem) $
-              throwError $ unwords ["Expected memory", pretty x_ext, "=>", pretty x_mem,
-                                    "but got", pretty y_mem]
+          MemMem y_space ->
             unless (x_space == y_space) $
               throwError $ unwords ["Expected memory", pretty y_mem, "in space", pretty x_space,
                                     "but actually in space", pretty y_space]
@@ -617,13 +635,12 @@ matchReturnType rettype res ts = do
                               "but array returned in", pretty y]
 
       bad :: String -> TC.TypeM lore a
-      bad s = TC.bad $ TC.TypeError $
-              unlines [ "Return type"
-                      , "  " ++ prettyTuple rettype
-                      , "cannot match returns of results"
-                      , "  " ++ prettyTuple ts
-                      , s
-                      ]
+      bad s = TC.bad $ TC.TypeError $ PP.pretty $
+              "Return type" PP.</>
+              PP.indent 2 (ppTuple' rettype) PP.</>
+              "cannot match returns of results" PP.</>
+              PP.indent 2 (ppTuple' ts) PP.</>
+              PP.text s
 
   unless (length (S.unions $ map extsInMemInfo rettype)  == length ctx_res) $
     TC.bad $ TC.TypeError $ "Too many context parameters for the number of " ++
@@ -662,20 +679,20 @@ matchPatternToExp pat e = do
         matches ctxids ctxexts (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
           x_pt == y_pt && x_shape == y_shape &&
           case (x_ret, y_ret) of
-            (ReturnsInBlock x_mem x_ixfun, Just (ReturnsInBlock y_mem y_ixfun)) ->
+            (ReturnsInBlock _ x_ixfun, Just (ReturnsInBlock _ y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_mem == y_mem && x_ixfun' == y_ixfun'
+              in  IxFun.closeEnough x_ixfun' y_ixfun'
             (ReturnsInBlock _ x_ixfun,
              Just (ReturnsNewBlock _ _ y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_ixfun' == y_ixfun'
-            (ReturnsNewBlock x_space x_i x_ixfun,
-             Just (ReturnsNewBlock y_space y_i y_ixfun)) ->
+              in  IxFun.closeEnough x_ixfun' y_ixfun'
+            (ReturnsNewBlock _ x_i x_ixfun,
+             Just (ReturnsNewBlock _ y_i y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_space == y_space && x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
+              in  x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
             (_, Nothing) -> True
             _ -> False
         matches _ _ _ _ = False
@@ -863,15 +880,6 @@ expReturns (BasicOp (SubExp (Var v))) =
 
 expReturns (BasicOp (Opaque (Var v))) =
   pure <$> varReturns v
-
-expReturns (BasicOp (Repeat outer_shapes inner_shape v)) = do
-  t <- repeatDims outer_shapes inner_shape <$> lookupType v
-  (et, _, mem, ixfun) <- arrayVarReturns v
-  let outer_shapes' = map (map (primExpFromSubExp int32) . shapeDims) outer_shapes
-      inner_shape' = map (primExpFromSubExp int32) $ shapeDims inner_shape
-  return [MemArray et (Shape $ map Free $ arrayDims t) NoUniqueness $
-          Just $ ReturnsInBlock mem $ existentialiseIxFun [] $
-          IxFun.repeat ixfun outer_shapes' inner_shape']
 
 expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v

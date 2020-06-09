@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Main monad in which the type checker runs, as well as ancillary
 -- data definitions.
 module Language.Futhark.TypeChecker.Monad
@@ -59,7 +60,6 @@ import Control.Monad.State
 import Control.Monad.RWS.Strict
 import Control.Monad.Identity
 import Data.List (isPrefixOf, find)
-import Data.Loc
 import Data.Maybe
 import Data.Either
 import qualified Data.Map.Strict as M

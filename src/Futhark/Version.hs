@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This module exports version information about the Futhark
 -- compiler.
 module Futhark.Version

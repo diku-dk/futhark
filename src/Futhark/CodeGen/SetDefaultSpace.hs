@@ -1,3 +1,7 @@
+-- | Change 'DefaultSpace' in a program to some other memory space.
+-- This is needed because the GPU backends use 'DefaultSpace' to refer
+-- to GPU memory for most of the pipeline, but final code generation
+-- assumes that 'DefaultSpace' is CPU memory.
 module Futhark.CodeGen.SetDefaultSpace
        ( setDefaultSpace
        )

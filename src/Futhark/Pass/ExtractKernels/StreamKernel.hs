@@ -75,6 +75,13 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
           let slice = fullSlice arr_t [DimSlice i (Var chunk_size) stride]
           letBindNames [slice_name] $ BasicOp $ Index arr slice
 
+partitionChunkedKernelFoldParameters :: Int -> [Param dec]
+                                     -> (VName, Param dec, [Param dec], [Param dec])
+partitionChunkedKernelFoldParameters num_accs (i_param : chunk_param : params) =
+  let (acc_params, arr_params) = splitAt num_accs params
+  in (paramName i_param, chunk_param, acc_params, arr_params)
+partitionChunkedKernelFoldParameters _ _ =
+  error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"
 
 blockedPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
                     VName -> SubExp -> KernelSize -> StreamOrd -> Lambda (Lore m)

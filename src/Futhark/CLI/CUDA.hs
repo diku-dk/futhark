@@ -21,6 +21,7 @@ main = compilerMain () []
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
              extra_options = [ "-lcuda"
+                             , "-lcudart"
                              , "-lnvrtc"
                              ]
          case mode of

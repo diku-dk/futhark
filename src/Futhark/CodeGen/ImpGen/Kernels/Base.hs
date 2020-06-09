@@ -301,10 +301,24 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
+  -- groupScan needs to treat the output as a one-dimensional array of
+  -- scan elements, so we invent some new flattened arrays here.  XXX:
+  -- this assumes that the original index function is just row-major,
+  -- but does not actually verify it.
+  dims_flat <- dPrimV "dims_flat" $ product dims'
+  let flattened pe = do
+        MemLocation mem _ _ <-
+          entryArrayLocation <$> lookupArray (patElemName pe)
+        let pe_t = typeOf pe
+            arr_dims = Var dims_flat : drop (length dims') (arrayDims pe_t)
+        sArray (baseString (patElemName pe) ++ "_flat")
+          (elemType pe_t) (Shape arr_dims) $
+          ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) arr_dims
+  arrs_flat <- mapM flattened $ patternElements pat
+
   forM_ scans $ \scan -> do
     let scan_op = segBinOpLambda scan
-    groupScan (Just crossesSegment) (product dims') (product dims') scan_op $
-      patternNames pat
+    groupScan (Just crossesSegment) (product dims') (product dims') scan_op arrs_flat
 
 compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   compileGroupSpace lvl space
@@ -1242,9 +1256,10 @@ sReplicateKernel arr se = do
   (constants, set_constants) <-
     simpleKernelConstants (product dims) "replicate"
 
-  let is' = unflattenIndex dims $ kernelGlobalThreadId constants
-      name = nameFromString $ "replicate_" ++
-             show (baseTag $ kernelGlobalThreadIdVar constants)
+  fname <- askFunction
+  let name = keyWithEntryPoint fname $ nameFromString $
+             "replicate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+      is' = unflattenIndex dims $ kernelGlobalThreadId constants
 
   sKernelFailureTolerant True threadOperations constants name $ do
     set_constants
@@ -1304,13 +1319,15 @@ sReplicate arr se = do
     Nothing -> sReplicateKernel arr se
 
 -- | Perform an Iota with a kernel.
-sIota :: VName -> Imp.Exp -> Imp.Exp -> Imp.Exp -> IntType
-      -> CallKernelGen ()
-sIota arr n x s et = do
+sIotaKernel :: VName -> Imp.Exp -> Imp.Exp -> Imp.Exp -> IntType
+            -> CallKernelGen ()
+sIotaKernel arr n x s et = do
   destloc <- entryArrayLocation <$> lookupArray arr
   (constants, set_constants) <- simpleKernelConstants n "iota"
 
-  let name = nameFromString $ "iota_" ++
+  fname <- askFunction
+  let name = keyWithEntryPoint fname $ nameFromString $
+             "iota_" ++ pretty et ++ "_" ++
              show (baseTag $ kernelGlobalThreadIdVar constants)
 
   sKernelFailureTolerant True threadOperations constants name $ do
@@ -1322,6 +1339,50 @@ sIota arr n x s et = do
       emit $
         Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
         Imp.ConvOpExp (SExt Int32 et) gtid * s + x
+
+iotaFunction :: IntType -> CallKernelGen Imp.Function
+iotaFunction bt = do
+  mem <- newVName "mem"
+  n <- newVName "n"
+  x <- newVName "x"
+  s <- newVName "s"
+
+  let params = [Imp.MemParam mem (Space "device"),
+                Imp.ScalarParam n int32,
+                Imp.ScalarParam x $ IntType bt,
+                Imp.ScalarParam s $ IntType bt]
+      shape = Shape [Var n]
+      n' = Imp.vi32 n
+      x' = Imp.var x $ IntType bt
+      s' = Imp.var s $ IntType bt
+
+  function [] params $ do
+    arr <- sArray "arr" (IntType bt) shape $ ArrayIn mem $ IxFun.iota $
+           map (primExpFromSubExp int32) $ shapeDims shape
+    sIotaKernel arr n' x' s' bt
+
+iotaName :: IntType -> String
+iotaName bt = "iota_" ++ pretty bt
+
+iotaForType :: IntType -> CallKernelGen Name
+iotaForType bt = do
+  let fname = nameFromString $ "builtin#" <> iotaName bt
+
+  exists <- hasFunction fname
+  unless exists $ emitFunction fname =<< iotaFunction bt
+
+  return fname
+
+-- | Perform an Iota with a kernel.
+sIota :: VName -> Imp.Exp -> Imp.Exp -> Imp.Exp -> IntType
+      -> CallKernelGen ()
+sIota arr n x s et = do
+  ArrayEntry (MemLocation arr_mem _ arr_ixfun) _ <- lookupArray arr
+  if IxFun.isLinear arr_ixfun then do
+    fname <- iotaForType et
+    emit $ Imp.Call [] fname
+      [Imp.MemArg arr_mem, Imp.ExpArg n, Imp.ExpArg x, Imp.ExpArg s]
+    else sIotaKernel arr n x s et
 
 sCopy :: CopyCompiler KernelsMem HostEnv Imp.HostOp
 sCopy bt

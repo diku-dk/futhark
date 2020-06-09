@@ -20,6 +20,7 @@ module Futhark.Bench
   where
 
 import Control.Applicative
+import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
@@ -31,6 +32,7 @@ import qualified Data.Text.Encoding as T
 import System.FilePath
 import System.Exit
 import System.IO
+import System.IO.Error
 import System.IO.Temp (withSystemTempFile)
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Timeout (timeout)
@@ -163,7 +165,33 @@ data RunOptions =
   , runExtraOptions :: [String]
   , runTimeout :: Int
   , runVerbose :: Int
+  , runResultAction :: Maybe (Int -> IO ())
+    -- ^ Invoked for every runtime measured during the run.  Can be
+    -- used to provide a progress bar.
   }
+
+
+-- | Like @tail -f@, but running an arbitrary IO action per line.
+follow :: (String -> IO ()) -> FilePath -> IO ()
+follow f fname = go 0
+  where go i = do
+          i' <- withFile fname ReadMode $ \h -> do
+            hSeek h AbsoluteSeek i
+            goH h i
+          go i'
+
+        goH h i = do
+          res <- tryIOError $ hGetLine h
+          case res of
+            Left e | isEOFError e -> do
+                       threadDelay followDelayMicroseconds
+                       pure i
+                   | otherwise -> ioError e
+            Right l -> do f l
+                          goH h =<< hTell h
+
+        triesPerSecond = 10
+        followDelayMicroseconds = 1000000 `div` triesPerSecond
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset :: RunOptions -> FilePath -> T.Text
@@ -197,10 +225,20 @@ benchmarkDataset opts program entry input_spec expected_spec ref_out =
     putStrLn $ unwords ["Running executable", show to_run,
                         "with arguments", show to_run_args]
 
+  let onResult l
+        | Just f <- runResultAction opts,
+          [(x, "")] <- reads l =
+            f x
+        | otherwise =
+            pure ()
+  watcher <- forkIO $ follow onResult tmpfile
+
   run_res <-
     timeout (runTimeout opts * 1000000) $
     readProcessWithExitCode to_run to_run_args $
     LBS.toStrict input
+
+  killThread watcher
 
   runExceptT $ case run_res of
     Just (progCode, output, progerr) -> do
