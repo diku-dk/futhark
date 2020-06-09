@@ -58,7 +58,7 @@ type Function = Imp.Function OpenCL
 type Code = Imp.Code OpenCL
 
 -- | The name of a kernel.
-type KernelName = String
+type KernelName = Name
 
 -- | An argument to be passed to a kernel.
 data KernelArg = ValueKArg Exp PrimType
