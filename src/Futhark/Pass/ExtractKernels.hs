@@ -393,13 +393,13 @@ transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w form arrs)))
       lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
       addStms =<< segScan lvl res_pat w scan_ops map_lam' arrs [] []
 
-transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w form arrs)))
+transformStm path (Let res_pat aux (Op (Screma w form arrs)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm' | commutativeLambda red_fun = Commutative
               | otherwise                 = comm,
     Just do_irwim <- irwim res_pat w comm' red_fun $ zip nes arrs = do
       types <- asksScope scopeForSOACs
-      (_, bnds) <- fst <$> runBinderT (simplifyStms =<< collectStms_ (certifying cs do_irwim)) types
+      (_, bnds) <- fst <$> runBinderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
       transformStms path $ stmsToList bnds
 
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
@@ -436,7 +436,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
   if not (lambdaContainsParallelism map_lam) ||
      "sequential_inner" `inAttrs` stmAuxAttrs aux
     then paralleliseOuter
-    else if incrementalFlattening then do
+    else do
     ((outer_suff, outer_suff_key), suff_stms) <-
       sufficientParallelism "suff_outer_redomap" [w] path
 
@@ -444,7 +444,6 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
     inner_stms <- innerParallelBody ((outer_suff_key, False):path)
 
     (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
-    else paralleliseOuter
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
@@ -457,8 +456,9 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel _ _ _ [])
     (stmsToList . snd <$> runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types)
 
 transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs)))
-  | incrementalFlattening,
-    not ("sequential_inner" `inAttrs` stmAuxAttrs aux) = do
+  | "sequential_inner" `inAttrs` stmAuxAttrs aux =
+      paralleliseOuter path
+  | otherwise = do
       ((outer_suff, outer_suff_key), suff_stms) <-
         sufficientParallelism "suff_outer_stream" [w] path
 
@@ -467,8 +467,6 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm re
 
       (suff_stms<>) <$>
         kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
-
-  | otherwise = paralleliseOuter path
 
   where
     paralleliseOuter path'
@@ -490,7 +488,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm re
 
           (stms<>) <$>
             inScopeOf stms
-            (transformStm path' $ Let red_pat aux $
+            (transformStm path' $ Let red_pat aux { stmAuxAttrs = mempty } $
              Op (Screma num_threads reduce_soac red_results))
 
       | otherwise = do
@@ -566,48 +564,67 @@ sufficientParallelism :: String -> [SubExp] -> KernelPath
                       -> DistribM ((SubExp, Name), Out.Stms Out.Kernels)
 sufficientParallelism desc ws path = cmpSizeLe desc (Out.SizeThreshold path) ws
 
--- | Returns the sizes of nested parallelism.
-nestedParallelism :: Body -> [SubExp]
-nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
-  where parallelism (Op (Scatter w _ _ _)) = [w]
-        parallelism (Op (Screma w _ _)) = [w]
-        parallelism (Op (Hist w _ _ _)) = [w]
-        parallelism (Op (Stream w Sequential{} lam _))
-          | chunk_size_param : _ <- lambdaParams lam =
-              let update (Var v) | v == paramName chunk_size_param = w
-                  update se = se
-              in map update $ nestedParallelism $ lambdaBody lam
-        parallelism (DoLoop _ _ _ body) = nestedParallelism body
-        parallelism _ = []
-
--- | Intra-group parallelism is worthwhile if the lambda contains
--- non-map nested parallelism, or any nested parallelism inside a
--- loop.
+-- | Intra-group parallelism is worthwhile if the lambda contains more
+-- than one instance of non-map nested parallelism, or any nested
+-- parallelism inside a loop.
 worthIntraGroup :: Lambda -> Bool
-worthIntraGroup lam = interesting $ lambdaBody lam
-  where interesting body = not (null $ nestedParallelism body) &&
-                           not (onlyMaps $ bodyStms body)
-        onlyMaps = all $ isMapOrSeq . stmExp
-        isMapOrSeq (Op (Screma _ form@(ScremaForm _ _ lam') _))
-          | isJust $ isMapSOAC form = not $ worthIntraGroup lam'
-        isMapOrSeq (Op Scatter{}) = True -- Basically a map.
-        isMapOrSeq (DoLoop _ _ _ body) =
-          null $ nestedParallelism body
-        isMapOrSeq (Op _) = False
-        isMapOrSeq _ = True
+worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
+  where bodyInterest body =
+          sum $ interest <$> bodyStms body
+        interest stm
+          | "sequential" `inAttrs` attrs =
+              0::Int
+          | Op (Screma w form@(ScremaForm _ _ lam') _) <- stmExp stm,
+            isJust $ isMapSOAC form =
+              if sequential_inner
+              then 0
+              else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
+          | Op Scatter{} <- stmExp stm =
+              0 -- Basically a map.
+          | DoLoop _ _ _ body <- stmExp stm =
+              bodyInterest body * 10
+          | Op (Screma w (ScremaForm _ _ lam') _) <- stmExp stm =
+              zeroIfTooSmall w + bodyInterest (lambdaBody lam')
+          | otherwise =
+              0
 
--- | A lambda is worth sequentialising if it contains nested
+          where attrs = stmAuxAttrs $ stmAux stm
+                sequential_inner = "sequential_inner" `inAttrs` attrs
+                zeroIfTooSmall (Constant (IntValue x))
+                  | intToInt64 x < 32 = 0
+                zeroIfTooSmall _ = 1
+
+-- | A lambda is worth sequentialising if it contains enough nested
 -- parallelism of an interesting kind.
 worthSequentialising :: Lambda -> Bool
-worthSequentialising lam = interesting $ lambdaBody lam
-  where interesting body = any (interesting' . stmExp) $ bodyStms body
-        interesting' (Op (Screma _ form@(ScremaForm _ _ lam') _))
-          | isJust $ isMapSOAC form = worthSequentialising lam'
-        interesting' (Op Scatter{}) = False -- Basically a map.
-        interesting' (DoLoop _ _ _ body) = interesting body
-        interesting' (Op _) = True
-        interesting' _ = False
+worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
+  where bodyInterest body =
+          sum $ interest <$> bodyStms body
+        interest stm
+          | "sequential" `inAttrs` attrs =
+              0::Int
+          | Op (Screma _ form@(ScremaForm _ _ lam') _) <- stmExp stm,
+            isJust $ isMapSOAC form =
+              if sequential_inner
+              then 0
+              else bodyInterest (lambdaBody lam')
+          | Op Scatter{} <- stmExp stm =
+              0 -- Basically a map.
+          | DoLoop _ _ _ body <- stmExp stm =
+              bodyInterest body * 10
+          | Op (Screma _ form@(ScremaForm _ _ lam') _) <- stmExp stm =
+              1 + bodyInterest (lambdaBody lam') +
+              -- Give this a bigger score if it's a redomap, as these
+              -- are often tileable and thus benefit more from
+              -- sequentialisation.
+              case isRedomapSOAC form of
+                Just _ -> 1
+                Nothing -> 0
+          | otherwise =
+              0
 
+          where attrs = stmAuxAttrs $ stmAux stm
+                sequential_inner = "sequential_inner" `inAttrs` attrs
 
 onTopLevelStms :: KernelPath -> Stms SOACS
                -> DistNestT Out.Kernels DistribM KernelsStms
@@ -634,20 +651,15 @@ onMap path (MapLoop pat aux w lam arrs) = do
         runDistNestT (env path') $
         distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
 
-  if not incrementalFlattening &&
-     not ("sequential_inner" `inAttrs` stmAuxAttrs aux)
-    then exploitInnerParallelism path
-    else do
+  let exploitOuterParallelism path' = do
+        let lam' = soacsLambdaToKernels lam
+        runDistNestT (env path') $ distribute $
+          addStmsToAcc (bodyStms $ lambdaBody lam') acc
 
-    let exploitOuterParallelism path' = do
-          let lam' = soacsLambdaToKernels lam
-          runDistNestT (env path') $ distribute $
-            addStmsToAcc (bodyStms $ lambdaBody lam') acc
-
-    onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat lam
-    where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
-                        , distStms = mempty
-                        }
+  onMap' (newKernel loopnest) path exploitOuterParallelism exploitInnerParallelism pat lam
+  where acc = DistAcc { distTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
+                      , distStms = mempty
+                      }
 
 mayExploitOuter :: Attrs -> Bool
 mayExploitOuter attrs =
@@ -734,8 +746,6 @@ onInnerMap :: KernelPath -> MapLoop -> DistAcc Out.Kernels
 onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
       addStmToAcc (mapLoopStm maploop) acc
-  | not incrementalFlattening, not $ "sequential_inner" `inAttrs` stmAuxAttrs aux =
-      distributeMap maploop acc
   | otherwise =
       distributeSingleStm acc (mapLoopStm maploop) >>= \case
       Just (post_kernels, res, nest, acc')
