@@ -3,8 +3,8 @@
 --
 -- ==
 -- structure distributed {
---   SegMap 1
---   DoLoop 2
+--   SegMap 6
+--   DoLoop 10
 -- }
 
 

@@ -5,7 +5,8 @@
 -- structure distributed { SegMap/DoLoop/DoLoop/SegMap 2 }
 
 let main [k] (ns: []i32) (xss: [][k]i32) (yss: [][k]i32) =
-  map (\n -> map (\xs' -> map (\ys' -> loop z = 0 for _p < n do i32.sum (map (+z) (map2 (*) xs' ys')))
+  map (\n -> map (\xs' -> map (\ys' -> loop z = 0 for _p < n do
+                                         #[sequential] i32.sum (map (+z) (map2 (*) xs' ys')))
                               yss)
                  xss)
        ns

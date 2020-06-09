@@ -25,9 +25,9 @@ let mkPrices [num_und][num_dates]
   let e_rows = map (\(x: []f64)  ->
                       map f64.exp x
                   ) (map combineVs (zip3 noises (md_vols) (md_drifts)))
-  in  scan (\(x: []f64) (y: []f64)  ->
-              map2 (*) x y)
-              md_starts e_rows
+  in scan (\(x: []f64) (y: []f64)  ->
+             map2 (*) x y)
+     md_starts e_rows
 
 let main(n: i32,
                     md_vols: [][]f64,
@@ -35,6 +35,8 @@ let main(n: i32,
                     md_starts: []f64,
                     noises_mat: [][][]f64): [][][]f64 =
   loop (noises_mat) for i < n do
+    #[incremental_flattening_only_inner]
     map  (\(noises: [][]f64) ->
+            #[incremental_flattening_only_inner]
            mkPrices(md_starts, md_vols, md_drifts, noises)) (
          noises_mat)

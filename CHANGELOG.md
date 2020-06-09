@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * Incremental flattening is now performed by default.  Use
+    attributes to constrain and direct the flattening if you have
+    exotic needs.  This will likely need further iteration and
+    refinement.
+
 ### Fixed
 
   * Fix bug in slice simplification (#992).

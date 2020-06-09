@@ -9,5 +9,6 @@
 -- }
 
 let main(a: []i32): []i32 =
+  #[incremental_flattening_only_inner]
   map (\(i: i32): i32  ->
         reduce (+) 0 (map (+1) (0..<i))) a
