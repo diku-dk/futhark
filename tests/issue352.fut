@@ -263,10 +263,9 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
                        val f : [D]f64 -> t }) : { val run : i32 -> X.t } =
   {
     let run (N:i32) : X.t =
-      reduce_stream_per X.op (\sz (ns:[sz]i32) : X.t ->
-                           if sz > 0
-                           then reduce X.op X.ne (map X.f (chunk ns[0] sz))
-                           else X.ne)
+      #[sequential_inner]
+      reduce_stream X.op (\sz (ns:[sz]i32) : X.t ->
+                       reduce X.op X.ne (map X.f (chunk (if sz > 0 then ns[0] else 0) sz)))
       (iota N)
 
   }
@@ -274,9 +273,6 @@ module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
 
 module S8 = Sobol x.sobol_dir { let D = 8 }
 module S2 = Sobol x.sobol_dir { let D = 2 }
-
-let mean [n] (xs: [n]f64) : f64 =
-  reduce (+) 0.0 xs / r64(n)
 
 module R = S2.Reduce { type t = f64
                        let ne = 0f64
