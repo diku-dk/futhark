@@ -1,5 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE Safe #-}
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
 -- be called a scalar.
@@ -82,7 +83,8 @@ module Futhark.IR.Primitive
        where
 
 import           Control.Applicative
-import           Data.Binary.IEEE754 (floatToWord, wordToFloat, doubleToWord, wordToDouble)
+import qualified Data.Binary.Get as G
+import qualified Data.Binary.Put as P
 import           Data.Bits
 import           Data.Fixed (mod') -- Weird location.
 import           Data.Int            (Int16, Int32, Int64, Int8)
@@ -854,6 +856,18 @@ convOpType (UIToFP from to) = (IntType from, FloatType to)
 convOpType (SIToFP from to) = (IntType from, FloatType to)
 convOpType (IToB from) = (IntType from, Bool)
 convOpType (BToI to) = (Bool, IntType to)
+
+floatToWord :: Float -> Word32
+floatToWord = G.runGet G.getWord32le . P.runPut . P.putFloatle
+
+wordToFloat :: Word32 -> Float
+wordToFloat = G.runGet G.getFloatle . P.runPut . P.putWord32le
+
+doubleToWord :: Double -> Word64
+doubleToWord = G.runGet G.getWord64le . P.runPut . P.putDoublele
+
+wordToDouble :: Word64 -> Double
+wordToDouble = G.runGet G.getDoublele . P.runPut . P.putWord64le
 
 -- | A mapping from names of primitive functions to their parameter
 -- types, their result type, and a function for evaluating them.

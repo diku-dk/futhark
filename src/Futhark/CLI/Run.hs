@@ -6,7 +6,6 @@ module Futhark.CLI.Run (main) where
 
 import Control.Monad.Free.Church
 import Control.Exception
-import Data.Loc
 import Data.Maybe
 import qualified Data.Map as M
 import Control.Monad
@@ -126,7 +125,7 @@ newFutharkiState cfg file = runExceptT $ do
         badOnLeft p (Left err) = throwError $ p err
 
 mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc
+mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreter' m = runF m (return . Right) intOp

@@ -15,6 +15,7 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.MonadFreshNames
+import Futhark.Util (zEncodeString)
 
 --maybe pass the config file rather than multiple arguments
 compileProg :: MonadFreshNames m =>
@@ -24,8 +25,9 @@ compileProg module_name prog = do
     ImpGen.compileProg prog
   --prepare the strings for assigning the kernels and set them as global
   let assign = unlines $
-               map (\x -> pretty $ Assign (Var ("self."++x++"_var"))
-                          (Var $ "program."++x)) $
+               map (\x -> pretty $
+                          Assign (Var ("self."++zEncodeString (nameToString x)++"_var"))
+                          (Var $ "program."++zEncodeString (nameToString x))) $
         M.keys kernels
 
   let defines =
@@ -158,12 +160,12 @@ callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = d
 
   where mult_exp = BinOp "*"
 
-launchKernel :: String -> Imp.Safety -> [PyExp] -> [PyExp] -> [Imp.KernelArg]
+launchKernel :: Imp.KernelName -> Imp.Safety -> [PyExp] -> [PyExp] -> [Imp.KernelArg]
              -> Py.CompilerM op s ()
 launchKernel kernel_name safety kernel_dims workgroup_dims args = do
   let kernel_dims' = Tuple kernel_dims
       workgroup_dims' = Tuple workgroup_dims
-      kernel_name' = "self." ++ kernel_name ++ "_var"
+      kernel_name' = "self." ++ zEncodeString (nameToString kernel_name) ++ "_var"
   args' <- mapM processKernelArg args
   let failure_args = take (Imp.numFailureParams safety)
                      [Var "self.global_failure",

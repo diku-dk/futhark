@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This module provides facilities for transforming Futhark programs
 -- such that names are unique, via the 'renameProg' function.
 module Futhark.Transform.Rename

@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 -- | High-level API for invoking the Futhark compiler.
 module Futhark.Compiler
@@ -34,7 +35,7 @@ import qualified Futhark.IR.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Compiler.Program
 import Futhark.Util.Log
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (prettyText, ppr)
 
 -- | The compiler configuration.  This only contains options related
 -- to core compiler functionality, such as reading the initial program
@@ -125,7 +126,7 @@ runPipelineOnProgram config pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Type-checking internalised program" :: String)
   typeCheckInternalProgram int_prog
-  runPasses pipeline pipeline_config int_prog
+  runPipeline pipeline pipeline_config int_prog
   where pipeline_config =
           PipelineConfig { pipelineVerbose = fst (futharkVerbose config) > NotVerbose
                          , pipelineValidate = True
@@ -134,7 +135,7 @@ runPipelineOnProgram config pipeline file = do
 typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()
 typeCheckInternalProgram prog =
   case I.checkProg prog' of
-    Left err -> internalErrorS ("After internalisation:\n" ++ show err) (Just prog')
+    Left err -> internalErrorS ("After internalisation:\n" ++ show err) (ppr prog')
     Right () -> return ()
   where prog' = Alias.aliasAnalysis prog
 

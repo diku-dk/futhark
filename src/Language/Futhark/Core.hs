@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -9,6 +9,10 @@ module Language.Futhark.Core
   , Commutativity(..)
 
   -- * Location utilities
+  , SrcLoc
+  , Loc
+  , Located(..)
+  , srclocOf
   , locStr
   , locStrRel
   , prettyStacktrace
@@ -40,10 +44,10 @@ where
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.String
 import Data.Word (Word8, Word16, Word32, Word64)
-import Data.Loc
 import qualified Data.Text as T
 
 import Futhark.Util.Pretty
+import Futhark.Util.Loc
 
 -- | The uniqueness attribute of a type.  This essentially indicates
 -- whether or not in-place modifications are acceptable.  With respect

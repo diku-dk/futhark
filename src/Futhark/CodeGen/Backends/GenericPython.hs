@@ -674,7 +674,8 @@ addTiming statements =
             [BinOp "-"
              (toMicroseconds (Var "time_end"))
              (toMicroseconds (Var "time_start"))]],
-           Exp $ simpleCall "runtime_file.write" [String "\n"]]
+           Exp $ simpleCall "runtime_file.write" [String "\n"],
+           Exp $ simpleCall "runtime_file.flush" []]
         toMicroseconds x =
           simpleCall "int" [BinOp "*" x $ Integer 1000000]
 

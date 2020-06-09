@@ -1,6 +1,7 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Trustworthy #-}
 -- | = Definition of the Futhark core language IR
 --
 -- For actually /constructing/ ASTs, see "Futhark.Construct".
@@ -163,7 +164,6 @@ module Futhark.IR.Syntax
 
 import qualified Data.Set as S
 import Data.Foldable
-import Data.Loc
 import qualified Data.Sequence as Seq
 import Data.String
 import Data.Traversable (fmapDefault, foldMapDefault)
@@ -236,8 +236,11 @@ instance Semigroup dec => Semigroup (StmAux dec) where
 
 -- | A local variable binding.
 data Stm lore = Let { stmPattern :: Pattern lore
+                      -- ^ Pattern.
                     , stmAux :: StmAux (ExpDec lore)
+                      -- ^ Auxiliary information statement.
                     , stmExp :: Exp lore
+                      -- ^ Expression.
                     }
 
 deriving instance Decorations lore => Ord (Stm lore)
@@ -375,14 +378,6 @@ data BasicOp
 
   | Replicate Shape SubExp
   -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
-
-  | Repeat [Shape] Shape VName
-  -- ^ Repeat each dimension of the input array some number of times,
-  -- given by the corresponding shape.  For an array of rank @k@, the
-  -- list must contain @k@ shapes.  A shape may be empty (in which
-  -- case the dimension is not repeated, but it is still present).
-  -- The last shape indicates the amount of extra innermost
-  -- dimensions.  All other extra dimensions are added *before* the original dimension.
 
   | Scratch PrimType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.

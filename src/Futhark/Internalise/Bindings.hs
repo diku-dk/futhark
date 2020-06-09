@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Safe #-}
 module Futhark.Internalise.Bindings
   (
   -- * Internalising bindings
@@ -15,7 +16,6 @@ import Control.Monad.Writer hiding (mapM)
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Loc
 
 import Language.Futhark as E hiding (matchDims)
 import qualified Futhark.IR.SOACS as I

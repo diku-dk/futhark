@@ -4,6 +4,7 @@
 module Futhark.Binder.Class
   ( Bindable (..)
   , mkLet
+  , mkLet'
   , MonadBinder (..)
   , insertStms
   , insertStm
@@ -116,6 +117,14 @@ mkLet ctx val e =
   let pat = mkExpPat ctx val e
       dec = mkExpDec pat e
   in Let pat (defAux dec) e
+
+-- | Like mkLet, but also take attributes and certificates from the
+-- given 'StmAux'.
+mkLet' :: Bindable lore => [Ident] -> [Ident] -> StmAux a -> Exp lore -> Stm lore
+mkLet' ctx val (StmAux cs attrs _) e =
+  let pat = mkExpPat ctx val e
+      dec = mkExpDec pat e
+  in Let pat (StmAux cs attrs dec) e
 
 -- | Add a statement with the given pattern element names and
 -- expression.

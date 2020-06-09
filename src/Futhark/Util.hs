@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 -- | Non-Futhark-specific utilities.  If you find yourself writing
 -- general functions on generic data structures, consider putting them
 -- here.
@@ -21,6 +22,7 @@ module Futhark.Util
         focusNth,
         unixEnvironment,
         isEnvVarSet,
+        fancyTerminal,
         runProgramWithExitCode,
         directoryContents,
         roundFloat, ceilFloat, floorFloat,
@@ -49,6 +51,7 @@ import Data.List (genericDrop, genericSplitAt)
 import Data.Either
 import Data.Maybe
 import System.Environment
+import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Unsafe
 import qualified System.Directory.Tree as Dir
 import System.Process.ByteString
@@ -143,6 +146,15 @@ isEnvVarSet name default_val = fromMaybe default_val $ do
     "1" -> return True
     _ -> Nothing
 
+{-# NOINLINE fancyTerminal #-}
+-- | Are we running in a terminal capable of fancy commands and
+-- visualisation?
+fancyTerminal :: Bool
+fancyTerminal = unsafePerformIO $ do
+  isTTY <- hIsTerminalDevice stdout
+  isDumb <- (Just "dumb" ==) <$> lookupEnv "TERM"
+  return $ isTTY && not isDumb
+
 -- | Like 'readProcessWithExitCode', but also wraps exceptions when
 -- the indicated binary cannot be launched, or some other exception is
 -- thrown.  Also does shenanigans to handle improperly encoded outputs.
@@ -152,8 +164,8 @@ runProgramWithExitCode exe args inp =
   (Right . postprocess <$> readProcessWithExitCode exe args inp)
   `catch` \e -> return (Left e)
   where decode = T.unpack . T.decodeUtf8With T.lenientDecode
-        postprocess (err, stdout, stderr) =
-          (err, decode stdout, decode stderr)
+        postprocess (code, out, err) =
+          (code, decode out, decode err)
 
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]

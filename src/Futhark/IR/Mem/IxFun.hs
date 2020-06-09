@@ -5,13 +5,11 @@ module Futhark.IR.Mem.IxFun
        ( IxFun(..)
        , index
        , iota
-       , offsetIndex
        , permute
        , rotate
        , reshape
        , slice
        , rebase
-       , repeat
        , shape
        , rank
        , linearWithOffset
@@ -20,17 +18,19 @@ module Futhark.IR.Mem.IxFun
        , isLinear
        , substituteInIxFun
        , leastGeneralGeneralization
+       , existentialize
        , closeEnough
        )
        where
 
-import Prelude hiding (mod, repeat)
+import Prelude hiding (mod)
 import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Function (on)
 import Data.Maybe (isJust)
 import Control.Monad.Identity
+import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 
@@ -46,15 +46,31 @@ import Futhark.Util.Pretty
 import Futhark.Analysis.PrimExp.Convert (substituteInPrimExp)
 import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 
+type Shape num   = [num]
+type Indices num = [num]
+type Permutation = [Int]
+
+data Monotonicity = Inc | Dec | Unknown
+               -- ^ monotonously increasing, decreasing or unknown
+             deriving (Show, Eq)
+
+data LMADDim num = LMADDim { ldStride :: num
+                           , ldRotate :: num
+                           , ldShape :: num
+                           , ldPerm :: Int
+                           , ldMon :: Monotonicity
+                           }
+                 deriving (Show, Eq)
+
 -- | LMAD's representation consists of a general offset and for each dimension a
 -- stride, rotate factor, number of elements (or shape), permutation, and
 -- monotonicity. Note that the permutation is not strictly necessary in that the
 -- permutation can be performed directly on LMAD dimensions, but then it is
 -- difficult to extract the permutation back from an LMAD.
 --
--- LMAD algebra is closed under composition w.r.t. operators such as permute,
--- repeat, index and slice.  However, other operations, such as reshape, cannot
--- always be represented inside the LMAD algebra.
+-- LMAD algebra is closed under composition w.r.t. operators such as
+-- permute, index and slice.  However, other operations, such as
+-- reshape, cannot always be represented inside the LMAD algebra.
 --
 -- It follows that the general representation of an index function is a list of
 -- LMADS, in which each following LMAD in the list implicitly corresponds to an
@@ -72,27 +88,19 @@ import qualified Futhark.Analysis.PrimExp.Generalize as PEG
 --
 --   \{ o + \Sigma_{j=0}^{k} ((i_j+r_j) `mod` n_j)*s_j,
 --      \forall i_j such that 0<=i_j<n_j, j=1..k \}
-type Shape num   = [num]
-type Indices num = [num]
-type Permutation = [Int]
-
-data Monotonicity = Inc | Dec | Unknown
-               -- ^ monotonously increasing, decreasing or unknown
-             deriving (Show, Eq)
-
-data LMADDim num = LMADDim { ldStride :: num
-                           , ldRotate :: num
-                           , ldShape :: num
-                           , ldPerm :: Int
-                           , ldMon :: Monotonicity
-                           }
-                 deriving (Show, Eq)
-
 data LMAD num = LMAD { lmadOffset :: num
                      , lmadDims :: [LMADDim num]
                      }
                 deriving (Show, Eq)
 
+-- | An index function is a mapping from a multidimensional array
+-- index space (the domain) to a one-dimensional memory index space.
+-- Essentially, it explains where the element at position @[i,j,p]@ of
+-- some array is stored inside the flat one-dimensional array that
+-- constitutes its memory.  For example, we can use this to
+-- distinguish row-major and column-major representations.
+--
+-- An index function is represented as a sequence of 'LMAD's.
 data IxFun num = IxFun { ixfunLMADs :: NonEmpty (LMAD num)
                        , base :: Shape num
                        , ixfunContig :: Bool
@@ -277,27 +285,6 @@ permute (IxFun (lmad :| lmads) oshp cg) perm_new =
   let perm_cur = lmadPermutation lmad
       perm = map (perm_cur !!) perm_new
   in IxFun (setLMADPermutation perm lmad :| lmads) oshp cg
-
--- | Repeat dimensions.
-repeat :: (Eq num, IntegralExp num) =>
-          IxFun num -> [Shape num] -> Shape num -> IxFun num
-repeat (IxFun (lmad@(LMAD off dims) :| lmads) oshp _) shps shp =
-  let perm = lmadPermutation lmad
-      -- inverse permute the shapes and update the permutation
-      lens = map (\s -> 1 + length s) shps
-      (shps', lens') = unzip $ permuteInv perm $ zip shps lens
-      scn = drop 1 $ scanl (+) 0 lens'
-      perm' = concatMap (\(p, l) -> map (\i-> (scn !! p) - l + i) [0..l-1])
-                        $ zip perm lens
-      tmp = length perm'
-      perm'' = perm' ++ [tmp..tmp-1+length shp]
-
-      dims' = concatMap (\(shp_k, srnp) ->
-                            map fakeDim shp_k ++ [srnp]
-                        ) $ zip shps' dims
-      lmad' = setLMADPermutation perm'' $ LMAD off (dims' ++ map fakeDim shp)
-  in IxFun (lmad' :| lmads) oshp False -- XXX: Can we be less conservative?
-  where fakeDim x = LMADDim 0 0 x 0 Unknown
 
 -- | Rotate an index function.
 rotate :: (Eq num, IntegralExp num) =>
@@ -506,7 +493,7 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) _ cg) newshape = do
                   (False, False, _) ->
                       ( (ip, (0, newDim shpdim)) : sup, rpt )
                       -- already checked that the reshaped
-                      -- dims cannot be repeats or rotates
+                      -- dims cannot be rotates
                   _ -> error "reshape: reached impossible case"
               ) ([], []) $ reverse $ zip3 iota_shape newshape perm'
 
@@ -543,6 +530,7 @@ reshape (IxFun (lmad0 :| lmad0s) oshp cg) new_shape =
     IxFun (lmad :| []) _ _ -> IxFun (lmad :| lmad0 : lmad0s) oshp cg
     _ -> error "reshape: reached impossible case"
 
+-- | The number of dimensions in the domain of the input function.
 rank :: IntegralExp num =>
         IxFun num -> Int
 rank (IxFun (LMAD _ sss :| _) _ _) = length sss
@@ -578,8 +566,7 @@ rebaseNice :: (Eq num, IntegralExp num) =>
 rebaseNice
   new_base@(IxFun (lmad_base :| lmads_base) _ cg_base)
   ixfun@(IxFun lmads shp cg) = do
-  let (lmad_full :| lmads') = NE.reverse lmads
-      ((outer_shapes, inner_shape), lmad) = shaveoffRepeats lmad_full
+  let (lmad :| lmads') = NE.reverse lmads
       dims = lmadDims lmad
       perm = lmadPermutation lmad
       perm_base = lmadPermutation lmad_base
@@ -634,40 +621,9 @@ rebaseNice
             (LMAD (off_base + ldStride (last dims_base) * lmadOffset lmad)
              dims_base')
       new_base' = IxFun (lmad_base'' :| lmads_base) shp cg_base
-      IxFun lmads_base' _ _ = if all null outer_shapes && null inner_shape
-                              then new_base'
-                              else repeat new_base' outer_shapes inner_shape
+      IxFun lmads_base' _ _ = new_base'
       lmads'' = lmads' ++@ lmads_base'
   return $ IxFun lmads'' shp (cg && cg_base)
-  where shaveoffRepeats :: (Eq num, IntegralExp num) =>
-                           LMAD num -> (([Shape num], Shape num), LMAD num)
-        shaveoffRepeats lmad =
-        -- Given an input lmad, this function computes a repetition @r@ and a new lmad
-        -- @res@, such that @repeat r res@ is identical to the input lmad.
-          let perm = lmadPermutation lmad
-              dims = lmadDims lmad
-              -- compute the Repeat:
-              resacc= foldl (\acc (LMADDim s _ n _ _) ->
-                              case acc of
-                                rpt : acc0 ->
-                                    if s == 0 then (n : rpt) : acc0
-                                    else [] : (rpt : acc0)
-                                _ -> error "shaveoffRepeats: empty accumulator"
-                            ) [[]] $ reverse $ permuteFwd perm dims
-              last_shape = last resacc
-              shapes = take (length resacc - 1) resacc
-              -- update permutation and lmad:
-              howManyRepLT k =
-                foldl (\i (LMADDim s _ _ p _) ->
-                         if s == 0 && p < k then i + 1 else i
-                      ) 0 dims
-              dims' = foldl (\acc (LMADDim s r n p info) ->
-                               if s == 0 then acc
-                               else let p' = p - howManyRepLT p
-                                    in LMADDim s r n p' info : acc
-                             ) [] $ reverse dims
-              lmad' = LMAD (lmadOffset lmad) dims'
-          in ((shapes, last_shape), lmad')
 
 -- | Rebase an index function on top of a new base.
 rebase :: (Eq num, IntegralExp num) =>
@@ -686,16 +642,6 @@ rebase new_base@(IxFun lmads_base shp_base cg_base) ixfun@(IxFun lmads shp cg)
 
 ixfunMonotonicity :: (Eq num, IntegralExp num) => IxFun num -> Monotonicity
 ixfunMonotonicity = ixfunMonotonicityRots False
-
--- | Offset index.  Results in the index function corresponding to indexing with
--- @i@ on the outermost dimension.
-offsetIndex :: (Eq num, IntegralExp num) =>
-               IxFun num -> num -> IxFun num
-offsetIndex ixfun i | i == 0 = ixfun
-offsetIndex ixfun i =
-  case shape ixfun of
-    d : ds -> slice ixfun (DimSlice i (d - i) 1 : map (unitSlice 0) ds)
-    [] -> error "offsetIndex: underlying index function has rank zero"
 
 -- | If the memory support of the index function is contiguous and row-major
 -- (i.e., no transpositions, repetitions, rotates, etc.), then this should
@@ -723,6 +669,7 @@ rearrangeWithOffset (IxFun (lmad :| []) oshp cg) elem_size = do
   return (offset, zip perm (permuteFwd perm (lmadShapeBase lmad)))
 rearrangeWithOffset _ _ = Nothing
 
+-- | Is this a row-major array starting at offset zero?
 isLinear :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isLinear = (== Just 0) . flip linearWithOffset 1
 
@@ -799,7 +746,7 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
   (oshp, m2) <- generalize m1 oshp1 oshp2
   (dstd, m3) <- generalize m2 (lmadDSrd lmad1) (lmadDSrd lmad2)
   (drot, m4) <- generalize m3 (lmadDRot lmad1) (lmadDRot lmad2)
-  (offt, m5) <- PEG.leastGeneralGeneralization m4 (lmadOffset lmad1) (lmadOffset lmad2)
+  let (offt, m5) = PEG.leastGeneralGeneralization m4 (lmadOffset lmad1) (lmadOffset lmad2)
   let lmad_dims = map (\(a,b,c,d,e) -> LMADDim a b c d e) $
         zip5 dstd drot dshp dperm dmon
       lmad = LMAD offt lmad_dims
@@ -810,10 +757,46 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
         lmadDRot = map ldRotate . lmadDims
         generalize m l1 l2 =
           foldM (\(l_acc, m') (pe1,pe2) -> do
-                    (e, m'') <- PEG.leastGeneralGeneralization m' pe1 pe2
+                    let (e, m'') = PEG.leastGeneralGeneralization m' pe1 pe2
                     return (l_acc++[e], m'')
                 ) ([], m) (zip l1 l2)
 leastGeneralGeneralization _ _ = Nothing
+
+isSequential :: [Int] -> Bool
+isSequential xs =
+  all (uncurry (==)) $ zip xs [0..]
+
+-- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
+existentialize :: (Eq v, Pretty v) =>
+                  IxFun (PrimExp v) -> State [PrimExp v] (Maybe (IxFun (PrimExp (Ext v))))
+existentialize (IxFun (lmad :| []) oshp True)
+  | all ((== 0) . ldRotate) (lmadDims lmad),
+    length (lmadShape lmad) == length oshp,
+    isSequential (map ldPerm $ lmadDims lmad) = do
+      oshp' <- mapM PEG.existentialize oshp
+      lmadOffset' <- PEG.existentialize $ lmadOffset lmad
+      lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
+      let lmad' = LMAD lmadOffset' lmadDims'
+      return $ Just $ IxFun (lmad' :| []) oshp' True
+        where
+          existentializeLMADDim :: LMADDim (PrimExp v) -> State [PrimExp v] (LMADDim (PrimExp (Ext v)))
+          existentializeLMADDim (LMADDim str rot shp perm mon) = do
+            stride' <- PEG.existentialize str
+            shape' <- PEG.existentialize shp
+            return $ LMADDim stride' (fmap Free rot) shape' perm mon
+
+    -- oshp' = LeafExp (Ext 0)
+    -- lmad' = LMAD lmadOffset' lmadDims'
+    -- lmadOffset' = LeafExp (Ext 1)
+    -- (_, lmadDims', lmadDimSubsts) = foldr generalizeDim (2, [], []) $ lmadDims lmad
+    -- substs = oshp : lmadOffset lmad' : lmadDimSubsts
+
+    -- generalizeDim :: (Int, [LMADDim num]) -> LMADDim num -> (Int, [LMADDim num])
+    -- generalizeDim (i, acc) (LMADDim stride rotate shape perm mon) =
+    --   (i + 3,
+    --    LMADDim (LeafExp $ Ext i) (LeafExp $ Ext $ i + 1) (LeafExp $ Ext $ i + 2) perm mon,
+    --    [stride, rotate, shape])
+existentialize _ = return Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,
 -- we may run into problems caused by the simplifier. As index functions can be
@@ -828,7 +811,6 @@ leastGeneralGeneralization _ _ = Nothing
 closeEnough :: IxFun num -> IxFun num -> Bool
 closeEnough ixf1 ixf2 =
   (length (base ixf1) == length (base ixf2)) &&
-  (ixfunContig ixf1 == ixfunContig ixf2) &&
   (NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2)) &&
   all closeEnoughLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
   where

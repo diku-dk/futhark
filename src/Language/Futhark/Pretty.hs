@@ -303,7 +303,6 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "=" <+> align (ppr ve)
   pprPrec _ (Index e idxs _ _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec (-1) e
   pprPrec _ (Assert e1 e2 _ _) = text "assert" <+> pprPrec 10 e1 <+> pprPrec 10 e2
   pprPrec p (Lambda params body rettype _ _) =
     parensIf (p /= -1) $
@@ -328,7 +327,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Constr n cs _ _) = text "#" <> ppr n <+> sep (map ppr cs)
   pprPrec _ (Match e cs _ _) = text "match" <+> ppr e </> (stack . map ppr) (NE.toList cs)
   pprPrec _ (Attr attr e _) =
-    text "#[" <> ppr attr <> text "]" <+/> pprPrec (-1) e
+    text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e
 
 instance Pretty AttrInfo where
   ppr (AttrInfo attr) = ppr attr

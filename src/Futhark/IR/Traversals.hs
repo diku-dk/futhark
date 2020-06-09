@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 -- |
 --
 -- Functions for generic traversals across Futhark syntax trees.  The
@@ -109,9 +110,6 @@ mapExpM tv (BasicOp (Iota n x s et)) =
   BasicOp <$> (Iota <$> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s <*> pure et)
 mapExpM tv (BasicOp (Replicate shape vexp)) =
   BasicOp <$> (Replicate <$> mapOnShape tv shape <*> mapOnSubExp tv vexp)
-mapExpM tv (BasicOp (Repeat shapes innershape v)) =
-  BasicOp <$> (Repeat <$> mapM (mapOnShape tv) shapes <*>
-               mapOnShape tv innershape <*> mapOnVName tv v)
 mapExpM tv (BasicOp (Scratch t shape)) =
   BasicOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
 mapExpM tv (BasicOp (Reshape shape arrexp)) =
@@ -245,8 +243,6 @@ walkExpM tv (BasicOp (Iota n x s _)) =
   walkOnSubExp tv n >> walkOnSubExp tv x >> walkOnSubExp tv s
 walkExpM tv (BasicOp (Replicate shape vexp)) =
   walkOnShape tv shape >> walkOnSubExp tv vexp
-walkExpM tv (BasicOp (Repeat shapes innershape v)) =
-  mapM_ (walkOnShape tv) shapes >> walkOnShape tv innershape >> walkOnVName tv v
 walkExpM tv (BasicOp (Scratch _ shape)) =
   mapM_ (walkOnSubExp tv) shape
 walkExpM tv (BasicOp (Reshape shape arrexp)) =

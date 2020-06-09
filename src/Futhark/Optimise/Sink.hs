@@ -52,27 +52,20 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import qualified Futhark.Analysis.Alias as Alias
-import qualified Futhark.Analysis.Range as Range
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.IR.Aliases
-import Futhark.IR.Ranges
 import Futhark.IR.Kernels
 import Futhark.IR.MC
 
 import Futhark.Pass
 
--- We do not care about ranges, but in order to use ST.SymbolTable
--- (which is a convenient way to handle aliases), we need range information.
 type SymbolTable lore = ST.SymbolTable lore
 type Sinking lore = M.Map VName (Stm lore)
 type Sunk = S.Set VName
 type Sinker lore a = SymbolTable lore -> Sinking lore -> a -> (a, Sunk)
 type Constraints lore = (ASTLore lore,
                          Aliased lore,
-                         ST.IndexOp (Op lore),
-                         RangesOf (BodyDec lore),
-                         RangeOf (LetDec lore),
-                         RangedOp (Op lore))
+                         ST.IndexOp (Op lore))
 
 -- | Given a statement, compute how often each of its free variables
 -- are used.  Not accurate: what we care about are only 1, and greater
@@ -195,19 +188,17 @@ optimiseSegOp onOp vtable sinking op =
           }
           where op_vtable = ST.fromScope scope <> vtable
 
-type SinkLore lore = Ranges (Aliases lore)
+type SinkLore lore = Aliases lore
 
 sink :: (ASTLore lore,
          CanBeAliased (Op lore),
-         CanBeRanged (OpWithAliases (Op lore)),
-         AliasedOp (OpWithRanges (OpWithAliases (Op lore))),
-         ST.IndexOp (OpWithRanges (OpWithAliases (Op lore)))) =>
+         ST.IndexOp (OpWithAliases (Op lore))) =>
         Sinker (SinkLore lore) (Op (SinkLore lore)) -> Pass lore lore
 sink onOp =
   Pass "sink" "move memory loads closer to their uses" $
-  fmap (removeProgAliases . removeProgRanges) .
+  fmap removeProgAliases .
   intraproceduralTransformationWithConsts onConsts onFun .
-  Range.rangeAnalysis . Alias.aliasAnalysis
+  Alias.aliasAnalysis
   where onFun _ fd = do
           let vtable = ST.insertFParams (funDefParams fd) mempty
               (body, _) = optimiseBody onOp vtable mempty $ funDefBody fd

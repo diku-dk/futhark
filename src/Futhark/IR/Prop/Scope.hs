@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 -- | The core Futhark AST does not contain type information when we
 -- use a variable.  Therefore, most transformations expect to be able
 -- to access some kind of symbol table that maps names to their types.

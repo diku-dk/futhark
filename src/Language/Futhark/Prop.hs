@@ -112,7 +112,6 @@ import           Data.Foldable
 import qualified Data.Map.Strict       as M
 import qualified Data.Set              as S
 import           Data.List (sortOn, genericLength, isPrefixOf, nub)
-import           Data.Loc
 import           Data.Maybe
 import           Data.Ord
 import           Data.Bifunctor
@@ -542,7 +541,6 @@ typeOf (LetWith _ _ _ _ _ (Info t) _) = t
 typeOf (Index _ _ (Info t, _) _) = t
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (RecordUpdate _ _ _ (Info t) _) = t
-typeOf (Unsafe e _) = typeOf e
 typeOf (Assert _ e _ _) = typeOf e
 typeOf (DoLoop _ _ _ _ _ (Info (t, _)) _) = t
 typeOf (Lambda params _ _ (Info (als, t)) _) =
@@ -833,13 +831,13 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         arr_a = Array () Nonunique t_a (rank 1)
         arr_2d_a = Array () Nonunique t_a (rank 2)
         uarr_a = Array () Unique t_a (rank 1)
-        tp_a = TypeParamType Unlifted tv_a noLoc
+        tp_a = TypeParamType Unlifted tv_a mempty
 
         tv_b = VName (nameFromString "b") 1
         t_b = TypeVar () Nonunique (typeName tv_b) []
         arr_b = Array () Nonunique t_b (rank 1)
         uarr_b = Array () Unique t_b (rank 1)
-        tp_b = TypeParamType Unlifted tv_b noLoc
+        tp_b = TypeParamType Unlifted tv_b mempty
 
         arr_a_b = Array () Nonunique
                   (Record (M.fromList $ zip tupleFieldNames [Scalar t_a, Scalar t_b]))

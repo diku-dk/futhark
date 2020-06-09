@@ -2,7 +2,7 @@
 
 //// Text I/O
 
-typedef int (*writer)(FILE*, void*);
+typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
 typedef int (*str_reader)(const char *, void*);
 
@@ -277,11 +277,11 @@ static int read_str_array(int64_t elem_size, str_reader elem_reader,
   }
 
 static int read_str_i8(char *buf, void* dest) {
-  /* Some platforms (WINDOWS) does not support scanf %hhd or its
-     cousin, %SCNi8.  Read into int first to avoid corrupting
-     memory.
-
-     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
+  // Some platforms (WINDOWS) does not support scanf %hhd or its
+  // cousin, %SCNi8.  Read into int first to avoid corrupting
+  // memory.
+  //
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417
   remove_underscores(buf);
   int j, x;
   if (sscanf(buf, "%i%n", &x, &j) == 1) {
@@ -293,11 +293,11 @@ static int read_str_i8(char *buf, void* dest) {
 }
 
 static int read_str_u8(char *buf, void* dest) {
-  /* Some platforms (WINDOWS) does not support scanf %hhd or its
-     cousin, %SCNu8.  Read into int first to avoid corrupting
-     memory.
-
-     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
+  // Some platforms (WINDOWS) does not support scanf %hhd or its
+  // cousin, %SCNu8.  Read into int first to avoid corrupting
+  // memory.
+  //
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417
   remove_underscores(buf);
   int j, x;
   if (sscanf(buf, "%i%n", &x, &j) == 1) {
@@ -662,7 +662,11 @@ static int end_of_input() {
   }
 }
 
-static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, unsigned char *data, int64_t *shape, int8_t rank) {
+static int write_str_array(FILE *out,
+                           const struct primtype_info_t *elem_type,
+                           const unsigned char *data,
+                           const int64_t *shape,
+                           int8_t rank) {
   if (rank==0) {
     elem_type->write_str(out, (void*)data);
   } else {
@@ -704,7 +708,11 @@ static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, u
   return 0;
 }
 
-static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, unsigned char *data, int64_t *shape, int8_t rank) {
+static int write_bin_array(FILE *out,
+                           const struct primtype_info_t *elem_type,
+                           const unsigned char *data,
+                           const int64_t *shape,
+                           int8_t rank) {
   int64_t num_elems = 1;
   for (int64_t i = 0; i < rank; i++) {
     num_elems *= shape[i];
@@ -720,7 +728,7 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
 
   if (IS_BIG_ENDIAN) {
     for (int64_t i = 0; i < num_elems; i++) {
-      unsigned char *elem = data+i*elem_type->size;
+      const unsigned char *elem = data+i*elem_type->size;
       for (int64_t j = 0; j < elem_type->size; j++) {
         fwrite(&elem[elem_type->size-j], 1, 1, out);
       }
@@ -733,7 +741,10 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
 }
 
 static int write_array(FILE *out, int write_binary,
-                       const struct primtype_info_t *elem_type, void *data, int64_t *shape, int8_t rank) {
+                       const struct primtype_info_t *elem_type,
+                       const void *data,
+                       const int64_t *shape,
+                       const int8_t rank) {
   if (write_binary) {
     return write_bin_array(out, elem_type, data, shape, rank);
   } else {

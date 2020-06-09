@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, ConstraintKinds #-}
+{-# LANGUAGE Safe #-}
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
 -- keep "Futhark.IRrsentation.AST.Syntax" simple, and put whatever

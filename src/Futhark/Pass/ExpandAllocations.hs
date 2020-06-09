@@ -612,7 +612,7 @@ sliceKernelSizes num_threads sizes space kstms = do
       return sizes
 
     localScope (scopeOfSegSpace space) $
-      Kernels.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s) []
+      Kernels.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s)
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
     num_threads_64 <- letSubExp "num_threads" $

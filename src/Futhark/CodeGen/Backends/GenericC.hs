@@ -1,6 +1,8 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
@@ -98,8 +100,7 @@ import Futhark.IR.Prop (isBuiltInFunction)
 
 
 data CompilerState s = CompilerState {
-    compTypeStructs :: [([Type], (C.Type, C.Definition))]
-  , compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))]
+    compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))]
   , compOpaqueStructs :: [(String, (C.Type, [C.Definition]))]
   , compEarlyDecls :: DL.DList C.Definition
   , compInit :: [C.Stm]
@@ -107,14 +108,13 @@ data CompilerState s = CompilerState {
   , compUserState :: s
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
   , compLibDecls :: DL.DList C.Definition
-  , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
+  , compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp)
   , compProfileItems :: DL.DList C.BlockItem
   , compDeclaredMem :: [(VName,Space)]
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
-newCompilerState src s = CompilerState { compTypeStructs = []
-                                       , compArrayStructs = []
+newCompilerState src s = CompilerState { compArrayStructs = []
                                        , compOpaqueStructs = []
                                        , compEarlyDecls = mempty
                                        , compInit = []
@@ -291,8 +291,7 @@ envStaticArray = opsStaticArray . envOperations
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
 
-tupleDefinitions, arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
-tupleDefinitions = map (snd . snd) . compTypeStructs
+arrayDefinitions, opaqueDefinitions :: CompilerState s -> [C.Definition]
 arrayDefinitions = concatMap (snd . snd) . compArrayStructs
 opaqueDefinitions = concatMap (snd . snd) . compOpaqueStructs
 
@@ -445,7 +444,7 @@ earlyDecl :: C.Definition -> CompilerM op s ()
 earlyDecl def = modify $ \s ->
   s { compEarlyDecls = compEarlyDecls s <> DL.singleton def }
 
-contextField :: String -> C.Type -> Maybe C.Exp -> CompilerM op s ()
+contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s { compCtxFields = compCtxFields s <> DL.singleton (name,ty,initial) }
 
@@ -559,8 +558,8 @@ defineMemorySpace space = do
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
-      fprintf(stderr, $string:("Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n"),
-                               desc, block->desc, $string:spacedesc, *(block->references));
+      fprintf(stderr, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
+                      desc, block->desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
       ctx->$id:usagename -= block->size;
@@ -633,10 +632,10 @@ defineMemorySpace space = do
           else [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
-          Space sid    -> ("peak_mem_usage_" ++ sid,
-                           "cur_mem_usage_" ++ sid,
-                           "memblock_" ++ sid,
-                           "space '" ++ sid ++ "'")
+          Space sid -> (C.toIdent ("peak_mem_usage_" ++ sid) noLoc,
+                        C.toIdent ("cur_mem_usage_" ++ sid) noLoc,
+                        C.toIdent ("memblock_" ++ sid) noLoc,
+                        "space '" ++ sid ++ "'")
           _ -> ("peak_mem_usage_default",
                 "cur_mem_usage_default",
                 "memblock",
@@ -670,7 +669,17 @@ setMem dest src space = do
                                                $string:src_s) != 0) {
                        return 1;
                      }|]
-    else stm [C.cstm|$exp:dest = $exp:src;|]
+    else case space of
+           ScalarSpace ds _ -> do
+             i' <- newVName "i"
+             let i = C.toIdent i'
+                 it = primTypeToCType $ IntType Int32
+                 ds' = map (`C.toExp` noLoc) ds
+                 bound = cproduct ds'
+             stm [C.cstm|for ($ty:it $id:i = 0; $id:i < $exp:bound; $id:i++) {
+                            $exp:dest[$id:i] = $exp:src[$id:i];
+                  }|]
+           _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
@@ -1248,6 +1257,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   long int elapsed_usec = t_end - t_start;
                   if (time_runs && runtime_file != NULL) {
                     fprintf(runtime_file, "%lld\n", (long long) elapsed_usec);
+                    fflush(runtime_file);
                   }
                   $stms:free_input
                 |]
@@ -1548,8 +1558,6 @@ $edecls:early_decls
 $edecls:prototypes
 
 $edecls:lib_decls
-
-$edecls:(tupleDefinitions endstate)
 
 $edecls:(map funcToDef definitions)
 
@@ -2086,7 +2094,7 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
-  contextField (pretty name)
+  contextField (C.toIdent name noLoc)
     [C.cty|struct memblock|] $
     Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]

@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 -- | Abstract Syntax Tree metrics.  This is used in the @futhark test@
 -- program, for the @structure@ stanzas.
 module Futhark.Analysis.Metrics
@@ -130,7 +131,6 @@ primOpMetrics Copy{} = seen "Copy"
 primOpMetrics Manifest{} = seen "Manifest"
 primOpMetrics Iota{} = seen "Iota"
 primOpMetrics Replicate{} = seen "Replicate"
-primOpMetrics Repeat{} = seen "Repeat"
 primOpMetrics Scratch{} = seen "Scratch"
 primOpMetrics Reshape{} = seen "Reshape"
 primOpMetrics Rearrange{} = seen "Rearrange"

@@ -1,4 +1,14 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
+-- | Definition of the core compiler driver building blocks.  The
+-- spine of the compiler is the 'FutharkM' monad, although note that
+-- individual passes are pure functions, and do not use the 'FutharkM'
+-- monad (see "Futhark.Pass").
+--
+-- Running the compiler involves producing an initial IR program (see
+-- "Futhark.Compiler.Program"), running a 'Pipeline' to produce a
+-- final program (still in IR), then running an 'Action', which is
+-- usually a code generator.
 module Futhark.Pipeline
        ( Pipeline
        , PipelineConfig (..)
@@ -8,13 +18,11 @@ module Futhark.Pipeline
        , runFutharkM
        , Verbosity(..)
 
-       , internalErrorS
-
        , module Futhark.Error
 
        , onePass
        , passes
-       , runPasses
+       , runPipeline
        )
        where
 
@@ -38,18 +46,23 @@ import Futhark.IR (Prog, PrettyLore)
 import Futhark.TypeCheck
 import Futhark.Pass
 import Futhark.Util.Log
-import Futhark.Util.Pretty (Pretty, prettyText)
+import Futhark.Util.Pretty (prettyText)
 import Futhark.MonadFreshNames
 
--- | If Verbose, print log messages to standard error.  If
--- VeryVerbose, also print logs from individual passes.
-data Verbosity = NotVerbose | Verbose | VeryVerbose deriving (Eq, Ord)
+-- | How much information to print to stderr while the compiler is running.
+data Verbosity
+  = NotVerbose -- ^ Silence is golden.
+  | Verbose -- ^ Print messages about which pass is running.
+  | VeryVerbose -- ^ Also print logs from individual passes.
+  deriving (Eq, Ord)
 
 newtype FutharkEnv = FutharkEnv { futharkVerbose :: Verbosity }
 
 data FutharkState = FutharkState { futharkPrevLog :: UTCTime
                                  , futharkNameSource :: VNameSource }
 
+-- | The main Futhark compiler driver monad - basically some state
+-- tracking on top if 'IO'.
 newtype FutharkM a = FutharkM (ExceptT CompilerError (StateT FutharkState (ReaderT FutharkEnv IO)) a)
                      deriving (Applicative, Functor, Monad,
                                MonadError CompilerError,
@@ -73,26 +86,29 @@ instance MonadLogger FutharkM where
             modify $ \s -> s { futharkPrevLog = now }
             when verb $ liftIO $ T.hPutStrLn stderr $ T.pack prefix <> msg
 
+-- | Run a 'FutharkM' action.
 runFutharkM :: FutharkM a -> Verbosity -> IO (Either CompilerError a)
 runFutharkM (FutharkM m) verbose = do
   s <- FutharkState <$> getCurrentTime <*> pure blankNameSource
   runReaderT (evalStateT (runExceptT m) s) newEnv
   where newEnv = FutharkEnv verbose
 
-internalErrorS :: Pretty t => String -> t -> FutharkM a
-internalErrorS s p = throwError $ InternalError (T.pack s) (prettyText p) CompilerBug
-
+-- | A compilation always ends with some kind of action.
 data Action lore =
   Action { actionName :: String
          , actionDescription :: String
          , actionProcedure :: Prog lore -> FutharkM ()
          }
 
+-- | Configuration object for running a compiler pipeline.
 data PipelineConfig =
   PipelineConfig { pipelineVerbose :: Bool
                  , pipelineValidate :: Bool
                  }
 
+-- | A compiler pipeline is conceptually a function from programs to
+-- programs, where the actual representation may change.  Pipelines
+-- can be composed using their 'Category' instance.
 newtype Pipeline fromlore tolore =
   Pipeline { unPipeline :: PipelineConfig -> Prog fromlore -> FutharkM (Prog tolore) }
 
@@ -100,14 +116,16 @@ instance Category Pipeline where
   id = Pipeline $ const return
   p2 . p1 = Pipeline perform
     where perform cfg prog =
-            runPasses p2 cfg =<< runPasses p1 cfg prog
+            runPipeline p2 cfg =<< runPipeline p1 cfg prog
 
-runPasses :: Pipeline fromlore tolore
-          -> PipelineConfig
-          -> Prog fromlore
-          -> FutharkM (Prog tolore)
-runPasses = unPipeline
+-- | Run the pipeline on the given program.
+runPipeline :: Pipeline fromlore tolore
+            -> PipelineConfig
+            -> Prog fromlore
+            -> FutharkM (Prog tolore)
+runPipeline = unPipeline
 
+-- | Construct a pipeline from a single compiler pass.
 onePass :: Checkable tolore =>
            Pass fromlore tolore -> Pipeline fromlore tolore
 onePass pass = Pipeline perform
@@ -122,6 +140,7 @@ onePass pass = Pipeline perform
               Right () -> return ()
           return prog'
 
+-- | Create a pipeline from a list of passes.
 passes :: Checkable lore =>
           [Pass lore lore] -> Pipeline lore lore
 passes = foldl (>>>) id . map onePass

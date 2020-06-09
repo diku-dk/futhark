@@ -196,8 +196,6 @@ instance Pretty BasicOp where
     where et' = text $ show $ primBitSize $ IntType et
   ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
-  ppr (Repeat shapes innershape v) =
-    text "repeat" <> apply [apply $ map ppr $ shapes ++ [innershape], ppr v]
   ppr (Scratch t shape) =
     text "scratch" <> apply (ppr t : map ppr shape)
   ppr (Reshape shape e) =

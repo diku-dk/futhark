@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Trustworthy #-}
 -- | This monomorphization module converts a well-typed, polymorphic,
 -- module-free Futhark program into an equivalent monomorphic program.
 --
@@ -21,7 +23,6 @@
 --
 -- Note that these changes are unfortunately not visible in the AST
 -- representation.
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Internalise.Monomorphise
   ( transformProg ) where
 
@@ -31,7 +32,6 @@ import           Control.Monad.Writer hiding (Sum)
 import           Data.Bitraversable
 import           Data.Bifunctor
 import           Data.List (partition)
-import           Data.Loc
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 import qualified Data.Set as S
@@ -344,8 +344,8 @@ transformExp (BinOp (fname, oploc) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
       (y_param_e, y_param) <- makeVarParam e2'
       return $ LetPat x_param e1'
         (LetPat y_param e2'
-          (applyOp fname' x_param_e y_param_e) (tp, Info mempty) noLoc)
-        (tp, Info mempty) noLoc
+          (applyOp fname' x_param_e y_param_e) (tp, Info mempty) mempty)
+        (tp, Info mempty) mempty
   where applyOp fname' x y =
           Apply (Apply fname' x (Info (Observe, snd (unInfo d1)))
                  (Info (foldFunType [fromStruct $ fst (unInfo d2)] (unInfo tp)),
@@ -355,8 +355,8 @@ transformExp (BinOp (fname, oploc) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
         makeVarParam arg = do
           let argtype = typeOf arg
           x <- newNameFromString "binop_p"
-          return (Var (qualName x) (Info argtype) noLoc,
-                  Id x (Info $ fromStruct argtype) noLoc)
+          return (Var (qualName x) (Info argtype) mempty,
+                  Id x (Info $ fromStruct argtype) mempty)
 
 
 transformExp (Project n e tp loc) = do
@@ -387,9 +387,6 @@ transformExp (Update e1 idxs e2 loc) =
 transformExp (RecordUpdate e1 fs e2 t loc) =
   RecordUpdate <$> transformExp e1 <*> pure fs
                <*> transformExp e2 <*> pure t <*> pure loc
-
-transformExp (Unsafe e1 loc) =
-  Unsafe <$> transformExp e1 <*> pure loc
 
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
@@ -433,19 +430,19 @@ desugarBinOpSection op e_left e_right t (xtype, xext) (ytype, yext) (rettype, re
   where makeVarParam (Just e) _ = return (e, [])
         makeVarParam Nothing argtype = do
           x <- newNameFromString "x"
-          return (Var (qualName x) (Info argtype) noLoc,
-                  [Id x (Info $ fromStruct argtype) noLoc])
+          return (Var (qualName x) (Info argtype) mempty,
+                  [Id x (Info $ fromStruct argtype) mempty])
 
 desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "project_p"
-  let body = foldl project (Var (qualName p) (Info t1) noLoc) fields
-  return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  let body = foldl project (Var (qualName p) (Info t1) mempty) fields
+  return $ Lambda [Id p (Info t1) mempty] body Nothing (Info (mempty, toStruct t2)) loc
   where project e field =
           case typeOf e of
             Scalar (Record fs)
               | Just t <- M.lookup field fs ->
-                  Project field e (Info t) noLoc
+                  Project field e (Info t) mempty
             t -> error $ "desugarOpSection: type " ++ pretty t ++
                  " does not have field " ++ pretty field
 desugarProjectSection  _ t _ = error $ "desugarOpSection: not a function type: " ++ pretty t
@@ -454,12 +451,12 @@ desugarIndexSection :: [DimIndex] -> PatternType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Scalar (Arrow _ _ t1 t2)) loc = do
   p <- newVName "index_i"
   let body = Index (Var (qualName p) (Info t1) loc) idxs (Info t2, Info []) loc
-  return $ Lambda [Id p (Info t1) noLoc] body Nothing (Info (mempty, toStruct t2)) loc
+  return $ Lambda [Id p (Info t1) mempty] body Nothing (Info (mempty, toStruct t2)) loc
 desugarIndexSection  _ t _ = error $ "desugarIndexSection: not a function type: " ++ pretty t
 
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
 noticeDims = mapM_ notice . nestedDims
-  where notice (NamedDim v) = void $ transformFName noLoc v i32
+  where notice (NamedDim v) = void $ transformFName mempty v i32
         notice _            = return ()
 
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
@@ -526,9 +523,9 @@ inferSizeArgs tparams bind_t t =
   where tparamArg dinst tp =
           case M.lookup (typeParamName tp) dinst of
             Just (NamedDim d) ->
-              Just $ Var d (Info i32) noLoc
+              Just $ Var d (Info i32) mempty
             Just (ConstDim x) ->
-              Just $ Literal (SignedValue $ Int32Value $ fromIntegral x) noLoc
+              Just $ Literal (SignedValue $ Int32Value $ fromIntegral x) mempty
             _ ->
               Nothing
 
