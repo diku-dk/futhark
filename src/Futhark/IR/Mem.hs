@@ -623,10 +623,7 @@ matchReturnType rettype res ts = do
             "\nixfun of return type: ", pretty x_ixfun,
             "\nand context elements: ", pretty ctx_res]
         case x_mem_type of
-          MemMem y_space -> do
-            unless (x_mem == Var y_mem) $
-              throwError $ unwords ["Expected memory", pretty x_ext, "=>", pretty x_mem,
-                                    "but got", pretty y_mem]
+          MemMem y_space ->
             unless (x_space == y_space) $
               throwError $ unwords ["Expected memory", pretty y_mem, "in space", pretty x_space,
                                     "but actually in space", pretty y_space]
@@ -682,20 +679,20 @@ matchPatternToExp pat e = do
         matches ctxids ctxexts (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
           x_pt == y_pt && x_shape == y_shape &&
           case (x_ret, y_ret) of
-            (ReturnsInBlock x_mem x_ixfun, Just (ReturnsInBlock y_mem y_ixfun)) ->
+            (ReturnsInBlock _ x_ixfun, Just (ReturnsInBlock _ y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_mem == y_mem && x_ixfun' == y_ixfun'
+              in  IxFun.closeEnough x_ixfun' y_ixfun'
             (ReturnsInBlock _ x_ixfun,
              Just (ReturnsNewBlock _ _ y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun ctxids  x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_ixfun' == y_ixfun'
-            (ReturnsNewBlock x_space x_i x_ixfun,
-             Just (ReturnsNewBlock y_space y_i y_ixfun)) ->
+              in  IxFun.closeEnough x_ixfun' y_ixfun'
+            (ReturnsNewBlock _ x_i x_ixfun,
+             Just (ReturnsNewBlock _ y_i y_ixfun)) ->
               let x_ixfun' = IxFun.substituteInIxFun  ctxids x_ixfun
                   y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-              in  x_space == y_space && x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
+              in  x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
             (_, Nothing) -> True
             _ -> False
         matches _ _ _ _ = False

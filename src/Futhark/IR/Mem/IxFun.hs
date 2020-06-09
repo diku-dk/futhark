@@ -18,6 +18,7 @@ module Futhark.IR.Mem.IxFun
        , isLinear
        , substituteInIxFun
        , leastGeneralGeneralization
+       , existentialize
        , closeEnough
        )
        where
@@ -29,6 +30,7 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Data.Function (on)
 import Data.Maybe (isJust)
 import Control.Monad.Identity
+import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 
@@ -744,7 +746,7 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
   (oshp, m2) <- generalize m1 oshp1 oshp2
   (dstd, m3) <- generalize m2 (lmadDSrd lmad1) (lmadDSrd lmad2)
   (drot, m4) <- generalize m3 (lmadDRot lmad1) (lmadDRot lmad2)
-  (offt, m5) <- PEG.leastGeneralGeneralization m4 (lmadOffset lmad1) (lmadOffset lmad2)
+  let (offt, m5) = PEG.leastGeneralGeneralization m4 (lmadOffset lmad1) (lmadOffset lmad2)
   let lmad_dims = map (\(a,b,c,d,e) -> LMADDim a b c d e) $
         zip5 dstd drot dshp dperm dmon
       lmad = LMAD offt lmad_dims
@@ -755,10 +757,46 @@ leastGeneralGeneralization (IxFun (lmad1 :| []) oshp1 ctg1) (IxFun (lmad2 :| [])
         lmadDRot = map ldRotate . lmadDims
         generalize m l1 l2 =
           foldM (\(l_acc, m') (pe1,pe2) -> do
-                    (e, m'') <- PEG.leastGeneralGeneralization m' pe1 pe2
+                    let (e, m'') = PEG.leastGeneralGeneralization m' pe1 pe2
                     return (l_acc++[e], m'')
                 ) ([], m) (zip l1 l2)
 leastGeneralGeneralization _ _ = Nothing
+
+isSequential :: [Int] -> Bool
+isSequential xs =
+  all (uncurry (==)) $ zip xs [0..]
+
+-- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
+existentialize :: (Eq v, Pretty v) =>
+                  IxFun (PrimExp v) -> State [PrimExp v] (Maybe (IxFun (PrimExp (Ext v))))
+existentialize (IxFun (lmad :| []) oshp True)
+  | all ((== 0) . ldRotate) (lmadDims lmad),
+    length (lmadShape lmad) == length oshp,
+    isSequential (map ldPerm $ lmadDims lmad) = do
+      oshp' <- mapM PEG.existentialize oshp
+      lmadOffset' <- PEG.existentialize $ lmadOffset lmad
+      lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
+      let lmad' = LMAD lmadOffset' lmadDims'
+      return $ Just $ IxFun (lmad' :| []) oshp' True
+        where
+          existentializeLMADDim :: LMADDim (PrimExp v) -> State [PrimExp v] (LMADDim (PrimExp (Ext v)))
+          existentializeLMADDim (LMADDim str rot shp perm mon) = do
+            stride' <- PEG.existentialize str
+            shape' <- PEG.existentialize shp
+            return $ LMADDim stride' (fmap Free rot) shape' perm mon
+
+    -- oshp' = LeafExp (Ext 0)
+    -- lmad' = LMAD lmadOffset' lmadDims'
+    -- lmadOffset' = LeafExp (Ext 1)
+    -- (_, lmadDims', lmadDimSubsts) = foldr generalizeDim (2, [], []) $ lmadDims lmad
+    -- substs = oshp : lmadOffset lmad' : lmadDimSubsts
+
+    -- generalizeDim :: (Int, [LMADDim num]) -> LMADDim num -> (Int, [LMADDim num])
+    -- generalizeDim (i, acc) (LMADDim stride rotate shape perm mon) =
+    --   (i + 3,
+    --    LMADDim (LeafExp $ Ext i) (LeafExp $ Ext $ i + 1) (LeafExp $ Ext $ i + 2) perm mon,
+    --    [stride, rotate, shape])
+existentialize _ = return Nothing
 
 -- | When comparing index functions as part of the type check in KernelsMem,
 -- we may run into problems caused by the simplifier. As index functions can be
@@ -773,7 +811,6 @@ leastGeneralGeneralization _ _ = Nothing
 closeEnough :: IxFun num -> IxFun num -> Bool
 closeEnough ixf1 ixf2 =
   (length (base ixf1) == length (base ixf2)) &&
-  (ixfunContig ixf1 == ixfunContig ixf2) &&
   (NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2)) &&
   all closeEnoughLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
   where
