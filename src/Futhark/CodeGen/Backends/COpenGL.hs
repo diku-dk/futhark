@@ -319,7 +319,7 @@ callShader opengl_code opengl_prelude shaders sizes
                    "group_size"   -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
                    "num_groups"   -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
                    "tile_size"    -> [C.cexp|1|]
-                   "local_memory" -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
+                   "local_memory" -> [C.cexp|int32_t(gl_WorkGroupSize[0])*12|]
                    _              -> [C.cexp|256|]
 
 launchShader :: C.ToExp a =>
