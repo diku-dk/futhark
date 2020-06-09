@@ -286,6 +286,7 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
   GC.publicDef_ "context_free" GC.InitDecl $ \s ->
     ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
      [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+                                 opengl_release_context(&ctx->opengl);
                                  free_lock(&ctx->lock);
                                  free(ctx);
                                }|])

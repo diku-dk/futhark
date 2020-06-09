@@ -89,6 +89,9 @@ struct opengl_context {
 
   GLuint program;
 
+  Display*   dpy;
+  GLXContext glctx;
+
 };
 
 static char *strclone(const char *str) {
@@ -336,6 +339,10 @@ static void setup_opengl(struct opengl_context *ctx,
       exit(1);
     }
 
+
+  ctx->dpy   = dpy;
+  ctx->glctx = glctx;
+
   free_list_init(&ctx->free_list);
   setup_size_opengl(ctx);
   OPENGL_SUCCEED(glGetError());
@@ -452,6 +459,36 @@ static GLenum opengl_free_all(struct opengl_context *ctx) {
   return GL_NO_ERROR;
 }
 
+
+static GLenum opengl_release_context(struct opengl_context *ctx) {
+
+  glXMakeCurrent(ctx->dpy, None, NULL);
+  glXDestroyContext(ctx->dpy, ctx->glctx);
+
+  GLenum error;
+  error = glGetError();
+  if (error != GL_NO_ERROR) {
+    return error;
+  }
+
+  return GL_NO_ERROR;
+}
+
+static GLenum opengl_release_all(struct opengl_context *ctx) {
+
+  opengl_release_context(ctx);
+  opengl_free_all(ctx);
+  free(ctx);
+
+  GLenum error;
+  error = glGetError();
+  if (error != GL_NO_ERROR) {
+    return error;
+  }
+
+  return GL_NO_ERROR;
+}
+
 static GLenum opengl_alloc(struct opengl_context *ctx,
                            size_t      min_size,
                            const char *tag,
@@ -481,7 +518,7 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
   if(min_size < 0 || min_size > ctx->max_block_size) {
     printf("Requested memory block size: %zu exceeds maximum block size: %zu\n",
             min_size, ctx->max_block_size);
-    OPENGL_SUCCEED(opengl_free_all(&ctx));
+    opengl_release_all(ctx);
     exit(1);
   }
 
