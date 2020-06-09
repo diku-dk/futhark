@@ -5,6 +5,10 @@ Coding Style for Futhark C Runtime Component
 
 * Try to stay below 80 characters per line.
 
+* Braces are mandatory for control flow structures.
+
+* Use only line comments.
+
 * Use snake_case for naming, except preprocessor macros, which are
   uppercase.
 
