@@ -848,8 +848,16 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
     // expose OpenCL pointer values directly to the application, but
     // instead rely on a level of indirection.
     if (size >= min_size) {
+      if (ctx->cfg.debugging) {
+        fprintf(stderr, "No need to allocate: Found a block in the free list.\n");
+      }
+
       return CL_SUCCESS;
     } else {
+      if (ctx->cfg.debugging) {
+        fprintf(stderr, "Found a free block, but it was too small.\n");
+      }
+
       // Not just right - free it.
       int error = clReleaseMemObject(*mem_out);
       if (error != CL_SUCCESS) {
@@ -865,6 +873,10 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
   // Since we don't know how far the allocation is from fitting, we
   // have to check after every deallocation.  This might be pretty
   // expensive.  Let's hope that this case is hit rarely.
+
+  if (ctx->cfg.debugging) {
+    fprintf(stderr, "Actually allocating the desired block.\n");
+  }
 
   int error = opencl_alloc_actual(ctx, min_size, mem_out);
 
