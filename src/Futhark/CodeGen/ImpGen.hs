@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
@@ -21,7 +22,8 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , localDefaultSpace, askFunction, newVNameForFun
+  , localDefaultSpace, askFunction
+  , newVNameForFun, nameForFun
   , askEnv, localEnv
   , localOps
   , VTable
@@ -924,6 +926,12 @@ newVNameForFun :: String -> ImpM lore r op VName
 newVNameForFun s = do
   fname <- fmap nameToString <$> askFunction
   newVName $ maybe "" (++".") fname ++ s
+
+-- | Generate a 'Name', prefixed with 'askFunction' if it exists.
+nameForFun :: String -> ImpM lore r op Name
+nameForFun s = do
+  fname <- askFunction
+  return $ maybe "" (<>".") fname <> nameFromString s
 
 askEnv :: ImpM lore r op r
 askEnv = asks envEnv
