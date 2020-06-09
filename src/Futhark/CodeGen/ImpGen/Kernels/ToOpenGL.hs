@@ -321,7 +321,7 @@ inShaderOperations body =
         shaderOps (LocalAlloc name size) = do
           name' <- newVName $ pretty name ++ "_backing"
           GenericC.modifyUserState $ \s ->
-            s { shaderLocalMemory = (name, size) : shaderLocalMemory s }
+            s { shaderLocalMemory = (name', size) : shaderLocalMemory s }
         shaderOps (ErrorSync f) = do
           label   <- nextErrorLabel
           pending <- shaderSyncPending <$> GenericC.getUserState
