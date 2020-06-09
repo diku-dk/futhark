@@ -30,23 +30,44 @@ def shlN(x,y):
 def ashrN(x,y):
   return x >> y
 
+# Python is so slow that we just make all the unsafe operations safe,
+# always.
+
 def sdivN(x,y):
-  return x // y
+  if y == 0:
+    return x-x
+  else:
+    return x // y
 
 def smodN(x,y):
-  return x % y
+  if y == 0:
+    return x-x
+  else:
+    return x % y
 
 def udivN(x,y):
-  return signed(unsigned(x) // unsigned(y))
+  if y == 0:
+    return x-x
+  else:
+    return signed(unsigned(x) // unsigned(y))
 
 def umodN(x,y):
-  return signed(unsigned(x) % unsigned(y))
+  if y == 0:
+    return x-x
+  else:
+    return signed(unsigned(x) % unsigned(y))
 
 def squotN(x,y):
-  return np.floor_divide(np.abs(x), np.abs(y)) * np.sign(x) * np.sign(y)
+  if y == 0:
+    return x-x
+  else:
+    return np.floor_divide(np.abs(x), np.abs(y)) * np.sign(x) * np.sign(y)
 
 def sremN(x,y):
-  return np.remainder(np.abs(x), np.abs(y)) * np.sign(x)
+  if y == 0:
+    return x-x
+  else:
+    return np.remainder(np.abs(x), np.abs(y)) * np.sign(x)
 
 def sminN(x,y):
   return min(x,y)
@@ -171,14 +192,21 @@ def zext_i64_i32(x):
 def zext_i64_i64(x):
   return np.int64(np.uint64(x))
 
+sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
+sdiv_safe8 = sdiv1_safe6 = sdiv_safe32 = sdiv_safe64 = sdivN
+smod8 = smod16 = smod32 = smod64 = smodN
+smod_safe8 = smod_safe16 = smod_safe32 = smod_safe64 = smodN
+udiv8 = udiv16 = udiv32 = udiv64 = udivN
+udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = udivN
+umod8 = umod16 = umod32 = umod64 = umodN
+umod_safe8 = umod_safe16 = umod_safe32 = umod_safe64 = umodN
+squot8 = squot16 = squot32 = squot64 = squotN
+squot_safe8 = squot_safe16 = squot_safe32 = squot_safe64 = squotN
+srem8 = srem16 = srem32 = srem64 = sremN
+srem_safe8 = srem_safe16 = srem_safe32 = srem_safe64 = sremN
+
 shl8 = shl16 = shl32 = shl64 = shlN
 ashr8 = ashr16 = ashr32 = ashr64 = ashrN
-sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
-smod8 = smod16 = smod32 = smod64 = smodN
-udiv8 = udiv16 = udiv32 = udiv64 = udivN
-umod8 = umod16 = umod32 = umod64 = umodN
-squot8 = squot16 = squot32 = squot64 = squotN
-srem8 = srem16 = srem32 = srem64 = sremN
 smax8 = smax16 = smax32 = smax64 = smaxN
 smin8 = smin16 = smin32 = smin64 = sminN
 umax8 = umax16 = umax32 = umax64 = umaxN
