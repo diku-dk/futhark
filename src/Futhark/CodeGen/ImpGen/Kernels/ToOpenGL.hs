@@ -340,9 +340,15 @@ inShaderOperations body =
           ind' <- GenericC.compileExp GenericC.TargetShader $ unCount ind
           val' <- GenericC.compileExp GenericC.TargetShader val
           cast <- atomicCast s ty
-          GenericC.stm [C.cstm|$id:old = $id:op($esc:(pretty cast)
-                                                ($id:arr[$exp:ind']),
-                                                $esc:(pretty ty)($exp:val'));|]
+          var  <- newVName $ pretty old
+          let dec = "shared " ++ pretty cast ++ " " ++ pretty var ++ " = "
+                    ++ pretty cast ++ "(" ++ pretty arr ++ "["
+                    ++ pretty ind' ++ "]);"
+          GenericC.item [C.citem|$escstm:(dec)|]
+          -- TODO: We may need barrier after this:
+          GenericC.stm [C.cstm|
+                   $id:old = $id:op($id:var, $esc:(pretty ty)($exp:val'));
+                   |]
 
         atomicOps s (AtomicAdd old arr ind val) =
           doAtomic s old arr ind val "atomicAdd" [C.cty|typename int32_t|]
