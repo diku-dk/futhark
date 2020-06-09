@@ -1199,7 +1199,7 @@ sKernel :: Operations KernelsMem KernelEnv Imp.KernelOp
         -> CallKernelGen ()
 sKernel ops flatf name num_groups group_size v f = do
   (constants, set_constants) <- kernelInitialisationSimple num_groups group_size
-  let name' = nameFromString $ name ++ "_" ++ show (baseTag v)
+  name' <- nameForFun $ name ++ "_" ++ show (baseTag v)
   sKernelFailureTolerant False ops constants name' $ do
     set_constants
     dPrimV_ v $ flatf constants
