@@ -206,6 +206,7 @@ static void setup_size_opengl(struct opengl_context *ctx) {
    int max_local_memory;
    int max_num_groups;
    int max_group_size;
+
    size_t max_block_size;
 
    glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE,
@@ -436,6 +437,21 @@ static void setup_shader(struct opengl_context *ctx,
   }
 }
 
+static GLenum opengl_free_all(struct opengl_context *ctx) {
+  GLuint mem;
+  GLenum error;
+  free_list_pack(&ctx->free_list);
+    while (free_list_first(&ctx->free_list, &mem) == 0) {
+      glDeleteBuffers(1, &mem);
+      error = glGetError();
+      if (error != GL_NO_ERROR) {
+        return error;
+      }
+    }
+
+  return GL_NO_ERROR;
+}
+
 static GLenum opengl_alloc(struct opengl_context *ctx,
                            size_t      min_size,
                            const char *tag,
@@ -465,6 +481,7 @@ static GLenum opengl_alloc(struct opengl_context *ctx,
   if(min_size < 0 || min_size > ctx->max_block_size) {
     printf("Requested memory block size: %zu exceeds maximum block size: %zu\n",
             min_size, ctx->max_block_size);
+    OPENGL_SUCCEED(opengl_free_all(&ctx));
     exit(1);
   }
 
@@ -510,21 +527,6 @@ static GLenum opengl_free(struct opengl_context *ctx,
   }
 
   return error;
-}
-
-static GLenum opengl_free_all(struct opengl_context *ctx) {
-  GLuint mem;
-  GLenum error;
-  free_list_pack(&ctx->free_list);
-    while (free_list_first(&ctx->free_list, &mem) == 0) {
-      glDeleteBuffers(1, &mem);
-      error = glGetError();
-      if (error != GL_NO_ERROR) {
-        return error;
-      }
-    }
-
-  return GL_NO_ERROR;
 }
 
 // End of opengl.h.
