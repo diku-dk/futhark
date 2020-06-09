@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( generateBoilerplate
   , profilingEvent
@@ -41,14 +42,14 @@ failureSwitch failures =
         zipWith onFailure [(0::Int)..] failures
   in [C.cstm|switch (failure_idx) { $stms:failure_cases }|]
 
-copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: String
+copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: Name
 copyDevToDev = "copy_dev_to_dev"
 copyDevToHost = "copy_dev_to_host"
 copyHostToDev = "copy_host_to_dev"
 copyScalarToDev = "copy_scalar_to_dev"
 copyScalarFromDev = "copy_scalar_from_dev"
 
-profilingEvent :: String -> C.Exp
+profilingEvent :: Name -> C.Exp
 profilingEvent name =
   [C.cexp|(ctx->profiling_paused || !ctx->profiling) ? NULL
           : opencl_get_event(&ctx->opencl,
@@ -57,7 +58,7 @@ profilingEvent name =
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
-generateBoilerplate :: String -> String -> [String] -> M.Map KernelName Safety -> [PrimType]
+generateBoilerplate :: String -> String -> [Name] -> M.Map KernelName Safety -> [PrimType]
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
@@ -440,9 +441,10 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                }|])
 
   GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
-  mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
+  mapM_ GC.profileReport $ costCentreReport $
+    cost_centres ++ M.keys kernels
 
-openClDecls :: [String] -> M.Map KernelName Safety -> String -> String
+openClDecls :: [Name] -> M.Map KernelName Safety -> String -> String
             -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
 openClDecls cost_centres kernels opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
@@ -490,11 +492,11 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
 
 loadKernel :: (KernelName, Safety) -> C.Stm
 loadKernel (name, safety) = [C.cstm|{
-  ctx->$id:name = clCreateKernel(prog, $string:name, &error);
+  ctx->$id:name = clCreateKernel(prog, $string:(pretty (C.toIdent name mempty)), &error);
   OPENCL_SUCCEED_FATAL(error);
   $items:set_args
   if (ctx->debugging) {
-    fprintf(stderr, "Created kernel %s.\n", $string:name);
+    fprintf(stderr, "Created kernel %s.\n", $string:(pretty name));
   }
   }|]
   where set_global_failure =
@@ -513,15 +515,15 @@ loadKernel (name, safety) = [C.cstm|{
 releaseKernel :: (KernelName, Safety) -> C.Stm
 releaseKernel (name, _) = [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseKernel(ctx->$id:name));|]
 
-kernelRuntime :: String -> String
-kernelRuntime = (++"_total_runtime")
+kernelRuntime :: KernelName -> Name
+kernelRuntime = (<>"_total_runtime")
 
-kernelRuns :: String -> String
-kernelRuns = (++"_runs")
+kernelRuns :: KernelName -> Name
+kernelRuns = (<>"_runs")
 
-costCentreReport :: [String] -> [C.BlockItem]
+costCentreReport :: [Name] -> [C.BlockItem]
 costCentreReport names = report_kernels ++ [report_total]
-  where longest_name = foldl max 0 $ map length names
+  where longest_name = foldl max 0 $ map (length . pretty) names
         report_kernels = concatMap reportKernel names
         format_string name =
           let padding = replicate (longest_name - length name) ' '
@@ -532,7 +534,7 @@ costCentreReport names = report_kernels ++ [report_total]
               total_runtime = kernelRuntime name
           in [[C.citem|
                str_builder(&builder,
-                           $string:(format_string name),
+                           $string:(format_string (pretty name)),
                            ctx->$id:runs,
                            (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
                            (long int) ctx->$id:total_runtime);

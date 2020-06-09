@@ -21,7 +21,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , localDefaultSpace, askFunction
+  , localDefaultSpace, askFunction, newVNameForFun
   , askEnv, localEnv
   , localOps
   , VTable
@@ -86,6 +86,7 @@ module Futhark.CodeGen.ImpGen
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
+import Control.Parallel.Strategies
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
@@ -331,19 +332,25 @@ compileProg :: (Mem lore, FreeIn op, MonadFreshNames m) =>
             -> Prog lore -> m (Imp.Definitions op)
 compileProg r ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-  let (consts', s') =
-        runImpM compile r ops space
-        (newState src) { stateVTable = constsVTable consts }
+    let (_, ss) =
+          unzip $ parMap rpar (compileFunDef' src) funs
+        free_in_funs =
+          freeIn $ mconcat $ map stateFunctions ss
+        (consts', s') =
+          runImpM (compileConsts free_in_funs consts) r ops space $
+          combineStates ss
   in (Imp.Definitions consts' (stateFunctions s'),
       stateNameSource s')
-  where compile = do
-          mapM_ compileFunDef' funs
-          free_in_funs <- gets (freeIn . stateFunctions)
-          compileConsts free_in_funs consts
+  where compileFunDef' src fdef =
+          runImpM (compileFunDef fdef) r ops space
+          (newState src) { stateVTable = constsVTable consts }
 
-        compileFunDef' fdef =
-          local (\env -> env { envFunction = Just $ funDefName fdef }) $
-          compileFunDef fdef
+        combineStates ss =
+          let Imp.Functions funs' = mconcat $ map stateFunctions ss
+              src = mconcat (map stateNameSource ss)
+          in (newState src) { stateFunctions =
+                                Imp.Functions $ M.toList $ M.fromList funs'
+                            }
 
 compileConsts :: Names -> Stms lore -> ImpM lore r op (Imp.Constants op)
 compileConsts used_consts stms = do
@@ -495,7 +502,8 @@ compileOutParams orig_rts orig_epts = do
 compileFunDef :: Mem lore =>
                  FunDef lore
               -> ImpM lore r op ()
-compileFunDef (FunDef entry fname rettype params body) = do
+compileFunDef (FunDef entry fname rettype params body) =
+  local (\env -> env { envFunction = Just fname }) $ do
   ((outparams, inparams, results, args), body') <- collect' compile
   emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args
   where params_entry = maybe (replicate (length params) TypeDirect) fst entry
@@ -730,7 +738,7 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
       dest_mem <- entryArrayLocation <$> lookupArray (patElemName pe)
       dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
       let t = primValueType v
-      static_array <- newVName "static_array"
+      static_array <- newVNameForFun "static_array"
       emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
       let static_src = MemLocation static_array [intConst Int32 $ fromIntegral $ length es] $
                        IxFun.iota [fromIntegral $ length es]
@@ -910,6 +918,12 @@ localDefaultSpace space = local (\env -> env { envDefaultSpace = space })
 
 askFunction :: ImpM lore r op (Maybe Name)
 askFunction = asks envFunction
+
+-- | Generate a 'VName', prefixed with 'askFunction' if it exists.
+newVNameForFun :: String -> ImpM lore r op VName
+newVNameForFun s = do
+  fname <- fmap nameToString <$> askFunction
+  newVName $ maybe "" (++".") fname ++ s
 
 askEnv :: ImpM lore r op r
 askEnv = asks envEnv
@@ -1310,7 +1324,7 @@ sStaticArray name space pt vs = do
   let num_elems = case vs of Imp.ArrayValues vs' -> length vs'
                              Imp.ArrayZeros n -> fromIntegral n
       shape = Shape [intConst Int32 $ toInteger num_elems]
-  mem <- newVName $ name ++ "_mem"
+  mem <- newVNameForFun $ name ++ "_mem"
   emit $ Imp.DeclareArray mem space pt vs
   addVar mem $ MemVar Nothing $ MemEntry space
   sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
@@ -1338,10 +1352,11 @@ sLoopNest = sLoopNest' [] . shapeDims
 x <-- e = emit $ Imp.SetScalar x e
 infixl 3 <--
 
--- | Constructing a non-entry point function.
+-- | Constructing an ad-hoc function that does not correspond to any
+-- of the IR functions in the input program.
 function :: [Imp.Param] -> [Imp.Param] -> ImpM lore r op ()
          -> ImpM lore r op (Imp.Function op)
-function outputs inputs m = do
+function outputs inputs m = local noFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
@@ -1350,3 +1365,4 @@ function outputs inputs m = do
           addVar name $ MemVar Nothing $ MemEntry space
         addParam (Imp.ScalarParam name bt) =
           addVar name $ ScalarVar Nothing $ ScalarEntry bt
+        noFunction env = env { envFunction = Nothing }

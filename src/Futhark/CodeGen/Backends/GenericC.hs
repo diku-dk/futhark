@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE Trustworthy #-}
@@ -101,7 +102,7 @@ data CompilerState s = CompilerState {
   , compUserState :: s
   , compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition)
   , compLibDecls :: DL.DList C.Definition
-  , compCtxFields :: DL.DList (String, C.Type, Maybe C.Exp)
+  , compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp)
   , compProfileItems :: DL.DList C.BlockItem
   , compDeclaredMem :: [(VName,Space)]
   }
@@ -422,7 +423,7 @@ earlyDecl :: C.Definition -> CompilerM op s ()
 earlyDecl def = modify $ \s ->
   s { compEarlyDecls = compEarlyDecls s <> DL.singleton def }
 
-contextField :: String -> C.Type -> Maybe C.Exp -> CompilerM op s ()
+contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s { compCtxFields = compCtxFields s <> DL.singleton (name,ty,initial) }
 
@@ -536,8 +537,8 @@ defineMemorySpace space = do
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
-      fprintf(stderr, $string:("Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n"),
-                               desc, block->desc, $string:spacedesc, *(block->references));
+      fprintf(stderr, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
+                      desc, block->desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
       ctx->$id:usagename -= block->size;
@@ -608,10 +609,10 @@ defineMemorySpace space = do
           else [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
-          Space sid    -> ("peak_mem_usage_" ++ sid,
-                           "cur_mem_usage_" ++ sid,
-                           "memblock_" ++ sid,
-                           "space '" ++ sid ++ "'")
+          Space sid -> (C.toIdent ("peak_mem_usage_" ++ sid) noLoc,
+                        C.toIdent ("cur_mem_usage_" ++ sid) noLoc,
+                        C.toIdent ("memblock_" ++ sid) noLoc,
+                        "space '" ++ sid ++ "'")
           _ -> ("peak_mem_usage_default",
                 "cur_mem_usage_default",
                 "memblock",
@@ -2064,7 +2065,7 @@ compileCode (DeclareArray name DefaultSpace t vs) = do
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
-  contextField (pretty name)
+  contextField (C.toIdent name noLoc)
     [C.cty|struct memblock|] $
     Just [C.cexp|(struct memblock){NULL, (char*)$id:name_realtype, 0}|]
   item [C.citem|struct memblock $id:name = ctx->$id:name;|]

@@ -26,7 +26,7 @@ errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
 -- | Block items to put before and after a thing to be profiled.
-profilingEnclosure :: String -> ([C.BlockItem], [C.BlockItem])
+profilingEnclosure :: Name -> ([C.BlockItem], [C.BlockItem])
 profilingEnclosure name =
   ([C.citems|
       typename cudaEvent_t *pevents = NULL;
@@ -45,7 +45,7 @@ profilingEnclosure name =
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
-generateBoilerplate :: String -> String -> [String] -> M.Map KernelName Safety
+generateBoilerplate :: String -> String -> [Name] -> M.Map KernelName Safety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
@@ -263,7 +263,7 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
-generateContextFuns :: String -> [String] -> M.Map KernelName Safety
+generateContextFuns :: String -> [Name] -> M.Map KernelName Safety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
@@ -278,8 +278,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
       forKernel name =
         ([C.csdecl|typename CUfunction $id:name;|],
-         [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(&ctx->$id:name,
-                                ctx->cuda.module, $string:name));|])
+         [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
+                                &ctx->$id:name,
+                                ctx->cuda.module,
+                                $string:(pretty (C.toIdent name mempty))));|])
         : forCostCentre name
 
       (kernel_fields, init_kernel_fields) =
