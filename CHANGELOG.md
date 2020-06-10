@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * Out-of-bounds literals are now an error rather than a warning.
+
 ### Fixed
 
   * Fix bug in slice simplification (#992).
