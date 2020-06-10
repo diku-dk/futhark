@@ -318,10 +318,7 @@ inShaderOperations body =
           GenericC.stm [C.cstm|groupMemoryBarrier();|]
         shaderOps (MemFence FenceGlobal) =
           GenericC.stm [C.cstm|memoryBarrier();|]
-        shaderOps (LocalAlloc name size) = do
-          name' <- newVName $ pretty name ++ "_backing"
-          GenericC.modifyUserState $ \s ->
-            s { shaderLocalMemory = (name', size) : shaderLocalMemory s }
+        shaderOps (LocalAlloc name size) = return ()
         shaderOps (ErrorSync f) = do
           label   <- nextErrorLabel
           pending <- shaderSyncPending <$> GenericC.getUserState

@@ -298,15 +298,7 @@ callShader opengl_code opengl_prelude shaders sizes
                                           $exp:v');|]
           GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
 
-        setShaderArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp GC.TargetHost $ unCount num_bytes
-          ssbo       <- newVName "ssbo"
-          GC.libDecl [C.cedecl|typename GLuint $id:ssbo;|]
-          GC.stm [C.cstm|opengl_alloc(&ctx->opengl, $exp:num_bytes',
-                                      $string:(pretty ssbo), &$id:ssbo);|]
-          GC.stm [C.cstm|glBindBufferBase(GL_SHADER_STORAGE_BUFFER, $int:i,
-                                          $id:ssbo);|]
-          GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
+        setShaderArg i (SharedMemoryKArg num_bytes) = return ()
 
         localBytes cur (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GC.compileExp GC.TargetHost $ unCount num_bytes
