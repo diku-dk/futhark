@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Incremental flattening is now performed by default.  Use
+    attributes to constrain and direct the flattening if you have
+    exotic needs.  This will likely need further iteration and
+    refinement.
+
   * Better code generation for `reverse` (and the equivalent explicit
     slice).
 
@@ -25,11 +30,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `unsafe` keyword has been removed.  Use `#[unsafe]` instead.
 
 ### Changed
-
-  * Incremental flattening is now performed by default.  Use
-    attributes to constrain and direct the flattening if you have
-    exotic needs.  This will likely need further iteration and
-    refinement.
 
 ### Fixed
 
