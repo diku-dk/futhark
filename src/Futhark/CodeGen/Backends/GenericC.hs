@@ -1358,14 +1358,15 @@ asExecutable (CParts a b c d) = a <> b <> c <> d
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg :: MonadFreshNames m =>
-               Operations op ()
+               String
+            -> Operations op ()
             -> CompilerM op () ()
             -> String
             -> [Space]
             -> [Option]
             -> Definitions op
             -> m CParts
-compileProg ops extra header_extra spaces options prog = do
+compileProg backend ops extra header_extra spaces options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_points), endstate) =
         runCompilerM ops src () compileProg'
@@ -1394,6 +1395,7 @@ $edecls:(entryDecls endstate)
 
 $esc:("\n// Miscellaneous\n")
 $edecls:(miscDecls endstate)
+$esc:("#define FUTHARK_BACKEND_"++backend)
                            |]
 
   let utildefs = [C.cunit|

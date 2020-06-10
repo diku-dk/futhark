@@ -17,6 +17,13 @@ non-zero value on error.  Others return a ``NULL`` pointer.  Use
 :c:func:`futhark_context_get_error` to get a (possibly) more precise
 error message.
 
+.. c:macro:: FUTHARK_BACKEND_foo
+
+   A preprocessor macro identifying that the backend *foo* was used to
+   generate the code; e.g. ``c``, ``opencl``, or ``cuda``.  This can
+   be used for conditional compilation of code that only works with
+   specific backends.
+
 Configuration
 -------------
 
