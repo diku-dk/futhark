@@ -833,7 +833,7 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
 
   size_t size;
 
-  if (free_list_find(&ctx->free_list, tag, min_size, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, min_size, &size, mem_out) == 0) {
     // Successfully found a free block.  Is it big enough?
     //
     // FIXME: we might also want to check whether the block is *too
@@ -904,7 +904,7 @@ static int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) 
   cl_mem existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, -1, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->free_list, -1, &size, &existing_mem) == 0) {
     int error = clReleaseMemObject(existing_mem);
     if (error != CL_SUCCESS) {
       return error;

@@ -527,7 +527,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   }
 
   size_t size;
-  if (free_list_find(&ctx->free_list, tag, min_size, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, min_size, &size, mem_out) == 0) {
     if (size >= min_size) {
       return CUDA_SUCCESS;
     } else {
@@ -561,7 +561,7 @@ static CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
   CUdeviceptr existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, -1, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->free_list, -1, &size, &existing_mem) == 0) {
     CUresult res = cuMemFree(existing_mem);
     if (res != CUDA_SUCCESS) {
       return res;
