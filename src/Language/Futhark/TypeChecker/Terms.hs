@@ -2464,7 +2464,8 @@ literalOverflowCheck = void . check
         inBoundsF x Float32 = not $ isInfinite (realToFrac x :: Float)
         inBoundsF x Float64 = not $ isInfinite x
         warnBounds inBounds x ty loc = unless inBounds
-          $ warn loc $ "Literal " <> show x <> " out of bounds for inferred type " <> pretty ty <> "."
+          $ typeError loc mempty $ "Literal " <> ppr x <>
+          " out of bounds for inferred type " <> ppr ty <> "."
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
