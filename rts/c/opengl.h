@@ -453,6 +453,9 @@ static void setup_shader(struct opengl_context *ctx,
     OPENGL_SUCCEED(glGetError());
 
   }
+
+  free(gl_src);
+
 }
 
 static GLenum opengl_free_all(struct opengl_context *ctx) {
