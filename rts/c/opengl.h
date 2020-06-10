@@ -260,6 +260,17 @@ static void setup_size_opengl(struct opengl_context *ctx) {
       *size_value = max_value;
     }
   }
+
+  if (ctx->lockstep_width == 0) {
+    ctx->lockstep_width = 1;
+  }
+
+  if (ctx->cfg.logging) {
+    fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
+    fprintf(stderr, "Default group size: %d\n", (int)ctx->cfg.default_group_size);
+    fprintf(stderr, "Default number of groups: %d\n", (int)ctx->cfg.default_num_groups);
+  }
+
 }
 
 static void setup_opengl(struct opengl_context *ctx,
