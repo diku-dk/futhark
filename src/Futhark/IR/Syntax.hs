@@ -419,13 +419,6 @@ deriving instance Decorations lore => Eq (ExpT lore)
 deriving instance Decorations lore => Show (ExpT lore)
 deriving instance Decorations lore => Ord (ExpT lore)
 
--- | Whether something is safe or unsafe (mostly function calls, and
--- in the context of whether operations are dynamically checked).
--- When we inline an 'Unsafe' function, we remove all safety checks in
--- its body.  The 'Ord' instance picks 'Unsafe' as being less than
--- 'Safe'.
-data Safety = Unsafe | Safe deriving (Eq, Ord, Show)
-
 -- | For-loop or while-loop?
 data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
                    | WhileLoop VName

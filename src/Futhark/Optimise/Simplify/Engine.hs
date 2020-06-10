@@ -285,16 +285,36 @@ protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
       auxing aux m
 protectIf _ f taken (Let pat aux e)
-  | f e = do
-      taken_body <- eBody [pure e]
-      untaken_body <- eBody $ map (emptyOfType $ patternContextNames pat)
-                                  (patternValueTypes pat)
-      if_ts <- expTypesFromPattern pat
-      auxing aux $
-        letBind pat $ If taken taken_body untaken_body $
-        IfDec if_ts IfFallback
+  | f e =
+      case makeSafe e of
+        Just e' ->
+          auxing aux $ letBind pat e'
+        Nothing -> do
+          taken_body <- eBody [pure e]
+          untaken_body <- eBody $ map (emptyOfType $ patternContextNames pat)
+                                      (patternValueTypes pat)
+          if_ts <- expTypesFromPattern pat
+          auxing aux $
+            letBind pat $ If taken taken_body untaken_body $
+            IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
+
+makeSafe :: Exp lore -> Maybe (Exp lore)
+makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
+  Just $ BasicOp (BinOp (SDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (SQuot t _) x y)) =
+  Just $ BasicOp (BinOp (SQuot t Safe) x y)
+makeSafe (BasicOp (BinOp (UDiv t _) x y)) =
+  Just $ BasicOp (BinOp (UDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (SMod t _) x y)) =
+  Just $ BasicOp (BinOp (SMod t Safe) x y)
+makeSafe (BasicOp (BinOp (SRem t _) x y)) =
+  Just $ BasicOp (BinOp (SRem t Safe) x y)
+makeSafe (BasicOp (BinOp (UMod t _) x y)) =
+  Just $ BasicOp (BinOp (UMod t Safe) x y)
+makeSafe _ =
+  Nothing
 
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem{} =

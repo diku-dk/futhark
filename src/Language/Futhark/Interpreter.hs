@@ -1237,10 +1237,20 @@ initialCtx =
     def "-" = arithOp (`P.Sub` P.OverflowWrap) P.FSub
     def "*" = arithOp (`P.Mul` P.OverflowWrap) P.FMul
     def "**" = arithOp P.Pow P.FPow
-    def "/" = Just $ bopDef $ sintOp P.SDiv ++ uintOp P.UDiv ++ floatOp P.FDiv
-    def "%" = Just $ bopDef $ sintOp P.SMod ++ uintOp P.UMod ++ floatOp P.FMod
-    def "//" = Just $ bopDef $ sintOp P.SQuot ++ uintOp P.UDiv
-    def "%%" = Just $ bopDef $ sintOp P.SRem ++ uintOp P.UMod
+    def "/" = Just $ bopDef $
+              sintOp (`P.SDiv` P.Unsafe) ++
+              uintOp (`P.UDiv` P.Unsafe) ++
+              floatOp P.FDiv
+    def "%" = Just $ bopDef $
+              sintOp (`P.SMod` P.Unsafe) ++
+              uintOp (`P.UMod` P.Unsafe) ++
+              floatOp P.FMod
+    def "//" = Just $ bopDef $
+               sintOp (`P.SQuot` P.Unsafe) ++
+               uintOp (`P.UDiv` P.Unsafe)
+    def "%%" = Just $ bopDef $
+               sintOp (`P.SRem` P.Unsafe) ++
+               uintOp (`P.UMod` P.Unsafe)
     def "^" = Just $ bopDef $ intOp P.Xor
     def "&" = Just $ bopDef $ intOp P.And
     def "|" = Just $ bopDef $ intOp P.Or

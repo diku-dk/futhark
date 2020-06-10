@@ -76,7 +76,14 @@ asBasicOp _            = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: IsOp (Op lore) => Exp lore -> Bool
 safeExp (BasicOp op) = safeBasicOp op
-  where safeBasicOp (BinOp SDiv{} _ (Constant y)) = not $ zeroIsh y
+  where safeBasicOp (BinOp (SDiv _ Safe) _ _) = True
+        safeBasicOp (BinOp (SQuot _ Safe) _ _) = True
+        safeBasicOp (BinOp (UDiv _ Safe) _ _) = True
+        safeBasicOp (BinOp (SMod _ Safe) _ _) = True
+        safeBasicOp (BinOp (SRem _ Safe) _ _) = True
+        safeBasicOp (BinOp (UMod _ Safe) _ _) = True
+
+        safeBasicOp (BinOp SDiv{} _ (Constant y)) = not $ zeroIsh y
         safeBasicOp (BinOp SDiv{} _ _) = False
         safeBasicOp (BinOp UDiv{} _ (Constant y)) = not $ zeroIsh y
         safeBasicOp (BinOp UDiv{} _ _) = False
