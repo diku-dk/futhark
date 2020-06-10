@@ -33,7 +33,7 @@ changes to the configuration must be made *before* calling
 freed before any context objects for which it is used.  The same
 configuration may be used for multiple concurrent contexts.
 
-.. c:type:: struct futhark_context_config
+.. c:struct:: futhark_context_config
 
    An opaque struct representing a Futhark configuration.
 
@@ -69,7 +69,7 @@ configuration may be used for multiple concurrent contexts.
 Context
 -------
 
-.. c:type:: struct futhark_context
+.. c:struct:: futhark_context
 
    An opaque struct representing a Futhark context.
 
@@ -150,7 +150,7 @@ reference counted, so even for entry points that return their input
 unchanged, you should still free both the input and the output - this
 will not result in a double free.
 
-.. c:type:: struct futhark_i32_1d
+.. c:struct:: futhark_i32_1d
 
    An opaque struct representing a Futhark value of type ``[]i32``.
 
@@ -238,6 +238,16 @@ The following functions are not interesting to most users.
    Set the default tile size used when executing kernels that have
    been block tiled.
 
+.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
+
+   During :c:func:`futhark_context_new`, dump the OpenCL or CUDA
+   program source to the given file.
+
+.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
+
+   During :c:func:`futhark_context_new`, read OpenCL or CUDA program
+   source from the given file instead of using the embedded program.
+
 OpenCL
 ------
 
@@ -277,16 +287,6 @@ advanced usage.
    Add a build option to the OpenCL kernel compiler.  See the OpenCL
    specification for `clBuildProgram` for available options.
 
-.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, dump the OpenCL program
-   source to the given file.
-
-.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, read OpenCL program source
-   from the given file instead of using the embedded program.
-
 .. c:function:: void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path)
 
    During :c:func:`futhark_context_new`, dump the compiled OpenCL
@@ -313,16 +313,6 @@ advanced usage.
 
    Add a build option to the NVRTC compiler.  See the CUDA
    documentation for ``nvrtcCompileProgram`` for available options.
-
-.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, dump the CUDA program
-   source to the given file.
-
-.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, read CUDA program source
-   from the given file instead of using the embedded program.
 
 .. c:function:: void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
 
