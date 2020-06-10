@@ -30,7 +30,7 @@ compileProg prog = do
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
-  GC.compileProg operations
+  GC.compileProg "opencl" operations
     (generateBoilerplate opencl_code opencl_prelude
      cost_centres kernels types sizes failures)
     include_opencl_h [Space "device", DefaultSpace]

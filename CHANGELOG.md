@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     option, although it is likely slightly less accurate in the
     presence of concurrent operations.
 
+  * A preprocessor macro `FUTHARK_BACKEND_foo` is now defined in
+    generated header files, where *foo* is the name of the backend
+    used.
+
 ### Removed
 
   * The C# backend has been removed (#984).
