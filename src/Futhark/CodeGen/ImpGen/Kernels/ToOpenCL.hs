@@ -102,7 +102,7 @@ newKernelState failures = KernelState mempty failures 0 False False
 errorLabel :: KernelState -> String
 errorLabel = ("error_"++) . show . kernelNextSync
 
-data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (Safety, C.Func)
+data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (KernelSafety, C.Func)
                          , clUsedTypes :: S.Set PrimType
                          , clSizes :: M.Map Name SizeClass
                          , clFailures :: [FailureMsg]

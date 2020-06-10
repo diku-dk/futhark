@@ -622,7 +622,7 @@ processResidualTile1D
   -- The number of residual elements that are not covered by
   -- the whole tiles.
   residual_input <- letSubExp "residual_input" $
-    BasicOp $ BinOp (SRem Int32) w tile_size
+    BasicOp $ BinOp (SRem Int32 Unsafe) w tile_size
 
   letTupExp "acc_after_residual" =<<
     eIf (toExp $ primExpFromSubExp int32 residual_input .==. 0)
@@ -670,7 +670,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
   let tile_size = unCount $ segGroupSize lvl
 
   -- Number of whole tiles that fit in the input.
-  num_whole_tiles <- letSubExp "num_whole_tiles" $ BasicOp $ BinOp (SQuot Int32) w tile_size
+  num_whole_tiles <- letSubExp "num_whole_tiles" $
+                     BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size
   return Tiling
     { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
         letBindNames [gtid] =<<
@@ -836,7 +837,7 @@ processResidualTile2D
   -- The number of residual elements that are not covered by
   -- the whole tiles.
   residual_input <- letSubExp "residual_input" $
-    BasicOp $ BinOp (SRem Int32) w tile_size
+    BasicOp $ BinOp (SRem Int32 Unsafe) w tile_size
 
   letTupExp "acc_after_residual" =<<
     eIf (toExp $ primExpFromSubExp int32 residual_input .==. 0)
@@ -887,7 +888,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
 
   -- Number of whole tiles that fit in the input.
   num_whole_tiles <- letSubExp "num_whole_tiles" $
-    BasicOp $ BinOp (SQuot Int32) w tile_size
+    BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size
   return Tiling
     { tilingSegMap = \desc lvl' manifest f ->
         segMap2D desc lvl' manifest (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do

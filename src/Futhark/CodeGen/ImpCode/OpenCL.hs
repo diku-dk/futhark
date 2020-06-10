@@ -14,7 +14,7 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , KernelName
        , KernelArg (..)
        , OpenCL (..)
-       , Safety(..)
+       , KernelSafety(..)
        , numFailureParams
        , KernelTarget (..)
        , FailureMsg(..)
@@ -35,7 +35,7 @@ import Futhark.Util.Pretty
 data Program = Program { openClProgram :: String
                        , openClPrelude :: String
                          -- ^ Must be prepended to the program.
-                       , openClKernelNames :: M.Map KernelName Safety
+                       , openClKernelNames :: M.Map KernelName KernelSafety
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
                        , openClSizes :: M.Map Name SizeClass
@@ -76,7 +76,7 @@ data MayFail = MayFail | CannotFail
 
 -- | Information about bounds checks and how sensitive it is to
 -- errors.  Ordered by least demanding to most.
-data Safety
+data KernelSafety
   = SafetyNone
     -- ^ Does not need to know if we are in a failing state, and also
     -- cannot fail.
@@ -89,13 +89,13 @@ data Safety
 
 -- | How many leading failure arguments we must pass when launching a
 -- kernel with these safety characteristics.
-numFailureParams :: Safety -> Int
+numFailureParams :: KernelSafety -> Int
 numFailureParams SafetyNone = 0
 numFailureParams SafetyCheap = 1
 numFailureParams SafetyFull = 3
 
 -- | Host-level OpenCL operation.
-data OpenCL = LaunchKernel Safety KernelName [KernelArg] [Exp] [Exp]
+data OpenCL = LaunchKernel KernelSafety KernelName [KernelArg] [Exp] [Exp]
             | GetSize VName Name
             | CmpSizeLe VName Name Exp
             | GetSizeMax VName SizeClass

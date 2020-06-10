@@ -386,7 +386,8 @@ rearrangeSlice d w num_chunks arr = do
 
   (w_padded, padding) <- paddedScanReduceInput w num_chunks'
 
-  per_chunk <- letSubExp "per_chunk" $ BasicOp $ BinOp (SQuot Int32) w_padded num_chunks'
+  per_chunk <- letSubExp "per_chunk" $
+               BasicOp $ BinOp (SQuot Int32 Unsafe) w_padded num_chunks'
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
   rearrange num_chunks' w_padded per_chunk (baseString arr) arr_padded arr_t

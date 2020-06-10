@@ -58,7 +58,9 @@ profilingEvent name =
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
-generateBoilerplate :: String -> String -> [Name] -> M.Map KernelName Safety -> [PrimType]
+generateBoilerplate :: String -> String -> [Name]
+                    -> M.Map KernelName KernelSafety
+                    -> [PrimType]
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
@@ -444,7 +446,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   mapM_ GC.profileReport $ costCentreReport $
     cost_centres ++ M.keys kernels
 
-openClDecls :: [Name] -> M.Map KernelName Safety -> String -> String
+openClDecls :: [Name] -> M.Map KernelName KernelSafety -> String -> String
             -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
 openClDecls cost_centres kernels opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
@@ -490,7 +492,7 @@ void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *
           $esc:openCL_h
           static const char *opencl_program[] = {$inits:program_fragments};|]
 
-loadKernel :: (KernelName, Safety) -> C.Stm
+loadKernel :: (KernelName, KernelSafety) -> C.Stm
 loadKernel (name, safety) = [C.cstm|{
   ctx->$id:name = clCreateKernel(prog, $string:(pretty (C.toIdent name mempty)), &error);
   OPENCL_SUCCEED_FATAL(error);
@@ -512,7 +514,7 @@ loadKernel (name, safety) = [C.cstm|{
                      SafetyCheap -> [set_global_failure]
                      SafetyFull -> [set_global_failure, set_global_failure_args]
 
-releaseKernel :: (KernelName, Safety) -> C.Stm
+releaseKernel :: (KernelName, KernelSafety) -> C.Stm
 releaseKernel (name, _) = [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseKernel(ctx->$id:name));|]
 
 kernelRuntime :: KernelName -> Name

@@ -45,7 +45,7 @@ profilingEnclosure name =
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
-generateBoilerplate :: String -> String -> [Name] -> M.Map KernelName Safety
+generateBoilerplate :: String -> String -> [Name] -> M.Map KernelName KernelSafety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
@@ -263,7 +263,7 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
-generateContextFuns :: String -> [Name] -> M.Map KernelName Safety
+generateContextFuns :: String -> [Name] -> M.Map KernelName KernelSafety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()

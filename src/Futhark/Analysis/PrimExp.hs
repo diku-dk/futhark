@@ -184,17 +184,19 @@ instance Pretty v => Fractional (PrimExp v) where
   fromRational = ValueExp . FloatValue . Float64Value . fromRational
 
 instance Pretty v => IntegralExp (PrimExp v) where
-  x `div` y | Just z <- msum [asIntOp SDiv x y, asFloatOp FDiv x y] = constFoldPrimExp z
+  x `div` y | Just z <- msum [asIntOp (`SDiv` Unsafe) x y,
+                              asFloatOp FDiv x y] =
+                constFoldPrimExp z
             | otherwise = numBad "div" (x,y)
 
-  x `mod` y | Just z <- msum [asIntOp SMod x y] = z
+  x `mod` y | Just z <- msum [asIntOp (`SMod` Unsafe) x y] = z
             | otherwise = numBad "mod" (x,y)
 
   x `quot` y | oneIshExp y = x
-             | Just z <- msum [asIntOp SQuot x y] = constFoldPrimExp z
+             | Just z <- msum [asIntOp (`SQuot` Unsafe) x y] = constFoldPrimExp z
              | otherwise = numBad "quot" (x,y)
 
-  x `rem` y | Just z <- msum [asIntOp SRem x y] = constFoldPrimExp z
+  x `rem` y | Just z <- msum [asIntOp (`SRem` Unsafe) x y] = constFoldPrimExp z
             | otherwise = numBad "rem" (x,y)
 
   sgn (ValueExp (IntValue i)) = Just $ signum $ valueIntegral i

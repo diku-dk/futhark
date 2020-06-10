@@ -160,7 +160,7 @@ callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = d
 
   where mult_exp = BinOp "*"
 
-launchKernel :: Imp.KernelName -> Imp.Safety -> [PyExp] -> [PyExp] -> [Imp.KernelArg]
+launchKernel :: Imp.KernelName -> Imp.KernelSafety -> [PyExp] -> [PyExp] -> [Imp.KernelArg]
              -> Py.CompilerM op s ()
 launchKernel kernel_name safety kernel_dims workgroup_dims args = do
   let kernel_dims' = Tuple kernel_dims
