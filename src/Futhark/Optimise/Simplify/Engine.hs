@@ -303,10 +303,14 @@ protectIf _ _ _ stm =
 makeSafe :: Exp lore -> Maybe (Exp lore)
 makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
   Just $ BasicOp (BinOp (SDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (SDivUp t _) x y)) =
+  Just $ BasicOp (BinOp (SDivUp t Safe) x y)
 makeSafe (BasicOp (BinOp (SQuot t _) x y)) =
   Just $ BasicOp (BinOp (SQuot t Safe) x y)
 makeSafe (BasicOp (BinOp (UDiv t _) x y)) =
   Just $ BasicOp (BinOp (UDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (UDivUp t _) x y)) =
+  Just $ BasicOp (BinOp (UDivUp t Safe) x y)
 makeSafe (BasicOp (BinOp (SMod t _) x y)) =
   Just $ BasicOp (BinOp (SMod t Safe) x y)
 makeSafe (BasicOp (BinOp (SRem t _) x y)) =
