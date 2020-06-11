@@ -519,7 +519,7 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
       certifying (mconcat css) $
         letBind pat $ Op $ Scatter w' fun' (concat xivs) $ map (incWrites r) dests
   where sizeOf :: VName -> Maybe SubExp
-        sizeOf x = arraySize 0 . ST.entryType <$> ST.lookup x vtable
+        sizeOf x = arraySize 0 . typeOf <$> ST.lookup x vtable
         mix = concat . transpose
         incWrites r (w, n, a) = (w, n*r, a) -- ToDO: is it (n*r) or (n+r-1)??
         isConcat v = case ST.lookupExp v vtable of

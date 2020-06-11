@@ -199,20 +199,20 @@ usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 enterLoop :: SimpleM lore a -> SimpleM lore a
 enterLoop = localVtable ST.deepen
 
-bindFParams :: [FParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindFParams :: SimplifiableLore lore => [FParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
 bindFParams params =
   localVtable $ ST.insertFParams params
 
-bindLParams :: [LParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindLParams :: SimplifiableLore lore => [LParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
 bindLParams params =
   localVtable $ \vtable -> foldr ST.insertLParam vtable params
 
-bindArrayLParams :: [LParam (Wise lore)] -> SimpleM lore a
+bindArrayLParams :: SimplifiableLore lore => [LParam (Wise lore)] -> SimpleM lore a
                  -> SimpleM lore a
 bindArrayLParams params =
   localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
 
-bindLoopVar :: VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
+bindLoopVar :: SimplifiableLore lore => VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
 

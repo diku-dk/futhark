@@ -1110,7 +1110,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se1 se2 = Simplify m
   | Just m <- simplifyWith se2 se1 = Simplify m
   where simplifyWith (Var v) x
-          | Just bnd <- ST.entryStm =<< ST.lookup v vtable,
+          | Just bnd <- ST.lookupStm v vtable,
             If p tbranch fbranch _ <- stmExp bnd,
             Just (y, z) <-
               returns v (stmPattern bnd) tbranch fbranch,
@@ -1252,19 +1252,25 @@ ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
       certifying cs_y $ auxing aux $
         letBind pat $ BasicOp $ Update arr_x slice_x' $ Var v'
 
--- Simplify away 0<i when 'i' is from a loop of form 'for i < n'.
-ruleBasicOp vtable pat aux (CmpOp (CmpSle Int32) x y)
+-- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
+ruleBasicOp vtable pat aux (CmpOp CmpSle{} x y)
   | Constant (IntValue (Int32Value 0)) <- x,
     Var v <- y,
     Just _ <- ST.lookupLoopVar v vtable =
       Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True
 
 -- Simplify away i<n when 'i' is from a loop of form 'for i < n'.
-ruleBasicOp vtable pat aux (CmpOp (CmpSlt Int32) x y)
+ruleBasicOp vtable pat aux (CmpOp CmpSlt{} x y)
   | Var v <- x,
     Just n <- ST.lookupLoopVar v vtable,
     n == y =
       Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True
+
+-- Simplify away x<0 when 'x' has been used as array size.
+ruleBasicOp vtable pat aux (CmpOp CmpSlt{} (Var x) y)
+  | isCt0 y,
+    maybe False ST.entryIsSize $ ST.lookup x vtable =
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant False
 
 ruleBasicOp _ _ _ _ =
   Skip
