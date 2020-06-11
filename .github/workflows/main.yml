@@ -58,12 +58,12 @@ jobs:
         key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
 
     - name: Build Futhark
-      run: nix-build
+      run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
 
     - uses: actions/upload-artifact@v1
       with:
         name: futhark
-        path: result/futhark-nightly.tar.xz
+        path: result/futhark-nightly-linux-x86_64.tar.xz
 
 
   build-linux-cabal:
