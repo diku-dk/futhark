@@ -39,6 +39,12 @@ def sdivN(x,y):
   else:
     return x // y
 
+def sdiv_upN(x,y):
+  if y == 0:
+    return x-x
+  else:
+    return (x+y-(y/y)) // y
+
 def smodN(x,y):
   if y == 0:
     return x-x
@@ -50,6 +56,12 @@ def udivN(x,y):
     return x-x
   else:
     return signed(unsigned(x) // unsigned(y))
+
+def udiv_upN(x,y):
+  if y == 0:
+    return x-x
+  else:
+    return signed(unsigned(x)+unsigned(y)-unsigned(y/y) // unsigned(y))
 
 def umodN(x,y):
   if y == 0:
@@ -193,11 +205,15 @@ def zext_i64_i64(x):
   return np.int64(np.uint64(x))
 
 sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
+sdiv_up8 = sdiv1_up6 = sdiv_up32 = sdiv_up64 = sdiv_upN
 sdiv_safe8 = sdiv1_safe6 = sdiv_safe32 = sdiv_safe64 = sdivN
+sdiv_up_safe8 = sdiv_up1_safe6 = sdiv_up_safe32 = sdiv_up_safe64 = sdiv_upN
 smod8 = smod16 = smod32 = smod64 = smodN
 smod_safe8 = smod_safe16 = smod_safe32 = smod_safe64 = smodN
 udiv8 = udiv16 = udiv32 = udiv64 = udivN
-udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = udivN
+udiv_up8 = udiv_up16 = udiv_up32 = udiv_up64 = udivN
+udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = udiv_upN
+udiv_up_safe8 = udiv_up_safe16 = udiv_up_safe32 = udiv_up_safe64 = udiv_upN
 umod8 = umod16 = umod32 = umod64 = umodN
 umod_safe8 = umod_safe16 = umod_safe32 = umod_safe64 = umodN
 squot8 = squot16 = squot32 = squot64 = squotN

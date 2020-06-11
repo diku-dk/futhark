@@ -659,8 +659,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
                     BasicOp $ BinOp (SMin Int32) (unCount (segGroupSize initial_lvl)) kdim
 
       -- How many groups we need to exhaust the innermost dimension.
-      ldim <- letSubExp "ldim" =<<
-              eDivRoundingUp Int32 (eSubExp kdim) (eSubExp group_size)
+      ldim <- letSubExp "ldim" $
+              BasicOp $ BinOp (SDivUp Int32 Unsafe) kdim group_size
 
       num_groups <- letSubExp "computed_num_groups" =<<
                     foldBinOp (Mul Int32 OverflowUndef) ldim (map snd dims_on_top)
@@ -872,10 +872,10 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
   group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) tile_size tile_size
 
-  num_groups_x <- letSubExp "num_groups_x" =<<
-                  eDivRoundingUp Int32 (eSubExp kdim_x) (eSubExp tile_size)
-  num_groups_y <- letSubExp "num_groups_y" =<<
-                  eDivRoundingUp Int32 (eSubExp kdim_y) (eSubExp tile_size)
+  num_groups_x <- letSubExp "num_groups_x" $
+                  BasicOp $ BinOp (SDivUp Int32 Unsafe) kdim_x tile_size
+  num_groups_y <- letSubExp "num_groups_y" $
+                  BasicOp $ BinOp (SDivUp Int32 Unsafe) kdim_y tile_size
 
   num_groups <- letSubExp "num_groups_top" =<<
                 foldBinOp (Mul Int32 OverflowUndef) num_groups_x

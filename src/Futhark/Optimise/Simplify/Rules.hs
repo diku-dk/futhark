@@ -442,6 +442,11 @@ simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt1 e2 = subExpRes e1
   | isCt0 e2 = Nothing
 
+simplifyBinOp _ _ (BinOp SDivUp{} e1 e2)
+  | isCt0 e1 = subExpRes e1
+  | isCt1 e2 = subExpRes e1
+  | isCt0 e2 = Nothing
+
 simplifyBinOp _ _ (BinOp FDiv{} e1 e2)
   | isCt0 e1 = subExpRes e1
   | isCt1 e2 = subExpRes e1

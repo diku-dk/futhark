@@ -62,7 +62,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Util (chunks)
-import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
+import Futhark.Util.IntegralExp (divUp, quot, rem)
 
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
@@ -188,7 +188,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
     forM_ gtids $ \v -> dPrimV_ v 0
 
     let num_elements = Imp.elements w
-    let elems_per_thread = num_elements `quotRoundingUp` Imp.elements (kernelNumThreads constants)
+    let elems_per_thread = num_elements `divUp` Imp.elements (kernelNumThreads constants)
 
     slugs <- mapM (segBinOpSlug
                    (kernelLocalThreadId constants)
@@ -233,7 +233,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
   let segment_size_nonzero = Imp.var segment_size_nonzero_v int32
       num_segments = product $ init dims'
       segments_per_group = unCount group_size' `quot` segment_size_nonzero
-      required_groups = num_segments `quotRoundingUp` segments_per_group
+      required_groups = num_segments `divUp` segments_per_group
 
   emit $ Imp.DebugPrint "\n# SegRed-small" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just num_segments
@@ -423,10 +423,10 @@ groupsPerSegmentAndElementsPerThread :: Imp.Exp -> Imp.Exp
 groupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size = do
   groups_per_segment <-
     dPrimVE "groups_per_segment" $
-    unCount num_groups_hint `quotRoundingUp` BinOpExp (SMax Int32) 1 num_segments
+    unCount num_groups_hint `divUp` BinOpExp (SMax Int32) 1 num_segments
   elements_per_thread <-
     dPrimVE "elements_per_thread" $
-    segment_size `quotRoundingUp` (unCount group_size * groups_per_segment)
+    segment_size `divUp` (unCount group_size * groups_per_segment)
   return (groups_per_segment, Imp.elements elements_per_thread)
 
 -- | A SegBinOp with auxiliary information.
@@ -661,7 +661,7 @@ reductionStageTwo constants segred_pes
       -- number of accesses should be tiny here.
       comment "read in the per-group-results" $ do
         read_per_thread <- dPrimVE "read_per_thread" $
-                           groups_per_segment `quotRoundingUp` group_size
+                           groups_per_segment `divUp` group_size
 
         forM_ (zip red_x_params nes) $ \(p, ne) ->
           copyDWIMFix (paramName p) [] ne []

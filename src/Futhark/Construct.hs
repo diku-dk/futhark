@@ -71,7 +71,6 @@ module Futhark.Construct
   , eAssert
   , eBody
   , eLambda
-  , eDivRoundingUp
   , eRoundToMultipleOf
   , eSliceArray
   , eBlank
@@ -266,14 +265,6 @@ eLambda :: MonadBinder m =>
 eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
                       bodyBind $ lambdaBody lam
   where bindParam param arg = letBindNames [paramName param] =<< arg
-
--- | Note: unsigned division.
-eDivRoundingUp :: MonadBinder m =>
-                  IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
-eDivRoundingUp t x y =
-  eBinOp (SQuot t Unsafe)
-  (eBinOp (Add t OverflowWrap) x (eBinOp (Sub t OverflowWrap) y (eSubExp one))) y
-  where one = intConst t 1
 
 eRoundToMultipleOf :: MonadBinder m =>
                       IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
