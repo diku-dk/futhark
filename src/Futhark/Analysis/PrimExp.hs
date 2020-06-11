@@ -199,6 +199,10 @@ instance Pretty v => IntegralExp (PrimExp v) where
   x `rem` y | Just z <- msum [asIntOp (`SRem` Unsafe) x y] = constFoldPrimExp z
             | otherwise = numBad "rem" (x,y)
 
+  x `divUp` y | Just z <- msum [asIntOp (`SDivUp` Unsafe) x y] =
+                  constFoldPrimExp z
+              | otherwise = numBad "divRoundingUp" (x,y)
+
   sgn (ValueExp (IntValue i)) = Just $ signum $ valueIntegral i
   sgn _ = Nothing
 

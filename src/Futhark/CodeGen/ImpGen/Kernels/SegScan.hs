@@ -17,7 +17,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
+import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Futhark.Util (takeLast)
 
 -- Aggressively try to reuse memory for different SegBinOps, because
@@ -140,7 +140,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
   let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
   let num_elements = product dims'
-      elems_per_thread = num_elements `quotRoundingUp` Imp.vi32 num_threads
+      elems_per_thread = num_elements `divUp` Imp.vi32 num_threads
       elems_per_group = unCount group_size' * elems_per_thread
 
   let crossesSegment =
@@ -333,7 +333,7 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
   let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
   required_groups <- dPrimVE "required_groups" $
-                     product dims' `quotRoundingUp` unCount group_size'
+                     product dims' `divUp` unCount group_size'
 
   sKernelThread "scan_stage3" num_groups' group_size' (segFlat space) $
     virtualiseGroups SegVirt required_groups $ \virt_group_id -> do

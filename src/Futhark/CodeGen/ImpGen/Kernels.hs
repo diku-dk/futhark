@@ -33,7 +33,7 @@ import Futhark.CodeGen.ImpGen.Kernels.SegHist
 import Futhark.CodeGen.ImpGen.Kernels.Transpose
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.CodeGen.SetDefaultSpace
-import Futhark.Util.IntegralExp (quot, quotRoundingUp, IntegralExp)
+import Futhark.Util.IntegralExp (quot, divUp, IntegralExp)
 
 callKernelOperations :: Operations KernelsMem HostEnv Imp.HostOp
 callKernelOperations =
@@ -99,7 +99,7 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_groups_maybe_zero = BinOpExp (SMin Int64)
-                              (toExp' int64 w64 `quotRoundingUp`
+                              (toExp' int64 w64 `divUp`
                                i64 (toExp' int32 group_size)) $
                               i64 (Imp.vi32 max_num_groups)
   -- We also don't want zero groups.

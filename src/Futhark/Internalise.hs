@@ -468,8 +468,8 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
               I.BasicOp $ I.BinOp (Mul Int32 I.OverflowWrap) step_i32 step_sign_i32
 
   num_elems <- certifying cs $
-               letSubExp "num_elems" =<<
-               eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)
+               letSubExp "num_elems" $
+               I.BasicOp $ I.BinOp (SDivUp Int32 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   bindExtSizes (E.toStruct ret) retext [se]

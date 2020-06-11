@@ -12,7 +12,7 @@ import Futhark.IR.KernelsMem
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.CodeGen.ImpGen
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
-import Futhark.Util.IntegralExp (quotRoundingUp)
+import Futhark.Util.IntegralExp (divUp)
 
 -- | Compile 'SegMap' instance code.
 compileSegMap :: Pattern KernelsMem
@@ -31,7 +31,7 @@ compileSegMap pat lvl space kbody = do
   case lvl of
     SegThread{} -> do
       emit $ Imp.DebugPrint "\n# SegMap" Nothing
-      let virt_num_groups = product dims' `quotRoundingUp` unCount group_size'
+      let virt_num_groups = product dims' `divUp` unCount group_size'
       sKernelThread "segmap" num_groups' group_size' (segFlat space) $
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
         local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
