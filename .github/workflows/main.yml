@@ -165,9 +165,10 @@ jobs:
         try() { cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
 
-    - uses: montudor/action-zip@v0.1.0
+    - uses: papeloto/action-zip@v1
       with:
-        args: zip -qq -r futhark-nightly-windows-x86_64.zip futhark.exe
+        files: futhark.exe
+        dest: futhark-nightly-windows-x86_64.zip
 
     - uses: actions/upload-artifact@v1
       with:
