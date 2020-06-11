@@ -873,7 +873,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
   where scope_vtable = segSpaceSymbolTable space
         bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
-segSpaceSymbolTable :: SegSpace -> ST.SymbolTable lore
+segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
   foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int32) gtids_and_dims
   where f vtable (gtid, dim) = ST.insertLoopVar gtid Int32 dim vtable
