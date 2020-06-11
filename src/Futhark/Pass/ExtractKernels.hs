@@ -574,13 +574,11 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
         interest stm
           | "sequential" `inAttrs` attrs =
               0::Int
-          | Op (Screma w form@(ScremaForm _ _ lam') _) <- stmExp stm,
-            isJust $ isMapSOAC form =
-              if sequential_inner
-              then 0
-              else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
-          | Op Scatter{} <- stmExp stm =
-              0 -- Basically a map.
+          | Op (Screma w form _) <- stmExp stm,
+            Just lam' <- isMapSOAC form =
+              mapLike w lam'
+          | Op (Scatter w lam' _ _) <- stmExp stm =
+              mapLike w lam'
           | DoLoop _ _ _ body <- stmExp stm =
               bodyInterest body * 10
           | Op (Screma w (ScremaForm _ _ lam') _) <- stmExp stm =
@@ -590,9 +588,15 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
 
           where attrs = stmAuxAttrs $ stmAux stm
                 sequential_inner = "sequential_inner" `inAttrs` attrs
+
                 zeroIfTooSmall (Constant (IntValue x))
                   | intToInt64 x < 32 = 0
                 zeroIfTooSmall _ = 1
+
+                mapLike w lam' =
+                  if sequential_inner
+                  then 0
+                  else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
 
 -- | A lambda is worth sequentialising if it contains enough nested
 -- parallelism of an interesting kind.
