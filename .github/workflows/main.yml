@@ -65,7 +65,6 @@ jobs:
         name: futhark
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
-
   build-linux-cabal:
     runs-on: ubuntu-18.04
 
@@ -165,3 +164,12 @@ jobs:
         cabal update
         try() { cabal install -j1 --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
+
+    - uses: montudor/action-zip@v0.1.0
+      with:
+        args: zip -qq -r futhark-nightly-windows-x86_64.zip futhark.exe
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark
+        path: futhark-nightly-windows-x86_64.zip
