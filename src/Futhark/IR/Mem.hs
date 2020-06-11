@@ -818,10 +818,8 @@ bindeeAnnot bindeeName bindeeLore bindee =
   case bindeeLore bindee of
     dec@MemArray{} ->
       Just $
-      PP.text "-- " <>
-      PP.oneLine (PP.ppr (bindeeName bindee) <>
-                  PP.text " : " <>
-                  PP.ppr dec)
+      PP.stack $ map (("-- "<>) . PP.text) $ lines $
+      pretty (PP.ppr (bindeeName bindee) PP.<+> ":" PP.<+> PP.ppr dec)
     MemMem {} ->
       Nothing
     MemPrim _ ->
