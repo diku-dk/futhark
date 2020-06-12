@@ -69,6 +69,7 @@ jobs:
       uses: shimataro/ssh-key-action@v2
       with:
         key: ${{ secrets.SSHKEY }}
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
     - name: scp to server
       run: scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.zip futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
@@ -187,6 +188,7 @@ jobs:
       uses: shimataro/ssh-key-action@v2
       with:
         key: ${{ secrets.SSHKEY }}
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
     - name: scp to server
       run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
