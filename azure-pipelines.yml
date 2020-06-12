@@ -66,13 +66,6 @@ jobs:
       archiveFile: 'futhark-nightly-windows-x86_64.zip'
       replaceExistingArchive: true
 
-  - task: CopyFilesOverSSH@0
-    inputs:
-      sshEndpoint: 'futhark-lang.org'
-      sourceFolder: '.'
-      contents: 'futhark-nightly-windows-x86_64.zip'
-      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
-
 - job: build_linux
 
   timeoutInMinutes: 120
@@ -164,13 +157,6 @@ jobs:
       . $HOME/.nix-profile/etc/profile.d/nix.sh
       commit=$(git describe --tags --long)
       nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $commit
-
-  - task: CopyFilesOverSSH@0
-    inputs:
-      sshEndpoint: 'futhark-lang.org'
-      sourceFolder: 'result'
-      contents: 'futhark-nightly-linux-x86_64.tar.xz'
-      targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
 
 - job: release_linux
 
