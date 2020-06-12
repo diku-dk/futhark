@@ -72,7 +72,7 @@ jobs:
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
     - name: scp to server
-      run: scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.zip futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+      run: scp -o StrictHostKeyChecking=no result/futhark-nightly-linux-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
   build-linux-cabal:
     runs-on: ubuntu-18.04
