@@ -17,13 +17,10 @@ jobs:
     - name: Install Nix
       uses: cachix/install-nix-action@v8
 
-    - name: Cache cabal
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-cabal
+    - uses: cachix/cachix-action@v6
       with:
-        path: ~/.cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+        name: futhark
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
     - name: Build Futhark
       run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
