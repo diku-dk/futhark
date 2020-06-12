@@ -464,19 +464,19 @@ static void setup_shader(struct opengl_context *ctx,
     char *compile_opts = (char*) malloc(compile_opts_size);
 
     int w = snprintf(compile_opts, compile_opts_size,
-                       "LOCKSTEP_WIDTH; %d; ",
+                       "LOCKSTEP_WIDTH %d ",
                        (int)ctx->lockstep_width);
 
     for (int i = 0; i < ctx->cfg.num_sizes; i++) {
       w += snprintf(compile_opts+w, compile_opts_size-w,
-                    "%s; %d; ",
+                    "%s %d ",
                     ctx->cfg.size_vars[i],
                     (int)ctx->cfg.size_values[i]);
     }
 
     for (int i = 0; ctx->cfg.extra_build_opts[i] != NULL; i++) {
       w += snprintf(compile_opts+w, compile_opts_size-w,
-                    "%s; ", ctx->cfg.extra_build_opts[i]);
+                    "%s ", ctx->cfg.extra_build_opts[i]);
     }
 
     // Replace `SizeClass` values with `compile_opts` in the shader code.
