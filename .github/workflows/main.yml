@@ -193,7 +193,7 @@ jobs:
 
     - uses: actions/download-artifact@v2
       with:
-        name: futhark-nightly-linux-x86_64.tar.gz
+        name: futhark-nightly-linux-x86_64.tar.xz
 
     - name: scp to server
       run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
