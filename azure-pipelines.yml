@@ -189,15 +189,3 @@ jobs:
       sourceFolder: 'result'
       contents: 'futhark-$(version)-linux-x86_64.tar.xz'
       targetFolder: '/var/www/htdocs/futhark-lang.org/releases'
-
-  - task: GithubRelease@0
-    displayName: 'Attach Linux x86_64 tarball to GitHub Release'
-    inputs:
-      gitHubConnection: 'release'
-      repositoryName: 'diku-dk/futhark'
-      assets: 'result/futhark-$(version)-linux-x86_64.tar.xz'
-      action: 'edit'
-      target: '$(Build.SourceVersion)'
-      tag: '$(githubTag)'
-      addChangeLog: false
-      assetUploadMode: 'replace'
