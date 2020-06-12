@@ -65,6 +65,14 @@ jobs:
         name: futhark
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSHKEY }}
+
+    - name: scp to server
+      run: scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.zip futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+
   build-linux-cabal:
     runs-on: ubuntu-18.04
 
@@ -174,3 +182,11 @@ jobs:
       with:
         name: futhark
         path: futhark-nightly-windows-x86_64.zip
+
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSHKEY }}
+
+    - name: scp to server
+      run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
