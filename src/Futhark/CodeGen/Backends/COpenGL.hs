@@ -265,11 +265,8 @@ callShader opengl_code opengl_prelude shaders sizes
     |]
   let shader_idx        = fromJust $ elemIndex name $ M.keys shaders
   let shader_code       = opengl_code !! shader_idx
-  let shader_size_value = pretty $ zipWith shaderSizeInit (M.keys  sizes)
-                                                          (M.elems sizes)
   let fragments         = map (\s -> [C.cinit|$string:s|])
-                          $ chunk 2000 (opengl_prelude ++ shader_size_value
-                                                       ++ shader_code)
+                          $ chunk 2000 (opengl_prelude ++ shader_code)
   GC.stm $ (loadShader fragments) ((M.toList shaders) !! shader_idx)
   GC.stm [C.cstm|glUseProgram(ctx->opengl.program);|]
   GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
@@ -304,15 +301,6 @@ callShader opengl_code opengl_prelude shaders sizes
           num_bytes' <- GC.compileExp GC.TargetHost $ unCount num_bytes
           return [C.cexp|$exp:cur + $exp:num_bytes'|]
         localBytes cur _ = return cur
-
-        shaderSizeInit k size = [C.cedecl|int $id:k = $exp:val;|]
-           where n_sizes = nameToString k
-                 val = case sizeName n_sizes of
-                   "group_size"   -> [C.cexp|int32_t(gl_WorkGroupSize[0])|]
-                   "num_groups"   -> [C.cexp|int32_t(gl_NumWorkGroups[0])|]
-                   "tile_size"    -> [C.cexp|1|]
-                   "local_memory" -> [C.cexp|int32_t(gl_WorkGroupSize[0])*12|]
-                   _              -> [C.cexp|256|]
 
 launchShader :: C.ToExp a =>
                 String -> [a] -> [a] -> a -> GC.CompilerM op s ()
@@ -383,12 +371,3 @@ launchShader shader_name num_workgroups workgroup_dims local_bytes = do
             map (printKernelDim work_size) [0..shader_rank-1]
           printKernelDim global_work_size i =
             [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
-
--- | Identifies the base of a given size variable.
-sizeName :: String -> String
-sizeName n =
-  if      isInfixOf "group_size"   n then "group_size"
-  else if isInfixOf "num_groups"   n then "num_groups"
-  else if isInfixOf "tile_size"    n then "tile_size"
-  else if isInfixOf "local_memory" n then "local_memory"
-  else n
