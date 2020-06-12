@@ -40,6 +40,8 @@ struct opengl_config {
   size_t      *size_values;
   const char **size_classes;
 
+  const char **extra_build_opts;
+
 };
 
 static void opengl_config_init(struct opengl_config *cfg,
@@ -103,6 +105,47 @@ static char *strclone(const char *str) {
 
   memcpy(copy, str, size);
   return copy;
+}
+
+// Replace all occurrences of `needle` with `replacement` in `target`.
+void strrep(char *target, const char *needle, const char *replacement) {
+  if (needle == NULL || replacement == NULL) {
+    return;
+  }
+
+  int buf_len = strlen(target) + 128;
+  char buffer[buf_len];
+
+  char *insert_point = &buffer[0];
+  const char *tmp    = target;
+  size_t needle_len  = strlen(needle);
+  size_t repl_len    = strlen(replacement);
+
+  memset(buffer, 0, buf_len);
+
+  while (1) {
+    const char *p = strstr(tmp, needle);
+
+    // Walked past the last occurrence of the needle;
+    // Copy the remaining part.
+    if (p == NULL) {
+        strcpy(insert_point, tmp);
+        break;
+    }
+
+    // Copy the part before the needle.
+    memcpy(insert_point, tmp, p - tmp);
+    insert_point += p - tmp;
+
+    // Copy the replacement the string.
+    memcpy(insert_point, replacement, repl_len);
+    insert_point += repl_len;
+
+    tmp = p + needle_len;
+  }
+
+  // Write the altered string back to the target.
+  strcpy(target, buffer);
 }
 
 // Read a file into a NUL-terminated string; returns NULL on error.
@@ -353,6 +396,7 @@ static void setup_opengl(struct opengl_context *ctx,
 
   ctx->dpy   = dpy;
   ctx->glctx = glctx;
+  ctx->cfg.extra_build_opts = extra_build_opts;
 
   free_list_init(&ctx->free_list);
   setup_size_opengl(ctx);
@@ -407,8 +451,52 @@ static void setup_shader(struct opengl_context *ctx,
 
     ctx->program = glCreateProgram();
 
-    // Create the compute shader object.
-    GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
+    int compile_opts_size = 1024;
+
+    for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+      compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
+    }
+
+    for (int i = 0; ctx->cfg.extra_build_opts[i] != NULL; i++) {
+      compile_opts_size += strlen(ctx->cfg.extra_build_opts[i] + 1);
+    }
+
+    char *compile_opts = (char*) malloc(compile_opts_size);
+
+    int w = snprintf(compile_opts, compile_opts_size,
+                       "LOCKSTEP_WIDTH; %d; ",
+                       (int)ctx->lockstep_width);
+
+    for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+      w += snprintf(compile_opts+w, compile_opts_size-w,
+                    "%s; %d; ",
+                    ctx->cfg.size_vars[i],
+                    (int)ctx->cfg.size_values[i]);
+    }
+
+    for (int i = 0; ctx->cfg.extra_build_opts[i] != NULL; i++) {
+      w += snprintf(compile_opts+w, compile_opts_size-w,
+                    "%s; ", ctx->cfg.extra_build_opts[i]);
+    }
+
+    // Replace `SizeClass` values with `compile_opts` in the shader code.
+    char opts[strlen(compile_opts)];
+    char src[strlen(gl_src)];
+    strcpy(opts, compile_opts);
+    strcpy(src, gl_src);
+
+    char* name, *size;
+    name = strtok(opts, " ");
+    size = strtok(NULL, " ");
+    strrep(src, name, size);
+
+    while(size != NULL) {
+      name = strtok(NULL, " ");
+      size = strtok(NULL, " ");
+      strrep(src, name, size);
+    }
+
+    strcpy(gl_src, src);
 
     // Create and compile the compute shader.
     //TODO: delete these
@@ -418,6 +506,10 @@ static void setup_shader(struct opengl_context *ctx,
       fputs(gl_src, fp);
     }
     fclose(fp);
+
+    // Create the compute shader object.
+    GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
+
     const char* src_ptr = gl_src;
     glShaderSource(computeShader, 1, &src_ptr, NULL);
     glCompileShader(computeShader);
@@ -434,6 +526,10 @@ static void setup_shader(struct opengl_context *ctx,
     // Delete the compute shader object.
     glDeleteShader(computeShader);
     OPENGL_SUCCEED(glGetError());
+
+    free(compile_opts);
+    free(gl_src);
+
   }
   else {
     if (ctx->cfg.debugging) {
@@ -453,8 +549,6 @@ static void setup_shader(struct opengl_context *ctx,
     OPENGL_SUCCEED(glGetError());
 
   }
-
-  free(gl_src);
 
 }
 
