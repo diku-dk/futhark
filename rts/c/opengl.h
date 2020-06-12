@@ -480,13 +480,11 @@ static void setup_shader(struct opengl_context *ctx,
     }
 
     // Replace `SizeClass` values with `compile_opts` in the shader code.
-    char opts[strlen(compile_opts)];
     char src[strlen(gl_src)];
-    strcpy(opts, compile_opts);
     strcpy(src, gl_src);
 
     char* name, *size;
-    name = strtok(opts, " ");
+    name = strtok(compile_opts, " ");
     size = strtok(NULL, " ");
     strrep(src, name, size);
 
