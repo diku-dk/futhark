@@ -279,6 +279,29 @@ jobs:
         export PATH=$HOME/.local/bin:$PATH
         cd pkgtests && sh test.sh
 
+  benchmark-opencl:
+    runs-on: ubuntu-latest
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        export PATH=$HOME/.local/bin:$PATH
+        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
+
   deploy-nightly:
     runs-on: ubuntu-latest
     needs: [build-windows, build-linux-nix]
