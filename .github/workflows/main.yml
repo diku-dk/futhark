@@ -42,13 +42,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install ghc-8.8.2
 
-    - name: Cache cabal
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-cabal
+    - uses: actions/cache@v2
+      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
-        path: ~/.cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+        path: |
+          ~/.cabal/packages
+          ~/.cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-cabal
 
     - name: Build Futhark
       run: |
@@ -68,20 +69,20 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y haskell-stack
 
-    - name: Cache stack
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-stack
+    - uses: actions/cache@v2
+      name: Cache ~/.stack and .stack-work
       with:
-        path: .stack-work
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}-${{ hashFiles('stack.yaml') }}-${{ hashFiles('stack.yaml.lock') }}
+        path: |
+          ~/.stack
+          .stack-work
+        key: ${{ runner.os }}-stack
 
     - name: Build Futhark
       run: |
         stack setup
         stack install
 
-  build-mac:
+  build-mac-cabal:
     runs-on: macos-latest
 
     steps:
@@ -91,13 +92,14 @@ jobs:
       run: |
         brew install cabal-install ghc
 
-    - name: Cache cabal
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-cabal
+    - uses: actions/cache@v2
+      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
-        path: ~/.cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+        path: |
+          ~/.cabal/packages
+          ~/.cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-cabal
 
     - name: Build
       run: |
@@ -115,13 +117,14 @@ jobs:
         choco install -y msys2
         choco install -y ghc --version=8.8.2 --allow-downgrade
 
-    - name: Cache cabal
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-cabal
+    - uses: actions/cache@v2
+      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
-        path: ~\AppData\cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('futhark.cabal') }}
+        path: |
+          ~/AppData/Roaming/cabal/packages
+          ~/AppData/Roaming/cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-cabal
 
     - name: Build
       shell: bash
@@ -156,7 +159,7 @@ jobs:
           ~/.cabal/packages
           ~/.cabal/store
           dist-newstyle
-        key: ${{ runner.os }}-${{ matrix.ghc }}
+        key: ${{ runner.os }}
 
     - name: Style check
       run: nix-shell --pure --run "tools/style-check.sh src"
