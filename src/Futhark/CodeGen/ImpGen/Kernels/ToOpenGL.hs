@@ -241,7 +241,7 @@ genOpenGlPrelude ts =
   [ [C.cedecl|$esc:("#version 450")|]
   , [C.cedecl|$esc:("#extension GL_ARB_gpu_shader_int64 : enable")|]
   , [C.cedecl|$esc:("#extension GL_ARB_gpu_shader_fp64 : enable")|]
-  , [C.cedecl|$esc:("layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;")|]
+  , [C.cedecl|$esc:("layout(local_size_x = XXXX, local_size_y = YYYY, local_size_z = ZZZZ) in;")|]
   , [C.cedecl|$esc:("#define int8_t int")|]
   , [C.cedecl|$esc:("#define int16_t int")|]
   , [C.cedecl|$esc:("#define int32_t int")|]

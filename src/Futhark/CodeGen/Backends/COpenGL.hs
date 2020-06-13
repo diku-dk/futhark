@@ -267,12 +267,14 @@ callShader opengl_code opengl_prelude shaders sizes
   let shader_code       = opengl_code !! shader_idx
   let fragments         = map (\s -> [C.cinit|$string:s|])
                           $ chunk 2000 (opengl_prelude ++ shader_code)
-  GC.stm $ (loadShader fragments) ((M.toList shaders) !! shader_idx)
+  workgroup_size' <- mapM (GC.compileExp GC.TargetHost) workgroup_size
+  num_workgroups' <- mapM (GC.compileExp GC.TargetHost) num_workgroups
+  local_work_size <- newVName "local_work_size"
+  GC.stm $ (loadShader fragments workgroup_size' local_work_size)
+           ((M.toList shaders) !! shader_idx)
   GC.stm [C.cstm|glUseProgram(ctx->opengl.program);|]
   GC.stm [C.cstm|OPENGL_SUCCEED(glGetError());|]
   zipWithM_ setShaderArg [(0::Int)..] args
-  num_workgroups' <- mapM (GC.compileExp GC.TargetHost) num_workgroups
-  workgroup_size' <- mapM (GC.compileExp GC.TargetHost) workgroup_size
   local_bytes     <- foldM localBytes [C.cexp|0|] args
   launchShader name num_workgroups' workgroup_size' local_bytes
   where setShaderArg i (ValueKArg e bt) = do

@@ -405,7 +405,10 @@ static void setup_opengl(struct opengl_context *ctx,
 }
 
 static void setup_shader(struct opengl_context *ctx,
-                         const char *srcs[]) {
+                         const char *srcs[],
+                         GLuint local_size_x,
+                         GLuint local_size_y,
+                         GLuint local_size_z) {
 
   char *gl_src = NULL;
 
@@ -494,6 +497,20 @@ static void setup_shader(struct opengl_context *ctx,
       strrep(src, name, size);
     }
 
+    // Assign local work-group sizes
+    char* size_x = "local_size_x = ";
+    char* work_size = (char*)malloc(strlen(size_x));
+    snprintf(work_size, strlen(size_x)+32, "%s%d", size_x, local_size_x);
+    strrep(src, "local_size_x = XXXX", work_size);
+
+    char* size_y = "local_size_y = ";
+    snprintf(work_size, strlen(size_y)+32, "%s%d", size_y, local_size_y);
+    strrep(src, "local_size_y = YYYY", work_size);
+
+    char* size_z = "local_size_z = ";
+    snprintf(work_size, strlen(size_z)+32, "%s%d", size_z, local_size_z);
+    strrep(src, "local_size_z = ZZZZ", work_size);
+
     strcpy(gl_src, src);
 
     // Create and compile the compute shader.
@@ -527,6 +544,7 @@ static void setup_shader(struct opengl_context *ctx,
 
     free(compile_opts);
     free(gl_src);
+    free(work_size);
 
   }
   else {

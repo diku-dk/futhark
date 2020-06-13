@@ -317,14 +317,25 @@ generateBoilerplate opengl_code opengl_prelude shaders sizes = do
                  ctx->profiling_paused = 0;
                }|])
 
-loadShader :: [C.Initializer] -> (ShaderName, Safety) -> C.Stm
-loadShader srcs (name, safety) =
+loadShader :: C.ToExp a =>
+              [C.Initializer] -> [a] -> VName -> (ShaderName, Safety) -> C.Stm
+loadShader srcs workgroup_dims local_work_size (name, safety) =
   let opengl_program = "opengl_program_" ++ name
   in [C.cstm|{
   const char *$id:opengl_program[] = {$inits:srcs, NULL};
-  setup_shader(&ctx->opengl, $id:opengl_program);
+  typename GLuint $id:local_work_size[3] = {$inits:workgroup_dims'};
+  if($id:local_work_size[1] == NULL) {
+    $id:local_work_size[1] = 1;
+  }
+  if($id:local_work_size[2] == NULL) {
+    $id:local_work_size[2] = 1;
+  }
+  setup_shader(&ctx->opengl, $id:opengl_program, $id:local_work_size[0],
+               $id:local_work_size[1], $id:local_work_size[2]);
   OPENGL_SUCCEED(glGetError());
   if (ctx->debugging) {
     fprintf(stderr, "Created shader %s.\n", $string:name);
   }
 }|]
+  where toInit e        = [C.cinit|$exp:e|]
+        workgroup_dims' = map toInit workgroup_dims
