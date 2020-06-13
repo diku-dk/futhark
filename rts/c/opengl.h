@@ -108,6 +108,8 @@ static char *strclone(const char *str) {
 }
 
 // Replace all occurrences of `needle` with `replacement` in `target`.
+// FIXME: This produces a sysmalloc error when `needle` is shorter
+//        than `replacement`.
 void strrep(char *target, const char *needle, const char *replacement) {
   if (needle == NULL || replacement == NULL) {
     return;
@@ -123,6 +125,7 @@ void strrep(char *target, const char *needle, const char *replacement) {
 
   memset(buffer, 0, buf_len);
 
+  // TODO: We may skip if the next character is a number to avoid overlapping.
   while (1) {
     const char *p = strstr(tmp, needle);
 
