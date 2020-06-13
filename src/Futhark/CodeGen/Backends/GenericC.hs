@@ -16,6 +16,7 @@ module Futhark.CodeGen.Backends.GenericC
   , defaultOperations
   , OpCompiler
   , ErrorCompiler
+  , CallCompiler
 
   , PointerQuals
   , MemoryType
@@ -172,6 +173,9 @@ type Copy op s = C.Exp -> C.Exp -> Space ->
                  C.Exp ->
                  CompilerM op s ()
 
+-- | Call a function.
+type CallCompiler op s = [VName] -> Name -> [C.Exp] -> CompilerM op s ()
+
 data Operations op s =
   Operations { opsWriteScalar :: WriteScalar op s
              , opsReadScalar :: ReadScalar op s
@@ -183,6 +187,7 @@ data Operations op s =
              , opsMemoryType :: MemoryType op s
              , opsCompiler :: OpCompiler op s
              , opsError :: ErrorCompiler op s
+             , opsCall :: CallCompiler op s
 
              , opsFatMemory :: Bool
                -- ^ If true, use reference counting.  Otherwise, bare
@@ -201,6 +206,17 @@ defError (ErrorMsg parts) stacktrace = do
                 return 1;
               }|]
 
+defCall :: CallCompiler op s
+defCall dests fname args = do
+  let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
+      args' | isBuiltInFunction fname = args
+            | otherwise = [C.cexp|ctx|] : out_args ++ args
+  case dests of
+    [dest] | isBuiltInFunction fname ->
+      stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
+    _ ->
+      item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
+
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
 -- memory management.
@@ -215,6 +231,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsCompiler = defCompiler
                                , opsFatMemory = True
                                , opsError = defError
+                               , opsCall = defCall
                                }
   where defWriteScalar _ _ _ _ _ =
           error "Cannot write to non-default memory space because I am dumb"
@@ -1550,7 +1567,10 @@ $edecls:entry_point_decls
 
           get_consts <- compileConstants consts
 
-          (prototypes, definitions) <- unzip <$> mapM (compileFun get_consts) funs
+          ctx_ty <- contextType
+
+          (prototypes, definitions) <-
+            unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
           mapM_ earlyDecl memstructs
           entry_points <-
@@ -1705,19 +1725,16 @@ cachingMemory lexical f = do
 
   local lexMem $ f (concatMap declCached cached') (map freeCached cached')
 
-compileFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants (fname, func@(Function _ outputs inputs body _ _)) = do
+compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
+compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
 
   cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
     body' <- blockScope $ compileFunBody out_ptrs outputs body
 
-    ctx_ty <- contextType
-    return ([C.cedecl|static int $id:(funName fname)($ty:ctx_ty *ctx,
-                                                     $params:outparams, $params:inparams);|],
-            [C.cfun|static int $id:(funName fname)($ty:ctx_ty *ctx,
-                                                   $params:outparams, $params:inparams) {
+    return ([C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
+            [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
                int err = 0;
                $items:decl_cached
                $items:get_constants
@@ -2091,16 +2108,9 @@ compileCode (SetScalar dest src) = do
 compileCode (SetMem dest src space) =
   setMem dest src space
 
-compileCode (Call dests fname args) = do
-  args' <- mapM compileArg args
-  let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
-      args'' | isBuiltInFunction fname = args'
-             | otherwise = [C.cexp|ctx|] : out_args ++ args'
-  case dests of
-    [dest] | isBuiltInFunction fname ->
-      stm [C.cstm|$id:dest = $id:(funName fname)($args:args'');|]
-    _ ->
-      item [C.citem|if ($id:(funName fname)($args:args'') != 0) { err = 1; goto cleanup; }|]
+compileCode (Call dests fname args) =
+  join $ asks (opsCall . envOperations)
+  <*> pure dests <*> pure fname <*> mapM compileArg args
   where compileArg (MemArg m) = return [C.cexp|$exp:m|]
         compileArg (ExpArg e) = compileExp e
 

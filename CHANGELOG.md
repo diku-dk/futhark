@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     generated header files, where *foo* is the name of the backend
     used.
 
+  * Non-inlined functions (via `#[noinline]`) are now supported in GPU
+    code, but only for functions that *exclusively* operate on
+    scalars.
+
 ### Removed
 
   * The C# backend has been removed (#984).
