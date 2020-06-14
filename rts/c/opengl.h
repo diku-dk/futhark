@@ -30,9 +30,11 @@ struct opengl_config {
   size_t default_num_groups;
   size_t default_tile_size;
   size_t default_threshold;
+  size_t default_block_size;
 
   int default_group_size_changed;
   int default_tile_size_changed;
+  int default_block_size_changed;
 
   int num_sizes;
   const char **size_names;
@@ -60,7 +62,7 @@ static void opengl_config_init(struct opengl_config *cfg,
   cfg->load_binary_from  = NULL;
 
   cfg->default_group_size = 256;
-  cfg->default_num_groups = 128;
+  cfg->default_num_groups = 256;
   cfg->default_tile_size  = 32;
   cfg->default_threshold  = 32*1024;
 
@@ -257,6 +259,7 @@ static void setup_size_opengl(struct opengl_context *ctx) {
    int max_group_size;
 
    size_t max_block_size;
+   size_t max_tile_size;
 
    glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE,
                  &max_local_memory);
@@ -268,12 +271,31 @@ static void setup_size_opengl(struct opengl_context *ctx) {
                    &max_block_size);
    OPENGL_SUCCEED(glGetError());
 
+   max_tile_size = sqrt(max_group_size);
+
    ctx->program           = 0;
    ctx->max_threshold     = 0;
    ctx->max_local_memory  = max_local_memory;
    ctx->max_num_groups    = max_num_groups;
    ctx->max_group_size    = max_group_size;
    ctx->max_block_size    = max_block_size;
+   ctx->max_tile_size     = max_tile_size;
+
+   if (max_group_size < ctx->cfg.default_group_size) {
+     if (ctx->cfg.default_group_size_changed) {
+       fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
+               max_group_size, ctx->cfg.default_group_size);
+     }
+     ctx->cfg.default_group_size = max_group_size;
+   }
+
+   if (max_tile_size < ctx->cfg.default_tile_size) {
+     if (ctx->cfg.default_tile_size_changed) {
+       fprintf(stderr, "Note: Device limits default tile size to %zu (down from %zu).\n",
+               max_tile_size, ctx->cfg.default_tile_size);
+     }
+     ctx->cfg.default_tile_size = max_tile_size;
+   }
 
   // Go through all the sizes, clamp them to the valid range,
   // or set them to the default.
