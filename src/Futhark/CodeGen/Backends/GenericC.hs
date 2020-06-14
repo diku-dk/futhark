@@ -47,6 +47,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileExpToName
   , rawMem
   , item
+  , items
   , stm
   , stms
   , decl
@@ -201,10 +202,9 @@ defError (ErrorMsg parts) stacktrace = do
       onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
-  stm [C.cstm|{ ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
-                $items:free_all_mem
-                return 1;
-              }|]
+  items [C.citems|ctx->error = msgprintf($string:formatstr, $args:formatargs, $string:stacktrace);
+                  $items:free_all_mem
+                  return 1;|]
 
 defCall :: CallCompiler op s
 defCall dests fname args = do
@@ -372,6 +372,9 @@ collect' m = pass $ do
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
+items :: [C.BlockItem] -> CompilerM op s ()
+items = mapM_ item
+
 fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace{} = return False
 fatMemory _ = asks envFatMemory
@@ -449,8 +452,6 @@ profileReport x = modify $ \s ->
   s { compProfileItems = compProfileItems s <> DL.singleton x }
 
 stm :: C.Stm -> CompilerM op s ()
-stm (C.Block items _) = mapM_ item items
-stm (C.Default s _) = stm s
 stm s = item [C.citem|$stm:s|]
 
 stms :: [C.Stm] -> CompilerM op s ()
@@ -745,9 +746,11 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0..] $ map ord (s ++ concatMa
         iter x = ((x::Word32) `shiftR` 16) `xor` x
 
 criticalSection :: [C.BlockItem] -> [C.BlockItem]
-criticalSection items = [[C.citem|lock_lock(&ctx->lock);|]] <>
-                        items <>
-                        [[C.citem|lock_unlock(&ctx->lock);|]]
+criticalSection x = [C.citems|
+                       lock_lock(&ctx->lock);
+                       $items:x
+                       lock_unlock(&ctx->lock);
+                     |]
 
 arrayLibraryFunctions :: Space -> PrimType -> Signedness -> [DimSize]
                       -> CompilerM op s [C.Definition]
@@ -1109,7 +1112,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e = do
       write_array(stdout, binary_output, &$exp:(primTypeInfo bt ept), arr,
                   $id:shape_array(ctx, $exp:e), $int:rank);
       free(arr);
-  }|]
+    }|]
   where rank = length shape
         bt' = primTypeToCType bt
         name = arrayName bt ept rank
@@ -1151,7 +1154,7 @@ readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
   new_array <- publicName $ "new_" ++ name
   free_array <- publicName $ "free_" ++ name
 
-  stm [C.cstm|{
+  items [C.citems|
      typename int64_t $id:shape[$int:rank];
      $ty:t' *$id:arr = NULL;
      errno = 0;
@@ -1165,8 +1168,7 @@ readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
                  $string:dims_s,
                  $exp:(primTypeInfo t ept).type_name,
                  strerror(errno));
-     }
-   }|]
+     }|]
 
   return ([C.cstm|assert(($exp:dest = $id:new_array(ctx, $id:arr, $args:dims_exps)) != 0);|],
           [C.cstm|assert($id:free_array(ctx, $exp:dest) == 0);|],
@@ -1938,10 +1940,10 @@ compileCode (Op op) =
 compileCode Skip = return ()
 
 compileCode (Comment s code) = do
-  items <- blockScope $ compileCode code
+  xs <- blockScope $ compileCode code
   let comment = "// " ++ s
   stm [C.cstm|$comment:comment
-              { $items:items }
+              { $items:xs }
              |]
 
 compileCode (DebugPrint s (Just e)) = do
@@ -2120,14 +2122,14 @@ blockScope = fmap snd . blockScope'
 blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 blockScope' m = do
   old_allocs <- gets compDeclaredMem
-  (x, items) <- pass $ do
+  (x, xs) <- pass $ do
     (x, w) <- listen m
-    let items = DL.toList $ accItems w
-    return ((x, items), const mempty)
+    let xs = DL.toList $ accItems w
+    return ((x, xs), const mempty)
   new_allocs <- gets $ filter (`notElem` old_allocs) . compDeclaredMem
   modify $ \s -> s { compDeclaredMem = old_allocs }
   releases <- collect $ mapM_ (uncurry unRefMem) new_allocs
-  return (x, items <> releases)
+  return (x, xs <> releases)
 
 compileFunBody :: [C.Exp] -> [Param] -> Code op -> CompilerM op s ()
 compileFunBody output_ptrs outputs code = do
