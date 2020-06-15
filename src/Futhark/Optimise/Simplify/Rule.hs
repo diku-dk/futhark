@@ -118,11 +118,11 @@ data SimplificationRule lore a = RuleGeneric (RuleGeneric lore a)
 -- | A collection of rules grouped by which forms of statements they
 -- may apply to.
 data Rules lore a = Rules { rulesAny :: [SimplificationRule lore a]
-                       , rulesBasicOp :: [SimplificationRule lore a]
-                       , rulesIf :: [SimplificationRule lore a]
-                       , rulesDoLoop :: [SimplificationRule lore a]
-                       , rulesOp :: [SimplificationRule lore a]
-                       }
+                          , rulesBasicOp :: [SimplificationRule lore a]
+                          , rulesIf :: [SimplificationRule lore a]
+                          , rulesDoLoop :: [SimplificationRule lore a]
+                          , rulesOp :: [SimplificationRule lore a]
+                          }
 
 instance Semigroup (Rules lore a) where
   Rules as1 bs1 cs1 ds1 es1 <> Rules as2 bs2 cs2 ds2 es2 =
