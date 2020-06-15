@@ -165,7 +165,9 @@ jobs:
       run: nix-shell --pure --run "tools/style-check.sh src"
 
     - name: Unit tests
-      run: nix-shell --pure --run "cabal test"
+      run: |
+          nix-shell --pure --run "cabal update"
+          nix-shell --pure --run "cabal test"
 
   test-interpreter:
     runs-on: ubuntu-latest
