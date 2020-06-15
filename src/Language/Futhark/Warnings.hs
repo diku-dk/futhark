@@ -29,9 +29,9 @@ instance Show Warnings where
   show (Warnings []) = ""
   show (Warnings ws) =
     intercalate "\n\n" ws' ++ "\n"
-    where ws' = map showWarning $ sortOn (off . locOf . fst) ws
-          off NoLoc = 0
-          off (Loc p _) = posCoff p
+    where ws' = map showWarning $ sortOn (rep . locOf . fst) ws
+          rep NoLoc = ("", 0)
+          rep (Loc p _) = (posFile p, posCoff p)
           showWarning (loc, w) =
             "Warning at " ++ locStr loc ++ ":\n" ++
             intercalate "\n" (map ("  "<>) $ lines w)
