@@ -250,22 +250,31 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
                              css <- forLoop ry [css_init] $ \i [css_merge] -> do
 
-                               a <- index "a" as [i]
                                css <- forLoop rx [css_merge] $ \j [css_merge'] -> do
+                                 resultBodyM =<< letTupExp' "foo" =<<
+                                   eIf ( toExp $ LeafExp iii int32 + LeafExp i int32 +
+                                                   primFromSe ry * LeafExp ltid_y int32
+                                                   .<. primFromSe height_A .&&.
+                                                 LeafExp jjj int32 + LeafExp j int32 +
+                                                   primFromSe rx * LeafExp ltid_x int32
+                                                   .<. primFromSe width_B
+                                       )
 
-                                 b <- index "b" bs [j]
-                                 c <- index "c" css_merge' [i, j]
-
-                                 map_res  <- newVName "map_res"
-                                 map_lam' <- renameLambda map_lam
-                                 red_lam' <- renameLambda red_lam
-
-                                 addStms $ rebindLambda map_lam' [a, b] map_res
-                                        <> rebindLambda red_lam' [c, map_res] c
-
-                                 css <- update "css" css_merge' [i, j] c
-
-                                 resultBodyM [Var css]
+                                       ( do a <- index "a" as [i]
+                                            b <- index "b" bs [j]
+                                            c <- index "c" css_merge' [i, j]
+                                            
+                                            map_res  <- newVName "map_res"
+                                            map_lam' <- renameLambda map_lam
+                                            red_lam' <- renameLambda red_lam
+                                            
+                                            addStms $ rebindLambda map_lam' [a, b] map_res
+                                                   <> rebindLambda red_lam' [c, map_res] c
+                                            
+                                            css <- update "css" css_merge' [i, j] c
+                                            
+                                            resultBodyM [Var css])
+                                       ( resultBodyM [Var css_merge'] )
                                resultBodyM [Var css]
                              return [Var css]
 
