@@ -226,6 +226,7 @@ library
       Futhark.Util.Log
       Futhark.Util.Options
       Futhark.Util.Pretty
+      Futhark.Util.ProgressBar
       Futhark.Util.Table
       Futhark.Version
       Language.Futhark

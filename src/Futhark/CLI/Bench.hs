@@ -9,7 +9,6 @@ import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
-import Data.IORef
 import Data.Maybe
 import Data.List (foldl', sortBy)
 import Data.Ord
@@ -25,9 +24,10 @@ import Text.Regex.TDFA
 
 import Futhark.Bench
 import Futhark.Test
-import Futhark.Util (fancyTerminal, maybeNth, pmapIO)
+import Futhark.Util (fancyTerminal, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
+import Futhark.Util.ProgressBar
 
 data BenchOptions = BenchOptions
                    { optBackend :: String
@@ -162,39 +162,6 @@ runOptions f opts =
              , runResultAction = Just f
              }
 
-progressBar :: Int -> Int -> Int -> String
-progressBar cur bound steps =
-  "[" ++ map cell [1..steps] ++ "] " ++ show cur ++ "/" ++ show bound
-  where step_size = bound `div` steps
-        chars = " ▏▎▍▍▌▋▊▉█"
-        char i = fromMaybe ' ' $ maybeNth (i::Int) chars
-
-        cell :: Int -> Char
-        cell i
-          | i * step_size <= cur = char 9
-          | otherwise = char (((cur - (i-1) * step_size) * length chars)
-                              `div` step_size)
-
-descString :: String -> Int -> String
-descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
-
-mkProgressPrompt :: Int -> Int -> String -> IO (Maybe Int -> IO ())
-mkProgressPrompt runs pad_to dataset_desc
-  | fancyTerminal = do
-      count <- newIORef (0::Int)
-      return $ \us -> do
-        putStr "\r" -- Go to start of line.
-        i <- readIORef count
-        let i' = if isJust us then i+1 else i
-        writeIORef count i'
-        putStr $ descString dataset_desc pad_to ++ progressBar i' runs 10
-        putStr " " -- Just to move the cursor away from the progress bar.
-        hFlush stdout
-
-  | otherwise = do
-      putStr $ descString dataset_desc pad_to
-      hFlush stdout
-      return $ const $ return ()
 
 reportResult :: [RunResult] -> IO ()
 reportResult results = do
