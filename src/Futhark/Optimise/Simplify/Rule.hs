@@ -54,25 +54,16 @@ module Futhark.Optimise.Simplify.Rule
        ) where
 
 import Control.Monad.State
-import qualified Control.Monad.Fail as Fail
-import Control.Monad.Except
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.IR
 import Futhark.Binder
 
-data RuleError = CannotSimplify
-               | OtherError String
-
 -- | The monad in which simplification rules are evaluated.
-newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource (Except RuleError)) a)
+newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource Maybe) a)
   deriving (Functor, Applicative, Monad,
-            MonadFreshNames, HasScope lore, LocalScope lore,
-            MonadError RuleError)
-
-instance Fail.MonadFail (RuleM lore) where
-  fail = throwError . OtherError
+            MonadFreshNames, HasScope lore, LocalScope lore)
 
 instance (ASTLore lore, BinderOps lore) => MonadBinder (RuleM lore) where
   type Lore (RuleM lore) = lore
@@ -84,20 +75,15 @@ instance (ASTLore lore, BinderOps lore) => MonadBinder (RuleM lore) where
   collectStms (RuleM m) = RuleM $ collectStms m
 
 -- | Execute a 'RuleM' action.  If succesful, returns the result and a
--- list of new bindings.  Even if the action fail, there may still be
--- a monadic effect - particularly, the name source may have been
--- modified.
+-- list of new bindings.
 simplify :: Scope lore -> VNameSource -> Rule lore
          -> Maybe (Stms lore, VNameSource)
 simplify _ _ Skip = Nothing
 simplify scope src (Simplify (RuleM m)) =
-  case runExcept $ runStateT (runBinderT m scope) src of
-    Left CannotSimplify -> Nothing
-    Left (OtherError err) -> error $ "simplify: " ++ err
-    Right (((), x), src') -> Just (x, src')
+  runStateT (runBinderT_ m scope) src
 
 cannotSimplify :: RuleM lore a
-cannotSimplify = throwError CannotSimplify
+cannotSimplify = RuleM $ lift $ lift Nothing
 
 liftMaybe :: Maybe a -> RuleM lore a
 liftMaybe Nothing = cannotSimplify
