@@ -23,7 +23,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 -- import Futhark.Construct  hiding (toExp)
 
 after_warpscan_area::Imp.Exp
-after_warpscan_area = 32
+after_warpscan_area = 0
 
 
 compileSegScan :: Pattern ExplicitMemory
@@ -344,14 +344,14 @@ compileSegScan  (Pattern _ pes)
           -- This local allocation does not reuse the memory.
           --   can be investigated at the optimization phase.
           --   Note: the Shape should have the size of the wave size not just the hard coded 32.
-          -- warpscan <- sAllocArray "warpscan" int8 (Shape [intConst Int32 32]) (Space "local")
+          warpscan <- sAllocArray "warpscan" int8 (Shape [intConst Int32 32]) (Space "local")
 
           -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn (head exchange) $ IxFun.iota [1]
           -- m <- lookupArray $ head exchange
           -- TODO: warpscan reuse exchange -
           -- sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
-          MemLocation m _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
-          warpscan <- sArray "warpscan" int8 (Shape [intConst Int32 32]) $ ArrayIn m $ IxFun.iota [32]
+          -- MemLocation mem _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
+          -- warpscan <- sArray "warpscan" int8 (Shape [intConst Int32 32]) $ ArrayIn mem $ IxFun.iota [32]
 
 
 

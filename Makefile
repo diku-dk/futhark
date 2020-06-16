@@ -43,7 +43,7 @@ dump-cuda:
 	./tests/scan/simple --dump-cuda tests/scan/simple-cuda-kernel.c
 
 load-cuda:
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-131072.data
+	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-65536.data > tests/scan/simple-cuda.result
 
 test:
 	$(FUTHARK) test --backend=opencl tests/scan/scanomap_2.fut
@@ -52,7 +52,7 @@ test-simple:
 	$(FUTHARK) test --backend=opencl tests/scan/simple.fut
 
 test-cuda: $(SIZES:%=kA-%.data)
-	$(FUTHARK) test --backend=cuda tests/scan/scanomap_2.fut
+	$(FUTHARK) test --backend=cuda tests/scan/simple.fut
 
 kA-%.data:
 	futhark dataset --i32-bounds=-10000:10000 -g [$*]i32 > tests/scan/$@
