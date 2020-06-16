@@ -30,6 +30,7 @@ module Language.Futhark.Attributes
 
   -- * Queries on patterns and params
   , patternIdents
+  , patternNames
   , patternMap
   , patternType
   , patternStructType
@@ -633,6 +634,17 @@ patternIdents Wildcard{}                = mempty
 patternIdents (PatternAscription p _ _) = patternIdents p
 patternIdents PatternLit{}              = mempty
 patternIdents (PatternConstr _ _ ps _ ) = mconcat $ map patternIdents ps
+
+-- | The set of names bound in a pattern.
+patternNames :: (Functor f, Ord vn) => PatternBase f vn -> S.Set vn
+patternNames (Id v _ _)                = S.singleton v
+patternNames (PatternParens p _)       = patternNames p
+patternNames (TuplePattern pats _)     = mconcat $ map patternNames pats
+patternNames (RecordPattern fs _)      = mconcat $ map (patternNames . snd) fs
+patternNames Wildcard{}                = mempty
+patternNames (PatternAscription p _ _) = patternNames p
+patternNames PatternLit{}              = mempty
+patternNames (PatternConstr _ _ ps _ ) = mconcat $ map patternNames ps
 
 -- | A mapping from names bound in a map to their identifier.
 patternMap :: (Functor f) => PatternBase f VName -> M.Map VName (IdentBase f VName)

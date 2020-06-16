@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.15.0]
+## [0.15.1]
 
 ### Added
 
@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     getting the upper part of multiplications.  Thanks to Chhi'mèd
     Künzang (@porcuquine) for the contribution!
 
+  * The `f32` and `f64` modules now also define `sinh`, `cosh`,
+    `tanh`, `asinh`, `acosh`, and `atanh` functions.
+
+  * The `f32` and `f64` modules now also define `fma` and `mad`
+    functions.
+
 ### Removed
 
   * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,
@@ -49,9 +55,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * `"futlib"` is now called `"prelude"`, and it is now an error to
+    import it explicitly.
+
 ### Fixed
 
   * Corrected address calculations in `csharp` backend.
+
+  * The C backends are now more careful about generating overflowing
+    integer operations (since this is undefined behaviour in C, but
+    defined in Futhark).
+
+  * `futhark dataset` no longer crashes uncontrollably when used
+    incorrectly (#849).
 
 ## [0.14.1]
 

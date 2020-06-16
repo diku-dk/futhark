@@ -310,7 +310,7 @@ data SizeSource = SourceArg FName (ExpBase NoInfo VName)
 -- generating unique names, as these will be user-visible.
 data TermTypeState = TermTypeState
                      { stateConstraints :: Constraints
-                     , stateCounter :: Int
+                     , stateCounter :: !Int
                      , stateDimTable :: M.Map SizeSource VName
                        -- ^ Mapping function arguments encountered to
                        -- the sizes they ended up generating (when
@@ -576,7 +576,7 @@ checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, 
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
       me <- liftTypeM askImportName
-      unless ("/futlib" `isPrefixOf` includeToString me) $
+      unless ("/prelude" `isPrefixOf` includeToString me) $
         warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
       scope <- asks termScope
       return (scope, v)
@@ -804,8 +804,8 @@ checkPattern' (PatternConstr n NoInfo ps loc) NoneInferred = do
   where usage = mkUsage loc "matching against constructor"
 
 patternNameMap :: Pattern -> NameMap
-patternNameMap = M.fromList . map asTerm . S.toList . patternIdents
-  where asTerm v = ((Term, baseName $ identName v), qualName $ identName v)
+patternNameMap = M.fromList . map asTerm . S.toList . patternNames
+  where asTerm v = ((Term, baseName v), qualName v)
 
 checkPattern :: UncheckedPattern -> InferredType -> (Pattern -> TermTypeM a)
              -> TermTypeM a
@@ -1029,8 +1029,16 @@ lexicalClosure params closure = do
                     Just (BoundV Local _ _) -> True
                     _ -> False
   return $ S.map AliasBound $ S.filter isLocal $
-    allOccuring closure S.\\
-    S.map identName (mconcat (map patternIdents params))
+    allOccuring closure S.\\ mconcat (map patternNames params)
+
+noAliasesIfOverloaded :: PatternType -> TermTypeM PatternType
+noAliasesIfOverloaded t@(Scalar (TypeVar _ u tn [])) = do
+  subst <- fmap snd . M.lookup (typeLeaf tn) <$> getConstraints
+  case subst of
+    Just Overloaded{} -> return $ Scalar $ TypeVar mempty u tn []
+    _ -> return t
+noAliasesIfOverloaded t =
+  return t
 
 -- Check the common parts of ascription and coercion.
 checkAscript :: SrcLoc
@@ -1088,20 +1096,22 @@ unscopeType tloc unscoped t = do
 
 -- 'checkApplyExp' is like 'checkExp', but tries to find the "root
 -- function", for better error messages.
-checkApplyExp :: UncheckedExp -> TermTypeM (Exp, Maybe (QualName VName))
+checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
 
 checkApplyExp (Apply e1 e2 _ _ loc) = do
-  (e1', fname) <- checkApplyExp e1
+  (e1', (fname, i)) <- checkApplyExp e1
   arg <- checkArg e2
   t <- expType e1'
-  (t1, rt, argext, exts) <- checkApply loc fname t arg
+  (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
   return (Apply e1' (argExp arg) (Info (diet t1, argext)) (Info rt, Info exts) loc,
-          fname)
+          (fname, i+1))
 
 checkApplyExp e = do
   e' <- checkExp e
-  return (e', case e' of Var qn _ _ -> Just qn
-                         _ -> Nothing)
+  return (e',
+          (case e' of Var qn _ _ -> Just qn
+                      _ -> Nothing,
+           0))
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 
@@ -1235,8 +1245,8 @@ checkExp (BinOp (op, oploc) NoInfo (e1,_) (e2,_) NoInfo NoInfo loc) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op') ftype e1_arg
-  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op') rt e2_arg
+  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
+  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
 
   return $ BinOp (op', oploc) (Info ftype)
     (argExp e1_arg, Info (toStruct p1_t, p1_ext))
@@ -1452,7 +1462,12 @@ checkExp (Index e idxes _ loc) = do
   (t', retext) <-
     sliceShape (Just (loc, Rigid (RigidSlice Nothing ""))) idxes' =<<
     expTypeFully e'
-  return $ Index e' idxes' (Info t', Info retext) loc
+
+  -- Remove aliases if the result is an overloaded type, because that
+  -- will certainly not be aliased.
+  t'' <- noAliasesIfOverloaded t'
+
+  return $ Index e' idxes' (Info t'', Info retext) loc
 
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
@@ -1524,7 +1539,7 @@ checkExp (OpSection op _ loc) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
-  (t1, rt, argext, retext) <- checkApply loc (Just op') ftype e_arg
+  (t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
   case rt of
     Scalar (Arrow _ _ t2 rettype) ->
       return $ OpSectionLeft op' (Info ftype) (argExp e_arg)
@@ -1538,7 +1553,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   case ftype of
     Scalar (Arrow as1 m1 t1 (Scalar (Arrow as2 m2 t2 ret))) -> do
       (t2', _, argext, _) <-
-        checkApply loc (Just op')
+        checkApply loc (Just op', 1)
         (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
       return $ OpSectionRight op' (Info ftype) (argExp e_arg)
         (Info $ toStruct t1, Info (toStruct t2', argext)) (Info ret) loc
@@ -1733,12 +1748,11 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
   -- and matches what happens for function calls.  Those arrays that
   -- really *cannot* be consumed will alias something unconsumable,
   -- and will be caught that way.
-  let bound_here = S.map identName (patternIdents mergepat'') <>
-                   S.fromList sparams <> form_bound
+  let bound_here = patternNames mergepat'' <> S.fromList sparams <> form_bound
       form_bound =
         case form' of
           For v _ -> S.singleton $ identName v
-          ForIn forpat _ -> S.map identName (patternIdents forpat)
+          ForIn forpat _ -> patternNames forpat
           While{} -> mempty
       loopt' = second (`S.difference` S.map AliasBound bound_here) $
                loopt `setUniqueness` Unique
@@ -1752,8 +1766,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
 
   where
     convergePattern pat body_cons body_t body_loc = do
-      let consumed_merge = S.map identName (patternIdents pat) `S.intersection`
-                           body_cons
+      let consumed_merge = patternNames pat `S.intersection` body_cons
 
           uniquePat (Wildcard (Info t) wloc) =
             Wildcard (Info $ t `setUniqueness` Nonunique) wloc
@@ -1856,7 +1869,7 @@ checkExp (Constr name es NoInfo loc) = do
   ets <- mapM expTypeFully es'
   mustHaveConstr (mkUsage loc "use of constructor") name t (toStruct <$> ets)
   -- A sum value aliases *anything* that went into its construction.
-  let als = mconcat (map aliases ets)
+  let als = foldMap aliases ets
   return $ Constr name es' (Info $ fromStruct t `addAliases` (<>als)) loc
 
 checkExp (Match e cs _ loc) =
@@ -2134,9 +2147,16 @@ instantiateDimsInReturnType :: SrcLoc -> Maybe (QualName VName)
 instantiateDimsInReturnType tloc fname =
   instantiateEmptyArrayDims tloc "ret" $ Rigid $ RigidRet fname
 
-checkApply :: SrcLoc -> Maybe (QualName VName) -> PatternType -> Arg
+-- Some information about the function/operator we are trying to
+-- apply, and how many arguments it has previously accepted.  Used for
+-- generating nicer type errors.
+type ApplyOp = (Maybe (QualName VName), Int)
+
+checkApply :: SrcLoc -> ApplyOp -> PatternType -> Arg
            -> TermTypeM (PatternType, PatternType, Maybe VName, [VName])
-checkApply loc fname (Scalar (Arrow as pname tp1 tp2)) (argexp, argtype, dflow, argloc) =
+checkApply loc (fname, _)
+           (Scalar (Arrow as pname tp1 tp2))
+           (argexp, argtype, dflow, argloc) =
   onFailure (CheckingApply fname argexp (toStruct tp1) (toStruct argtype)) $ do
   expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
@@ -2190,10 +2210,19 @@ checkApply loc fname tfun@(Scalar TypeVar{}) arg = do
   tfun' <- normPatternType tfun
   checkApply loc fname tfun' arg
 
-checkApply loc _ ftype arg =
+checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
+  let fname' = maybe "expression" (pquote . ppr) fname
+
   typeError loc mempty $
-  "Attempt to apply an expression of type" <+> ppr ftype <+>
-  "to an argument of type" <+> ppr (argType arg) <> "."
+    if prev_applied == 0
+    then "Cannot apply" <+> fname' <+> "as function, as it has type:" </>
+         indent 2 (ppr ftype)
+    else "Cannot apply" <+> fname' <+> "to argument #" <> ppr (prev_applied+1) <+>
+         pquote (shorten $ pretty $ flatten $ ppr argexp) <> "," <+/>
+         "as" <+> fname' <+> "only takes" <+> ppr prev_applied <+>
+         arguments <> "."
+  where arguments | prev_applied == 1 = "argument"
+                  | otherwise = "arguments"
 
 isInt32 :: Exp -> Maybe Int32
 isInt32 (Literal (SignedValue (Int32Value k')) _) = Just $ fromIntegral k'
@@ -2290,8 +2319,10 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   let t = toStruct $ typeOf e'
   (tparams, _, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
-  fixOverloadedTypes
   e'' <- updateTypes e'
+  fixOverloadedTypes
+  checkUnmatched e''
+  causalityCheck e''
   return (tparams, e'')
 
 -- Verify that all sum type constructors and empty array literals have
@@ -2472,7 +2503,7 @@ fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList . M.map s
 
 hiddenParamNames :: [Pattern] -> Names
 hiddenParamNames params = hidden
-  where param_all_names = S.map identName $ mconcat $ map patternIdents params
+  where param_all_names = mconcat $ map patternNames params
         named (Named x, _) = Just x
         named (Unnamed, _) = Nothing
         param_names =
@@ -2595,7 +2626,7 @@ checkGlobalAliases params body_t loc = do
                     _ -> False
   let als = filter (not . isLocal) $ S.toList $
             boundArrayAliases body_t `S.difference`
-            S.map identName (mconcat (map patternIdents params))
+            foldMap patternNames params
   case als of
     v:_ | not $ null params ->
       typeError loc mempty $
@@ -2629,9 +2660,9 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((>1) . snd) . M.toList . d
 
 uniqueParamNames :: [Pattern] -> Names
 uniqueParamNames =
-  S.fromList . map identName
-  . filter (unique . unInfo . identType)
-  . S.toList . mconcat . map patternIdents
+  S.map identName
+  . S.filter (unique . unInfo . identType)
+  . foldMap patternIdents
 
 boundArrayAliases :: PatternType -> S.Set VName
 boundArrayAliases (Array als _ _ _) = boundAliases als
@@ -2665,7 +2696,7 @@ nothingMustBeUnique loc = check
 verifyFunctionParams :: Maybe Name -> [Pattern] -> TermTypeM ()
 verifyFunctionParams fname params =
   onFailure (CheckingParams fname) $
-  verifyParams (mconcat (map patternNames params)) =<< mapM updateTypes params
+  verifyParams (foldMap patternNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p:ps)
       | d:_ <- S.toList $ patternDimNames p `S.intersection` forbidden =
@@ -2914,9 +2945,6 @@ arrayOfM :: (Pretty (ShapeDecl dim), Monoid as) =>
 arrayOfM loc t shape u = do
   zeroOrderType (mkUsage loc "use as array element") "type used in array" t
   return $ arrayOf t shape u
-
-patternNames :: Pattern -> S.Set VName
-patternNames = S.map identName . patternIdents
 
 updateTypes :: ASTMappable e => e -> TermTypeM e
 updateTypes = astMap tv

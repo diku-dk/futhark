@@ -31,7 +31,8 @@ instance Monoid VNameSource where
 
 -- | Produce a fresh name, using the given name as a template.
 newName :: VNameSource -> VName -> (VName, VNameSource)
-newName (VNameSource i) k = (VName (baseName k) i, VNameSource (i+1))
+newName (VNameSource i) k = i' `seq` (VName (baseName k) i, VNameSource i')
+  where i' = i+1
 
 -- | A blank name source.
 blankNameSource :: VNameSource

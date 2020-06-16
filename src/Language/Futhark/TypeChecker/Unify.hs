@@ -363,11 +363,16 @@ unifyWith onDims usage = subunify False mempty
               forM_ (M.toList $ M.intersectionWith (,) fs arg_fs) $ \(k, (k_t1, k_t2)) -> do
               let bcs' = breadCrumb (MatchingFields [k]) bcs
               subunify ord bound bcs' k_t1 k_t2
+          | otherwise -> do
+              let missing = filter (`notElem` M.keys arg_fs) (M.keys fs) ++
+                            filter (`notElem` M.keys fs) (M.keys arg_fs)
+              unifyError usage mempty bcs $
+                "Unshared fields:" <+> commasep (map ppr missing) <> "."
 
         (Scalar (TypeVar _ _ (TypeName _ tn) targs),
          Scalar (TypeVar _ _ (TypeName _ arg_tn) arg_targs))
           | tn == arg_tn, length targs == length arg_targs -> do
-            let bcs' = breadCrumb (Matching "When matching type arguments") bcs
+            let bcs' = breadCrumb (Matching "When matching type arguments.") bcs
             zipWithM_ (unifyTypeArg bcs') targs arg_targs
 
         (Scalar (TypeVar _ _ (TypeName [] v1) []),
@@ -394,10 +399,10 @@ unifyWith onDims usage = subunify False mempty
           (a2', a2_dims) <- instantiateEmptyArrayDims (srclocOf usage) "anonymous" r2 a2
           let bound' = bound <> mapMaybe pname [p1, p2] <> a1_dims <> a2_dims
           subunify (not ord) bound
-            (breadCrumb (Matching "When matching parameter types") bcs)
+            (breadCrumb (Matching "When matching parameter types.") bcs)
             a1' a2'
           subunify ord bound'
-            (breadCrumb (Matching "When matching return types") bcs)
+            (breadCrumb (Matching "When matching return types.") bcs)
             b1' b2'
           where (b1', b2') =
                   -- Replace one parameter name with the other in the
@@ -428,6 +433,11 @@ unifyWith onDims usage = subunify False mempty
          Scalar (Sum arg_cs))
           | M.keys cs == M.keys arg_cs ->
               unifySharedConstructors onDims usage bcs cs arg_cs
+          | otherwise -> do
+              let missing = filter (`notElem` M.keys arg_cs) (M.keys cs) ++
+                            filter (`notElem` M.keys cs) (M.keys arg_cs)
+              unifyError usage mempty bcs $
+                "Unshared constructors:" <+> commasep (map (("#"<>) . ppr) missing) <> "."
 
         _ | t1' == t2' -> return ()
           | otherwise -> failure

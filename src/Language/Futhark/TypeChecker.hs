@@ -11,7 +11,6 @@ module Language.Futhark.TypeChecker
   , checkDec
   , checkModExp
   , TypeError
-  , prettyTypeError
   , Warnings
   , initialEnv
   )
@@ -592,8 +591,8 @@ checkOneDec (LocalDec d loc) = do
 
 checkOneDec (ImportDec name NoInfo loc) = do
   (name', env) <- lookupImport loc name
-  when ("/futlib" `isPrefixOf` name) $
-    warn loc $ name ++ " is already implicitly imported."
+  when ("/prelude" `isPrefixOf` name) $
+    typeError loc mempty $ ppr name <+> "may not be explicitly imported."
   return (mempty, env, ImportDec name (Info name') loc)
 
 checkOneDec (ValDec vb) = do
