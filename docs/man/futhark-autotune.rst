@@ -9,7 +9,7 @@ futhark-autotune
 SYNOPSIS
 ========
 
-futhark autotune [options...] program
+futhark autotune [options...] <program.fut>
 
 DESCRIPTION
 ===========
