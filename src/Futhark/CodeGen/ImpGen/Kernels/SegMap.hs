@@ -1,5 +1,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+-- | Code generation for 'SegMap' is quite straightforward.  The only
+-- trick is virtualisation in case the physical number of threads is
+-- not sufficient to cover the logical thread space.  This is handled
+-- by having actual workgroups run a loop to imitate multiple workgroups.
 module Futhark.CodeGen.ImpGen.Kernels.SegMap
   ( compileSegMap )
 where
