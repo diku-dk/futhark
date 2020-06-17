@@ -62,6 +62,8 @@ compileProg env prog =
   setDefaultSpace (Imp.Space "device") <$>
   Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
 
+-- | Compile a 'KernelsMem' program to low-level parallel code, with
+-- either CUDA or OpenCL characteristics.
 compileProgOpenCL, compileProgCUDA
   :: MonadFreshNames m => Prog KernelsMem -> m Imp.Program
 compileProgOpenCL = compileProg $ HostEnv openclAtomics
