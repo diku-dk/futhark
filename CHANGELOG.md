@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     code, but only for functions that *exclusively* operate on
     scalars.
 
+  * `futhark repl` now accepts a command line argument to load a
+    program initially.
+
 ### Removed
 
   * The C# backend has been removed (#984).

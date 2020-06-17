@@ -50,13 +50,14 @@ banner = unlines [
 -- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options..." run
-  where run []     _      = Just repl
+  where run []     _      = Just $ repl Nothing
+        run [prog] _      = Just $ repl $ Just prog
         run _      _      = Nothing
 
 data StopReason = EOF | Stop | Exit | Load FilePath
 
-repl :: IO ()
-repl = do
+repl :: Maybe FilePath -> IO ()
+repl maybe_prog = do
   putStr banner
   putStrLn $ "Version " ++ showVersion version ++ "."
   putStrLn "Copyright (C) DIKU, University of Copenhagen, released under the ISC license."
@@ -84,7 +85,7 @@ repl = do
         quit <- confirmQuit
         if quit then return () else toploop s
 
-  maybe_init_state <- liftIO $ newFutharkiState 0 Nothing
+  maybe_init_state <- liftIO $ newFutharkiState 0 maybe_prog
   case maybe_init_state of
     Left err -> error $ "Failed to initialise interpreter state: " ++ err
     Right init_state -> Haskeline.runInputT Haskeline.defaultSettings $ toploop init_state
