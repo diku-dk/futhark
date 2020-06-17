@@ -23,7 +23,6 @@ import NeatInterpolation (text)
 import System.Directory
 import System.FilePath
 import System.Console.GetOpt
-import System.IO
 import Text.Read (readMaybe)
 import qualified System.Console.Haskeline as Haskeline
 
@@ -159,7 +158,7 @@ newFutharkiState count maybe_file = runExceptT $ do
         liftIO (runExceptT (readProgram file)
                  `catch` \(err::IOException) ->
                    return (externalErrorS (show err)))
-      liftIO $ hPrint stderr ws
+      liftIO $ print ws
 
       let imp = T.mkInitialImport "."
       ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
