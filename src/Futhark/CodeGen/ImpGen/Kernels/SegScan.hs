@@ -1,5 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+-- | Code generation for segmented and non-segmented scans.  Uses a
+-- fairly inefficient two-pass algorithm.
 module Futhark.CodeGen.ImpGen.Kernels.SegScan
   ( compileSegScan )
   where

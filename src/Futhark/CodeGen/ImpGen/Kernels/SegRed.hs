@@ -11,7 +11,7 @@
 --
 -- * Instead of depending on storage layout transformations to handle
 --   non-commutative reductions efficiently, we slide a
---   'groupsize'-sized window over the input, and perform a parallel
+--   @groupsize@-sized window over the input, and perform a parallel
 --   reduction for each window.  This sacrifices the notion of
 --   efficient sequentialisation, but is sometimes faster and
 --   definitely simpler and more predictable (and uses less auxiliary
@@ -69,6 +69,10 @@ import Futhark.Util.IntegralExp (divUp, quot, rem)
 maxNumOps :: Int32
 maxNumOps = 10
 
+-- | Code generation for the body of the SegRed, taking a continuation
+-- for saving the results of the body.  The results should be
+-- represented as a pairing of a t'SubExp' along with a list of
+-- indexes into that 'SubExp' for reading the result.
 type DoSegBody = ([(SubExp, [Imp.Exp])] -> InKernelGen ()) -> InKernelGen ()
 
 -- | Compile 'SegRed' instance to host-level code with calls to
