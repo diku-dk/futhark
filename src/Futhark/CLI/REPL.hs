@@ -49,7 +49,7 @@ banner = unlines [
 
 -- | Run @futhark repl@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions interpreterConfig options "options..." run
+main = mainWithOptions interpreterConfig options "options... [program.fut]" run
   where run []     _      = Just $ repl Nothing
         run [prog] _      = Just $ repl $ Just prog
         run _      _      = Nothing

@@ -9,7 +9,7 @@ futhark-c
 SYNOPSIS
 ========
 
-futhark c [options...] infile
+futhark c [options...] <program.fut>
 
 DESCRIPTION
 ===========

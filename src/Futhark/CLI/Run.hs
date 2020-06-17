@@ -32,7 +32,7 @@ import qualified Language.Futhark.Interpreter as I
 
 -- | Run @futhark run@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions interpreterConfig options "options... program" run
+main = mainWithOptions interpreterConfig options "options... <program.fut>" run
   where run [prog] config = Just $ interpret config prog
         run _      _      = Nothing
 
