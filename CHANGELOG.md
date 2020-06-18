@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed handling of dumb terminals in futhark test (#1000).
 
+  * Fixed exotic monomorphisation case involving lifted type
+    parameters instantiated with functions that take named parameters
+    (#1026).
+
 ## [0.15.8]
 
 ### Added

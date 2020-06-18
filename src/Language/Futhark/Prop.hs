@@ -183,36 +183,49 @@ data DimPos
 
 -- | Perform a traversal (possibly including replacement) on sizes
 -- that are parameters in a function type, but also including the type
--- immediately passed to the function.
+-- immediately passed to the function.  Also passes along a set of the
+-- parameter names inside the type that have come in scope at the
+-- occurrence of the dimension.
 traverseDims :: forall f fdim tdim als.
                 Applicative f =>
-                (DimPos -> fdim -> f tdim)
+                (S.Set VName -> DimPos -> fdim -> f tdim)
              -> TypeBase fdim als
              -> f (TypeBase tdim als)
-traverseDims f = go PosImmediate
-  where go :: forall als'. DimPos -> TypeBase fdim als' -> f (TypeBase tdim als')
-        go b t@Array{} = bitraverse (f b) pure t
-        go b (Scalar (Record fields)) = Scalar . Record <$> traverse (go b) fields
-        go b (Scalar (TypeVar as u tn targs)) =
-          Scalar <$> (TypeVar as u tn <$> traverse (onTypeArg b) targs)
-        go b (Scalar (Sum cs)) = Scalar . Sum <$> traverse (traverse (go b)) cs
-        go _ (Scalar (Prim t)) = pure $ Scalar $ Prim t
-        go _ (Scalar (Arrow als p t1 t2)) =
-          Scalar <$> (Arrow als p <$> go PosParam t1 <*> go PosReturn t2)
+traverseDims f = go mempty PosImmediate
+  where go :: forall als'.
+              S.Set VName -> DimPos -> TypeBase fdim als'
+           -> f (TypeBase tdim als')
+        go bound b t@Array{} =
+          bitraverse (f bound b) pure t
+        go bound b (Scalar (Record fields)) =
+          Scalar . Record <$> traverse (go bound b) fields
+        go bound b (Scalar (TypeVar as u tn targs)) =
+          Scalar <$> (TypeVar as u tn <$> traverse (onTypeArg bound b) targs)
+        go bound b (Scalar (Sum cs)) =
+          Scalar . Sum <$> traverse (traverse (go bound b)) cs
+        go _ _ (Scalar (Prim t)) =
+          pure $ Scalar $ Prim t
+        go bound _ (Scalar (Arrow als p t1 t2)) =
+          Scalar <$> (Arrow als p <$> go bound' PosParam t1 <*> go bound' PosReturn t2)
+          where bound' = case p of Named p' -> S.insert p' bound
+                                   Unnamed -> bound
 
-        onTypeArg b (TypeArgDim d loc) =
-          TypeArgDim <$> f b d <*> pure loc
-        onTypeArg b (TypeArgType t loc) =
-          TypeArgType <$> go b t <*> pure loc
+        onTypeArg bound b (TypeArgDim d loc) =
+          TypeArgDim <$> f bound b d <*> pure loc
+        onTypeArg bound b (TypeArgType t loc) =
+          TypeArgType <$> go bound b t <*> pure loc
 
 mustBeExplicitAux :: StructType -> M.Map VName Bool
 mustBeExplicitAux t =
   execState (traverseDims onDim t) mempty
-  where onDim PosImmediate (NamedDim d) =
+  where onDim bound _ (NamedDim d)
+          | qualLeaf d `S.member` bound =
+              modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
+        onDim _ PosImmediate (NamedDim d) =
           modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-        onDim _ (NamedDim d) =
+        onDim _ _ (NamedDim d) =
           modify $ M.insertWith (&&) (qualLeaf d) True
-        onDim _ _ =
+        onDim _ _ _ =
           return ()
 
 -- | Figure out which of the sizes in a parameter type must be passed

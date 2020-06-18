@@ -26,6 +26,7 @@
 module Futhark.Internalise.Monomorphise
   ( transformProg ) where
 
+import           Control.Monad.Identity
 import           Control.Monad.RWS hiding (Sum)
 import           Control.Monad.State
 import           Control.Monad.Writer hiding (Sum)
@@ -118,13 +119,16 @@ type InferSizeArgs = StructType -> [Exp]
 
 -- The kind of type relative to which we monomorphise.  What is
 -- important to us is not the specific dimensions, but merely whether
--- they are known or anonymous (the latter False).
+-- they are known or anonymous/local (the latter False).
 type MonoType = TypeBase Bool ()
 
 monoType :: TypeBase (DimDecl VName) als -> MonoType
-monoType = bimap onDim (const ())
-  where onDim AnyDim = False
-        onDim _      = True
+monoType = runIdentity . traverseDims onDim . toStruct
+  where onDim bound _ (NamedDim d)
+          -- A locally bound size.
+          | qualLeaf d `S.member` bound = pure False
+        onDim _ _ AnyDim = pure False
+        onDim _ _ _      = pure True
 
 -- Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
