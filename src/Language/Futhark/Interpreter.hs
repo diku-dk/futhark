@@ -447,16 +447,12 @@ patternMatch env (Id v (Info t) _) val =
   valEnv (M.singleton v (Just $ T.BoundV [] $ toStruct t, val)) <> env
 patternMatch env Wildcard{} _ =
   lift $ pure env
-patternMatch env (TuplePattern ps _) (ValueRecord vs)
-  | length ps == length vs' =
-      foldM (\env' (p,v) -> patternMatch env' p v) env $
-      zip ps (map snd $ sortFields vs)
-    where vs' = sortFields vs
-patternMatch env (RecordPattern ps _) (ValueRecord vs)
-  | length ps == length vs' =
-      foldM (\env' (p,v) -> patternMatch env' p v) env $
-      zip (map snd $ sortFields $ M.fromList ps) (map snd $ sortFields vs)
-    where vs' = sortFields vs
+patternMatch env (TuplePattern ps _) (ValueRecord vs) =
+  foldM (\env' (p,v) -> patternMatch env' p v) env $
+  zip ps (map snd $ sortFields vs)
+patternMatch env (RecordPattern ps _) (ValueRecord vs) =
+  foldM (\env' (p,v) -> patternMatch env' p v) env $
+  M.intersectionWith (,) (M.fromList ps) vs
 patternMatch env (PatternParens p _) v = patternMatch env p v
 patternMatch env (PatternAscription p _ _) v =
   patternMatch env p v
