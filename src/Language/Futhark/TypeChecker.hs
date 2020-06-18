@@ -173,8 +173,8 @@ bindingTypeParams tparams = localEnv env
 
 emptyDimParam :: StructType -> Bool
 emptyDimParam = isNothing . traverseDims onDim
-  where onDim pos AnyDim | pos `elem` [PosImmediate, PosParam] = Nothing
-        onDim _ d = Just d
+  where onDim _ pos AnyDim | pos `elem` [PosImmediate, PosParam] = Nothing
+        onDim _ _ d = Just d
 
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive

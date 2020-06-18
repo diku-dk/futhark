@@ -1087,12 +1087,12 @@ unscopeType :: SrcLoc
 unscopeType tloc unscoped t = do
   (t', m) <- runStateT (traverseDims onDim t) mempty
   return (t' `addAliases` S.map unAlias, M.elems m)
-  where onDim p (NamedDim d)
+  where onDim _ p (NamedDim d)
           | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped =
               if p == PosImmediate || p == PosParam
               then inst loc $ qualLeaf d
               else return AnyDim
-        onDim _ d = return d
+        onDim _ _ d = return d
 
         inst loc d = do
           prev <- gets $ M.lookup d
@@ -2772,10 +2772,10 @@ verifyFunctionParams fname params =
 -- the sizes of parameter types, and the sizes of return types.
 dimUses :: StructType -> (Names, Names, Names)
 dimUses = execWriter . traverseDims f
-  where f PosImmediate (NamedDim v) = tell (S.singleton (qualLeaf v), mempty, mempty)
-        f PosParam (NamedDim v) = tell (mempty, S.singleton (qualLeaf v), mempty)
-        f PosReturn (NamedDim v) = tell (mempty, mempty, S.singleton (qualLeaf v))
-        f _ _ = return ()
+  where f _ PosImmediate (NamedDim v) = tell (S.singleton (qualLeaf v), mempty, mempty)
+        f _ PosParam (NamedDim v) = tell (mempty, S.singleton (qualLeaf v), mempty)
+        f _ PosReturn (NamedDim v) = tell (mempty, mempty, S.singleton (qualLeaf v))
+        f _ _ _ = return ()
 
 -- | Find at all type variables in the given type that are covered by
 -- the constraints, and produce type parameters that close over them.

@@ -254,8 +254,8 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
 
         emptyDims :: StructType -> Bool
         emptyDims = isNothing . traverseDims onDim
-          where onDim PosImmediate AnyDim = Nothing
-                onDim _ d = Just d
+          where onDim _ PosImmediate AnyDim = Nothing
+                onDim _ _ d = Just d
 
 resolveMTyNames :: MTy -> MTy
                 -> M.Map VName (QualName VName)
