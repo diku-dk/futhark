@@ -71,7 +71,7 @@ def udiv_upN(x,y):
   if y == 0:
     return intlit(type(x), 0)
   else:
-    return signed(unsigned(x)+unsigned(y)-unsigned(y/y) // unsigned(y))
+    return signed((unsigned(x)+unsigned(y)-unsigned(intlit(type(x),1))) // unsigned(y))
 
 def umodN(x,y):
   if y == 0:
