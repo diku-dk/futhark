@@ -4,6 +4,16 @@ import numpy as np
 import math
 import struct
 
+def intlit(t, x):
+  if t == np.int8:
+    return np.int8(x)
+  elif t == np.int16:
+    return np.int16(x)
+  elif t == np.int32:
+    return np.int32(x)
+  else:
+    return np.int64(x)
+
 def signed(x):
   if type(x) == np.uint8:
     return np.int8(x)
@@ -35,49 +45,49 @@ def ashrN(x,y):
 
 def sdivN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
     return x // y
 
 def sdiv_upN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
-    return (x+y-(y/y)) // y
+    return (x+y-intlit(type(x), 1)) // y
 
 def smodN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
     return x % y
 
 def udivN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
     return signed(unsigned(x) // unsigned(y))
 
 def udiv_upN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
     return signed(unsigned(x)+unsigned(y)-unsigned(y/y) // unsigned(y))
 
 def umodN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
     return signed(unsigned(x) % unsigned(y))
 
 def squotN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
     return np.floor_divide(np.abs(x), np.abs(y)) * np.sign(x) * np.sign(y)
 
 def sremN(x,y):
   if y == 0:
-    return x-x
+    return intlit(type(x), 0)
   else:
     return np.remainder(np.abs(x), np.abs(y)) * np.sign(x)
 
