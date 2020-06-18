@@ -196,31 +196,56 @@ withStm stm = local $ \env ->
 
 leavingNesting :: (MonadFreshNames m, DistLore lore) =>
                   DistAcc lore -> DistNestT lore m (DistAcc lore)
+
 leavingNesting acc =
   case popInnerTarget $ distTargets acc of
    Nothing ->
      error "The kernel targets list is unexpectedly small"
-   Just ((pat, res), newtargets) -> do
-     -- Any results left over correspond to a Replicate or a Copy in
-     -- the parent nesting, depending on whether the argument is a
-     -- parameter of the innermost nesting.
-     (Nesting _ inner_nesting, _) <- asks distNest
-     let w = loopNestingWidth inner_nesting
-         aux = loopNestingAux inner_nesting
-         inps = loopNestingParamsAndArrs inner_nesting
 
-         remnantStm pe (Var v)
-           | Just (_, arr) <- find ((==v) . paramName . fst) inps =
+   Just ((pat, res), newtargets)
+     | not $ null $ distStms acc -> do
+         -- Any statements left over correspond to something that
+         -- could not be distributed because it would cause irregular
+         -- arrays.  These must be reconstructed into a a Map SOAC
+         -- that will be sequentialised. XXX: life would be better if
+         -- we were able to distribute irregular parallelism.
+         (Nesting _ inner, _) <- asks distNest
+         let MapNesting _ aux w params_and_arrs = inner
+             body = Body () (distStms acc) res
+             used_in_body = freeIn body
+             (used_params, used_arrs) =
+               unzip $
+               filter ((`nameIn` used_in_body) . paramName . fst) params_and_arrs
+             lam' = Lambda { lambdaParams = used_params
+                           , lambdaBody = body
+                           , lambdaReturnType = map rowType $ patternTypes pat
+                           }
+         stms <- runBinder_ $ auxing aux $ FOT.transformSOAC pat $
+                 Screma w (mapSOAC lam') used_arrs
+
+         return $ acc { distTargets = newtargets, distStms = stms }
+
+     | otherwise -> do
+         -- Any results left over correspond to a Replicate or a Copy in
+         -- the parent nesting, depending on whether the argument is a
+         -- parameter of the innermost nesting.
+         (Nesting _ inner_nesting, _) <- asks distNest
+         let w = loopNestingWidth inner_nesting
+             aux = loopNestingAux inner_nesting
+             inps = loopNestingParamsAndArrs inner_nesting
+
+             remnantStm pe (Var v)
+               | Just (_, arr) <- find ((==v) . paramName . fst) inps =
+                   Let (Pattern [] [pe]) aux $
+                   BasicOp $ Copy arr
+             remnantStm pe se =
                Let (Pattern [] [pe]) aux $
-               BasicOp $ Copy arr
-         remnantStm pe se =
-           Let (Pattern [] [pe]) aux $
-           BasicOp $ Replicate (Shape [w]) se
+               BasicOp $ Replicate (Shape [w]) se
 
-         stms =
-           stmsFromList $ zipWith remnantStm (patternElements pat) res
+             stms =
+               stmsFromList $ zipWith remnantStm (patternElements pat) res
 
-     return $ addStmsToAcc stms acc { distTargets = newtargets }
+         return $ acc { distTargets = newtargets, distStms = stms }
 
 mapNesting :: (MonadFreshNames m, DistLore lore) =>
               PatternT Type -> StmAux () -> SubExp -> Lambda SOACS -> [VName]
