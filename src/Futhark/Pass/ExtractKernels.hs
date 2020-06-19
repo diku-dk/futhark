@@ -582,7 +582,9 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
           | DoLoop _ _ _ body <- stmExp stm =
               bodyInterest body * 10
           | Op (Screma w (ScremaForm _ _ lam') _) <- stmExp stm =
-              zeroIfTooSmall w + bodyInterest (lambdaBody lam')
+              zeroIfTooSmall w * 2 + bodyInterest (lambdaBody lam')
+          | Op (Stream _ (Sequential _) lam' _) <- stmExp stm =
+              bodyInterest $ lambdaBody lam'
           | otherwise =
               0
 

@@ -3,5 +3,6 @@
 -- random input { [1][256]i32 } auto output
 -- compiled random input { [100][256]i32 } auto output
 -- compiled random input { [100][512]i32 } auto output
+-- structure distributed { SegMap/SegRed 1 }
 
 let main = map (\xs -> (i32.sum xs, i32.product xs)) >-> unzip
