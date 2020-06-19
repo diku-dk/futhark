@@ -41,6 +41,7 @@ jobs:
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
         sudo apt-get install ghc-8.8.2
+        echo "::add-path::/opt/ghc/bin"
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -53,7 +54,6 @@ jobs:
 
     - name: Build Futhark
       run: |
-        export PATH=/opt/ghc/bin:$PATH
         cabal --version
         cabal update
         cabal install --install-method=copy --overwrite-policy=always
