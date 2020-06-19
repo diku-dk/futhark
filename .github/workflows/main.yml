@@ -179,9 +179,13 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
     - run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        export PATH=$HOME/.local/bin:$PATH
         futhark test -i tests examples
 
   test-c:
@@ -195,9 +199,13 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
     - run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        export PATH=$HOME/.local/bin:$PATH
         futhark test -c --backend=c tests examples --no-tuning
         make -C libtests/c
 
@@ -217,9 +225,13 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
     - run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        export PATH=$HOME/.local/bin:$PATH
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
 
   test-opencl:
@@ -238,9 +250,13 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
     - run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        export PATH=$HOME/.local/bin:$PATH
         futhark test -C --no-terminal --backend=opencl --exclude=no_opencl tests examples
 
   test-cuda:
@@ -259,9 +275,13 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
     - run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        export PATH=$HOME/.local/bin:$PATH
         futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
 
   test-tools:
@@ -275,9 +295,13 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
     - run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        export PATH=$HOME/.local/bin:$PATH
         cd pkgtests && sh test.sh
 
   benchmark-opencl:
@@ -298,9 +322,13 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
     - run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz && make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        export PATH=$HOME/.local/bin:$PATH
         futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
 
   deploy-nightly:
