@@ -14,13 +14,14 @@ module Language.Futhark.Parser.Lexer
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Data.Char (ord, toLower)
+import Data.Char (ord, toLower, digitToInt)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Bits
 import Data.Function (fix)
 import Data.List
 import Data.Monoid
+import Numeric
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
@@ -51,12 +52,12 @@ import Futhark.Util.Loc hiding (L)
 @unop = "!"
 @qualunop = (@identifier ".")+ @unop
 
-@opchar = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
-@binop = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^") @opchar*
+$opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
+@binop = ($opchar # \.) $opchar*
 @qualbinop = (@identifier ".")+ @binop
 
 @space = [\ \t\f\v]
-@doc = "-- |"[^\n]*(\n@space*"--"[^\n]*)*
+@doc = "-- |".*(\n@space*"--".*)*
 
 tokens :-
 
@@ -65,7 +66,7 @@ tokens :-
                                       map (T.drop 3 . T.stripStart) .
                                            T.split (== '\n') . ("--"<>) .
                                            T.drop 4 }
-  "--"[^\n]*                            ;
+  "--".*                            ;
   "="                      { tokenC EQU }
   "("                      { tokenC LPAR }
   ")"                      { tokenC RPAR }
@@ -104,9 +105,9 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
-  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit "f32" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f32") }
-  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
-  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
+  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit "f32" . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit "f64" . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit "f64" . T.filter (/= '_') }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 
@@ -178,20 +179,11 @@ tryRead desc s = case reads s' of
 
 readIntegral :: Integral a => T.Text -> a
 readIntegral s
-  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s =
-      T.foldl (another hex_digits) 0 (T.drop 2 s)
-  | "0b" `T.isPrefixOf` s || "0b" `T.isPrefixOf` s =
-      T.foldl (another binary_digits) 0 (T.drop 2 s)
-  | "0r" `T.isPrefixOf` s =
-       fromRoman (T.drop 2 s)
-  | otherwise =
-      T.foldl (another decimal_digits) 0 s
-      where another digits acc c = acc * base + maybe 0 fromIntegral (elemIndex (toLower c) digits)
-              where base = fromIntegral $ length digits
-
-            binary_digits = ['0', '1']
-            decimal_digits = ['0'..'9']
-            hex_digits = decimal_digits ++ ['a'..'f']
+  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s = parseBase 16 (T.drop 2 s)
+  | "0b" `T.isPrefixOf` s || "0B" `T.isPrefixOf` s = parseBase 2 (T.drop 2 s)
+  | "0r" `T.isPrefixOf` s || "0R" `T.isPrefixOf` s = fromRoman (T.drop 2 s)
+  | otherwise = parseBase 10 s
+      where parseBase base = T.foldl (\acc c -> acc * base + fromIntegral (digitToInt c)) 0
 
 tokenC v  = tokenS $ const v
 
@@ -257,9 +249,9 @@ fromHexRealLit s =
   let comps = (T.split (\x -> x == '.' || x == 'p' || x == 'P') num) in
   case comps of
     [i, f, p] ->
-        let int_part = readIntegral (T.pack ("0x" ++ (T.unpack i)))
-            frac_part = readIntegral (T.pack ("0x" ++ (T.unpack f)))
-            exponent = if ((T.pack "-") `T.isPrefixOf` p)
+        let int_part = readIntegral ("0x" <> i)
+            frac_part = readIntegral ("0x" <> f)
+            exponent = if ("-" `T.isPrefixOf` p)
                        then -1 * (readIntegral p)
                        else readIntegral p
 
