@@ -166,7 +166,7 @@ type SpaceId = String
 data NoUniqueness = NoUniqueness
                   deriving (Eq, Ord, Show)
 
--- | An Futhark type is either an array or an element type.  When
+-- | A Futhark type is either an array or an element type.  When
 -- comparing types for equality with '==', shapes must match.
 data TypeBase shape u = Prim PrimType
                       | Array PrimType shape u
