@@ -58,6 +58,10 @@ jobs:
         cabal update
         cabal install --install-method=copy --overwrite-policy=always
 
+    - name: Unit tests
+      run: |
+          cabal test
+
   build-linux-stack:
     runs-on: ubuntu-18.04
 
@@ -143,7 +147,7 @@ jobs:
         name: futhark-nightly-windows-x86_64.zip
         path: futhark-nightly-windows-x86_64.zip
 
-  test-unit-and-style:
+  test-style:
     runs-on: ubuntu-18.04
 
     steps:
@@ -159,15 +163,10 @@ jobs:
           ~/.cabal/packages
           ~/.cabal/store
           dist-newstyle
-        key: ${{ runner.os }}-unit
+        key: ${{ runner.os }}-style
 
     - name: Style check
       run: nix-shell --pure --run "tools/style-check.sh src"
-
-    - name: Unit tests
-      run: |
-          nix-shell --pure --run "cabal update"
-          nix-shell --pure --run "cabal test"
 
   test-interpreter:
     runs-on: ubuntu-latest
