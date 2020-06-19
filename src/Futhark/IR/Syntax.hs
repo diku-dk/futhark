@@ -441,7 +441,7 @@ data IfSort = IfNormal
               -- ^ A branch where the "true" case is what we are
               -- actually interested in, and the "false" case is only
               -- present as a fallback for when the true case cannot
-              -- be safely evaluated.  the compiler is permitted to
+              -- be safely evaluated.  The compiler is permitted to
               -- optimise away the branch if the true case contains
               -- only safe statements.
             | IfEquiv
