@@ -14,6 +14,7 @@ module Language.Futhark.Parser.Lexer
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.Text.Read as T
 import Data.Char (ord, toLower, digitToInt)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
@@ -21,6 +22,7 @@ import Data.Bits
 import Data.Function (fix)
 import Data.List
 import Data.Monoid
+import Data.Either
 import Numeric
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
@@ -105,9 +107,9 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
-  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit "f32" . T.filter (/= '_') . T.dropEnd 3 }
-  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit "f64" . T.filter (/= '_') . T.dropEnd 3 }
-  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit "f64" . T.filter (/= '_') }
+  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit . T.filter (/= '_') }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 
@@ -242,30 +244,23 @@ fromRoman s =
     Nothing -> 0
     Just (d,n) -> n+fromRoman (T.drop (T.length d) s)
 
-fromHexRealLit :: RealFloat a => T.Text -> Maybe a
-fromHexRealLit s =
+readHexRealLit :: RealFloat a => T.Text -> Alex a
+readHexRealLit s =
   let num =  (T.drop 2 s) in
   -- extract number into integer, fractional and (optional) exponent
-  let comps = (T.split (\x -> x == '.' || x == 'p' || x == 'P') num) in
+  let comps = T.split (`elem` ['.','p','P']) num in
   case comps of
     [i, f, p] ->
-        let int_part = readIntegral ("0x" <> i)
-            frac_part = readIntegral ("0x" <> f)
-            exponent = if ("-" `T.isPrefixOf` p)
-                       then -1 * (readIntegral p)
-                       else readIntegral p
+        let runTextReader r = fromIntegral . fst . fromRight (error "internal error") . r
+            intPart = runTextReader T.hexadecimal i
+            fracPart = runTextReader T.hexadecimal f
+            exponent = runTextReader (T.signed T.decimal) p
 
-            frac_len = T.length f
-            frac_val = (fromIntegral frac_part) / (16.0 ** (fromIntegral frac_len))
-            total_val = ((fromIntegral int_part) + frac_val) * (2.0 ** (fromIntegral exponent)) in
-        Just (total_val)
-    _ -> Nothing
-
-readHexRealLit :: RealFloat a => String -> T.Text -> Alex a
-readHexRealLit desc s =
-  case fromHexRealLit s of
-    Just (n) -> return n
-    Nothing -> error $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
+            fracLen = fromIntegral $ T.length f
+            fracVal = fracPart / (16.0 ** fracLen)
+            totalVal = (intPart + fracVal) * (2.0 ** exponent) in
+        return totalVal
+    _ -> error "bad hex real literal"
 
 alexGetPosn :: Alex (Int, Int, Int)
 alexGetPosn = Alex $ \s ->
