@@ -1586,9 +1586,10 @@ Attributes
 An expression can be prefixed with an attribute, written as
 ``#[attr]``.  This may affect how it is treated by the compiler or
 other tools.  In no case will attributes affect or change the
-*semantics* of a program, but it may affect how well it compiles (or
-in some cases, whether it compiles at all).  Unknown attributes are
-silently ignored.  Most have no effect in the interpreter.
+*semantics* of a program, but it may affect how well it compiles and
+runs (or in some cases, whether it compiles or runs at all).  Unknown
+attributes are silently ignored.  Most have no effect in the
+interpreter.
 
 Many attributes affect second-order array combinators (*SOACS*).
 These must be applied to a fully saturated function application or
@@ -1609,6 +1610,14 @@ parallelism" version for the attributed SOACs.
 
 When using incremental flattening, do not generate the "intra-group
 parallelism" version for the attributed SOACs.
+
+``incremental_flattening_only_intra``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When using incremental flattening, *only* generate the "intra-group
+parallelism" version of the attributed SOACs.  **Beware**: the
+resulting program will fail to run if the inner parallelism does not
+fit on the device.
 
 ``incremental_flattening_only_inner``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

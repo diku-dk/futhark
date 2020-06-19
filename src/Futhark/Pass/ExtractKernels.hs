@@ -582,7 +582,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
           | DoLoop _ _ _ body <- stmExp stm =
               bodyInterest body * 10
           | Op (Screma w (ScremaForm _ _ lam') _) <- stmExp stm =
-              zeroIfTooSmall w * 2 + bodyInterest (lambdaBody lam')
+              zeroIfTooSmall w + bodyInterest (lambdaBody lam')
           | Op (Stream _ (Sequential _) lam' _) <- stmExp stm =
               bodyInterest $ lambdaBody lam'
           | otherwise =
@@ -667,6 +667,10 @@ onMap path (MapLoop pat aux w lam arrs) = do
                       , distStms = mempty
                       }
 
+onlyExploitIntra :: Attrs -> Bool
+onlyExploitIntra attrs =
+  "incremental_flattening_only_intra" `inAttrs` attrs
+
 mayExploitOuter :: Attrs -> Bool
 mayExploitOuter attrs =
   not $
@@ -689,26 +693,27 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
   let nest_ws = kernelNestWidths loopnest
       res = map Var $ patternNames pat
       aux = loopNestingAux $ innermostKernelNesting loopnest
+      attrs = stmAuxAttrs aux
 
   types <- askScope
   ((outer_suff, outer_suff_key), outer_suff_stms) <-
     sufficientParallelism "suff_outer_par" nest_ws path
 
-  intra <- if worthIntraGroup lam && mayExploitIntra (stmAuxAttrs aux) then
+  intra <- if onlyExploitIntra (stmAuxAttrs aux) ||
+              (worthIntraGroup lam && mayExploitIntra attrs) then
              flip runReaderT types $ intraGroupParallelise loopnest lam
            else return Nothing
   seq_body <- renameBody =<< mkBody <$>
               mk_seq_stms ((outer_suff_key, True) : path) <*> pure res
   let seq_alts = [(outer_suff, seq_body)
-                 | worthSequentialising lam,
-                   mayExploitOuter $ stmAuxAttrs aux]
+                 | worthSequentialising lam, mayExploitOuter attrs]
 
   case intra of
     Nothing -> do
       par_body <- renameBody =<< mkBody <$>
                   mk_par_stms ((outer_suff_key, False) : path) <*> pure res
 
-      if "sequential_inner" `inAttrs` stmAuxAttrs aux
+      if "sequential_inner" `inAttrs` attrs
         then kernelAlternatives pat seq_body []
         else (outer_suff_stms<>) <$> kernelAlternatives pat par_body seq_alts
 
@@ -742,8 +747,11 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
                                 (intra_suff_key, False)]
                                 ++ path) <*> pure res
 
-      if "sequential_inner" `inAttrs` stmAuxAttrs aux
+      if "sequential_inner" `inAttrs` attrs
         then kernelAlternatives pat seq_body []
+        else
+        if onlyExploitIntra attrs
+        then (intra_suff_stms<>) <$> kernelAlternatives pat group_par_body []
         else ((outer_suff_stms<>intra_suff_stms)<>) <$>
              kernelAlternatives pat par_body (seq_alts ++ [(intra_ok, group_par_body)])
 
