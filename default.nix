@@ -3,12 +3,12 @@
 #
 # Just run 'nix-build' and fish the tarball out of 'result/'.
 
-{ nixpkgs ? import <nixpkgs> {},
-  compiler ? "ghc883",
+{ compiler ? "ghc883",
   suffix ? "nightly",
   commit ? "" }:
 let
-  pkgs = nixpkgs;
+  sources = import ./nix/sources.nix;
+  pkgs = import sources.nixpkgs {};
 
   futhark =
     pkgs.haskell.lib.overrideCabal
