@@ -48,7 +48,7 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
-import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
+import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Futhark.Util (chunks, maybeNth, mapAccumLM, takeLast, dropLast)
 
 newtype HostEnv = HostEnv
@@ -159,7 +159,7 @@ kernelLoop tid num_threads n f =
   else do
     -- Compute how many elements this thread is responsible for.
     -- Formula: (n - tid) / num_threads (rounded up).
-    let elems_for_this = (n - tid) `quotRoundingUp` num_threads
+    let elems_for_this = (n - tid) `divUp` num_threads
 
     sFor "i" elems_for_this $ \i -> f $
       i * num_threads + tid
@@ -301,10 +301,10 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
-  -- groupScan needs to treat the output as a one-dimensional array of
-  -- scan elements, so we invent some new flattened arrays here.  XXX:
-  -- this assumes that the original index function is just row-major,
-  -- but does not actually verify it.
+  -- groupScan needs to treat the scan output as a one-dimensional
+  -- array of scan elements, so we invent some new flattened arrays
+  -- here.  XXX: this assumes that the original index function is just
+  -- row-major, but does not actually verify it.
   dims_flat <- dPrimV "dims_flat" $ product dims'
   let flattened pe = do
         MemLocation mem _ _ <-
@@ -314,7 +314,10 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
         sArray (baseString (patElemName pe) ++ "_flat")
           (elemType pe_t) (Shape arr_dims) $
           ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) arr_dims
-  arrs_flat <- mapM flattened $ patternElements pat
+
+      num_scan_results = sum $ map (length . segBinOpNeutral) scans
+
+  arrs_flat <- mapM flattened $ take num_scan_results $ patternElements pat
 
   forM_ scans $ \scan -> do
     let scan_op = segBinOpLambda scan
@@ -703,7 +706,7 @@ computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread nu
   chunk_var <--
     Imp.BinOpExp (SMin Int32)
     (Imp.unCount elements_per_thread)
-    ((Imp.unCount num_elements - thread_index) `quotRoundingUp` stride')
+    ((Imp.unCount num_elements - thread_index) `divUp` stride')
 
 computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
   starting_point <- dPrimV "starting_point" $
@@ -1000,7 +1003,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
   barrier
 
   sComment "restore correct values for first block" $
-    sWhen is_first_block $forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
+    sWhen is_first_block $ forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
       if primType (paramType y)
       then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
       else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
@@ -1102,7 +1105,7 @@ computeMapKernelGroups kernel_size = do
   let group_size_var = Imp.var group_size int32
       group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty group_size
   sOp $ Imp.GetSize group_size group_size_key Imp.SizeGroup
-  num_groups <- dPrimV "num_groups" $ kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
+  num_groups <- dPrimV "num_groups" $ kernel_size `divUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
   return (Imp.var num_groups int32, Imp.var group_size int32)
 
 simpleKernelConstants :: Imp.Exp -> String
@@ -1145,7 +1148,7 @@ virtualiseGroups SegVirt required_groups m = do
   constants <- kernelConstants <$> askEnv
   phys_group_id <- dPrim "phys_group_id" int32
   sOp $ Imp.GetGroupId phys_group_id 0
-  let iterations = (required_groups - Imp.vi32 phys_group_id) `quotRoundingUp`
+  let iterations = (required_groups - Imp.vi32 phys_group_id) `divUp`
                    kernelNumGroups constants
 
   sFor "i" iterations $ \i -> do
@@ -1200,7 +1203,7 @@ sKernel :: Operations KernelsMem KernelEnv Imp.KernelOp
         -> CallKernelGen ()
 sKernel ops flatf name num_groups group_size v f = do
   (constants, set_constants) <- kernelInitialisationSimple num_groups group_size
-  let name' = nameFromString $ name ++ "_" ++ show (baseTag v)
+  name' <- nameForFun $ name ++ "_" ++ show (baseTag v)
   sKernelFailureTolerant False ops constants name' $ do
     set_constants
     dPrimV_ v $ flatf constants
@@ -1432,7 +1435,7 @@ compileGroupResult _ pe (TileReturns [(w,per_group_elems)] what) = do
     then sWhen (offset + ltid .<. toExp' int32 w) $
          copyDWIMFix (patElemName pe) [ltid + offset] (Var what) [ltid]
     else
-    sFor "i" (n `quotRoundingUp` kernelGroupSize constants) $ \i -> do
+    sFor "i" (n `divUp` kernelGroupSize constants) $ \i -> do
       j <- fmap Imp.vi32 $ dPrimV "j" $
            kernelGroupSize constants * i + ltid
       sWhen (j .<. n) $ copyDWIMFix (patElemName pe) [j + offset] (Var what) [j]

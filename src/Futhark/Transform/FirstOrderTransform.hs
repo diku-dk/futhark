@@ -27,7 +27,6 @@ import qualified Futhark.IR as AST
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.IR.Prop.Aliases
 import Futhark.Util (chunks, splitAt3)
 
 -- | The constraints that must hold for a lore in order to be the
@@ -35,8 +34,7 @@ import Futhark.Util (chunks, splitAt3)
 type FirstOrderLore lore =
   (Bindable lore, BinderOps lore,
    LetDec SOACS ~ LetDec lore,
-   LParamInfo SOACS ~ LParamInfo lore,
-   CanBeAliased (Op lore))
+   LParamInfo SOACS ~ LParamInfo lore)
 
 -- | First-order-transform a single function, with the given scope
 -- provided by top-level constants.
@@ -58,8 +56,7 @@ transformConsts stms =
 -- first-order transformation.
 type Transformer m = (MonadBinder m, LocalScope (Lore m) m,
                       Bindable (Lore m), BinderOps (Lore m),
-                      LParamInfo SOACS ~ LParamInfo (Lore m),
-                      CanBeAliased (Op (Lore m)))
+                      LParamInfo SOACS ~ LParamInfo (Lore m))
 
 transformBody :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                  Body -> m (AST.Body (Lore m))
@@ -265,8 +262,7 @@ transformLambda :: (MonadFreshNames m,
                     Bindable lore, BinderOps lore,
                     LocalScope somelore m,
                     SameScope somelore lore,
-                    LetDec lore ~ LetDec SOACS,
-                    CanBeAliased (Op lore)) =>
+                    LetDec lore ~ LetDec SOACS) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda params body rettype) = do
   body' <- runBodyBinder $

@@ -50,6 +50,7 @@ import qualified Data.Set as S
 import Data.Maybe
 import Data.List (zip4, partition, sort)
 
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplify.Lore (mkWiseBody)
 import Futhark.MonadFreshNames
 import Futhark.IR.Mem
@@ -930,10 +931,11 @@ simplifiable :: (Engine.SimplifiableLore lore,
                  BodyDec lore ~ (),
                  Op lore ~ MemOp inner,
                  Allocator lore (PatAllocM lore)) =>
-                (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner, Stms (Engine.Wise lore)))
+                (Engine.OpWithWisdom inner -> UT.UsageTable)
+             -> (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner, Stms (Engine.Wise lore)))
              -> SimpleOps lore
-simplifiable simplifyInnerOp =
-  SimpleOps mkExpDecS' mkBodyS' protectOp simplifyOp
+simplifiable innerUsage simplifyInnerOp =
+  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyOp
   where mkExpDecS' _ pat e =
           return $ Engine.mkWiseExpDec pat () e
 
@@ -946,6 +948,13 @@ simplifiable simplifyInnerOp =
                    If taken tbody fbody $ IfDec [MemPrim int64] IfFallback
           letBind pat $ Op $ Alloc size' space
         protectOp _ _ _ = Nothing
+
+        opUsage (Alloc (Var size) _) =
+          UT.sizeUsage size
+        opUsage (Alloc _ _) =
+          mempty
+        opUsage (Inner inner) =
+          innerUsage inner
 
         simplifyOp (Alloc size space) =
           (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty

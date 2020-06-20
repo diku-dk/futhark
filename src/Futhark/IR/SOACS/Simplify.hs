@@ -53,17 +53,8 @@ simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
 
 simplifySOACS :: Prog SOACS -> PassM (Prog SOACS)
-simplifySOACS = Simplify.simplifyProg simpleSOACS soacRules blockers
-  where blockers = Engine.noExtraHoistBlockers { Engine.getArraySizes = getShapeNames }
-
--- | Getting the roots of what to hoist, for now only variable
--- names that represent shapes/sizes.
-getShapeNames :: (LetDec lore ~ (VarWisdom, Type)) =>
-                 AST.Stm lore -> Names
-getShapeNames bnd =
-  let tps1 = map patElemType $ patternElements $ stmPattern bnd
-      tps2 = map (snd . patElemDec) $ patternElements $ stmPattern bnd
-  in  namesFromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
+simplifySOACS =
+  Simplify.simplifyProg simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyFun :: MonadFreshNames m =>
                ST.SymbolTable (Wise SOACS) -> FunDef SOACS -> m (FunDef SOACS)
@@ -519,7 +510,7 @@ fuseConcatScatter vtable pat _ (Scatter _ fun arrs dests)
       certifying (mconcat css) $
         letBind pat $ Op $ Scatter w' fun' (concat xivs) $ map (incWrites r) dests
   where sizeOf :: VName -> Maybe SubExp
-        sizeOf x = arraySize 0 . ST.entryType <$> ST.lookup x vtable
+        sizeOf x = arraySize 0 . typeOf <$> ST.lookup x vtable
         mix = concat . transpose
         incWrites r (w, n, a) = (w, n*r, a) -- ToDO: is it (n*r) or (n+r-1)??
         isConcat v = case ST.lookupExp v vtable of

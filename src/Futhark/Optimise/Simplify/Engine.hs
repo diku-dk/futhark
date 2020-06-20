@@ -85,18 +85,16 @@ data HoistBlockers lore = HoistBlockers
                             -- ^ Blocker for hoisting out of sequential loops.
                           , blockHoistBranch :: BlockPred (Wise lore)
                             -- ^ Blocker for hoisting out of branches.
-                          , getArraySizes :: Stm (Wise lore) -> Names
-                            -- ^ gets the sizes of arrays from a binding.
                           , isAllocation  :: Stm (Wise lore) -> Bool
                           }
 
 noExtraHoistBlockers :: HoistBlockers lore
 noExtraHoistBlockers =
-  HoistBlockers neverBlocks neverBlocks neverBlocks (const mempty) (const False)
+  HoistBlockers neverBlocks neverBlocks neverBlocks (const False)
 
 neverHoist :: HoistBlockers lore
 neverHoist =
-  HoistBlockers alwaysBlocks alwaysBlocks alwaysBlocks (const mempty) (const False)
+  HoistBlockers alwaysBlocks alwaysBlocks alwaysBlocks (const False)
 
 data Env lore = Env { envRules         :: RuleBook (Wise lore)
                     , envHoistBlockers :: HoistBlockers lore
@@ -123,6 +121,7 @@ data SimpleOps lore =
               -- ^ Make a hoisted Op safe.  The SubExp is a boolean
               -- that is true when the value of the statement will
               -- actually be used.
+            , opUsageS :: Op (Wise lore) -> UT.UsageTable
             , simplifyOpS :: SimplifyOp lore (Op lore)
             }
 
@@ -130,7 +129,8 @@ type SimplifyOp lore op = op -> SimpleM lore (OpWithWisdom op, Stms (Wise lore))
 
 bindableSimpleOps :: (SimplifiableLore lore, Bindable lore) =>
                      SimplifyOp lore (Op lore) -> SimpleOps lore
-bindableSimpleOps = SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS'
+bindableSimpleOps =
+  SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
   where mkExpDecS' _ pat e = return $ mkExpDec pat e
         mkBodyS' _ bnds res = return $ mkBody bnds res
         protectHoistedOpS' _ _ _ = Nothing
@@ -199,20 +199,20 @@ usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 enterLoop :: SimpleM lore a -> SimpleM lore a
 enterLoop = localVtable ST.deepen
 
-bindFParams :: [FParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindFParams :: SimplifiableLore lore => [FParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
 bindFParams params =
   localVtable $ ST.insertFParams params
 
-bindLParams :: [LParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
+bindLParams :: SimplifiableLore lore => [LParam (Wise lore)] -> SimpleM lore a -> SimpleM lore a
 bindLParams params =
   localVtable $ \vtable -> foldr ST.insertLParam vtable params
 
-bindArrayLParams :: [LParam (Wise lore)] -> SimpleM lore a
+bindArrayLParams :: SimplifiableLore lore => [LParam (Wise lore)] -> SimpleM lore a
                  -> SimpleM lore a
 bindArrayLParams params =
   localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
 
-bindLoopVar :: VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
+bindLoopVar :: SimplifiableLore lore => VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
 
@@ -285,16 +285,40 @@ protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
       auxing aux m
 protectIf _ f taken (Let pat aux e)
-  | f e = do
-      taken_body <- eBody [pure e]
-      untaken_body <- eBody $ map (emptyOfType $ patternContextNames pat)
-                                  (patternValueTypes pat)
-      if_ts <- expTypesFromPattern pat
-      auxing aux $
-        letBind pat $ If taken taken_body untaken_body $
-        IfDec if_ts IfFallback
+  | f e =
+      case makeSafe e of
+        Just e' ->
+          auxing aux $ letBind pat e'
+        Nothing -> do
+          taken_body <- eBody [pure e]
+          untaken_body <- eBody $ map (emptyOfType $ patternContextNames pat)
+                                      (patternValueTypes pat)
+          if_ts <- expTypesFromPattern pat
+          auxing aux $
+            letBind pat $ If taken taken_body untaken_body $
+            IfDec if_ts IfFallback
 protectIf _ _ _ stm =
   addStm stm
+
+makeSafe :: Exp lore -> Maybe (Exp lore)
+makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
+  Just $ BasicOp (BinOp (SDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (SDivUp t _) x y)) =
+  Just $ BasicOp (BinOp (SDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (SQuot t _) x y)) =
+  Just $ BasicOp (BinOp (SQuot t Safe) x y)
+makeSafe (BasicOp (BinOp (UDiv t _) x y)) =
+  Just $ BasicOp (BinOp (UDiv t Safe) x y)
+makeSafe (BasicOp (BinOp (UDivUp t _) x y)) =
+  Just $ BasicOp (BinOp (UDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (SMod t _) x y)) =
+  Just $ BasicOp (BinOp (SMod t Safe) x y)
+makeSafe (BasicOp (BinOp (SRem t _) x y)) =
+  Just $ BasicOp (BinOp (SRem t Safe) x y)
+makeSafe (BasicOp (BinOp (UMod t _) x y)) =
+  Just $ BasicOp (BinOp (UMod t Safe) x y)
+makeSafe _ =
+  Nothing
 
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem{} =
@@ -331,11 +355,17 @@ hoistStms rules block vtable uses orig_stms = do
           let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps stms'
           return (blocked, hoisted)
 
-        simplifyStmsBottomUp' vtable' uses' stms =
-          foldM hoistable (uses',[]) $ reverse $ zip (stmsToList stms) vtables
+        simplifyStmsBottomUp' vtable' uses' stms = do
+          opUsage <- asks $ opUsageS . fst
+          let usageInStm stm =
+                UT.usageInStm stm <>
+                case stmExp stm of
+                  Op op -> opUsage op
+                  _ -> mempty
+          foldM (hoistable usageInStm) (uses',[]) $ reverse $ zip (stmsToList stms) vtables
             where vtables = scanl (flip ST.insertStm) vtable' $ stmsToList stms
 
-        hoistable (uses',stms) (stm, vtable')
+        hoistable usageInStm (uses',stms) (stm, vtable')
           | not $ any (`UT.isUsedDirectly` uses') $ provides stm = -- Dead statement.
             return (uses', stms)
           | otherwise = do
@@ -344,11 +374,12 @@ hoistStms rules block vtable uses orig_stms = do
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
                 | block vtable' uses' stm ->
-                  return (expandUsage vtable' uses' stm
-                          `UT.without` provides stm,
-                          Left stm : stms)
+                    return (expandUsage usageInStm vtable' uses' stm
+                            `UT.without` provides stm,
+                            Left stm : stms)
                 | otherwise ->
-                  return (expandUsage vtable' uses' stm, Right stm : stms)
+                    return (expandUsage usageInStm vtable' uses' stm,
+                            Right stm : stms)
               Just optimstms -> do
                 changed
                 (uses'',stms') <- simplifyStmsBottomUp' vtable' uses' optimstms
@@ -370,12 +401,15 @@ provides :: Stm lore -> [VName]
 provides = patternNames . stmPattern
 
 expandUsage :: (ASTLore lore, Aliased lore) =>
-               ST.SymbolTable lore -> UT.UsageTable -> Stm lore -> UT.UsageTable
-expandUsage vtable utable bnd =
-  UT.expand (`ST.lookupAliases` vtable) (UT.usageInStm bnd <> usageThroughAliases) <>
+               (Stm lore -> UT.UsageTable) -> ST.SymbolTable lore -> UT.UsageTable
+            -> Stm lore -> UT.UsageTable
+expandUsage usageInStm vtable utable stm@(Let pat _ e) =
+  UT.expand (`ST.lookupAliases` vtable) (usageInStm stm <> usageThroughAliases) <>
+  (if any (`UT.isSize` utable) (patternNames pat)
+   then UT.sizeUsages (freeIn e)
+   else mempty) <>
   utable
-  where pat = stmPattern bnd
-        usageThroughAliases =
+  where usageThroughAliases =
           mconcat $ mapMaybe usageThroughBindeeAliases $
           zip (patternNames pat) (patternAliases pat)
         usageThroughBindeeAliases (name, aliases) = do
@@ -472,7 +506,6 @@ hoistCommon :: SimplifiableLore lore =>
                              Stms (Wise lore))
 hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
   is_alloc_fun <- asksEngineEnv $ isAllocation  . envHoistBlockers
-  getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
   branch_blocker <- asksEngineEnv $ blockHoistBranch . envHoistBlockers
   vtable <- askVtable
   let -- We are unwilling to hoist things that are unsafe or costly,
@@ -494,18 +527,20 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
            ifsort /= IfFallback &&
            loopInvariantStm vtable stm)
 
-      hoistbl_nms = filterBnds desirableToHoist getArrSz_fun $
-                    stmsToList $ stms1<>stms2
-
       -- No matter what, we always want to hoist constants as much as
       -- possible.
-      isNotHoistableBnd _ _ _ (Let _ _ (BasicOp ArrayLit{})) = False
-      isNotHoistableBnd _ _ _ (Let _ _ (BasicOp SubExp{})) = False
-      isNotHoistableBnd nms _ _ stm = not (hasPatName nms stm)
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit{})) = False
+      isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp{})) = False
+      isNotHoistableBnd _ usages (Let pat _ _)
+        | any (`UT.isSize` usages) $ patternNames pat =
+            False
+      isNotHoistableBnd _ _ _ =
+        -- Hoist aggressively out of versioning branches.
+        ifsort /= IfEquiv
 
       block = branch_blocker `orIf`
               ((isNotSafe `orIf` isNotCheap) `andAlso` stmIs (not . desirableToHoist))
-              `orIf` isInPlaceBound `orIf` isNotHoistableBnd hoistbl_nms
+              `orIf` isInPlaceBound `orIf` isNotHoistableBnd
 
   rules <- asksEngineEnv envRules
   (body1_bnds', safe1) <- protectIfHoisted cond True $
@@ -516,21 +551,6 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
   body1' <- constructBody body1_bnds' res1
   body2' <- constructBody body2_bnds' res2
   return (body1', body2', hoistable)
-  where filterBnds interesting getArrSz_fn all_bnds =
-          let sz_nms     = mconcat $ map getArrSz_fn all_bnds
-              sz_needs   = transClosSizes all_bnds sz_nms []
-              alloc_bnds = filter interesting all_bnds
-              sel_nms    = namesFromList $
-                           concatMap (patternNames . stmPattern)
-                                     (sz_needs ++ alloc_bnds)
-          in  sel_nms
-        transClosSizes all_bnds scal_nms hoist_bnds =
-          let new_bnds = filter (hasPatName scal_nms) all_bnds
-              new_nms  = mconcat $ map (freeIn . stmExp) new_bnds
-          in  if null new_bnds
-              then hoist_bnds
-              else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
-        hasPatName nms bnd = any (`nameIn` nms) $ patternNames $ stmPattern bnd
 
 -- | Simplify a single body.  The @[Diet]@ only covers the value
 -- elements, because the context cannot be consumed.

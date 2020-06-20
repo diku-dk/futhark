@@ -447,16 +447,12 @@ patternMatch env (Id v (Info t) _) val =
   valEnv (M.singleton v (Just $ T.BoundV [] $ toStruct t, val)) <> env
 patternMatch env Wildcard{} _ =
   lift $ pure env
-patternMatch env (TuplePattern ps _) (ValueRecord vs)
-  | length ps == length vs' =
-      foldM (\env' (p,v) -> patternMatch env' p v) env $
-      zip ps (map snd $ sortFields vs)
-    where vs' = sortFields vs
-patternMatch env (RecordPattern ps _) (ValueRecord vs)
-  | length ps == length vs' =
-      foldM (\env' (p,v) -> patternMatch env' p v) env $
-      zip (map snd $ sortFields $ M.fromList ps) (map snd $ sortFields vs)
-    where vs' = sortFields vs
+patternMatch env (TuplePattern ps _) (ValueRecord vs) =
+  foldM (\env' (p,v) -> patternMatch env' p v) env $
+  zip ps (map snd $ sortFields vs)
+patternMatch env (RecordPattern ps _) (ValueRecord vs) =
+  foldM (\env' (p,v) -> patternMatch env' p v) env $
+  M.intersectionWith (,) (M.fromList ps) vs
 patternMatch env (PatternParens p _) v = patternMatch env p v
 patternMatch env (PatternAscription p _ _) v =
   patternMatch env p v
@@ -1237,10 +1233,20 @@ initialCtx =
     def "-" = arithOp (`P.Sub` P.OverflowWrap) P.FSub
     def "*" = arithOp (`P.Mul` P.OverflowWrap) P.FMul
     def "**" = arithOp P.Pow P.FPow
-    def "/" = Just $ bopDef $ sintOp P.SDiv ++ uintOp P.UDiv ++ floatOp P.FDiv
-    def "%" = Just $ bopDef $ sintOp P.SMod ++ uintOp P.UMod ++ floatOp P.FMod
-    def "//" = Just $ bopDef $ sintOp P.SQuot ++ uintOp P.UDiv
-    def "%%" = Just $ bopDef $ sintOp P.SRem ++ uintOp P.UMod
+    def "/" = Just $ bopDef $
+              sintOp (`P.SDiv` P.Unsafe) ++
+              uintOp (`P.UDiv` P.Unsafe) ++
+              floatOp P.FDiv
+    def "%" = Just $ bopDef $
+              sintOp (`P.SMod` P.Unsafe) ++
+              uintOp (`P.UMod` P.Unsafe) ++
+              floatOp P.FMod
+    def "//" = Just $ bopDef $
+               sintOp (`P.SQuot` P.Unsafe) ++
+               uintOp (`P.UDiv` P.Unsafe)
+    def "%%" = Just $ bopDef $
+               sintOp (`P.SRem` P.Unsafe) ++
+               uintOp (`P.UMod` P.Unsafe)
     def "^" = Just $ bopDef $ intOp P.Xor
     def "&" = Just $ bopDef $ intOp P.And
     def "|" = Just $ bopDef $ intOp P.Or

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Incremental flattening is now performed by default.  Use
+    attributes to constrain and direct the flattening if you have
+    exotic needs.  This will likely need further iteration and
+    refinement.
+
   * Better code generation for `reverse` (and the equivalent explicit
     slice).
 
@@ -18,6 +23,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     option, although it is likely slightly less accurate in the
     presence of concurrent operations.
 
+  * A preprocessor macro `FUTHARK_BACKEND_foo` is now defined in
+    generated header files, where *foo* is the name of the backend
+    used.
+
+  * Non-inlined functions (via `#[noinline]`) are now supported in GPU
+    code, but only for functions that *exclusively* operate on
+    scalars.
+
+  * `futhark repl` now accepts a command line argument to load a
+    program initially.
+
 ### Removed
 
   * The C# backend has been removed (#984).
@@ -25,6 +41,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `unsafe` keyword has been removed.  Use `#[unsafe]` instead.
 
 ### Changed
+
+  * Out-of-bounds literals are now an error rather than a warning.
 
 ### Fixed
 
@@ -34,6 +52,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     (#995).
 
   * Fixed handling of dumb terminals in futhark test (#1000).
+
+  * Fixed exotic monomorphisation case involving lifted type
+    parameters instantiated with functions that take named parameters
+    (#1026).
 
 ## [0.15.8]
 

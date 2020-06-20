@@ -41,6 +41,7 @@ module Futhark.CodeGen.ImpCode
 
   , declaredIn
   , lexicalMemoryUsage
+  , calledFuncs
 
     -- * Typed enumerations
   , Bytes
@@ -59,6 +60,7 @@ module Futhark.CodeGen.ImpCode
   where
 
 import Data.List (intersperse)
+import qualified Data.Set as S
 import Data.Traversable
 import qualified Data.Map as M
 
@@ -90,7 +92,9 @@ paramName (MemParam name _) = name
 paramName (ScalarParam name _) = name
 
 -- | A collection of imperative functions and constants.
-data Definitions a = Definitions (Constants a) (Functions a)
+data Definitions a = Definitions { defConsts :: Constants a
+                                 , defFuns :: Functions a
+                                 }
 
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
@@ -281,6 +285,17 @@ lexicalMemoryUsage func =
 
         set (SetMem x y _) = namesFromList [x,y]
         set x = go set x
+
+-- | The set of functions that are called by this code.  Assumes there
+-- are no function calls in 'Op's.
+calledFuncs :: Code a -> S.Set Name
+calledFuncs (x :>>: y) = calledFuncs x <> calledFuncs y
+calledFuncs (If _ x y) = calledFuncs x <> calledFuncs y
+calledFuncs (For _ _ _ x) = calledFuncs x
+calledFuncs (While _ x) = calledFuncs x
+calledFuncs (Comment _ x) = calledFuncs x
+calledFuncs (Call _ f _) = S.singleton f
+calledFuncs _ = mempty
 
 -- | The leaves of an 'Exp'.
 data ExpLeaf = ScalarVar VName

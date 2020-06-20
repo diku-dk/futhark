@@ -22,7 +22,7 @@ import Futhark.MonadFreshNames
 -- | Compile the program to sequential C.
 compileProg :: MonadFreshNames m => Prog SeqMem -> m GC.CParts
 compileProg =
-  GC.compileProg operations generateContext "" [DefaultSpace] [] <=<
+  GC.compileProg "c" operations generateContext "" [DefaultSpace] [] <=<
   ImpGen.compileProg
   where operations :: GC.Operations Imp.Sequential ()
         operations = GC.defaultOperations

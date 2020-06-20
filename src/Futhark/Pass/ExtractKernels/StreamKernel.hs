@@ -50,7 +50,7 @@ blockedKernelSize desc w = do
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
-    eDivRoundingUp Int64 (eSubExp w64) (toExp =<< asIntS Int64 num_threads)
+    eBinOp (SDivUp Int64 Unsafe) (eSubExp w64) (toExp =<< asIntS Int64 num_threads)
 
   return $ KernelSize per_thread_elements num_threads
 
@@ -243,7 +243,7 @@ segThreadCapped ws desc r = do
       usable_groups <- letSubExp "segmap_usable_groups" .
                        BasicOp . ConvOp (SExt Int64 Int32) =<<
                        letSubExp "segmap_usable_groups_64" =<<
-                       eDivRoundingUp Int64 (eSubExp w64)
+                       eBinOp (SDivUp Int64 Unsafe) (eSubExp w64)
                        (eSubExp =<< asIntS Int64 group_size)
       return $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
     NoRecommendation v -> do

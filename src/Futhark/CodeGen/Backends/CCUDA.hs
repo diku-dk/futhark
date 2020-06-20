@@ -33,7 +33,7 @@ compileProg prog = do
          copyScalarToDev, copyScalarFromDev]
       extra = generateBoilerplate cuda_code cuda_prelude
               cost_centres kernels sizes failures
-  GC.compileProg operations extra cuda_includes
+  GC.compileProg "cuda" operations extra cuda_includes
     [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()

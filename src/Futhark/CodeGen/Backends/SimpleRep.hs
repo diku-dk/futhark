@@ -77,9 +77,9 @@ cIntOps :: [C.Definition]
 cIntOps = concatMap (`map` [minBound..maxBound]) ops
           ++ cIntPrimFuns
   where ops = [mkAdd, mkSub, mkMul,
-               mkUDiv, mkUMod,
-               mkSDiv, mkSMod,
-               mkSQuot, mkSRem,
+               mkUDiv, mkUDivUp, mkUMod, mkUDivSafe, mkUDivUpSafe, mkUModSafe,
+               mkSDiv, mkSDivUp, mkSMod, mkSDivSafe, mkSDivUpSafe, mkSModSafe,
+               mkSQuot, mkSRem, mkSQuotSafe, mkSRemSafe,
                mkSMin, mkUMin,
                mkSMax, mkUMax,
                mkShl, mkLShr, mkAShr,
@@ -102,7 +102,11 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         mkSub = simpleUintOp "sub" [C.cexp|x - y|]
         mkMul = simpleUintOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
+        mkUDivUp = simpleUintOp "udiv_up" [C.cexp|(x+y-1) / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
+        mkUDivSafe = simpleUintOp "udiv_safe" [C.cexp|y == 0 ? 0 : x / y|]
+        mkUDivUpSafe = simpleUintOp "udiv_up_safe" [C.cexp|y == 0 ? 0 : (x+y-1) / y|]
+        mkUModSafe = simpleUintOp "umod_safe" [C.cexp|y == 0 ? 0 : x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
         mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
 
@@ -114,6 +118,8 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                          return q -
                            (((r != 0) && ((r < 0) != (y < 0))) ? 1 : 0);
              }|]
+        mkSDivUp t =
+          simpleIntOp "sdiv_up" [C.cexp|$id:(taggedI "sdiv" t)(x+y-1,y)|] t
         mkSMod t =
           let ct = intTypeToCType t
           in [C.cedecl|static inline $ty:ct $id:(taggedI "smod" t)($ty:ct x, $ty:ct y) {
@@ -121,9 +127,17 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                          return r +
                            ((r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0)) ? 0 : y);
               }|]
+        mkSDivSafe t =
+          simpleIntOp "sdiv_safe" [C.cexp|y == 0 ? 0 : $id:(taggedI "sdiv" t)(x,y)|] t
+        mkSDivUpSafe t =
+          simpleIntOp "sdiv_up_safe" [C.cexp|$id:(taggedI "sdiv_safe" t)(x+y-1,y)|] t
+        mkSModSafe t =
+          simpleIntOp "smod_safe" [C.cexp|y == 0 ? 0 : $id:(taggedI "smod" t)(x,y)|] t
 
         mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
         mkSRem = simpleIntOp "srem" [C.cexp|x % y|]
+        mkSQuotSafe = simpleIntOp "squot_safe" [C.cexp|y == 0 ? 0 : x / y|]
+        mkSRemSafe = simpleIntOp "srem_safe" [C.cexp|y == 0 ? 0 : x % y|]
         mkSMax = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
         mkSMin = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
         mkShl = simpleUintOp "shl" [C.cexp|x << y|]

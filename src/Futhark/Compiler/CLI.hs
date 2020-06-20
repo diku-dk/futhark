@@ -37,7 +37,7 @@ compilerMain cfg cfg_opts name desc pipeline doIt prog args = do
   hSetEncoding stdout utf8
   hSetEncoding stderr utf8
   mainWithOptions (newCompilerConfig cfg) (commandLineOptions ++ map wrapOption cfg_opts)
-    "options... program" inspectNonOptions prog args
+    "options... <program.fut>" inspectNonOptions prog args
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 

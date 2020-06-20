@@ -24,6 +24,7 @@ module Futhark.IR.Primitive
 
          -- * Operations
        , Overflow (..)
+       , Safety(..)
        , UnOp (..), allUnOps
        , BinOp (..), allBinOps
        , ConvOp (..), allConvOps
@@ -296,6 +297,24 @@ instance Eq Overflow where
 instance Ord Overflow where
   _ `compare` _ = EQ
 
+-- | Whether something is safe or unsafe (mostly function calls, and
+-- in the context of whether operations are dynamically checked).
+-- When we inline an 'Unsafe' function, we remove all safety checks in
+-- its body.  The 'Ord' instance picks 'Unsafe' as being less than
+-- 'Safe'.
+--
+-- For operations like integer division, a safe division will not
+-- explode the computer in case of division by zero, but instead
+-- return some unspecified value.  This always involves a run-time
+-- check, so generally the unsafe variant is what the compiler will
+-- insert, but guarded by an explicit assertion elsewhere.  Safe
+-- operations are useful when the optimiser wants to move e.g. a
+-- division to a location where the divisor may be zero, but where the
+-- result will only be used when it is non-zero (so it doesn't matter
+-- what result is provided with a zero divisor, as long as the program
+-- keeps running).
+data Safety = Unsafe | Safe deriving (Eq, Ord, Show)
+
 -- | Binary operators.  These correspond closely to the binary operators in
 -- LLVM.  Most are parametrised by their expected input and output
 -- types.
@@ -308,28 +327,38 @@ data BinOp = Add IntType Overflow -- ^ Integer addition.
            | Mul IntType Overflow -- ^ Integer multiplication.
            | FMul FloatType -- ^ Floating-point multiplication.
 
-           | UDiv IntType
+           | UDiv IntType Safety
              -- ^ Unsigned integer division.  Rounds towards
              -- negativity infinity.  Note: this is different
              -- from LLVM.
-           | SDiv IntType
+           | UDivUp IntType Safety
+             -- ^ Unsigned integer division.  Rounds towards positive
+             -- infinity.
+
+           | SDiv IntType Safety
              -- ^ Signed integer division.  Rounds towards
              -- negativity infinity.  Note: this is different
              -- from LLVM.
+           | SDivUp IntType Safety
+             -- ^ Signed integer division.  Rounds towards positive
+             -- infinity.
+
            | FDiv FloatType -- ^ Floating-point division.
            | FMod FloatType -- ^ Floating-point modulus.
 
-           | UMod IntType
+           | UMod IntType Safety
              -- ^ Unsigned integer modulus; the countepart to 'UDiv'.
-           | SMod IntType
+           | SMod IntType Safety
              -- ^ Signed integer modulus; the countepart to 'SDiv'.
 
-           | SQuot IntType
-             -- ^ Signed integer division.  Rounds towards zero.
-             -- This corresponds to the @sdiv@ instruction in LLVM.
-           | SRem IntType
-             -- ^ Signed integer division.  Rounds towards zero.
-             -- This corresponds to the @srem@ instruction in LLVM.
+           | SQuot IntType Safety
+             -- ^ Signed integer division.  Rounds towards zero.  This
+             -- corresponds to the @sdiv@ instruction in LLVM and
+             -- integer division in C.
+           | SRem IntType Safety
+             -- ^ Signed integer division.  Rounds towards zero.  This
+             -- corresponds to the @srem@ instruction in LLVM and
+             -- integer modulo in C.
 
            | SMin IntType
              -- ^ Returns the smallest of two signed integers.
@@ -427,14 +456,16 @@ allBinOps = concat [ map (`Add` OverflowWrap) allIntTypes
                    , map FSub allFloatTypes
                    , map (`Mul` OverflowWrap) allIntTypes
                    , map FMul allFloatTypes
-                   , map UDiv allIntTypes
-                   , map SDiv allIntTypes
+                   , map (`UDiv` Unsafe) allIntTypes
+                   , map (`UDivUp` Unsafe) allIntTypes
+                   , map (`SDiv` Unsafe) allIntTypes
+                   , map (`SDivUp` Unsafe) allIntTypes
                    , map FDiv allFloatTypes
                    , map FMod allFloatTypes
-                   , map UMod allIntTypes
-                   , map SMod allIntTypes
-                   , map SQuot allIntTypes
-                   , map SRem allIntTypes
+                   , map (`UMod` Unsafe) allIntTypes
+                   , map (`SMod` Unsafe) allIntTypes
+                   , map (`SQuot` Unsafe) allIntTypes
+                   , map (`SRem` Unsafe) allIntTypes
                    , map SMin allIntTypes
                    , map UMin allIntTypes
                    , map FMin allFloatTypes
@@ -518,7 +549,9 @@ doBinOp FSub{}   = doFloatBinOp (-) (-)
 doBinOp Mul{}    = doIntBinOp doMul
 doBinOp FMul{}   = doFloatBinOp (*) (*)
 doBinOp UDiv{}   = doRiskyIntBinOp doUDiv
+doBinOp UDivUp{} = doRiskyIntBinOp doUDivUp
 doBinOp SDiv{}   = doRiskyIntBinOp doSDiv
+doBinOp SDivUp{} = doRiskyIntBinOp doSDivUp
 doBinOp FDiv{}   = doFloatBinOp (/) (/)
 doBinOp FMod{}   = doFloatBinOp mod' mod'
 doBinOp UMod{}   = doRiskyIntBinOp doUMod
@@ -582,21 +615,35 @@ doSub v1 v2 = intValue (intValueType v1) $ intToInt64 v1 - intToInt64 v2
 doMul :: IntValue -> IntValue -> IntValue
 doMul v1 v2 = intValue (intValueType v1) $ intToInt64 v1 * intToInt64 v2
 
--- | Unsigned integer division.  Rounds towards
--- negativity infinity.  Note: this is different
--- from LLVM.
+-- | Unsigned integer division.  Rounds towards negativity infinity.
+-- Note: this is different from LLVM.
 doUDiv :: IntValue -> IntValue -> Maybe IntValue
 doUDiv v1 v2
   | zeroIshInt v2 = Nothing
-  | otherwise = Just $ intValue (intValueType v1) $ intToWord64 v1 `div` intToWord64 v2
+  | otherwise = Just $ intValue (intValueType v1) $
+                intToWord64 v1 `div` intToWord64 v2
 
--- | Signed integer division.  Rounds towards
--- negativity infinity.  Note: this is different
--- from LLVM.
+-- | Unsigned integer division.  Rounds towards positive infinity.
+doUDivUp :: IntValue -> IntValue -> Maybe IntValue
+doUDivUp v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $
+                (intToWord64 v1 + intToWord64 v2 - 1) `div` intToWord64 v2
+
+-- | Signed integer division.  Rounds towards negativity infinity.
+-- Note: this is different from LLVM.
 doSDiv :: IntValue -> IntValue -> Maybe IntValue
 doSDiv v1 v2
   | zeroIshInt v2 = Nothing
-  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `div` intToInt64 v2
+  | otherwise = Just $ intValue (intValueType v1) $
+                intToInt64 v1 `div` intToInt64 v2
+
+-- | Signed integer division.  Rounds towards positive infinity.
+doSDivUp :: IntValue -> IntValue -> Maybe IntValue
+doSDivUp v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $
+                (intToInt64 v1 + intToInt64 v2 - 1) `div` intToInt64 v2
 
 -- | Unsigned integer modulus; the countepart to 'UDiv'.
 doUMod :: IntValue -> IntValue -> Maybe IntValue
@@ -796,12 +843,14 @@ binOpType :: BinOp -> PrimType
 binOpType (Add t _) = IntType t
 binOpType (Sub t _) = IntType t
 binOpType (Mul t _) = IntType t
-binOpType (SDiv t)  = IntType t
-binOpType (SMod t)  = IntType t
-binOpType (SQuot t) = IntType t
-binOpType (SRem t)  = IntType t
-binOpType (UDiv t)  = IntType t
-binOpType (UMod t)  = IntType t
+binOpType (SDiv t _)   = IntType t
+binOpType (SDivUp t _) = IntType t
+binOpType (SMod t _)  = IntType t
+binOpType (SQuot t _) = IntType t
+binOpType (SRem t _)  = IntType t
+binOpType (UDiv t _)  = IntType t
+binOpType (UDivUp t _) = IntType t
+binOpType (UMod t _)   = IntType t
 binOpType (SMin t)  = IntType t
 binOpType (UMin t)  = IntType t
 binOpType (FMin t)  = FloatType t
@@ -1176,12 +1225,22 @@ instance Pretty BinOp where
   ppr (FAdd t)  = taggedF "fadd" t
   ppr (FSub t)  = taggedF "fsub" t
   ppr (FMul t)  = taggedF "fmul" t
-  ppr (UDiv t)  = taggedI "udiv" t
-  ppr (UMod t)  = taggedI "umod" t
-  ppr (SDiv t)  = taggedI "sdiv" t
-  ppr (SMod t)  = taggedI "smod" t
-  ppr (SQuot t) = taggedI "squot" t
-  ppr (SRem t)  = taggedI "srem" t
+  ppr (UDiv t Safe)    = taggedI "udiv_safe" t
+  ppr (UDiv t Unsafe)  = taggedI "udiv" t
+  ppr (UDivUp t Safe)   = taggedI "udiv_up_safe" t
+  ppr (UDivUp t Unsafe) = taggedI "udiv_up" t
+  ppr (UMod t Safe)    = taggedI "umod_safe" t
+  ppr (UMod t Unsafe)  = taggedI "umod" t
+  ppr (SDiv t Safe)    = taggedI "sdiv_safe" t
+  ppr (SDiv t Unsafe)  = taggedI "sdiv" t
+  ppr (SDivUp t Safe)   = taggedI "sdiv_up_safe" t
+  ppr (SDivUp t Unsafe) = taggedI "sdiv_up" t
+  ppr (SMod t Safe)    = taggedI "smod_safe" t
+  ppr (SMod t Unsafe)  = taggedI "smod" t
+  ppr (SQuot t Safe)   = taggedI "squot_safe" t
+  ppr (SQuot t Unsafe) = taggedI "squot" t
+  ppr (SRem t Safe)    = taggedI "srem_safe" t
+  ppr (SRem t Unsafe)  = taggedI "srem" t
   ppr (FDiv t)  = taggedF "fdiv" t
   ppr (FMod t)  = taggedF "fmod" t
   ppr (SMin t)  = taggedI "smin" t

@@ -2,11 +2,9 @@
 module Futhark.Analysis.PrimExp.Generalize
   (
     leastGeneralGeneralization
-  , existentialize
   ) where
 
 import           Data.List (elemIndex)
-import           Control.Monad.State
 
 import           Futhark.Analysis.PrimExp
 import           Futhark.IR.Syntax.Core (Ext(..))
@@ -69,10 +67,3 @@ generalize m exp1 exp2 =
   in case elemIndex (exp1, exp2) m of
        Just i -> (LeafExp (Ext i) t, m)
        Nothing -> (LeafExp (Ext $ length m) t, m ++ [(exp1, exp2)])
-
-existentialize :: PrimExp v -> State [PrimExp v] (PrimExp (Ext v))
-existentialize e = do
-  i <- gets length
-  modify (++ [e])
-  let t = primExpType e
-  return $ LeafExp (Ext i) t

@@ -848,9 +848,15 @@ updatePattern (RecordPattern ps loc) (RecordSV svs)
                                 (n, updatePattern p sv)) ps' svs') loc
 updatePattern (PatternParens pat loc) sv =
   PatternParens (updatePattern pat sv) loc
-updatePattern pat@(Id vn (Info tp) loc) sv
-  | orderZero tp = pat
-  | otherwise = Id vn (Info $ typeFromSV sv `setUniqueness` Nonunique) loc
+updatePattern (Id vn (Info tp) loc) sv =
+  Id vn (Info $ comb tp (typeFromSV sv  `setUniqueness` Nonunique)) loc
+  -- Preserve any original zeroth-order types.
+  where comb (Scalar Arrow{}) t2 = t2
+        comb (Scalar (Record m1)) (Scalar (Record m2)) =
+          Scalar $ Record $ M.intersectionWith comb m1 m2
+        comb (Scalar (Sum m1)) (Scalar (Sum m2)) =
+          Scalar $ Sum $ M.intersectionWith (zipWith comb) m1 m2
+        comb t1 _ = t1 -- t1 must be array or prim.
 updatePattern pat@(Wildcard (Info tp) loc) sv
   | orderZero tp = pat
   | otherwise = Wildcard (Info $ typeFromSV sv) loc

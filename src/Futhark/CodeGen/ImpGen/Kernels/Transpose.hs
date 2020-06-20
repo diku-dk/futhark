@@ -11,7 +11,7 @@ import Prelude hiding (quot, rem)
 
 import Futhark.CodeGen.ImpCode.Kernels
 import Futhark.IR.Prop.Types
-import Futhark.Util.IntegralExp (IntegralExp, quot, rem, quotRoundingUp)
+import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
 
 -- | Which form of transposition to generate code for.
 data TransposeType = TransposeNormal
@@ -242,16 +242,16 @@ mapTransposeKernel desc block_dim_int args t kind =
         (num_groups, group_size) =
           case kind of
             TransposeSmall ->
-              ([(num_arrays * width * height) `quotRoundingUp` (block_dim * block_dim)],
+              ([(num_arrays * width * height) `divUp` (block_dim * block_dim)],
                [block_dim * block_dim])
             TransposeLowWidth ->
-              lowDimKernelAndGroupSize block_dim num_arrays width $ height `quotRoundingUp` muly
+              lowDimKernelAndGroupSize block_dim num_arrays width $ height `divUp` muly
             TransposeLowHeight ->
-              lowDimKernelAndGroupSize block_dim num_arrays (width `quotRoundingUp` mulx) height
+              lowDimKernelAndGroupSize block_dim num_arrays (width `divUp` mulx) height
             TransposeNormal ->
               let actual_dim = block_dim*2
-              in ( [ width `quotRoundingUp` actual_dim
-                   , height `quotRoundingUp` actual_dim
+              in ( [ width `divUp` actual_dim
+                   , height `divUp` actual_dim
                    , num_arrays]
                  , [actual_dim, actual_dim `quot` elemsPerThread, 1])
 
@@ -269,7 +269,7 @@ mapTransposeKernel desc block_dim_int args t kind =
 
 lowDimKernelAndGroupSize :: Exp -> Exp -> Exp -> Exp -> ([Exp], [Exp])
 lowDimKernelAndGroupSize block_dim num_arrays x_elems y_elems =
-  ([x_elems `quotRoundingUp` block_dim,
-    y_elems `quotRoundingUp` block_dim,
+  ([x_elems `divUp` block_dim,
+    y_elems `divUp` block_dim,
     num_arrays],
    [block_dim, block_dim, 1])

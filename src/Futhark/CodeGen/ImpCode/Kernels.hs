@@ -128,7 +128,7 @@ instance Pretty Kernel where
     (text "groups" <+> brace (ppr $ kernelNumGroups kernel) </>
      text "group_size" <+> brace (ppr $ kernelGroupSize kernel) </>
      text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
-     text "failure_tolerant" <+> ppr (kernelFailureTolerant kernel) </>
+     text "failure_tolerant" <+> brace (ppr $ kernelFailureTolerant kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
 
 -- | When we do a barrier or fence, is it at the local or global

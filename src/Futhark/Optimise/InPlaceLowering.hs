@@ -272,7 +272,7 @@ bindingScope :: Scope (Aliases lore)
              -> ForwardingM lore a
 bindingScope scope = local $ \(TopDown n vtable d x y) ->
   let entries = M.map entry scope
-      infoAliases (LetName (aliases, _)) = unNames aliases
+      infoAliases (LetName (aliases, _)) = unAliases aliases
       infoAliases _ = mempty
       entry info = Entry n (infoAliases info) d False info
   in TopDown (n+1) (entries<>vtable) d x y
@@ -285,7 +285,7 @@ bindingStm (Let pat _ _) = local $ \(TopDown n vtable d x y) ->
       entry patElem =
         let (aliases, _) = patElemDec patElem
         in (patElemName patElem,
-            Entry n (unNames aliases) d True $ LetName $ patElemDec patElem)
+            Entry n (unAliases aliases) d True $ LetName $ patElemDec patElem)
   in TopDown (n+1) (M.union entries vtable) d x y
 
 bindingNumber :: VName -> ForwardingM lore Int

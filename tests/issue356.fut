@@ -308,7 +308,7 @@ let normss [n] [D] (xs:[n][D]u32) : [n][D]f64 = map norms xs
 let means [n] [D] (xs:[D][n]f64) : [D]f64 = map mean xs
 
 let main (n: i32) =
-  let offs = 2323234545
+  let offs = i32.u32 2323234545
   let a = S2.chunki offs n
   let b = map S2.independent (map (+offs) (iota n))
   in (means (transpose (normss a)), means (transpose (normss b)))
