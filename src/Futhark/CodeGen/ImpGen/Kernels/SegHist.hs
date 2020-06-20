@@ -76,7 +76,7 @@ data SegHistSlug = SegHistSlug
 histoSpaceUsage :: HistOp KernelsMem
                 -> Imp.Count Imp.Bytes Imp.Exp
 histoSpaceUsage op =
-  sum $
+  fmap (ConvOpExp (SExt Int64 Int32)) $ sum $
   map (typeSize .
        (`arrayOfRow` histWidth op) .
        (`arrayOfShape` histShape op)) $
@@ -270,11 +270,11 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
     slugElSize (SegHistSlug op _ _ do_op) =
       case do_op of
         AtomicLocking{} ->
-          unCount
-          (sum $ map (typeSize . (`arrayOfShape` histShape op)) $
-           Prim int32 : lambdaReturnType (histOp op))
+          ConvOpExp (SExt Int64 Int32) $ unCount $
+          sum $ map (typeSize . (`arrayOfShape` histShape op)) $
+          Prim int32 : lambdaReturnType (histOp op)
         _ ->
-          unCount $ sum $
+          ConvOpExp (SExt Int64 Int32) $ unCount $ sum $
           map (typeSize . (`arrayOfShape` histShape op)) $
           lambdaReturnType (histOp op)
 
