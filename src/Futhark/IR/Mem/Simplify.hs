@@ -33,16 +33,16 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Util
 
 simpleGeneric :: (SimplifyMemory lore, Op lore ~ MemOp inner) =>
-                 Simplify.SimplifyOp lore inner
+                 (OpWithWisdom inner -> UT.UsageTable)
+              -> Simplify.SimplifyOp lore inner
               -> Simplify.SimpleOps lore
 simpleGeneric = simplifiable
 
-simplifyProgGeneric :: (SimplifyMemory lore,
-                        Op lore ~ MemOp inner) =>
-                       Simplify.SimplifyOp lore inner
+simplifyProgGeneric :: (SimplifyMemory lore, Op lore ~ MemOp inner) =>
+                       Simplify.SimpleOps lore
                     -> Prog lore -> PassM (Prog lore)
-simplifyProgGeneric onInner =
-  Simplify.simplifyProg (simpleGeneric onInner) callKernelRules
+simplifyProgGeneric ops =
+  Simplify.simplifyProg ops callKernelRules
   blockers { Engine.blockHoistBranch = blockAllocs }
   where blockAllocs vtable _ (Let _ _ (Op Alloc{})) =
           not $ ST.simplifyMemory vtable
@@ -57,11 +57,11 @@ simplifyProgGeneric onInner =
 
 simplifyStmsGeneric :: (HasScope lore m, MonadFreshNames m,
                         SimplifyMemory lore, Op lore ~ MemOp inner) =>
-                       Simplify.SimplifyOp lore inner -> Stms lore
+                       Simplify.SimpleOps lore -> Stms lore
                     -> m (ST.SymbolTable (Wise lore), Stms lore)
-simplifyStmsGeneric onInner stms = do
+simplifyStmsGeneric ops stms = do
   scope <- askScope
-  Simplify.simplifyStms (simpleGeneric onInner) callKernelRules blockers
+  Simplify.simplifyStms ops callKernelRules blockers
     scope stms
 
 isResultAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
@@ -69,26 +69,15 @@ isResultAlloc _ usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc{})) =
   UT.isInResult (patElemName bindee) usage
 isResultAlloc _ _ _ = False
 
--- | Getting the roots of what to hoist, for now only variable
--- names that represent array and memory-block sizes.
-getShapeNames :: (Mem lore, Op lore ~ MemOp op) =>
-                 Stm (Wise lore) -> Names
-getShapeNames stm =
-  let ts = map patElemType $ patternElements $ stmPattern stm
-  in freeIn (concatMap arrayDims ts) <>
-     case stmExp stm of Op (Alloc size _) -> freeIn size
-                        _                 -> mempty
-
 isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isAlloc _ _ (Let _ _ (Op Alloc{})) = True
 isAlloc _ _ _                      = False
 
-blockers :: (Mem lore, Op lore ~ MemOp inner) =>
+blockers :: (Op lore ~ MemOp inner) =>
             Simplify.HoistBlockers lore
 blockers = Engine.noExtraHoistBlockers {
     Engine.blockHoistPar    = isAlloc
   , Engine.blockHoistSeq    = isResultAlloc
-  , Engine.getArraySizes    = getShapeNames
   , Engine.isAllocation     = isAlloc mempty mempty
   }
 

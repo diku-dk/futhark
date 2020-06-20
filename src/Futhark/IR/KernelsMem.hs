@@ -18,6 +18,7 @@ module Futhark.IR.KernelsMem
   where
 
 import Futhark.Analysis.PrimExp.Convert
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.IR.Syntax
@@ -82,16 +83,28 @@ instance BinderOps (Engine.Wise KernelsMem) where
   mkLetNamesB = mkLetNamesB''
 
 simplifyProg :: Prog KernelsMem -> PassM (Prog KernelsMem)
-simplifyProg =
-  simplifyProgGeneric $ simplifyKernelOp $ const $ return ((), mempty)
+simplifyProg = simplifyProgGeneric simpleKernelsMem
 
 simplifyStms :: (HasScope KernelsMem m, MonadFreshNames m) =>
                  Stms KernelsMem
              -> m (Engine.SymbolTable (Engine.Wise KernelsMem),
                    Stms KernelsMem)
-simplifyStms =
-  simplifyStmsGeneric $ simplifyKernelOp $ const $ return ((), mempty)
+simplifyStms = simplifyStmsGeneric simpleKernelsMem
 
 simpleKernelsMem :: Engine.SimpleOps KernelsMem
 simpleKernelsMem =
-  simpleGeneric $ simplifyKernelOp $ const $ return ((), mempty)
+  simpleGeneric usage $ simplifyKernelOp $ const $ return ((), mempty)
+  where
+    -- Slightly hackily, we look at the inside of SegGroup operations
+    -- to figure out the sizes of local memory allocations, and add
+    -- usages for those sizes.  This is necessary so the simplifier
+    -- will hoist those sizes out as far as possible (most
+    -- importantly, past the versioning If).
+    usage (SegOp (SegMap SegGroup{} _ _ kbody)) = localAllocs kbody
+    usage _ = mempty
+    localAllocs = foldMap stmLocalAlloc . kernelBodyStms
+    stmLocalAlloc = expLocalAlloc . stmExp
+    expLocalAlloc (Op (Alloc (Var v) (Space "local"))) =
+      UT.sizeUsage v
+    expLocalAlloc _ =
+      mempty
