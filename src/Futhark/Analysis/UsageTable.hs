@@ -10,10 +10,13 @@ module Futhark.Analysis.UsageTable
   , isConsumed
   , isInResult
   , isUsedDirectly
+  , isSize
   , usages
   , usage
   , consumedUsage
   , inResultUsage
+  , sizeUsage
+  , sizeUsages
   , Usages
   , usageInStm
   )
@@ -78,6 +81,10 @@ isInResult = is inResultU
 isUsedDirectly :: VName -> UsageTable -> Bool
 isUsedDirectly = is presentU
 
+-- | Is this name used as the size of something (array or memory block)?
+isSize :: VName -> UsageTable -> Bool
+isSize = is sizeU
+
 -- | Construct a usage table reflecting that these variables have been
 -- used.
 usages :: Names -> UsageTable
@@ -97,6 +104,16 @@ consumedUsage name = UsageTable $ M.singleton name consumedU
 inResultUsage :: VName -> UsageTable
 inResultUsage name = UsageTable $ M.singleton name inResultU
 
+-- | Construct a usage table where the given variable has been used as
+-- an array or memory size.
+sizeUsage :: VName -> UsageTable
+sizeUsage name = UsageTable $ M.singleton name sizeU
+
+-- | Construct a usage table where the given names have been used as
+-- an array or memory size.
+sizeUsages :: Names -> UsageTable
+sizeUsages names = UsageTable $ M.fromList [ (name, sizeU) | name <- namesToList names ]
+
 -- | A description of how a single variable has been used.
 newtype Usages = Usages Int -- Bitmap representation for speed.
   deriving (Eq, Ord, Show)
@@ -107,10 +124,11 @@ instance Semigroup Usages where
 instance Monoid Usages where
   mempty = Usages 0
 
-consumedU, inResultU, presentU :: Usages
+consumedU, inResultU, presentU, sizeU :: Usages
 consumedU = Usages 1
 inResultU = Usages 2
 presentU = Usages 4
+sizeU = Usages 8
 
 -- | Check whether the bits that are set in the first argument are
 -- also set in the second.
@@ -131,8 +149,9 @@ usageInStm (Let pat lore e) =
            usages (freeIn e)]
   where usageInPat =
           usages (mconcat (map freeIn $ patternElements pat)
-                     `namesSubtract`
-                     namesFromList (patternNames pat))
+                  `namesSubtract`
+                  namesFromList (patternNames pat)) <>
+          sizeUsages (foldMap (freeIn . patElemType) (patternElements pat))
         usageInExpLore =
           usages $ freeIn lore
 
