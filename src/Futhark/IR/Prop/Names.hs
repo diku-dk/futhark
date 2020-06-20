@@ -6,6 +6,7 @@
 module Futhark.IR.Prop.Names
        ( -- * Free names
          Names
+       , namesIntMap
        , nameIn
        , oneName
        , namesFromList
@@ -44,12 +45,20 @@ import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Scope
 import Futhark.Util.Pretty
 
--- | A set of names.
-newtype Names = Names { unNames :: IM.IntMap VName }
+-- | A set of names.  Note that the 'Ord' instance is a dummy that
+-- treats everything as 'EQ' if '==', and otherwise 'LT'.
+newtype Names = Names (IM.IntMap VName)
               deriving (Eq, Show)
 
+-- | Retrieve the data structure underlying the names representation.
+namesIntMap :: Names -> IM.IntMap VName
+namesIntMap (Names m) = m
+
+instance Ord Names where
+  x `compare` y = if x == y then EQ else LT
+
 instance Semigroup Names where
-  vs1 <> vs2 = Names $ unNames vs1 <> unNames vs2
+  vs1 <> vs2 = Names $ namesIntMap vs1 <> namesIntMap vs2
 
 instance Monoid Names where
   mempty = Names mempty
@@ -67,7 +76,7 @@ namesFromList vs = Names $ IM.fromList $ zip (map baseTag vs) vs
 
 -- | Turn a name set into a list of names.  Slow.
 namesToList :: Names -> [VName]
-namesToList = IM.elems . unNames
+namesToList = IM.elems . namesIntMap
 
 -- | Construct a name set from a single name.
 oneName :: VName -> Names
@@ -79,7 +88,7 @@ namesIntersection (Names vs1) (Names vs2) = Names $ IM.intersection vs1 vs2
 
 -- | Do the two name sets intersect?
 namesIntersect :: Names -> Names -> Bool
-namesIntersect vs1 vs2 = not $ IM.disjoint (unNames vs1) (unNames vs2)
+namesIntersect vs1 vs2 = not $ IM.disjoint (namesIntMap vs1) (namesIntMap vs2)
 
 -- | Subtract the latter name set from the former.
 namesSubtract :: Names -> Names -> Names
@@ -316,6 +325,9 @@ instance FreeDec a => FreeDec [a] where
 instance FreeDec a => FreeDec (Maybe a) where
   precomputed Nothing = id
   precomputed (Just a) = precomputed a
+
+instance FreeDec Names where
+  precomputed _ fv = fv
 
 -- | The names bound by the bindings immediately in a t'Body'.
 boundInBody :: Body lore -> Names

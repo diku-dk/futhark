@@ -7,7 +7,7 @@
 module Futhark.IR.Aliases
        ( -- * The Lore definition
          Aliases
-       , Names' (..)
+       , AliasDec (..)
        , VarAliases
        , ConsumedInExp
        , BodyAliasing
@@ -57,40 +57,40 @@ import qualified Futhark.Util.Pretty as PP
 -- | The lore for the basic representation.
 data Aliases lore
 
--- | A wrapper around 'Names' to get around the fact that we need an
--- 'Ord' instance, which 'Names' does not have.
-newtype Names' = Names' { unNames :: Names }
+-- | A wrapper around 'AliasDec to get around the fact that we need an
+-- 'Ord' instance, which 'AliasDec does not have.
+newtype AliasDec = AliasDec { unAliases :: Names }
                deriving (Show)
 
-instance Semigroup Names' where
-  x <> y = Names' $ unNames x <> unNames y
+instance Semigroup AliasDec where
+  x <> y = AliasDec $ unAliases x <> unAliases y
 
-instance Monoid Names' where
-  mempty = Names' mempty
+instance Monoid AliasDec where
+  mempty = AliasDec mempty
 
-instance Eq Names' where
+instance Eq AliasDec where
   _ == _ = True
 
-instance Ord Names' where
+instance Ord AliasDec where
   _ `compare` _ = EQ
 
-instance Rename Names' where
-  rename (Names' names) = Names' <$> rename names
+instance Rename AliasDec where
+  rename (AliasDec names) = AliasDec <$> rename names
 
-instance Substitute Names' where
-  substituteNames substs (Names' names) = Names' $ substituteNames substs names
+instance Substitute AliasDec where
+  substituteNames substs (AliasDec names) = AliasDec $ substituteNames substs names
 
-instance FreeIn Names' where
+instance FreeIn AliasDec where
   freeIn' = const mempty
 
-instance PP.Pretty Names' where
-  ppr = PP.commasep . map PP.ppr . namesToList . unNames
+instance PP.Pretty AliasDec where
+  ppr = PP.commasep . map PP.ppr . namesToList . unAliases
 
 -- | The aliases of the let-bound variable.
-type VarAliases = Names'
+type VarAliases = AliasDec
 
 -- | Everything consumed in the expression.
-type ConsumedInExp = Names'
+type ConsumedInExp = AliasDec
 
 -- | The aliases of what is returned by the t'Body', and what is
 -- consumed inside of it.
@@ -108,9 +108,9 @@ instance (Decorations lore, CanBeAliased (Op lore)) =>
   type Op (Aliases lore) = OpWithAliases (Op lore)
 
 instance AliasesOf (VarAliases, dec) where
-  aliasesOf = unNames . fst
+  aliasesOf = unAliases . fst
 
-instance FreeDec Names' where
+instance FreeDec AliasDec where
 
 withoutAliases :: (HasScope (Aliases lore) m, Monad m) =>
                  ReaderT (Scope lore) m a -> m a
@@ -123,13 +123,13 @@ instance (ASTLore lore, CanBeAliased (Op lore)) => ASTLore (Aliases lore) where
     withoutAliases . expTypesFromPattern . removePatternAliases
 
 instance (ASTLore lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
-  bodyAliases = map unNames . fst . fst . bodyDec
-  consumedInBody = unNames . snd . fst . bodyDec
+  bodyAliases = map unAliases . fst . fst . bodyDec
+  consumedInBody = unAliases . snd . fst . bodyDec
 
 instance PrettyAnnot (PatElemT dec) =>
   PrettyAnnot (PatElemT (VarAliases, dec)) where
 
-  ppAnnot (PatElem name (Names' als, dec)) =
+  ppAnnot (PatElem name (AliasDec als, dec)) =
     let alias_comment = PP.oneLine <$> aliasComment name als
     in case (alias_comment, ppAnnot (PatElem name dec)) of
          (_, Nothing) ->
@@ -158,7 +158,7 @@ instance (ASTLore lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) whe
                    bodyAliases body
               _ -> Nothing
 
-          exp_dec = case namesToList $ unNames consumed of
+          exp_dec = case namesToList $ unAliases consumed of
             []  -> Nothing
             als -> Just $ PP.oneLine $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
@@ -221,7 +221,7 @@ removeLambdaAliases :: CanBeAliased (Op lore) =>
                        Lambda (Aliases lore) -> Lambda lore
 removeLambdaAliases = runIdentity . rephraseLambda removeAliases
 
-removePatternAliases :: PatternT (Names', a)
+removePatternAliases :: PatternT (AliasDec, a)
                      -> PatternT a
 removePatternAliases = runIdentity . rephrasePattern (return . snd)
 
@@ -251,7 +251,7 @@ mkPatternAliases pat e =
   in (zipWith annotateBindee (patternContextElements pat) context_als,
       zipWith annotateBindee (patternValueElements pat) als)
   where annotateBindee bindee names =
-            bindee `setPatElemLore` (Names' names', patElemDec bindee)
+            bindee `setPatElemLore` (AliasDec names', patElemDec bindee)
           where names' =
                   case patElemType bindee of
                     Array {} -> names
@@ -292,7 +292,7 @@ mkBodyAliases bnds res =
         foldMap (namesFromList . patternNames . stmPattern) bnds
       aliases' = map (`namesSubtract` boundNames) aliases
       consumed' = consumed `namesSubtract` boundNames
-  in (map Names' aliases', Names' consumed')
+  in (map AliasDec aliases', AliasDec consumed')
 
 mkStmsAliases :: Aliased lore =>
                  Stms lore -> [SubExp]
@@ -335,13 +335,13 @@ mkAliasedLetStm :: (ASTLore lore, CanBeAliased (Op lore)) =>
                 -> Stm (Aliases lore)
 mkAliasedLetStm pat (StmAux cs attrs dec) e =
   Let (addAliasesToPattern pat e)
-  (StmAux cs attrs (Names' $ consumedInExp e, dec))
+  (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
   e
 
 instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where
   mkExpDec pat e =
     let dec = mkExpDec (removePatternAliases pat) $ removeExpAliases e
-    in (Names' $ consumedInExp e, dec)
+    in (AliasDec $ consumedInExp e, dec)
 
   mkExpPat ctx val e =
     addAliasesToPattern (mkExpPat ctx val $ removeExpAliases e) e

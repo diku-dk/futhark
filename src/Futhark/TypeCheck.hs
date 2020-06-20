@@ -354,7 +354,7 @@ expandAliases :: Names -> Env lore -> Names
 expandAliases names env = names <> aliasesOfAliases
   where aliasesOfAliases =  mconcat . map look . namesToList $ names
         look k = case M.lookup k $ envVtable env of
-          Just (LetName (als, _)) -> unNames als
+          Just (LetName (als, _)) -> unAliases als
           _                       -> mempty
 
 binding :: Checkable lore =>
@@ -365,11 +365,11 @@ binding bnds = check . local (`bindVars` bnds)
   where bindVars = M.foldlWithKey' bindVar
         boundnames = M.keys bnds
 
-        bindVar env name (LetName (Names' als, dec)) =
+        bindVar env name (LetName (AliasDec als, dec)) =
           let als' | primType (typeOf dec) = mempty
                    | otherwise = expandAliases als env
           in env { envVtable =
-                     M.insert name (LetName (Names' als', dec)) $ envVtable env
+                     M.insert name (LetName (AliasDec als', dec)) $ envVtable env
                  }
         bindVar env name dec =
           env { envVtable = M.insert name dec $ envVtable env }
@@ -397,7 +397,7 @@ lookupAliases name = do
            else oneName name <> aliases info
 
 aliases :: NameInfo (Aliases lore) -> Names
-aliases (LetName (als, _)) = unNames als
+aliases (LetName (als, _)) = unAliases als
 aliases _ = mempty
 
 subExpAliasesM :: Checkable lore => SubExp -> TypeM lore Names
