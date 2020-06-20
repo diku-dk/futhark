@@ -62,7 +62,7 @@ analyseStm :: (ASTLore lore, CanBeAliased (Op lore)) =>
 analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
   let e' = analyseExp aliases e
       pat' = addAliasesToPattern pat e'
-      lore' = (Names' $ consumedInExp e', dec)
+      lore' = (AliasDec $ consumedInExp e', dec)
   in Let pat' (StmAux cs attrs lore') e'
 
 analyseExp :: (ASTLore lore, CanBeAliased (Op lore)) =>
@@ -74,11 +74,11 @@ analyseExp aliases (If cond tb fb dec) =
   let Body ((tb_als, tb_cons), tb_dec) tb_stms tb_res = analyseBody aliases tb
       Body ((fb_als, fb_cons), fb_dec) fb_stms fb_res = analyseBody aliases fb
       cons = tb_cons <> fb_cons
-      isConsumed v = any (`nameIn` unNames cons) $
+      isConsumed v = any (`nameIn` unAliases cons) $
                      v : namesToList (M.findWithDefault mempty v aliases)
-      notConsumed = Names' . namesFromList .
+      notConsumed = AliasDec . namesFromList .
                     filter (not . isConsumed) .
-                    namesToList . unNames
+                    namesToList . unAliases
       tb_als' = map notConsumed tb_als
       fb_als' = map notConsumed fb_als
       tb' = Body ((tb_als', tb_cons), tb_dec) tb_stms tb_res
