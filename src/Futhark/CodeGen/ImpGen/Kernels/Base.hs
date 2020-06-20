@@ -301,10 +301,10 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
   let segment_size = last dims'
       crossesSegment from to = (to-from) .>. (to `rem` segment_size)
 
-  -- groupScan needs to treat the output as a one-dimensional array of
-  -- scan elements, so we invent some new flattened arrays here.  XXX:
-  -- this assumes that the original index function is just row-major,
-  -- but does not actually verify it.
+  -- groupScan needs to treat the scan output as a one-dimensional
+  -- array of scan elements, so we invent some new flattened arrays
+  -- here.  XXX: this assumes that the original index function is just
+  -- row-major, but does not actually verify it.
   dims_flat <- dPrimV "dims_flat" $ product dims'
   let flattened pe = do
         MemLocation mem _ _ <-
@@ -314,7 +314,10 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
         sArray (baseString (patElemName pe) ++ "_flat")
           (elemType pe_t) (Shape arr_dims) $
           ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) arr_dims
-  arrs_flat <- mapM flattened $ patternElements pat
+
+      num_scan_results = sum $ map (length . segBinOpNeutral) scans
+
+  arrs_flat <- mapM flattened $ take num_scan_results $ patternElements pat
 
   forM_ scans $ \scan -> do
     let scan_op = segBinOpLambda scan
@@ -999,7 +1002,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
   barrier
 
   sComment "restore correct values for first block" $
-    sWhen is_first_block $forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
+    sWhen is_first_block $ forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
       if primType (paramType y)
       then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
       else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
