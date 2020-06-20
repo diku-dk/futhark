@@ -13,8 +13,9 @@ module Futhark.CodeGen.ImpGen.Kernels
   where
 
 import Control.Monad.Except
+import qualified Data.Map as M
 import Data.Maybe
-import Data.List ()
+import Data.List (foldl')
 
 import Prelude hiding (quot)
 
@@ -137,6 +138,34 @@ segOpCompiler pat (SegHist (SegThread num_groups group_size _) space ops _ kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ pretty (segLevel segop) ++ " for rhs of pattern " ++ pretty pat
 
+-- Create boolean expression that checks whether all kernels in the
+-- enclosed code do not use more local memory than we have available.
+-- We look at *all* the kernels here, even those that might be
+-- otherwise protected by their own multi-versioning branches deeper
+-- down.  Currently the compiler will not generate multi-versioning
+-- that makes this a problem, but it might in the future.
+checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe Imp.Exp)
+checkLocalMemoryReqs code = do
+  scope <- askScope
+  let alloc_sizes = map (sum . localAllocSizes . Imp.kernelBody) $ getKernels code
+
+  -- If any of the sizes involve a variable that is not known at this
+  -- point, then we cannot check the requirements.
+  if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
+    then return Nothing
+    else do
+    local_memory_capacity <- dPrim "local_memory_capacity" int32
+    sOp $ Imp.GetSizeMax local_memory_capacity SizeLocalMemory
+    let fits size = unCount size .<=. Imp.vi32 local_memory_capacity
+    return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
+  where getKernels = foldMap getKernel
+        getKernel (Imp.CallKernel k) = [k]
+        getKernel _ = []
+
+        localAllocSizes = foldMap localAllocSize
+        localAllocSize (Imp.LocalAlloc _ size) = [size]
+        localAllocSize _ = []
+
 expCompiler :: ExpCompiler KernelsMem HostEnv Imp.HostOp
 
 -- We generate a simple kernel for itoa and replicate.
@@ -153,6 +182,20 @@ expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   return ()
+
+-- This is a multi-versioning If created by incremental flattening.
+-- We need to augment the conditional with a check that any local
+-- memory requirements in tbranch are compatible with the hardware.
+-- We do not check anything for fbranch, as we assume that it will
+-- always be safe (and what would we do if none of the branches would
+-- work?).
+expCompiler dest (If cond tbranch fbranch (IfDec _ IfEquiv)) = do
+  tcode <- collect $ compileBody dest tbranch
+  fcode <- collect $ compileBody dest fbranch
+  check <- checkLocalMemoryReqs tcode
+  emit $ case check of
+           Nothing -> fcode
+           Just ok -> Imp.If (ok .&&. toExp' Bool cond) tcode fcode
 
 expCompiler dest e =
   defCompileExp dest e
