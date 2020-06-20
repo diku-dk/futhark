@@ -156,8 +156,13 @@ checkLocalMemoryReqs code = do
     else do
     local_memory_capacity <- dPrim "local_memory_capacity" int32
     sOp $ Imp.GetSizeMax local_memory_capacity SizeLocalMemory
-    let fits size = unCount size .<=. Imp.vi32 local_memory_capacity
+
+    let local_memory_capacity_64 =
+          ConvOpExp (SExt Int32 Int64) $ Imp.vi32 local_memory_capacity
+        fits size =
+          unCount size .<=. local_memory_capacity_64
     return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
+
   where getKernels = foldMap getKernel
         getKernel (Imp.CallKernel k) = [k]
         getKernel _ = []
