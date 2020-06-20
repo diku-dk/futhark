@@ -723,7 +723,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
       ((intra_ok, intra_suff_key), intra_suff_stms) <- do
 
         ((intra_suff, suff_key), check_suff_stms) <-
-          sufficientParallelism "suff_intra_par" [intra_avail_par] $
+          sufficientParallelism "suff_intra_par" (nest_ws ++ [intra_avail_par]) $
           (outer_suff_key, False) : path
 
         runBinder $ do
