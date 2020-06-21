@@ -76,4 +76,7 @@ instance BinderOps (Engine.Wise MCMem) where
   mkLetNamesB = mkLetNamesB''
 
 simplifyProg :: Prog MCMem -> PassM (Prog MCMem)
-simplifyProg = simplifyProgGeneric simplifySegOp
+simplifyProg = simplifyProgGeneric simpleMCMem
+
+simpleMCMem :: Engine.SimpleOps MCMem
+simpleMCMem = simpleGeneric (const mempty) simplifySegOp

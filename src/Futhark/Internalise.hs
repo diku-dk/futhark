@@ -468,8 +468,8 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
               I.BasicOp $ I.BinOp (Mul Int32 I.OverflowWrap) step_i32 step_sign_i32
 
   num_elems <- certifying cs $
-               letSubExp "num_elems" =<<
-               eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)
+               letSubExp "num_elems" $
+               I.BasicOp $ I.BinOp (SDivUp Int32 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   bindExtSizes (E.toStruct ret) retext [se]
@@ -993,8 +993,9 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   -- Something like a division-rounding-up, but accomodating negative
   -- operands.
   let divRounding x y =
-        eBinOp (SQuot Int32) (eBinOp (Add Int32 I.OverflowWrap) x
-                              (eBinOp (Sub Int32 I.OverflowWrap) y (eSignum $ toExp s'))) y
+        eBinOp (SQuot Int32 Unsafe)
+        (eBinOp (Add Int32 I.OverflowWrap) x
+         (eBinOp (Sub Int32 I.OverflowWrap) y (eSignum $ toExp s'))) y
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
 
   -- Bounds checks depend on whether we are slicing forwards or
@@ -1260,10 +1261,10 @@ internaliseBinOp _ desc E.Times x y (E.FloatType t) _ =
   simpleBinOp desc (I.FMul t) x y
 internaliseBinOp loc desc E.Divide x y (E.Signed t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.SDiv t) x y
+  simpleBinOp desc (I.SDiv t I.Unsafe) x y
 internaliseBinOp loc desc E.Divide x y (E.Unsigned t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.UDiv t) x y
+  simpleBinOp desc (I.UDiv t I.Unsafe) x y
 internaliseBinOp _ desc E.Divide x y (E.FloatType t) _ =
   simpleBinOp desc (I.FDiv t) x y
 internaliseBinOp _ desc E.Pow x y (E.FloatType t) _ =
@@ -1275,24 +1276,24 @@ internaliseBinOp _ desc E.Pow x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Pow t) x y
 internaliseBinOp loc desc E.Mod x y (E.Signed t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.SMod t) x y
+  simpleBinOp desc (I.SMod t I.Unsafe) x y
 internaliseBinOp loc desc E.Mod x y (E.Unsigned t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.UMod t) x y
+  simpleBinOp desc (I.UMod t I.Unsafe) x y
 internaliseBinOp _ desc E.Mod x y (E.FloatType t) _ =
   simpleBinOp desc (I.FMod t) x y
 internaliseBinOp loc desc E.Quot x y (E.Signed t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.SQuot t) x y
+  simpleBinOp desc (I.SQuot t I.Unsafe) x y
 internaliseBinOp loc desc E.Quot x y (E.Unsigned t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.UDiv t) x y
+  simpleBinOp desc (I.UDiv t I.Unsafe) x y
 internaliseBinOp loc desc E.Rem x y (E.Signed t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.SRem t) x y
+  simpleBinOp desc (I.SRem t I.Unsafe) x y
 internaliseBinOp loc desc E.Rem x y (E.Unsigned t) _ =
   certifyingNonzero loc t y $
-  simpleBinOp desc (I.UMod t) x y
+  simpleBinOp desc (I.UMod t I.Unsafe) x y
 internaliseBinOp _ desc E.ShiftR x y (E.Signed t) _ =
   simpleBinOp desc (I.AShr t) x y
 internaliseBinOp _ desc E.ShiftR x y (E.Unsigned t) _ =

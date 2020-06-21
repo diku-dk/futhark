@@ -9,9 +9,9 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
   )
   where
 
+import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Identity
-import Control.Monad.Reader
 import Data.FileEmbed
 import Data.Maybe
 import qualified Data.Set as S
@@ -21,12 +21,14 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Quote.CUDA as CUDAC
 
-import qualified Futhark.CodeGen.Backends.GenericC as GenericC
+import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
+import Futhark.Error (compilerLimitationS)
+import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (prettyOneLine)
@@ -40,22 +42,29 @@ translateKernels :: KernelTarget
                  -> ImpKernels.Program
                  -> ImpOpenCL.Program
 translateKernels target prog =
-  let (prog', ToOpenCL kernels used_types sizes failures) =
-        flip runState initialOpenCL $ do
+  let (prog',
+       ToOpenCL kernels device_funs used_types sizes failures) =
+
+        (`runState` initialOpenCL) . (`runReaderT` defFuns prog) $ do
           let ImpKernels.Definitions
                 (ImpKernels.Constants ps consts)
                 (ImpKernels.Functions funs) = prog
-          consts' <- runReaderT (traverse (onHostOp target) consts)
-                     (nameFromString "val")
+          consts' <- traverse (onHostOp target) consts
           funs' <- forM funs $ \(fname, fun) ->
-            (fname,) <$> runReaderT (traverse (onHostOp target) fun) fname
+            (fname,) <$> traverse (onHostOp target) fun
+
           return $ ImpOpenCL.Definitions
             (ImpOpenCL.Constants ps consts')
             (ImpOpenCL.Functions funs')
 
+      (device_prototypes, device_defs) = unzip $ M.elems device_funs
       kernels' = M.map fst kernels
       opencl_code = openClCode $ map snd $ M.elems kernels
-      opencl_prelude = pretty $ genPrelude target used_types
+
+      opencl_prelude =
+        unlines [pretty $ genPrelude target used_types,
+                 unlines $ map pretty device_prototypes,
+                 unlines $ map pretty device_defs]
 
   in ImpOpenCL.Program opencl_code opencl_prelude kernels'
      (S.toList used_types) (cleanSizes sizes) failures prog'
@@ -102,16 +111,22 @@ newKernelState failures = KernelState mempty failures 0 False False
 errorLabel :: KernelState -> String
 errorLabel = ("error_"++) . show . kernelNextSync
 
-data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (Safety, C.Func)
+data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (KernelSafety, C.Func)
+                         , clDevFuns :: M.Map Name (C.Definition, C.Func)
                          , clUsedTypes :: S.Set PrimType
                          , clSizes :: M.Map Name SizeClass
                          , clFailures :: [FailureMsg]
                          }
 
 initialOpenCL :: ToOpenCL
-initialOpenCL = ToOpenCL mempty mempty mempty mempty
+initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
-type OnKernelM = ReaderT Name (State ToOpenCL)
+type AllFunctions = ImpKernels.Functions ImpKernels.HostOp
+
+lookupFunction :: Name -> AllFunctions -> Maybe ImpKernels.Function
+lookupFunction fname (ImpKernels.Functions fs) = lookup fname fs
+
+type OnKernelM = ReaderT AllFunctions (State ToOpenCL)
 
 addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =
@@ -128,16 +143,82 @@ onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
+genGPUCode :: OpsMode -> KernelCode -> [FailureMsg]
+           -> GC.CompilerM KernelOp KernelState a
+           -> (a, GC.CompilerState KernelState)
+genGPUCode mode body failures =
+  GC.runCompilerM (inKernelOperations mode body)
+  blankNameSource (newKernelState failures)
+
+-- Compilation of a device function that is not not invoked from the
+-- host, but is invoked by (perhaps multiple) kernels.
+generateDeviceFun :: Name -> ImpKernels.Function -> OnKernelM ()
+generateDeviceFun fname host_func = do
+  -- Functions are a priori always considered host-level, so we have
+  -- to convert them to device code.  This is where most of our
+  -- limitations on device-side functions (no arrays, no parallelism)
+  -- comes from.
+  let device_func = fmap toDevice host_func
+  when (any memParam $ functionInput host_func) bad
+
+  failures <- gets clFailures
+
+  let params =
+        [[C.cparam|__global int *global_failure|],
+         [C.cparam|__global int *global_failure_args|]]
+      (func, cstate) =
+        genGPUCode FunMode (functionBody device_func) failures $
+        GC.compileFun mempty params (fname, device_func)
+      kstate = GC.compUserState cstate
+
+  modify $ \s -> s
+           { clUsedTypes = typesInCode (functionBody device_func) <> clUsedTypes s
+           , clDevFuns = M.insert fname func $ clDevFuns s
+           , clFailures = kernelFailures kstate
+           }
+
+  -- Important to do this after the 'modify' call, so we propagate the
+  -- right clFailures.
+  void $ ensureDeviceFuns $ functionBody device_func
+
+  where toDevice :: HostOp -> KernelOp
+        toDevice _ = bad
+
+        memParam MemParam{} = True
+        memParam ScalarParam{} = False
+
+        bad = compilerLimitationS "Cannot generate GPU functions that use arrays."
+
+-- Ensure that this device function is available, but don't regenerate
+-- it if it already exists.
+ensureDeviceFun :: Name -> ImpKernels.Function -> OnKernelM ()
+ensureDeviceFun fname host_func = do
+  exists <- gets $ M.member fname . clDevFuns
+  unless exists $ generateDeviceFun fname host_func
+
+ensureDeviceFuns :: ImpKernels.KernelCode -> OnKernelM [Name]
+ensureDeviceFuns code = do
+  let called = calledFuncs code
+  fmap catMaybes $ forM (S.toList called) $ \fname -> do
+    def <- asks $ lookupFunction fname
+    case def of
+      Just func -> do ensureDeviceFun fname func
+                      return $ Just fname
+      Nothing -> return Nothing
+
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
 
 onKernel target kernel = do
+  called <- ensureDeviceFuns $ kernelBody kernel
+
+  -- Crucial that this is done after 'ensureDeviceFuns', as the device
+  -- functions may themselves define failure points.
   failures <- gets clFailures
+
   let (kernel_body, cstate) =
-        GenericC.runCompilerM (inKernelOperations (kernelBody kernel))
-        blankNameSource
-        (newKernelState failures) $
-        GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
-      kstate = GenericC.compUserState cstate
+        genGPUCode KernelMode (kernelBody kernel) failures $
+        GC.blockScope $ GC.compileCode $ kernelBody kernel
+      kstate = GC.compUserState cstate
 
       use_params = mapMaybe useAsParam $ kernelUses kernel
 
@@ -170,6 +251,10 @@ onKernel target kernel = do
       (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
 
   let (safety, error_init)
+        -- We conservatively assume that any called function can fail.
+        | not $ null called =
+            (SafetyFull, [])
+
         | length (kernelFailures kstate) == length failures =
             if kernelFailureTolerant kernel
             then (SafetyNone, [])
@@ -250,7 +335,7 @@ useAsParam (ScalarUse name bt) =
   let ctp = case bt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
-        _    -> GenericC.primTypeToCType bt
+        _    -> GC.primTypeToCType bt
   in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name) =
   Just [C.cparam|__global unsigned char *$id:name|]
@@ -437,7 +522,7 @@ extern volatile __shared__ char shared_mem[];
 |]
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
-compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
+compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
   where compileKernelConst (SizeConst key) =
           return [C.cexp|$id:(zEncodeString (pretty key))|]
 
@@ -447,17 +532,17 @@ kernelArgs = mapMaybe useToArg . kernelUses
         useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
         useToArg ConstUse{}       = Nothing
 
-nextErrorLabel :: GenericC.CompilerM KernelOp KernelState String
+nextErrorLabel :: GC.CompilerM KernelOp KernelState String
 nextErrorLabel =
-  errorLabel <$> GenericC.getUserState
+  errorLabel <$> GC.getUserState
 
-incErrorLabel :: GenericC.CompilerM KernelOp KernelState ()
+incErrorLabel :: GC.CompilerM KernelOp KernelState ()
 incErrorLabel =
-  GenericC.modifyUserState $ \s -> s { kernelNextSync = kernelNextSync s + 1 }
+  GC.modifyUserState $ \s -> s { kernelNextSync = kernelNextSync s + 1 }
 
-pendingError :: Bool -> GenericC.CompilerM KernelOp KernelState ()
+pendingError :: Bool -> GC.CompilerM KernelOp KernelState ()
 pendingError b =
-  GenericC.modifyUserState $ \s -> s { kernelSyncPending = b }
+  GC.modifyUserState $ \s -> s { kernelSyncPending = b }
 
 hasCommunication :: ImpKernels.KernelCode -> Bool
 hasCommunication = any communicates
@@ -465,59 +550,66 @@ hasCommunication = any communicates
         communicates Barrier{} = True
         communicates _ = False
 
-inKernelOperations :: ImpKernels.KernelCode -> GenericC.Operations KernelOp KernelState
-inKernelOperations body =
-  GenericC.Operations
-  { GenericC.opsCompiler = kernelOps
-  , GenericC.opsMemoryType = kernelMemoryType
-  , GenericC.opsWriteScalar = kernelWriteScalar
-  , GenericC.opsReadScalar = kernelReadScalar
-  , GenericC.opsAllocate = cannotAllocate
-  , GenericC.opsDeallocate = cannotDeallocate
-  , GenericC.opsCopy = copyInKernel
-  , GenericC.opsStaticArray = noStaticArrays
-  , GenericC.opsFatMemory = False
-  , GenericC.opsError = errorInKernel
+-- Whether we are generating code for a kernel or a device function.
+-- This has minor effects, such as exactly how failures are
+-- propagated.
+data OpsMode = KernelMode | FunMode deriving (Eq)
+
+inKernelOperations :: OpsMode -> ImpKernels.KernelCode
+                   -> GC.Operations KernelOp KernelState
+inKernelOperations mode body =
+  GC.Operations
+  { GC.opsCompiler = kernelOps
+  , GC.opsMemoryType = kernelMemoryType
+  , GC.opsWriteScalar = kernelWriteScalar
+  , GC.opsReadScalar = kernelReadScalar
+  , GC.opsAllocate = cannotAllocate
+  , GC.opsDeallocate = cannotDeallocate
+  , GC.opsCopy = copyInKernel
+  , GC.opsStaticArray = noStaticArrays
+  , GC.opsFatMemory = False
+  , GC.opsError = errorInKernel
+  , GC.opsCall = callInKernel
   }
   where has_communication = hasCommunication body
 
         fence FenceLocal = [C.cexp|CLK_LOCAL_MEM_FENCE|]
         fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE|]
 
-        kernelOps :: GenericC.OpCompiler KernelOp KernelState
+        kernelOps :: GC.OpCompiler KernelOp KernelState
         kernelOps (GetGroupId v i) =
-          GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
+          GC.stm [C.cstm|$id:v = get_group_id($int:i);|]
         kernelOps (GetLocalId v i) =
-          GenericC.stm [C.cstm|$id:v = get_local_id($int:i);|]
+          GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
         kernelOps (GetLocalSize v i) =
-          GenericC.stm [C.cstm|$id:v = get_local_size($int:i);|]
+          GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
         kernelOps (GetGlobalId v i) =
-          GenericC.stm [C.cstm|$id:v = get_global_id($int:i);|]
+          GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
         kernelOps (GetGlobalSize v i) =
-          GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
+          GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
         kernelOps (GetLockstepWidth v) =
-          GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
+          GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
         kernelOps (Barrier f) = do
-          GenericC.stm [C.cstm|barrier($exp:(fence f));|]
-          GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
+          GC.stm [C.cstm|barrier($exp:(fence f));|]
+          GC.modifyUserState $ \s -> s { kernelHasBarriers = True }
         kernelOps (MemFence FenceLocal) =
-          GenericC.stm [C.cstm|mem_fence_local();|]
+          GC.stm [C.cstm|mem_fence_local();|]
         kernelOps (MemFence FenceGlobal) =
-          GenericC.stm [C.cstm|mem_fence_global();|]
+          GC.stm [C.cstm|mem_fence_global();|]
         kernelOps (LocalAlloc name size) = do
           name' <- newVName $ pretty name ++ "_backing"
-          GenericC.modifyUserState $ \s ->
+          GC.modifyUserState $ \s ->
             s { kernelLocalMemory = (name', size) : kernelLocalMemory s }
-          GenericC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
+          GC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
         kernelOps (ErrorSync f) = do
           label <- nextErrorLabel
-          pending <- kernelSyncPending <$> GenericC.getUserState
+          pending <- kernelSyncPending <$> GC.getUserState
           when pending $ do
             pendingError False
-            GenericC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
-            GenericC.stm [C.cstm|if (local_failure) { return; }|]
-          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
-          GenericC.modifyUserState $ \s -> s { kernelHasBarriers = True }
+            GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
+            GC.stm [C.cstm|if (local_failure) { return; }|]
+          GC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
+          GC.modifyUserState $ \s -> s { kernelHasBarriers = True }
           incErrorLabel
         kernelOps (Atomic space aop) = atomicOps space aop
 
@@ -531,10 +623,10 @@ inKernelOperations body =
         atomicSpace _           = "global"
 
         doAtomic s t old arr ind val op ty = do
-          ind' <- GenericC.compileExp $ unCount ind
-          val' <- GenericC.compileExp val
+          ind' <- GC.compileExp $ unCount ind
+          val' <- GC.compileExp val
           cast <- atomicCast s ty
-          GenericC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+          GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
           where op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
 
         atomicOps s (AtomicAdd t old arr ind val) =
@@ -565,33 +657,33 @@ inKernelOperations body =
           doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
 
         atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
-          ind' <- GenericC.compileExp $ unCount ind
-          cmp' <- GenericC.compileExp cmp
-          val' <- GenericC.compileExp val
+          ind' <- GC.compileExp $ unCount ind
+          cmp' <- GC.compileExp cmp
+          val' <- GC.compileExp val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+          GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
           where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
 
         atomicOps s (AtomicXchg t old arr ind val) = do
-          ind' <- GenericC.compileExp $ unCount ind
-          val' <- GenericC.compileExp val
+          ind' <- GC.compileExp $ unCount ind
+          val' <- GC.compileExp val
           cast <- atomicCast s [C.cty|int|]
-          GenericC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+          GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
           where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
 
-        cannotAllocate :: GenericC.Allocate KernelOp KernelState
+        cannotAllocate :: GC.Allocate KernelOp KernelState
         cannotAllocate _ =
           error "Cannot allocate memory in kernel"
 
-        cannotDeallocate :: GenericC.Deallocate KernelOp KernelState
+        cannotDeallocate :: GC.Deallocate KernelOp KernelState
         cannotDeallocate _ _ =
           error "Cannot deallocate memory in kernel"
 
-        copyInKernel :: GenericC.Copy KernelOp KernelState
+        copyInKernel :: GC.Copy KernelOp KernelState
         copyInKernel _ _ _ _ _ _ _ =
           error "Cannot bulk copy in kernel."
 
-        noStaticArrays :: GenericC.StaticArray KernelOp KernelState
+        noStaticArrays :: GC.StaticArray KernelOp KernelState
         noStaticArrays _ _ _ _ =
           error "Cannot create static array in kernel."
 
@@ -600,29 +692,48 @@ inKernelOperations body =
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
         kernelWriteScalar =
-          GenericC.writeScalarPointerWithQuals pointerQuals
+          GC.writeScalarPointerWithQuals pointerQuals
 
         kernelReadScalar =
-          GenericC.readScalarPointerWithQuals pointerQuals
+          GC.readScalarPointerWithQuals pointerQuals
+
+        whatNext = do
+           label <- nextErrorLabel
+           pendingError True
+           return $ if has_communication
+                    then [C.citems|local_failure = true; goto $id:label;|]
+                    else if mode == FunMode
+                         then [C.citems|return 1;|]
+                         else [C.citems|return;|]
+
+        callInKernel dests fname args
+          | isBuiltInFunction fname =
+              GC.opsCall GC.defaultOperations dests fname args
+
+          | otherwise = do
+              let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
+                  args' = [C.cexp|global_failure|] : [C.cexp|global_failure_args|] :
+                          out_args ++ args
+
+              what_next <- whatNext
+
+              GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
 
         errorInKernel msg@(ErrorMsg parts) backtrace = do
-          n <- length . kernelFailures <$> GenericC.getUserState
-          GenericC.modifyUserState $ \s ->
+          n <- length . kernelFailures <$> GC.getUserState
+          GC.modifyUserState $ \s ->
             s { kernelFailures = kernelFailures s ++ [FailureMsg msg backtrace] }
           let setArgs _ [] = return []
               setArgs i (ErrorString{} : parts') = setArgs i parts'
               setArgs i (ErrorInt32 x : parts') = do
-                x' <- GenericC.compileExp x
+                x' <- GC.compileExp x
                 stms <- setArgs (i+1) parts'
                 return $ [C.cstm|global_failure_args[$int:i] = $exp:x';|] : stms
           argstms <- setArgs (0::Int) parts
-          label <- nextErrorLabel
-          pendingError True
-          let what_next
-                | has_communication = [C.citems|local_failure = true;
-                                                goto $id:label;|]
-                | otherwise         = [C.citems|return;|]
-          GenericC.stm [C.cstm|{ if (atomic_cmpxchg_i32_global(global_failure, -1, $int:n) == -1)
+
+          what_next <- whatNext
+
+          GC.stm [C.cstm|{ if (atomic_cmpxchg_i32_global(global_failure, -1, $int:n) == -1)
                                  { $stms:argstms; }
                                  $items:what_next
                                }|]

@@ -168,9 +168,9 @@ instance PrettyLore lore => Pretty (Stm lore) where
 
           stmannot =
             case attrAnnots bnd <>
-            mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
+                 mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
               []     -> id
-              annots -> (stack annots </>)
+              annots -> (align (stack annots) </>)
 
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se

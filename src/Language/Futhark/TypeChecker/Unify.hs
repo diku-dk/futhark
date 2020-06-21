@@ -318,9 +318,9 @@ instantiateEmptyArrayDims :: MonadUnify m =>
                           -> TypeBase (DimDecl VName) als
                           -> m (TypeBase (DimDecl VName) als, [VName])
 instantiateEmptyArrayDims tloc desc r = runWriterT . traverseDims onDim
-  where onDim PosImmediate AnyDim = inst
-        onDim PosParam AnyDim = inst
-        onDim _ d = return d
+  where onDim _ PosImmediate AnyDim = inst
+        onDim _ PosParam AnyDim = inst
+        onDim _ _ d = return d
         inst = do
           dim <- lift $ newDimVar tloc r desc
           tell [dim]

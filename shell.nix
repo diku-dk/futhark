@@ -1,19 +1,21 @@
-{ nixpkgs ? import <nixpkgs> {} }:
-with nixpkgs;
-stdenv.mkDerivation {
+let
+  sources = import ./nix/sources.nix;
+  pkgs = import sources.nixpkgs {};
+in
+pkgs.stdenv.mkDerivation {
   name = "futhark";
   buildInputs = [
-    cabal-install
-    cacert
-    curl
-    file
-    git
-    haskell.compiler.ghc8101
-    hlint
-    ocl-icd
-    opencl-headers
-    pkgconfig
-    zlib
-    zlib.out
+    pkgs.cabal-install
+    pkgs.cacert
+    pkgs.curl
+    pkgs.file
+    pkgs.git
+    pkgs.haskell.compiler.ghc8101
+    pkgs.hlint
+    pkgs.ocl-icd
+    pkgs.opencl-headers
+    pkgs.pkgconfig
+    pkgs.zlib
+    pkgs.zlib.out
   ];
 }

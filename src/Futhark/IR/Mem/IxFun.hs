@@ -34,7 +34,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 
-import Futhark.Analysis.PrimExp (PrimExp(..))
+import Futhark.Analysis.PrimExp (PrimExp(..), primExpType)
 import Futhark.IR.Syntax.Core (Ext(..))
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -766,6 +766,13 @@ isSequential :: [Int] -> Bool
 isSequential xs =
   all (uncurry (==)) $ zip xs [0..]
 
+existentializeExp :: PrimExp v -> State [PrimExp v] (PrimExp (Ext v))
+existentializeExp e = do
+  i <- gets length
+  modify (++ [e])
+  let t = primExpType e
+  return $ LeafExp (Ext i) t
+
 -- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
 existentialize :: (Eq v, Pretty v) =>
                   IxFun (PrimExp v) -> State [PrimExp v] (Maybe (IxFun (PrimExp (Ext v))))
@@ -773,16 +780,16 @@ existentialize (IxFun (lmad :| []) oshp True)
   | all ((== 0) . ldRotate) (lmadDims lmad),
     length (lmadShape lmad) == length oshp,
     isSequential (map ldPerm $ lmadDims lmad) = do
-      oshp' <- mapM PEG.existentialize oshp
-      lmadOffset' <- PEG.existentialize $ lmadOffset lmad
+      oshp' <- mapM existentializeExp oshp
+      lmadOffset' <- existentializeExp $ lmadOffset lmad
       lmadDims' <- mapM existentializeLMADDim $ lmadDims lmad
       let lmad' = LMAD lmadOffset' lmadDims'
       return $ Just $ IxFun (lmad' :| []) oshp' True
         where
           existentializeLMADDim :: LMADDim (PrimExp v) -> State [PrimExp v] (LMADDim (PrimExp (Ext v)))
           existentializeLMADDim (LMADDim str rot shp perm mon) = do
-            stride' <- PEG.existentialize str
-            shape' <- PEG.existentialize shp
+            stride' <- existentializeExp str
+            shape' <- existentializeExp shp
             return $ LMADDim stride' (fmap Free rot) shape' perm mon
 
     -- oshp' = LeafExp (Ext 0)

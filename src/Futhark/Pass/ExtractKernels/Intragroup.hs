@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | Extract limited nested parallelism for execution inside
 -- individual kernel workgroups.
 module Futhark.Pass.ExtractKernels.Intragroup
@@ -25,6 +26,7 @@ import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.ToKernels
+import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Util (chunks)
 import Futhark.Util.Log
 
@@ -166,6 +168,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       fbody' <- intraGroupBody lvl fbody
       certifying (stmAuxCerts aux) $
         letBind pat $ If cond tbody' fbody' ifdec
+
+    Op soac
+      | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
+          mapM_ (intraGroupStm lvl) . fmap (certify (stmAuxCerts aux)) =<<
+          runBinder_ (FOT.transformSOAC pat soac)
 
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do

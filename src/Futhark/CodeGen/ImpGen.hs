@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
@@ -21,7 +22,8 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , localDefaultSpace, askFunction, newVNameForFun
+  , localDefaultSpace, askFunction
+  , newVNameForFun, nameForFun
   , askEnv, localEnv
   , localOps
   , VTable
@@ -925,6 +927,12 @@ newVNameForFun s = do
   fname <- fmap nameToString <$> askFunction
   newVName $ maybe "" (++".") fname ++ s
 
+-- | Generate a 'Name', prefixed with 'askFunction' if it exists.
+nameForFun :: String -> ImpM lore r op Name
+nameForFun s = do
+  fname <- askFunction
+  return $ maybe "" (<>".") fname <> nameFromString s
+
 askEnv :: ImpM lore r op r
 askEnv = asks envEnv
 
@@ -1224,10 +1232,12 @@ compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ pretty pat
 
 -- | The number of bytes needed to represent the array in a
--- straightforward contiguous format.
+-- straightforward contiguous format, as an 'Int64' expression.
 typeSize :: Type -> Count Bytes Imp.Exp
-typeSize t = Imp.bytes $ Imp.LeafExp (Imp.SizeOf $ elemType t) int32 *
-             product (map (toExp' int32) (arrayDims t))
+typeSize t =
+  Imp.bytes $ i64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int32) *
+  product (map (i64 . toExp' int32) (arrayDims t))
+  where i64 = ConvOpExp (SExt Int32 Int64)
 
 --- Building blocks for constructing code.
 
