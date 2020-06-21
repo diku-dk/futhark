@@ -228,7 +228,7 @@ runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds ex
 
   case res of
     Left err -> do
-      liftIO $ putStr $ descString dataset_desc pad_to
+      liftIO $ putStrLn $ descString dataset_desc pad_to
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do
