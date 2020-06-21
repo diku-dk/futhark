@@ -239,12 +239,12 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     if ($exp:sizes_nonzero) {
       int perm[3] = { 0, 1, 2 };
 
-      if ($exp:grid_y > (1<<16)) {
+      if ($exp:grid_y >= (1<<16)) {
         perm[1] = perm[0];
         perm[0] = 1;
       }
 
-      if ($exp:grid_z > (1<<16)) {
+      if ($exp:grid_z >= (1<<16)) {
         perm[2] = perm[0];
         perm[0] = 2;
       }
