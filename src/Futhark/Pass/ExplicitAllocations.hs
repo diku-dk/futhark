@@ -179,8 +179,8 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 
   mkBodyM bnds res = return $ Body () bnds res
 
-  addStms binding = AllocM $ addBinderStms binding
-  collectStms (AllocM m) = AllocM $ collectBinderStms m
+  addStms = AllocM . addStms
+  collectStms (AllocM m) = AllocM $ collectStms m
 
 instance (Allocable fromlore tolore) =>
          Allocator tolore (AllocM fromlore tolore) where

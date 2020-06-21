@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts, TypeFamilies #-}
 -- | This module defines a convenience typeclass for creating
 -- normalised programs.
+--
+-- See "Futhark.Construct" for a high-level description.
 module Futhark.Binder.Class
   ( Bindable (..)
   , mkLet
