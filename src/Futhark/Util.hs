@@ -9,6 +9,7 @@
 -- compatible).
 module Futhark.Util
        (mapAccumLM,
+        maxinum,
         chunk,
         chunks,
         dropAt,
@@ -47,7 +48,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import Data.Char
-import Data.List (genericDrop, genericSplitAt)
+import Data.List (foldl', genericDrop, genericSplitAt)
 import Data.Either
 import Data.Maybe
 import System.Environment
@@ -85,6 +86,10 @@ chunks [] _ = []
 chunks (n:ns) xs =
   let (bef,aft) = splitAt n xs
   in bef : chunks ns aft
+
+-- | Like 'maximum', but returns zero for an empty list.
+maxinum :: (Num a, Ord a, Foldable f) => f a -> a
+maxinum = foldl' max 0
 
 -- | @dropAt i n@ drops @n@ elements starting at element @i@.
 dropAt :: Int -> Int -> [a] -> [a]

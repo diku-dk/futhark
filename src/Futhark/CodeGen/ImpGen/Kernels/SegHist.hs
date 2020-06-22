@@ -56,7 +56,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.SegRed (compileSegRed')
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import Futhark.Util.IntegralExp (divUp, quot, rem)
-import Futhark.Util (chunks, mapAccumLM, splitFromEnd, takeLast)
+import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
 import Futhark.Construct (fullSliceNum)
 
 i32Toi64 :: PrimExp v -> PrimExp v
@@ -836,7 +836,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   hist_S <- dPrimVE "hist_S" $ (hist_H * local_mem_needed) `divUp` Imp.vi32 hist_L
   let max_S = case bodyPassage kbody of
                 MustBeSinglePass -> 1
-                MayBeMultiPass -> fromIntegral $ maximum $ map slugMaxLocalMemPasses slugs
+                MayBeMultiPass -> fromIntegral $ maxinum $ map slugMaxLocalMemPasses slugs
 
   -- We only use local memory if the number of updates per histogram
   -- at least matches the histogram size, as otherwise it is not

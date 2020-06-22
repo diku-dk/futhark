@@ -20,7 +20,6 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Except
-import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.List (intercalate)
 import qualified System.FilePath.Posix as Posix
@@ -59,7 +58,7 @@ emptyBasis = Basis { basisImports = mempty
                    , basisNameSource = src
                    , basisRoots = mempty
                    }
-  where src = newNameSource $ succ $ maximum $ map E.baseTag $ M.keys E.intrinsics
+  where src = newNameSource $ E.maxIntrinsicTag + 1
 
 readImport :: (MonadError CompilerError m, MonadIO m) =>
               [ImportName] -> ImportName -> CompilerM m ()

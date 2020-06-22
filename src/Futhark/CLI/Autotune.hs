@@ -22,6 +22,7 @@ import System.Console.GetOpt
 
 import Futhark.Bench
 import Futhark.Test
+import Futhark.Util (maxinum)
 import Futhark.Util.Options
 
 data AutotuneOptions = AutotuneOptions
@@ -243,7 +244,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
 
             newMax <- binarySearch runner (t, tMax) ePars
             let newMinIdx = pred <$> elemIndex newMax ePars
-            let newMin = maximum $ catMaybes [Just tMin, newMinIdx]
+            let newMin = maxinum $ catMaybes [Just tMin, newMinIdx]
             return (newMin, newMax)
 
     bestPair :: [(Int, Int)] -> (Int, Int)

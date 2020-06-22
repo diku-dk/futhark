@@ -8,6 +8,7 @@ module Futhark.Util.Table
 import Data.List (intercalate, transpose)
 import System.Console.ANSI
 
+import Futhark.Util (maxinum)
 import Futhark.Util.Console (color)
 
 data RowTemplate = RowTemplate [Int] Int deriving (Show)
@@ -23,7 +24,7 @@ mkEntry s = (s, [])
 buildRowTemplate :: [[Entry]] -> Int -> RowTemplate
 
 buildRowTemplate rows = RowTemplate widths
-  where widths = map (maximum . map (length . fst)) . transpose $ rows
+  where widths = map (maxinum . map (length . fst)) . transpose $ rows
 
 buildRow :: RowTemplate -> [Entry] -> String
 buildRow (RowTemplate widths pad) entries = cells ++ "\n"
