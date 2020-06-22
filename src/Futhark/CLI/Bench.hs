@@ -25,7 +25,7 @@ import Text.Regex.TDFA
 
 import Futhark.Bench
 import Futhark.Test
-import Futhark.Util (fancyTerminal, maybeNth, pmapIO)
+import Futhark.Util (fancyTerminal, maybeNth, maxinum, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 
@@ -202,7 +202,7 @@ reportResult results = do
       avg = sum runtimes / fromIntegral (length runtimes)
       rsd = stddevp runtimes / mean runtimes :: Double
   putStrLn $ printf "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
-    avg rsd ((minimum runtimes / avg - 1) * 100) ((maximum runtimes / avg - 1) * 100)
+    avg rsd ((minimum runtimes / avg - 1) * 100) ((maxinum runtimes / avg - 1) * 100)
 
 runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
                  -> IO (Maybe DataResult)

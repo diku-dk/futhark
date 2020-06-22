@@ -106,7 +106,6 @@ module Language.Futhark.Prop
   where
 
 import           Control.Monad.State
-import           Control.Monad.Writer  hiding (Sum)
 import           Data.Char
 import           Data.Foldable
 import qualified Data.Map.Strict       as M
@@ -118,8 +117,7 @@ import           Data.Bifunctor
 import           Data.Bifoldable
 import           Data.Bitraversable (bitraverse)
 
-import           Prelude
-
+import           Futhark.Util (maxinum)
 import           Futhark.Util.Pretty
 
 import           Language.Futhark.Syntax
@@ -931,7 +929,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
 maxIntrinsicTag :: Int
-maxIntrinsicTag = maximum $ map baseTag $ M.keys intrinsics
+maxIntrinsicTag = maxinum $ map baseTag $ M.keys intrinsics
 
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v
