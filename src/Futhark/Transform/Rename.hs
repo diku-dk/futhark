@@ -170,12 +170,12 @@ renamingStms stms m = descend mempty stms
             descend (stms' <> oneStm stm') rem_stms'
 
 instance Renameable lore => Rename (FunDef lore) where
-  rename (FunDef entry fname ret params body) =
+  rename (FunDef entry attrs fname ret params body) =
     bind (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
-      return $ FunDef entry fname ret' params' body'
+      return $ FunDef entry attrs fname ret' params' body'
 
 instance Rename SubExp where
   rename (Var v)      = Var <$> rename v

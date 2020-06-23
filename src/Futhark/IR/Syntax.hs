@@ -477,6 +477,7 @@ type LParam lore = Param (LParamInfo lore)
 data FunDef lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
                             -- ^ Contains a value if this function is
                             -- an entry point.
+                          , funDefAttrs :: Attrs
                           , funDefName :: Name
                           , funDefRetType :: [RetType lore]
                           , funDefParams :: [FParam lore]

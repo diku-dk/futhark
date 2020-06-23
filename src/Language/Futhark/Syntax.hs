@@ -868,6 +868,7 @@ data ValBindBase f vn = ValBind
   , valBindParams     :: [PatternBase f vn]
   , valBindBody       :: ExpBase f vn
   , valBindDoc        :: Maybe DocComment
+  , valBindAttrs      :: [AttrInfo]
   , valBindLocation   :: SrcLoc
   }
 deriving instance Showable f vn => Show (ValBindBase f vn)

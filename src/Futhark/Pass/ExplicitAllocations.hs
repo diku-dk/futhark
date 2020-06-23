@@ -583,12 +583,12 @@ explicitAllocationsGeneric handleOp hints =
   intraproceduralTransformationWithConsts onStms allocInFun
   where onStms stms = runAllocM handleOp hints $ allocInStms stms pure
 
-        allocInFun consts (FunDef entry fname rettype params fbody) =
+        allocInFun consts (FunDef entry attrs fname rettype params fbody) =
           runAllocM handleOp hints $ inScopeOf consts $
           allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
           fbody' <- insertStmsM $ allocInFunBody
                     (map (const $ Just DefaultSpace) rettype) fbody
-          return $ FunDef entry fname (memoryInDeclExtType rettype) params' fbody'
+          return $ FunDef entry attrs fname (memoryInDeclExtType rettype) params' fbody'
 
 explicitAllocationsInStmsGeneric :: (MonadFreshNames m, HasScope tolore m,
                                      Allocable fromlore tolore) =>
