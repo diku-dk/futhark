@@ -184,7 +184,7 @@ instance (FreeDec (ExpDec lore),
           FreeIn (LetDec lore),
           FreeIn (RetType lore),
           FreeIn (Op lore)) => FreeIn (FunDef lore) where
-  freeIn' (FunDef _ _ rettype params body) =
+  freeIn' (FunDef _ _ _ rettype params body) =
     fvBind (namesFromList $ map paramName params) $
     freeIn' rettype <> freeIn' params <> freeIn' body
 

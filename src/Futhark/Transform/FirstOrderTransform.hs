@@ -40,9 +40,9 @@ type FirstOrderLore lore =
 -- provided by top-level constants.
 transformFunDef :: (MonadFreshNames m, FirstOrderLore tolore) =>
                    Scope tolore -> FunDef SOACS -> m (AST.FunDef tolore)
-transformFunDef consts_scope (FunDef entry fname rettype params body) = do
+transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
   (body',_) <- modifyNameSource $ runState $ runBinderT m consts_scope
-  return $ FunDef entry fname rettype params body'
+  return $ FunDef entry attrs fname rettype params body'
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
 -- | First-order-transform these top-level constants.
