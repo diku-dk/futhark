@@ -100,6 +100,7 @@ module Language.Futhark.Prop
   , UncheckedPattern
   , UncheckedValBind
   , UncheckedDec
+  , UncheckedSpec
   , UncheckedProg
   , UncheckedCase
   )
@@ -1058,6 +1059,9 @@ type UncheckedValBind = ValBindBase NoInfo Name
 
 -- | A declaration with no type annotations.
 type UncheckedDec = DecBase NoInfo Name
+
+-- | A spec with no type annotations.
+type UncheckedSpec = SpecBase NoInfo Name
 
 -- | A Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name

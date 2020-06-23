@@ -97,7 +97,8 @@ aggInlineFunctions prog =
               (vtable', consts', not_to_inline_in <> to_inline_in')
 
         keep fd =
-          isJust (funDefEntryPoint fd) || funDefName fd `S.member` noninlined
+          isJust (funDefEntryPoint fd) ||
+          funDefName fd `S.member` noninlined
 
 -- | @inlineInFunDef constf fdmap caller@ inlines in @calleer@ the
 -- functions in @fdmap@ that are called as @constf@. At this point the
@@ -107,8 +108,8 @@ aggInlineFunctions prog =
 inlineInFunDef :: MonadFreshNames m =>
                   M.Map Name (FunDef SOACS) -> FunDef SOACS
                -> m (FunDef SOACS)
-inlineInFunDef fdmap (FunDef entry name rtp args body) =
-  FunDef entry name rtp args <$> inlineInBody fdmap body
+inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
+  FunDef entry attrs name rtp args <$> inlineInBody fdmap body
 
 inlineFunction :: MonadFreshNames m =>
                   Pattern
@@ -159,9 +160,9 @@ inlineInBody :: MonadFreshNames m =>
 inlineInBody fdmap = onBody
   where inline (Let pat aux (Apply fname args _ what) : rest)
           | Just fd <- M.lookup fname fdmap,
-            not noinline =
+            not $ "noinline" `inAttrs` funDefAttrs fd,
+            not $ "noinline" `inAttrs` stmAuxAttrs aux =
               (<>) <$> inlineFunction pat aux args what fd <*> inline rest
-          where noinline = "noinline" `inAttrs` stmAuxAttrs aux
 
         inline (stm : rest) =
           (:) <$> onStm stm <*> inline rest

@@ -1063,7 +1063,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
 
 evalDec :: Env -> Dec -> EvalM Env
 
-evalDec env (ValDec (ValBind _ v _ (Info (ret, retext)) tparams ps fbody _ _)) = do
+evalDec env (ValDec (ValBind _ v _ (Info (ret, retext)) tparams ps fbody _ _ _)) = do
   binding <- evalFunctionBinding env tparams ps ret retext fbody
   return $ env { envTerm = M.insert v binding $ envTerm env }
 

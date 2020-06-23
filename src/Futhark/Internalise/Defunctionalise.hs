@@ -731,6 +731,7 @@ liftValDec fname rettype dims pats body = tell $ Seq.singleton dec
           , valBindParams     = pats
           , valBindBody       = body
           , valBindDoc        = Nothing
+          , valBindAttrs      = mempty
           , valBindLocation   = mempty
           }
 
@@ -992,14 +993,14 @@ patternVars = mconcat . map ident . S.toList . patternIdents
 defuncValBind :: ValBind -> DefM (ValBind, Env, Bool)
 
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind entry name _ (Info (rettype, retext)) tparams params body _ loc)
+defuncValBind (ValBind entry name _ (Info (rettype, retext)) tparams params body _ attrs loc)
   | Scalar Arrow{} <- rettype = do
       (body_pats, body', rettype') <- etaExpand (fromStruct rettype) body
       defuncValBind $ ValBind entry name Nothing
         (Info (rettype', retext))
-        tparams (params <> body_pats) body' Nothing loc
+        tparams (params <> body_pats) body' Nothing attrs loc
 
-defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ _) = do
+defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ _ _) = do
   (tparams', params', body', sv) <- defuncLet tparams params body rettype
   let rettype' = combineTypeShapes rettype $ anySizes $ toStruct $ typeOf body'
   return ( valbind { valBindRetDecl    = retdecl

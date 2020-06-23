@@ -470,7 +470,7 @@ checkProg (Prog consts funs) = do
   where
     buildFtable = do table <- initialFtable
                      foldM expand table funs
-    expand ftable (FunDef _ name ret params _)
+    expand ftable (FunDef _ _ name ret params _)
       | M.member name ftable =
           bad $ DupDefinitionError name
       | otherwise =
@@ -486,7 +486,7 @@ initialFtable = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
 
 checkFun :: Checkable lore =>
             FunDef (Aliases lore) -> TypeM lore ()
-checkFun (FunDef _ fname rettype params body) =
+checkFun (FunDef _ _ fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
                map declExtTypeOf rettype,

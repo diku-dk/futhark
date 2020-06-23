@@ -1,7 +1,8 @@
 -- ==
 -- structure { Apply 1 }
 
+#[noinline]
 let f (x: i32) = x + 2
 
 let main x =
-  map (\i -> #[noinline] f i) (iota x)
+  f x

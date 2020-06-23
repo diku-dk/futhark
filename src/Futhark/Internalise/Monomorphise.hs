@@ -57,7 +57,8 @@ i32 = Scalar $ Prim $ Signed Int32
 -- in local functions.
 data PolyBinding = PolyBinding RecordReplacements
                    (VName, [TypeParam], [Pattern],
-                     Maybe (TypeExp VName), StructType, [VName], Exp, SrcLoc)
+                     Maybe (TypeExp VName), StructType, [VName], Exp,
+                     [AttrInfo], SrcLoc)
 
 -- Mapping from record names to the variable names that contain the
 -- fields.  This is used because the monomorphiser also expands all
@@ -264,7 +265,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e e_t loc)
       -- filter those that are monomorphic versions of the current let-bound
       -- function and insert them at this point, and propagate the rest.
       rr <- asks envRecordReplacements
-      let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, [], body, loc)
+      let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, [], body, mempty, loc)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
         -- Do not remember this one for next time we monomorphise this
@@ -467,7 +468,7 @@ noticeDims = mapM_ notice . nestedDims
 -- monomorphic functions with the given expression at the bottom.
 unfoldLetFuns :: [ValBind] -> Exp -> Exp
 unfoldLetFuns [] e = e
-unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ loc : rest) e =
+unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ _ loc : rest) e =
   LetFun fname (dim_params, params, Nothing, Info rettype, body) e' (Info e_t) loc
   where e' = unfoldLetFuns rest e
         e_t = typeOf e'
@@ -566,7 +567,7 @@ noNamedParams = f
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphiseBinding :: Bool -> PolyBinding -> MonoType
                     -> MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, retext, body, loc)) t =
+monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, retext, body, attrs, loc)) t =
   replaceRecordReplacements rr $ do
   let bind_t = foldFunType (map patternStructType params) rettype
   (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams t
@@ -619,6 +620,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
                   , valBindParams     = params''
                   , valBindBody       = body''
                   , valBindDoc        = Nothing
+                  , valBindAttrs      = attrs
                   , valBindLocation   = loc
                   }
 
@@ -675,12 +677,12 @@ substPattern entry f pat = case pat of
   PatternConstr n (Info tp) ps loc -> PatternConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ loc) =
-  PolyBinding mempty (name, tparams, params, retdecl, rettype, retext, body, loc)
+toPolyBinding (ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ attrs loc) =
+  PolyBinding mempty (name, tparams, params, retdecl, rettype, retext, body, attrs, loc)
 
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
-removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats body _ _) = do
+removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats body _ _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   let mapper = ASTMapper {
           mapOnExp         = astMap mapper

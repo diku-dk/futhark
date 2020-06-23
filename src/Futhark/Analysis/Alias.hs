@@ -33,8 +33,8 @@ aliasAnalysis (Prog consts funs) =
 
 analyseFun :: (ASTLore lore, CanBeAliased (Op lore)) =>
               FunDef lore -> FunDef (Aliases lore)
-analyseFun (FunDef entry fname restype params body) =
-  FunDef entry fname restype params body'
+analyseFun (FunDef entry attrs fname restype params body) =
+  FunDef entry attrs fname restype params body'
   where body' = analyseBody mempty body
 
 -- | Pre-existing aliases for variables.  Used to add transitive

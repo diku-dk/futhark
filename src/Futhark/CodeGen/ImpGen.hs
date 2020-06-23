@@ -504,7 +504,7 @@ compileOutParams orig_rts orig_epts = do
 compileFunDef :: Mem lore =>
                  FunDef lore
               -> ImpM lore r op ()
-compileFunDef (FunDef entry fname rettype params body) =
+compileFunDef (FunDef entry _ fname rettype params body) =
   local (\env -> env { envFunction = Just fname }) $ do
   ((outparams, inparams, results, args), body') <- collect' compile
   emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args

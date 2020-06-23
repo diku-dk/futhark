@@ -50,6 +50,12 @@ internaliseProg always_safe prog = do
     runInternaliseM always_safe (internaliseValBinds prog_decs'')
   I.renameProg $ I.Prog consts funs
 
+internaliseAttr :: E.AttrInfo -> Attr
+internaliseAttr (E.AttrInfo v) = I.AttrAtom v
+
+internaliseAttrs :: [E.AttrInfo] -> Attrs
+internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)
+
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
@@ -66,7 +72,7 @@ internaliseFunName ofname _  = do
     Nothing -> return $ nameFromString $ pretty ofname
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ loc) = do
+internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $ bindingParams tparams params $ \shapeparams params' -> do
     rettype_bad <- internaliseReturnType rettype
     let rettype' = zeroExts rettype_bad
@@ -100,7 +106,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
         free_params = nub $ free_shape_params ++ used_free_params
         all_params = free_params ++ shapeparams ++ concat params'
 
-    let fd = I.FunDef Nothing fname' rettype' all_params body'
+    let fd = I.FunDef Nothing (internaliseAttrs attrs) fname'
+             rettype' all_params body'
 
     if null params'
       then bindConstant fname fd
@@ -151,7 +158,8 @@ allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
   mapM allDimsFreshInPat pats <*> pure loc
 
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint (E.EntryPoint e_paramts e_rettype) (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ loc) = localConstsScope $ do
+generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
+  let (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ attrs loc) = vb
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
   params_fresh <- mapM allDimsFreshInPat params
@@ -176,7 +184,8 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) (E.ValBind _ ofname _ (Inf
       resultBodyM (ctx ++ vals)
 
     addFunDef $
-      I.FunDef (Just entry') (baseName ofname)
+      I.FunDef (Just entry') (internaliseAttrs attrs)
+      (baseName ofname)
       (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
@@ -535,7 +544,8 @@ internaliseExp desc (E.LetPat pat e body (Info ret, Info retext) loc) = do
   return ses
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody _ loc) = do
-  internaliseValBind $ E.ValBind Nothing ofname retdecl (Info (rettype, [])) tparams params body Nothing loc
+  internaliseValBind $
+    E.ValBind Nothing ofname retdecl (Info (rettype, [])) tparams params body Nothing mempty loc
   internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret, retext)) loc) = do
@@ -715,13 +725,14 @@ internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
           return $ bef ++ src'' ++ aft
         replace _ _ ve' _ = return ve'
 
-internaliseExp desc (E.Attr (AttrInfo attr) e _) =
+internaliseExp desc (E.Attr attr e _) =
   local f $ internaliseExp desc e
-  where f env | attr == "unsafe",
+  where attrs = oneAttr $ internaliseAttr attr
+        f env | "unsafe" `inAttrs` attrs,
                 not $ envSafe env =
                   env { envDoBoundsChecks = False }
               | otherwise =
-                  env { envAttrs = oneAttr (AttrAtom attr) <> envAttrs env }
+                  env { envAttrs = envAttrs env <> attrs }
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1

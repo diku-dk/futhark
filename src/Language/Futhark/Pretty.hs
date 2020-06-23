@@ -406,7 +406,8 @@ instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamType l name _) = text "'" <> ppr l <> pprName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
-  ppr (ValBind entry name retdecl rettype tparams args body _ _) =
+  ppr (ValBind entry name retdecl rettype tparams args body _ attrs _) =
+    mconcat (map ((<> line) . ppr) attrs) <>
     text fun <+> pprName name <+>
     align (sep (map ppr tparams ++ map ppr args)) <> retdecl' <> text " =" </>
     indent 2 (ppr body)
