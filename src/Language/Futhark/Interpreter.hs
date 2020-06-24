@@ -13,6 +13,7 @@ module Language.Futhark.Interpreter
   , interpretImport
   , interpretFunction
   , ExtOp(..)
+  , BreakReason(..)
   , StackFrame(..)
   , typeCheckerEnv
   , Value (ValuePrim, ValueArray, ValueRecord)
@@ -54,13 +55,18 @@ data StackFrame = StackFrame { stackFrameLoc :: Loc
 instance Located StackFrame where
   locOf = stackFrameLoc
 
+-- | What is the reason for this break point?
+data BreakReason
+  = BreakPoint -- ^ An explicit breakpoint in the program.
+  | BreakNaN -- ^ A
+
 data ExtOp a = ExtOpTrace Loc String a
-             | ExtOpBreak (NE.NonEmpty StackFrame) a
+             | ExtOpBreak BreakReason (NE.NonEmpty StackFrame) a
              | ExtOpError InterpreterError
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
-  fmap f (ExtOpBreak backtrace x) = ExtOpBreak backtrace $ f x
+  fmap f (ExtOpBreak why backtrace x) = ExtOpBreak why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
 
 type Stack = [StackFrame]
@@ -413,7 +419,7 @@ break = do
   backtrace <- asks $ drop 1 . fst
   case NE.nonEmpty backtrace of
     Nothing -> return ()
-    Just backtrace' -> liftF $ ExtOpBreak backtrace' ()
+    Just backtrace' -> liftF $ ExtOpBreak BreakPoint backtrace' ()
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
@@ -1098,6 +1104,22 @@ data Ctx = Ctx { ctxEnv :: Env
                , ctxImports :: M.Map FilePath Env
                }
 
+nanValue :: PrimValue -> Bool
+nanValue (FloatValue v) =
+  case v of Float32Value x -> isNaN x
+            Float64Value x -> isNaN x
+nanValue _ = False
+
+breakOnNaN :: [PrimValue] -> PrimValue -> EvalM ()
+breakOnNaN inputs result
+  | not (any nanValue inputs) && nanValue result = do
+      backtrace <- asks fst
+      case NE.nonEmpty backtrace of
+        Nothing -> return ()
+        Just backtrace' -> liftF $ ExtOpBreak BreakNaN backtrace' ()
+breakOnNaN _ _ =
+  return ()
+
 -- | The initial environment contains definitions of the various intrinsic functions.
 initialCtx :: Ctx
 initialCtx =
@@ -1186,7 +1208,8 @@ initialCtx =
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
         (ValuePrim x', ValuePrim y')
-          | Just z <- msum $ map (`bopDef'` (x', y')) fs ->
+          | Just z <- msum $ map (`bopDef'` (x', y')) fs -> do
+              breakOnNaN [x', y'] z
               return $ ValuePrim z
         _ ->
           bad noLoc mempty $ "Cannot apply operator to arguments " <>
@@ -1199,7 +1222,8 @@ initialCtx =
     unopDef fs = fun1 $ \x ->
       case x of
         (ValuePrim x')
-          | Just r <- msum $ map (`unopDef'` x') fs ->
+          | Just r <- msum $ map (`unopDef'` x') fs -> do
+              breakOnNaN [x'] r
               return $ ValuePrim r
         _ ->
           bad noLoc mempty $ "Cannot apply function to argument " <>
@@ -1213,8 +1237,9 @@ initialCtx =
         Just [ValuePrim x, ValuePrim y]
           | Just x' <- getV x,
             Just y' <- getV y,
-            Just z <- f x' y' ->
-              return $ ValuePrim $ putV z
+            Just z <- putV <$> f x' y' -> do
+              breakOnNaN [x, y] z
+              return $ ValuePrim z
         _ ->
           bad noLoc mempty $ "Cannot apply operator to argument " <>
           quote (pretty v) <> "."
@@ -1292,11 +1317,13 @@ initialCtx =
           case length pts of
             1 -> Just $ unopDef [(getV, Just . putV, f . pure)]
             _ -> Just $ fun1 $ \x -> do
-              let getV' (ValuePrim v) = getV v
+              let getV' (ValuePrim v) = Just v
                   getV' _ = Nothing
-              case f =<< mapM getV' =<< fromTuple x of
-                Just res ->
-                  return $ ValuePrim $ putV res
+              case mapM getV' =<< fromTuple x of
+                Just vs
+                  | Just res <- fmap putV . f =<< mapM getV vs -> do
+                      breakOnNaN vs res
+                      return $ ValuePrim res
                 _ ->
                   error $ "Cannot apply " ++ pretty s ++ " to " ++ pretty x
 

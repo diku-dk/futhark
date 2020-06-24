@@ -131,6 +131,7 @@ data FutharkiState =
                   -- ^ Are we currently stopped at a breakpoint?
                 , futharkiSkipBreaks :: [Loc]
                 -- ^ Skip breakpoints at these locations.
+                , futharkiBreakOnNaN :: Bool
                 , futharkiLoaded :: Maybe FilePath
                 -- ^ The currently loaded file.
                 }
@@ -178,6 +179,7 @@ newFutharkiState count maybe_file = runExceptT $ do
                        , futharkiEnv = (tenv, ienv)
                        , futharkiBreaking = Nothing
                        , futharkiSkipBreaks = mempty
+                       , futharkiBreakOnNaN = False
                        , futharkiLoaded = maybe_file
                        }
   where badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
@@ -293,6 +295,16 @@ prettyBreaking :: Breaking -> String
 prettyBreaking b =
   prettyStacktrace (breakingAt b) $ map locStr $ NE.toList $ breakingStack b
 
+-- Are we currently willing to break for this reason?  Among othe
+-- things, we do not want recursive breakpoints.  It could work fine
+-- technically, but is probably too confusing to be useful.
+breakForReason :: FutharkiState -> I.StackFrame -> I.BreakReason -> Bool
+breakForReason s _ I.BreakNaN
+  | not $ futharkiBreakOnNaN s = False
+breakForReason s top _ =
+  isNothing (futharkiBreaking s) &&
+  locOf top `notElem` futharkiSkipBreaks s
+
 runInterpreter :: F I.ExtOp a -> FutharkiM (Either I.InterpreterError a)
 runInterpreter m = runF m (return . Right) intOp
   where
@@ -301,19 +313,19 @@ runInterpreter m = runF m (return . Right) intOp
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putStrLn $ "Trace at " ++ locStr (srclocOf w) ++ ": " ++ v
       c
-    intOp (I.ExtOpBreak callstack c) = do
+    intOp (I.ExtOpBreak why callstack c) = do
       s <- get
 
-      let top = NE.head callstack
+      let why' = case why of I.BreakPoint -> "Breakpoint"
+                             I.BreakNaN -> "NaN produced"
+          top = NE.head callstack
           ctx = I.stackFrameCtx top
           tenv = I.typeCheckerEnv $ I.ctxEnv ctx
           breaking = Breaking callstack 0
 
-      -- Are we supposed to skip this breakpoint?  Also, We do not
-      -- want recursive breakpoints.  It could work fine technically,
-      -- but is probably too confusing to be useful.
-      unless (isJust (futharkiBreaking s) || locOf top `elem` futharkiSkipBreaks s) $ do
-        liftIO $ putStrLn $ "Breakpoint at " ++ locStr top
+      -- Are we supposed to respect this breakpoint?
+      when (breakForReason s top why) $ do
+        liftIO $ putStrLn $ why' <> " at " ++ locStr top
         liftIO $ putStrLn $ prettyBreaking breaking
         liftIO $ putStrLn "<Enter> to continue."
 
@@ -330,8 +342,13 @@ runInterpreter m = runF m (return . Right) intOp
         case stop of
           Left (Load file) -> throwError $ Load file
           _ -> do liftIO $ putStrLn "Continuing..."
-                  put s { futharkiCount = futharkiCount s'
-                        , futharkiSkipBreaks = futharkiSkipBreaks s' <> futharkiSkipBreaks s }
+                  put s { futharkiCount =
+                            futharkiCount s'
+                        , futharkiSkipBreaks =
+                            futharkiSkipBreaks s' <> futharkiSkipBreaks s
+                        , futharkiBreakOnNaN =
+                            futharkiBreakOnNaN s'
+                        }
 
       c
 
@@ -341,7 +358,7 @@ runInterpreter' m = runF m (return . Right) intOp
         intOp (I.ExtOpTrace w v c) = do
           liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
           c
-        intOp (I.ExtOpBreak _ c) = c
+        intOp (I.ExtOpBreak _ _ c) = c
 
 type Command = T.Text -> FutharkiM ()
 
@@ -385,6 +402,15 @@ unbreakCommand _ = do
     Nothing -> liftIO $ putStrLn "Not currently stopped at a breakpoint."
     Just top' -> do modify $ \s -> s { futharkiSkipBreaks = locOf top' : futharkiSkipBreaks s }
                     throwError Stop
+
+nanbreakCommand :: Command
+nanbreakCommand _ = do
+  modify $ \s -> s { futharkiBreakOnNaN = not $ futharkiBreakOnNaN s }
+  b <- gets futharkiBreakOnNaN
+  liftIO $ putStrLn $
+    if b
+    then "Now treating NaNs as breakpoints."
+    else "No longer treating NaNs as breakpoints."
 
 frameCommand :: Command
 frameCommand which = do
@@ -447,6 +473,10 @@ Show the type of a module expression, which must fit on a single line.
 |])),
             ("unbreak", (unbreakCommand, [text|
 Skip all future occurences of the current breakpoint.
+|])),
+            ("nanbreak", (nanbreakCommand, [text|
+Toggle treating operators that produce new NaNs as breakpoints.  We consider a NaN
+to be "new" if none of the arguments to the operator in question is a NaN.
 |])),
             ("frame", (frameCommand, [text|
 While at a break point, jump to another stack frame, whose variables can then
