@@ -151,12 +151,12 @@ runTestCase (TestCase mode program testcase progs) = do
          ExitFailure 1 -> throwError $ T.decodeUtf8 err
          ExitFailure _ -> checkError expected_error err
 
-    RunCases _ _ warnings | mode == TypeCheck -> do
+    RunCases{} | mode == TypeCheck -> do
       let options = ["check", program] ++ configExtraCompilerOptions progs
       context (mconcat ["Type-checking with '", T.pack futhark,
                         " check ", T.pack program, "'"]) $ do
         (code, _, err) <- io $ readProcessWithExitCode futhark options ""
-        testWarnings warnings err
+
         case code of
          ExitSuccess -> return ()
          ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark

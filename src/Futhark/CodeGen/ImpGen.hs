@@ -82,6 +82,9 @@ module Futhark.CodeGen.ImpGen
   , (<--)
 
   , function
+
+  , warn
+  , module Language.Futhark.Warnings
   )
   where
 
@@ -107,6 +110,7 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util
+import Language.Futhark.Warnings
 
 -- | How to compile an t'Op'.
 type OpCompiler lore r op = Pattern lore -> Op lore -> ImpM lore r op ()
@@ -203,6 +207,9 @@ data Env lore r op = Env {
     -- ^ User-extensible environment.
   , envFunction :: Maybe Name
     -- ^ Name of the function we are compiling, if any.
+  , envAttrs :: Attrs
+    -- ^ The set of attributes that are active on the enclosing
+    -- statements (including the one we are currently compiling).
   }
 
 newEnv :: r -> Operations lore r op -> Imp.Space -> Env lore r op
@@ -216,6 +223,7 @@ newEnv r ops ds =
       , envVolatility = Imp.Nonvolatile
       , envEnv = r
       , envFunction = Nothing
+      , envAttrs = mempty
       }
 
 -- | The symbol table used during compilation.
@@ -225,11 +233,12 @@ data ImpState lore r op =
   ImpState { stateVTable :: VTable lore
            , stateFunctions :: Imp.Functions op
            , stateCode :: Imp.Code op
+           , stateWarnings :: Warnings
            , stateNameSource :: VNameSource
            }
 
 newState :: VNameSource -> ImpState lore r op
-newState = ImpState mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty
 
 newtype ImpM lore r op a =
   ImpM (ReaderT (Env lore r op) (State (ImpState lore r op)) a)
@@ -281,10 +290,12 @@ subImpM r ops (ImpM m) = do
                     , stateFunctions = mempty
                     , stateCode = mempty
                     , stateNameSource = stateNameSource s
+                    , stateWarnings = mempty
                     }
       (x, s'') = runState (runReaderT m env') s'
 
   putNameSource $ stateNameSource s''
+  warnings $ stateWarnings s''
   return (x, stateCode s'')
 
 -- | Execute a code generation action, returning the code that was
@@ -311,6 +322,14 @@ comment desc m = do code <- collect m
 emit :: Imp.Code op -> ImpM lore r op ()
 emit code = modify $ \s -> s { stateCode = stateCode s <> code }
 
+warnings :: Warnings -> ImpM lore r op ()
+warnings ws = modify $ \s -> s { stateWarnings = ws <> stateWarnings s}
+
+-- | Emit a warning about something the user should be aware of.
+warn :: Located loc => loc -> [loc] -> String -> ImpM lore r op ()
+warn loc locs problem =
+  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) problem
+
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM lore r op ()
 emitFunction fname fun = do
@@ -331,7 +350,7 @@ constsVTable = foldMap stmVtable
 
 compileProg :: (Mem lore, FreeIn op, MonadFreshNames m) =>
                r -> Operations lore r op -> Imp.Space
-            -> Prog lore -> m (Imp.Definitions op)
+            -> Prog lore -> m (Warnings, Imp.Definitions op)
 compileProg r ops space (Prog consts funs) =
   modifyNameSource $ \src ->
     let (_, ss) =
@@ -341,7 +360,8 @@ compileProg r ops space (Prog consts funs) =
         (consts', s') =
           runImpM (compileConsts free_in_funs consts) r ops space $
           combineStates ss
-  in (Imp.Definitions consts' (stateFunctions s'),
+  in ((stateWarnings s',
+       Imp.Definitions consts' (stateFunctions s')),
       stateNameSource s')
   where compileFunDef' src fdef =
           runImpM (compileFunDef fdef) r ops space
@@ -352,6 +372,8 @@ compileProg r ops space (Prog consts funs) =
               src = mconcat (map stateNameSource ss)
           in (newState src) { stateFunctions =
                                 Imp.Functions $ M.toList $ M.fromList funs'
+                            , stateWarnings =
+                                mconcat $ map stateWarnings ss
                             }
 
 compileConsts :: Names -> Stms lore -> ImpM lore r op (Imp.Constants op)
@@ -569,10 +591,11 @@ defCompileStms alive_after_stms all_stms m =
   -- Free.  This is very conservative, but can cut down on lifetimes
   -- in some cases.
   void $ compileStms' mempty $ stmsToList all_stms
-  where compileStms' allocs (Let pat _ e:bs) = do
+  where compileStms' allocs (Let pat aux e:bs) = do
           dVars (Just e) (patternElements pat)
 
-          e_code <- collect $ compileExp pat e
+          e_code <- localAttrs (stmAuxAttrs aux) $
+                    collect $ compileExp pat e
           (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
           let dies_here v = not (v `nameIn` live_after) &&
                             v `nameIn` freeIn e_code
@@ -684,6 +707,10 @@ defCompileBasicOp _ (Assert e msg loc) = do
   e' <- toExp e
   msg' <- traverse toExp msg
   emit $ Imp.Assert e' msg' loc
+
+  attrs <- askAttrs
+  when (AttrComp "warn" ["safety_checks"] `inAttrs` attrs) $
+    uncurry warn loc "Safety check required at run-time."
 
 defCompileBasicOp (Pattern _ [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
@@ -938,6 +965,15 @@ askEnv = asks envEnv
 
 localEnv :: (r -> r) -> ImpM lore r op a -> ImpM lore r op a
 localEnv f = local $ \env -> env { envEnv = f $ envEnv env }
+
+-- | The active attributes, including those for the statement
+-- currently being compiled.
+askAttrs :: ImpM lore r op Attrs
+askAttrs = asks envAttrs
+
+-- | Add more attributes to what is returning by 'askAttrs'.
+localAttrs :: Attrs -> ImpM lore r op a -> ImpM lore r op a
+localAttrs attrs = local $ \env -> env { envAttrs = attrs <> envAttrs env }
 
 localOps :: Operations lore r op -> ImpM lore r op a -> ImpM lore r op a
 localOps ops = local $ \env ->
