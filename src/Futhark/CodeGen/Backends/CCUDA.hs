@@ -24,16 +24,17 @@ import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
 
 -- | Compile the program to C with calls to CUDA.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
-  (Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
+  (ws, Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
     ImpGen.compileProg prog
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
       extra = generateBoilerplate cuda_code cuda_prelude
               cost_centres kernels sizes failures
-  GC.compileProg "cuda" operations extra cuda_includes
+  (ws,) <$>
+    GC.compileProg "cuda" operations extra cuda_includes
     [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()

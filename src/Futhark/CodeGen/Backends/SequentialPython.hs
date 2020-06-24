@@ -13,15 +13,15 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog SeqMem -> m String
+               Maybe String -> Prog SeqMem -> m (ImpGen.Warnings, String)
 compileProg module_name =
   ImpGen.compileProg >=>
-  GenericPython.compileProg
-  module_name
-  GenericPython.emptyConstructor
-  imports
-  defines
-  operations () [] []
+  traverse (GenericPython.compileProg
+            module_name
+            GenericPython.emptyConstructor
+            imports
+            defines
+            operations () [] [])
   where imports = [Import "sys" Nothing,
                    Import "numpy" $ Just "np",
                    Import "ctypes" $ Just "ct",

@@ -17,8 +17,8 @@ import Futhark.Compiler.CLI
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile OpenCL" "Generate OpenCL/C code from optimised Futhark program."
-       gpuPipeline $ \() mode outpath prog -> do
-         cprog <- COpenCL.compileProg prog
+       gpuPipeline $ \fcfg () mode outpath prog -> do
+         cprog <- handleWarnings fcfg $ COpenCL.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
              extra_options

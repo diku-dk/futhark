@@ -9,10 +9,12 @@
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProgOpenCL
   , compileProgCUDA
+  , Warnings
   )
   where
 
 import Control.Monad.Except
+import Data.Bifunctor (second)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.List (foldl')
@@ -58,15 +60,16 @@ openclAtomics, cudaAtomics :: AtomicBinOp
                  ]
         cuda = opencl ++ [(FAdd Float32, Imp.AtomicFAdd Float32)]
 
-compileProg :: MonadFreshNames m => HostEnv -> Prog KernelsMem -> m Imp.Program
+compileProg :: MonadFreshNames m => HostEnv -> Prog KernelsMem
+            -> m (Warnings, Imp.Program)
 compileProg env prog =
-  setDefaultSpace (Imp.Space "device") <$>
+  second (setDefaultSpace (Imp.Space "device")) <$>
   Futhark.CodeGen.ImpGen.compileProg env callKernelOperations (Imp.Space "device") prog
 
 -- | Compile a 'KernelsMem' program to low-level parallel code, with
 -- either CUDA or OpenCL characteristics.
 compileProgOpenCL, compileProgCUDA
-  :: MonadFreshNames m => Prog KernelsMem -> m Imp.Program
+  :: MonadFreshNames m => Prog KernelsMem -> m (Warnings, Imp.Program)
 compileProgOpenCL = compileProg $ HostEnv openclAtomics
 compileProgCUDA = compileProg $ HostEnv cudaAtomics
 

@@ -6,6 +6,8 @@ module Futhark.Compiler.CLI
        ( compilerMain
        , CompilerOption
        , CompilerMode(..)
+       , module Futhark.Pipeline
+       , module Futhark.Compiler
        )
 where
 
@@ -28,7 +30,8 @@ compilerMain :: cfg -- ^ Initial configuration.
              -> String -- ^ The short action name (e.g. "compile to C").
              -> String -- ^ The longer action description.
              -> Pipeline SOACS lore -- ^ The pipeline to use.
-             -> (cfg -> CompilerMode -> FilePath -> Prog lore -> FutharkM ())
+             -> (FutharkConfig -> cfg -> CompilerMode -> FilePath -> Prog lore
+                 -> FutharkM ())
              -- ^ The action to take on the result of the pipeline.
              -> String -- ^ Program name
              -> [String] -- ^ Command line arguments.
@@ -49,8 +52,10 @@ compilerMain cfg cfg_opts name desc pipeline doIt prog args = do
           Action { actionName = name
                  , actionDescription = desc
                  , actionProcedure =
-                   doIt (compilerConfig config) (compilerMode config) $
-                   outputFilePath filepath config
+                     doIt (futharkConfig config)
+                          (compilerConfig config)
+                          (compilerMode config)
+                          (outputFilePath filepath config)
                  }
 
 -- | An option that modifies the configuration of type @cfg@.

@@ -1,4 +1,6 @@
-{-# LANGUAGE QuasiQuotes, FlexibleContexts #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 -- | Code generation for C with OpenCL.
 module Futhark.CodeGen.Backends.COpenCL
   ( compileProg
@@ -23,14 +25,15 @@ import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
 -- | Compile the program to C with calls to OpenCL.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
-  (Program opencl_code opencl_prelude kernels
-    types sizes failures prog') <- ImpGen.compileProg prog
+  (ws, Program opencl_code opencl_prelude kernels
+       types sizes failures prog') <- ImpGen.compileProg prog
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
-  GC.compileProg "opencl" operations
+  (ws,) <$>
+    GC.compileProg "opencl" operations
     (generateBoilerplate opencl_code opencl_prelude
      cost_centres kernels types sizes failures)
     include_opencl_h [Space "device", DefaultSpace]

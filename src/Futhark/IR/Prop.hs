@@ -1,4 +1,8 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, ConstraintKinds #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Safe #-}
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
@@ -31,6 +35,7 @@ module Futhark.IR.Prop
   , stmCerts
   , certify
   , expExtTypesFromPattern
+  , attrsForAssert
 
   , ASTConstraints
   , IsOp (..)
@@ -41,6 +46,7 @@ module Futhark.IR.Prop
 import Data.List (find)
 import Data.Maybe (mapMaybe, isJust)
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.Rearrange
@@ -234,3 +240,10 @@ expExtTypesFromPattern :: Typed dec => PatternT dec -> [ExtType]
 expExtTypesFromPattern pat =
   existentialiseExtTypes (patternContextNames pat) $
   staticShapes $ map patElemType $ patternValueElements pat
+
+-- | Keep only those attributes that are relevant for 'Assert'
+-- expressions.
+attrsForAssert :: Attrs -> Attrs
+attrsForAssert (Attrs attrs) =
+  Attrs $ S.filter attrForAssert attrs
+  where attrForAssert = (==AttrComp "warn" ["safety_checks"])

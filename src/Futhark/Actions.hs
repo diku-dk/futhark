@@ -43,7 +43,7 @@ impCodeGenAction :: Action SeqMem
 impCodeGenAction =
   Action { actionName = "Compile imperative"
          , actionDescription = "Translate program into imperative IL and write it on standard output."
-         , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenSequential.compileProg
+         , actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenSequential.compileProg
          }
 
 -- | Convert the program to GPU ImpCode and print it to stdout.
@@ -51,5 +51,5 @@ kernelImpCodeGenAction :: Action KernelsMem
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
-         , actionProcedure = liftIO . putStrLn . pretty <=< ImpGenKernels.compileProgOpenCL
+         , actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
          }
