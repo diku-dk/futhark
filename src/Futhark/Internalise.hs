@@ -90,7 +90,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
                           typeExpForError dt
                Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
       internaliseBody body >>=
-        ensureResultExtShape asserting msg loc (map I.fromDecl rettype')
+        ensureResultExtShape msg loc (map I.fromDecl rettype')
 
     constants <- allConsts
     let free_in_fun = freeIn body'
@@ -345,7 +345,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
               e':_ -> mapM subExpType e'
 
       let arraylit ks rt = do
-            ks' <- mapM (ensureShape asserting
+            ks' <- mapM (ensureShape
                          "shape of element differs from shape of first element"
                          loc rt "elem_reshaped") ks
             return $ I.BasicOp $ I.ArrayLit ks' rt
@@ -464,13 +464,10 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
   step_invalid <- letSubExp "step_invalid" $
                   I.BasicOp $ I.BinOp I.LogOr step_wrong_dir step_zero
 
-  cs <- assertingOne $ do
-    invalid <- letSubExp "range_invalid" $
-               I.BasicOp $ I.BinOp I.LogOr step_invalid bounds_invalid
-    valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp I.Not invalid
-
-    letExp "range_valid_c" $
-      I.BasicOp $ I.Assert valid errmsg (loc, mempty)
+  invalid <- letSubExp "range_invalid" $
+             I.BasicOp $ I.BinOp I.LogOr step_invalid bounds_invalid
+  valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp I.Not invalid
+  cs <- assert "range_valid_c" valid errmsg loc
 
   step_i32 <- asIntS Int32 step
   pos_step <- letSubExp "pos_step" $
@@ -496,7 +493,7 @@ internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) _ loc) = do
     let parts = ["Value of (core language) shape ("] ++
                 intersperse ", " (map ErrorInt32 dims) ++
                 [") cannot match shape of type `"] ++ dt' ++ ["`."]
-    ensureExtShape asserting (errorMsg parts) loc (I.fromDecl t') desc e'
+    ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
 
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
@@ -576,7 +573,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
   loopbody'' <- localScope (scopeOfFParams $ map fst merge) $
                 inScopeOf form' $ insertStmsM $
     resultBodyM
-    =<< ensureArgShapes asserting
+    =<< ensureArgShapes
         "shape of loop result does not match shapes in loop parameter"
         loc (map (I.paramName . fst) ctxmerge) merge_ts
     =<< bodyBind loopbody'
@@ -706,7 +703,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
         sname_t <- lookupType sname
         let full_slice = fullSlice sname_t idxs'
             rowtype = sname_t `setArrayDims` sliceDims full_slice
-        ve'' <- ensureShape asserting "shape of value does not match shape of source array"
+        ve'' <- ensureShape "shape of value does not match shape of source array"
                 loc rowtype "lw_val_correct_shape" ve'
         letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
   certifying cs $ map I.Var <$> zipWithM comb srcs ves
@@ -736,8 +733,7 @@ internaliseExp desc (E.Attr attr e _) =
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
-  c <- assertingOne $ letExp "assert_c" $
-       I.BasicOp $ I.Assert e1' (errorMsg [ErrorString check]) (loc, mempty)
+  c <- assert "assert_c" e1' (errorMsg [ErrorString check]) loc
   -- Make sure there are some bindings to certify.
   certifying c $ mapM rebind =<< internaliseExp desc e2
   where rebind v = do
@@ -958,12 +954,11 @@ internaliseSlice :: SrcLoc
                  -> InternaliseM ([I.DimIndex SubExp], Certificates)
 internaliseSlice loc dims idxs = do
  (idxs', oks, parts) <- unzip3 <$> zipWithM internaliseDimIndex dims idxs
- c <- assertingOne $ do
-   ok <- letSubExp "index_ok" =<< eAll oks
-   let msg = errorMsg $ ["Index ["] ++ intercalate [", "] parts ++
-             ["] out of bounds for array of shape ["] ++
-             intersperse "][" (map ErrorInt32 $ take (length idxs) dims) ++ ["]."]
-   letExp "index_certs" $ I.BasicOp $ I.Assert ok msg (loc, mempty)
+ ok <- letSubExp "index_ok" =<< eAll oks
+ let msg = errorMsg $ ["Index ["] ++ intercalate [", "] parts ++
+           ["] out of bounds for array of shape ["] ++
+           intersperse "][" (map ErrorInt32 $ take (length idxs) dims) ++ ["]."]
+ c <- assert "index_certs" ok msg loc
  return (idxs', c)
 
 internaliseDimIndex :: SubExp -> E.DimIndex
@@ -1068,7 +1063,7 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   nes <- internaliseExp (what++"_ne") ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
     rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape asserting
+    ensureShape
       "Row shape of input array does not match shape of neutral element"
       loc rowtype (what++"_ne_right_shape") ne'
   nests <- mapM I.subExpType nes'
@@ -1091,7 +1086,7 @@ internaliseHist desc rf hist op ne buckets img loc = do
   -- reshape neutral element to have same size as the destination array
   ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
     rowtype <- I.stripArray 1 <$> lookupType h
-    ensureShape asserting
+    ensureShape
       "Row shape of destination array does not match shape of neutral element"
       loc rowtype "hist_ne_right_shape" n
   ne_ts <- mapM I.subExpType ne_shp
@@ -1106,7 +1101,7 @@ internaliseHist desc rf hist op ne buckets img loc = do
       rettype = I.Prim int32 : ne_ts
       body = mkBody mempty $ map (I.Var . paramName) params
   body' <- localScope (scopeOfLParams params) $
-           ensureResultShape asserting
+           ensureResultShape
            "Row shape of value array does not match row shape of hist target"
            (srclocOf img) rettype body
 
@@ -1119,9 +1114,8 @@ internaliseHist desc rf hist op ne buckets img loc = do
   b_shape <- I.arrayShape <$> lookupType buckets'
   let b_w = shapeSize 0 b_shape
   cmp <- letSubExp "bucket_cmp" $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) b_w w_img
-  c <- assertingOne $
-    letExp "bucket_cert" $ I.BasicOp $
-    I.Assert cmp "length of index and value array does not match" (loc, mempty)
+  c <- assert "bucket_cert" cmp
+       "length of index and value array does not match" loc
   buckets'' <- certifying c $ letExp (baseString buckets') $
     I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
 
@@ -1168,7 +1162,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
     return p { I.paramName = name }
 
   body_with_lam0 <-
-    ensureResultShape asserting "shape of result does not match shape of initial value"
+    ensureResultShape "shape of result does not match shape of initial value"
     (srclocOf lam0) acctps <=< insertStmsM $ do
       lam_res <- bodyBind lam_body
 
@@ -1179,7 +1173,7 @@ internaliseStreamRed desc o comm lam0 lam arr = do
           copyIfConsumed _ x = return x
 
       accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
-      lam_res' <- ensureArgShapes asserting
+      lam_res' <- ensureArgShapes
                   "shape of chunk function result does not match shape of initial value"
                   (srclocOf lam) [] (map I.typeOf $ I.lambdaParams lam0') lam_res
       new_lam_res <- eLambda lam0' $ map eSubExp $ accs' ++ lam_res'
@@ -1227,23 +1221,19 @@ certifyingNonzero :: SrcLoc -> IntType -> SubExp
                   -> InternaliseM a
                   -> InternaliseM a
 certifyingNonzero loc t x m = do
-  c <- assertingOne $ do
-    zero <- letSubExp "zero" $ I.BasicOp $
-            CmpOp (CmpEq (IntType t)) x (intConst t 0)
-    nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp Not zero
-    letExp "nonzero_cert" $ I.BasicOp $
-      I.Assert nonzero "division by zero" (loc, mempty)
+  zero <- letSubExp "zero" $ I.BasicOp $
+          CmpOp (CmpEq (IntType t)) x (intConst t 0)
+  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp Not zero
+  c <- assert "nonzero_cert" nonzero "division by zero" loc
   certifying c m
 
 certifyingNonnegative :: SrcLoc -> IntType -> SubExp
                       -> InternaliseM a
                       -> InternaliseM a
 certifyingNonnegative loc t x m = do
-  c <- assertingOne $ do
-    nonnegative <- letSubExp "nonnegative" $ I.BasicOp $
-                   CmpOp (CmpSle t) (intConst t 0) x
-    letExp "nonzero_cert" $ I.BasicOp $
-      I.Assert nonnegative "negative exponent" (loc, mempty)
+  nonnegative <- letSubExp "nonnegative" $ I.BasicOp $
+                 CmpOp (CmpSle t) (intConst t 0) x
+  c <- assert "nonzero_cert" nonnegative "negative exponent" loc
   certifying c m
 
 internaliseBinOp :: SrcLoc -> String
@@ -1587,12 +1577,13 @@ isOverloadedFunction qname args loc = do
       -- The unflattened dimension needs to have the same number of elements
       -- as the original dimension.
       old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
-      dim_ok <- assertingOne $ letExp "dim_ok" =<<
-                eAssert (eCmpOp (I.CmpEq I.int32)
-                         (eBinOp (I.Mul Int32 I.OverflowUndef) (eSubExp n') (eSubExp m'))
-                         (eSubExp old_dim))
-                "new shape has different number of elements than old shape" loc
-      certifying dim_ok $ forM arrs $ \arr' -> do
+      dim_ok <- letSubExp "dim_ok" =<<
+                eCmpOp (I.CmpEq I.int32)
+                (eBinOp (I.Mul Int32 I.OverflowUndef) (eSubExp n') (eSubExp m'))
+                (eSubExp old_dim)
+      dim_ok_cert <- assert "dim_ok_cert" dim_ok
+                     "new shape has different number of elements than old shape" loc
+      certifying dim_ok_cert $ forM arrs $ \arr' -> do
         arr_t <- lookupType arr'
         letSubExp desc $ I.BasicOp $
           I.Reshape (reshapeOuter [DimNew n', DimNew m'] 1 $ I.arrayShape arr_t) arr'
@@ -1700,9 +1691,8 @@ isOverloadedFunction qname args loc = do
         -- size.
         cmp <- letSubExp "write_cmp" $ I.BasicOp $
           I.CmpOp (I.CmpEq I.int32) si_w sv_w
-        c   <- assertingOne $
-          letExp "write_cert" $ I.BasicOp $
-          I.Assert cmp "length of index and value array does not match" (loc, mempty)
+        c <- assert "write_cert" cmp
+             "length of index and value array does not match" loc
         certifying c $ letExp (baseString sv ++ "_write_sv") $
           I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
@@ -1722,7 +1712,7 @@ isOverloadedFunction qname args loc = do
         let outs = replicate (length valueNames) indexName ++ valueNames
         results <- forM outs $ \name ->
           letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
-        ensureResultShape asserting "scatter value has wrong size" loc
+        ensureResultShape "scatter value has wrong size" loc
           bodyTypes $ resultBody results
 
       let lam = I.Lambda { I.lambdaParams = bodyParams
@@ -1747,7 +1737,7 @@ funcall desc (QualName _ fname) args loc = do
       constOrShape = const $ I.Prim int32
       paramts = closure_ts ++
                 map constOrShape shapeargs ++ map I.fromDecl value_paramts
-  args' <- ensureArgShapes asserting "function arguments of wrong shape"
+  args' <- ensureArgShapes "function arguments of wrong shape"
            loc (map I.paramName fun_params)
            paramts (map I.Var closure ++ shapeargs ++ args)
   argts' <- mapM subExpType args'
