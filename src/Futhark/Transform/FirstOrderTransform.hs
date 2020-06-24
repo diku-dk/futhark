@@ -70,13 +70,11 @@ transformStmRecursively :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                            Stm -> m ()
 
 transformStmRecursively (Let pat aux (Op soac)) =
-  certifying (stmAuxCerts aux) $
-  transformSOAC pat =<< mapSOACM soacTransform soac
+  auxing aux $ transformSOAC pat =<< mapSOACM soacTransform soac
   where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda }
 
 transformStmRecursively (Let pat aux e) =
-  certifying (stmAuxCerts aux) $
-  letBind pat =<< mapExpM transform e
+  auxing aux $ letBind pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
                                    , mapOnBranchType = return

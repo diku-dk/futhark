@@ -663,9 +663,8 @@ allocInStms origstms m = allocInStms' (stmsToList origstms) mempty
                             , envConsts = stms_consts <> envConsts env
                             }
             local f $ allocInStms' xs (stms'<>allocstms)
-        allocInStm' bnd = do
-          ((),stms') <- collectStms $ certifying (stmCerts bnd) $ allocInStm bnd
-          return stms'
+        allocInStm' stm =
+          collectStms_ $ auxing (stmAux stm) $ allocInStm stm
 
 allocInStm :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
               Stm fromlore -> AllocM fromlore tolore ()
