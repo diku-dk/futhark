@@ -6,6 +6,6 @@
 
 let main =
   map (\xss ->
-         #[incremental_flattening_only_intra]
+         #[incremental_flattening(only_intra)]
          map (\xs -> (i32.sum xs, i32.product xs)) xss)
       >-> map unzip >-> unzip

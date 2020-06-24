@@ -51,7 +51,8 @@ internaliseProg always_safe prog = do
   I.renameProg $ I.Prog consts funs
 
 internaliseAttr :: E.AttrInfo -> Attr
-internaliseAttr (E.AttrInfo v) = I.AttrAtom v
+internaliseAttr (E.AttrAtom v) = I.AttrAtom v
+internaliseAttr (E.AttrComp f attrs) = I.AttrComp f $ map internaliseAttr attrs
 
 internaliseAttrs :: [E.AttrInfo] -> Attrs
 internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)

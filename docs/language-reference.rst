@@ -1584,6 +1584,7 @@ Attributes
 
 .. productionlist::
    attr:   `id`
+       : | `id` "(" [`attr` ("," `attr`)*] ")"
 
 An expression, declaration, or module type spec can be prefixed with
 an attribute, written as ``#[attr]``.  This may affect how it is
@@ -1591,7 +1592,10 @@ treated by the compiler or other tools.  In no case will attributes
 affect or change the *semantics* of a program, but it may affect how
 well it compiles and runs (or in some cases, whether it compiles or
 runs at all).  Unknown attributes are silently ignored.  Most have no
-effect in the interpreter.
+effect in the interpreter.  An attribute can be either an *atom*,
+written as just an identifier, or *compound*, consisting of an
+identifier and a comma-separated sequence of attributes.  The latter
+is used for grouping and encoding of more complex information.
 
 Expression attributes
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1604,28 +1608,28 @@ unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
-``incremental_flattening_no_outer``
-...................................
+``incremental_flattening(no_outer)``
+....................................
 
 When using incremental flattening, do not generate the "only outer
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening_no_intra``
-...................................
+``incremental_flattening(no_intra)``
+....................................
 
 When using incremental flattening, do not generate the "intra-group
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening_only_intra``
-.....................................
+``incremental_flattening(only_intra)``
+......................................
 
 When using incremental flattening, *only* generate the "intra-group
 parallelism" version of the attributed SOACs.  **Beware**: the
 resulting program will fail to run if the inner parallelism does not
 fit on the device.
 
-``incremental_flattening_only_inner``
-.....................................
+``incremental_flattening(only_inner)``
+......................................
 
 When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise
