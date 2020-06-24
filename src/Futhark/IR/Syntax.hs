@@ -115,6 +115,7 @@ module Futhark.IR.Syntax
   , Attrs(..)
   , oneAttr
   , inAttrs
+  , withoutAttrs
 
   -- * Abstract syntax tree
   , Ident (..)
@@ -193,6 +194,10 @@ oneAttr = Attrs . S.singleton
 -- | Is the given attribute to be found in the attribute set?
 inAttrs :: Attr -> Attrs -> Bool
 inAttrs attr (Attrs attrs) = attr `S.member` attrs
+
+-- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
+withoutAttrs :: Attrs -> Attrs -> Attrs
+withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 
 -- | A type alias for namespace control.
 type PatElem lore = PatElemT (LetDec lore)

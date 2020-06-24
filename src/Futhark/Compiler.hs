@@ -11,6 +11,7 @@ module Futhark.Compiler
        , FutharkConfig (..)
        , newFutharkConfig
        , dumpError
+       , handleWarnings
 
        , module Futhark.Compiler.Program
        , readProgram
@@ -112,12 +113,8 @@ runPipelineOnProgram :: FutharkConfig
 runPipelineOnProgram config pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (ws, prog_imports, namesrc) <- readProgram file
-
-  when (futharkWarn config) $ do
-    liftIO $ hPutStr stderr $ show ws
-    when (futharkWerror config && ws /= mempty) $
-      externalErrorS "Treating above warnings as errors due to --Werror."
+  (prog_imports, namesrc) <-
+    handleWarnings config $ (\(a,b,c) -> (a,(b,c))) <$> readProgram file
 
   putNameSource namesrc
   when (pipelineVerbose pipeline_config) $
@@ -159,3 +156,18 @@ readProgramOrDie file = liftIO $ do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
     Right res' -> return res'
+
+-- | Run an operation that produces warnings, and handle them
+-- appropriately, yielding the non-warning return value.  "Proper
+-- handling" means e.g. to print them to the screen, as directed by
+-- the compiler configuration.
+handleWarnings :: FutharkConfig -> FutharkM (Warnings, a) -> FutharkM a
+handleWarnings config m = do
+  (ws, a) <- m
+
+  when (futharkWarn config) $ do
+    liftIO $ hPutStr stderr $ show ws
+    when (futharkWerror config && ws /= mempty) $
+      externalErrorS "Treating above warnings as errors due to --Werror."
+
+  return a

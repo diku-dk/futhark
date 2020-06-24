@@ -48,7 +48,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -201,9 +200,6 @@ assert desc se msg loc = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
   attributing attrs $ letExp desc $
     BasicOp $ Assert se msg (loc, mempty)
-  where attrsForAssert (Attrs attrs) =
-          Attrs $ S.filter attrForAssert attrs
-        attrForAssert = (==AttrAtom "warn_on_safety_check")
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

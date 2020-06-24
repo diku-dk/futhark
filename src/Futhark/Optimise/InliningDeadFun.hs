@@ -198,23 +198,25 @@ addLocations attrs caller_safety more_locs = fmap onStm
           Apply fname args t (min caller_safety safety, loc,locs++more_locs)
           where aux' = aux { stmAuxAttrs = attrs <> stmAuxAttrs aux }
         onStm (Let pat aux (BasicOp (Assert cond desc (loc,locs)))) =
-          Let pat aux $
+          Let pat (withAttrs (attrsForAssert attrs) aux) $
           case caller_safety of
             Safe -> BasicOp $ Assert cond desc (loc,locs++more_locs)
             Unsafe -> BasicOp $ SubExp $ Constant Checked
         onStm (Let pat aux (Op soac)) =
-          Let pat (withAttrs aux) $ Op $ runIdentity $ mapSOACM
+          Let pat (withAttrs attrs' aux) $ Op $ runIdentity $ mapSOACM
           identitySOACMapper { mapOnSOACLambda = return . onLambda
                              } soac
-          where onLambda lam =
-                  lam { lambdaBody = onBody mempty $ lambdaBody lam }
+          where attrs' = attrs `withoutAttrs` for_assert
+                for_assert = attrsForAssert attrs
+                onLambda lam =
+                  lam { lambdaBody = onBody for_assert $ lambdaBody lam }
         onStm (Let pat aux e) =
           Let pat aux $ onExp e
 
         onExp = mapExp identityMapper
                 { mapOnBody = const $ return . onBody attrs }
 
-        withAttrs aux = aux { stmAuxAttrs = attrs <> stmAuxAttrs aux }
+        withAttrs attrs' aux = aux { stmAuxAttrs = attrs' <> stmAuxAttrs aux }
 
         onBody attrs' body =
           body { bodyStms = addLocations attrs' caller_safety more_locs $
