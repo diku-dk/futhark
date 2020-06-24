@@ -1,4 +1,8 @@
-{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
@@ -23,8 +27,7 @@ module Futhark.Internalise.Monad
 
   , localConstsScope
 
-  , asserting
-  , assertingOne
+  , assert
 
   -- * Type Handling
   , InternaliseTypeM
@@ -45,6 +48,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -187,6 +191,19 @@ localConstsScope :: InternaliseM a -> InternaliseM a
 localConstsScope m = do
   scope <- gets stateConstScope
   localScope scope m
+
+-- | Construct an 'Assert' statement, but taking attributes into
+-- account.  Always use this function, and never construct 'Assert'
+-- directly in the internaliser!
+assert :: String -> SubExp -> ErrorMsg SubExp -> SrcLoc
+       -> InternaliseM Certificates
+assert desc se msg loc = assertingOne $ do
+  attrs <- asks $ attrsForAssert . envAttrs
+  attributing attrs $ letExp desc $
+    BasicOp $ Assert se msg (loc, mempty)
+  where attrsForAssert (Attrs attrs) =
+          Attrs $ S.filter attrForAssert attrs
+        attrForAssert = (==AttrAtom "warn_on_safety_check")
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
