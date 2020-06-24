@@ -204,7 +204,9 @@ instance IsPrimValue Bool where
   primValue = BoolValue
 
 -- | The payload of an attribute.
-newtype AttrInfo = AttrInfo Name
+data AttrInfo
+  = AttrAtom Name
+  | AttrComp Name [AttrInfo]
   deriving (Eq, Ord, Show)
 
 -- | A type class for things that can be array dimensions.

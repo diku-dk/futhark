@@ -330,7 +330,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     text "#[" <> ppr attr <> text "]" </> pprPrec (-1) e
 
 instance Pretty AttrInfo where
-  ppr (AttrInfo attr) = ppr attr
+  ppr (AttrAtom attr) = ppr attr
+  ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e

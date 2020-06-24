@@ -5,5 +5,5 @@
 -- structure distributed { SegMap/SegScan 1 }
 
 let main xss =
-  #[incremental_flattening_only_intra]
+  #[incremental_flattening(only_intra)]
   unzip (map (\xs -> (scan (+) 0i32 xs, scan (*) 1i32 xs)) xss)

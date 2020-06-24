@@ -5,4 +5,4 @@
 -- structure distributed { SegMap/SegRed 1 }
 
 let main =
-  map (\xs -> #[incremental_flattening_only_intra] map i32.sum xs)
+  map (\xs -> #[incremental_flattening(only_intra)] map i32.sum xs)

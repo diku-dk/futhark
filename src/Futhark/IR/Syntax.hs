@@ -173,7 +173,9 @@ import Futhark.IR.Decorations
 import Futhark.IR.Syntax.Core
 
 -- | A single attribute.
-newtype Attr = AttrAtom Name
+data Attr
+  = AttrAtom Name
+  | AttrComp Name [Attr]
   deriving (Ord, Show, Eq)
 
 instance IsString Attr where

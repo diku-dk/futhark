@@ -890,7 +890,13 @@ maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
 
 AttrInfo :: { AttrInfo }
-         : id { let L _ (ID s) = $1 in AttrInfo s }
+         : id { let L _ (ID s) = $1 in AttrAtom s }
+         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] }
+         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 }
+
+Attrs :: { [AttrInfo] }
+       : AttrInfo           { [$1] }
+       | AttrInfo ',' Attrs { $1 : $3 }
 
 Value :: { Value }
 Value : IntValue { $1 }

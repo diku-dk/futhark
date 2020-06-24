@@ -669,19 +669,19 @@ onMap path (MapLoop pat aux w lam arrs) = do
 
 onlyExploitIntra :: Attrs -> Bool
 onlyExploitIntra attrs =
-  "incremental_flattening_only_intra" `inAttrs` attrs
+  AttrComp "incremental_flattening" ["only_intra"] `inAttrs` attrs
 
 mayExploitOuter :: Attrs -> Bool
 mayExploitOuter attrs =
   not $
-  "incremental_flattening_no_outer" `inAttrs` attrs ||
-  "incremental_flattening_only_inner" `inAttrs` attrs
+  AttrComp "incremental_flattening" ["no_outer"] `inAttrs` attrs ||
+  AttrComp "incremental_flattening" ["only_inner"] `inAttrs` attrs
 
 mayExploitIntra :: Attrs -> Bool
 mayExploitIntra attrs =
   not $
-  "incremental_flattening_no_intra" `inAttrs` attrs ||
-  "incremental_flattening_only_inner" `inAttrs` attrs
+  AttrComp "incremental_flattening" ["no_intra"] `inAttrs` attrs ||
+  AttrComp "incremental_flattening" ["only_inner"] `inAttrs` attrs
 
 onMap' :: KernelNest -> KernelPath
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))

@@ -35,8 +35,8 @@ let main(n: i32,
                     md_starts: []f64,
                     noises_mat: [][][]f64): [][][]f64 =
   loop (noises_mat) for i < n do
-    #[incremental_flattening_only_inner]
+    #[incremental_flattening(only_inner)]
     map  (\(noises: [][]f64) ->
-            #[incremental_flattening_only_inner]
+            #[incremental_flattening(only_inner)]
            mkPrices(md_starts, md_vols, md_drifts, noises)) (
          noises_mat)

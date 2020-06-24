@@ -120,6 +120,7 @@ instance PrettyLore lore => Pretty (Body lore) where
 
 instance Pretty Attr where
   ppr (AttrAtom v) = ppr v
+  ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
 
 attrAnnots :: Attrs -> [Doc]
 attrAnnots = map f . toList . unAttrs
