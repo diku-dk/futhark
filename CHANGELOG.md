@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Attributes are now also permitted on declarations and specs.
 
+  * `futhark repl` now has a `:nanbreak` command (#839).
+
 ### Removed
 
   * The C# backend has been removed (#984).
