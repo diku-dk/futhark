@@ -1,4 +1,8 @@
-{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
@@ -23,8 +27,7 @@ module Futhark.Internalise.Monad
 
   , localConstsScope
 
-  , asserting
-  , assertingOne
+  , assert
 
   -- * Type Handling
   , InternaliseTypeM
@@ -187,6 +190,16 @@ localConstsScope :: InternaliseM a -> InternaliseM a
 localConstsScope m = do
   scope <- gets stateConstScope
   localScope scope m
+
+-- | Construct an 'Assert' statement, but taking attributes into
+-- account.  Always use this function, and never construct 'Assert'
+-- directly in the internaliser!
+assert :: String -> SubExp -> ErrorMsg SubExp -> SrcLoc
+       -> InternaliseM Certificates
+assert desc se msg loc = assertingOne $ do
+  attrs <- asks $ attrsForAssert . envAttrs
+  attributing attrs $ letExp desc $
+    BasicOp $ Assert se msg (loc, mempty)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

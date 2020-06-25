@@ -16,8 +16,8 @@ import Futhark.Util
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile sequential C" "Generate sequential C code from optimised Futhark program."
-       sequentialCpuPipeline $ \() mode outpath prog -> do
-         cprog <- SequentialC.compileProg prog
+       sequentialCpuPipeline $ \fcfg () mode outpath prog -> do
+         cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
 

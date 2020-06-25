@@ -115,6 +115,7 @@ module Futhark.IR.Syntax
   , Attrs(..)
   , oneAttr
   , inAttrs
+  , withoutAttrs
 
   -- * Abstract syntax tree
   , Ident (..)
@@ -173,7 +174,9 @@ import Futhark.IR.Decorations
 import Futhark.IR.Syntax.Core
 
 -- | A single attribute.
-newtype Attr = AttrAtom Name
+data Attr
+  = AttrAtom Name
+  | AttrComp Name [Attr]
   deriving (Ord, Show, Eq)
 
 instance IsString Attr where
@@ -191,6 +194,10 @@ oneAttr = Attrs . S.singleton
 -- | Is the given attribute to be found in the attribute set?
 inAttrs :: Attr -> Attrs -> Bool
 inAttrs attr (Attrs attrs) = attr `S.member` attrs
+
+-- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
+withoutAttrs :: Attrs -> Attrs -> Attrs
+withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 
 -- | A type alias for namespace control.
 type PatElem lore = PatElemT (LetDec lore)
@@ -477,6 +484,7 @@ type LParam lore = Param (LParamInfo lore)
 data FunDef lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
                             -- ^ Contains a value if this function is
                             -- an entry point.
+                          , funDefAttrs :: Attrs
                           , funDefName :: Name
                           , funDefRetType :: [RetType lore]
                           , funDefParams :: [FParam lore]

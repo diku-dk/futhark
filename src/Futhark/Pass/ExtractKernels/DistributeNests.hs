@@ -196,6 +196,7 @@ withStm stm = local $ \env ->
 
 leavingNesting :: (MonadFreshNames m, DistLore lore) =>
                   DistAcc lore -> DistNestT lore m (DistAcc lore)
+
 leavingNesting acc =
   case popInnerTarget $ distTargets acc of
    Nothing ->

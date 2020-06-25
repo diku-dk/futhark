@@ -17,6 +17,7 @@ import Prelude
 
 import Futhark.Error
 import Futhark.Util.Options
+import Futhark.Util (maxinum)
 
 import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.C as C
@@ -76,7 +77,7 @@ msg = unlines $
       ["<command> options...", "Commands:", ""] ++
       [ "   " <> cmd <> replicate (k - length cmd) ' ' <> desc
       | (cmd, (_, desc)) <- commands ]
-  where k = maximum (map (length . fst) commands) + 3
+  where k = maxinum (map (length . fst) commands) + 3
 
 -- | Catch all IO exceptions and print a better error message if they
 -- happen.
