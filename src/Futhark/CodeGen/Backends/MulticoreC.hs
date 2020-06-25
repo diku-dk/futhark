@@ -28,9 +28,10 @@ import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRep
 
 compileProg :: MonadFreshNames m => Prog MCMem
-            -> m GC.CParts
+            -> m (ImpGen.Warnings, GC.CParts)
 compileProg =
-  GC.compileProg "multicore" operations generateContext "" [DefaultSpace] cliOptions <=<
+  traverse (GC.compileProg "multicore" operations generateContext
+            "" [DefaultSpace] cliOptions) <=<
   ImpGen.compileProg
   where generateContext = do
 

@@ -29,7 +29,7 @@ internaliseMapLambda internaliseLambda lam args = do
   (params, body, rettype) <- internaliseLambda lam rowtypes
   (rettype', _) <- instantiateShapes' rettype
   body' <- localScope (scopeOfLParams params) $
-           ensureResultShape asserting
+           ensureResultShape
            (ErrorMsg [ErrorString "not all iterations produce same shape"])
            (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
@@ -53,7 +53,7 @@ internaliseStreamMapLambda internaliseLambda lam args = do
     (rettype', _) <- instantiateShapes' rettype
     body' <- localScope (scopeOfLParams params) $ insertStmsM $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
-      ensureResultShape asserting
+      ensureResultShape
         (ErrorMsg [ErrorString "not all iterations produce same shape"])
         (srclocOf lam) (map outer rettype') body
     return $ I.Lambda (chunk_param:params) body' (map outer rettype')
@@ -71,7 +71,7 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
   body' <- localScope (scopeOfLParams params) $
-           ensureResultShape asserting
+           ensureResultShape
            (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
            (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'

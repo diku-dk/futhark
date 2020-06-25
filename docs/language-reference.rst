@@ -212,6 +212,7 @@ names bound by preceding declarations.
       : | "open" `mod_exp`
       : | "import" `stringlit`
       : | "local" `dec`
+      : | "#[" attr "]" dec
 
 The ``open`` declaration brings names defined in another module into
 scope (see also `Module System`_).  For the meaning of ``import``, see
@@ -1538,6 +1539,7 @@ Module Type Expressions
        : | "type" ["^"] `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
+       : | "#[" attr "]" spec
    spec_type: `type` | `type` "->" `spec_type`
 
 Module types classify modules, with the only (unimportant) difference
@@ -1582,75 +1584,110 @@ Attributes
 
 .. productionlist::
    attr:   `id`
+       : | `id` "(" [`attr` ("," `attr`)*] ")"
 
-An expression can be prefixed with an attribute, written as
-``#[attr]``.  This may affect how it is treated by the compiler or
-other tools.  In no case will attributes affect or change the
-*semantics* of a program, but it may affect how well it compiles and
-runs (or in some cases, whether it compiles or runs at all).  Unknown
-attributes are silently ignored.  Most have no effect in the
-interpreter.
+An expression, declaration, or module type spec can be prefixed with
+an attribute, written as ``#[attr]``.  This may affect how it is
+treated by the compiler or other tools.  In no case will attributes
+affect or change the *semantics* of a program, but it may affect how
+well it compiles and runs (or in some cases, whether it compiles or
+runs at all).  Unknown attributes are silently ignored.  Most have no
+effect in the interpreter.  An attribute can be either an *atom*,
+written as just an identifier, or *compound*, consisting of an
+identifier and a comma-separated sequence of attributes.  The latter
+is used for grouping and encoding of more complex information.
 
-Many attributes affect second-order array combinators (*SOACS*).
-These must be applied to a fully saturated function application or
-they will have no effect.  If two SOACs with contradictory attributes
-are combined through fusion, it is unspecified which attributes take
-precedence.
+Expression attributes
+~~~~~~~~~~~~~~~~~~~~~
+
+Many expression attributes affect second-order array combinators
+(*SOACS*).  These must be applied to a fully saturated function
+application or they will have no effect.  If two SOACs with
+contradictory attributes are combined through fusion, it is
+unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
-``incremental_flattening_no_outer``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``incremental_flattening(no_outer)``
+....................................
 
 When using incremental flattening, do not generate the "only outer
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening_no_intra``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``incremental_flattening(no_intra)``
+....................................
 
 When using incremental flattening, do not generate the "intra-group
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening_only_intra``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``incremental_flattening(only_intra)``
+......................................
 
 When using incremental flattening, *only* generate the "intra-group
 parallelism" version of the attributed SOACs.  **Beware**: the
 resulting program will fail to run if the inner parallelism does not
 fit on the device.
 
-``incremental_flattening_only_inner``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``incremental_flattening(only_inner)``
+......................................
 
 When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise
 to multiple versions at deeper levels).
 
 ``noinline``
-~~~~~~~~~~~~
+............
 
 Do not inline the attributed function application.  If used within a
 parallel construct (e.g. ``map``), this will likely prevent the GPU
 backends from generating working code.
 
 ``sequential``
-~~~~~~~~~~~~~~
+..............
 
 *Fully* sequentialise the attributed SOAC.
 
 ``sequential_outer``
-~~~~~~~~~~~~~~~~~~~~
+....................
 
 Turn the outer parallelism in the attributed SOAC sequential, but
 preserve any inner parallelism.
 
 ``sequential_inner``
-~~~~~~~~~~~~~~~~~~~~
+....................
 
 Exploit only outer parallelism in the attributed SOAC.
 
 ``unsafe``
-~~~~~~~~~~
+..........
 
 Do not perform any dynamic safety checks (such as bound checks) during
 execution of the attributed expression.
+
+``warn_on(safety_checks)``
+..........................
+
+Make the compiler issue a warning if the attributed expression (or its
+subexpressions) requires safety checks (such as bounds checking) at
+run-time.  This is used for performance-critical code where you want
+to be told when the compiler is unable to statically verify the safety
+of all operations.
+
+Declaration attributes
+~~~~~~~~~~~~~~~~~~~~~~
+
+The following declaration attributes are supported.
+
+``noinline``
+............
+
+Do not inline any calls to this function.  If the function is then
+used within a parallel construct (e.g. ``map``), this will likely
+prevent the GPU backends from generating working code.
+
+Spec attributes
+~~~~~~~~~~~~~~~
+
+No spec attributes are currently supported by the compiler itself,
+although they are syntactically permitted and may be used by other
+tools.

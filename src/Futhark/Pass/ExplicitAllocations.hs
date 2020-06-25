@@ -179,8 +179,8 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 
   mkBodyM bnds res = return $ Body () bnds res
 
-  addStms binding = AllocM $ addBinderStms binding
-  collectStms (AllocM m) = AllocM $ collectBinderStms m
+  addStms = AllocM . addStms
+  collectStms (AllocM m) = AllocM $ collectStms m
 
 instance (Allocable fromlore tolore) =>
          Allocator tolore (AllocM fromlore tolore) where
@@ -583,12 +583,12 @@ explicitAllocationsGeneric handleOp hints =
   intraproceduralTransformationWithConsts onStms allocInFun
   where onStms stms = runAllocM handleOp hints $ allocInStms stms pure
 
-        allocInFun consts (FunDef entry fname rettype params fbody) =
+        allocInFun consts (FunDef entry attrs fname rettype params fbody) =
           runAllocM handleOp hints $ inScopeOf consts $
           allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
           fbody' <- insertStmsM $ allocInFunBody
                     (map (const $ Just DefaultSpace) rettype) fbody
-          return $ FunDef entry fname (memoryInDeclExtType rettype) params' fbody'
+          return $ FunDef entry attrs fname (memoryInDeclExtType rettype) params' fbody'
 
 explicitAllocationsInStmsGeneric :: (MonadFreshNames m, HasScope tolore m,
                                      Allocable fromlore tolore) =>
@@ -663,9 +663,8 @@ allocInStms origstms m = allocInStms' (stmsToList origstms) mempty
                             , envConsts = stms_consts <> envConsts env
                             }
             local f $ allocInStms' xs (stms'<>allocstms)
-        allocInStm' bnd = do
-          ((),stms') <- collectStms $ certifying (stmCerts bnd) $ allocInStm bnd
-          return stms'
+        allocInStm' stm =
+          collectStms_ $ auxing (stmAux stm) $ allocInStm stm
 
 allocInStm :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
               Stm fromlore -> AllocM fromlore tolore ()

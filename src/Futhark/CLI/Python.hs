@@ -14,11 +14,11 @@ import Futhark.Compiler.CLI
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile sequential Python" "Generate sequential Python code from optimised Futhark program."
-       sequentialCpuPipeline $ \() mode outpath prog -> do
+       sequentialCpuPipeline $ \fcfg () mode outpath prog -> do
           let class_name =
                 case mode of ToLibrary -> Just $ takeBaseName outpath
                              ToExecutable -> Nothing
-          pyprog <- SequentialPy.compileProg class_name prog
+          pyprog <- handleWarnings fcfg $ SequentialPy.compileProg class_name prog
 
           case mode of
             ToLibrary ->

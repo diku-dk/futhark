@@ -224,6 +224,9 @@ Dec_ :: { UncheckedDec }
     | import stringlit
       { let L _ (STRINGLIT s) = $2 in ImportDec s NoInfo (srcspan $1 $>) }
     | local Dec         { LocalDec $2 (srcspan $1 $>) }
+    | '#[' AttrInfo ']' Dec_
+                        { addAttr $2 $4 }
+
 ;
 
 SigExp :: { UncheckedSigExp }
@@ -318,6 +321,8 @@ Spec :: { SpecBase NoInfo Name }
         { IncludeSpec $2 (srcspan $1 $>) }
       | Doc Spec
         { addDocSpec $1 $2 }
+      | '#[' AttrInfo ']' Spec
+        { addAttrSpec $2 $4 }
 
 Specs :: { [SpecBase NoInfo Name] }
        : Spec Specs { $1 : $2 }
@@ -391,22 +396,22 @@ Val    :: { ValBindBase NoInfo Name }
 Val     : let BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let (name, _) = $2
             in ValBind (if name==defaultEntryPoint then Just NoInfo else Nothing) name (fmap declaredType $5) NoInfo
-               $3 $4 $7 Nothing (srcspan $1 $>)
+               $3 $4 $7 Nothing mempty (srcspan $1 $>)
           }
 
         | entry BindingId TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let (name, loc) = $2
             in ValBind (Just NoInfo) name (fmap declaredType $5) NoInfo
-               $3 $4 $7 Nothing (srcspan $1 $>) }
+               $3 $4 $7 Nothing mempty (srcspan $1 $>) }
 
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 Nothing (srcspan $1 $>)
+          { ValBind Nothing $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7
+            Nothing mempty (srcspan $1 $>)
           }
 
         | let BindingUnOp TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
-          { let name = $2
-            in ValBind Nothing name (fmap declaredType $5) NoInfo
-               $3 $4 $7 Nothing (srcspan $1 $>)
+          { ValBind Nothing $2 (fmap declaredType $5) NoInfo $3 $4 $7
+            Nothing mempty (srcspan $1 $>)
           }
 
 TypeExpDecl :: { TypeDeclBase NoInfo Name }
@@ -885,7 +890,13 @@ maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
 
 AttrInfo :: { AttrInfo }
-         : id { let L _ (ID s) = $1 in AttrInfo s }
+         : id { let L _ (ID s) = $1 in AttrAtom s }
+         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] }
+         | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 }
+
+Attrs :: { [AttrInfo] }
+       : AttrInfo           { [$1] }
+       | AttrInfo ',' Attrs { $1 : $3 }
 
 Value :: { Value }
 Value : IntValue { $1 }
@@ -990,6 +1001,16 @@ addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
 addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
 addDocSpec _ spec = spec
+
+addAttr :: AttrInfo -> UncheckedDec -> UncheckedDec
+addAttr attr (ValDec val) =
+  ValDec $ val { valBindAttrs = attr : valBindAttrs val }
+addAttr attr dec =
+  dec
+
+-- We will extend this function once we actually start tracking these.
+addAttrSpec :: AttrInfo -> UncheckedSpec -> UncheckedSpec
+addAttrSpec _attr dec = dec
 
 reverseNonempty :: (a, [a]) -> (a, [a])
 reverseNonempty (x, l) =

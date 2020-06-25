@@ -40,9 +40,9 @@ type FirstOrderLore lore =
 -- provided by top-level constants.
 transformFunDef :: (MonadFreshNames m, FirstOrderLore tolore) =>
                    Scope tolore -> FunDef SOACS -> m (AST.FunDef tolore)
-transformFunDef consts_scope (FunDef entry fname rettype params body) = do
+transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
   (body',_) <- modifyNameSource $ runState $ runBinderT m consts_scope
-  return $ FunDef entry fname rettype params body'
+  return $ FunDef entry attrs fname rettype params body'
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
 -- | First-order-transform these top-level constants.
@@ -70,13 +70,11 @@ transformStmRecursively :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                            Stm -> m ()
 
 transformStmRecursively (Let pat aux (Op soac)) =
-  certifying (stmAuxCerts aux) $
-  transformSOAC pat =<< mapSOACM soacTransform soac
+  auxing aux $ transformSOAC pat =<< mapSOACM soacTransform soac
   where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda }
 
 transformStmRecursively (Let pat aux e) =
-  certifying (stmAuxCerts aux) $
-  letBind pat =<< mapExpM transform e
+  auxing aux $ letBind pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
                                    , mapOnBranchType = return

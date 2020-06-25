@@ -8,5 +8,5 @@
 -- }
 
 let main xsss =
-  #[incremental_flattening_only_inner]
+  #[incremental_flattening(only_inner)]
   map (\xss -> #[sequential_outer] map i32.sum xss) xsss

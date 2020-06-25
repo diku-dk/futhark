@@ -47,14 +47,14 @@ static inline void check_err(int errval, int sets_errno, const char *fun, int li
 #define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
 
 // Read a file into a NUL-terminated string; returns NULL on error.
-static char* slurp_file(const char *filename, size_t *size) {
-  char *s;
+static void* slurp_file(const char *filename, size_t *size) {
+  unsigned char *s;
   FILE *f = fopen(filename, "rb"); // To avoid Windows messing with linebreaks.
   if (f == NULL) return NULL;
   fseek(f, 0, SEEK_END);
   size_t src_size = ftell(f);
   fseek(f, 0, SEEK_SET);
-  s = (char*) malloc(src_size + 1);
+  s = (unsigned char*) malloc(src_size + 1);
   if (fread(s, 1, src_size, f) != src_size) {
     free(s);
     s = NULL;
@@ -72,7 +72,7 @@ static char* slurp_file(const char *filename, size_t *size) {
 
 // Dump 'n' bytes from 'buf' into the file at the designated location.
 // Returns 0 on success.
-static int dump_file(const char *file, const char *buf, size_t n) {
+static int dump_file(const char *file, const void *buf, size_t n) {
   FILE *f = fopen(file, "w");
 
   if (f == NULL) {

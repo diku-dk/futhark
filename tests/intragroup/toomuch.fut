@@ -10,7 +10,7 @@ let vecadd (a: vec) (b: vec) =
 let psum = scan vecadd (0,0,0,0)
 
 let main (xss: [][]f64) (yss: [][]f64) (zss: [][]f64) (vss: [][]f64) =
-  #[incremental_flattening_no_outer]
+  #[incremental_flattening(no_outer)]
   map (psum >-> psum >-> psum >-> psum >-> psum >-> psum >-> psum >-> psum >-> psum)
       (map4 zip4 xss yss zss vss)
   |> map unzip4 |> unzip4

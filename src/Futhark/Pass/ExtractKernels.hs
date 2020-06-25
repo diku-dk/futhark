@@ -230,10 +230,10 @@ runDistribM (DistribM m) = do
 transformFunDef :: (MonadFreshNames m, MonadLogger m) =>
                    Scope Out.Kernels -> FunDef SOACS
                 -> m (Out.FunDef Out.Kernels)
-transformFunDef scope (FunDef entry name rettype params body) = runDistribM $ do
+transformFunDef scope (FunDef entry attrs name rettype params body) = runDistribM $ do
   body' <- localScope (scope <> scopeOfFParams params) $
            transformBody mempty body
-  return $ FunDef entry name rettype params body'
+  return $ FunDef entry attrs name rettype params body'
 
 type KernelsStms = Stms Out.Kernels
 
@@ -669,19 +669,19 @@ onMap path (MapLoop pat aux w lam arrs) = do
 
 onlyExploitIntra :: Attrs -> Bool
 onlyExploitIntra attrs =
-  "incremental_flattening_only_intra" `inAttrs` attrs
+  AttrComp "incremental_flattening" ["only_intra"] `inAttrs` attrs
 
 mayExploitOuter :: Attrs -> Bool
 mayExploitOuter attrs =
   not $
-  "incremental_flattening_no_outer" `inAttrs` attrs ||
-  "incremental_flattening_only_inner" `inAttrs` attrs
+  AttrComp "incremental_flattening" ["no_outer"] `inAttrs` attrs ||
+  AttrComp "incremental_flattening" ["only_inner"] `inAttrs` attrs
 
 mayExploitIntra :: Attrs -> Bool
 mayExploitIntra attrs =
   not $
-  "incremental_flattening_no_intra" `inAttrs` attrs ||
-  "incremental_flattening_only_inner" `inAttrs` attrs
+  AttrComp "incremental_flattening" ["no_intra"] `inAttrs` attrs ||
+  AttrComp "incremental_flattening" ["only_inner"] `inAttrs` attrs
 
 onMap' :: KernelNest -> KernelPath
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))

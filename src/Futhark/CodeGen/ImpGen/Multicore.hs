@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Futhark.CodeGen.ImpGen.Multicore
   ( Futhark.CodeGen.ImpGen.Multicore.compileProg
+  , Warnings
   )
   where
 
@@ -20,7 +21,7 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog MCMem
-            -> m (Imp.Definitions Imp.Multicore)
+            -> m (Warnings, Imp.Definitions Imp.Multicore)
 compileProg = Futhark.CodeGen.ImpGen.compileProg ModeParallel ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
         opCompiler dest (Alloc e space) = compileAlloc dest e space

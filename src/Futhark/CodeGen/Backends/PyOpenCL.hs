@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 module Futhark.CodeGen.Backends.PyOpenCL
   ( compileProg
   ) where
@@ -19,9 +20,10 @@ import Futhark.Util (zEncodeString)
 
 --maybe pass the config file rather than multiple arguments
 compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog KernelsMem -> m String
+               Maybe String -> Prog KernelsMem -> m (ImpGen.Warnings, String)
 compileProg module_name prog = do
-  Imp.Program opencl_code opencl_prelude kernels types sizes failures prog' <-
+  (ws, Imp.Program opencl_code opencl_prelude
+       kernels types sizes failures prog') <-
     ImpGen.compileProg prog
   --prepare the strings for assigning the kernels and set them as global
   let assign = unlines $
@@ -110,7 +112,8 @@ compileProg module_name prog = do
                          }
                 ]
 
-  Py.compileProg module_name constructor imports defines operations ()
+  (ws,) <$>
+    Py.compileProg module_name constructor imports defines operations ()
     [Exp $ Py.simpleCall "sync" [Var "self"]] options prog'
   where operations :: Py.Operations Imp.OpenCL ()
         operations = Py.Operations

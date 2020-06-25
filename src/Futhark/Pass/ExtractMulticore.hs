@@ -107,9 +107,9 @@ transformBody (Body () stms res) =
   Body () <$> transformStms stms <*> pure res
 
 transformFunDef :: FunDef SOACS -> ExtractM (FunDef MC)
-transformFunDef (FunDef entry name rettype params body) = do
+transformFunDef (FunDef entry attrs name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $ transformBody body
-  return $ FunDef entry name rettype params body'
+  return $ FunDef entry attrs name rettype params body'
 
 transformMap :: MapLoop -> ExtractM (Stms MC)
 transformMap (MapLoop pat cs w lam arrs) = do

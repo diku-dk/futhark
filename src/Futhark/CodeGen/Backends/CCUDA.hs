@@ -24,16 +24,17 @@ import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
 
 -- | Compile the program to C with calls to CUDA.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
-  (Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
+  (ws, Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
     ImpGen.compileProg prog
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
       extra = generateBoilerplate cuda_code cuda_prelude
               cost_centres kernels sizes failures
-  GC.compileProg "cuda" operations extra cuda_includes
+  (ws,) <$>
+    GC.compileProg "cuda" operations extra cuda_includes
     [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()
@@ -239,12 +240,12 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     if ($exp:sizes_nonzero) {
       int perm[3] = { 0, 1, 2 };
 
-      if ($exp:grid_y > (1<<16)) {
+      if ($exp:grid_y >= (1<<16)) {
         perm[1] = perm[0];
         perm[0] = 1;
       }
 
-      if ($exp:grid_z > (1<<16)) {
+      if ($exp:grid_z >= (1<<16)) {
         perm[2] = perm[0];
         perm[0] = 2;
       }

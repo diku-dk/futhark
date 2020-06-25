@@ -14,8 +14,8 @@ import Futhark.Util
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile to multicore C" "Generate multicore C code from optimised Futhark program."
-       multicorePipeline $ \() mode outpath prog -> do
-         cprog <- MulticoreC.compileProg prog
+       multicorePipeline $ \fcfg () mode outpath prog -> do
+         cprog <- handleWarnings fcfg $ MulticoreC.compileProg prog
          let cpath = outpath `addExtension` "c"
              hpath = outpath `addExtension` "h"
 
