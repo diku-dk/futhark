@@ -1058,6 +1058,17 @@ ruleBasicOp vtable pat _ (Update src _ (Var v))
   | Just (BasicOp Scratch{}, _) <- ST.lookupExp v vtable =
       Simplify $ letBind pat $ BasicOp $ SubExp $ Var src
 
+-- If we are writing a single-element slice from some array, and the
+-- element of that array can be computed as a PrimExp based on the
+-- index, let's just write that instead.
+ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
+  | isCt1 n, isCt1 s,
+    Just (ST.Indexed cs e) <- ST.index v [intConst Int32 0] vtable =
+      Simplify $ do
+        e' <- toSubExp "update_elem" e
+        auxing aux $ certifying cs $
+          letBind pat $ BasicOp $ Update src [DimFix i] e'
+
 ruleBasicOp vtable pat _ (Update dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
