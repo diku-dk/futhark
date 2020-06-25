@@ -79,9 +79,9 @@ instance HasSegOp (Wise Kernels) where
   segOp = SegOp
 
 instance SOAC.HasSOAC (Wise Kernels) where
-  toSOAC (OtherOp soac) = Just soac
-  toSOAC _ = Nothing
-  fromSOAC = OtherOp
+  asSOAC (OtherOp soac) = Just soac
+  asSOAC _ = Nothing
+  soacOp = OtherOp
 
 kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <> segOpRules <>

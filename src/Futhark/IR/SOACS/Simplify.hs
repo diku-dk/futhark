@@ -168,12 +168,12 @@ soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 -- | Does this lore contain 'SOAC's in its t'Op's?  A lore must be an
 -- instance of this class for the simplification rules to work.
 class HasSOAC lore where
-  toSOAC :: Op lore -> Maybe (SOAC lore)
-  fromSOAC :: SOAC lore -> Op lore
+  asSOAC :: Op lore -> Maybe (SOAC lore)
+  soacOp :: SOAC lore -> Op lore
 
 instance HasSOAC (Wise SOACS) where
-  toSOAC = Just
-  fromSOAC = id
+  asSOAC = Just
+  soacOp = id
 
 topDownRules :: [TopDownRule (Wise SOACS)]
 topDownRules = [RuleOp hoistCertificates,
@@ -225,7 +225,7 @@ liftIdentityMapping :: forall lore.
                        (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
                        BottomUpRuleOp (Wise lore)
 liftIdentityMapping (_, usages) pat aux op
-  | Just (Screma w form arrs :: SOAC (Wise lore)) <- toSOAC op,
+  | Just (Screma w form arrs :: SOAC (Wise lore)) <- asSOAC op,
     Just fun <- isMapSOAC form = do
   let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
       free = freeIn $ lambdaBody fun
@@ -263,7 +263,7 @@ liftIdentityMapping (_, usages) pat aux op
                      }
       mapM_ (uncurry letBind) invariant
       auxing aux $
-        letBindNames (map patElemName pat') $ Op $ fromSOAC $ Screma w (mapSOAC fun') arrs
+        letBindNames (map patElemName pat') $ Op $ soacOp $ Screma w (mapSOAC fun') arrs
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
@@ -300,11 +300,11 @@ liftIdentityStreaming _ _ _ _ = Skip
 removeReplicateMapping :: (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
                           TopDownRuleOp (Wise lore)
 removeReplicateMapping vtable pat aux op
-  | Just (Screma w form arrs) <- toSOAC op,
+  | Just (Screma w form arrs) <- asSOAC op,
     Just fun <- isMapSOAC form,
     Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
       forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
-      auxing aux $ letBind pat $ Op $ fromSOAC $ Screma w (mapSOAC fun') arrs'
+      auxing aux $ letBind pat $ Op $ soacOp $ Screma w (mapSOAC fun') arrs'
 removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
@@ -563,7 +563,7 @@ simplifyClosedFormReduce _ _ _ _ = Skip
 simplifyKnownIterationSOAC :: (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
                               TopDownRuleOp (Wise lore)
 simplifyKnownIterationSOAC _ pat _ op
-  | Just (Screma (Constant k) (ScremaForm scans reds map_lam) arrs) <- toSOAC op,
+  | Just (Screma (Constant k) (ScremaForm scans reds map_lam) arrs) <- asSOAC op,
     oneIsh k = Simplify $ do
 
       let (Reduce _ red_lam red_nes) = singleReduce reds
@@ -591,7 +591,7 @@ simplifyKnownIterationSOAC _ pat _ op
       zipWithM_ bindArrayResult map_pes map_res
 
 simplifyKnownIterationSOAC _ pat _ op
-  | Just (Stream (Constant k) form fold_lam arrs) <- toSOAC op,
+  | Just (Stream (Constant k) form fold_lam arrs) <- asSOAC op,
     oneIsh k = Simplify $ do
       let nes = getStreamAccums form
           (chunk_param, acc_params, slice_params) =
