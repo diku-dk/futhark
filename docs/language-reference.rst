@@ -1664,8 +1664,8 @@ Exploit only outer parallelism in the attributed SOAC.
 Do not perform any dynamic safety checks (such as bound checks) during
 execution of the attributed expression.
 
-``warn_on(safety_checks)``
-..........................
+``warn(safety_checks)``
+.......................
 
 Make the compiler issue a warning if the attributed expression (or its
 subexpressions) requires safety checks (such as bounds checking) at
