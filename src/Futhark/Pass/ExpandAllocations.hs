@@ -22,7 +22,7 @@ import Futhark.Tools
 import Futhark.Pass
 import Futhark.IR
 import Futhark.IR.KernelsMem
-import Futhark.IR.Kernels.Simplify as Kernels
+import qualified Futhark.IR.Kernels.Simplify as Kernels
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)
 import Futhark.Pass.ExtractKernels.ToKernels (segThread)
