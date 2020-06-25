@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.IR.SOACS.Simplify
        ( simplifySOACS
        , simplifyLambda
@@ -15,6 +16,11 @@ module Futhark.IR.SOACS.Simplify
        , simplifySOAC
 
        , soacRules
+
+       , HasSOAC(..)
+       , simplifyKnownIterationSOAC
+       , removeReplicateMapping
+       , liftIdentityMapping
 
        , SOACS
        )
@@ -159,6 +165,16 @@ removeLambdaResults keep lam = lam { lambdaBody = lam_body'
 soacRules :: RuleBook (Wise SOACS)
 soacRules = standardRules <> ruleBook topDownRules bottomUpRules
 
+-- | Does this lore contain 'SOAC's in its t'Op's?  A lore must be an
+-- instance of this class for the simplification rules to work.
+class HasSOAC lore where
+  toSOAC :: Op lore -> Maybe (SOAC lore)
+  fromSOAC :: SOAC lore -> Op lore
+
+instance HasSOAC (Wise SOACS) where
+  toSOAC = Just
+  fromSOAC = id
+
 topDownRules :: [TopDownRule (Wise SOACS)]
 topDownRules = [RuleOp hoistCertificates,
                 RuleOp removeReplicateMapping,
@@ -205,9 +221,12 @@ hoistCertificates vtable pat aux soac
 hoistCertificates _ _ _ _ =
   Skip
 
-liftIdentityMapping :: BottomUpRuleOp (Wise SOACS)
-liftIdentityMapping (_, usages) pat aux (Screma w form arrs)
-  | Just fun <- isMapSOAC form = do
+liftIdentityMapping :: forall lore.
+                       (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
+                       BottomUpRuleOp (Wise lore)
+liftIdentityMapping (_, usages) pat aux op
+  | Just (Screma w form arrs :: SOAC (Wise lore)) <- toSOAC op,
+    Just fun <- isMapSOAC form = do
   let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
       free = freeIn $ lambdaBody fun
       rettype = lambdaReturnType fun
@@ -244,7 +263,7 @@ liftIdentityMapping (_, usages) pat aux (Screma w form arrs)
                      }
       mapM_ (uncurry letBind) invariant
       auxing aux $
-        letBindNames (map patElemName pat') $ Op $ Screma w (mapSOAC fun') arrs
+        letBindNames (map patElemName pat') $ Op $ fromSOAC $ Screma w (mapSOAC fun') arrs
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
@@ -278,12 +297,14 @@ liftIdentityStreaming _ _ _ _ = Skip
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
-removeReplicateMapping :: TopDownRuleOp (Wise SOACS)
-removeReplicateMapping vtable pat aux (Screma w form arrs)
-  | Just fun <- isMapSOAC form,
+removeReplicateMapping :: (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
+                          TopDownRuleOp (Wise lore)
+removeReplicateMapping vtable pat aux op
+  | Just (Screma w form arrs) <- toSOAC op,
+    Just fun <- isMapSOAC form,
     Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = Simplify $ do
       forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames vs e
-      auxing aux $ letBind pat $ Op $ Screma w (mapSOAC fun') arrs'
+      auxing aux $ letBind pat $ Op $ fromSOAC $ Screma w (mapSOAC fun') arrs'
 removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
@@ -539,11 +560,26 @@ simplifyClosedFormReduce vtable pat _ (Screma _ form arrs)
 simplifyClosedFormReduce _ _ _ _ = Skip
 
 -- For now we just remove singleton SOACs.
-simplifyKnownIterationSOAC :: TopDownRuleOp (Wise SOACS)
-simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
-                                    (ScremaForm scans reds map_lam)
-                                    arrs)
-  | oneIsh k = Simplify $ do
+simplifyKnownIterationSOAC :: (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
+                              TopDownRuleOp (Wise lore)
+simplifyKnownIterationSOAC _ pat _ op
+  | Just (Screma (Constant k) (ScremaForm scans reds map_lam) arrs) <- toSOAC op,
+    oneIsh k = Simplify $ do
+
+      let (Reduce _ red_lam red_nes) = singleReduce reds
+          (Scan scan_lam scan_nes) = singleScan scans
+          (scan_pes, red_pes, map_pes) = splitAt3 (length scan_nes) (length red_nes) $
+                                         patternElements pat
+          bindMapParam p a = do
+            a_t <- lookupType a
+            letBindNames [paramName p] $
+              BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0::Int32)]
+          bindArrayResult pe se =
+            letBindNames [patElemName pe] $
+            BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
+          bindResult pe se =
+            letBindNames [patElemName pe] $ BasicOp $ SubExp se
+
       zipWithM_ bindMapParam (lambdaParams map_lam) arrs
       (to_scan, to_red, map_res) <- splitAt3 (length scan_nes) (length red_nes) <$>
                                     bodyBind (lambdaBody map_lam)
@@ -554,22 +590,9 @@ simplifyKnownIterationSOAC _ pat _ (Screma (Constant k)
       zipWithM_ bindResult red_pes red_res
       zipWithM_ bindArrayResult map_pes map_res
 
-        where (Reduce _ red_lam red_nes) = singleReduce reds
-              (Scan scan_lam scan_nes) = singleScan scans
-              (scan_pes, red_pes, map_pes) = splitAt3 (length scan_nes) (length red_nes) $
-                                             patternElements pat
-              bindMapParam p a = do
-                a_t <- lookupType a
-                letBindNames [paramName p] $
-                  BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0::Int32)]
-              bindArrayResult pe se =
-                letBindNames [patElemName pe] $
-                BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
-              bindResult pe se =
-                letBindNames [patElemName pe] $ BasicOp $ SubExp se
-
-simplifyKnownIterationSOAC _ pat _ (Stream (Constant k) form fold_lam arrs)
-  | oneIsh k = Simplify $ do
+simplifyKnownIterationSOAC _ pat _ op
+  | Just (Stream (Constant k) form fold_lam arrs) <- toSOAC op,
+    oneIsh k = Simplify $ do
       let nes = getStreamAccums form
           (chunk_param, acc_params, slice_params) =
             partitionChunkedFoldParameters (length nes) (lambdaParams fold_lam)
