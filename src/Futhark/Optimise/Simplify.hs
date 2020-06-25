@@ -111,7 +111,7 @@ simplifyLambda simpl rules blockers orig_lam = do
   simplifySomething Engine.simplifyLambdaNoHoisting
     removeLambdaWisdom simpl rules blockers vtable orig_lam
 
--- | Simplify a list of 'Stm's.
+-- | Simplify a sequence of 'Stm's.
 simplifyStms :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                 Engine.SimpleOps lore
              -> RuleBook (Engine.Wise lore)
