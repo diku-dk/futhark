@@ -25,8 +25,6 @@ import Futhark.IR.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.IR.Prop.Aliases
-import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util (splitAt3)
 
 import Futhark.Internalise.Monad as I
@@ -1151,40 +1149,36 @@ internaliseStreamRed desc o comm lam0 lam arr = do
     letBindNames [I.paramName p] $
     I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
     I.arrayDims $ I.paramType p
-  accs <- bodyBind =<< renameBody lam_body
+  nes <- bodyBind =<< renameBody lam_body
 
-  acctps <- mapM I.subExpType accs
+  nes_ts <- mapM I.subExpType nes
   outsz  <- arraysSize 0 <$> mapM lookupType arrs
-  let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
-  lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
-  let lam0_acc_params = take (length accs) $ I.lambdaParams lam0'
-  acc_params <- forM lam0_acc_params $ \p -> do
+  let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- nes_ts ]
+  lam0' <- internaliseFoldLambda internaliseLambda lam0 nes_ts acc_arr_tps
+
+  let lam0_acc_params = take (length nes) $ I.lambdaParams lam0'
+  lam_acc_params <- forM lam0_acc_params $ \p -> do
     name <- newVName $ baseString $ I.paramName p
     return p { I.paramName = name }
 
+  -- Make sure the chunk size parameter comes first.
+  let lam_params' = chunk_param : lam_acc_params ++ lam_val_params
+
   body_with_lam0 <-
     ensureResultShape "shape of result does not match shape of initial value"
-    (srclocOf lam0) acctps <=< insertStmsM $ do
+    (srclocOf lam0) nes_ts <=< insertStmsM $ localScope (scopeOfLParams lam_params') $ do
       lam_res <- bodyBind lam_body
-
-      let consumed = consumedByLambda $ Alias.analyseLambda lam0'
-          copyIfConsumed p (I.Var v)
-            | I.paramName p `nameIn` consumed =
-                letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
-          copyIfConsumed _ x = return x
-
-      accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
       lam_res' <- ensureArgShapes
                   "shape of chunk function result does not match shape of initial value"
                   (srclocOf lam) [] (map I.typeOf $ I.lambdaParams lam0') lam_res
-      new_lam_res <- eLambda lam0' $ map eSubExp $ accs' ++ lam_res'
+      new_lam_res <- eLambda lam0' $ map eSubExp $
+                     map (I.Var . paramName) lam_acc_params ++ lam_res'
       return $ resultBody new_lam_res
 
-  -- Make sure the chunk size parameter comes first.
-  let form = I.Parallel o comm lam0' accs
-      lam' = I.Lambda { lambdaParams = chunk_param : acc_params ++ lam_val_params
+  let form = I.Parallel o comm lam0' nes
+      lam' = I.Lambda { lambdaParams = lam_params'
                       , lambdaBody = body_with_lam0
-                      , lambdaReturnType = acctps }
+                      , lambdaReturnType = nes_ts }
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
