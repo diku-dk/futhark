@@ -16,6 +16,7 @@ module Futhark.IR.MC
        , module Futhark.IR.Syntax
        , module Futhark.IR.SegOp
        , module Futhark.IR.SOACS.SOAC
+       , module Futhark.IR.MC.Op
        )
 where
 
@@ -32,17 +33,19 @@ import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Optimise.Simplify as Simplify
 import Futhark.Optimise.Simplify.Rules
+import Futhark.IR.MC.Op
+import qualified Futhark.IR.SOACS.Simplify as SOAC
 
 data MC
 
 instance Decorations MC where
-  type Op MC = SegOp () MC
+  type Op MC = MCOp MC (SOAC MC)
 
 instance ASTLore MC where
   expTypesFromPattern = return . expExtTypesFromPattern
 
 instance TypeCheck.CheckableOp MC where
-  checkOp = typeCheckSegOp (const $ pure ())
+  checkOp = typeCheckMCOp typeCheckSOAC
 
 instance TypeCheck.Checkable MC where
 
@@ -59,7 +62,7 @@ instance BinderOps (Engine.Wise MC) where
 instance PrettyLore MC where
 
 simpleMC :: Simplify.SimpleOps MC
-simpleMC = Simplify.bindableSimpleOps simplifySegOp
+simpleMC = Simplify.bindableSimpleOps $ simplifyMCOp SOAC.simplifySOAC
 
 simplifyProg :: Prog MC -> PassM (Prog MC)
 simplifyProg = Simplify.simplifyProg simpleMC rules blockers
@@ -68,10 +71,10 @@ simplifyProg = Simplify.simplifyProg simpleMC rules blockers
 
 instance HasSegOp MC where
   type SegOpLevel MC = ()
-  asSegOp = Just
-  segOp = id
+  asSegOp = const Nothing
+  segOp = ParOp Nothing
 
 instance HasSegOp (Engine.Wise MC) where
   type SegOpLevel (Engine.Wise MC) = ()
-  asSegOp = Just
-  segOp = id
+  asSegOp = const Nothing
+  segOp = ParOp Nothing

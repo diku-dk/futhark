@@ -145,6 +145,7 @@ library
       Futhark.IR.Kernels.Sizes
       Futhark.IR.KernelsMem
       Futhark.IR.MC
+      Futhark.IR.MC.Op
       Futhark.IR.MCMem
       Futhark.IR.Mem
       Futhark.IR.Mem.IxFun

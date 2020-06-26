@@ -92,7 +92,7 @@ inPlaceLoweringSeq = inPlaceLowering pure lowerUpdate
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLoweringMC :: Pass MC MC
-inPlaceLoweringMC = inPlaceLowering onSegOp lowerUpdate
+inPlaceLoweringMC = inPlaceLowering onMCOp lowerUpdate
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLowering :: Constraints lore =>
@@ -193,6 +193,10 @@ onSegOp op =
                   mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
           return kbody { kernelBodyStms = stmsFromList stms }
     mapSegOpM mapper op
+
+onMCOp :: OnOp MC
+onMCOp (ParOp par_op op) = ParOp <$> traverse onSegOp par_op <*> onSegOp op
+onMCOp op = return op
 
 onKernelOp :: OnOp Kernels
 onKernelOp (SegOp op) = SegOp <$> onSegOp op

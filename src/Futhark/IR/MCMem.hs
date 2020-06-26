@@ -12,6 +12,7 @@ module Futhark.IR.MCMem
     -- * Module re-exports
   , module Futhark.IR.Mem
   , module Futhark.IR.SegOp
+  , module Futhark.IR.MC.Op
   )
   where
 
@@ -23,6 +24,7 @@ import Futhark.IR.Traversals
 import Futhark.IR.Pretty
 import Futhark.IR.SegOp
 import qualified Futhark.TypeCheck as TC
+import Futhark.IR.MC.Op
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import Futhark.Pass.ExplicitAllocations (BinderOps(..), mkLetNamesB', mkLetNamesB'')
@@ -36,14 +38,15 @@ instance Decorations MCMem where
   type LParamInfo  MCMem = LParamMem
   type RetType     MCMem = RetTypeMem
   type BranchType  MCMem = BranchTypeMem
-  type Op          MCMem = MemOp (SegOp () MCMem)
+  type Op          MCMem = MemOp (MCOp MCMem ())
 
 instance ASTLore MCMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
 
 instance OpReturns MCMem where
   opReturns (Alloc _ space) = return [MemMem space]
-  opReturns (Inner op) = segOpReturns op
+  opReturns (Inner (ParOp _ op)) = segOpReturns op
+  opReturns (Inner (OtherOp ())) = pure []
 
 instance PrettyLore MCMem where
 
@@ -52,7 +55,7 @@ instance TC.CheckableOp MCMem where
     where typeCheckMemoryOp (Alloc size _) =
             TC.require [Prim int64] size
           typeCheckMemoryOp (Inner op) =
-            typeCheckSegOp pure op
+            typeCheckMCOp pure op
 
 instance TC.Checkable MCMem where
   checkFParamLore = checkMemInfo
@@ -79,4 +82,5 @@ simplifyProg :: Prog MCMem -> PassM (Prog MCMem)
 simplifyProg = simplifyProgGeneric simpleMCMem
 
 simpleMCMem :: Engine.SimpleOps MCMem
-simpleMCMem = simpleGeneric (const mempty) simplifySegOp
+simpleMCMem =
+  simpleGeneric (const mempty) $ simplifyMCOp $ const $ return ((), mempty)

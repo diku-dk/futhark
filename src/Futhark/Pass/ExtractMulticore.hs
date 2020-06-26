@@ -3,9 +3,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
 
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 
+import Futhark.Analysis.Rephrase
 import Futhark.Tools
 import Futhark.Pass
 import Futhark.IR
@@ -17,7 +19,9 @@ import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.SOACS.Simplify as SOACS
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.DistributeNests
+import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
 import qualified Futhark.Transform.FirstOrderTransform as FOT
+import Futhark.Transform.Rename (Rename, renameSomething)
 import Futhark.Util (chunks, takeLast)
 import Futhark.Util.Log
 
@@ -35,16 +39,18 @@ indexArray i (Param p t) arr =
   Let (Pattern [] [PatElem p t]) (defAux ()) $
   BasicOp $ Index arr $ DimFix (Var i) : map sliceDim (arrayDims t)
 
-mapLambdaToBody :: VName -> Lambda SOACS -> [VName] -> ExtractM (Body MC)
-mapLambdaToBody i lam arrs = do
+mapLambdaToBody :: (Body SOACS -> ExtractM (Body MC))
+                -> VName -> Lambda SOACS -> [VName] -> ExtractM (Body MC)
+mapLambdaToBody onBody i lam arrs = do
   let indexings = zipWith (indexArray i) (lambdaParams lam) arrs
-  Body () stms res <- inScopeOf indexings $ transformBody $ lambdaBody lam
+  Body () stms res <- inScopeOf indexings $ onBody $ lambdaBody lam
   return $ Body () (stmsFromList indexings <> stms) res
 
-mapLambdaToKernelBody :: VName -> Lambda SOACS -> [VName]
+mapLambdaToKernelBody :: (Body SOACS -> ExtractM (Body MC))
+                      -> VName -> Lambda SOACS -> [VName]
                       -> ExtractM (KernelBody MC)
-mapLambdaToKernelBody i lam arrs = do
-  Body () stms res <- mapLambdaToBody i lam arrs
+mapLambdaToKernelBody onBody i lam arrs = do
+  Body () stms res <- mapLambdaToBody onBody i lam arrs
   return $ KernelBody () stms $ map (Returns ResultMaySimplify) res
 
 reduceToSegBinOp :: Reduce SOACS -> ExtractM (Stms MC, SegBinOp MC)
@@ -106,6 +112,10 @@ transformBody :: Body SOACS -> ExtractM (Body MC)
 transformBody (Body () stms res) =
   Body () <$> transformStms stms <*> pure res
 
+sequentialiseBody :: Body SOACS -> ExtractM (Body MC)
+sequentialiseBody = pure . runIdentity . rephraseBody toMC
+  where toMC = injectSOACS OtherOp
+
 transformFunDef :: FunDef SOACS -> ExtractM (FunDef MC)
 transformFunDef (FunDef entry attrs name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $ transformBody body
@@ -136,7 +146,6 @@ transformMap (MapLoop pat cs w lam arrs) = do
                         mempty
                     }
 
-  -- XXX: we are throwing away the Log here.
   runDistNestT env $
     distributeMapBodyStms acc $ bodyStms $ lambdaBody lam
 
@@ -183,6 +192,39 @@ unstreamLambda attrs nes lam = do
     then FOT.transformLambda map_lam'
     else return map_lam'
 
+-- Code generation for each parallel basic block is parameterised over
+-- how we handle parallelism in the body (whether it's sequentialised
+-- by keeping it as SOACs, or turned into SegOps).
+
+data NeedsRename = DoRename | DoNotRename
+
+renameIfNeeded :: Rename a => NeedsRename -> a -> ExtractM a
+renameIfNeeded DoRename = renameSomething
+renameIfNeeded DoNotRename = pure
+
+transformRedomap :: NeedsRename -> (Body SOACS -> ExtractM (Body MC))
+                 -> SubExp -> [Reduce SOACS] -> Lambda SOACS -> [VName]
+                 -> ExtractM ([Stms MC], SegOp () MC)
+transformRedomap rename onBody w reds map_lam arrs = do
+  (gtid, space) <- mkSegSpace w
+  kbody <- mapLambdaToKernelBody onBody gtid map_lam arrs
+  (reds_stms, reds') <- unzip <$> mapM reduceToSegBinOp reds
+  op' <- renameIfNeeded rename $
+         SegRed () space reds' (lambdaReturnType map_lam) kbody
+  return (reds_stms, op')
+
+transformParStream :: NeedsRename -> (Body SOACS -> ExtractM (Body MC))
+                   -> SubExp -> Commutativity -> Lambda SOACS
+                   -> [SubExp] -> Lambda SOACS -> [VName]
+                   -> ExtractM (Stms MC, SegOp () MC)
+transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
+  (gtid, space) <- mkSegSpace w
+  kbody <- mapLambdaToKernelBody onBody gtid map_lam arrs
+  (red_stms, red) <- reduceToSegBinOp $ Reduce comm red_lam red_nes
+  op <- renameIfNeeded rename $
+        SegRed () space [red] (lambdaReturnType map_lam) kbody
+  return (red_stms, op)
+
 transformSOAC :: Pattern SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
 
 transformSOAC pat _ (Screma w form arrs)
@@ -190,19 +232,24 @@ transformSOAC pat _ (Screma w form arrs)
       transformMap $ MapLoop pat (defAux ()) w lam arrs
 
   | Just (reds, map_lam) <- isRedomapSOAC form = do
-      (gtid, space) <- mkSegSpace w
-      kbody <- mapLambdaToKernelBody gtid map_lam arrs
-      (reds_stms, reds') <- unzip <$> mapM reduceToSegBinOp reds
-      return $ mconcat reds_stms <>
-        oneStm (Let pat (defAux ()) $ Op $
-                SegRed () space reds' (lambdaReturnType map_lam) kbody)
+      (seq_reds_stms, seq_op) <-
+        transformRedomap DoNotRename sequentialiseBody w reds map_lam arrs
+      if lambdaContainsParallelism map_lam
+        then do
+        (par_reds_stms, par_op) <-
+          transformRedomap DoRename transformBody w reds map_lam arrs
+        return $ mconcat (seq_reds_stms<>par_reds_stms) <>
+          oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
+        else
+        return $ mconcat seq_reds_stms <>
+        oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
 
   | Just (scans, map_lam) <- isScanomapSOAC form = do
       (gtid, space) <- mkSegSpace w
-      kbody <- mapLambdaToKernelBody gtid map_lam arrs
+      kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- unzip <$> mapM scanToSegBinOp scans
       return $ mconcat scans_stms <>
-        oneStm (Let pat (defAux ()) $ Op $
+        oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing $
                 SegScan () space scans' (lambdaReturnType map_lam) kbody)
 
   | otherwise = do
@@ -214,7 +261,7 @@ transformSOAC pat _ (Screma w form arrs)
 transformSOAC pat _ (Scatter w lam ivs dests) = do
   (gtid, space) <- mkSegSpace w
 
-  Body () kstms res <- mapLambdaToBody gtid lam ivs
+  Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
 
   let (dests_ws, dests_ns, dests_vs) = unzip3 dests
       (i_res, v_res) = splitAt (sum dests_ns) res
@@ -223,7 +270,8 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
                                    chunks dests_ns $ zip i_res v_res
                 return $ WriteReturns [a_w] a [ ([DimFix i],v) | (i,v) <- is_vs ]
       kbody = KernelBody () kstms kres
-  return $ oneStm $ Let pat (defAux ()) $ Op $ SegMap () space rets kbody
+  return $ oneStm $ Let pat (defAux ()) $ Op $ ParOp Nothing $
+    SegMap () space rets kbody
 
 transformSOAC pat _ (Hist w ops lam arrs) = do
   ops' <- forM ops $ \(SOACS.HistOp num_bins rf dests nes op) -> do
@@ -232,21 +280,28 @@ transformSOAC pat _ (Hist w ops lam arrs) = do
 
   (gtid, space) <- mkSegSpace w
 
-  Body () kstms res <- mapLambdaToBody gtid lam arrs
+  Body () kstms res <- mapLambdaToBody transformBody gtid lam arrs
   let kbody = KernelBody () kstms $ map (Returns ResultMaySimplify) res
 
-  return $ oneStm $ Let pat (defAux ()) $ Op $
+  return $ oneStm $ Let pat (defAux ()) $ Op $ ParOp Nothing $
     SegHist () space ops' (lambdaReturnType lam) kbody
 
 transformSOAC pat attrs (Stream w (Parallel _ comm red_lam red_nes) fold_lam arrs)
   | not $ null red_nes = do
-  (gtid, space) <- mkSegSpace w
   map_lam <- unstreamLambda attrs red_nes fold_lam
-  kbody <- mapLambdaToKernelBody gtid map_lam arrs
-  (red_stms, red) <- reduceToSegBinOp $ Reduce comm red_lam red_nes
-  return $ red_stms <>
-    oneStm (Let pat (defAux ()) $ Op $
-            SegRed () space [red] (lambdaReturnType map_lam) kbody)
+  (seq_red_stms, seq_op) <-
+    transformParStream DoNotRename
+    sequentialiseBody w comm red_lam red_nes map_lam arrs
+
+  if lambdaContainsParallelism map_lam then do
+    (par_red_stms, par_op) <-
+      transformParStream DoRename
+      transformBody w comm red_lam red_nes map_lam arrs
+    return $ seq_red_stms <> par_red_stms <>
+      oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
+    else
+    return $ seq_red_stms <>
+    oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
 
 transformSOAC pat _ (Stream w form lam arrs) = do
   -- Just remove the stream and transform the resulting stms.

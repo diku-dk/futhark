@@ -218,6 +218,12 @@ sinkKernels = sink onHostOp
 
 -- | Sinking for multicore.
 sinkMC :: Pass MC MC
-sinkMC = sink onSegOp
-  where onSegOp :: Sinker (SinkLore MC) (Op (SinkLore MC))
-        onSegOp = optimiseSegOp onSegOp
+sinkMC = sink onHostOp
+  where onHostOp :: Sinker (SinkLore MC) (Op (SinkLore MC))
+        onHostOp vtable sinking (ParOp par_op op) =
+          let (par_op', par_sunk) =
+                maybe (Nothing, mempty)
+                (first Just . optimiseSegOp onHostOp vtable sinking) par_op
+              (op', sunk) = optimiseSegOp onHostOp vtable sinking op
+          in (ParOp par_op' op', par_sunk <> sunk)
+        onHostOp _ _ op = (op, mempty)

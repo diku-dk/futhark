@@ -3,6 +3,20 @@
 -- | Sequentialise any remaining SOACs.  It is very important that
 -- this is run *after* any access-pattern-related optimisation,
 -- because this pass will destroy information.
+--
+-- This pass conceptually contains three subpasses:
+--
+-- 1. Sequentialise 'Stream' operations, leaving other SOACs intact.
+--
+-- 2. Apply whole-program simplification.
+--
+-- 3. Sequentialise remaining SOACs.
+--
+-- This is because sequentialisation of streams creates many SOACs
+-- operating on single-element arrays, which can be efficiently
+-- simplified away, but only *before* they are turned into loops.  In
+-- principle this pass could be split into multiple, but for now it is
+-- kept together.
 module Futhark.Optimise.Unstream
   (unstreamKernels, unstreamMC) where
 
@@ -11,24 +25,35 @@ import Control.Monad.Reader
 
 import Futhark.MonadFreshNames
 import Futhark.IR.Kernels
+import qualified Futhark.IR.Kernels as Kernels
+import Futhark.IR.Kernels.Simplify (simplifyKernels)
 import Futhark.IR.MC
+import qualified Futhark.IR.MC as MC
 import Futhark.Pass
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 
 -- | The pass for GPU kernels.
 unstreamKernels :: Pass Kernels Kernels
-unstreamKernels = unstream onHostOp
+unstreamKernels = unstream onHostOp simplifyKernels
 
 -- | The pass for multicore.
 unstreamMC :: Pass MC MC
-unstreamMC = unstream onSegOp
+unstreamMC = unstream onMCOp MC.simplifyProg
 
-unstream :: ASTLore lore => OnOp lore -> Pass lore lore
-unstream onOp = Pass "unstream" "sequentialise remaining SOACs" $
-                intraproceduralTransformation optimise
-  where optimise scope stms =
-          modifyNameSource $ runState $ runReaderT (optimiseStms onOp stms) scope
+data Stage = SeqStreams | SeqAll
+
+unstream :: ASTLore lore =>
+            (Stage -> OnOp lore) -> (Prog lore -> PassM (Prog lore))
+         -> Pass lore lore
+unstream onOp simplify =
+  Pass "unstream" "sequentialise remaining SOACs" $
+  intraproceduralTransformation (optimise SeqStreams)
+  >=> simplify
+  >=> intraproceduralTransformation (optimise SeqAll)
+  where optimise stage scope stms =
+          modifyNameSource $ runState $
+          runReaderT (optimiseStms (onOp stage) stms) scope
 
 type UnstreamM lore = ReaderT (Scope lore) (State VNameSource)
 
@@ -73,7 +98,6 @@ optimiseStm onOp (Let pat aux e) =
                                       localScope scope . optimiseBody onOp
                                   }
 
-
 optimiseSegOp :: ASTLore lore =>
                  OnOp lore -> SegOp lvl lore
               -> UnstreamM lore (SegOp lvl lore)
@@ -83,19 +107,41 @@ optimiseSegOp onOp op =
                                        , mapOnSegOpLambda = optimiseLambda onOp
                                        }
 
-onSegOp :: OnOp MC
-onSegOp pat aux op =
-  pure <$> (Let pat aux . Op <$> optimiseSegOp onSegOp op)
+onMCOp :: Stage -> OnOp MC
+onMCOp stage pat aux (ParOp par_op op) = do
+  par_op' <- traverse (optimiseSegOp (onMCOp stage)) par_op
+  op' <- optimiseSegOp (onMCOp stage) op
+  pure [Let pat aux $ Op $ ParOp par_op' op']
+onMCOp stage pat aux (MC.OtherOp soac)
+  | sequentialise stage soac = do
+      stms <- runBinder_ $ FOT.transformSOAC pat soac
+      fmap concat $ localScope (scopeOf stms) $
+        mapM (optimiseStm (onMCOp stage)) $ stmsToList stms
+  | otherwise =
+      -- Still sequentialise whatever's inside.
+      pure <$> (Let pat aux . Op . MC.OtherOp <$> mapSOACM optimise soac)
+        where optimise = identitySOACMapper
+                         { mapOnSOACLambda = optimiseLambda (onMCOp stage) }
 
-onHostOp :: OnOp Kernels
+sequentialise :: Stage -> SOAC lore -> Bool
+sequentialise SeqStreams Stream{} = True
+sequentialise SeqStreams _ = False
+sequentialise SeqAll _ = True
 
-onHostOp pat aux (OtherOp soac) = do
-  stms <- runBinder_ $ FOT.transformSOAC pat soac
-  fmap concat $ localScope (scopeOf stms) $
-    mapM (optimiseStm onHostOp) $ stmsToList $
-    certify (stmAuxCerts aux) <$> stms
+onHostOp :: Stage -> OnOp Kernels
 
-onHostOp pat aux (SegOp op) =
-  pure <$> (Let pat aux . Op . SegOp <$> optimiseSegOp onHostOp op)
+onHostOp stage pat aux (Kernels.OtherOp soac)
+  | sequentialise stage soac = do
+      stms <- runBinder_ $ FOT.transformSOAC pat soac
+      fmap concat $ localScope (scopeOf stms) $
+        mapM (optimiseStm (onHostOp stage)) $ stmsToList stms
+  | otherwise =
+      -- Still sequentialise whatever's inside.
+      pure <$> (Let pat aux . Op . Kernels.OtherOp <$> mapSOACM optimise soac)
+        where optimise = identitySOACMapper
+                         { mapOnSOACLambda = optimiseLambda (onHostOp stage) }
 
-onHostOp pat aux op = return [Let pat aux $ Op op]
+onHostOp stage pat aux (SegOp op) =
+  pure <$> (Let pat aux . Op . SegOp <$> optimiseSegOp (onHostOp stage) op)
+
+onHostOp _ pat aux op = return [Let pat aux $ Op op]
