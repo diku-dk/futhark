@@ -9,6 +9,8 @@ module Futhark.Pass.ExtractKernels.ToKernels
        , soacsStmToKernels
        , scopeForKernels
        , scopeForSOACs
+
+       , injectSOACS
        )
        where
 

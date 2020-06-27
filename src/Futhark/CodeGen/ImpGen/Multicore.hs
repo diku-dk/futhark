@@ -25,11 +25,18 @@ compileProg :: MonadFreshNames m => Prog MCMem
 compileProg = Futhark.CodeGen.ImpGen.compileProg ModeParallel ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
         opCompiler dest (Alloc e space) = compileAlloc dest e space
-        opCompiler dest (Inner op) = compileSegOp dest op
+        opCompiler dest (Inner op) = compileMCOp dest op
+
+compileMCOp :: Pattern MCMem -> MCOp MCMem ()
+            -> ImpM MCMem Mode Imp.Multicore ()
+compileMCOp _ (OtherOp ()) = pure ()
+compileMCOp pat (ParOp par_op op) =
+  -- TODO: use the par_op version
+  compileSegOp pat op
 
 compileSegOp :: Pattern MCMem -> SegOp () MCMem
              -> ImpM MCMem Mode Imp.Multicore ()
-compileSegOp pat  (SegHist _ space histops _ kbody) =
+compileSegOp pat (SegHist _ space histops _ kbody) =
   compileSegHist pat space histops kbody
 
 compileSegOp pat (SegScan _ space scans _ kbody) =
