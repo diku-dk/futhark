@@ -20,12 +20,13 @@ compileSegScan :: Pattern MCMem
                 -> SegSpace
                 -> [SegBinOp MCMem]
                 -> KernelBody MCMem
-                -> MulticoreGen ()
-compileSegScan pat space reds kbody
+                -> Mode
+                -> MulticoreGen Imp.Code
+compileSegScan pat space reds kbody mode
   | [_] <- unSegSpace space =
-      nonsegmentedScan pat space reds kbody
+      nonsegmentedScan pat space reds kbody mode
   | otherwise =
-      segmentedScan pat space reds kbody
+      segmentedScan pat space reds kbody mode
 
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
@@ -42,23 +43,35 @@ nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
                  -> [SegBinOp MCMem]
                  -> KernelBody MCMem
-                 -> MulticoreGen ()
-nonsegmentedScan pat space scan_ops kbody = do
+                 -> Mode
+                 -> MulticoreGen Imp.Code
+
+nonsegmentedScan pat space scan_ops kbody ModeSequential = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  collect $ localMode ModeSequential $ do
+    flat_seq_idx <- dPrimV "seq_iter" 0
+    seq_code_body <- sequentialScan flat_seq_idx pat space scan_ops kbody
+    sFor "i" (product ns') $ \i -> do
+      flat_seq_idx <-- i
+      emit seq_code_body
+
+
+
+nonsegmentedScan pat space scan_ops kbody ModeParallel = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  dPrimV_ (segFlat space) 0
   tid' <- toExp $ Var $ segFlat space
-
-  num_threads <- getNumThreads
 
   let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res            = segBinOpChunks scan_ops all_scan_res
       per_scan_pes            = segBinOpChunks scan_ops $ patternValueElements pat
 
-  par_code <- collect $ do
+  collect $ do
     flat_par_idx <- dPrimV "iter" 0
     flat_par_idx' <- toExp $ Var flat_par_idx
 
@@ -214,22 +227,6 @@ nonsegmentedScan pat space scan_ops kbody = do
     emit $ Imp.Op $ Imp.MCFunc flat_par_idx stage_3_prebody stage_3_body free_params' $
       Imp.MulticoreInfo ntasks Imp.Static (segFlat space)
 
-  seq_code <- collect $ localMode ModeSequential $ do
-    flat_seq_idx <- dPrimV "seq_iter" 0
-    seq_code_body <- sequentialScan flat_seq_idx pat space scan_ops kbody
-    sFor "i" (product ns') $ \i -> do
-      flat_seq_idx <-- i
-      emit seq_code_body
-
-  mode <- askEnv
-
-  if mode == ModeSequential
-    then emit seq_code
-    else do free_task_params <- freeParams (par_code <> seq_code) [segFlat space]
-            emit $ Imp.Op $ Imp.Task free_task_params (product ns') par_code seq_code (segFlat space) []
-
-  emit $ Imp.DebugPrint "nonsegmentedScan End" Nothing
-
 sequentialScan :: VName
                -> Pattern MCMem
                -> SegSpace
@@ -322,14 +319,11 @@ segmentedScan :: Pattern MCMem
               -> SegSpace
               -> [SegBinOp MCMem]
               -> KernelBody MCMem
-              -> MulticoreGen ()
-segmentedScan pat space scan_ops kbody = do
+              -> Mode
+              -> MulticoreGen Imp.Code
+segmentedScan pat space scan_ops kbody ModeParallel = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
-
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  par_code <- collect $ do
+  collect $ do
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     -- iteration variable
     fbody <- compileSegScanBody n_par_segments pat space scan_ops kbody
@@ -339,16 +333,12 @@ segmentedScan pat space scan_ops kbody = do
     emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty fbody free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
-  seq_code <- collect $ localMode ModeSequential $ do
+segmentedScan pat space scan_ops kbody ModeSequential = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+  collect $ localMode ModeSequential $ do
     n_seq_segments <- dPrim "segment_iter" $ IntType Int32
     fbody <- compileSegScanBody n_seq_segments pat space scan_ops kbody
     sFor "i" (product $ init ns') $ \i -> do
       n_seq_segments <-- i
       emit fbody
-
-  mode <- askEnv
-
-  if mode == ModeSequential
-    then emit seq_code
-    else do free_task_params <- freeParams (seq_code <> par_code) mempty
-            emit $ Imp.Op $ Imp.Task free_task_params (product $ init ns') par_code seq_code (segFlat space) []

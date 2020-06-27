@@ -20,6 +20,8 @@ import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 
+import Control.Monad
+
 compileProg :: MonadFreshNames m => Prog MCMem
             -> m (Warnings, Imp.Definitions Imp.Multicore)
 compileProg = Futhark.CodeGen.ImpGen.compileProg ModeParallel ops Imp.DefaultSpace
@@ -37,13 +39,57 @@ compileMCOp pat (ParOp par_op op) =
 compileSegOp :: Pattern MCMem -> SegOp () MCMem
              -> ImpM MCMem Mode Imp.Multicore ()
 compileSegOp pat (SegHist _ space histops _ kbody) =
-  compileSegHist pat space histops kbody
+  error "SegHist WIP"
+  -- compileSegHist pat space histops kbody
 
-compileSegOp pat (SegScan _ space scans _ kbody) =
-  compileSegScan pat space scans kbody
+compileSegOp pat (SegScan _ space scans _ kbody) = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
 
-compileSegOp pat (SegRed _ space reds _ kbody) =
-  compileSegRed pat space reds kbody
+  dPrimV_ (segFlat space) 0
+  let iterations = case unSegSpace space of
+        [_] -> product ns'
+        _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
 
-compileSegOp pat (SegMap _ space _ kbody) =
-  compileSegMap pat space kbody
+  seq_code <- compileSegScan pat space scans kbody ModeSequential
+  par_code <- compileSegScan pat space scans kbody ModeParallel
+  free_task_params <- freeParams (par_code <> seq_code) [segFlat space]
+  emit $ Imp.Op $ Imp.Task free_task_params iterations par_code seq_code (segFlat space) []
+
+
+
+compileSegOp pat (SegRed _ space reds _ kbody) = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  dPrimV_ (segFlat space) 0
+  sComment "neutral-initialise the output" $
+   forM_ reds $ \red ->
+     forM_ (zip (patternElements pat) $ segBinOpNeutral red) $ \(pe, ne) ->
+       sLoopNest (segBinOpShape red) $ \vec_is ->
+         copyDWIMFix (patElemName pe) vec_is ne []
+
+  let iterations = case unSegSpace space of
+        [_] -> product ns'
+        _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
+
+  let retvals = map patElemName $ patternElements pat
+  retvals_ts <- mapM lookupType retvals
+  retval_params <- zipWithM toParam retvals retvals_ts
+  let retval_names = map Imp.paramName retval_params
+
+  seq_code <- compileSegRed pat space reds kbody ModeSequential
+  par_code <- compileSegRed pat space reds kbody ModeParallel
+
+  free_params <- freeParams (par_code <> seq_code) (segFlat space : retval_names)
+  emit $ Imp.Op $ Imp.Task free_params iterations par_code seq_code (segFlat space) retval_params
+
+
+compileSegOp pat (SegMap _ space _ kbody) = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  seq_code <- compileSequentialSegMap pat space kbody
+  par_code <- compileParallelSegMap pat space kbody
+  free_params_task <- freeParams (par_code <> seq_code) mempty
+  emit $ Imp.Op $ Imp.Task free_params_task (product ns') par_code seq_code (segFlat space) []

@@ -1,5 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.SegMap
-  (compileSegMap
+  (
+   compileSequentialSegMap
+  , compileParallelSegMap
   )
   where
 
@@ -49,20 +51,13 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
     compileStms (freeIn kres) kstms' $
       zipWithM_ (writeResult is) (patternElements pat) kres
 
-
-compileSegMap :: Pattern MCMem
-              -> SegSpace
-              -> KernelBody MCMem
-              -> MulticoreGen ()
-compileSegMap pat space kbody = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  mode <- askEnv
-
+compileParallelSegMap :: Pattern MCMem
+                      -> SegSpace
+                      -> KernelBody MCMem
+                      -> MulticoreGen Imp.Code
+compileParallelSegMap pat space kbody = do
   dPrimV_ (segFlat space) 0
-
-  par_task_code <- collect $ do
+  collect $ do
     flat_par_idx <- dPrim "iter" int32
     body <- compileSegMapBody flat_par_idx pat space kbody
     free_params <- freeParams body [segFlat space, flat_par_idx]
@@ -72,7 +67,14 @@ compileSegMap pat space kbody = do
     ntasks <- dPrim "num_tasks" $ IntType Int32
     emit $ Imp.Op $ Imp.MCFunc flat_par_idx body_allocs body' free_params $ Imp.MulticoreInfo ntasks sched (segFlat space)
 
-  seq_task_code <- collect $ localMode ModeSequential $ do
+compileSequentialSegMap :: Pattern MCMem
+                        -> SegSpace
+                        -> KernelBody MCMem
+                        -> MulticoreGen Imp.Code
+compileSequentialSegMap pat space kbody = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+  collect $ localMode ModeSequential $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
     flat_seq_idx <- dPrim "seq_iter" int32
     body <- compileSegMapBody flat_seq_idx pat space kbody
@@ -83,8 +85,42 @@ compileSegMap pat space kbody = do
       emit body'
 
 
-  if mode == ModeSequential
-    then emit seq_task_code
-    else do
-    free_params_task <- freeParams (par_task_code <> seq_task_code) mempty
-    emit $ Imp.Op $ Imp.Task free_params_task (product ns') par_task_code seq_task_code (segFlat space) []
+
+-- compileSegMap :: Pattern MCMem
+--               -> SegSpace
+--               -> KernelBody MCMem
+--               -> MulticoreGen ()
+-- compileSegMap pat space kbody = do
+--   let ns = map snd $ unSegSpace space
+--   ns' <- mapM toExp ns
+
+--   mode <- askEnv
+
+--   dPrimV_ (segFlat space) 0
+
+--   par_task_code <- collect $ do
+--     flat_par_idx <- dPrim "iter" int32
+--     body <- compileSegMapBody flat_par_idx pat space kbody
+--     free_params <- freeParams body [segFlat space, flat_par_idx]
+--     let (body_allocs, body') = extractAllocations body
+--         sched = decideScheduling body'
+--     emit $ Imp.DebugPrint "SegMap parallel" Nothing
+--     ntasks <- dPrim "num_tasks" $ IntType Int32
+--     emit $ Imp.Op $ Imp.MCFunc flat_par_idx body_allocs body' free_params $ Imp.MulticoreInfo ntasks sched (segFlat space)
+
+--   seq_task_code <- collect $ localMode ModeSequential $ do
+--     emit $ Imp.DebugPrint "SegMap sequential" Nothing
+--     flat_seq_idx <- dPrim "seq_iter" int32
+--     body <- compileSegMapBody flat_seq_idx pat space kbody
+--     let (body_allocs, body') = extractAllocations body
+--     emit body_allocs
+--     sFor "i" (product ns') $ \i -> do
+--       flat_seq_idx <-- i
+--       emit body'
+
+
+--   if mode == ModeSequential
+--     then emit seq_task_code
+--     else do
+--     free_params_task <- freeParams (par_task_code <> seq_task_code) mempty
+--     emit $ Imp.Op $ Imp.Task free_params_task (product ns') par_task_code seq_task_code (segFlat space) []

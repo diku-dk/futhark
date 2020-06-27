@@ -18,12 +18,13 @@ type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
 
 -- | Generate code for a SegRed construct
 compileSegRed :: Pattern MCMem
-                 -> SegSpace
-                 -> [SegBinOp MCMem]
-                 -> KernelBody MCMem
-                 -> MulticoreGen ()
-compileSegRed pat space reds kbody =
-  compileSegRed' pat space reds $ \red_cont ->
+              -> SegSpace
+              -> [SegBinOp MCMem]
+              -> KernelBody MCMem
+              -> Mode
+              -> MulticoreGen Imp.Code
+compileSegRed pat space reds kbody mode =
+  compileSegRed' pat space reds mode $ \red_cont ->
     compileStms mempty (kernelBodyStms kbody) $ do
     let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult kbody
 
@@ -37,13 +38,14 @@ compileSegRed pat space reds kbody =
 compileSegRed' :: Pattern MCMem
                -> SegSpace
                -> [SegBinOp MCMem]
+               -> Mode
                -> DoSegBody
-               -> MulticoreGen ()
-compileSegRed' pat space reds kbody
+               -> MulticoreGen Imp.Code
+compileSegRed' pat space reds mode kbody
   | [_] <- unSegSpace space =
-      nonsegmentedReduction pat space reds kbody
+      nonsegmentedReduction pat space reds kbody mode
   | otherwise =
-      segmentedReduction pat space reds kbody
+      segmentedReduction pat space reds kbody mode
 
 
 -- | A SegBinOp with auxiliary information.
@@ -85,22 +87,15 @@ nonsegmentedReduction :: Pattern MCMem
                       -> SegSpace
                       -> [SegBinOp MCMem]
                       -> DoSegBody
-                      -> MulticoreGen ()
-nonsegmentedReduction pat space reds kbody = do
+                      -> Mode
+                      -> MulticoreGen Imp.Code
+nonsegmentedReduction pat space reds kbody ModeParallel = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
 
-  dPrimV_ (segFlat space) 0
-
-  sComment "neutral-initialise the output" $
-    forM_ reds $ \red ->
-      forM_ (zip (patternElements pat) $ segBinOpNeutral red) $ \(pe, ne) ->
-        sLoopNest (segBinOpShape red) $ \vec_is ->
-          copyDWIMFix (patElemName pe) vec_is ne []
-
-  par_code <- collect $ do
+  collect $ do
     flat_idx <- dPrim "iter" int32
     emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
     stage_one_red_arrs <- groupResultArrays (Var num_threads) reds
@@ -170,7 +165,13 @@ nonsegmentedReduction pat space reds kbody = do
                   \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
 
 
-  seq_code <- collect $ localMode ModeSequential $ do
+
+
+nonsegmentedReduction pat space reds kbody ModeSequential = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  collect $ localMode ModeSequential $ do
     flat_seq_idx <- dPrimV "seq_iter" 0
     seq_code_body <- sequentialRed pat flat_seq_idx space reds kbody
     let (body_allocs, seq_code_body') = extractAllocations seq_code_body
@@ -179,19 +180,8 @@ nonsegmentedReduction pat space reds kbody = do
       flat_seq_idx <-- i
       emit seq_code_body'
 
-  let retvals = map patElemName $ patternElements pat
-  retvals_ts <- mapM lookupType retvals
-  retval_params <- zipWithM toParam retvals retvals_ts
-  let retval_names = map Imp.paramName retval_params
 
-  mode <- askEnv
 
-  if mode == ModeSequential
-    then emit seq_code
-    else do free_params <- freeParams (par_code <> seq_code) (segFlat space : retval_names)
-            emit $ Imp.Op $ Imp.Task free_params (product ns') par_code seq_code (segFlat space) retval_params
-
-  emit $ Imp.DebugPrint "SegRed end\n" Nothing
 
 sequentialRed :: Pattern MCMem
               -> VName
@@ -283,14 +273,11 @@ segmentedReduction :: Pattern MCMem
                    -> SegSpace
                    -> [SegBinOp MCMem]
                    -> DoSegBody
-                   -> MulticoreGen ()
-segmentedReduction pat space reds kbody = do
-  emit $ Imp.DebugPrint "segmented segBinOp " Nothing
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
-
-  par_code <- collect $ do
+                   -> Mode
+                   -> MulticoreGen Imp.Code
+segmentedReduction pat space reds kbody ModeParallel = do
+  collect $ do
+    emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     par_body    <- compileSegRedBody n_par_segments pat space reds kbody
     ntasks      <- dPrim "num_tasks" $ IntType Int32
@@ -299,13 +286,12 @@ segmentedReduction pat space reds kbody = do
     emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty par_body free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
-
-  seq_code <- collect $ localMode ModeSequential $ do
+segmentedReduction pat space reds kbody ModeSequential = do
+  collect $ do
+    let ns = map snd $ unSegSpace space
+    ns' <- mapM toExp ns
     n_seq_segments <- dPrim "segment_iter" $ IntType Int32
     seq_body   <- compileSegRedBody n_seq_segments pat space reds kbody
     sFor "i" (product $ init ns') $ \i -> do
       n_seq_segments <-- i
       emit seq_body
-
-  free_task_params <- freeParams (seq_code <> par_code) [segFlat space]
-  emit $ Imp.Op $ Imp.Task free_task_params (product $ init ns') par_code seq_code (segFlat space) []
