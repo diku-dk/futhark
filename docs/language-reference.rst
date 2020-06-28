@@ -115,7 +115,7 @@ definition has been hidden via the module system (see `Module
 System`_).
 
 .. productionlist::
-   tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
+   tuple_type: "(" ")" | "(" `type` ("," `type`)+ ")"
 
 A tuple value or type is written as a sequence of comma-separated
 values or types enclosed in parentheses.  For example, ``(0, 1)`` is a
