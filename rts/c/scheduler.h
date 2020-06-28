@@ -212,7 +212,7 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
 {
   assert(task != NULL);
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_do_task] starting task with %d iterations\n", task->iterations);
+  fprintf(stderr, "[scheduler_do_task] starting task with %ld iterations\n", task->iterations);
 #endif
 
   // If there are no free workers, we just run the
