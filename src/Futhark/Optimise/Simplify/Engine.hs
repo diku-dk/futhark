@@ -483,6 +483,7 @@ cheapExp (BasicOp UnOp{})         = True
 cheapExp (BasicOp CmpOp{})        = True
 cheapExp (BasicOp ConvOp{})       = True
 cheapExp (BasicOp Copy{})         = False
+cheapExp (BasicOp Manifest{})     = False
 cheapExp DoLoop{}                 = False
 cheapExp (If _ tbranch fbranch _) = all cheapStm (bodyStms tbranch) &&
                                     all cheapStm (bodyStms fbranch)
