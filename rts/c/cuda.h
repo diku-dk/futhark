@@ -67,7 +67,7 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->load_ptx_from = NULL;
 
   cfg->default_block_size = 256;
-  cfg->default_grid_size = 256;
+  cfg->default_grid_size = 0; // Set properly later.
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
 
@@ -361,6 +361,13 @@ static void cuda_size_setup(struct cuda_context *ctx)
           ctx->max_tile_size, ctx->cfg.default_tile_size);
     }
     ctx->cfg.default_tile_size = ctx->max_tile_size;
+  }
+
+  if (!ctx->cfg.default_grid_size_changed) {
+    ctx->cfg.default_grid_size =
+      (device_query(ctx->dev, MULTIPROCESSOR_COUNT) *
+       device_query(ctx->dev, MAX_THREADS_PER_MULTIPROCESSOR))
+      / ctx->cfg.default_block_size;
   }
 
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
