@@ -526,6 +526,16 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_LOCAL_MEM_SIZE,
                                        sizeof(size_t), &max_local_memory, NULL));
 
+  // Futhark reserves 4 bytes for bookkeeping information.
+  max_local_memory -= 4;
+
+  // NVIDIA reserves some more bytes for who-knows-what.  The number
+  // of bytes here has been experimentally determined, but the
+  // overhead seems to vary a bit depending on what the kernel does.
+  if (strstr(device_option.platform_name, "NVIDIA CUDA") != NULL) {
+    max_local_memory -= 12;
+  }
+
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
