@@ -65,14 +65,11 @@ def check_types(self, required_types):
             raise Exception('Program uses double-precision floats, but this is not supported on chosen device: %s' % self.device.name)
 
 def apply_size_heuristics(self, size_heuristics, sizes):
-    for (platform_name, device_type, size, value) in size_heuristics:
+    for (platform_name, device_type, size, valuef) in size_heuristics:
         if sizes[size] == None \
            and self.platform.name.find(platform_name) >= 0 \
            and self.device.type == device_type:
-               if type(value) == str:
-                   sizes[size] = self.device.get_info(getattr(cl.device_info,value))
-               else:
-                   sizes[size] = value
+               sizes[size] = valuef(self.device)
     return sizes
 
 def initialise_opencl_object(self,
