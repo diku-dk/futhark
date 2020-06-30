@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , compileVar
   , compileDim
   , compileExp
+  , compilePrimExp
   , compileCode
   , compilePrimValue
   , compilePrimType
@@ -690,11 +691,12 @@ compileUnOp op =
     USignum{} -> "usignum"
 
 compileBinOpLike :: Monad m =>
-                    Imp.Exp -> Imp.Exp
-                 -> CompilerM op s (PyExp, PyExp, String -> m PyExp)
-compileBinOpLike x y = do
-  x' <- compileExp x
-  y' <- compileExp y
+                    (v -> m PyExp)
+                 -> Imp.PrimExp v -> Imp.PrimExp v
+                 -> m (PyExp, PyExp, String -> m PyExp)
+compileBinOpLike f x y = do
+  x' <- compilePrimExp f x
+  y' <- compilePrimExp f y
   let simple s = return $ BinOp s x' y'
   return (x', y', simple)
 
@@ -786,30 +788,15 @@ compileVar :: VName -> CompilerM op s PyExp
 compileVar v =
   asks $ fromMaybe (Var $ compileName v) . M.lookup v . envVarExp
 
-compileExp :: Imp.Exp -> CompilerM op s PyExp
+-- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
+compilePrimExp :: Monad m => (v -> m PyExp) -> Imp.PrimExp v -> m PyExp
 
-compileExp (Imp.ValueExp v) = return $ compilePrimValue v
+compilePrimExp _ (Imp.ValueExp v) = return $ compilePrimValue v
 
-compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
-  compileVar vname
+compilePrimExp f (Imp.LeafExp v _) = f v
 
-compileExp (Imp.LeafExp (Imp.SizeOf t) _) =
-  return $ simpleCall (compilePrimToNp $ IntType Int32) [Integer $ primByteSize t]
-
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
-  join $ asks envReadScalar
-    <*> compileVar src <*> compileExp iexp
-    <*> pure restype <*> pure space
-
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt _ _) _) = do
-  iexp' <- compileExp iexp
-  let bt' = compilePrimType bt
-      nptype = compilePrimToNp bt
-  src' <- compileVar src
-  return $ simpleCall "indexArray" [src', iexp', Var bt', Var nptype]
-
-compileExp (Imp.BinOpExp op x y) = do
-  (x', y', simple) <- compileBinOpLike x y
+compilePrimExp f (Imp.BinOpExp op x y) = do
+  (x', y', simple) <- compileBinOpLike f x y
   case op of
     Add{} -> simple "+"
     Sub{} -> simple "-"
@@ -827,12 +814,12 @@ compileExp (Imp.BinOpExp op x y) = do
     LogOr{} -> simple "or"
     _ -> return $ simpleCall (pretty op) [x', y']
 
-compileExp (Imp.ConvOpExp conv x) = do
-  x' <- compileExp x
+compilePrimExp f (Imp.ConvOpExp conv x) = do
+  x' <- compilePrimExp f x
   return $ simpleCall (pretty conv) [x']
 
-compileExp (Imp.CmpOpExp cmp x y) = do
-  (x', y', simple) <- compileBinOpLike x y
+compilePrimExp f (Imp.CmpOpExp cmp x y) = do
+  (x', y', simple) <- compileBinOpLike f x y
   case cmp of
     CmpEq{} -> simple "=="
     FCmpLt{} -> simple "<"
@@ -841,11 +828,31 @@ compileExp (Imp.CmpOpExp cmp x y) = do
     CmpLle -> simple "<="
     _ -> return $ simpleCall (pretty cmp) [x', y']
 
-compileExp (Imp.UnOpExp op exp1) =
-  UnOp (compileUnOp op) <$> compileExp exp1
+compilePrimExp f (Imp.UnOpExp op exp1) =
+  UnOp (compileUnOp op) <$> compilePrimExp f exp1
 
-compileExp (Imp.FunExp h args _) =
-  simpleCall (futharkFun (pretty h)) <$> mapM compileExp args
+compilePrimExp f (Imp.FunExp h args _) =
+  simpleCall (futharkFun (pretty h)) <$> mapM (compilePrimExp f) args
+
+compileExp :: Imp.Exp -> CompilerM op s PyExp
+compileExp = compilePrimExp compileLeaf
+  where compileLeaf (Imp.ScalarVar vname) =
+          compileVar vname
+
+        compileLeaf (Imp.SizeOf t) =
+          return $ simpleCall (compilePrimToNp $ IntType Int32) [Integer $ primByteSize t]
+
+        compileLeaf (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) =
+          join $ asks envReadScalar
+          <*> compileVar src <*> compileExp iexp
+          <*> pure restype <*> pure space
+
+        compileLeaf (Imp.Index src (Imp.Count iexp) bt _ _) = do
+          iexp' <- compileExp iexp
+          let bt' = compilePrimType bt
+              nptype = compilePrimToNp bt
+          src' <- compileVar src
+          return $ simpleCall "indexArray" [src', iexp', Var bt', Var nptype]
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 

@@ -13,18 +13,25 @@ module Futhark.CodeGen.OpenCL.Heuristics
        ( SizeHeuristic (..)
        , DeviceType (..)
        , WhichSize (..)
-       , HeuristicValue (..)
+       , DeviceInfo (..)
        , sizeHeuristicsTable
        )
        where
 
+import Futhark.Analysis.PrimExp
+import Futhark.Util.Pretty
+
 -- | The type of OpenCL device that this heuristic applies to.
 data DeviceType = DeviceCPU | DeviceGPU
 
--- | The value supplies by a heuristic can be a constant, or inferred
--- from some device information.
-data HeuristicValue = HeuristicConst Int
-                    | HeuristicDeviceInfo String
+-- | The value supplies by a heuristic can depend on some device
+-- information.  This will be translated into a call to
+-- @clGetDeviceInfo()@. Make sure to only request info that can be
+-- casted to a scalar type.
+newtype DeviceInfo = DeviceInfo String
+
+instance Pretty DeviceInfo where
+  ppr (DeviceInfo s) = text "device_info" <> parens (ppr s)
 
 -- | A size that can be assigned a default.
 data WhichSize = LockstepWidth | NumGroups | GroupSize | TileSize | Threshold
@@ -34,23 +41,29 @@ data SizeHeuristic =
     SizeHeuristic { platformName :: String
                   , deviceType :: DeviceType
                   , heuristicSize :: WhichSize
-                  , heuristicValue :: HeuristicValue
+                  , heuristicValue :: PrimExp DeviceInfo
                   }
 
 -- | All of our heuristics.
 sizeHeuristicsTable :: [SizeHeuristic]
 sizeHeuristicsTable =
-  [ SizeHeuristic "NVIDIA CUDA" DeviceGPU LockstepWidth $ HeuristicConst 32
-  , SizeHeuristic "AMD Accelerated Parallel Processing" DeviceGPU LockstepWidth $ HeuristicConst 32
-  , SizeHeuristic "" DeviceGPU LockstepWidth $ HeuristicConst 1
-  , SizeHeuristic "" DeviceGPU NumGroups $ HeuristicConst 256
-  , SizeHeuristic "" DeviceGPU GroupSize $ HeuristicConst 256
-  , SizeHeuristic "" DeviceGPU TileSize $ HeuristicConst 32
-  , SizeHeuristic "" DeviceGPU Threshold $ HeuristicConst $ 32*1024
+  [ SizeHeuristic "NVIDIA CUDA" DeviceGPU LockstepWidth $ constant 32
+  , SizeHeuristic "AMD Accelerated Parallel Processing" DeviceGPU LockstepWidth $ constant 32
+  , SizeHeuristic "" DeviceGPU LockstepWidth $ constant 1
+  -- We calculate the number of groups to aim for 1024 threads per
+  -- compute unit if we also use the default group size.  This seems
+  -- to perform well in practice.
+  , SizeHeuristic "" DeviceGPU NumGroups $ 4 * max_compute_units
+  , SizeHeuristic "" DeviceGPU GroupSize $ constant 256
+  , SizeHeuristic "" DeviceGPU TileSize $ constant 32
+  , SizeHeuristic "" DeviceGPU Threshold $ constant $ 32*1024
 
-  , SizeHeuristic "" DeviceCPU LockstepWidth $ HeuristicConst 1
-  , SizeHeuristic "" DeviceCPU NumGroups $ HeuristicDeviceInfo "MAX_COMPUTE_UNITS"
-  , SizeHeuristic "" DeviceCPU GroupSize $ HeuristicConst 32
-  , SizeHeuristic "" DeviceCPU TileSize $ HeuristicConst 4
-  , SizeHeuristic "" DeviceCPU Threshold $ HeuristicDeviceInfo "MAX_COMPUTE_UNITS"
+  , SizeHeuristic "" DeviceCPU LockstepWidth $ constant 1
+  , SizeHeuristic "" DeviceCPU NumGroups max_compute_units
+  , SizeHeuristic "" DeviceCPU GroupSize $ constant 32
+  , SizeHeuristic "" DeviceCPU TileSize $ constant 4
+  , SizeHeuristic "" DeviceCPU Threshold max_compute_units
   ]
+  where constant = ValueExp . IntValue . Int32Value
+        max_compute_units =
+          LeafExp (DeviceInfo "MAX_COMPUTE_UNITS") $ IntType Int32

@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   , openClPrelude
   ) where
 
+import Control.Monad.Identity
 import Data.FileEmbed
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -17,6 +18,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
    FailureMsg(..), ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.Backends.GenericPython.AST
+import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import Futhark.Util.Pretty (prettyText)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
@@ -94,6 +96,8 @@ sizeHeuristicsToPython = List . map f
                                        TileSize      -> String "tile_size"
                                        Threshold     -> String "threshold"
 
-                what' = case what of
-                          HeuristicConst x -> Integer $ toInteger x
-                          HeuristicDeviceInfo s -> String s
+                what' = Lambda "device" $ runIdentity $ Py.compilePrimExp onLeaf what
+
+                onLeaf (DeviceInfo s) =
+                  pure $ Py.simpleCall "device.get_info"
+                  [Py.simpleCall "getattr" [Var "cl.device_info", String s]]

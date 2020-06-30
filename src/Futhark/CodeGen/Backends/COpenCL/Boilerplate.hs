@@ -1,6 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( generateBoilerplate
   , profilingEvent
@@ -13,6 +14,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   , kernelRuns
   ) where
 
+import Control.Monad.State
 import Data.FileEmbed
 import qualified Data.Map as M
 import qualified Language.C.Syntax as C
@@ -555,7 +557,7 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
    if ($exp:which' == 0 &&
        strstr(option->platform_name, $string:platform_name) != NULL &&
        (option->device_type & $exp:(clDeviceType device_type)) == $exp:(clDeviceType device_type)) {
-     $stm:get_size
+     $items:get_size
    }|]
   where clDeviceType DeviceGPU = [C.cexp|CL_DEVICE_TYPE_GPU|]
         clDeviceType DeviceCPU = [C.cexp|CL_DEVICE_TYPE_CPU|]
@@ -567,17 +569,27 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
                    TileSize -> [C.cexp|ctx->cfg.default_tile_size|]
                    Threshold -> [C.cexp|ctx->cfg.default_threshold|]
 
-        get_size = case what of
-                     HeuristicConst x ->
-                       [C.cstm|$exp:which' = $int:x;|]
-                     HeuristicDeviceInfo s ->
-                       -- This only works for device info that fits in the variable.
-                       let s' = "CL_DEVICE_" ++ s
-                       in [C.cstm|clGetDeviceInfo(ctx->device,
-                                                  $id:s',
-                                                  sizeof($exp:which'),
-                                                  &$exp:which',
-                                                  NULL);|]
+        get_size =
+          let (e, m) = runState (GC.compilePrimExp onLeaf what) mempty
+          in concat (M.elems m) ++ [[C.citem|$exp:which' = $exp:e;|]]
+
+        onLeaf (DeviceInfo s) = do
+          let s' = "CL_DEVICE_" ++ s
+              v = s ++ "_val"
+          m <- get
+          case M.lookup s m of
+            Nothing ->
+              -- Cheating with the type here; works for the infos we
+              -- currently use, but should be made more size-aware in
+              -- the future.
+              modify $ M.insert s'
+              [C.citems|size_t $id:v;
+                        clGetDeviceInfo(ctx->device, $id:s',
+                                        sizeof($id:v), &$id:v,
+                                        NULL);|]
+            Just _ -> return ()
+
+          return [C.cexp|$id:v|]
 
 -- Options that are common to multiple GPU-like backends.
 commonOptions :: [Option]

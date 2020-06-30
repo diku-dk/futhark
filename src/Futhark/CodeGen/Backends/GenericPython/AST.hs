@@ -37,6 +37,7 @@ data PyExp = Integer Integer
            | List [PyExp]
            | Field PyExp String
            | Dict [(PyExp, PyExp)]
+           | Lambda String PyExp
            | None
              deriving (Eq, Show)
 
@@ -115,7 +116,7 @@ instance Pretty PyExp where
   ppr (List es) = brackets $ commasep $ map ppr es
   ppr (Dict kvs) = braces $ commasep $ map ppElem kvs
     where ppElem (k, v) = ppr k <> colon <+> ppr v
-
+  ppr (Lambda p e) = text "lambda" <+> text p <> text ":" <+> ppr e
   ppr None = text "None"
 
 instance Pretty PyStmt where
