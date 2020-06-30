@@ -384,6 +384,12 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = ctx->max_grid_size;
       default_value = ctx->cfg.default_grid_size;
+      // XXX: as a quick and dirty hack, use twice as many threads for
+      // histograms by default.  We really should just be smarter
+      // about sizes somehow.
+      if (strstr(size_name, ".seghist_") != NULL) {
+        default_value *= 2;
+      }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
       default_value = ctx->cfg.default_tile_size;
