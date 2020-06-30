@@ -70,11 +70,10 @@ splitScanOrRedomap patelems w map_lam accs = do
       newIdent (baseString (patElemName pe) ++ "_map_acc") $ acc_t `arrayOfRow` w
     arrMapPatElem = return . patElemIdent
 
--- | Turn a Screma into simpler Scremas that are all simple scans,
--- reduces, and maps.  This is used to handle Scremas that are so
--- complicated that we cannot directly generate efficient parallel
--- code for them.  In essense, what happens is the opposite of
--- horisontal fusion.
+-- | Turn a Screma into a Scanomap (possibly with mapout parts) and a
+-- Redomap.  This is used to handle Scremas that are so complicated
+-- that we cannot directly generate efficient parallel code for them.
+-- In essense, what happens is the opposite of horisontal fusion.
 dissectScrema :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
                   Bindable (Lore m)) =>
                  Pattern (Lore m) -> SubExp -> ScremaForm (Lore m) -> [VName]
@@ -85,17 +84,14 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
       (scan_res, red_res, map_res) =
         splitAt3 num_scans num_reds $ patternNames pat
 
-  -- First we perform the Map, then we perform the Reduce, and finally
-  -- the Scan.
-  to_scan <- replicateM num_scans $ newVName "to_scan"
   to_red <- replicateM num_reds $ newVName "to_red"
-  letBindNames (to_scan <> to_red <> map_res) $ Op $ Screma w (mapSOAC map_lam) arrs
+
+  let scanomap = scanomapSOAC scans map_lam
+  letBindNames (scan_res <> to_red <> map_res) $
+    Op $ Screma w scanomap arrs
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w reduce to_red
-
-  scan <- scanSOAC scans
-  letBindNames scan_res $ Op $ Screma w scan to_scan
 
 -- | Turn a stream SOAC into statements that apply the stream lambda
 -- to the entire input.
