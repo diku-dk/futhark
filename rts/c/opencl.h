@@ -573,6 +573,12 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = max_group_size; // Futhark assumes this constraint.
       default_value = ctx->cfg.default_num_groups;
+      // XXX: as a quick and dirty hack, use twice as many threads for
+      // histograms by default.  We really should just be smarter
+      // about sizes somehow.
+      if (strstr(size_name, ".seghist_") != NULL) {
+        default_value *= 2;
+      }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = sqrt(max_group_size);
       default_value = ctx->cfg.default_tile_size;
