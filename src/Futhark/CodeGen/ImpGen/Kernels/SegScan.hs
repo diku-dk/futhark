@@ -344,14 +344,14 @@ compileSegScan  (Pattern _ pes)
           -- This local allocation does not reuse the memory.
           --   can be investigated at the optimization phase.
           --   Note: the Shape should have the size of the wave size not just the hard coded 32.
-          warpscan <- sAllocArray "warpscan" int8 (Shape [intConst Int32 32]) (Space "local")
+          -- warpscan <- sAllocArray "warpscan" int8 (Shape [intConst Int32 32]) (Space "local")
 
           -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn (head exchange) $ IxFun.iota [1]
           -- m <- lookupArray $ head exchange
           -- TODO: warpscan reuse exchange -
           -- sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
-          -- MemLocation mem _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
-          -- warpscan <- sArray "warpscan" int8 (Shape [intConst Int32 32]) $ ArrayIn mem $ IxFun.iota [32]
+          MemLocation mem _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
+          warpscan <- sArray "warpscan" int8 (Shape [intConst Int32 (32*5)]) $ ArrayIn mem $ IxFun.iota [32*5]
 
 
 
@@ -362,12 +362,12 @@ compileSegScan  (Pattern _ pes)
               copyDWIMFix ag [Imp.var wG_ID int32] (Var ac) []
             sOp Imp.MemFenceGlobal
             copyDWIMFix statusflgs [Imp.var wG_ID int32] (intConst Int8 1) []
-            copyDWIMFix warpscan [0] (Var statusflgs) [Imp.var wG_ID int32 - 1]
+            copyDWIMFix warpscan [0+32*4] (Var statusflgs) [Imp.var wG_ID int32 - 1]
 
           sOp Imp.MemFenceGlobal
           -- if (warpscan[0] == STATUS_P && tid == 0) prefix = incprefix[WG_ID-1];
           status1 <- dPrim "status1" int8
-          copyDWIMFix status1 [] (Var warpscan) [0]
+          copyDWIMFix status1 [] (Var warpscan) [0+32*4]
           sIf (Imp.var status1 int8 .==. 2)
             -- if
             (sWhen (ltid .==. 0) (forM_ (zip prefix incprefix) $ \(pre,inc) ->
@@ -409,14 +409,14 @@ compileSegScan  (Pattern _ pes)
               -- TODO: The msb is signed and have to be mult with -1 or bit shiftet or something
               -- combined_flg <-- (Imp.var used int8 * 4) .|. Imp.var flag int8
               combined_flg <-- Imp.BinOpExp (Shl Int8) (Imp.var used int8) 2 .|. Imp.var flag int8
-              copyDWIMFix warpscan [ltid] (Var combined_flg) []
+              copyDWIMFix warpscan [ltid+32*4] (Var combined_flg) []
               sOp Imp.MemFenceGlobal
 
 
               -- Perform reduce
               wsmone <- dPrim "wsmone" int8
               -- wsmone <-- 0
-              copyDWIMFix wsmone [] (Var warpscan) [waveSize-1]
+              copyDWIMFix wsmone [] (Var warpscan) [waveSize-1+32*4]
               sUnless (Imp.var wsmone int32 .==. 2) $ do -- STATUS_P
 
                 -- p = 1
@@ -449,12 +449,12 @@ compileSegScan  (Pattern _ pes)
                     stat2 <- dPrim "stat2" int8
                     tmp <- dPrim "tmp" int8
                     let tmpVar = Imp.var tmp int32
-                    copyDWIMFix tmp [] (Var warpscan) [acc_th]
+                    copyDWIMFix tmp [] (Var warpscan) [acc_th+32*4]
 
                     stat1 <-- tmpVar .&. 3
                     usd1 <-- Imp.BinOpExp (LShr Int8) tmpVar 2
 
-                    copyDWIMFix tmp [] (Var warpscan) [cur_th]
+                    copyDWIMFix tmp [] (Var warpscan) [cur_th+32*4]
                     stat2 <-- tmpVar .&. 3
                     usd2 <-- Imp.BinOpExp (LShr Int8) tmpVar 2
 
@@ -467,7 +467,7 @@ compileSegScan  (Pattern _ pes)
                     usd1 <-- Imp.var usd1 int8 + Imp.var usd2 int8
                     usd1 <-- Imp.BinOpExp (Shl Int8) (Imp.var usd1 int8) 2
                     usd1 <-- Imp.var usd1 int8 .|. Imp.var stat1 int8
-                    copyDWIMFix warpscan [cur_th] (Var usd1) []
+                    copyDWIMFix warpscan [cur_th+32*4] (Var usd1) []
 
                     dScope Nothing $ scopeOfLParams $ lambdaParams scan_op
                     let (scan_x_params, scan_y_params) = splitAt (length nes) $ lambdaParams scan_op
@@ -491,7 +491,7 @@ compileSegScan  (Pattern _ pes)
               sWhen (ltid .==.0) $ do
                 -- read result from local data after warp reduce
                 usedflg_val <- dPrim "usedflg_val" int8
-                copyDWIMFix usedflg_val [] (Var warpscan) [waveSize-1]
+                copyDWIMFix usedflg_val [] (Var warpscan) [waveSize-1+32*4]
                 flag <-- Imp.var usedflg_val int8 .&. 3 -- get status
                 sIf (flagExp .==. 2)
                   (read_offset <-- Imp.var loop_stop int32) $ do-- EXIT
