@@ -106,7 +106,16 @@ def initialise_opencl_object(self,
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
     self.max_num_groups = 0
+
     self.max_local_memory = int(self.device.local_mem_size)
+
+    # Futhark reserves 4 bytes of local memory for its own purposes.
+    self.max_local_memory -= 4
+
+    # See comment in rts/c/opencl.h.
+    if self.platform.name.find('NVIDIA CUDA') >= 0:
+        self.max_local_memory -= 12
+
     self.free_list = {}
 
     self.global_failure = self.pool.allocate(np.int32().itemsize)
