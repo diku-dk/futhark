@@ -1398,8 +1398,9 @@ sCopy bt
 
   (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
 
-  let name = nameFromString $ "copy_" ++
-             show (baseTag $ kernelGlobalThreadIdVar constants)
+  fname <- askFunction
+  let name = keyWithEntryPoint fname $ nameFromString $
+             "copy_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
 
   sKernelFailureTolerant True threadOperations constants name $ do
     set_constants
