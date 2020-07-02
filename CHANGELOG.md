@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Further tightening of the causality restriction (#1042).
 
+  * Fixed alias tracking for right-operand operator sections (#1043).
+
 ## [0.15.8]
 
 ### Added
