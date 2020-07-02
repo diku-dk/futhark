@@ -1561,11 +1561,12 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   e_arg <- checkArg e
   case ftype of
     Scalar (Arrow as1 m1 t1 (Scalar (Arrow as2 m2 t2 ret))) -> do
-      (t2', _, argext, _) <-
+      (t2', ret', argext, _) <-
         checkApply loc (Just op', 1)
         (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
       return $ OpSectionRight op' (Info ftype) (argExp e_arg)
-        (Info $ toStruct t1, Info (toStruct t2', argext)) (Info ret) loc
+        (Info $ toStruct t1, Info (toStruct t2', argext))
+        (Info $ addAliases ret (<>aliases ret')) loc
     _ -> typeError loc mempty $
          "Operator section with invalid operator of type" <+> ppr ftype
 
