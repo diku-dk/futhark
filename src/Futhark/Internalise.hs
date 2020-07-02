@@ -1047,7 +1047,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
                    ErrorInt32 j'] ++
                    maybe mempty (const [":", ErrorInt32 s']) s
                 (_, Nothing, Nothing) ->
-                  [ErrorInt32 i']
+                  [ErrorInt32 i', ":"]
   return (I.DimSlice i' n s', ok_or_empty, parts)
   where zero = constant (0::Int32)
         negone = constant (-1::Int32)
