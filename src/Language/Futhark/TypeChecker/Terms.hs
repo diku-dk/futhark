@@ -2350,7 +2350,7 @@ causalityCheck binding_body = do
 
   let checkCausality what known t loc
         | (d,dloc):_ <- mapMaybe (unknown constraints known) $
-                        S.toList $ mustBeExplicit $ toStruct t =
+                        S.toList $ typeDimNames $ toStruct t =
             Just $ lift $ causality what loc d dloc t
         | otherwise = Nothing
 

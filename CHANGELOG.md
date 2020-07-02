@@ -61,6 +61,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     parameters instantiated with functions that take named parameters
     (#1026).
 
+  * Further tightening of the causality restriction (#1042).
+
 ## [0.15.8]
 
 ### Added

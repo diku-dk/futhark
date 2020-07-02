@@ -6,4 +6,4 @@ let (<*>) 'a 'b (f: a -> b) (xs: a) =
   f xs
 
 let main (xs: []i32) =
-  (<*>(filter (>0) xs)) id
+  (<*>take 5 xs) id

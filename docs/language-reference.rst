@@ -1173,8 +1173,9 @@ inferable.  Specifically, this value must have been used as the size
 of an array *before* the ``f x`` application is encountered.  The
 notion of "before" is subtle, as there is no evaluation ordering of a
 Futhark expression, *except* that a ``let``-binding is always
-evaluated before its body, and the argument to a function is always
-evaluated before the function.
+evaluated before its body, the argument to a function is always
+evaluated before the function itself, and the left operand to an
+operator is evaluated before the right.
 
 The causality restriction only occurs when a function has size
 parameters whose first use is *not* as a concrete array size.  For
