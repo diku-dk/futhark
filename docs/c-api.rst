@@ -89,8 +89,9 @@ Context
 
 .. c:function:: int futhark_context_sync(struct futhark_context *ctx)
 
-   Block until all outstanding operations have finished executing.
-   Many API functions are asynchronous on their own.
+   Block until all outstanding operations, including copies, have
+   finished executing.  Many API functions are asynchronous on their
+   own.
 
 .. c:function:: void futhark_context_pause_profiling(struct futhark_context *ctx)
 
@@ -178,8 +179,9 @@ will not result in a double free.
 
 .. c:function:: int futhark_values_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr, int32_t *data)
 
-   Copy data from the value into ``data``, which must be of sufficient
-   size.  Multi-dimensional arrays are written in row-major form.
+   Asynchronously copy data from the value into ``data``, which must
+   be of sufficient size.  Multi-dimensional arrays are written in
+   row-major form.
 
 .. c:function:: const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
