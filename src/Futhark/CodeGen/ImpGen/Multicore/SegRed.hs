@@ -95,6 +95,7 @@ nonsegmentedReduction pat space reds kbody ModeParallel = do
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
 
+
   collect $ do
     flat_idx <- dPrim "iter" int32
     emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
@@ -147,21 +148,22 @@ nonsegmentedReduction pat space reds kbody ModeParallel = do
 
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
 
+    let per_red_pes = segBinOpChunks reds $ patternValueElements pat
     sFor "i" ntasks' $ \i' -> do
       emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
       segFlat space <-- i'
       sComment "Apply main thread reduction" $
-        forM_ slugs' $ \slug ->
+        forM_ (zip slugs' per_red_pes) $ \(slug, red_res) ->
           sLoopNest (slugShape slug) $ \vec_is -> do
             sComment "load acc params" $
               forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
               copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
             sComment "load next params" $
-              forM_ (zip (nextParams slug) $ patternElements pat) $ \(p, pe) ->
+              forM_ (zip (nextParams slug) red_res) $ \(p, pe) ->
               copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
             sComment "red body" $
               compileStms mempty (bodyStms $ slugBody slug) $
-                forM_ (zip (patternElements pat) (bodyResult $ slugBody slug)) $
+                forM_ (zip red_res (bodyResult $ slugBody slug)) $
                   \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
 
 
