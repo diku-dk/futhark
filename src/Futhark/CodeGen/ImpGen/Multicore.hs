@@ -79,9 +79,10 @@ compileSegOp pat (SegRed _ space reds _ kbody) _par_op = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
 
+  let per_red_pes = segBinOpChunks reds $ patternValueElements pat
   sComment "neutral-initialise the output" $
-   forM_ reds $ \red ->
-     forM_ (zip (patternElements pat) $ segBinOpNeutral red) $ \(pe, ne) ->
+   forM_ (zip reds per_red_pes) $ \(red, red_res) ->
+     forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
        sLoopNest (segBinOpShape red) $ \vec_is ->
          copyDWIMFix (patElemName pe) vec_is ne []
 

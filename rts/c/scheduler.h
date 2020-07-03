@@ -204,7 +204,7 @@ static inline int do_task_directly(sub_task_fn fn,
   fprintf(stderr, "[do_task_directly] doing task directly\n");
 #endif
   assert(fn != NULL);
-  return fn(args, 0, iterations, (worker_local == NULL) ? 0 : worker_local->tid);
+  return fn(args, 0, iterations, 0); // (worker_local == NULL) ? 0 : worker_local->tid);
 }
 
 
@@ -228,11 +228,12 @@ static inline int scheduler_execute(struct scheduler *scheduler,
   // than the parallel algorithm, when both are executed using
   // a single thread.
   if (!free_workers) {
+    *ntask = 1;
     return do_task_directly(task->fn, task->args, task->iterations);
   }
 
   /* Run task directly if below some threshold */
-  if (task->iterations < 50 || 1) {
+  if (task->iterations < 50) {
     *ntask = 1;
     return do_task_directly(task->fn, task->args, task->iterations);
   }
