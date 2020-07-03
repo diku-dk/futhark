@@ -439,7 +439,6 @@ compileOp (Task params e par_code seq_code tid retvals) = do
       free = zip free_args free_ctypes
       retval = zip retval_args retval_ctypes
 
-
   e' <- GC.compileExp e
 
   let lexical_par = lexicalMemoryUsage $ Function False [] params par_code [] []
@@ -523,7 +522,7 @@ compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
 
   let ftask_name = ftask <> "_task"
-  GC.decl [C.cdecl|struct scheduler_parallel_task $id:ftask_name;|]
+  GC.decl [C.cdecl|struct scheduler_subtask $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
   GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
@@ -532,7 +531,7 @@ compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
 
   let ftask_err = ftask <> "_err"
   code' <- benchmarkCode ftask_name Nothing
-    [C.citems|int $id:ftask_err = scheduler_parallel(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
+    [C.citems|int $id:ftask_err = scheduler_execute(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
               if ($id:ftask_err != 0) {
                 futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
               }|]

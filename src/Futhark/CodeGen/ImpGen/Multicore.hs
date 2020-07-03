@@ -56,7 +56,7 @@ compileSegOp pat (SegHist _ space histops _ kbody) par_op = do
   emit $ Imp.Op $ Imp.Task free_params iterations par_code seq_code (segFlat space) []
   emit $ Imp.DebugPrint "Histogram end" Nothing
 
-compileSegOp pat (SegScan _ space scans _ kbody) par_op = do
+compileSegOp pat (SegScan _ space scans _ kbody) _par_op = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -65,17 +65,17 @@ compileSegOp pat (SegScan _ space scans _ kbody) par_op = do
         [_] -> product ns'
         _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
 
-  seq_code <- compileSegScan pat space scans kbody ModeSequential
+  seq_code <- compileSegScan pat space scans kbody ModeParallel
 
-  par_code <- case par_op of
-    Just nested_op -> compileSegScan pat space scans kbody ModeParallel -- collect $ compileSegOp pat nested_op Nothing
-    Nothing -> compileSegScan pat space scans kbody ModeParallel
+  -- par_code <- case par_op of
+  --   Just nested_op -> compileSegScan pat space scans kbody ModeParallel -- collect $ compileSegOp pat nested_op Nothing
+  --   Nothing -> compileSegScan pat space scans kbody ModeParallel
 
-  free_task_params <- freeParams (par_code <> seq_code) [segFlat space]
-  emit $ Imp.Op $ Imp.Task free_task_params iterations par_code seq_code (segFlat space) []
+  free_task_params <- freeParams (seq_code) [segFlat space]
+  emit $ Imp.Op $ Imp.Task free_task_params iterations mempty seq_code (segFlat space) []
 
 
-compileSegOp pat (SegRed _ space reds _ kbody) par_op = do
+compileSegOp pat (SegRed _ space reds _ kbody) _par_op = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -95,25 +95,26 @@ compileSegOp pat (SegRed _ space reds _ kbody) par_op = do
   let retval_names = map Imp.paramName retval_params
 
   dPrimV_ (segFlat space) 0
-  seq_code <- compileSegRed pat space reds kbody ModeSequential
+  seq_code <- compileSegRed pat space reds kbody ModeParallel
 
-  par_code <- case par_op of
-    Just _nested_op -> compileSegRed pat space reds kbody ModeParallel
-      -- collect $ compileSegOp pat nested_op Nothing
-    Nothing -> compileSegRed pat space reds kbody ModeParallel
+  -- par_code <- case par_op of
+  --   Just _nested_op -> compileSegRed pat space reds kbody ModeParallel
+  --     -- collect $ compileSegOp pat nested_op Nothing
+  --   Nothing -> compileSegRed pat space reds kbody ModeParallel
 
-  free_params <- freeParams (par_code <> seq_code) (segFlat space : retval_names)
-  emit $ Imp.Op $ Imp.Task free_params iterations par_code seq_code (segFlat space) retval_params
+  free_params <- freeParams (seq_code) (segFlat space : retval_names)
+  emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) retval_params
 
 
-compileSegOp pat (SegMap _ space _ kbody) par_op = do
+compileSegOp pat (SegMap _ space _ kbody) _par_op = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
 
-  seq_code <- compileSequentialSegMap pat space kbody
-  par_code <- case par_op of
-    Just _nested_op -> compileParallelSegMap pat space kbody -- collect $ compileSegOp pat nested_op Nothing
-    Nothing -> compileParallelSegMap pat space kbody
+  dPrimV_ (segFlat space) 0
+  seq_code <- compileParallelSegMap pat space kbody
+  -- par_code <- case par_op of
+    -- Just nested_op -> compileParallelSegMap pat space kbody -- collect $ compileSegOp pat nested_op Nothing
+    -- Nothing -> compileParallelSegMap pat space kbody
 
-  free_params_task <- freeParams (par_code <> seq_code) mempty
-  emit $ Imp.Op $ Imp.Task free_params_task (product ns') par_code seq_code (segFlat space) []
+  free_params_task <- freeParams (seq_code) mempty
+  emit $ Imp.Op $ Imp.Task free_params_task (product ns') mempty seq_code (segFlat space) []

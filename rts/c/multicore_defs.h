@@ -66,7 +66,7 @@ struct scheduler_task {
 };
 
 /* Parallel task  */
-struct scheduler_parallel_task {
+struct scheduler_subtask {
   const char* name;
   sub_task_fn fn;
   void* args;

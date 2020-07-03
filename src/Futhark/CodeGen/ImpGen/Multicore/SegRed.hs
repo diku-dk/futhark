@@ -275,7 +275,7 @@ segmentedReduction :: Pattern MCMem
                    -> DoSegBody
                    -> Mode
                    -> MulticoreGen Imp.Code
-segmentedReduction pat space reds kbody ModeParallel = do
+segmentedReduction pat space reds kbody ModeParallel =
   collect $ do
     emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
@@ -286,7 +286,7 @@ segmentedReduction pat space reds kbody ModeParallel = do
     emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty par_body free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
-segmentedReduction pat space reds kbody ModeSequential = do
+segmentedReduction pat space reds kbody ModeSequential =
   collect $ do
     let ns = map snd $ unSegSpace space
     ns' <- mapM toExp ns

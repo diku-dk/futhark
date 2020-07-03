@@ -50,12 +50,12 @@ static inline void *scheduler_worker(void* arg)
 }
 
 
-static inline int scheduler_task(struct scheduler *scheduler,
-                                 struct scheduler_parallel_task *task,
-                                 int *ntask)
+static inline int scheduler_parallel(struct scheduler *scheduler,
+                                     struct scheduler_subtask *task,
+                                     int *ntask)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_task] Performing scheduling with granularity %d\n", task->granularity);
+  fprintf(stderr, "[scheduler_parallel] Performing scheduling with granularity %d\n", task->granularity);
 #endif
 
   pthread_mutex_t mutex;
@@ -116,7 +116,7 @@ static inline int scheduler_task(struct scheduler *scheduler,
 
 
 static inline int scheduler_nested(struct scheduler *scheduler,
-                                   struct scheduler_parallel_task* task,
+                                   struct scheduler_subtask* task,
                                    int *ntask,
                                    struct worker* calling_worker)
 {
@@ -196,48 +196,24 @@ static inline int scheduler_nested(struct scheduler *scheduler,
 }
 
 
-static inline int do_task_directly(task_fn seq_fn,
+static inline int do_task_directly(sub_task_fn fn,
                                    void *args,
                                    int iterations)
 {
 #ifdef MCDEBUG
   fprintf(stderr, "[do_task_directly] doing task directly\n");
 #endif
-  assert(seq_fn != NULL);
-  return seq_fn(args, iterations, (worker_local == NULL) ? 0 : worker_local->tid);
-}
-
-static inline int scheduler_do_task(struct scheduler* scheduler,
-                                    struct scheduler_task *task)
-{
-  assert(task != NULL);
-#ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_do_task] starting task with %ld iterations\n", task->iterations);
-#endif
-
-  // If there are no free workers, we just run the
-  // sequential version as it assumed that it's faster
-  // than the parallel algorithm, when both are executed using
-  // a single thread.
-  if (!free_workers) {
-    return do_task_directly(task->seq_fn, task->args, task->iterations);
-  }
-
-  /* Run task directly if below some threshold */
-  if (task->iterations < 50) {
-    return do_task_directly(task->seq_fn, task->args, task->iterations);
-  }
-
-  return task->par_fn(task->args, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid);
+  assert(fn != NULL);
+  return fn(args, 0, iterations, (worker_local == NULL) ? 0 : worker_local->tid);
 }
 
 
-static inline int scheduler_parallel(struct scheduler *scheduler,
-                                     struct scheduler_parallel_task *task,
-                                     int *ntask)
+static inline int scheduler_execute(struct scheduler *scheduler,
+                                    struct scheduler_subtask *task,
+                                    int *ntask)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_parallel] starting task %s with %ld iterations \n", task->name, task->iterations);
+  fprintf(stderr, "[scheduler_execute] starting task %s with %ld iterations \n", task->name, task->iterations);
 #endif
   assert(scheduler != NULL);
   assert(task != NULL);
@@ -247,17 +223,44 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
     return 0;
   }
 
-  // This case indicates that we are inside a nested parallel operation
-  // so we handle this differently
+  // If there are no free workers, we just run the
+  // sequential version as it assumed that it's faster
+  // than the parallel algorithm, when both are executed using
+  // a single thread.
+  if (!free_workers) {
+    return do_task_directly(task->fn, task->args, task->iterations);
+  }
+
+  /* Run task directly if below some threshold */
+  if (task->iterations < 50 || 1) {
+    *ntask = 1;
+    return do_task_directly(task->fn, task->args, task->iterations);
+  }
+
+  /* This case indicates that we are inside a nested parallel operation */
+  /* so we handle this differently */
   if (worker_local != NULL) {
     CHECK_ERR(scheduler_nested(scheduler, task, ntask, worker_local), "scheduler_nested");
     return 0;
   }
 
-  return scheduler_task(scheduler, task, ntask);
+  return scheduler_parallel(scheduler, task, ntask);
 }
 
 #endif
+
+
+/* Decide whether to run sequential  or (potentially nested) parallel code body */
+static inline int scheduler_do_task(struct scheduler* scheduler,
+                                    struct scheduler_task *task)
+{
+  assert(task != NULL);
+#ifdef MCDEBUG
+  fprintf(stderr, "[scheduler_do_task] starting task with %ld iterations\n", task->iterations);
+#endif
+
+  return task->seq_fn(task->args, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid);
+}
 
 
 // End of scheduler.h

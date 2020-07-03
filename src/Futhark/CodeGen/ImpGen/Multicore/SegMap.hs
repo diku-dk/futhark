@@ -55,15 +55,14 @@ compileParallelSegMap :: Pattern MCMem
                       -> SegSpace
                       -> KernelBody MCMem
                       -> MulticoreGen Imp.Code
-compileParallelSegMap pat space kbody = do
-  dPrimV_ (segFlat space) 0
+compileParallelSegMap pat space kbody =
   collect $ do
     flat_par_idx <- dPrim "iter" int32
     body <- compileSegMapBody flat_par_idx pat space kbody
     free_params <- freeParams body [segFlat space, flat_par_idx]
     let (body_allocs, body') = extractAllocations body
         sched = decideScheduling body'
-    emit $ Imp.DebugPrint "SegMap parallel" Nothing
+    emit $ Imp.DebugPrint "SegMap sequential body" Nothing
     ntasks <- dPrim "num_tasks" $ IntType Int32
     emit $ Imp.Op $ Imp.MCFunc flat_par_idx body_allocs body' free_params $ Imp.MulticoreInfo ntasks sched (segFlat space)
 
