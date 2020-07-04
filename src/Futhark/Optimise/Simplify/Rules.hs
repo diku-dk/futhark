@@ -674,7 +674,8 @@ simplifyIndexing vtable seType idd inds consuming =
       IndexResult cs a <$> mapM adjust (zip3 inds offsets dims)
 
     Just (Index aa ais, cs) ->
-      Just $ IndexResult cs aa <$> sliceSlice ais inds
+      Just $ IndexResult cs aa <$>
+      subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice inds))
 
     Just (Replicate (Shape [_]) (Var vv), cs)
       | [DimFix{}]   <- inds, not consuming -> Just $ pure $ SubExpResult cs $ Var vv
@@ -783,21 +784,6 @@ simplifyIndexing vtable seType idd inds consuming =
           worthInlining' (UnOpExp _ x) = worthInlining' x
           worthInlining' FunExp{} = False
           worthInlining' _ = True
-
-sliceSlice :: MonadBinder m =>
-              [DimIndex SubExp] -> [DimIndex SubExp] -> m [DimIndex SubExp]
-sliceSlice (DimFix j:js') is' = (DimFix j:) <$> sliceSlice js' is'
-sliceSlice (DimSlice j _ s:js') (DimFix i:is') = do
-  i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32 OverflowWrap) i s
-  j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32 OverflowWrap) j i_t_s
-  (DimFix j_p_i_t_s:) <$> sliceSlice js' is'
-sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
-  s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32 OverflowWrap) s0 i
-  j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32 OverflowWrap) j s0_t_i
-  s2 <- toSubExp "s0_t_s1" $ primExpFromSubExp int32 s0 * primExpFromSubExp int32 s1
-  (DimSlice j_p_s0_t_i n s2:) <$> sliceSlice js' is'
-sliceSlice _ _ = return []
-
 
 simplifyConcat :: BinderOps lore => BottomUpRuleBasicOp lore
 
@@ -1107,7 +1093,7 @@ ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update dest1 is1 (Var v1))
     Just (Index v4 is4, cs4) <- ST.lookupBasicOp v3 vtable,
     is4 == is1, v4 == dest1 =
       Simplify $ certifying (cs1 <> cs2 <> cs3 <> cs4) $ do
-      is5 <- sliceSlice is1 is2
+      is5 <- subExpSlice $ sliceSlice (primExpSlice is1) (primExpSlice is2)
       attributing attrs $ letBind pat $ BasicOp $ Update dest1 is5 se2
 
 -- | If we are comparing X against the result of a branch of the form
