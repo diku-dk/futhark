@@ -48,7 +48,7 @@ import Futhark.IR
 import qualified Futhark.IR.SOACS as SOACS
 import Futhark.IR.SOACS.SOAC hiding (HistOp, histDest)
 import Futhark.IR.SOACS (SOACS)
-import Futhark.IR.SOACS.Simplify (simpleSOACS)
+import Futhark.IR.SOACS.Simplify (simpleSOACS, simplifyStms)
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -346,9 +346,14 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
           nest' <- expandKernelNest pat_unused nest
           types <- asksScope scopeForSOACs
 
-          bnds <- runReaderT
-                  (interchangeLoops nest' (SeqLoop perm pat val form body)) types
-          onTopLevelStms bnds
+          -- Simplification is key to hoisting out statements that
+          -- were variant to the loop, but invariant to the outer maps
+          -- (which are now innermost).
+          stms <-
+            (`runReaderT` types) $
+            fmap snd . simplifyStms =<<
+            interchangeLoops nest' (SeqLoop perm pat val form body)
+          onTopLevelStms stms
           return acc'
     _ ->
       addStmToAcc bnd acc
