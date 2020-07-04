@@ -415,6 +415,23 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Hist w ops lam as))) acc =
     _ ->
       addStmToAcc bnd acc
 
+-- Parallelise Index slices if the result is going to be returned
+-- directly from the kernel.  This is because we would otherwise have
+-- to sequentialise writing the result, which may be costly.
+maybeDistributeStm stm@(Let (Pattern [] [pe])
+                        aux
+                        (BasicOp (Index arr slice))) acc
+  | not $ null $ sliceDims slice,
+    Var (patElemName pe) `elem`  snd (innerTarget (distTargets acc)) =
+      distributeSingleStm acc stm >>= \case
+      Just (kernels, _res, nest, acc') ->
+        localScope (typeEnvFromDistAcc acc') $ do
+        addPostStms kernels
+        postStm =<< segmentedGatherKernel nest (stmAuxCerts aux) arr slice
+        return acc'
+      _ ->
+        addStmToAcc stm acc
+
 -- If the scan can be distributed by itself, we will turn it into a
 -- segmented scan.
 --
@@ -758,6 +775,39 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
+
+    letBind pat $ Op $ segOp k
+
+segmentedGatherKernel :: (MonadFreshNames m, DistLore lore) =>
+                         KernelNest
+                      -> Certificates
+                      -> VName
+                      -> Slice SubExp
+                      -> DistNestT lore m (Stms lore)
+segmentedGatherKernel nest cs arr slice = do
+  let slice_dims = sliceDims slice
+  slice_gtids <- replicateM (length slice_dims) (newVName "gtid_slice")
+
+  (base_ispace, kernel_inps) <- flatKernel nest
+  let ispace = base_ispace ++ zip slice_gtids slice_dims
+
+  ((res_t, res), kstms) <- runBinder $ do
+    -- Compute indexes into full array.
+    slice'' <- subExpSlice $
+               sliceSlice (primExpSlice slice) $
+               primExpSlice $ map (DimFix . Var) slice_gtids
+    v' <- certifying cs $ letSubExp "v" $ BasicOp $ Index arr slice''
+    v_t <- subExpType v'
+    return (v_t, Returns ResultMaySimplify v')
+
+  mk_lvl <- mkSegLevel
+  (k, prestms) <- mapKernel mk_lvl ispace kernel_inps [res_t] $
+                  KernelBody () kstms [res]
+
+  traverse renameStm <=< runBinder_ $ do
+    addStms prestms
+
+    let pat = Pattern [] $ patternValueElements $ loopNestingPattern $ fst nest
 
     letBind pat $ Op $ segOp k
 
