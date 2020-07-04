@@ -55,10 +55,9 @@ where
 
 import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.Writer
+import Control.Monad.Writer hiding (Sum)
 import Control.Monad.State
-import Control.Monad.RWS.Strict
-import Control.Monad.Identity
+import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List (isPrefixOf, find)
 import Data.Maybe
 import Data.Either
@@ -69,7 +68,6 @@ import Prelude hiding (mapM, mod)
 
 import Language.Futhark
 import Language.Futhark.Semantic
-import Language.Futhark.Traversals
 import Language.Futhark.Warnings
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
@@ -313,15 +311,38 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
 
 -- | Try to prepend qualifiers to the type names such that they
 -- represent how to access the type in some scope.
-qualifyTypeVars :: ASTMappable t => Env -> [VName] -> [VName] -> t -> t
-qualifyTypeVars outer_env except ref_qs = runIdentity . astMap mapper
-  where mapper = ASTMapper { mapOnExp = pure
-                           , mapOnName = pure
-                           , mapOnQualName = pure . qual
-                           , mapOnStructType = pure
-                           , mapOnPatternType = pure
-                           }
-        qual (QualName orig_qs name)
+qualifyTypeVars :: Env -> [VName] -> [VName] -> TypeBase (DimDecl VName) as
+                -> TypeBase (DimDecl VName) as
+qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
+  where onType :: S.Set VName -> TypeBase (DimDecl VName) as
+               -> TypeBase (DimDecl VName) as
+        onType except (Array as u et shape) =
+          Array as u (onScalar except et) (fmap (onDim except) shape)
+        onType except (Scalar t) =
+          Scalar $ onScalar except t
+
+        onScalar _ (Prim t) = Prim t
+        onScalar except (TypeVar as u tn targs) =
+          TypeVar as u tn' $ map (onTypeArg except) targs
+          where tn' = typeNameFromQualName $ qual except $ qualNameFromTypeName tn
+        onScalar except (Record m) =
+          Record $ M.map (onType except) m
+        onScalar except (Sum m) =
+          Sum $ M.map (map $ onType except) m
+        onScalar except (Arrow as p t1 t2) =
+          Arrow as p (onType except' t1) (onType except' t2)
+          where except' = case p of Named p' -> S.insert p' except
+                                    Unnamed -> except
+
+        onTypeArg except (TypeArgDim d loc) =
+          TypeArgDim (onDim except d) loc
+        onTypeArg except (TypeArgType t loc) =
+          TypeArgType (onType except t) loc
+
+        onDim except (NamedDim qn) = NamedDim $ qual except qn
+        onDim _ d = d
+
+        qual except (QualName orig_qs name)
           | name `elem` except || reachable orig_qs name outer_env =
               QualName orig_qs name
           | otherwise =
