@@ -9,6 +9,8 @@ module Futhark.Analysis.PrimExp.Convert
   , replaceInPrimExp
   , replaceInPrimExpM
   , substituteInPrimExp
+  , primExpSlice
+  , subExpSlice
 
     -- * Module reexport
     , module Futhark.Analysis.PrimExp
@@ -103,3 +105,11 @@ substituteInPrimExp :: Ord v => M.Map v (PrimExp v)
                     -> PrimExp v -> PrimExp v
 substituteInPrimExp tab = replaceInPrimExp $ \v t ->
   fromMaybe (LeafExp v t) $ M.lookup v tab
+
+-- | Convert a 'SubExp' slice to a 'PrimExp' slice.
+primExpSlice :: Slice SubExp -> Slice (PrimExp VName)
+primExpSlice = map $ fmap $ primExpFromSubExp int32
+
+-- | Convert a 'PrimExp' slice to a 'SubExp' slice.
+subExpSlice :: MonadBinder m => Slice (PrimExp VName) -> m (Slice SubExp)
+subExpSlice = mapM $ traverse $ toSubExp "slice"
