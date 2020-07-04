@@ -56,7 +56,7 @@ tileInKernelBody :: Names -> VarianceTable
 tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
   | Just kbody_res <- mapM isSimpleResult $ kernelBodyResult kbody = do
       maybe_tiled <-
-        tileInBody branch_variant initial_variance lvl initial_kspace ts $
+        tileInBody branch_variant mempty initial_variance lvl initial_kspace ts $
         Body () (kernelBodyStms kbody) kbody_res
       case maybe_tiled of
         Just (host_stms, tiling, tiledBody) -> do
@@ -72,10 +72,10 @@ tileInKernelBody branch_variant initial_variance lvl initial_kspace ts kbody
   where isSimpleResult (Returns _ se) = Just se
         isSimpleResult _ = Nothing
 
-tileInBody :: Names -> VarianceTable
+tileInBody :: Names -> Names -> VarianceTable
            -> SegLevel -> SegSpace -> [Type] -> Body Kernels
            -> TileM (Maybe (Stms Kernels, Tiling, TiledBody))
-tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Body () initial_kstms stms_res) =
+tileInBody branch_variant private initial_variance initial_lvl initial_space res_ts (Body () initial_kstms stms_res) =
   descend mempty $ stmsToList initial_kstms
   where
     variance = varianceInStms initial_variance initial_kstms
@@ -95,7 +95,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn stms_res =
 
-          Just . injectPrelude initial_space variance prestms' used <$>
+          Just . injectPrelude initial_space private variance prestms' used <$>
           tileGeneric (tiling1d $ reverse top_space_rev)
           initial_lvl res_ts (stmPattern stm_to_tile)
           gtid kdim
@@ -111,7 +111,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
         used <- freeIn stm_to_tile <> freeIn stms_res =
 
-          Just . injectPrelude initial_space variance prestms' used <$>
+          Just . injectPrelude initial_space private variance prestms' used <$>
           tileGeneric (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
           initial_lvl res_ts (stmPattern stm_to_tile)
           (gtid_x, gtid_y) (kdim_x, kdim_y)
@@ -127,10 +127,11 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
                 mconcat (map (flip (M.findWithDefault mempty) variance)
                          (namesToList (freeIn bound)))
               merge_params = map fst merge
+              private' = namesFromList $ map paramName merge_params
 
           maybe_tiled <-
             localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params) $
-            tileInBody branch_variant' variance initial_lvl initial_space
+            tileInBody branch_variant' private' variance initial_lvl initial_space
             (map paramType merge_params) $ mkBody (bodyStms loopbody) (bodyResult loopbody)
 
           case maybe_tiled of
@@ -183,7 +184,7 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 -- be manifested in memory).
 partitionPrelude :: VarianceTable -> Stms Kernels -> Names
                  -> (Stms Kernels, Stms Kernels, Stms Kernels)
-partitionPrelude variance prestms tiled_kdims =
+partitionPrelude variance prestms private =
   (invariant_prestms, precomputed_variant_prestms, recomputed_variant_prestms)
   where
     invariantTo names stm =
@@ -192,7 +193,7 @@ partitionPrelude variance prestms tiled_kdims =
         v:_ -> not $ any (`nameIn` names) $ namesToList $
                M.findWithDefault mempty v variance
     (invariant_prestms, variant_prestms) =
-      Seq.partition (invariantTo tiled_kdims) prestms
+      Seq.partition (invariantTo private) prestms
 
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
     mustBeInlinedExp (BasicOp Rotate{}) = True
@@ -209,21 +210,24 @@ partitionPrelude variance prestms tiled_kdims =
     (recomputed_variant_prestms, precomputed_variant_prestms) =
       Seq.partition recompute variant_prestms
 
-injectPrelude :: SegSpace -> VarianceTable
+-- Anything that is variant to the "private" names should be
+-- considered thread-local.
+injectPrelude :: SegSpace -> Names -> VarianceTable
               -> Stms Kernels -> Names
               -> (Stms Kernels, Tiling, TiledBody)
               -> (Stms Kernels, Tiling, TiledBody)
-injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody) =
+injectPrelude initial_space private variance prestms used (host_stms, tiling, tiledBody) =
   (host_stms, tiling, tiledBody')
-  where tiled_kdims = namesFromList $ map fst $
-                      filter (`notElem` unSegSpace (tilingSpace tiling)) $
-                      unSegSpace initial_space
+  where private' = private <> namesFromList
+                   (map fst $
+                    filter (`notElem` unSegSpace (tilingSpace tiling)) $
+                    unSegSpace initial_space)
 
         tiledBody' privstms = do
           let (invariant_prestms,
                precomputed_variant_prestms,
                recomputed_variant_prestms) =
-                partitionPrelude variance prestms tiled_kdims
+                partitionPrelude variance prestms private'
 
           addStms invariant_prestms
 
@@ -291,7 +295,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
               fullSlice (paramType from) slice
 
         loopbody' <- runBodyBinder $ resultBody . map Var <$>
-                     tiledBody (privstms <> inloop_privstms <> PrivStms mempty indexMergeParams)
+                     tiledBody (PrivStms mempty indexMergeParams <> privstms <> inloop_privstms)
         accs' <- letTupExp "tiled_inside_loop" $
                  DoLoop [] merge' (ForLoop i it bound []) loopbody'
 
@@ -393,7 +397,7 @@ data Tiling =
 
   , tilingLevel :: SegLevel
 
-  , tilingNumWholeTiles :: SubExp
+  , tilingNumWholeTiles :: Binder Kernels SubExp
   }
 
 type DoTiling gtids kdims =
@@ -416,8 +420,9 @@ postludeGeneric :: Tiling -> PrivStms
 postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts =
   tilingSegMap tiling "thread_res" (scalarLevel tiling) ResultPrivate $ \in_bounds slice -> do
     -- Read our per-thread result from the tiled loop.
-    forM_ (zip (patternNames pat) accs') $ \(us, everyone) ->
-      letBindNames [us] $ BasicOp $ Index everyone slice
+    forM_ (zip (patternNames pat) accs') $ \(us, everyone) -> do
+      everyone_t <- lookupType everyone
+      letBindNames [us] $ BasicOp $ Index everyone $ fullSlice everyone_t slice
 
     if poststms == mempty
       then do -- The privstms may still be necessary for the result.
@@ -454,8 +459,9 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
 
     tiledBody :: Tiling -> PrivStms -> Binder Kernels [VName]
     tiledBody tiling privstms = do
-      let num_whole_tiles = tilingNumWholeTiles tiling
-          tile_shape = tilingTileShape tiling
+      let tile_shape = tilingTileShape tiling
+
+      num_whole_tiles <- tilingNumWholeTiles tiling
 
       -- We don't use a Replicate here, because we want to enforce a
       -- scalar memory space.
@@ -669,9 +675,7 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
               SegSpace gid_flat $ dims_on_top ++ [(gid, ldim)])
   let tile_size = unCount $ segGroupSize lvl
 
-  -- Number of whole tiles that fit in the input.
-  num_whole_tiles <- letSubExp "num_whole_tiles" $
-                     BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size
+
   return Tiling
     { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
         letBindNames [gtid] =<<
@@ -692,7 +696,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
     , tilingTileReturns = tileReturns dims_on_top [(kdim, tile_size)]
 
     , tilingTileShape = Shape [tile_size]
-    , tilingNumWholeTiles = num_whole_tiles
+    , tilingNumWholeTiles = letSubExp "num_whole_tiles" $
+                            BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size
     , tilingLevel = lvl
     , tilingSpace = space
     }
@@ -886,9 +891,6 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
       space = SegSpace gid_flat $
               dims_on_top ++ [(gid_x, num_groups_x), (gid_y, num_groups_y)]
 
-  -- Number of whole tiles that fit in the input.
-  num_whole_tiles <- letSubExp "num_whole_tiles" $
-    BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size
   return Tiling
     { tilingSegMap = \desc lvl' manifest f ->
         segMap2D desc lvl' manifest (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
@@ -904,7 +906,8 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
     , tilingTileReturns = tileReturns dims_on_top [(kdim_x, tile_size), (kdim_y, tile_size)]
 
     , tilingTileShape = Shape [tile_size, tile_size]
-    , tilingNumWholeTiles = num_whole_tiles
+    , tilingNumWholeTiles = letSubExp "num_whole_tiles" $
+                            BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size
     , tilingLevel = lvl
     , tilingSpace = space
     }
