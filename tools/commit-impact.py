@@ -8,6 +8,8 @@ import subprocess
 from urllib.request import urlopen
 from urllib.error import HTTPError
 import json
+import tempfile
+import os
 
 def url_for(backend, system, commit):
     return 'https://futhark-lang.org/benchmark-results/futhark-{}-{}-{}.json'.format(backend, system, commit)
@@ -26,10 +28,11 @@ def first_commit_with_results(backend, system, commits):
         if res:
             return commit, res
 
-if __name__ == '__main__':
-    backend, system, commit = sys.argv[1:]
+def find_commits(start):
+    return subprocess.check_output(['git', 'rev-list', start]).decode('utf-8').splitlines()
 
-    commits = subprocess.check_output(['git', 'rev-list', commit]).decode('utf-8').splitlines()
+if __name__ == '__main__':
+    backend, system, commit = sys.argv[1:4]
 
     now = results_for_commit(backend, system, commit)
 
@@ -37,11 +40,20 @@ if __name__ == '__main__':
         print('No results found')
         sys.exit(1)
 
+    if len(sys.argv) == 5:
+        commits = find_commits(sys.argv[4])
+    else:
+        commits = find_commits(commit)[1:]
+
     then_commit, then = first_commit_with_results(backend, system, commits[1:])
 
     print('Comparing {}'.format(commit))
     print('     with {}'.format(then_commit))
 
-    # Hacky hacky...
-    m = __import__('cmp-bench-json')
-    m.compare(then, now)
+    with tempfile.NamedTemporaryFile(prefix=commit, mode='w') as now_file:
+        with tempfile.NamedTemporaryFile(prefix=then_commit, mode='w') as then_file:
+            json.dump(now, now_file)
+            json.dump(then, then_file)
+            now_file.flush()
+            then_file.flush()
+            os.system('tools/cmp-bench-json.py {} {}'.format(then_file.name, now_file.name))
