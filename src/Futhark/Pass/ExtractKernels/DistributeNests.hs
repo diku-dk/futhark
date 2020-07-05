@@ -374,7 +374,10 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             addPostStms kernels
             types <- asksScope scopeForSOACs
             let branch = Branch perm pat cond tbranch fbranch ret
-            stms <- runReaderT (interchangeBranch nest' branch) types
+            stms <-
+              (`runReaderT` types) $
+              fmap snd . simplifyStms =<<
+              interchangeBranch nest' branch
             onTopLevelStms stms
             return acc'
       _ ->
