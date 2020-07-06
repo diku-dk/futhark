@@ -698,6 +698,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   }
 
   if (ctx->cfg.debugging) {
+    fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
     fprintf(stderr, "Building OpenCL program...\n");
   }
   OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
