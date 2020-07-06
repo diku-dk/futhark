@@ -199,7 +199,7 @@ entryPoint params (eret, crets) =
      (Just ts, Just (E.TETuple e_ts _)) ->
        concatMap entryPointType $
        zip (zipWith E.EntryType ts (map Just e_ts)) crets
-     (Just ts, _) ->
+     (Just ts, Nothing) ->
        concatMap entryPointType $
        zip (map (`E.EntryType` Nothing) ts) crets
      _ ->
