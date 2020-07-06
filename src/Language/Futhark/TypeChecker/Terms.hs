@@ -2373,6 +2373,11 @@ causalityCheck binding_body = do
         | bad : _ <- mapMaybe (checkParamCausality known) params =
             bad
 
+      onExp known e@(Coerce what _ (_, Info ext) _) = do
+        modify (S.fromList ext<>)
+        void $ onExp known what
+        return e
+
       onExp known e@(LetPat _ bindee_e body_e (_, Info ext) _) = do
         sequencePoint known bindee_e body_e ext
         return e
