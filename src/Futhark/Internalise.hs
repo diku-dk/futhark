@@ -483,11 +483,12 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
 internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
 
-internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) _ loc) = do
-  es <- internaliseExp desc e
+internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) (Info ret, Info retext) loc) = do
+  ses <- internaliseExp desc e
   ts <- internaliseReturnType et
   dt' <- typeExpForError dt
-  forM (zip es ts) $ \(e',t') -> do
+  bindExtSizes (E.toStruct ret) retext ses
+  forM (zip ses ts) $ \(e',t') -> do
     dims <- arrayDims <$> subExpType e'
     let parts = ["Value of (core language) shape ("] ++
                 intersperse ", " (map ErrorInt32 dims) ++
