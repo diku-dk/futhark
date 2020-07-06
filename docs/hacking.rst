@@ -93,3 +93,25 @@ For debugging specific compiler passes, the ``futhark dev`` subcommand
 allows you to tailor your own compilation pipeline using command line
 options.  It is also useful for seeing what the AST looks like after
 specific passes.
+
+When you are about to have a bad day
+------------------------------------
+
+When using the ``cuda`` backend, you can use the ``--dump-ptx``
+runtime option to dump PTX, a kind of high-level assembly for NVIDIA
+GPUs, corresponding to the GPU kernels.  This can be used to
+investigate why the generated code isn't running as fast as you expect
+(not fun), or even whether NVIDIAs compiler is miscompiling something
+(extremely not fun).  With the OpenCL backend,
+``--dump-opencl-binary`` does the same thing.
+
+On AMD platforms, ``--dump-opencl-binary`` tends to produce an actual
+binary of some kind, and it is pretty tricky to obtain a debugger for
+it (they are available and open source, but the documentation and
+installation instructions are terrible).  Instead, AMDs OpenCL kernel
+compiler accepts a ``-save-temps=foo`` build option, which will make
+it write certain intermediate files, prefixed with ``foo``.  In
+particular, it will write an ``.s`` file that contains what appears to
+be HSA assembly (at least when using ROCm).  If you find yourself
+having to do do this, then you are definitely going to have a bad day,
+and probably evening and night as well.
