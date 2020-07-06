@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Out-of-bounds literals are now an error rather than a warning.
 
+  * Type ascriptions on entry points now always result in opaque types
+    when the underlying concrete type is a tuple (#1048).
+
 ### Fixed
 
   * Fix bug in slice simplification (#992).
