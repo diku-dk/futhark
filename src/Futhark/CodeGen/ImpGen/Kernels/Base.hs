@@ -1268,21 +1268,6 @@ sReplicateKernel arr se = do
     sWhen (kernelThreadActive constants) $
       copyDWIMFix arr is' se $ drop (length ds) is'
 
-replicateFunction :: PrimType -> CallKernelGen Imp.Function
-replicateFunction bt = do
-  mem <- newVName "mem"
-  num_elems <- newVName "num_elems"
-  val <- newVName "val"
-
-  let params = [Imp.MemParam mem (Space "device"),
-                Imp.ScalarParam num_elems int32,
-                Imp.ScalarParam val bt]
-      shape = Shape [Var num_elems]
-  function [] params $ do
-    arr <- sArray "arr" bt shape $ ArrayIn mem $ IxFun.iota $
-           map (primExpFromSubExp int32) $ shapeDims shape
-    sReplicateKernel arr $ Var val
-
 replicateName :: PrimType -> String
 replicateName bt = "replicate_" ++ pretty bt
 
@@ -1291,7 +1276,19 @@ replicateForType bt = do
   let fname = nameFromString $ "builtin#" <> replicateName bt
 
   exists <- hasFunction fname
-  unless exists $ emitFunction fname =<< replicateFunction bt
+  unless exists $ do
+    mem <- newVName "mem"
+    num_elems <- newVName "num_elems"
+    val <- newVName "val"
+
+    let params = [Imp.MemParam mem (Space "device"),
+                  Imp.ScalarParam num_elems int32,
+                  Imp.ScalarParam val bt]
+        shape = Shape [Var num_elems]
+    function fname [] params $ do
+      arr <- sArray "arr" bt shape $ ArrayIn mem $ IxFun.iota $
+             map (primExpFromSubExp int32) $ shapeDims shape
+      sReplicateKernel arr $ Var val
 
   return fname
 
@@ -1342,27 +1339,6 @@ sIotaKernel arr n x s et = do
         Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
         Imp.ConvOpExp (SExt Int32 et) gtid * s + x
 
-iotaFunction :: IntType -> CallKernelGen Imp.Function
-iotaFunction bt = do
-  mem <- newVName "mem"
-  n <- newVName "n"
-  x <- newVName "x"
-  s <- newVName "s"
-
-  let params = [Imp.MemParam mem (Space "device"),
-                Imp.ScalarParam n int32,
-                Imp.ScalarParam x $ IntType bt,
-                Imp.ScalarParam s $ IntType bt]
-      shape = Shape [Var n]
-      n' = Imp.vi32 n
-      x' = Imp.var x $ IntType bt
-      s' = Imp.var s $ IntType bt
-
-  function [] params $ do
-    arr <- sArray "arr" (IntType bt) shape $ ArrayIn mem $ IxFun.iota $
-           map (primExpFromSubExp int32) $ shapeDims shape
-    sIotaKernel arr n' x' s' bt
-
 iotaName :: IntType -> String
 iotaName bt = "iota_" ++ pretty bt
 
@@ -1371,7 +1347,25 @@ iotaForType bt = do
   let fname = nameFromString $ "builtin#" <> iotaName bt
 
   exists <- hasFunction fname
-  unless exists $ emitFunction fname =<< iotaFunction bt
+  unless exists $ do
+    mem <- newVName "mem"
+    n <- newVName "n"
+    x <- newVName "x"
+    s <- newVName "s"
+
+    let params = [Imp.MemParam mem (Space "device"),
+                  Imp.ScalarParam n int32,
+                  Imp.ScalarParam x $ IntType bt,
+                  Imp.ScalarParam s $ IntType bt]
+        shape = Shape [Var n]
+        n' = Imp.vi32 n
+        x' = Imp.var x $ IntType bt
+        s' = Imp.var s $ IntType bt
+
+    function fname [] params $ do
+      arr <- sArray "arr" (IntType bt) shape $ ArrayIn mem $ IxFun.iota $
+             map (primExpFromSubExp int32) $ shapeDims shape
+      sIotaKernel arr n' x' s' bt
 
   return fname
 
