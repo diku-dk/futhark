@@ -222,7 +222,7 @@ entryPoint params (eret, crets) =
 
         -- | We remove dimension arguments such that we hopefully end
         -- up with a simpler type name for the entry point.  The
-        -- intend is that if an entry point uses a type 'nasty [w] [h]',
+        -- intent is that if an entry point uses a type 'nasty [w] [h]',
         -- then we should turn that into an opaque type just called
         -- 'nasty'.  Also, we try to give arrays of opaques a nicer name.
         typeExpOpaqueName (TEApply te TypeArgExpDim{} _) =
