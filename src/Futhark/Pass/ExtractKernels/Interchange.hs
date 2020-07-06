@@ -127,7 +127,7 @@ interchangeBranch1
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
         (params, arrs) = unzip params_and_arrs
-        lam_ret = map rowType $ patternTypes pat
+        lam_ret = rearrangeShape perm $ map rowType $ patternTypes pat
 
         branch_pat' =
           Pattern [] $ map (fmap (`arrayOfRow` w)) $ patternElements branch_pat
