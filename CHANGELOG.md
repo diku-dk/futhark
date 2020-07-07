@@ -68,9 +68,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed alias tracking for right-operand operator sections (#1043).
 
-  * Opaque type names now respect any type ascription, even if the
-    real type is a tuple (#1048).
-
 ## [0.15.8]
 
 ### Added
