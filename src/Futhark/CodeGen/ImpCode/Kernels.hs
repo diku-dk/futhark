@@ -67,7 +67,7 @@ data Kernel = Kernel
                -- alphanumeric and without spaces.
 
               , kernelFailureTolerant :: Bool
-                -- ^ If true, this kernel does not need for check
+                -- ^ If true, this kernel does not need to check
                 -- whether we are in a failing state, as it can cope.
                 -- Intuitively, it means that the kernel does not
                 -- depend on any non-scalar parameters to make control
