@@ -325,3 +325,21 @@ advanced usage.
 
    During :c:func:`futhark_context_new`, read PTX code from the given
    file instead of using the embedded program.
+
+General guarantees
+------------------
+
+Calling an entry point, or interacting with Futhark values through the
+functions listed above, has no system-wide side effects, such as
+writing to the file system, launching processes, or performing network
+connections.
+
+Initialising a Futhark context likewise has no side effects, except if
+explicitly configured differently, such as by using
+:c:func:`futhark_context_config_dump_program_to`.  In its default
+configuration, Futhark will not access the file system.
+
+Note that for the GPU backends, the underlying API (such as CUDA or
+OpenCL) may perform file system operations during startup, and perhaps
+for caching GPU kernels in some cases.  This is beyond Futhark's
+control.
