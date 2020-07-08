@@ -450,3 +450,10 @@ takes various keyword parameters:
 Futhark arrays are mapped to either the Numpy ``ndarray`` type or the
 `pyopencl.array <https://documen.tician.de/pyopencl/array.html>`_
 type.  Scalars are mapped to Numpy scalar types.
+
+Reproducibility
+---------------
+
+The Futhark compiler is deterministic by design, so repeatedly
+compiling the *same program* with the *same version* of the compiler
+will produce identical output every time.
