@@ -454,6 +454,7 @@ type.  Scalars are mapped to Numpy scalar types.
 Reproducibility
 ---------------
 
-The Futhark compiler is deterministic by design, so repeatedly
-compiling the *same program* with the *same version* of the compiler
-will produce identical output every time.
+The Futhark compiler is deterministic by design, meaning that
+repeatedly compiling the *same program* with the *same compilation
+flags* and using the *same version* of the compiler will produce
+identical output every time.
