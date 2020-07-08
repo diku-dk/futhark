@@ -332,7 +332,16 @@ General guarantees
 Calling an entry point, or interacting with Futhark values through the
 functions listed above, has no system-wide side effects, such as
 writing to the file system, launching processes, or performing network
-connections.
+connections.  Defects in the program or Futhark compiler itself can
+with high probability result only in the consumption of CPU or GPU
+resources, or a process crash.
+
+Using the ``#[unsafe]`` attribute with in-place updates can result in
+writes to arbitrary memory locations.  A malicious program can likely
+exploit this to obtain arbitrary code execution, just as with any
+insecure C program.  If you must run untrusted code, consider using
+the ``--safe`` command line option to instruct the compiler to disable
+``#[unsafe]``.
 
 Initialising a Futhark context likewise has no side effects, except if
 explicitly configured differently, such as by using
