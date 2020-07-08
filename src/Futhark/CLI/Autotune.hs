@@ -348,6 +348,12 @@ commandLineOptions = [
     (ReqArg (\prog -> Right $ \config -> config { optFuthark = Just prog })
      "PROGRAM")
     "The binary used for operations (defaults to 'futhark')."
+  , Option [] ["pass-option"]
+    (ReqArg (\opt ->
+               Right $ \config ->
+               config { optExtraOptions = opt : optExtraOptions config })
+     "OPT")
+    "Pass this option to programs being run."
   , Option [] ["tuning"]
     (ReqArg (\s -> Right $ \config -> config { optTuning = Just s })
     "EXTENSION")
