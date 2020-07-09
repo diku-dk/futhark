@@ -73,6 +73,11 @@ compileSegHist pat space histops kbody mode
   | otherwise =
       segmentedHist pat space histops kbody mode
 
+-- | Split some list into chunks equal to the number of values
+-- returned by each 'SegBinOp'
+segHistOpChunks :: [HistOp lore] -> [a] -> [[a]]
+segHistOpChunks = chunks . map (length . histNeutral)
+
 
 compileSegHistBody :: VName
                    -> Pattern MCMem
@@ -233,6 +238,8 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
   let pes = patternElements pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
       (all_red_pes, map_pes) = splitAt num_red_res pes
+
+  let per_red_pes = segHistOpChunks histops $ patternValueElements pat
   hist_M <- dPrimV "hist_M" num_threads'
 
   init_histograms <-
@@ -253,8 +260,8 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
   prebody <- collect $ do
     emit $ Imp.DebugPrint "nonsegmented segHist stage 1" Nothing
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
-    forM_ (zip3 histograms hist_H_chks histops) $ \((hists, _, _), hist_H_chk, histop) ->
-      forM_ (zip3 (patternElements pat) hists (histNeutral histop)) $ \(pe, hist, ne) -> do
+    forM_ (zip4 per_red_pes histograms hist_H_chks histops) $ \(pes', (hists, _, _), hist_H_chk, histop) ->
+      forM_ (zip3 pes' hists (histNeutral histop)) $ \(pe, hist, ne) -> do
         hist_H_chk' <- toExp $ Var hist_H_chk
 
         -- First thread initializes histrogram wtih dest vals
