@@ -165,15 +165,19 @@ runOptions f opts =
 progressBar :: Int -> Int -> Int -> String
 progressBar cur bound steps =
   "[" ++ map cell [1..steps] ++ "] " ++ show cur ++ "/" ++ show bound
-  where step_size = bound `div` steps
+  where step_size :: Double
+        step_size = fromIntegral bound / fromIntegral steps
+        cur' = fromIntegral cur
         chars = " ▏▎▍▍▌▋▊▉█"
         char i = fromMaybe ' ' $ maybeNth (i::Int) chars
+        num_chars = fromIntegral $ length chars
 
         cell :: Int -> Char
         cell i
-          | i * step_size <= cur = char 9
-          | otherwise = char (((cur - (i-1) * step_size) * length chars)
-                              `div` step_size)
+          | i' * step_size <= cur' = char 9
+          | otherwise = char (floor (((cur' - (i'-1) * step_size) * num_chars)
+                                     / step_size))
+          where i' = fromIntegral i
 
 descString :: String -> Int -> String
 descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
