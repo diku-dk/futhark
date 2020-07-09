@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `futhark bench`: progress bar now correct when number of runs is
+    less than 10 (#1050).
+
 ## [0.16.1]
 
 ### Added
