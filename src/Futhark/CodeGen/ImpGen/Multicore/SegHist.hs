@@ -311,7 +311,7 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
 
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32
-  emit $ Imp.Op $ Imp.MCFunc flat_idx mempty body free_params $
+  emit $ Imp.Op $ Imp.MCFunc flat_idx prebody body free_params $
       Imp.MulticoreInfo num_histos sched (segFlat space)
 
 
