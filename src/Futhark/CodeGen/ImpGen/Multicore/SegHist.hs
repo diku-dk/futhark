@@ -192,14 +192,14 @@ nonsegmentedHist pat space histops kbody ModeParallel = do
   num_threads' <- toExp $ Var num_threads
   hist_width <- toExp $ histWidth $ head histops
   -- TODO we should find a proper condition
-  let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns'
+  -- let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns'
   histops' <- renameHistOpLambda histops
 
   collect $ do
     flat_idx <- dPrim "iter" int32
-    sIf use_small_dest_histogram
-     (smallDestHistogram pat flat_idx space histops num_threads kbody)
-     (largeDestHistogram pat space histops' kbody)
+    -- sIf use_small_dest_histogram
+    (smallDestHistogram pat flat_idx space histops num_threads kbody)
+     -- (largeDestHistogram pat space histops' kbody)
 
 nonsegmentedHist pat space histops kbody ModeSequential = do
   let ns = map snd $ unSegSpace space
@@ -321,7 +321,6 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
     bucket_id <- newVName "bucket_id"
     subhistogram_id <- newVName "subhistogram_id"
 
-    flat_gtid <- newVName "flat_gtid"
     let unitHistoCase =
        -- This is OK because the memory blocks are at least as
        -- large as the ones we are supposed to use for the result.
@@ -340,12 +339,12 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
       let num_buckets = histWidth op
 
       let segred_space =
-            SegSpace flat_gtid $
+            SegSpace (segFlat space)$
             segment_dims ++
             [(bucket_id, num_buckets)] ++
             [(subhistogram_id, Var num_histos)]
 
-      let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) (histShape op)
+      let segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
       red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] ModeParallel $ \red_cont ->
         red_cont $ flip map hists $ \subhisto ->
               (Var subhisto, map Imp.vi32 $
