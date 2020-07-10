@@ -47,13 +47,13 @@ compileSegOp pat (SegHist _ space histops _ kbody) par_op = do
         [_] -> product ns'
         _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
 
-  seq_code <- compileSegHist pat space histops kbody ModeSequential
-  par_code <- case par_op of
-    Just nested_op -> collect $ compileSegOp pat nested_op Nothing
-    Nothing -> compileSegHist pat space histops kbody ModeParallel
+  seq_code <- compileSegHist pat space histops kbody ModeParallel
+  -- par_code <- case par_op of
+  --   Just nested_op -> collect $ compileSegOp pat nested_op Nothing
+  --   Nothing -> compileSegHist pat space histops kbody ModeParallel
 
-  free_params <- freeParams (par_code <> seq_code)  [segFlat space]
-  emit $ Imp.Op $ Imp.Task free_params iterations par_code seq_code (segFlat space) []
+  free_params <- freeParams seq_code [segFlat space]
+  emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) []
   emit $ Imp.DebugPrint "Histogram end" Nothing
 
 compileSegOp pat (SegScan _ space scans _ kbody) _par_op = do
@@ -103,7 +103,7 @@ compileSegOp pat (SegRed _ space reds _ kbody) _par_op = do
   --     -- collect $ compileSegOp pat nested_op Nothing
   --   Nothing -> compileSegRed pat space reds kbody ModeParallel
 
-  free_params <- freeParams (seq_code) (segFlat space : retval_names)
+  free_params <- freeParams seq_code (segFlat space : retval_names)
   emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) retval_params
 
 

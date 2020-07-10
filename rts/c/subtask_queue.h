@@ -23,7 +23,10 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->counter = counter;
   subtask->start   = start;
   subtask->end     = end;
-  subtask->chunk   = chunk;
+  subtask->chunkable   = chunk;
+  // This should start at the value of minimum work pr. subtask
+  subtask->iterations = chunk;
+  subtask->stolen_from = 0;
   subtask->id      = id;
   return subtask;
 }
@@ -52,27 +55,32 @@ static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) 
 
 static inline struct subtask* jobqueue_get_subtask_chunk(struct worker *worker,
                                                          struct subtask_queue *subtask_queue,
-                                                         int from_end)
+                                                         int stealing)
 {
   struct subtask *cur_head = subtask_queue->buffer[subtask_queue->first];
-
   int remaining_iter = cur_head->end - cur_head->start;
   assert(remaining_iter > 0);
 
-  if (cur_head->chunk > 0 && remaining_iter > cur_head->chunk)
+  if (cur_head->chunkable && remaining_iter > cur_head->iterations)
   {
+    /* fprintf(stderr, "%d - chuink %d - rem %d\n", pthread_self(), cur_head->chunk, remaining_iter); */
     struct subtask *new_subtask = malloc(sizeof(struct subtask));
     *new_subtask = *cur_head;
 
     // Update ranges on new subtasks
-    if (from_end) {
-      new_subtask->start = cur_head->end - cur_head->chunk;
+    if (stealing) {
+      cur_head->stolen_from++;
+      /* if (cur_head->iterations > 1) cur_head->iterations /= 2; */
+      /* new_subtask->iterations = cur_head->iterations; */
+      new_subtask->start = cur_head->end - cur_head->iterations;
       cur_head->end = new_subtask->start;
     } else {
-      new_subtask->end = cur_head->start + cur_head->chunk;
-      cur_head->start += cur_head->chunk;
+      new_subtask->end = cur_head->start + cur_head->iterations;
+      cur_head->start += cur_head->iterations;
+      /* cur_head->iterations *= 2; */
     }
     new_subtask->id = worker->tid;
+
     CHECK_ERR(pthread_mutex_lock(cur_head->mutex), "pthread_mutex_lock");
     (*cur_head->counter)++;
     CHECK_ERR(pthread_cond_broadcast(cur_head->cond), "pthread_cond_signal");
@@ -185,8 +193,6 @@ static inline int subtask_queue_steal(struct worker *worker,
   uint64_t start = get_wall_time();
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
 
-  // chunk == 0 indicates that task is not stealable
-  // so we just return also
   if (subtask_queue->num_used == 0) {
     CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");

@@ -10,7 +10,7 @@
 
 #define MULTICORE
 /* #define MCDEBUG */
-#define MCPROFILE
+/* #define MCPROFILE */
 
 #ifdef _WIN32
 #include <windows.h>
@@ -42,7 +42,9 @@ struct subtask {
   int start, end;
   // How much of a task to take a the time
   // If it's zero , then the subtasks is not stealable
-  int chunk;
+  int chunkable;
+  long int iterations;
+  int stolen_from;
   int id;
 
   // Shared variables across subtasks
@@ -176,7 +178,6 @@ static inline void output_thread_usage(struct worker *worker)
           worker->q.n_dequeues,
           worker->q.time_enqueue / (worker->q.n_enqueues == 0 ? 1 : worker->q.n_enqueues));
 }
-
 
 
 #endif

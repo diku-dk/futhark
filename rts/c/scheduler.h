@@ -20,6 +20,7 @@ static inline void *scheduler_worker(void* arg)
 #ifdef MCPROFILE
       int64_t start = get_wall_time();
 #endif
+      /* fprintf(stderr, "iterations %ld\n", subtask->end - subtask->start); */
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
 #ifdef MCPROFILE
       int64_t end = get_wall_time();
@@ -132,8 +133,7 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   pthread_cond_t cond;
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
-  assert(free_workers != 0);
-  int max_num_tasks = free_workers;
+  int max_num_tasks = scheduler->num_threads;
   int iter_pr_subtask = task->iterations / max_num_tasks;
   int remainder = task->iterations % max_num_tasks;
 
@@ -227,16 +227,16 @@ static inline int scheduler_execute(struct scheduler *scheduler,
   // sequential version as it assumed that it's faster
   // than the parallel algorithm, when both are executed using
   // a single thread.
-  if (!free_workers) {
-    *ntask = 1;
-    return do_task_directly(task->fn, task->args, task->iterations);
-  }
+  /* if (!free_workers) { */
+  /*   *ntask = 1; */
+  /*   return do_task_directly(task->fn, task->args, task->iterations); */
+  /* } */
 
   /* Run task directly if below some threshold */
-  if (task->iterations < 50) {
-    *ntask = 1;
-    return do_task_directly(task->fn, task->args, task->iterations);
-  }
+  /* if (task->iterations < 50) { */
+  /*   *ntask = 1; */
+  /*   return do_task_directly(task->fn, task->args, task->iterations); */
+  /* } */
 
   /* This case indicates that we are inside a nested parallel operation */
   /* so we handle this differently */
