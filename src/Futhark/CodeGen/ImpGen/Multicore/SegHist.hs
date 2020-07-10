@@ -14,7 +14,7 @@ import Futhark.IR.MCMem
 import Futhark.Transform.Rename
 
 import Futhark.CodeGen.ImpGen.Multicore.Base
-import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
+import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed2')
 import Futhark.MonadFreshNames
 
 
@@ -339,17 +339,16 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
       let num_buckets = histWidth op
 
       let segred_space =
-            SegSpace (segFlat space)$
+            SegSpace (segFlat space) $
             segment_dims ++
             [(bucket_id, num_buckets)] ++
             [(subhistogram_id, Var num_histos)]
 
       let segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
-      red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] ModeParallel $ \red_cont ->
+      compileSegRed2' (Pattern [] red_pes) segred_space [segred_op] ModeParallel $ \red_cont ->
         red_cont $ flip map hists $ \subhisto ->
               (Var subhisto, map Imp.vi32 $
                 map fst segment_dims ++ [subhistogram_id, bucket_id])
-      emit red_code
 
    where segment_dims = init $ unSegSpace space
 

@@ -1,6 +1,7 @@
 module Futhark.CodeGen.ImpGen.Multicore.SegRed
   ( compileSegRed
   , compileSegRed'
+  , compileSegRed2'
   )
   where
 
@@ -15,6 +16,36 @@ import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen.Multicore.Base
 
 type DoSegBody = (([(SubExp, [Imp.Exp])] -> MulticoreGen ()) -> MulticoreGen ())
+
+
+-- | Like 'compileSegRed', but where the body is a monadic action.
+compileSegRed2' :: Pattern MCMem
+               -> SegSpace
+               -> [SegBinOp MCMem]
+               -> Mode
+               -> DoSegBody
+               -> MulticoreGen ()
+compileSegRed2' pat space reds mode kbody = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+
+  let iterations = case unSegSpace space of
+        [_] -> product ns'
+        _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
+
+  let retvals = map patElemName $ patternElements pat
+  retvals_ts <- mapM lookupType retvals
+  retval_params <- zipWithM toParam retvals retvals_ts
+  let retval_names = map Imp.paramName retval_params
+
+  dPrimV_ (segFlat space) 0
+  seq_code <- case unSegSpace space of
+    [_] -> nonsegmentedReduction pat space reds kbody mode
+    _   -> segmentedReduction pat space reds kbody mode
+
+  free_params <- freeParams seq_code (segFlat space : retval_names)
+  emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) retval_params
+
 
 -- | Generate code for a SegRed construct
 compileSegRed :: Pattern MCMem
