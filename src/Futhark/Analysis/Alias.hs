@@ -87,8 +87,7 @@ analyseExp aliases (If cond tb fb dec) =
 
 analyseExp aliases e = mapExp analyse e
   where analyse =
-          Mapper { mapOnSubExp = return
-                 , mapOnVName = return
+          Mapper { mapOnVName = return
                  , mapOnBody = const $ return . analyseBody aliases
                  , mapOnRetType = return
                  , mapOnBranchType = return

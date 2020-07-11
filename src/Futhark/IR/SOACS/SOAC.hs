@@ -273,15 +273,17 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
 
 -- | Like 'Mapper', but just for 'SOAC's.
 data SOACMapper flore tlore m = SOACMapper {
-    mapOnSOACSubExp :: SubExp -> m SubExp
-  , mapOnSOACLambda :: Lambda flore -> m (Lambda tlore)
+    mapOnSOACLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnSOACVName :: VName -> m VName
   }
 
+mapOnSOACSubExp :: Monad m => SOACMapper flore tlore m -> SubExp -> m SubExp
+mapOnSOACSubExp _ (Constant x) = pure $ Constant x
+mapOnSOACSubExp tv (Var v) = Var <$> mapOnSOACVName tv v
+
 -- | A mapper that simply returns the SOAC verbatim.
 identitySOACMapper :: Monad m => SOACMapper lore lore m
-identitySOACMapper = SOACMapper { mapOnSOACSubExp = return
-                                , mapOnSOACLambda = return
+identitySOACMapper = SOACMapper { mapOnSOACLambda = return
                                 , mapOnSOACVName = return
                                 }
 
@@ -333,8 +335,7 @@ mapSOACM tv (Screma w (ScremaForm scans reds map_lam) arrs) =
 instance ASTLore lore => FreeIn (SOAC lore) where
   freeIn' = flip execState mempty . mapSOACM free
     where walk f x = modify (<>f x) >> return x
-          free = SOACMapper { mapOnSOACSubExp = walk freeIn'
-                            , mapOnSOACLambda = walk freeIn'
+          free = SOACMapper { mapOnSOACLambda = walk freeIn'
                             , mapOnSOACVName = walk freeIn'
                             }
 
@@ -342,14 +343,13 @@ instance ASTLore lore => Substitute (SOAC lore) where
   substituteNames subst =
     runIdentity . mapSOACM substitute
     where substitute =
-            SOACMapper { mapOnSOACSubExp = return . substituteNames subst
-                       , mapOnSOACLambda = return . substituteNames subst
+            SOACMapper { mapOnSOACLambda = return . substituteNames subst
                        , mapOnSOACVName = return . substituteNames subst
                        }
 
 instance ASTLore lore => Rename (SOAC lore) where
   rename = mapSOACM renamer
-    where renamer = SOACMapper rename rename rename
+    where renamer = SOACMapper rename rename
 
 -- | The type of a SOAC.
 soacType :: SOAC lore -> [Type]
@@ -431,7 +431,7 @@ instance (ASTLore lore,
           onScan scan = scan { scanLambda = Alias.analyseLambda $ scanLambda scan }
 
   removeOpAliases = runIdentity . mapSOACM remove
-    where remove = SOACMapper return (return . removeLambdaAliases) return
+    where remove = SOACMapper (return . removeLambdaAliases) return
 
 instance ASTLore lore => IsOp (SOAC lore) where
   safeOp _ = False
@@ -453,7 +453,7 @@ instance (ASTLore lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
 
   removeOpWisdom = runIdentity . mapSOACM remove
-    where remove = SOACMapper return (return . removeLambdaWisdom) return
+    where remove = SOACMapper (return . removeLambdaWisdom) return
 
 instance Decorations lore => ST.IndexOp (SOAC lore) where
   indexOp vtable k soac [i] = do

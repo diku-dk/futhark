@@ -723,9 +723,6 @@ simplifyExpBase = mapExpM hoist
                 -- provide their result diet.
                   mapOnBody =
                   error "Unhandled body in simplification engine."
-                , mapOnSubExp = simplify
-                -- Lambdas are handled explicitly because we need to
-                -- bind their parameters.
                 , mapOnVName = simplify
                 , mapOnRetType = simplify
                 , mapOnBranchType = simplify

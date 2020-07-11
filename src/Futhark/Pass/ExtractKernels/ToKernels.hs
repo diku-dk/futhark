@@ -54,8 +54,7 @@ injectSOACS f = Rephraser { rephraseExpLore = return
                           , rephraseBranchType = return
                           }
   where onSOAC = SOAC.mapSOACM mapper
-        mapper = SOAC.SOACMapper { SOAC.mapOnSOACSubExp = return
-                                 , SOAC.mapOnSOACVName = return
+        mapper = SOAC.SOACMapper { SOAC.mapOnSOACVName = return
                                  , SOAC.mapOnSOACLambda = rephraseLambda $ injectSOACS f
                                  }
 

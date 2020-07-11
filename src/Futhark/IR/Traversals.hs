@@ -29,6 +29,7 @@ module Futhark.IR.Traversals
   , identityMapper
   , mapExpM
   , mapExp
+  , mapOnSubExp
   , mapOnType
 
   -- * Walking
@@ -50,8 +51,7 @@ import Futhark.IR.Prop.Scope
 -- of this structure expresses the operation to be performed on a
 -- given child.
 data Mapper flore tlore m = Mapper {
-    mapOnSubExp :: SubExp -> m SubExp
-  , mapOnBody :: Scope tlore -> Body flore -> m (Body tlore)
+    mapOnBody :: Scope tlore -> Body flore -> m (Body tlore)
     -- ^ Most bodies are enclosed in a scope, which is passed along
     -- for convenience.
   , mapOnVName :: VName -> m VName
@@ -65,8 +65,7 @@ data Mapper flore tlore m = Mapper {
 -- | A mapper that simply returns the tree verbatim.
 identityMapper :: Monad m => Mapper lore lore m
 identityMapper = Mapper {
-                   mapOnSubExp = return
-                 , mapOnBody = const return
+                   mapOnBody = const return
                  , mapOnVName = return
                  , mapOnRetType = return
                  , mapOnBranchType = return
@@ -161,6 +160,11 @@ mapOnLoopForm tv (WhileLoop cond) =
 -- | Like 'mapExpM', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
+
+-- | Apply 'mapOnVName' to variables, and leave constants alone.
+mapOnSubExp :: Monad m => Mapper flore tlore m -> SubExp -> m SubExp
+mapOnSubExp _ (Constant x) = pure $ Constant x
+mapOnSubExp tv (Var v) = Var <$> mapOnVName tv v
 
 -- | Transform any t'SubExp's in the type.
 mapOnType :: Monad m =>

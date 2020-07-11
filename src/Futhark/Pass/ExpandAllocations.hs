@@ -571,7 +571,6 @@ unAllocKernelsStms = unAllocStms False
                       , mapOnFParam = unParam
                       , mapOnLParam = unParam
                       , mapOnOp = unAllocOp
-                      , mapOnSubExp = Right
                       , mapOnVName = Right
                       }
 

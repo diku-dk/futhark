@@ -577,17 +577,19 @@ checkScanRed space ops ts kbody = do
 
 -- | Like 'Mapper', but just for 'SegOp's.
 data SegOpMapper lvl flore tlore m = SegOpMapper {
-    mapOnSegOpSubExp :: SubExp -> m SubExp
-  , mapOnSegOpLambda :: Lambda flore -> m (Lambda tlore)
+    mapOnSegOpLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnSegOpBody :: KernelBody flore -> m (KernelBody tlore)
   , mapOnSegOpVName :: VName -> m VName
   , mapOnSegOpLevel :: lvl -> m lvl
   }
 
+mapOnSegOpSubExp :: Monad m => SegOpMapper lvl flore tlore m -> SubExp -> m SubExp
+mapOnSegOpSubExp _ (Constant x) = pure $ Constant x
+mapOnSegOpSubExp tv (Var v) = Var <$> mapOnSegOpVName tv v
+
 -- | A mapper that simply returns the 'SegOp' verbatim.
 identitySegOpMapper :: Monad m => SegOpMapper lvl lore lore m
-identitySegOpMapper = SegOpMapper { mapOnSegOpSubExp = return
-                                  , mapOnSegOpLambda = return
+identitySegOpMapper = SegOpMapper { mapOnSegOpLambda = return
                                   , mapOnSegOpBody = return
                                   , mapOnSegOpVName = return
                                   , mapOnSegOpLevel = return
@@ -657,8 +659,7 @@ instance (ASTLore lore, Substitute lvl) =>
          Substitute (SegOp lvl lore) where
   substituteNames subst = runIdentity . mapSegOpM substitute
     where substitute =
-            SegOpMapper { mapOnSegOpSubExp = return . substituteNames subst
-                        , mapOnSegOpLambda = return . substituteNames subst
+            SegOpMapper { mapOnSegOpLambda = return . substituteNames subst
                         , mapOnSegOpBody = return . substituteNames subst
                         , mapOnSegOpVName = return . substituteNames subst
                         , mapOnSegOpLevel = return . substituteNames subst
@@ -667,14 +668,13 @@ instance (ASTLore lore, Substitute lvl) =>
 instance (ASTLore lore, ASTConstraints lvl) =>
          Rename (SegOp lvl lore) where
   rename = mapSegOpM renamer
-    where renamer = SegOpMapper rename rename rename rename rename
+    where renamer = SegOpMapper rename rename rename rename
 
 instance (ASTLore lore, FreeIn (LParamInfo lore), FreeIn lvl) =>
          FreeIn (SegOp lvl lore) where
   freeIn' e = flip execState mempty $ mapSegOpM free e
     where walk f x = modify (<>f x) >> return x
-          free = SegOpMapper { mapOnSegOpSubExp = walk freeIn'
-                             , mapOnSegOpLambda = walk freeIn'
+          free = SegOpMapper { mapOnSegOpLambda = walk freeIn'
                              , mapOnSegOpBody = walk freeIn'
                              , mapOnSegOpVName = walk freeIn'
                              , mapOnSegOpLevel = walk freeIn'
@@ -743,11 +743,11 @@ instance (ASTLore lore, ASTLore (Aliases lore),
   type OpWithAliases (SegOp lvl lore) = SegOp lvl (Aliases lore)
 
   addOpAliases = runIdentity . mapSegOpM alias
-    where alias = SegOpMapper return (return . Alias.analyseLambda)
+    where alias = SegOpMapper (return . Alias.analyseLambda)
                   (return . aliasAnalyseKernelBody) return return
 
   removeOpAliases = runIdentity . mapSegOpM remove
-    where remove = SegOpMapper return (return . removeLambdaAliases)
+    where remove = SegOpMapper (return . removeLambdaAliases)
                    (return . removeKernelBodyAliases) return return
 
 instance (CanBeWise (Op lore), ASTLore lore, ASTConstraints lvl) =>
@@ -755,7 +755,7 @@ instance (CanBeWise (Op lore), ASTLore lore, ASTConstraints lvl) =>
   type OpWithWisdom (SegOp lvl lore) = SegOp lvl (Wise lore)
 
   removeOpWisdom = runIdentity . mapSegOpM remove
-    where remove = SegOpMapper return
+    where remove = SegOpMapper
                    (return . removeLambdaWisdom)
                    (return . removeKernelBodyWisdom)
                    return return

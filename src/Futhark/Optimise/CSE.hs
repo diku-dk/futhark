@@ -213,7 +213,7 @@ instance (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
          CSEInOp (Kernel.SegOp lvl lore) where
   cseInOp = subCSE .
             Kernel.mapSegOpM
-            (Kernel.SegOpMapper return cseInLambda cseInKernelBody return return)
+            (Kernel.SegOpMapper cseInLambda cseInKernelBody return return)
 
 cseInKernelBody :: (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>
                    Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)
@@ -229,4 +229,4 @@ instance (ASTLore lore,
           CanBeAliased (Op lore),
           CSEInOp (OpWithAliases (Op lore))) =>
          CSEInOp (SOAC.SOAC (Aliases lore)) where
-  cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper return cseInLambda return)
+  cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper cseInLambda return)

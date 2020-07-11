@@ -118,7 +118,6 @@ instance Substitutable lore => Substitute (Body lore) where
 replace :: Substitutable lore => M.Map VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
-                 , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = const $ return . substituteNames substs
                  , mapOnRetType = return . substituteNames substs
                  , mapOnBranchType = return . substituteNames substs

@@ -70,8 +70,7 @@ substituteIndicesInExp :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
                        -> m (Exp (Lore m))
 substituteIndicesInExp substs e = do
   substs' <- copyAnyConsumed e
-  let substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs'
-                                  , mapOnVName  = substituteIndicesInVar substs'
+  let substitute = identityMapper { mapOnVName  = substituteIndicesInVar substs'
                                   , mapOnBody   = const $ substituteIndicesInBody substs'
                                   }
 

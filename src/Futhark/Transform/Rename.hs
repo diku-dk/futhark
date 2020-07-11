@@ -244,7 +244,6 @@ instance Renameable lore => Rename (Exp lore) where
   rename e = mapExpM mapper e
     where mapper = Mapper {
                       mapOnBody = const rename
-                    , mapOnSubExp = rename
                     , mapOnVName = rename
                     , mapOnRetType = rename
                     , mapOnBranchType = rename
