@@ -6,5 +6,5 @@
 -- random input { [100000]i32 } auto output
 -- random input { [1000000]i32 } auto output
 
-let main x:[]i32 =
+let main x =
     scan (+) 0 x
