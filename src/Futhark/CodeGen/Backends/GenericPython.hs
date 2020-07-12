@@ -294,7 +294,7 @@ compileProg :: MonadFreshNames m =>
             -> [Option]
             -> Imp.Definitions op
             -> m String
-compileProg module_name constructor imports defines ops userstate pre_timing options prog = do
+compileProg module_name constructor imports defines ops userstate sync options prog = do
   src <- getNameSource
   let prog' = runCompilerM ops src userstate compileProg'
       maybe_shebang =
@@ -321,14 +321,14 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
           case module_name of
             Just name -> do
               (entry_points, entry_point_types) <-
-                unzip <$> mapM compileEntryFun (filter (Imp.functionEntry . snd) funs)
+                unzip <$> mapM (compileEntryFun sync) (filter (Imp.functionEntry . snd) funs)
               return [ClassDef $ Class name $
                        Assign (Var "entry_points") (Dict entry_point_types) :
                        map FunDef (constructor' : definitions ++ entry_points)]
             Nothing -> do
               let classinst = Assign (Var "self") $ simpleCall "internal" []
               (entry_point_defs, entry_point_names, entry_points) <-
-                unzip3 <$> mapM (callEntryFun pre_timing)
+                unzip3 <$> mapM (callEntryFun sync)
                 (filter (Imp.functionEntry . snd) funs)
               return (parse_options ++
                       ClassDef (Class "internal" $ map FunDef $
@@ -604,14 +604,14 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
                      [srcmem, srcidx, Var "ct.c_byte"]
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, nbytes]
 
-compileEntryFun :: (Name, Imp.Function op)
+compileEntryFun :: [PyStmt] -> (Name, Imp.Function op)
                 -> CompilerM op s (PyFunDef, (PyExp, PyExp))
-compileEntryFun entry = do
+compileEntryFun sync entry = do
   (fname', params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
   let ret = Return $ tupleOrSingle $ map snd res
       (pts, rts) = entryTypes $ snd entry
   return (Def fname' ("self" : params) $
-           prepareIn ++ body_lib ++ prepareOut ++ [ret],
+           prepareIn ++ body_lib ++ prepareOut ++ sync ++ [ret],
           (String fname', Tuple [List (map String pts), List (map String rts)]))
 
 entryTypes :: Imp.Function op -> ([String], [String])
