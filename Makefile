@@ -43,7 +43,7 @@ dump-cuda:
 	./tests/scan/simple --dump-cuda tests/scan/simple-cuda-kernel.c
 
 load-cuda: $(SIZES:%=kA-%.data)
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES:%).data > tests/scan/simple-cuda.result
+	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
 
 test:
 	$(FUTHARK) test --backend=opencl tests/scan/scanomap_2.fut
