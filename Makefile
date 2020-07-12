@@ -1,5 +1,5 @@
 FUTHARK = ~/.local/bin/futhark
-SIZES = 524288
+SIZES = 101
 #13 42 8704 32768 524288 1048576
 # 65536 131072 262144 524288 1048576 16777216
 # 33 1024 1025 2048 8704
@@ -42,8 +42,8 @@ dump-fused:
 dump-cuda:
 	./tests/scan/simple --dump-cuda tests/scan/simple-cuda-kernel.c
 
-load-cuda:
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-65536.data > tests/scan/simple-cuda.result
+load-cuda: $(SIZES:%=kA-%.data)
+	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES:%).data > tests/scan/simple-cuda.result
 
 test:
 	$(FUTHARK) test --backend=opencl tests/scan/scanomap_2.fut
