@@ -84,6 +84,7 @@ compileSegScan  (Pattern _ pes)
     let eLEMS_PER_THREAD = IntValue $ intValue Int32 eLMPT
     let eLEMS_PER_THREAD_const = ValueExp eLEMS_PER_THREAD -- Constant eLEMS_PER_THREAD
     let eLM_shape = Shape [Constant eLEMS_PER_THREAD]
+    gsize <- dPrimV "gsize" (unCount group_size' * eLEMS_PER_THREAD_const)
 
 
 
@@ -109,7 +110,11 @@ compileSegScan  (Pattern _ pes)
       let (Count gsz) = group_size
       exchange <- forM xp $ \p -> do
             let pt = elemType $ paramType p
-                shape = Shape [gsz]
+                -- shape = Shape [gsz]                                                -- ShapeBase SubExp
+                -- shape = Shape [kernelGroupSize constants * eLEMS_PER_THREAD_const] -- ShapeBase Imp.Exp
+                -- shape = Shape [gsz * (Constant eLEMS_PER_THREAD)] -- No instance for (Num SubExp) arising from a use of ‘*’
+                -- shape = Shape [gsz * (intConst Int32 eLMPT)] -- No instance for (Num SubExp) arising from a use of ‘*’
+                shape = Shape [Var gsize]
             sAllocArray "exchange" pt shape $ Space "local"
 
       -- TODO: reuse exchange.
