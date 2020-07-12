@@ -16,11 +16,12 @@ endif
 
 .PHONY: test clean
 
-test: test_a test_b test_c test_d
+test: test_a test_b test_c test_d test_e
 	./test_a
 	./test_b
 	./test_c
 	./test_d
+	./test_e
 
 test_%: test_%.c %.o
 	gcc -o $@ $^ -Wall -Wextra -pedantic -std=c99 $(LDFLAGS)

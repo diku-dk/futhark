@@ -416,6 +416,14 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                  OPENCL_SUCCEED_OR_RETURN(clFinish(ctx->opencl.queue));
 
                  if (failure_idx >= 0) {
+                   // We have to clear global_failure so that the next entry point
+                   // is not considered a failure from the start.
+                   typename cl_int no_failure = -1;
+                   OPENCL_SUCCEED_OR_RETURN(
+                    clEnqueueWriteBuffer(ctx->opencl.queue, ctx->global_failure, CL_TRUE,
+                                         0, sizeof(cl_int), &no_failure,
+                                         0, NULL, NULL));
+
                    typename cl_int args[$int:max_failure_args+1];
                    OPENCL_SUCCEED_OR_RETURN(
                      clEnqueueReadBuffer(ctx->opencl.queue,
