@@ -219,6 +219,11 @@ def sync(self):
     cl.enqueue_copy(self.queue, failure, self.global_failure, is_blocking=True)
     self.failure_is_an_option = np.int32(0)
     if failure[0] >= 0:
+        # Reset failure information.
+        cl.enqueue_fill_buffer(self.queue, self.global_failure, np.int32(-1), 0, np.int32().itemsize)
+
+        # Read failure args.
         failure_args = np.empty(self.global_failure_args_max+1, dtype=np.int32)
         cl.enqueue_copy(self.queue, failure_args, self.global_failure_args, is_blocking=True)
+
         raise Exception(self.failure_msgs[failure[0]].format(*failure_args))
