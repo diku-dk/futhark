@@ -212,10 +212,11 @@ sequential C backend, errors will always be available when the entry
 point returns, and :c:func:`futhark_context_sync` will always return
 success.  When using a GPU backend such as ``cuda`` or ``opencl``, the
 entry point may still be running asynchronous operations when it
-returns.  Thus, when using these backends, the entry point may return
-zero successfully, even though execution has already (or will) fail.
-These problems will be reported when :c:func:`futhark_context_sync` is
-called.
+returns, in which case the entry point may return zero successfully,
+even though execution has already (or will) fail.  These problems will
+be reported when :c:func:`futhark_context_sync` is called.  When using
+GPU backends, be careful to check the return code of *both* the entry
+point itself, and :c:func:`futhark_context_sync`.
 
 GPU
 ---
