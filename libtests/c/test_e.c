@@ -20,10 +20,17 @@ int main() {
   struct futhark_f32_1d *out_fut = NULL;
 
   err = futhark_entry_main(ctx, &out_fut, xs_fut, is0_fut);
-  assert(err == 0); // Technically this one could also fail, although
-                    // that isn't what the compiler currently does.
+
+#ifdef FUTHARK_BACKEND_c
+  assert(err != 0);
+  err = futhark_context_sync(ctx);
+  assert(err == 0);
+#else
+  assert(err == 0);
   err = futhark_context_sync(ctx);
   assert(err != 0);
+#endif
+
   char *error = futhark_context_get_error(ctx);
   assert(strstr(error, "Index [-1] out of bounds") != NULL);
   free(error);
