@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Aliases of arguments passed for consuming parameters are now
     properly checked (#1053).
 
+  * When using a GPU backend, errors are now properly cleared.
+    Previously, once e.g. an out-of-bounds error had occurred, all
+    future operations would fail with the same error.
+
 ## [0.16.1]
 
 ### Added
