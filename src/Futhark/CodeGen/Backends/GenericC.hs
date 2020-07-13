@@ -1990,7 +1990,7 @@ compileCode (Allocate name (Count e) space) = do
   cached <- cacheMem name
   case cached of
     Just cur_size ->
-      stm [C.cstm|if ($exp:cur_size < $exp:size) {
+      stm [C.cstm|if ($exp:cur_size < (size_t)$exp:size) {
                     $exp:name = realloc($exp:name, $exp:size);
                     $exp:cur_size = $exp:size;
                   }|]
