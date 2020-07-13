@@ -187,11 +187,11 @@ nonsegmentedReduction pat space reds kbody ModeParallel = do
         forM_ (zip slugs' per_red_pes) $ \(slug, red_res) ->
           sLoopNest (slugShape slug) $ \vec_is -> do
             sComment "load acc params" $
-              forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-              copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
-            sComment "load next params" $
-              forM_ (zip (nextParams slug) red_res) $ \(p, pe) ->
+              forM_ (zip (accParams slug) red_res) $ \(p, pe) ->
               copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
+            sComment "load next params" $
+              forM_ (zip (nextParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+              copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
             sComment "red body" $
               compileStms mempty (bodyStms $ slugBody slug) $
                 forM_ (zip red_res (bodyResult $ slugBody slug)) $
