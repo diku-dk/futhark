@@ -56,7 +56,7 @@ test-cuda: $(SIZES:%=kA-%.data)
 	$(FUTHARK) test --backend=cuda tests/scan/simple.fut
 
 kA-%.data:
-	futhark dataset --i8-bounds=-10:10 -g [$*]i8 > tests/scan/$@
+	futhark dataset --i32-bounds=-10000:10000 -g [$*]i32 > tests/scan/$@
 
 ntest: $(SIZES:%=kA-%.data)
 	$(FUTHARK) test --backend=cuda tests/scan/n-tests.fut
