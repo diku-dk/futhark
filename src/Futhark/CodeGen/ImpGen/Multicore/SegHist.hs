@@ -90,7 +90,8 @@ compileSegHistBody idx pat space histops kbody = do
   ns' <- mapM toExp ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+      (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+      per_red_pes = segHistOpChunks histops $ patternValueElements pat
 
   idx' <- toExp $ Var idx
   flat_idx <- dPrim "iter" int32
@@ -108,8 +109,8 @@ compileSegHistBody idx pat space histops kbody = do
             (buckets, vs) = splitAt (length histops) red_res
             perOp = chunks $ map (length . histDest) histops
 
-        forM_ (zip3 histops (perOp vs) buckets) $
-           \(HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
+        forM_ (zip4 per_red_pes histops (perOp vs) buckets) $
+           \(red_res, HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
 
              let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
                  bucket'   = toExp' int32 bucket
@@ -126,13 +127,13 @@ compileSegHistBody idx pat space histops kbody = do
                sLoopNest shape $ \is' -> do
                  -- Index
                  buck <- toExp bucket
-                 forM_ (zip all_red_pes is_params) $ \(pe, p) ->
+                 forM_ (zip red_res is_params) $ \(pe, p) ->
                    copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 (init is)  ++ [buck] ++ is')
                  -- Value at index
                  forM_ (zip vs_params vs') $ \(p, v) ->
                    copyDWIMFix (paramName p) [] v is'
                  compileStms mempty (bodyStms $ lambdaBody lam) $
-                   forM_ (zip all_red_pes  $ bodyResult $ lambdaBody lam) $
+                   forM_ (zip red_res  $ bodyResult $ lambdaBody lam) $
                    \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ [buck] ++ is') se []
 
 
@@ -186,14 +187,14 @@ nonsegmentedHist :: Pattern MCMem
 nonsegmentedHist pat space histops kbody ModeParallel = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
+  -- ns' <- mapM toExp ns
 
   num_threads <- getNumThreads
-  num_threads' <- toExp $ Var num_threads
-  hist_width <- toExp $ histWidth $ head histops
+  -- num_threads' <- toExp $ Var num_threads
+  -- hist_width <- toExp $ histWidth $ head histops
   -- TODO we should find a proper condition
   -- let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns'
-  histops' <- renameHistOpLambda histops
+  -- histops' <- renameHistOpLambda histops
 
   collect $ do
     flat_idx <- dPrim "iter" int32
@@ -208,7 +209,7 @@ nonsegmentedHist pat space histops kbody ModeSequential = do
   collect $ localMode ModeSequential $ do
     flat_seq_idx <- dPrim "iter" int32
     seq_body <- sequentialHist flat_seq_idx pat space histops kbody
-    emit $ Imp.DebugPrint "SegMap sequential" Nothing
+    emit $ Imp.DebugPrint "SegHist sequential" Nothing
     sFor "i" (product ns') $ \i -> do
       flat_seq_idx <-- i
       emit seq_body
@@ -237,7 +238,7 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
   num_threads' <- toExp $ Var num_threads
   let pes = patternElements pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (all_red_pes, map_pes) = splitAt num_red_res pes
+      (_all_red_pes, map_pes) = splitAt num_red_res pes
 
   let per_red_pes = segHistOpChunks histops $ patternValueElements pat
   hist_M <- dPrimV "hist_M" num_threads'
@@ -307,7 +308,7 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
                do_op (bucket_is ++ is')
 
   free_params <- freeParams (prebody <> body) (segFlat space : [flat_idx])
-  let sched = decideScheduling body
+  let sched = Imp.Static -- decideScheduling body
 
   -- How many subtasks was used by scheduler
   num_histos <- dPrim "num_histos" $ IntType Int32
@@ -316,8 +317,8 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
 
 
   emit $ Imp.DebugPrint "nonsegmented hist stage 2"  Nothing
-  let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
-  forM_ (zip3 pes_per_op histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
+  -- let pes_per_op = chunks (map (length . histDest) histops) _all_red_pes
+  forM_ (zip3 per_red_pes histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
     bucket_id <- newVName "bucket_id"
     subhistogram_id <- newVName "subhistogram_id"
 
