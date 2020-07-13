@@ -42,7 +42,11 @@ dump-fused:
 dump-cuda:
 	./tests/scan/simple --dump-cuda tests/scan/simple-cuda-kernel.c
 
-load-cuda: $(SIZES:%=kA-%.data)
+load-cuda:
+	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
+	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
+
+load-cuda-generate-data: $(SIZES:%=kA-%.data)
 	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
 	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
 
