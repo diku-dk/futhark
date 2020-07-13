@@ -128,6 +128,14 @@ nonsegmentedReduction pat space reds kbody ModeParallel = do
 
 
   collect $ do
+    let per_red_pes = segBinOpChunks reds $ patternValueElements pat
+    sComment "neutral-initialise the output" $
+     forM_ (zip reds per_red_pes) $ \(red, red_res) ->
+       forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
+         sLoopNest (segBinOpShape red) $ \vec_is ->
+           copyDWIMFix (patElemName pe) vec_is ne []
+
+
     flat_idx <- dPrim "iter" int32
     emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
     stage_one_red_arrs <- groupResultArrays (Var num_threads) reds
@@ -179,7 +187,6 @@ nonsegmentedReduction pat space reds kbody ModeParallel = do
 
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
 
-    let per_red_pes = segBinOpChunks reds $ patternValueElements pat
     sFor "i" ntasks' $ \i' -> do
       emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
       segFlat space <-- i'

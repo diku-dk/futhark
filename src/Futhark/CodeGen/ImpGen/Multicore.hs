@@ -29,93 +29,61 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg ModeParallel ops Imp.DefaultSpa
         opCompiler dest (Alloc e space) = compileAlloc dest e space
         opCompiler dest (Inner op) = compileMCOp dest op
 
+
+getSpace :: SegOp () MCMem -> SegSpace
+getSpace (SegHist _ space _ _ _ ) = space
+getSpace (SegRed _ space _ _ _ ) = space
+getSpace (SegScan _ space _ _ _ ) = space
+getSpace (SegMap _ space _ _) = space
+
+getIterationDomain :: SegOp () MCMem -> SegSpace -> ImpM MCMem Mode Imp.Multicore Imp.Exp
+getIterationDomain (SegMap {}) space = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+  return $ product ns'
+getIterationDomain _ space = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+  case unSegSpace space of
+     [_] -> return $ product ns'
+     _   -> return $ product $ init ns' -- Segmented reduction is over the inner most dimension
+
+getReturnParams :: Pattern MCMem -> SegOp () MCMem -> ImpM MCMem Mode Imp.Multicore [Imp.Param]
+getReturnParams pat SegRed{} = do
+  let retvals = map patElemName $ patternElements pat
+  retvals_ts <- mapM lookupType retvals
+  zipWithM toParam retvals retvals_ts
+getReturnParams _ _ = return mempty
+
+-- TODO: use the par_op version
 compileMCOp :: Pattern MCMem -> MCOp MCMem ()
             -> ImpM MCMem Mode Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
-compileMCOp pat (ParOp par_op op) =
-  -- TODO: use the par_op version
-  compileSegOp pat op par_op
-
-compileSegOp :: Pattern MCMem -> SegOp () MCMem -> Maybe (SegOp () MCMem)
-             -> ImpM MCMem Mode Imp.Multicore ()
-compileSegOp pat (SegHist _ space histops _ kbody) par_op = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
+compileMCOp pat (ParOp _par_op op) = do
+  let space = getSpace op
   dPrimV_ (segFlat space) 0
-  let iterations = case unSegSpace space of
-        [_] -> product ns'
-        _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
+  iterations <- getIterationDomain op space
+  seq_code <- compileSegOp pat op
+  retvals <- getReturnParams pat op
 
-  seq_code <- compileSegHist pat space histops kbody ModeParallel
   -- par_code <- case par_op of
   --   Just nested_op -> collect $ compileSegOp pat nested_op Nothing
   --   Nothing -> compileSegHist pat space histops kbody ModeParallel
 
-  free_params <- freeParams seq_code [segFlat space]
-  emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) []
-  emit $ Imp.DebugPrint "Histogram end" Nothing
-
-compileSegOp pat (SegScan _ space scans _ kbody) _par_op = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  dPrimV_ (segFlat space) 0
-  let iterations = case unSegSpace space of
-        [_] -> product ns'
-        _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
-
-  seq_code <- compileSegScan pat space scans kbody ModeParallel
-
-  -- par_code <- case par_op of
-  --   Just nested_op -> compileSegScan pat space scans kbody ModeParallel -- collect $ compileSegOp pat nested_op Nothing
-  --   Nothing -> compileSegScan pat space scans kbody ModeParallel
-
-  free_task_params <- freeParams (seq_code) [segFlat space]
-  emit $ Imp.Op $ Imp.Task free_task_params iterations mempty seq_code (segFlat space) []
+  free_params <- freeParams seq_code (segFlat space : map Imp.paramName retvals)
+  emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) retvals
 
 
-compileSegOp pat (SegRed _ space reds _ kbody) _par_op = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
+compileSegOp :: Pattern MCMem -> SegOp () MCMem
+             -> ImpM MCMem Mode Imp.Multicore Imp.Code
+compileSegOp pat (SegHist _ space histops _ kbody) =
+  compileSegHist pat space histops kbody ModeParallel
 
-  let per_red_pes = segBinOpChunks reds $ patternValueElements pat
-  sComment "neutral-initialise the output" $
-   forM_ (zip reds per_red_pes) $ \(red, red_res) ->
-     forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
-       sLoopNest (segBinOpShape red) $ \vec_is ->
-         copyDWIMFix (patElemName pe) vec_is ne []
+compileSegOp pat (SegScan _ space scans _ kbody) =
+  compileSegScan pat space scans kbody ModeParallel
 
-  let iterations = case unSegSpace space of
-        [_] -> product ns'
-        _   -> product $ init ns' -- Segmented reduction is over the inner most dimension
+compileSegOp pat (SegRed _ space reds _ kbody) =
+  compileSegRed pat space reds kbody ModeParallel
 
-  let retvals = map patElemName $ patternElements pat
-  retvals_ts <- mapM lookupType retvals
-  retval_params <- zipWithM toParam retvals retvals_ts
-  let retval_names = map Imp.paramName retval_params
-
-  dPrimV_ (segFlat space) 0
-  seq_code <- compileSegRed pat space reds kbody ModeParallel
-
-  -- par_code <- case par_op of
-  --   Just _nested_op -> compileSegRed pat space reds kbody ModeParallel
-  --     -- collect $ compileSegOp pat nested_op Nothing
-  --   Nothing -> compileSegRed pat space reds kbody ModeParallel
-
-  free_params <- freeParams seq_code (segFlat space : retval_names)
-  emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) retval_params
-
-
-compileSegOp pat (SegMap _ space _ kbody) _par_op = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  dPrimV_ (segFlat space) 0
-  seq_code <- compileParallelSegMap pat space kbody
-  -- par_code <- case par_op of
-    -- Just nested_op -> compileParallelSegMap pat space kbody -- collect $ compileSegOp pat nested_op Nothing
-    -- Nothing -> compileParallelSegMap pat space kbody
-
-  free_params_task <- freeParams (seq_code) mempty
-  emit $ Imp.Op $ Imp.Task free_params_task (product ns') mempty seq_code (segFlat space) []
+compileSegOp pat (SegMap _ space _ kbody) =
+  compileParallelSegMap pat space kbody
