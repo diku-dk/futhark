@@ -1425,7 +1425,8 @@ compileGroupResult _ pe (TileReturns [(w,per_group_elems)] what) = do
 
   -- Avoid loop for the common case where each thread is statically
   -- known to write at most one element.
-  if toExp' int32 per_group_elems == kernelGroupSize constants
+  localOps threadOperations $
+    if toExp' int32 per_group_elems == kernelGroupSize constants
     then sWhen (offset + ltid .<. toExp' int32 w) $
          copyDWIMFix (patElemName pe) [ltid + offset] (Var what) [ltid]
     else
@@ -1441,7 +1442,8 @@ compileGroupResult space pe (TileReturns dims what) = do
   local_is <- localThreadIDs $ map snd dims
   is_for_thread <- mapM (dPrimV "thread_out_index") $ zipWith (+) group_is local_is
 
-  sWhen (isActive $ zip is_for_thread $ map fst dims) $
+  localOps threadOperations $
+    sWhen (isActive $ zip is_for_thread $ map fst dims) $
     copyDWIMFix (patElemName pe) (map Imp.vi32 is_for_thread) (Var what) local_is
 
 compileGroupResult space pe (Returns _ what) = do
