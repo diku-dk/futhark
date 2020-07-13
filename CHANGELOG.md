@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     Previously, once e.g. an out-of-bounds error had occurred, all
     future operations would fail with the same error.
 
+  * Size-coercing a transposed array no longer leads to invalid code
+    generation (#1054).
+
 ## [0.16.1]
 
 ### Added

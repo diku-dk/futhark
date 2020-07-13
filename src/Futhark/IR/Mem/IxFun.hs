@@ -421,8 +421,8 @@ reshapeCoercion (IxFun (lmad@(LMAD off dims) :| lmads) _ cg) newshape = do
       mid_dims = take (length dims - num_coercions) $ drop hd_len dims'
       num_rshps = length reshapes
   guard (num_rshps == 0 || (num_rshps == 1 && length mid_dims == 1))
-  let dims'' = map snd $ sortBy (compare `on` fst) $
-               zipWith (\ld n -> (ldPerm ld, ld { ldShape = n }))
+  let dims'' = permuteInv perm $
+               zipWith (\ld n -> ld { ldShape = n })
                dims' (newDims newshape)
       lmad' = LMAD off dims''
   return $ IxFun (lmad' :| lmads) (newDims newshape) cg
