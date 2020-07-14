@@ -282,7 +282,6 @@ compileSegScanBody idx pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
-  flat_par_idx <- dPrim "iter" int32
   idx' <- toExp $ Var idx
   collect $ do
     emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
@@ -295,8 +294,8 @@ compileSegScanBody idx pat space scan_ops kbody = do
 
       let inner_bound = last ns'
       sFor "i" inner_bound $ \i -> do
-        dPrimV_ flat_par_idx (idx' * inner_bound + i)
-        zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_par_idx
+        zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns') idx'
+        dPrimV_ (last is) i
         compileStms mempty (kernelBodyStms kbody) $ do
           let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody
           sComment "write to-scan values to parameters" $

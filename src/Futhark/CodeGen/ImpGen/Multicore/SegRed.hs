@@ -269,7 +269,6 @@ compileSegRedBody n_segments pat space reds kbody = do
   collect $ do
     emit $ Imp.DebugPrint "segmented segBinOp stage 1" Nothing
     flat_idx <- dPrimV "flat_idx" (n_segments' * inner_bound)
-    flat_idx' <- toExp $ Var flat_idx
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     sComment "neutral-initialise the accumulators" $
       forM_ reds $ \red->
@@ -279,8 +278,9 @@ compileSegRedBody n_segments pat space reds kbody = do
 
     sComment "function main body" $ do
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
-      sFor "i" inner_bound $ \_i -> do
-        forM_ (zip is $ unflattenIndex ns' $ Imp.vi32 flat_idx) $ uncurry (<--)
+      sFor "i" inner_bound $ \i -> do
+        forM_ (zip (init is) $ unflattenIndex (init ns') n_segments') $ uncurry (<--)
+        dPrimV_ (last is) i
         kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res
           forM_ (zip reds red_res') $ \(red, res') ->
@@ -302,7 +302,6 @@ compileSegRedBody n_segments pat space reds kbody = do
                 sComment "write back to res" $
                 forM_ (zip (patternElements pat) (bodyResult lbody)) $
                   \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) se' []
-        flat_idx <-- flat_idx' + 1
 
 
 -- Each thread reduces over the number of segments

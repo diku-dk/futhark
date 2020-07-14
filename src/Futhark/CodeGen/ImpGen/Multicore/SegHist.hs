@@ -94,19 +94,18 @@ compileSegHistBody idx pat space histops kbody = do
       per_red_pes = segHistOpChunks histops $ patternValueElements pat
 
   idx' <- toExp $ Var idx
-  flat_idx <- dPrim "iter" int32
   collect $ do
     emit $ Imp.DebugPrint "Segmented segHist" Nothing
     let inner_bound = last ns'
 
     sFor "i" inner_bound $ \i -> do
-      dPrimV_ flat_idx (idx' * inner_bound + i)
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+      zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns') idx'
+      dPrimV_ (last is) i
 
       compileStms mempty (kernelBodyStms kbody) $ do
-        let (red_res, map_res) = splitFromEnd (length map_pes) $
+        let (_red_res, map_res) = splitFromEnd (length map_pes) $
                                  map kernelResultSubExp $ kernelBodyResult kbody
-            (buckets, vs) = splitAt (length histops) red_res
+            (buckets, vs) = splitAt (length histops) _red_res
             perOp = chunks $ map (length . histDest) histops
 
         forM_ (zip4 per_red_pes histops (perOp vs) buckets) $
