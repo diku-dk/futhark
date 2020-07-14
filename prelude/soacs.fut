@@ -254,3 +254,24 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Span:** *O(1)*
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs) :> *[m]t
+
+type~ acc 't = intrinsics.acc t
+
+let scatter_stream [k] 'a 'b
+                   (dest: *[k]a)
+                   (f: *acc ([k]a) -> b -> *acc ([k]a))
+                   (bs: []b)
+                 : *[k]a =
+  intrinsics.scatter_stream (dest, f, bs) :> [k]a
+
+let reduce_by_index_stream [k] 'a 'b
+                   (dest: *[k]a)
+                   (op: a -> a -> a)
+                   (ne: a)
+                   (f: *acc ([k]a) -> b -> *acc ([k]a))
+                   (bs: []b)
+                 : *[k]a =
+  intrinsics.hist_stream (dest, op, ne, f, bs) :> [k]a
+
+let write [n] 't (acc : *acc ([n]t)) (i: i32) (v: t) : *acc ([n]t) =
+  intrinsics.acc_write (acc, i, v)

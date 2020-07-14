@@ -108,6 +108,11 @@ internaliseTypeM orig_t =
       | null ets -> return [I.Prim I.Bool]
       | otherwise ->
           concat <$> mapM (internaliseTypeM . snd) (E.sortFields ets)
+    E.Scalar (E.TypeVar _ _ tn [E.TypeArgType arr_t _])
+      | baseTag (E.typeLeaf tn) <= E.maxIntrinsicTag,
+        baseString (E.typeLeaf tn) == "acc" ->
+          pure . Acc . map accElemType <$> internaliseTypeM arr_t
+
     E.Scalar E.TypeVar{} ->
       error "internaliseTypeM: cannot handle type variable."
     E.Scalar E.Arrow{} ->
@@ -118,6 +123,12 @@ internaliseTypeM orig_t =
       return $ I.Prim (I.IntType I.Int8) : ts
 
   where internaliseShape = mapM internaliseDim . E.shapeDims
+
+        accElemType (Array (ElemPrim pt) shape _)
+          | Just shape' <- traverse isFree shape =
+              (pt, shape')
+        accElemType t =
+          error $ "mkAcc: " ++ pretty t
 
 internaliseConstructors :: M.Map Name [I.TypeBase ExtShape Uniqueness]
                         -> ([I.TypeBase ExtShape Uniqueness],

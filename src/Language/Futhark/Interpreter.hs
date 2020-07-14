@@ -211,12 +211,15 @@ data Value = ValuePrim !PrimValue
            | ValueFun (Value -> EvalM Value)
            | ValueSum ValueShape Name [Value]
              -- Stores the full shape.
+           | ValueAcc (Value -> Value -> EvalM Value) !(Array Int Value)
+             -- The update function and the array.
 
 instance Eq Value where
   ValuePrim x == ValuePrim y = x == y
   ValueArray _ x == ValueArray _ y = x == y
   ValueRecord x == ValueRecord y = x == y
   ValueSum _ n1 vs1 == ValueSum _ n2 vs2 = n1 == n2 && vs1 == vs2
+  ValueAcc _ x == ValueAcc _ y = x == y
   _ == _ = False
 
 instance Pretty Value where
@@ -231,6 +234,7 @@ instance Pretty Value where
 
   ppr (ValueRecord m) = prettyRecord m
   ppr ValueFun{} = text "#<fun>"
+  ppr ValueAcc{} = text "#<acc>"
   ppr (ValueSum _ n vs) = text "#" <> sep (ppr n : map ppr vs)
 
 valueShape :: Value -> ValueShape
@@ -1200,6 +1204,11 @@ initialCtx =
       case fromTuple v of Just [x,y,z] -> f x y z
                           _ -> error $ "Expected triple; got: " ++ pretty v
 
+    fun5t f =
+      TermValue Nothing $ ValueFun $ \v ->
+      case fromTuple v of Just [x,y,z,a,b] -> f x y z a b
+                          _ -> error $ "Expected pentuple; got: " ++ pretty v
+
     fun6t f =
       TermValue Nothing $ ValueFun $ \v ->
       case fromTuple v of Just [x,y,z,a,b,c] -> f x y z a b c
@@ -1354,7 +1363,7 @@ initialCtx =
         _ ->
           error $ "Invalid arguments to map intrinsic:\n" ++
           unlines [pretty t, pretty v]
-      where typeRowShape = traverse id . structTypeShape mempty . stripArray 1
+      where typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
 
     def s | "reduce" `isPrefixOf` s = Just $ fun3t $ \f ne xs ->
       foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
@@ -1408,6 +1417,46 @@ initialCtx =
             insertAt i x (l:ls) = l:insertAt (i-1) x ls
             insertAt _ _ ls = ls
 
+    def "scatter_stream" = Just $ fun3t $ \dest f vs ->
+      case (dest, vs) of
+        (ValueArray dest_shape dest_arr,
+         ValueArray _ vs_arr) -> do
+          let acc = ValueAcc (\_ x -> pure x) dest_arr
+          acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
+          case acc' of
+            ValueAcc _ dest_arr' ->
+              return $ ValueArray dest_shape dest_arr'
+            _ ->
+              error $ "scatter_stream produced: " ++ pretty acc'
+        _ ->
+          error $ "scatter_stream expects array, but got: " ++ pretty (dest, vs)
+
+    def "hist_stream" = Just $ fun5t $ \dest op _ne f vs ->
+      case (dest, vs) of
+        (ValueArray dest_shape dest_arr,
+         ValueArray _ vs_arr) -> do
+          let acc = ValueAcc (apply2 noLoc mempty op) dest_arr
+          acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
+          case acc' of
+            ValueAcc _ dest_arr' ->
+              return $ ValueArray dest_shape dest_arr'
+            _ ->
+              error $ "hist_stream produced: " ++ pretty acc'
+        _ ->
+          error $ "hist_stream expects array, but got: " ++ pretty (dest, vs)
+
+    def "acc_write" = Just $ fun3t $ \acc i v -> do
+      case (acc, i) of
+        (ValueAcc op acc_arr,
+         ValuePrim (SignedValue (Int32Value i'))) ->
+          if i' >= 0 && i' < arrayLength acc_arr
+            then do let x = acc_arr ! fromIntegral i'
+                    res <- op x v
+                    pure $ ValueAcc op $ acc_arr // [(fromIntegral i', res)]
+            else pure acc
+        _ ->
+          error $ "acc_write invalid arguments: " ++ pretty (acc, i, v)
+
     def "unzip" = Just $ fun1 $ \x -> do
       let ShapeDim _ (ShapeRecord fs) = valueShape x
           Just [xs_shape, ys_shape] = areTupleFields fs
@@ -1460,6 +1509,8 @@ initialCtx =
     def "break" = Just $ fun1 $ \v -> do
       break
       return v
+
+    def "acc" = Nothing
 
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
 

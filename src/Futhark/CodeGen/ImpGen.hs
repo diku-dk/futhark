@@ -258,7 +258,7 @@ instance HasScope SOACS (ImpM lore r op) where
             Mem (entryMemSpace memEntry)
           entryType (ArrayVar _ arrayEntry) =
             Array
-            (entryArrayElemType arrayEntry)
+            (ElemPrim (entryArrayElemType arrayEntry))
             (Shape $ entryArrayShape arrayEntry)
             NoUniqueness
           entryType (ScalarVar _ scalarEntry) =
@@ -1271,8 +1271,11 @@ compileAlloc pat _ _ =
 -- straightforward contiguous format, as an 'Int64' expression.
 typeSize :: Type -> Count Bytes Imp.Exp
 typeSize t =
-  Imp.bytes $ sExt Int64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int32) *
+  Imp.bytes $ sExt Int64 elem_size *
   product (map (sExt Int64 . toExp' int32) (arrayDims t))
+  where elem_size = case elemType t of
+                      ElemPrim t' -> Imp.LeafExp (Imp.SizeOf t') int32
+                      ElemAcc{} -> 0
 
 --- Building blocks for constructing code.
 
@@ -1353,7 +1356,7 @@ sArrayInMem name pt shape mem =
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
-  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  mem <- sAlloc (name ++ "_mem") (typeSize (Array (ElemPrim pt) shape NoUniqueness)) space
   let iota_ixfun = IxFun.iota $ map (primExpFromSubExp int32) permuted_dims
   sArray name pt shape $
     ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm

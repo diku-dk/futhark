@@ -80,20 +80,28 @@ instance Pretty Space where
   ppr (Space s) = text "@" <> text s
   ppr (ScalarSpace d t) = text "@" <> mconcat (map (brackets . ppr) d) <> ppr t
 
+instance Pretty ElemType where
+  ppr (ElemPrim et) = ppr et
+  ppr (ElemAcc arrs) = text "acc" <> ppTuple' (map f arrs)
+    where f (pt, shape) = ppr shape <> ppr pt
+
 instance Pretty u => Pretty (TypeBase Shape u) where
-  ppr (Prim et) = ppr et
+  ppr (Prim t) = ppr $ ElemPrim t
+  ppr (Acc ts) = ppr $ ElemAcc ts
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
-  ppr (Prim et) = ppr et
+  ppr (Prim t) = ppr $ ElemPrim t
+  ppr (Acc ts) = ppr $ ElemAcc ts
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase Rank u) where
-  ppr (Prim et) = ppr et
+  ppr (Prim t) = ppr $ ElemPrim t
+  ppr (Acc ts) = ppr $ ElemAcc ts
   ppr (Array et (Rank n) u) =
     ppr u <> mconcat (replicate n $ brackets mempty) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
@@ -165,6 +173,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
                         DoLoop{}           -> True
                         Op{}               -> True
                         If{}               -> True
+                        MkAcc{}            -> True
                         Apply{}            -> True
                         BasicOp ArrayLit{} -> False
                         BasicOp Assert{}   -> True
@@ -214,6 +223,10 @@ instance Pretty BasicOp where
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg (loc, _)) =
     text "assert" <> apply [ppr e, ppr msg, text $ show $ locStr loc]
+  ppr (UnAcc acc ts) =
+    text "un_acc" <> apply [ppr acc, ppTuple' ts]
+  ppr (UpdateAcc acc is v) =
+    text "update_acc" <> apply [ppr acc, ppTuple' is, ppTuple' v]
 
 instance Pretty a => Pretty (ErrorMsg a) where
   ppr (ErrorMsg parts) = commasep $ map p parts
@@ -257,6 +270,12 @@ instance PrettyLore lore => Pretty (Exp lore) where
     where (ctxparams, ctxinit) = unzip ctx
           (valparams, valinit) = unzip val
           pprLoopVar (p,a) = ppr p <+> text "in" <+> ppr a
+  ppr (MkAcc shape arrs Nothing) =
+    text "mk_acc" <> apply [ppr shape, ppTuple' arrs]
+  ppr (MkAcc shape arrs (Just op)) =
+    text "mk_acc" <> parens (ppr shape <> comma <+>
+                             ppTuple' arrs <> comma </>
+                             ppr op)
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda [] _ []) = text "nilFn"

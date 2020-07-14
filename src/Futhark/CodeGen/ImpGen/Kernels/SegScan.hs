@@ -46,7 +46,7 @@ makeLocalArrays (Count group_size) num_threads scans = do
                   ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
                 return (arr, [])
               _ -> do
-                let pt = elemType $ paramType p
+                let ElemPrim pt = elemType $ paramType p
                     shape = Shape [group_size]
                 (sizes, mem') <- getMem pt shape
                 arr <- lift $ sArrayInMem "scan_arr" pt shape mem'
@@ -55,7 +55,7 @@ makeLocalArrays (Count group_size) num_threads scans = do
           return arrs
 
         getMem pt shape = do
-          let size = typeSize $ Array pt shape NoUniqueness
+          let size = typeSize $ Array (ElemPrim pt) shape NoUniqueness
           mems <- get
           case (find ((size `elem`) . fst) mems, mems) of
             (Just mem, _) -> do

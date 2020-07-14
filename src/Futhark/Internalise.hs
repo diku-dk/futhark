@@ -862,6 +862,13 @@ internaliseArg desc (arg, argdim) = do
     _ -> return ()
   return arg'
 
+elemPrimType :: I.ElemType -> I.PrimType
+elemPrimType ElemAcc{} = error "elemPrimType: accumulator"
+elemPrimType (ElemPrim t) = t
+
+subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
+subExpPrimType = fmap (elemPrimType . I.elemType) . subExpType
+
 generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
@@ -871,7 +878,7 @@ generateCond orig_p orig_ses = do
     -- Literals are always primitive values.
     compares (E.PatternLit e _ _) (se:ses) = do
       e' <- internaliseExp1 "constant" e
-      t' <- I.elemType <$> subExpType se
+      t' <- subExpPrimType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
 
@@ -1183,6 +1190,24 @@ internaliseStreamRed desc o comm lam0 lam arr = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
+internaliseStreamScatter :: String -> E.Exp -> E.Exp -> E.Exp
+                         -> InternaliseM [SubExp]
+internaliseStreamScatter desc dest lam bs = do
+  dest' <- internaliseExpToVars "scatter_dest" dest
+  dest_ts <- mapM lookupType dest'
+  bs' <- internaliseExpToVars "scatter_input" bs
+
+  w <- arraysSize 0 <$> mapM lookupType bs'
+  acc <- letExp "scatter_acc" $ MkAcc (Shape [w]) dest' Nothing
+
+  lam' <- internaliseMapLambda internaliseLambda lam $
+          map I.Var $ acc : bs'
+
+  acc' <- letExp "scatter_acc_res" $ I.Op $ I.Screma w (I.mapSOAC lam') $
+          acc : bs'
+
+  letTupExp' desc (BasicOp $ UnAcc acc' dest_ts)
+
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
   vs <- internaliseExp desc e
@@ -1405,6 +1430,7 @@ isOverloadedFunction qname args loc = do
                   handleIntrinsicOps,
                   handleOps,
                   handleSOACs,
+                  handleAccs,
                   handleRest]
   msum [h args $ baseString $ qualLeaf qname | h <- handlers]
   where
@@ -1482,7 +1508,7 @@ isOverloadedFunction qname args loc = do
                       y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
                       -- Compare the elements.
-                      cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
+                      cmp_lam <- cmpOpLambda $ I.CmpEq (elemPrimType (elemType x_t))
                       cmps <- letExp "cmps" $ I.Op $
                               I.Screma x_num_elems (I.mapSOAC cmp_lam) [x_flat, y_flat]
 
@@ -1559,6 +1585,17 @@ isOverloadedFunction qname args loc = do
 
     handleSOACs _ _ = Nothing
 
+    handleAccs [TupLit [dest, f, bs] _] "scatter_stream" = Just $ \desc ->
+      internaliseStreamScatter desc dest f bs
+
+    handleAccs [TupLit [acc, i, v] _] "acc_write" = Just $ \desc -> do
+      acc' <- head <$> internaliseExpToVars "acc" acc
+      i' <- internaliseExp1 "acc_i" i
+      vs <- internaliseExp "acc_v" v
+      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
+
+    handleAccs _ _ = Nothing
+
     handleRest [x] "!" = Just $ complementF x
 
     handleRest [x] "opaque" = Just $ \desc ->
@@ -1625,6 +1662,7 @@ isOverloadedFunction qname args loc = do
            <*> internaliseExp (desc ++ "_zip_y") y
 
     handleRest [x] "unzip" = Just $ flip internaliseExp x
+
     handleRest [x] "trace" = Just $ flip internaliseExp x
     handleRest [x] "break" = Just $ flip internaliseExp x
 

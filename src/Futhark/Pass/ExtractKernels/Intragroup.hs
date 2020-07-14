@@ -111,26 +111,26 @@ intraGroupParallelise knest lam = runMaybeT $ do
   where first_nest = fst knest
         aux = loopNestingAux first_nest
 
-data Acc = Acc { accMinPar :: S.Set [SubExp]
-               , accAvailPar :: S.Set [SubExp]
-               , accLog :: Log
-               }
+data IntraAcc = IntraAcc { accMinPar :: S.Set [SubExp]
+                         , accAvailPar :: S.Set [SubExp]
+                         , accLog :: Log
+                         }
 
-instance Semigroup Acc where
-  Acc min_x avail_x log_x <> Acc min_y avail_y log_y =
-    Acc (min_x <> min_y) (avail_x <> avail_y) (log_x <> log_y)
+instance Semigroup IntraAcc where
+  IntraAcc min_x avail_x log_x <> IntraAcc min_y avail_y log_y =
+    IntraAcc (min_x <> min_y) (avail_x <> avail_y) (log_x <> log_y)
 
-instance Monoid Acc where
-  mempty = Acc mempty mempty mempty
+instance Monoid IntraAcc where
+  mempty = IntraAcc mempty mempty mempty
 
 type IntraGroupM =
-  BinderT Out.Kernels (RWS () Acc VNameSource)
+  BinderT Out.Kernels (RWS () IntraAcc VNameSource)
 
 instance MonadLogger IntraGroupM where
   addLog log = tell mempty { accLog = log }
 
 runIntraGroupM :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                  IntraGroupM () -> m (Acc, Out.Stms Out.Kernels)
+                  IntraGroupM () -> m (IntraAcc, Out.Stms Out.Kernels)
 runIntraGroupM m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
@@ -238,8 +238,8 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
       let replace (Var v) | v == paramName chunk_size_param = w
           replace se = se
-          replaceSets (Acc x y log) =
-            Acc (S.map (map replace) x) (S.map (map replace) y) log
+          replaceSets (IntraAcc x y log) =
+            IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
       censor replaceSets $ mapM_ (intraGroupStm lvl) stream_bnds
 
     Op (Scatter w lam ivs dests) -> do
@@ -275,7 +275,7 @@ intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                              SegLevel -> Body
                           -> m ([[SubExp]], [[SubExp]], Log, Out.KernelBody Out.Kernels)
 intraGroupParalleliseBody lvl body = do
-  (Acc min_ws avail_ws log, kstms) <-
+  (IntraAcc min_ws avail_ws log, kstms) <-
     runIntraGroupM $ intraGroupStms lvl $ bodyStms body
   return (S.toList min_ws, S.toList avail_ws, log,
           KernelBody () kstms $ map (Returns ResultMaySimplify) $ bodyResult body)

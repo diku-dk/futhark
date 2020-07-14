@@ -9,6 +9,7 @@ module Futhark.IR.RetType
        )
        where
 
+import Control.Monad.Identity
 import qualified Data.Map.Strict as M
 
 import Futhark.IR.Syntax.Core
@@ -48,14 +49,10 @@ expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
     where parammap :: M.Map VName SubExp
           parammap = M.fromList $ zip shapes args
 
-          correctDims t =
-            t `setArrayShape`
-            Shape (map correctDim $ shapeDims $ arrayShape t)
-
-          correctDim (Constant v) = Constant v
-          correctDim (Var v)
-            | Just se <- M.lookup v parammap = se
-            | otherwise                       = Var v
+          correctDims = runIdentity . mapOnType (pure . f)
+            where f (Var v)
+                    | Just se <- M.lookup v parammap = se
+                  f se = se
 
 instance IsRetType DeclExtType where
   primRetType = Prim
@@ -71,14 +68,7 @@ instance IsRetType DeclExtType where
           parammap :: M.Map VName SubExp
           parammap = M.fromList $ zip (map paramName params) (map fst args)
 
-          correctExtDims t =
-            t `setArrayShape`
-            Shape (map correctExtDim $ shapeDims $ arrayShape t)
-
-          correctExtDim (Ext i)  = Ext i
-          correctExtDim (Free d) = Free $ correctDim d
-
-          correctDim (Constant v) = Constant v
-          correctDim (Var v)
-            | Just se <- M.lookup v parammap = se
-            | otherwise                       = Var v
+          correctExtDims = runIdentity . mapOnExtType (pure . f)
+            where f (Var v)
+                    | Just se <- M.lookup v parammap = se
+                  f se = se

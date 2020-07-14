@@ -448,6 +448,15 @@ checkArrIdent v = do
     Array{} -> return t
     _       -> bad $ NotAnArray v t
 
+checkAccIdent :: Checkable lore =>
+                 VName -> TypeM lore [(PrimType, Shape)]
+checkAccIdent v = do
+  t <- lookupType v
+  case t of
+    Acc ts -> return ts
+    _ -> bad $ TypeError $ pretty v ++
+         " should be an accumulator but is of type " ++ pretty t
+
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
 -- information.
@@ -694,7 +703,7 @@ checkBasicOp (Update src idxes se) = do
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
-  require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
+  require [arrayOf (elemToType (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
   consume =<< lookupAliases src
 
 checkBasicOp (Iota e x s et) = do
@@ -756,6 +765,35 @@ checkBasicOp (Manifest perm arr) =
 
 checkBasicOp (Assert e _ _) =
   require [Prim Bool] e
+
+checkBasicOp (UnAcc acc ts) = do
+  expected <- checkIfAccArr =<< checkArrIdent acc
+  unless (expected == ts) $
+    bad $ TypeError $ unlines ["Annotation: " ++ pretty ts,
+                               "Inferred: " ++ pretty expected]
+  where checkIfAccArr (Array (ElemAcc ts_and_shapes) _ _) =
+          pure $ map mkArr ts_and_shapes
+        checkIfAccArr t =
+          bad $ TypeError $ "Bad type for UnAcc: " ++ pretty t
+
+        mkArr (pt, shape) = Array (ElemPrim pt) shape NoUniqueness
+
+checkBasicOp (UpdateAcc acc is ses) = do
+  ts_and_shapes <- checkAccIdent acc
+
+  unless (length ses == length ts_and_shapes) $
+    bad $ TypeError $ "Accumulator requires " ++
+    show (length ts_and_shapes) ++ " values, but only " ++
+    show (length ses) ++ " provided."
+
+  forM_ (zip ts_and_shapes ses) $ \((t, shape), se) -> do
+    se_t <- subExpType se
+    case peelArray (length is) (Array (ElemPrim t) shape NoUniqueness) of
+      Just t' | t' == se_t -> return ()
+              | otherwise ->
+                  bad $ TypeError $ pretty se ++ " has type " ++ pretty se_t ++
+                  ", but expected " ++ pretty t'
+      _ -> bad $ TypeError "Too many indexes for accumulator."
 
 matchLoopResultExt :: Checkable lore =>
                       [Param DeclType] -> [Param DeclType]
@@ -867,6 +905,17 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                              scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here) <$>
               mapM subExpAliasesM (bodyResult loopbody)
+
+checkExp (MkAcc shape arrs lam) = do
+  mapM_ (require [Prim int32]) (shapeDims shape)
+  arrs_ts <- mapM checkArrIdent arrs
+  let mkArg t = (rowType t, mempty)
+
+  case lam of
+    Just lam' ->
+      checkLambda lam' $ map mkArg $ arrs_ts ++ arrs_ts
+    Nothing ->
+      return ()
 
 checkExp (Op op) = do checker <- asks envCheckOp
                       checker op
@@ -1041,12 +1090,8 @@ checkArg arg = do argt <- checkSubExp arg
 checkFuncall :: Maybe Name
              -> [DeclType] -> [Arg]
              -> TypeM lore ()
-checkFuncall fname paramts args = do
-  let argts = map argType args
-  unless (validApply paramts argts) $
-    bad $ ParameterMismatch fname
-          (map fromDecl paramts) $
-          map argType args
+checkFuncall fname paramts args =
+  -- The actual types have already been checked in lookupFun.
   forM_ (zip (map diet paramts) args) $ \(d, (_, als)) ->
     occur [consumption (consumeArg als d)]
   where consumeArg als Consume = als
