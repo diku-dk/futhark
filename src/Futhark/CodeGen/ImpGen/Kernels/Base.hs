@@ -248,7 +248,7 @@ prepareIntraGroupSegHist group_size =
                      shapeDims (histShape op) ++
                      [histWidth op]
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
-              locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
+              locks_t = Array (ElemPrim int32) (Shape [unCount group_size]) NoUniqueness
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
           dArray locks int32 (arrayShape locks_t) $
@@ -310,9 +310,9 @@ compileGroupOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
         MemLocation mem _ _ <-
           entryArrayLocation <$> lookupArray (patElemName pe)
         let pe_t = typeOf pe
+            ElemPrim pe_pt = elemType pe_t
             arr_dims = Var dims_flat : drop (length dims') (arrayDims pe_t)
-        sArray (baseString (patElemName pe) ++ "_flat")
-          (elemType pe_t) (Shape arr_dims) $
+        sArray (baseString (patElemName pe) ++ "_flat") pe_pt (Shape arr_dims) $
           ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) arr_dims
 
       num_scan_results = sum $ map (length . segBinOpNeutral) scans
@@ -333,7 +333,8 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
   dims' <- mapM toExp dims
 
   let mkTempArr t =
-        sAllocArray "red_arr" (elemType t) (Shape dims <> arrayShape t) $ Space "local"
+        sAllocArray "red_arr" pt (Shape dims <> arrayShape t) $ Space "local"
+        where ElemPrim pt = elemType t
   tmp_arrs <- mapM mkTempArr $ concatMap (lambdaReturnType . segBinOpLambda) ops
   let tmps_for_ops = chunks (map (length . segBinOpNeutral) ops) tmp_arrs
 
@@ -671,6 +672,7 @@ readsFromSet free =
       Array {} -> return Nothing
       Mem (Space "local") -> return Nothing
       Mem {} -> return $ Just $ Imp.MemoryUse var
+      Acc{} -> return Nothing
       Prim bt ->
         isConstExp vtable (Imp.var var bt) >>= \case
           Just ce -> return $ Just $ Imp.ConstUse var ce

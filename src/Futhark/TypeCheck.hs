@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, ScopedTypeVariables #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
 -- | The type checker checks whether the program is type-consistent.
@@ -448,6 +449,22 @@ checkArrIdent v = do
     Array{} -> return t
     _       -> bad $ NotAnArray v t
 
+checkAccIdent :: Checkable lore =>
+                 VName -> TypeM lore [(PrimType, Shape)]
+checkAccIdent v = do
+  t <- lookupType v
+  case t of
+    Acc arrs -> do
+      arr_ts <- mapM checkArrIdent arrs
+      forM arr_ts $ \case
+        Array (ElemPrim pt) shape _ ->
+          return (pt, shape)
+        _ ->
+          bad $ TypeError $ pretty v ++
+          " is an accumulator of arrays of accumulators."
+    _ -> bad $ TypeError $ pretty v ++
+         " should be an accumulator but is of type " ++ pretty t
+
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
 -- information.
@@ -685,7 +702,7 @@ checkBasicOp (Update src idxes se) = do
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
-  require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
+  require [arrayOf (elemToType (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
   consume =<< lookupAliases src
 
 checkBasicOp (Iota e x s et) = do
@@ -747,6 +764,35 @@ checkBasicOp (Manifest perm arr) =
 
 checkBasicOp (Assert e _ _) =
   require [Prim Bool] e
+
+checkBasicOp (UnAcc acc ts) = do
+  expected <- checkIfAccArr =<< checkArrIdent acc
+  unless (expected == ts) $
+    bad $ TypeError $ unlines ["Annotation: " ++ pretty ts,
+                               "Inferred: " ++ pretty expected]
+  where checkIfAccArr (Array (ElemAcc arrs) _ _) =
+          mapM lookupType arrs
+        checkIfAccArr t =
+          bad $ TypeError $ "Bad type for UnAcc: " ++ pretty t
+
+        mkArr (pt, shape) = Array (ElemPrim pt) shape NoUniqueness
+
+checkBasicOp (UpdateAcc acc is ses) = do
+  ts_and_shapes <- checkAccIdent acc
+
+  unless (length ses == length ts_and_shapes) $
+    bad $ TypeError $ "Accumulator requires " ++
+    show (length ts_and_shapes) ++ " values, but only " ++
+    show (length ses) ++ " provided."
+
+  forM_ (zip ts_and_shapes ses) $ \((t, shape), se) -> do
+    se_t <- subExpType se
+    case peelArray (length is) (Array (ElemPrim t) shape NoUniqueness) of
+      Just t' | t' == se_t -> return ()
+              | otherwise ->
+                  bad $ TypeError $ pretty se ++ " has type " ++ pretty se_t ++
+                  ", but expected " ++ pretty t'
+      _ -> bad $ TypeError "Too many indexes for accumulator."
 
 matchLoopResultExt :: Checkable lore =>
                       [Param DeclType] -> [Param DeclType]
@@ -858,6 +904,21 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                              scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here) <$>
               mapM subExpAliasesM (bodyResult loopbody)
+
+checkExp (MkAcc shape arrs op) = do
+  mapM_ (require [Prim int32]) (shapeDims shape)
+  arrs_ts <- mapM checkArrIdent arrs
+  let mkArg t = (rowType t, mempty)
+
+  case op of
+    Just (lam, nes) -> do
+      nes_ts <- mapM checkSubExp nes
+      unless (nes_ts == lambdaReturnType lam) $
+        bad $ TypeError $ unlines [ "Accumulator operator return type: " ++ pretty (lambdaReturnType lam)
+                                  , "Type of neutral elements: " ++ pretty nes_ts]
+      checkLambda lam $ map mkArg $ arrs_ts ++ arrs_ts
+    Nothing ->
+      return ()
 
 checkExp (Op op) = do checker <- asks envCheckOp
                       checker op
@@ -1032,12 +1093,9 @@ checkArg arg = do argt <- checkSubExp arg
 checkFuncall :: Maybe Name
              -> [DeclType] -> [Arg]
              -> TypeM lore ()
-checkFuncall fname paramts args = do
-  let argts = map argType args
-  unless (validApply paramts argts) $
-    bad $ ParameterMismatch fname
-          (map fromDecl paramts) $
-          map argType args
+checkFuncall fname paramts args =
+  -- The actual types have already been checked in lookupFun. FIXME:
+  -- is this true even for loops?
   forM_ (zip (map diet paramts) args) $ \(d, (_, als)) ->
     occur [consumption (consumeArg als d)]
   where consumeArg als Consume = als

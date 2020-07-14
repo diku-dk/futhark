@@ -577,7 +577,7 @@ unAllocKernelsStms = unAllocStms False
 
 unMem :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
 unMem (MemPrim pt) = Just $ Prim pt
-unMem (MemArray pt shape u _) = Just $ Array pt shape u
+unMem (MemArray pt shape u _) = Just $ Array (ElemPrim pt) shape u
 unMem MemMem{} = Nothing
 
 unAllocScope :: Scope KernelsMem -> Scope Kernels.Kernels

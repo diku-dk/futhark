@@ -116,8 +116,8 @@ initialEnv = intrinsicsModule
 
         intrinsicsModule = Env mempty initialTypeTable mempty mempty intrinsicsNameMap
 
-        addIntrinsicT (name, IntrinsicType t) =
-          Just (name, TypeAbbr Unlifted [] $ Scalar $ Prim t)
+        addIntrinsicT (name, IntrinsicType l ps t) =
+          Just (name, TypeAbbr l ps t)
         addIntrinsicT _ =
           Nothing
 

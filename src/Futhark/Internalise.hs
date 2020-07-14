@@ -87,7 +87,8 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
 
     ((rettype', body_res), body_stms) <- collectStms $ do
       body_res <- internaliseExp "res" body
-      rettype_bad <- internaliseReturnType rettype
+      rettype_bad <- internaliseReturnType rettype =<<
+                     mapM subExpType body_res
       let rettype' = zeroExts rettype_bad
       return (rettype', body_res)
     body' <- ensureResultExtShape msg loc (map I.fromDecl rettype') $
@@ -331,7 +332,8 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
 
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
-      arr_t_ext <- internaliseReturnType (E.toStruct arr_t)
+      arr_t_ext <- internaliseReturnType (E.toStruct arr_t) =<<
+                   mapM subExpType (concat es')
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -488,7 +490,7 @@ internaliseExp desc (E.Ascript e _ _) =
 
 internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) (Info ret, Info retext) loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType et
+  ts <- internaliseReturnType et =<< mapM subExpType ses
   dt' <- typeExpForError dt
   bindExtSizes (E.toStruct ret) retext ses
   forM (zip ses ts) $ \(e',t') -> do
@@ -605,7 +607,8 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
 
       i <- newVName "i"
 
-      bindingLoopParams sparams' mergepat $
+      ts <- mapM subExpType mergeinit
+      bindingLoopParams sparams' mergepat ts $
         \shapepat mergepat' ->
         bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
           let loopvars = zip x_params arr'
@@ -620,13 +623,15 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
               I.Prim (IntType it) -> return it
               _                   -> error "internaliseExp DoLoop: invalid type"
 
-      bindingLoopParams sparams' mergepat $
+      ts <- mapM subExpType mergeinit
+      bindingLoopParams sparams' mergepat ts $
         \shapepat mergepat' ->
           forLoop mergepat' shapepat mergeinit $
           I.ForLoop i' it num_iterations' []
 
-    handleForm mergeinit (E.While cond) =
-      bindingLoopParams sparams' mergepat $ \shapepat mergepat' -> do
+    handleForm mergeinit (E.While cond) = do
+      ts <- mapM subExpType mergeinit
+      bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' -> do
         mergeinit_ts <- mapM subExpType mergeinit
         -- We need to insert 'cond' twice - once for the initial
         -- condition (do we enter the loop at all?), and once with the
@@ -852,6 +857,13 @@ internaliseArg desc (arg, argdim) = do
     _ -> return ()
   return arg'
 
+elemPrimType :: I.ElemType -> I.PrimType
+elemPrimType ElemAcc{} = error "elemPrimType: accumulator"
+elemPrimType (ElemPrim t) = t
+
+subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
+subExpPrimType = fmap (elemPrimType . I.elemType) . subExpType
+
 generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
@@ -861,7 +873,7 @@ generateCond orig_p orig_ses = do
     -- Literals are always primitive values.
     compares (E.PatternLit e _ _) (se:ses) = do
       e' <- internaliseExp1 "constant" e
-      t' <- elemType <$> subExpType se
+      t' <- subExpPrimType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
 
@@ -1172,6 +1184,35 @@ internaliseStreamRed desc o comm lam0 lam arr = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
+internaliseStreamAcc :: String -> E.Exp -> Maybe (E.Exp, E.Exp) -> E.Exp -> E.Exp
+                     -> InternaliseM [SubExp]
+internaliseStreamAcc desc dest op lam bs = do
+  dest' <- internaliseExpToVars "scatter_dest" dest
+  dest_ts <- mapM lookupType dest'
+  bs' <- internaliseExpToVars "scatter_input" bs
+
+  op' <-
+    case op of
+      Just (op_lam, ne) -> do
+        ne' <- internaliseExp "hist_ne" ne
+        ne_ts <- mapM I.subExpType ne'
+        (lam_params, lam_body, lam_rettype) <- internaliseLambda op_lam $ ne_ts ++ ne_ts
+        let op_lam' = I.Lambda lam_params lam_body lam_rettype
+        return $ Just (op_lam', ne')
+      Nothing ->
+        return Nothing
+
+  w <- arraysSize 0 <$> mapM lookupType bs'
+  acc <- letExp "scatter_acc" $ MkAcc (Shape [w]) dest' op'
+
+  lam' <- internaliseMapLambda internaliseLambda lam $
+          map I.Var $ acc : bs'
+
+  acc' <- letExp "scatter_acc_res" $ I.Op $ I.Screma w (I.mapSOAC lam') $
+          acc : bs'
+
+  letTupExp' desc (BasicOp $ UnAcc acc' dest_ts)
+
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
   vs <- internaliseExp desc e
@@ -1379,7 +1420,7 @@ internaliseLambda (E.Parens e _) rowtypes =
 internaliseLambda (E.Lambda params body _ (Info (_, rettype)) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
     body' <- internaliseBody body
-    rettype' <- internaliseLambdaReturnType rettype
+    rettype' <- internaliseLambdaReturnType rettype =<< bodyExtType body'
     return (params', body', rettype')
 
 internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
@@ -1394,6 +1435,7 @@ isOverloadedFunction qname args loc = do
                   handleIntrinsicOps,
                   handleOps,
                   handleSOACs,
+                  handleAccs,
                   handleRest]
   msum [h args $ baseString $ qualLeaf qname | h <- handlers]
   where
@@ -1471,7 +1513,7 @@ isOverloadedFunction qname args loc = do
                       y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
                       -- Compare the elements.
-                      cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
+                      cmp_lam <- cmpOpLambda $ I.CmpEq (elemPrimType (elemType x_t))
                       cmps <- letExp "cmps" $ I.Op $
                               I.Screma x_num_elems (I.mapSOAC cmp_lam) [x_flat, y_flat]
 
@@ -1547,6 +1589,20 @@ isOverloadedFunction qname args loc = do
       internaliseHist desc rf dest op ne buckets img loc
 
     handleSOACs _ _ = Nothing
+
+    handleAccs [TupLit [dest, f, bs] _] "scatter_stream" = Just $ \desc ->
+      internaliseStreamAcc desc dest Nothing f bs
+
+    handleAccs [TupLit [dest, op, ne, f, bs] _] "hist_stream" = Just $ \desc ->
+      internaliseStreamAcc desc dest (Just (op, ne)) f bs
+
+    handleAccs [TupLit [acc, i, v] _] "acc_write" = Just $ \desc -> do
+      acc' <- head <$> internaliseExpToVars "acc" acc
+      i' <- internaliseExp1 "acc_i" i
+      vs <- internaliseExp "acc_v" v
+      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
+
+    handleAccs _ _ = Nothing
 
     handleRest [x] "!" = Just $ complementF x
 

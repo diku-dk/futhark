@@ -10,6 +10,7 @@ module Futhark.Internalise.AccurateSizes
   where
 
 import Control.Monad
+import Data.List (find)
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -19,15 +20,23 @@ import Futhark.Internalise.Monad
 import Futhark.IR.SOACS
 import Futhark.Util (takeLast)
 
-shapeMapping :: HasScope SOACS m =>
+shapeMapping :: (HasScope SOACS m, Monad m) =>
                 [FParam] -> [Type]
              -> m (M.Map VName (S.Set SubExp))
 shapeMapping all_params value_arg_types =
   mconcat <$> zipWithM f value_params value_arg_types
   where value_params = takeLast (length value_arg_types) all_params
 
+        findArrParam arr = find ((==arr) . paramName) all_params
+
         f (Param _ t1@Array{}) t2@Array{} =
           pure $ M.fromList $ mapMaybe match $ zip (arrayDims t1) (arrayDims t2)
+        f (Param _ (Acc arrs1)) (Acc arrs2)
+          | Just arrs1_params <- mapM findArrParam arrs1 = do
+              arrs2_ts <- mapM lookupType arrs2
+              let arr_m = M.fromList $ zip arrs1 $ map (S.singleton . Var) arrs2
+              arr_sizes_m <- mconcat <$> zipWithM f arrs1_params arrs2_ts
+              return $ arr_m <> arr_sizes_m
         f _ _ =
           pure mempty
 

@@ -85,6 +85,7 @@ module Futhark.Construct
   , resultBodyM
   , insertStmsM
   , mapResult
+  , bodyExtType
 
   , foldBinOp
   , binOpLambda
@@ -196,8 +197,8 @@ eIf' ce te fe if_sort = do
           mkBodyM stms $ ctx_res++val_res
             where stmsscope = scopeOf stms
 
--- The type of a body.  Watch out: this only works for the degenerate
--- case where the body does not already return its context.
+-- | The type of a body.  Watch out: this only works for the
+-- degenerate case where the body does not already return its context.
 bodyExtType :: (HasScope lore m, Monad m) => Body lore -> m [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes <$>
@@ -329,6 +330,7 @@ eWriteArray arr is v = do
 eBlank :: MonadBinder m => Type -> m (Exp (Lore m))
 eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
 eBlank (Array t shape _) = return $ BasicOp $ Scratch t $ shapeDims shape
+eBlank Acc{} = error "eBlank: cannot create blank accumulator"
 eBlank Mem{} = error "eBlank: cannot create blank memory"
 
 -- | Sign-extend to the given integer type.

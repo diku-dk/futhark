@@ -144,10 +144,19 @@ instance Substitute d => Substitute (Ext d) where
 instance Substitute Names where
   substituteNames = mapNames . substituteNames
 
+instance Substitute ElemType where
+  substituteNames _ (ElemPrim t) =
+    ElemPrim t
+  substituteNames substs (ElemAcc arrs) =
+    ElemAcc $ map (substituteNames substs) arrs
+
 instance Substitute shape => Substitute (TypeBase shape u) where
-  substituteNames _ (Prim et) = Prim et
+  substituteNames _ (Prim et) =
+    Prim et
+  substituteNames substs (Acc arrs) =
+    Acc $ map (substituteNames substs) arrs
   substituteNames substs (Array et sz u) =
-    Array et (substituteNames substs sz) u
+    Array (substituteNames substs et) (substituteNames substs sz) u
   substituteNames _ (Mem space) =
     Mem space
 

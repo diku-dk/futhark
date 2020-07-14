@@ -74,7 +74,7 @@ primOpType (ConvOp conv _) =
   pure [Prim $ snd $ convOpType conv]
 primOpType (Index ident slice) =
   result <$> lookupType ident
-  where result t = [Prim (elemType t) `arrayOfShape` shape]
+  where result t = [elemToType (elemType t) `arrayOfShape` shape]
         shape = Shape $ mapMaybe dimSize slice
         dimSize (DimSlice _ d _) = Just d
         dimSize DimFix{}         = Nothing
@@ -87,10 +87,10 @@ primOpType (Replicate (Shape []) e) =
 primOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 primOpType (Scratch t shape) =
-  pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
+  pure [Array t (Shape shape) NoUniqueness]
 primOpType (Reshape [] e) =
   result <$> lookupType e
-  where result t = [Prim $ elemType t]
+  where result t = [elemToType $ elemType t]
 primOpType (Reshape shape e) =
   result <$> lookupType e
   where result t = [t `setArrayShape` newShape shape]
@@ -108,6 +108,10 @@ primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert{} =
   pure [Prim Cert]
+primOpType (UnAcc v ts) =
+  pure ts
+primOpType (UpdateAcc v _ _) =
+  pure <$> lookupType v
 
 -- | The type of an expression.
 expExtType :: (HasScope lore m, TypedOp (Op lore)) =>
@@ -117,7 +121,9 @@ expExtType (If _ _ _ rt)  = pure $ map extTypeOf $ ifReturns rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 expExtType (BasicOp op)    = staticShapes <$> primOpType op
-expExtType (Op op)        = opType op
+expExtType (MkAcc shape arrs _) =
+  pure $ staticShapes [Array (ElemAcc arrs) shape NoUniqueness]
+expExtType (Op op) = opType op
 
 -- | The number of values returned by an expression.
 expExtTypeSize :: (Decorations lore, TypedOp (Op lore)) =>

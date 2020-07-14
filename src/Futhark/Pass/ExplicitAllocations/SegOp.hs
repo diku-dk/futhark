@@ -35,7 +35,7 @@ allocInBinOpParams :: Allocable fromlore tolore =>
 allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc xs ys
   where alloc x y =
           case paramType x of
-            Array bt shape u -> do
+            Array (ElemPrim pt) shape u -> do
               twice_num_threads <-
                 letSubExp "twice_num_threads" $
                 BasicOp $ BinOp (Mul Int32 OverflowUndef) num_threads $ intConst Int32 2
@@ -49,11 +49,11 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
                             fullSliceNum base_dims [DimFix my_id]
                   ixfun_y = IxFun.slice ixfun_base $
                             fullSliceNum base_dims [DimFix other_id]
-              return (x { paramDec = MemArray bt shape u $ ArrayIn mem ixfun_x },
-                      y { paramDec = MemArray bt shape u $ ArrayIn mem ixfun_y })
-            Prim bt ->
-              return (x { paramDec = MemPrim bt },
-                      y { paramDec = MemPrim bt })
+              return (x { paramDec = MemArray pt shape u $ ArrayIn mem ixfun_x },
+                      y { paramDec = MemArray pt shape u $ ArrayIn mem ixfun_y })
+            Prim pt ->
+              return (x { paramDec = MemPrim pt },
+                      y { paramDec = MemPrim pt })
             Mem space ->
               return (x { paramDec = MemMem space },
                       y { paramDec = MemMem space })

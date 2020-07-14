@@ -134,7 +134,7 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
         sArray "red_arr" pt shape' $
           ArrayIn mem $ IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape'
       _ -> do
-        let pt = elemType $ paramType p
+        let ElemPrim pt = elemType $ paramType p
             shape = Shape [group_size]
         sAllocArray "red_arr" pt shape $ Space "local"
 
@@ -150,7 +150,7 @@ groupResultArrays :: Count NumGroups SubExp -> Count GroupSize SubExp
 groupResultArrays (Count virt_num_groups) (Count group_size) reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
-    let pt = elemType t
+    let ElemPrim pt = elemType t
         full_shape = Shape [group_size, virt_num_groups] <> shape <> arrayShape t
         -- Move the groupsize dimension last to ensure coalesced
         -- memory access.

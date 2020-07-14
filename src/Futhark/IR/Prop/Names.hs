@@ -270,10 +270,15 @@ instance FreeIn d => FreeIn (Ext d) where
   freeIn' (Free x) = freeIn' x
   freeIn' (Ext _)  = mempty
 
+instance FreeIn ElemType where
+  freeIn' ElemPrim{} = mempty
+  freeIn' (ElemAcc arrs) = freeIn' arrs
+
 instance FreeIn shape => FreeIn (TypeBase shape u) where
-  freeIn' (Array _ shape _) = freeIn' shape
+  freeIn' (Array t shape _) = freeIn' t <> freeIn' shape
   freeIn' (Mem s)           = freeIn' s
-  freeIn' (Prim _)          = mempty
+  freeIn' Prim{}            = mempty
+  freeIn' (Acc arrs)        = freeIn' arrs
 
 instance FreeIn dec => FreeIn (Param dec) where
   freeIn' (Param _ dec) = freeIn' dec
