@@ -204,7 +204,7 @@ def initialise_opencl_object(self,
     if (len(program_src) >= 0):
         return cl.Program(self.ctx, program_src).build(
             ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
-            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi'),v) for (s,v) in self.sizes.items()])
+            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi').replace('#', 'zh'),v) for (s,v) in self.sizes.items()])
 
 def opencl_alloc(self, min_size, tag):
     min_size = 1 if min_size == 0 else min_size
