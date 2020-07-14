@@ -323,6 +323,8 @@ makeSafe _ =
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem{} =
   error "emptyOfType: Cannot hoist non-existential memory."
+emptyOfType _ Acc{} =
+  error "emptyOfType: Cannot hoist accumulator."
 emptyOfType _ (Prim pt) =
   return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
 emptyOfType ctx_names (Array pt shape _) = do
@@ -703,6 +705,18 @@ simplifyExp (DoLoop ctx val form loopbody) = do
 simplifyExp (Op op) = do (op', stms) <- simplifyOp op
                          return (Op op', stms)
 
+simplifyExp (MkAcc shape arrs op) = do
+  (op', op_stms) <- case op of
+                      Nothing ->
+                        pure (Nothing, mempty)
+                      Just (lam, nes) -> do
+                        (lam', lam_stms) <- simplifyLambda lam
+                        nes' <- simplify nes
+                        return (Just (lam', nes'), lam_stms)
+  (,)
+    <$> (MkAcc <$> simplify shape <*> simplify arrs <*> pure op')
+    <*> pure op_stms
+
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions
 -- more identical, which helps CSE.
@@ -815,10 +829,15 @@ instance Simplifiable Space where
   simplify (ScalarSpace ds t) = ScalarSpace <$> simplify ds <*> pure t
   simplify s = pure s
 
+instance Simplifiable ElemType where
+  simplify (ElemPrim pt) = pure $ ElemPrim pt
+  simplify (ElemAcc ts) = ElemAcc <$> mapM simplify ts
+
 instance Simplifiable shape => Simplifiable (TypeBase shape u) where
-  simplify (Array et shape u) = do
-    shape' <- simplify shape
-    return $ Array et shape' u
+  simplify (Array et shape u) =
+    Array <$> simplify et <*> simplify shape <*> pure u
+  simplify (Acc ts) =
+    Acc <$> mapM simplify ts
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =

@@ -28,7 +28,7 @@ bindingParams :: [E.TypeParam] -> [E.Pattern]
 bindingParams tparams params m = do
   flattened_params <- mapM flattenPattern params
   let params_idents = concat flattened_params
-  params_ts <-
+  (extra_params, params_ts) <-
     internaliseParamTypes $
     map (flip E.setAliases () . E.unInfo . E.identType) params_idents
   let num_param_idents = map length flattened_params
@@ -37,16 +37,16 @@ bindingParams tparams params m = do
   let shape_params = [ I.Param v $ I.Prim I.int32 | E.TypeParamDim v _ <- tparams ]
       shape_subst = M.fromList [ (I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params ]
   bindingFlatPattern params_idents (concat params_ts) $ \valueparams ->
-    I.localScope (I.scopeOfFParams $ shape_params++concat valueparams) $
-    substitutingVars shape_subst $ m shape_params $
+    I.localScope (I.scopeOfFParams $ extra_params++shape_params++concat valueparams) $
+    substitutingVars shape_subst $ m (extra_params++shape_params) $
     chunks num_param_ts (concat valueparams)
 
-bindingLoopParams :: [E.TypeParam] -> E.Pattern
+bindingLoopParams :: [E.TypeParam] -> E.Pattern -> [I.Type]
                   -> ([I.FParam] -> [I.FParam] -> InternaliseM a)
                   -> InternaliseM a
-bindingLoopParams tparams pat m = do
+bindingLoopParams tparams pat ts m = do
   pat_idents <- flattenPattern pat
-  pat_ts <- internaliseLoopParamType (E.patternStructType pat)
+  pat_ts <- internaliseLoopParamType (E.patternStructType pat) ts
 
   let shape_params = [ I.Param v $ I.Prim I.int32 | E.TypeParamDim v _ <- tparams ]
       shape_subst = M.fromList [ (I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params ]

@@ -649,7 +649,10 @@ typeSubstsM loc orig_t1 orig_t2 =
           | Just t1' <- peelArray (arrayRank t1) t1,
             Just t2' <- peelArray (arrayRank t1) t2 =
               sub t1' t2'
-        sub (Scalar (TypeVar _ _ v _)) t = addSubst v t
+        sub (Scalar (TypeVar _ _ v _)) t =
+          -- Cannot substitute intrinsic abstract types.
+          unless (baseTag (typeLeaf v) <= maxIntrinsicTag) $
+          addSubst v t
         sub (Scalar (Record fields1)) (Scalar (Record fields2)) =
           zipWithM_ sub
           (map snd $ sortFields fields1) (map snd $ sortFields fields2)

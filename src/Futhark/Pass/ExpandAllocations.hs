@@ -575,9 +575,13 @@ unAllocKernelsStms = unAllocStms False
                       , mapOnVName = Right
                       }
 
-unMem :: MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
+unMem :: (ArrayShape (ShapeBase d), Monoid u) =>
+         MemInfo d u ret -> Maybe (TypeBase (ShapeBase d) u)
 unMem (MemPrim pt) = Just $ Prim pt
-unMem (MemArray pt shape u _) = Just $ Array pt shape u
+unMem (MemArray pt shape u _) = Just $ Array (ElemPrim pt) shape u
+unMem (MemAcc arrs shape)
+  | shapeRank shape == 0 = Just $ Acc arrs
+  | otherwise = Just $ Array (ElemAcc arrs) shape mempty
 unMem MemMem{} = Nothing
 
 unAllocScope :: Scope KernelsMem -> Scope Kernels.Kernels

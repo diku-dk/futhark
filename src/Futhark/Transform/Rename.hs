@@ -255,12 +255,16 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnOp = rename
                     }
 
+instance Rename ElemType where
+  rename (ElemPrim t) = pure $ ElemPrim t
+  rename (ElemAcc ts) = ElemAcc <$> mapM rename ts
+
 instance Rename shape =>
          Rename (TypeBase shape u) where
-  rename (Array et size u) = do
-    size' <- rename size
-    return $ Array et size' u
-  rename (Prim et) = return $ Prim et
+  rename (Array et size u) =
+    Array <$> rename et <*> rename size <*> pure u
+  rename (Prim t) = return $ Prim t
+  rename (Acc ts) = Acc <$> mapM rename ts
   rename (Mem space) = pure $ Mem space
 
 instance Renameable lore => Rename (Lambda lore) where

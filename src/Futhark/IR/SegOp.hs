@@ -649,6 +649,7 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
 mapOnSegOpType :: Monad m =>
                   SegOpMapper lvl flore tlore m -> Type -> m Type
 mapOnSegOpType _tv t@Prim{} = pure t
+mapOnSegOpType _tv t@Acc{} = pure t
 mapOnSegOpType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnSegOpSubExp tv) dims
 mapOnSegOpType _tv (Mem s) = pure $ Mem s

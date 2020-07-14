@@ -438,7 +438,8 @@ instance ASTLore lore => IsOp (SOAC lore) where
   cheapOp _ = True
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
-substNamesInType _ tp@(Prim _) = tp
+substNamesInType _ t@Prim{} = t
+substNamesInType _ t@Acc{} = t
 substNamesInType _ (Mem space) = Mem space
 substNamesInType subs (Array btp shp u) =
   let shp' = Shape $ map (substNamesInSubExp subs) (shapeDims shp)

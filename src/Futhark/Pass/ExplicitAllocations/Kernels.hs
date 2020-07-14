@@ -100,7 +100,8 @@ mapResultHint lvl space = hint
         coalesceReturnOfShape _ _ = True
 
         hint t Returns{}
-          | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t = do
+          | ElemPrim pt <- elemType t,
+            coalesceReturnOfShape (primByteSize pt) $ arrayDims t = do
               let space_dims = segSpaceDims space
               t_dims <- mapM dimAllocationSize $ arrayDims t
               return $ Hint (innermost space_dims t_dims) DefaultSpace
@@ -144,9 +145,10 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
           then let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
                    dims = seg_dims ++ map (primExpFromSubExp int32) (arrayDims t)
                    nilSlice d = DimSlice 0 d 0
+                   ElemPrim pt = elemType t
              in Hint (IxFun.slice (IxFun.iota dims) $
                       fullSliceNum dims $ map nilSlice seg_dims) $
-                ScalarSpace (arrayDims t) $ elemType t
+                ScalarSpace (arrayDims t) pt
           else NoHint
   where private (Returns ResultPrivate _) = True
         private _                         = False
@@ -157,7 +159,7 @@ inThreadExpHints e = do
   consts <- askConsts
   mapM (maybePrivate consts) =<< expExtType e
   where maybePrivate consts t
-          | Just (Array pt shape _) <- hasStaticShape t,
+          | Just (Array (ElemPrim pt) shape _) <- hasStaticShape t,
             all (semiStatic consts) $ shapeDims shape = do
               let ixfun = IxFun.iota $ map (primExpFromSubExp int32) $
                           shapeDims shape

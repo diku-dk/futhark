@@ -175,6 +175,7 @@ newtype ScalarEntry = ScalarEntry {
 data VarEntry lore = ArrayVar (Maybe (Exp lore)) ArrayEntry
                    | ScalarVar (Maybe (Exp lore)) ScalarEntry
                    | MemVar (Maybe (Exp lore)) MemEntry
+                   | AccVar (Maybe (Exp lore)) [VName] Shape
                    deriving (Show)
 
 -- | When compiling an expression, this is a description of where the
@@ -234,11 +235,18 @@ data ImpState lore r op =
            , stateFunctions :: Imp.Functions op
            , stateCode :: Imp.Code op
            , stateWarnings :: Warnings
+           , stateAccs :: M.Map [VName] (Lambda lore, [SubExp])
+             -- ^ Maps the arrays backing each accumulator to their
+             -- update function and neutral elements.  This works
+             -- because an array name can only become part of a single
+             -- accumulator throughout its lifetime.  If the arrays
+             -- backing an accumulator is not in this mapping, the
+             -- accumulator is scatter-like.
            , stateNameSource :: VNameSource
            }
 
 newState :: VNameSource -> ImpState lore r op
-newState = ImpState mempty mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty mempty
 
 newtype ImpM lore r op a =
   ImpM (ReaderT (Env lore r op) (State (ImpState lore r op)) a)
@@ -258,11 +266,16 @@ instance HasScope SOACS (ImpM lore r op) where
             Mem (entryMemSpace memEntry)
           entryType (ArrayVar _ arrayEntry) =
             Array
-            (entryArrayElemType arrayEntry)
+            (ElemPrim (entryArrayElemType arrayEntry))
             (Shape $ entryArrayShape arrayEntry)
             NoUniqueness
           entryType (ScalarVar _ scalarEntry) =
             Prim $ entryScalarType scalarEntry
+          entryType (AccVar _ arrs shape)
+            | shape == mempty =
+                Acc arrs
+            | otherwise =
+                Array (ElemAcc arrs) shape NoUniqueness
 
 runImpM :: ImpM lore r op a
         -> r -> Operations lore r op -> Imp.Space -> ImpState lore r op
@@ -291,6 +304,7 @@ subImpM r ops (ImpM m) = do
                     , stateCode = mempty
                     , stateNameSource = stateNameSource s
                     , stateWarnings = mempty
+                    , stateAccs = stateAccs s
                     }
       (x, s'') = runState (runReaderT m env') s'
 
@@ -405,6 +419,8 @@ compileInParam fparam = case paramDec fparam of
   MemArray bt shape _ (ArrayIn mem ixfun) ->
     return $ Right $ ArrayDecl name bt $
     MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
+  MemAcc{} ->
+    error "Functions may not have accumulator parameters."
   where name = paramName fparam
 
 data ArrayDecl = ArrayDecl VName PrimType MemLocation
@@ -491,6 +507,8 @@ compileOutParams orig_rts orig_epts = do
 
         mkParam MemMem{} _ =
           error "Functions may not explicitly return memory blocks."
+        mkParam MemAcc{} _ =
+          error "Functions may not return accumulators."
         mkParam (MemPrim t) ept = do
           out <- imp $ newVName "scalar_out"
           tell ([Imp.ScalarParam out t], mempty)
@@ -672,6 +690,14 @@ defCompileExp pat (DoLoop ctx val form body) = do
   where merge = ctx ++ val
         mergepat = map fst merge
 
+defCompileExp _ (MkAcc _ arrs Nothing) =
+  -- In case these arrays have been used for another accumulator on
+  -- another code path, we have to forget about that.
+  modify $ \s -> s { stateAccs = M.delete arrs $ stateAccs s }
+
+defCompileExp _ (MkAcc _ arrs (Just (lam, nes))) =
+  modify $ \s -> s { stateAccs = M.insert arrs (lam, nes) $ stateAccs s }
+
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
   opc pat op
@@ -791,6 +817,49 @@ defCompileBasicOp _ Rotate{} =
 defCompileBasicOp _ Reshape{} =
   return ()
 
+defCompileBasicOp _ UnAcc{} =
+  return ()
+
+defCompileBasicOp _ (UpdateAcc acc is vs) = do
+  acc_t <- lookupType acc
+  is' <- mapM (fmap DimFix . toExp) is
+
+  -- We need to figure out whether we are updating a scatter-like
+  -- accumulator or a generalised reduction.
+  let arrs = accArrs acc_t
+  op <- gets $ M.lookup arrs . stateAccs
+
+  case op of
+    Nothing ->
+      -- Scatter-like.
+      forM_ (zip arrs vs) $ \(arr, v) -> copyDWIM arr is' v []
+    Just (lam, _) ->
+      -- Generalised reduction.
+      --
+      -- We are abusing the comment mechanism to wrap the operator in
+      -- braces when we end up generating code.  This is necessary
+      -- because we might otherwise end up declaring these parameters
+      -- multiple times, as they are duplicated every time we do an
+      -- UpdateAcc for the same accumulator.
+      sComment "UpdateAcc" $ do
+        dLParams $ lambdaParams lam
+        let (x_params, y_params) =
+              splitAt (length vs) $ map paramName $ lambdaParams lam
+
+        forM_ (zip x_params arrs) $ \(xp, arr) ->
+          copyDWIM xp [] (Var arr) is'
+
+        forM_ (zip y_params vs) $ \(yp, v) ->
+          copyDWIM yp [] v []
+
+        compileStms mempty (bodyStms $ lambdaBody lam) $
+          forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
+          copyDWIM arr is' se []
+
+  where accArrs (Acc arrs) = arrs
+        accArrs (Array (ElemAcc arrs) _ _) = arrs
+        accArrs t = error $ unwords ["accArrs:", pretty acc, pretty t]
+
 defCompileBasicOp pat e =
   error $ "ImpGen.defCompileBasicOp: Invalid pattern\n  " ++
   pretty pat ++ "\nfor expression\n  " ++ pretty e
@@ -863,6 +932,8 @@ memBoundToVarEntry e (MemPrim bt) =
   ScalarVar e ScalarEntry { entryScalarType = bt }
 memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
+memBoundToVarEntry e (MemAcc arrs space) =
+  AccVar e arrs space
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
   let location = MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
   in ArrayVar e ArrayEntry { entryArrayLocation = location
@@ -888,6 +959,8 @@ dInfo e name info = do
     ScalarVar _ entry' ->
       emit $ Imp.DeclareScalar name Imp.Nonvolatile $ entryScalarType entry'
     ArrayVar _ _ ->
+      return ()
+    AccVar{} ->
       return ()
   addVar name entry
 
@@ -1034,9 +1107,10 @@ destinationFromPattern pat =
               return $ ArrayDestination Nothing
             MemVar{} ->
               return $ MemoryDestination name
-
             ScalarVar{} ->
               return $ ScalarDestination name
+            AccVar{} ->
+              return $ ArrayDestination Nothing
 
 fullyIndexArray :: VName -> [Imp.Exp]
                 -> ImpM lore r op (VName, Imp.Space, Count Elements Imp.Exp)
@@ -1227,6 +1301,9 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
       return () -- Nothing to do; something else set some memory
                 -- somewhere.
 
+    (_, AccVar{}) ->
+      return () -- Nothing to do; accumulators are phantoms.
+
 -- | Copy from here to there; both destination and source be
 -- indexeded.  If so, they better be arrays of enough dimensions.
 -- This function will generally just Do What I Mean, and Do The Right
@@ -1245,6 +1322,10 @@ copyDWIM dest dest_slice src src_slice = do
 
           MemVar _ _ ->
             MemoryDestination dest
+
+          AccVar{} ->
+            -- Does not matter; accumulators are phantoms.
+            ArrayDestination Nothing
   copyDWIMDest dest_target dest_slice src src_slice
 
 -- | As 'copyDWIM', but implicitly 'DimFix'es the indexes.
@@ -1271,8 +1352,11 @@ compileAlloc pat _ _ =
 -- straightforward contiguous format, as an 'Int64' expression.
 typeSize :: Type -> Count Bytes Imp.Exp
 typeSize t =
-  Imp.bytes $ sExt Int64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int32) *
+  Imp.bytes $ sExt Int64 elem_size *
   product (map (sExt Int64 . toExp' int32) (arrayDims t))
+  where elem_size = case elemType t of
+                      ElemPrim t' -> Imp.LeafExp (Imp.SizeOf t') int32
+                      ElemAcc{} -> 0
 
 --- Building blocks for constructing code.
 
@@ -1353,7 +1437,7 @@ sArrayInMem name pt shape mem =
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
-  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  mem <- sAlloc (name ++ "_mem") (typeSize (Array (ElemPrim pt) shape NoUniqueness)) space
   let iota_ixfun = IxFun.iota $ map (primExpFromSubExp int32) permuted_dims
   sArray name pt shape $
     ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm

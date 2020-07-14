@@ -232,36 +232,52 @@ type ExtIxFun = IxFun.IxFun (PrimExp (Ext VName))
 -- | A summary of the memory information for every let-bound
 -- identifier, function parameter, and return value.  Parameterisered
 -- over uniqueness, dimension, and auxiliary array information.
-data MemInfo d u ret = MemPrim PrimType
-                     -- ^ A primitive value.
-                     | MemMem Space
-                     -- ^ A memory block.
-                     | MemArray PrimType (ShapeBase d) u ret
-                     -- ^ The array is stored in the named memory block,
-                     -- and with the given index function.  The index
-                     -- function maps indices in the array to /element/
-                     -- offset, /not/ byte offsets!  To translate to byte
-                     -- offsets, multiply the offset with the size of the
-                     -- array element type.
-                     deriving (Eq, Show, Ord) --- XXX Ord?
+data MemInfo d u ret
+  = MemPrim PrimType
+    -- ^ A primitive value.
+  | MemMem Space
+    -- ^ A memory block.
+  | MemArray PrimType (ShapeBase d) u ret
+    -- ^ The array is stored in the named memory block, and with the
+    -- given index function.  The index function maps indices in the
+    -- array to /element/ offset, /not/ byte offsets!  To translate to
+    -- byte offsets, multiply the offset with the size of the array
+    -- element type.
+  | MemAcc [VName] (ShapeBase d)
+    -- ^ An accumulator, or array of them.  The 'ShapeBase' is empty
+    -- if not an array of accumulators.  The reason for decoupling
+    -- accumulators from arrays (which is not done in 'TypeBase') is
+    -- that arrays of accumulators do not need to be stored in memory.
+    -- They are a fiction for the benefit of code generation; a mere
+    -- handle to the underlying arrays which is what are really
+    -- updated by 'UpdateAcc'.
+  deriving (Eq, Show, Ord) --- XXX Ord?
 
 type MemBound u = MemInfo SubExp u MemBind
 
 instance FixExt ret => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
   declExtTypeOf (MemPrim pt) = Prim pt
   declExtTypeOf (MemMem space) = Mem space
-  declExtTypeOf (MemArray pt shape u _) = Array pt shape u
+  declExtTypeOf (MemArray pt shape u _) = Array (ElemPrim pt) shape u
+  declExtTypeOf (MemAcc arrs shape)
+    | shape == mempty = Acc arrs
+    | otherwise = Array (ElemAcc arrs) shape Unique
 
 instance FixExt ret => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
   extTypeOf (MemPrim pt) = Prim pt
   extTypeOf (MemMem space) = Mem space
-  extTypeOf (MemArray pt shape u _) = Array pt shape u
+  extTypeOf (MemArray pt shape u _) = Array (ElemPrim pt) shape u
+  extTypeOf (MemAcc arrs shape)
+    | shape == mempty = Acc arrs
+    | otherwise = Array (ElemAcc arrs) shape NoUniqueness
 
 instance FixExt ret => FixExt (MemInfo ExtSize u ret) where
   fixExt _ _ (MemPrim pt) = MemPrim pt
   fixExt _ _ (MemMem space) = MemMem space
   fixExt i se (MemArray pt shape u ret) =
     MemArray pt (fixExt i se shape) u (fixExt i se ret)
+  fixExt _ _ (MemAcc arrs shape) =
+    MemAcc arrs shape
 
 instance Typed (MemInfo SubExp Uniqueness ret) where
   typeOf = fromDecl . declTypeOf
@@ -269,23 +285,34 @@ instance Typed (MemInfo SubExp Uniqueness ret) where
 instance Typed (MemInfo SubExp NoUniqueness ret) where
   typeOf (MemPrim pt) = Prim pt
   typeOf (MemMem space) = Mem space
-  typeOf (MemArray bt shape u _) = Array bt shape u
+  typeOf (MemArray bt shape u _) = Array (ElemPrim bt) shape u
+  typeOf (MemAcc arrs shape)
+    | shape == mempty = Acc arrs
+    | otherwise = Array (ElemAcc arrs) shape NoUniqueness
 
 instance DeclTyped (MemInfo SubExp Uniqueness ret) where
   declTypeOf (MemPrim bt) = Prim bt
   declTypeOf (MemMem space) = Mem space
-  declTypeOf (MemArray bt shape u _) = Array bt shape u
+  declTypeOf (MemArray bt shape u _) = Array (ElemPrim bt) shape u
+  declTypeOf (MemAcc arrs shape)
+    | shape == mempty = Acc arrs
+    | otherwise = Array (ElemAcc arrs) shape Unique
 
 instance (FreeIn d, FreeIn ret) => FreeIn (MemInfo d u ret) where
   freeIn' (MemArray _ shape _ ret) = freeIn' shape <> freeIn' ret
   freeIn' (MemMem s) = freeIn' s
   freeIn' MemPrim{} = mempty
+  freeIn' (MemAcc arrs shape) = freeIn' arrs <> freeIn' shape
 
 instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
   substituteNames subst (MemArray bt shape u ret) =
     MemArray bt
     (substituteNames subst shape) u
     (substituteNames subst ret)
+  substituteNames substs (MemAcc arrs shape) =
+    MemAcc
+    (substituteNames substs arrs)
+    (substituteNames substs shape)
   substituteNames _ (MemMem space) =
     MemMem space
   substituteNames _ (MemPrim bt) =
@@ -315,14 +342,19 @@ instance (Engine.Simplifiable d, Engine.Simplifiable ret) =>
     pure $ MemMem space
   simplify (MemArray bt shape u ret) =
     MemArray bt <$> Engine.simplify shape <*> pure u <*> Engine.simplify ret
+  simplify (MemAcc arrs shape) =
+    MemAcc <$> Engine.simplify arrs <*> Engine.simplify shape
 
-instance (PP.Pretty (TypeBase (ShapeBase d) u),
+instance (PP.Pretty (ShapeBase d),
+          PP.Pretty (TypeBase (ShapeBase d) u),
           PP.Pretty d, PP.Pretty u, PP.Pretty ret) => PP.Pretty (MemInfo d u ret) where
   ppr (MemPrim bt) = PP.ppr bt
   ppr (MemMem DefaultSpace) = PP.text "mem"
   ppr (MemMem s) = PP.text "mem" <> PP.ppr s
   ppr (MemArray bt shape u ret) =
-    PP.ppr (Array bt shape u) <> PP.text "@" <> PP.ppr ret
+    PP.ppr (Array (ElemPrim bt) shape u) <> PP.text "@" <> PP.ppr ret
+  ppr (MemAcc arrs shape) =
+    PP.ppr shape <> PP.ppr (Acc arrs :: Type)
 
 instance PP.Pretty (Param (MemInfo SubExp Uniqueness ret)) where
   ppr = PP.ppr . fmap declTypeOf
@@ -463,6 +495,8 @@ maybeReturns (MemPrim bt) =
   MemPrim bt
 maybeReturns (MemMem space) =
   MemMem space
+maybeReturns (MemAcc arrs shape) =
+  MemAcc arrs shape
 
 noUniquenessReturns :: MemInfo d u r -> MemInfo d NoUniqueness r
 noUniquenessReturns (MemArray bt shape _ r) =
@@ -471,6 +505,8 @@ noUniquenessReturns (MemPrim bt) =
   MemPrim bt
 noUniquenessReturns (MemMem space) =
   MemMem space
+noUniquenessReturns (MemAcc arrs shape) =
+  MemAcc arrs shape
 
 funReturnsToExpReturns :: FunReturns -> ExpReturns
 funReturnsToExpReturns = noUniquenessReturns . maybeReturns
@@ -497,6 +533,7 @@ matchFunctionReturnType rettype result = do
           case dec of
             MemPrim _ -> return ()
             MemMem{} -> return ()
+            MemAcc{} -> return ()
             MemArray _ _ _ (ArrayIn _ ixfun)
               | IxFun.isLinear ixfun ->
                 return ()
@@ -527,6 +564,8 @@ matchLoopResultMem ctx val = matchRetTypeToResult rettype
           MemPrim t
         toRet (MemMem space) =
           MemMem space
+        toRet (MemAcc arrs shape) =
+          MemAcc arrs (fmap toExtSE shape)
         toRet (MemArray pt shape u (ArrayIn mem ixfun))
           | Just i <- mem `elemIndex` ctx_names,
             Param _ (MemMem space) : _ <- drop i ctx =
@@ -584,13 +623,16 @@ matchReturnType rettype res ts = do
         | x == y = return ()
       checkReturn (MemMem x) (MemMem y)
         | x == y = return ()
+      checkReturn (MemAcc x_arrs x_shape) (MemAcc y_arrs y_shape)
+        | x_arrs == y_arrs, shapeRank x_shape == shapeRank y_shape =
+            zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
       checkReturn (MemArray x_pt x_shape _ x_ret)
                   (MemArray y_pt y_shape _ y_ret)
         | x_pt == y_pt, shapeRank x_shape == shapeRank y_shape = do
             zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
             checkMemReturn x_ret y_ret
       checkReturn x y =
-        throwError $ unwords ["Expected ", pretty x, " but got ", pretty y]
+        throwError $ unwords ["Expected", pretty x, "but got", pretty y]
 
       checkDim (Free x) y
         | x == y = return ()
@@ -676,6 +718,8 @@ matchPatternToExp pat e = do
   where matches _ _ (MemPrim x) (MemPrim y) = x == y
         matches _ _ (MemMem x_space) (MemMem y_space) =
           x_space == y_space
+        matches _ _ (MemAcc x_arrs x_shape) (MemAcc y_arrs y_shape) =
+          x_arrs == y_arrs && x_shape == y_shape
         matches ctxids ctxexts (MemArray x_pt x_shape _ x_ret) (MemArray y_pt y_shape _ y_ret) =
           x_pt == y_pt && x_shape == y_shape &&
           case (x_ret, y_ret) of
@@ -758,6 +802,9 @@ checkMemInfo :: TC.Checkable lore =>
 checkMemInfo _ (MemPrim _) = return ()
 checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int32]) d
 checkMemInfo _ (MemMem _) = return ()
+checkMemInfo _ (MemAcc arrs shape) = do
+  mapM_ (TC.require [Prim int32]) $ shapeDims shape
+  mapM_ lookupType arrs
 checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
   t <- lookupType v
   case t of
@@ -803,6 +850,8 @@ bodyReturnsFromPattern pat =
                   ReturnsNewBlock space i $
                   existentialiseIxFun (map patElemName ctx) ixfun
                 _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+            MemAcc arrs shape ->
+              MemAcc arrs $ Shape $ map ext $ shapeDims shape
          )
 
 instance (PP.Pretty u, PP.Pretty r) => PrettyAnnot (PatElemT (MemInfo SubExp u r)) where
@@ -824,33 +873,44 @@ bindeeAnnot bindeeName bindeeLore bindee =
       Nothing
     MemPrim _ ->
       Nothing
+    MemAcc{} ->
+      Nothing
 
 extReturns :: [ExtType] -> [ExpReturns]
 extReturns ts =
-    evalState (mapM addDec ts) 0
-    where addDec (Prim bt) =
-            return $ MemPrim bt
-          addDec (Mem space) =
-            return $ MemMem space
-          addDec t@(Array bt shape u)
-            | existential t = do
-              i <- get <* modify (+1)
-              return $ MemArray bt shape u $ Just $
-                ReturnsNewBlock DefaultSpace i $
-                IxFun.iota $ map convert $ shapeDims shape
-            | otherwise =
-              return $ MemArray bt shape u Nothing
-          convert (Ext i) = LeafExp (Ext i) int32
-          convert (Free v) = Free <$> primExpFromSubExp int32 v
+  evalState (mapM addDec ts) 0
+  where addDec (Prim bt) =
+          return $ MemPrim bt
+        addDec (Mem space) =
+          return $ MemMem space
+        addDec t@(Array (ElemPrim pt) shape u)
+          | existential t = do
+            i <- get <* modify (+1)
+            return $ MemArray pt shape u $ Just $
+              ReturnsNewBlock DefaultSpace i $
+              IxFun.iota $ map convert $ shapeDims shape
+          | otherwise =
+            return $ MemArray pt shape u Nothing
+        addDec (Array (ElemAcc arrs) shape _) =
+          return $ MemAcc arrs shape
+        addDec (Acc arrs) =
+          return $ MemAcc arrs mempty
+        convert (Ext i) = LeafExp (Ext i) int32
+        convert (Free v) = Free <$> primExpFromSubExp int32 v
+
+data ArrayVar = ArrayVar PrimType Shape VName (IxFun.IxFun (PrimExp VName))
+              | ArrayAccVar [VName] Shape
 
 arrayVarReturns :: (HasScope lore m, Monad m, Mem lore) =>
                    VName
-                -> m (PrimType, Shape, VName, IxFun.IxFun (PrimExp VName))
+                -> m ArrayVar
 arrayVarReturns v = do
   summary <- lookupMemInfo v
   case summary of
     MemArray et shape _ (ArrayIn mem ixfun) ->
-      return (et, Shape $ shapeDims shape, mem, ixfun)
+      return $ ArrayVar et (Shape $ shapeDims shape) mem ixfun
+    MemAcc arrs shape ->
+      return $ ArrayAccVar arrs shape
     _ ->
       error $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
@@ -866,6 +926,8 @@ varReturns v = do
                Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun
     MemMem space ->
       return $ MemMem space
+    MemAcc arrs shape ->
+      return $ MemAcc arrs $ fmap Free shape
 
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
@@ -880,24 +942,37 @@ expReturns (BasicOp (Opaque (Var v))) =
   pure <$> varReturns v
 
 expReturns (BasicOp (Reshape newshape v)) = do
-  (et, _, mem, ixfun) <- arrayVarReturns v
-  return [MemArray et (Shape $ map (Free . newDim) newshape) NoUniqueness $
-          Just $ ReturnsInBlock mem $ existentialiseIxFun [] $
-          IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape]
+  info <- arrayVarReturns v
+  let shape = Shape $ map (Free . newDim) newshape
+  case info of
+    ArrayVar et _ mem ixfun ->
+      return [MemArray et shape NoUniqueness $
+              Just $ ReturnsInBlock mem $ existentialiseIxFun [] $
+              IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape]
+    ArrayAccVar arrs _ ->
+      return [MemAcc arrs shape]
 
 expReturns (BasicOp (Rearrange perm v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let ixfun' = IxFun.permute ixfun perm
-      dims'  = rearrangeShape perm dims
-  return [MemArray et (Shape $ map Free dims') NoUniqueness $
-          Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun']
+  info <- arrayVarReturns v
+  case info of
+    ArrayVar et (Shape dims) mem ixfun -> do
+      let ixfun' = IxFun.permute ixfun perm
+          dims'  = rearrangeShape perm dims
+      return [MemArray et (Shape $ map Free dims') NoUniqueness $
+              Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun']
+    ArrayAccVar arrs (Shape dims) ->
+      return [MemAcc arrs $ Shape $ map Free $ rearrangeShape perm dims]
 
 expReturns (BasicOp (Rotate offsets v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let offsets' = map (primExpFromSubExp int32) offsets
-      ixfun' = IxFun.rotate ixfun offsets'
-  return [MemArray et (Shape $ map Free dims) NoUniqueness $
-          Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun']
+  info <- arrayVarReturns v
+  case info of
+    ArrayVar et (Shape dims) mem ixfun -> do
+      let offsets' = map (primExpFromSubExp int32) offsets
+          ixfun' = IxFun.rotate ixfun offsets'
+      return [MemArray et (Shape $ map Free dims) NoUniqueness $
+              Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun']
+    ArrayAccVar arrs shape ->
+      return [MemAcc arrs (fmap Free shape)]
 
 expReturns (BasicOp (Index v slice)) = do
   info <- sliceInfo v slice
@@ -907,9 +982,22 @@ expReturns (BasicOp (Index v slice)) = do
               Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun]
     MemPrim pt -> return [MemPrim pt]
     MemMem space -> return [MemMem space]
+    MemAcc arrs shape -> return [MemAcc arrs (fmap Free shape)]
 
 expReturns (BasicOp (Update v _ _)) =
   pure <$> varReturns v
+
+expReturns (BasicOp (UnAcc acc _)) = do
+  acc_info <- lookupMemInfo acc
+  case acc_info of
+    MemAcc arrs _ -> mapM varReturns arrs
+    _ -> error $ "UnAcc accumulator has info: " ++ pretty acc_info
+
+expReturns (BasicOp (UpdateAcc acc _ _)) =
+  pure <$> varReturns acc
+
+expReturns (MkAcc shape arrs _) =
+  return [MemAcc arrs $ fmap Free shape]
 
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
@@ -919,18 +1007,23 @@ expReturns e@(DoLoop ctx val _ _) = do
   zipWithM typeWithDec t $ map fst val
     where typeWithDec t p =
             case (t, paramDec p) of
-              (Array bt shape u, MemArray _ _ _ (ArrayIn mem ixfun))
+              (Array (ElemPrim pt) shape u,
+               MemArray _ _ _ (ArrayIn mem ixfun))
                 | Just (i, mem_p) <- isMergeVar mem,
                   Mem space <- paramType mem_p ->
-                    return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ixfun'
+                    return $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
                 | otherwise ->
-                  return (MemArray bt shape u $
+                  return (MemArray pt shape u $
                           Just $ ReturnsInBlock mem ixfun')
                   where ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
+              (Array (ElemAcc arrs) shape _, _) ->
+                return $ MemAcc arrs shape
               (Array{}, _) ->
                 error "expReturns: Array return type but not array merge variable."
-              (Prim bt, _) ->
-                return $ MemPrim bt
+              (Acc arrs, _) ->
+                return $ MemAcc arrs mempty
+              (Prim pt, _) ->
+                return $ MemPrim pt
               (Mem{}, _) ->
                 error "expReturns: loop returns memory block explicitly."
           isMergeVar v = find ((==v) . paramName . snd) $ zip [0..] mergevars
@@ -949,13 +1042,16 @@ sliceInfo :: (Monad m, HasScope lore m, Mem lore) =>
              VName
           -> Slice SubExp -> m (MemInfo SubExp NoUniqueness MemBind)
 sliceInfo v slice = do
-  (et, _, mem, ixfun) <- arrayVarReturns v
-  case sliceDims slice of
-    [] -> return $ MemPrim et
-    dims ->
+  info <- arrayVarReturns v
+  case (info, sliceDims slice) of
+    (ArrayVar et _ _ _, []) ->
+      return $ MemPrim et
+    (ArrayVar et _ mem ixfun, dims) ->
       return $ MemArray et (Shape dims) NoUniqueness $
       ArrayIn mem $ IxFun.slice ixfun
       (map (fmap (primExpFromSubExp int32)) slice)
+    (ArrayAccVar arrs _, dims) ->
+      return $ MemAcc arrs (Shape dims)
 
 class TypedOp (Op lore) => OpReturns lore where
   opReturns :: (Monad m, HasScope lore m) =>
@@ -988,6 +1084,10 @@ applyFunReturns rets params args
         correctDims (MemArray et shape u memsummary) =
           MemArray et (correctShape shape) u $
           correctSummary memsummary
+        correctDims (MemAcc arrs shape) =
+          -- FIXME: probably not right, but for now let us assume that
+          -- we are not passing accumulators across function calls.
+          MemAcc arrs shape
 
         correctShape = Shape . map correctDim . shapeDims
         correctDim (Ext i)   = Ext i

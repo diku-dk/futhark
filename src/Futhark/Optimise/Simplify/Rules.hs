@@ -1013,13 +1013,13 @@ improveReshape _ seType (Reshape newshape v)
       Just (Reshape newshape' v, mempty)
 improveReshape _ _ _ = Nothing
 
--- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
--- itself.
+-- | If we are copying a scratch array (possibly indirectly), just
+-- turn it into a scratch by itself.
 copyScratchToScratch :: SimpleRule lore
 copyScratchToScratch defOf seType (Copy src) = do
   t <- seType $ Var src
-  if isActuallyScratch src then
-    Just (Scratch (elemType t) (arrayDims t), mempty)
+  if isActuallyScratch src
+    then Just (Scratch (elemType t) (arrayDims t), mempty)
     else Nothing
   where isActuallyScratch v =
           case asBasicOp . fst =<< defOf v of

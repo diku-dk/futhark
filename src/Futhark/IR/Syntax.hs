@@ -386,7 +386,7 @@ data BasicOp
   | Replicate Shape SubExp
   -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
 
-  | Scratch PrimType [SubExp]
+  | Scratch ElemType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
@@ -403,6 +403,19 @@ data BasicOp
   -- ^ Rotate the dimensions of the input array.  The list of
   -- subexpressions specify how much each dimension is rotated.  The
   -- length of this list must be equal to the rank of the array.
+
+  -- Accumulator operations
+
+  | UnAcc VName [Type]
+  -- ^ Collapse an array of accumulators to the final arrays produced
+  -- by the accumulations.  Consumes the accumulator and returns an
+  -- array for each 'Type' (which is also incidentally the types of
+  -- the arrays).
+
+  | UpdateAcc VName [SubExp] [SubExp]
+  -- ^ Update an accumulator at the given index with the given value.
+  -- Consumes the accumulator and produces a new one.
+
   deriving (Eq, Ord, Show)
 
 -- | The root Futhark expression type.  The v'Op' constructor contains
@@ -419,6 +432,12 @@ data ExpT lore
   | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
     -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
     -- parameters are divided into context and value part.
+
+  | MkAcc Shape [VName] (Maybe (Lambda lore, [SubExp]))
+  -- ^ Create an array of accumulators of the given shape and
+  -- combination function, which is ultimately backed by the given
+  -- arrays.  This is not part of 'BasicOp' because we need the @lore@
+  -- parameter.
 
   | Op (Op lore)
 

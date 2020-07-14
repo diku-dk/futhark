@@ -17,15 +17,6 @@ allocInKernelBody :: Allocable fromlore tolore =>
 allocInKernelBody (KernelBody () stms res) =
   allocInStms stms $ \stms' -> return $ KernelBody () stms' res
 
-allocInLambda :: Allocable fromlore tolore =>
-                 [LParam tolore] -> Body fromlore -> [Type]
-              -> AllocM fromlore tolore (Lambda tolore)
-allocInLambda params body rettype = do
-  body' <- localScope (scopeOfLParams params) $
-           allocInStms (bodyStms body) $ \bnds' ->
-           return $ Body () bnds' $ bodyResult body
-  return $ Lambda params body' rettype
-
 allocInBinOpParams :: Allocable fromlore tolore =>
                       SubExp
                    -> PrimExp VName -> PrimExp VName
@@ -35,7 +26,7 @@ allocInBinOpParams :: Allocable fromlore tolore =>
 allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc xs ys
   where alloc x y =
           case paramType x of
-            Array bt shape u -> do
+            Array (ElemPrim pt) shape u -> do
               twice_num_threads <-
                 letSubExp "twice_num_threads" $
                 BasicOp $ BinOp (Mul Int32 OverflowUndef) num_threads $ intConst Int32 2
@@ -49,14 +40,24 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
                             fullSliceNum base_dims [DimFix my_id]
                   ixfun_y = IxFun.slice ixfun_base $
                             fullSliceNum base_dims [DimFix other_id]
-              return (x { paramDec = MemArray bt shape u $ ArrayIn mem ixfun_x },
-                      y { paramDec = MemArray bt shape u $ ArrayIn mem ixfun_y })
-            Prim bt ->
-              return (x { paramDec = MemPrim bt },
-                      y { paramDec = MemPrim bt })
+              return (x { paramDec = MemArray pt shape u $ ArrayIn mem ixfun_x },
+                      y { paramDec = MemArray pt shape u $ ArrayIn mem ixfun_y })
+            Prim pt ->
+              return (x { paramDec = MemPrim pt },
+                      y { paramDec = MemPrim pt })
             Mem space ->
               return (x { paramDec = MemMem space },
                       y { paramDec = MemMem space })
+
+            -- This next two cases will never happen.
+
+            Array (ElemAcc arrs) shape _ ->
+              return (x { paramDec = MemAcc arrs shape },
+                      y { paramDec = MemAcc arrs shape })
+
+            Acc arrs ->
+              return (x { paramDec = MemAcc arrs mempty },
+                      y { paramDec = MemAcc arrs mempty })
 
 allocInBinOpLambda :: Allocable fromlore tolore =>
                       SubExp -> SegSpace -> Lambda fromlore

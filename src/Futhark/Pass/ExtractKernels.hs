@@ -274,6 +274,7 @@ unbalancedLambda lam =
         unbalancedStm _ Op{} =
           False
         unbalancedStm _ DoLoop{} = False
+        unbalancedStm _ MkAcc{} = False
 
         unbalancedStm bound (If cond tbranch fbranch _) =
           cond `subExpBound` bound &&
