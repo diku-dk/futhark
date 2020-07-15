@@ -77,13 +77,13 @@ compileMCOp pat (ParOp _par_op op) = do
 compileSegOp :: Pattern MCMem -> SegOp () MCMem
              -> ImpM MCMem Mode Imp.Multicore Imp.Code
 compileSegOp pat (SegHist _ space histops _ kbody) =
-  compileSegHist pat space histops kbody ModeParallel
+  compileSegHist pat space histops kbody
 
 compileSegOp pat (SegScan _ space scans _ kbody) =
-  compileSegScan pat space scans kbody ModeParallel
+  compileSegScan pat space scans kbody
 
 compileSegOp pat (SegRed _ space reds _ kbody) =
-  compileSegRed pat space reds kbody ModeParallel
+  compileSegRed pat space reds kbody
 
 compileSegOp pat (SegMap _ space _ kbody) =
-  compileParallelSegMap pat space kbody
+  compileSegMap pat space kbody

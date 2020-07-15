@@ -11,10 +11,10 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
-import Futhark.Transform.Rename
+-- import Futhark.Transform.Rename
 
 import Futhark.CodeGen.ImpGen.Multicore.Base
-import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed2')
+import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
 import Futhark.MonadFreshNames
 
 
@@ -65,13 +65,12 @@ compileSegHist  :: Pattern MCMem
                 -> SegSpace
                 -> [HistOp MCMem]
                 -> KernelBody MCMem
-                -> Mode
                 -> MulticoreGen Imp.Code
-compileSegHist pat space histops kbody mode
+compileSegHist pat space histops kbody
   | [_] <- unSegSpace space =
-      nonsegmentedHist pat space histops kbody mode
+      nonsegmentedHist pat space histops kbody
   | otherwise =
-      segmentedHist pat space histops kbody mode
+      segmentedHist pat space histops kbody
 
 -- | Split some list into chunks equal to the number of values
 -- returned by each 'SegBinOp'
@@ -136,17 +135,12 @@ compileSegHistBody idx pat space histops kbody = do
                    \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ [buck] ++ is') se []
 
 
-
-
-
-
 segmentedHist :: Pattern MCMem
               -> SegSpace
               -> [HistOp MCMem]
               -> KernelBody MCMem
-              -> Mode
               -> MulticoreGen Imp.Code
-segmentedHist pat space histops kbody ModeParallel = do
+segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
 
   -- iteration variable
@@ -159,33 +153,15 @@ segmentedHist pat space histops kbody ModeParallel = do
     emit $ Imp.Op $ Imp.MCFunc n_segments mempty par_body free_params $
       Imp.MulticoreInfo ntasks sched (segFlat space)
 
-segmentedHist pat space histops kbody ModeSequential = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  collect $ do
-    n_seq_segments <- dPrim "segment_iter" $ IntType Int32
-    seq_body <- compileSegHistBody n_seq_segments pat space histops kbody
-    sFor "i" (product $ init ns') $ \i -> do
-      n_seq_segments <-- i
-      emit seq_body
-
-
-renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
-renameHistOpLambda hist_ops =
-  forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
-    lam' <- renameLambda lam
-    return $ HistOp w rf dest neutral shape lam'
 
 nonsegmentedHist :: Pattern MCMem
                 -> SegSpace
                 -> [HistOp MCMem]
                 -> KernelBody MCMem
-                -> Mode
                 -> MulticoreGen Imp.Code
-nonsegmentedHist pat space histops kbody ModeParallel = do
+nonsegmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
-  let ns = map snd $ unSegSpace space
+  -- let ns = map snd $ unSegSpace space
   -- ns' <- mapM toExp ns
 
   num_threads <- getNumThreads
@@ -198,21 +174,8 @@ nonsegmentedHist pat space histops kbody ModeParallel = do
   collect $ do
     flat_idx <- dPrim "iter" int32
     -- sIf use_small_dest_histogram
-    (smallDestHistogram pat flat_idx space histops num_threads kbody)
+    smallDestHistogram pat flat_idx space histops num_threads kbody
      -- (largeDestHistogram pat space histops' kbody)
-
-nonsegmentedHist pat space histops kbody ModeSequential = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-
-  collect $ localMode ModeSequential $ do
-    flat_seq_idx <- dPrim "iter" int32
-    seq_body <- sequentialHist flat_seq_idx pat space histops kbody
-    emit $ Imp.DebugPrint "SegHist sequential" Nothing
-    sFor "i" (product ns') $ \i -> do
-      flat_seq_idx <-- i
-      emit seq_body
-
 
 -- Generates num_threads sub histograms of the size
 -- of the destination histogram
@@ -316,7 +279,6 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
 
 
   emit $ Imp.DebugPrint "nonsegmented hist stage 2"  Nothing
-  -- let pes_per_op = chunks (map (length . histDest) histops) _all_red_pes
   forM_ (zip3 per_red_pes histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
     bucket_id <- newVName "bucket_id"
     subhistogram_id <- newVName "subhistogram_id"
@@ -345,116 +307,149 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
             [(subhistogram_id, Var num_histos)]
 
       let segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
-      compileSegRed2' (Pattern [] red_pes) segred_space [segred_op] ModeParallel $ \red_cont ->
+          ns_red = map snd $ unSegSpace segred_space
+      ns_red' <- mapM toExp ns_red
+
+      let iterations = case unSegSpace segred_space of
+                         [_] -> product ns_red'
+                         _   -> product $ init ns_red' -- Segmented reduction is over the inner most dimension
+      let retvals = map patElemName red_pes
+      retvals_ts <- mapM lookupType retvals
+      retval_params <- zipWithM toParam retvals retvals_ts
+      let retval_names = map Imp.paramName retval_params
+
+      dPrimV_ (segFlat segred_space) 0
+      red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont ->
         red_cont $ flip map hists $ \subhisto ->
               (Var subhisto, map Imp.vi32 $
                 map fst segment_dims ++ [subhistogram_id, bucket_id])
+
+      free_params_red <- freeParams red_code (segFlat space : retval_names)
+      emit $ Imp.Op $ Imp.Task free_params_red iterations mempty red_code (segFlat space) retval_params
+
 
    where segment_dims = init $ unSegSpace space
 
 
 
+-- nonsegmentedHist pat space histops kbody ModeSequential = do
+--   let ns = map snd $ unSegSpace space
+--   ns' <- mapM toExp ns
+
+--   collect $ localMode ModeSequential $ do
+--     flat_seq_idx <- dPrim "iter" int32
+--     seq_body <- sequentialHist flat_seq_idx pat space histops kbody
+--     emit $ Imp.DebugPrint "SegHist sequential" Nothing
+--     sFor "i" (product ns') $ \i -> do
+--       flat_seq_idx <-- i
+--       emit seq_body
+
+
+-- sequentialHist :: VName
+--                -> Pattern MCMem
+--                -> SegSpace
+--                -> [HistOp MCMem]
+--                -> KernelBody MCMem
+--                -> MulticoreGen Imp.Code
+-- sequentialHist flat_idx pat space histops kbody = do
+--   let (is, ns) = unzip $ unSegSpace space
+--   ns' <- mapM toExp ns
+--   let num_red_res = length histops + sum (map (length . histNeutral) histops)
+--       (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+
+--   collect $ do
+--     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+--     compileStms mempty (kernelBodyStms kbody) $ do
+--       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
+--           (buckets, vs) = splitAt (length histops) red_res
+--           perOp = chunks $ map (length . histDest) histops
+
+--       let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
+--       forM_ (zip4 histops (perOp vs) buckets pes_per_op) $
+--          \(HistOp dest_w _ _ _ shape lam, vs', bucket, dest_res) -> do
+
+--            let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
+--                bucket'   = toExp' int32 $ kernelResultSubExp bucket
+--                dest_w'   = toExp' int32 dest_w
+--                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+
+--            sComment "save map-out results" $
+--              forM_ (zip map_pes map_res) $ \(pe, res) ->
+--                copyDWIMFix (patElemName pe) (map Imp.vi32 is) (kernelResultSubExp res) []
+
+--            sComment "perform non-atomic updates" $
+--              sWhen bucket_in_bounds $ do
+--                dLParams $ lambdaParams lam
+--                let segment_dims =  map Imp.vi32 $ init is
+--                sLoopNest shape $ \is' -> do
+--                  forM_ (zip vs_params vs') $ \(p, res) ->
+--                    copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
+--                  -- sComment "bind lhs" $
+--                  forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
+--                    copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
+--                  -- sComment "execute operation" $
+--                  compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
+--                    forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
+--                      \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
 
 -- |
 -- A different version of segHist
 -- Takes sequential version and simpley chunks is
 -- Implementation does currently not ensure amotic updates
 -- but just doing it sequentially, single threaded seems faster
-largeDestHistogram :: Pattern MCMem
-                   -> SegSpace
-                   -> [HistOp MCMem]
-                   -> KernelBody MCMem
-                   -> MulticoreGen ()
-largeDestHistogram pat space histops kbody = do
-  emit $ Imp.DebugPrint "largeDestHistogram segHist" Nothing
+-- largeDestHistogram :: Pattern MCMem
+--                    -> SegSpace
+--                    -> [HistOp MCMem]
+--                    -> KernelBody MCMem
+--                    -> MulticoreGen ()
+-- largeDestHistogram pat space histops kbody = do
+--   emit $ Imp.DebugPrint "largeDestHistogram segHist" Nothing
 
-  let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
-  let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
-
-
-  flat_idx <- dPrim "iter" int32
-  emit $ Imp.DebugPrint "largeDestHistogram segHist body" Nothing
-  -- body' <- collect $ do
-  sFor "i" (product ns') $ \i -> do
-    dPrimV_ flat_idx i
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
-          (buckets, vs) = splitAt (length histops) red_res
-          perOp = chunks $ map (length . histDest) histops
-
-      let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
-      forM_ (zip4 histops (perOp vs) buckets pes_per_op) $
-         \(HistOp dest_w _ _ _ shape lam, vs', bucket, dest_res) -> do
-
-           let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-               bucket'   = toExp' int32 $ kernelResultSubExp bucket
-               dest_w'   = toExp' int32 dest_w
-               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
-
-           sComment "save map-out results" $
-             forM_ (zip map_pes map_res) $ \(pe, res) ->
-               copyDWIMFix (patElemName pe) (map Imp.vi32 is) (kernelResultSubExp res) []
-
-           sComment "perform non-atomic updates" $
-             sWhen bucket_in_bounds $ do
-               dLParams $ lambdaParams lam
-               let segment_dims =  map Imp.vi32 $ init is
-               sLoopNest shape $ \is' -> do
-                 forM_ (zip vs_params vs') $ \(p, res) ->
-                   copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-                 forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
-                   copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
-                 compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
-                   forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
-                     \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
+--   let (is, ns) = unzip $ unSegSpace space
+--   ns' <- mapM toExp ns
+--   let num_red_res = length histops + sum (map (length . histNeutral) histops)
+--       (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
 
-sequentialHist :: VName
-               -> Pattern MCMem
-               -> SegSpace
-               -> [HistOp MCMem]
-               -> KernelBody MCMem
-               -> MulticoreGen Imp.Code
-sequentialHist flat_idx pat space histops kbody = do
-  let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
-  let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
+--   flat_idx <- dPrim "iter" int32
+--   emit $ Imp.DebugPrint "largeDestHistogram segHist body" Nothing
+--   -- body' <- collect $ do
+--   sFor "i" (product ns') $ \i -> do
+--     dPrimV_ flat_idx i
+--     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+--     compileStms mempty (kernelBodyStms kbody) $ do
+--       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
+--           (buckets, vs) = splitAt (length histops) red_res
+--           perOp = chunks $ map (length . histDest) histops
 
-  collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
-    compileStms mempty (kernelBodyStms kbody) $ do
-      let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
-          (buckets, vs) = splitAt (length histops) red_res
-          perOp = chunks $ map (length . histDest) histops
+--       let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
+--       forM_ (zip4 histops (perOp vs) buckets pes_per_op) $
+--          \(HistOp dest_w _ _ _ shape lam, vs', bucket, dest_res) -> do
 
-      let pes_per_op = chunks (map (length . histDest) histops) all_red_pes
-      forM_ (zip4 histops (perOp vs) buckets pes_per_op) $
-         \(HistOp dest_w _ _ _ shape lam, vs', bucket, dest_res) -> do
+--            let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
+--                bucket'   = toExp' int32 $ kernelResultSubExp bucket
+--                dest_w'   = toExp' int32 dest_w
+--                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
 
-           let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-               bucket'   = toExp' int32 $ kernelResultSubExp bucket
-               dest_w'   = toExp' int32 dest_w
-               bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
+--            sComment "save map-out results" $
+--              forM_ (zip map_pes map_res) $ \(pe, res) ->
+--                copyDWIMFix (patElemName pe) (map Imp.vi32 is) (kernelResultSubExp res) []
 
-           sComment "save map-out results" $
-             forM_ (zip map_pes map_res) $ \(pe, res) ->
-               copyDWIMFix (patElemName pe) (map Imp.vi32 is) (kernelResultSubExp res) []
+--            sComment "perform non-atomic updates" $
+--              sWhen bucket_in_bounds $ do
+--                dLParams $ lambdaParams lam
+--                let segment_dims =  map Imp.vi32 $ init is
+--                sLoopNest shape $ \is' -> do
+--                  forM_ (zip vs_params vs') $ \(p, res) ->
+--                    copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
+--                  forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
+--                    copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
+--                  compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
+--                    forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
+--                      \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
 
-           sComment "perform non-atomic updates" $
-             sWhen bucket_in_bounds $ do
-               dLParams $ lambdaParams lam
-               let segment_dims =  map Imp.vi32 $ init is
-               sLoopNest shape $ \is' -> do
-                 forM_ (zip vs_params vs') $ \(p, res) ->
-                   copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-                 -- sComment "bind lhs" $
-                 forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
-                   copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
-                 -- sComment "execute operation" $
-                 compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
-                   forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
-                     \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
+-- renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
+-- renameHistOpLambda hist_ops =
+--   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
+--     lam' <- renameLambda lam
+--     return $ HistOp w rf dest neutral shape lam'
