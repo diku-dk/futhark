@@ -81,6 +81,13 @@ Context
    you must not pass values between them.  They have the same C type,
    so this is an easy mistake to make.
 
+   After you have created a context object, you must immediately call
+   :c:func:`futhark_context_get_error`, which will return non-``NULL``
+   if initialisation failed.  If initialisation has failed, then you
+   still need to call :c:func:`futhark_context_free` to release
+   resources used for the context object, but you may not use the
+   context object for anything else.
+
 .. c:function:: void futhark_context_free(struct futhark_context *ctx)
 
    Free the context object.  It must not be used again.  The
