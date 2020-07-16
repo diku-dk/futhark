@@ -30,6 +30,7 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
+import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
@@ -450,6 +451,7 @@ commandLineOptions =
     allocateOption "a",
     kernelsMemPassOption doubleBuffer [],
     kernelsMemPassOption expandAllocations [],
+    kernelsMemPassOption ReuseAllocations.optimise [],
     cseOption [],
     simplifyOption "e",
     soacsPipelineOption
