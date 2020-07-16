@@ -37,7 +37,7 @@ getSpace (SegScan _ space _ _ _ ) = space
 getSpace (SegMap _ space _ _) = space
 
 getIterationDomain :: SegOp () MCMem -> SegSpace -> ImpM MCMem Mode Imp.Multicore Imp.Exp
-getIterationDomain (SegMap {}) space = do
+getIterationDomain SegMap{} space = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
   return $ product ns'
@@ -55,23 +55,25 @@ getReturnParams pat SegRed{} = do
   zipWithM toParam retvals retvals_ts
 getReturnParams _ _ = return mempty
 
--- TODO: use the par_op version
 compileMCOp :: Pattern MCMem -> MCOp MCMem ()
             -> ImpM MCMem Mode Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
-compileMCOp pat (ParOp _par_op op) = do
+compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) 0
   iterations <- getIterationDomain op space
   seq_code <- compileSegOp pat op
   retvals <- getReturnParams pat op
 
-  -- par_code <- case par_op of
-  --   Just nested_op -> collect $ compileSegOp pat nested_op Nothing
-  --   Nothing -> compileSegHist pat space histops kbody ModeParallel
+  par_code <- case par_op of
+    Just nested_op -> do
+      let space' = getSpace nested_op
+      dPrimV_ (segFlat space') 0
+      compileSegOp pat nested_op
+    Nothing -> return mempty
 
-  free_params <- freeParams seq_code (segFlat space : map Imp.paramName retvals)
-  emit $ Imp.Op $ Imp.Task free_params iterations mempty seq_code (segFlat space) retvals
+  free_params <- freeParams (par_code <> seq_code) (segFlat space : map Imp.paramName retvals)
+  emit $ Imp.Op $ Imp.Task free_params iterations seq_code par_code (segFlat space) retvals
 
 
 compileSegOp :: Pattern MCMem -> SegOp () MCMem

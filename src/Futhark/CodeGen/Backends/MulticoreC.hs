@@ -430,7 +430,7 @@ generateFunction lexical basename code fstruct free retval tid = do
 
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Task params e par_code seq_code tid retvals) = do
+compileOp (Task params e seq_code par_code tid retvals) = do
 
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
@@ -451,8 +451,8 @@ compileOp (Task params e par_code seq_code tid retvals) = do
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
 
-  fpar_task <- generateFunction lexical_par "par_task" par_code fstruct free retval tid
   fseq_task <- generateFunction lexical_seq "seq_task" seq_code fstruct free retval tid
+  fpar_task <- generateFunction lexical_par "par_task" par_code fstruct free retval tid
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
