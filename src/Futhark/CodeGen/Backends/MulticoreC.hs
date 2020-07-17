@@ -465,8 +465,8 @@ compileOp (Task params e seq_code par_code tid retvals) = do
 
   fnpar_task <- case par_code of
         Just code -> do
-          let lexical_par = lexicalMemoryUsage $ Function False [] params code [] []
-          fnpar_task <- generateFunction lexical_par "nested_par_task" code fstruct free retval tid
+          let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
+          fnpar_task <- generateFunction lexical_npar "nested_par_task" code fstruct free retval tid
           GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
           return $ zip [fnpar_task]  [True]
         Nothing -> do

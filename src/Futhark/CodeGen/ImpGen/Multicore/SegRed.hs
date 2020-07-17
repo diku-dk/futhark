@@ -206,7 +206,7 @@ compileSegRedBody n_segments pat space reds kbody = do
   n_segments' <- toExp $ Var n_segments
   -- Perform sequential reduce on inner most dimension
   collect $ do
-    emit $ Imp.DebugPrint "segmented segBinOp stage 1" Nothing
+    emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     flat_idx <- dPrimV "flat_idx" (n_segments' * inner_bound)
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     sComment "neutral-initialise the accumulators" $
