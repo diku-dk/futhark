@@ -441,8 +441,7 @@ compileOp (Task params e seq_code par_code tid retvals) = do
 
   e' <- GC.compileExp e
 
-  let lexical_par = lexicalMemoryUsage $ Function False [] params par_code [] []
-  let lexical_seq = lexicalMemoryUsage $ Function False [] params seq_code [] []
+  let lexical_par = lexicalMemoryUsage $ Function False [] params seq_code [] []
 
   fstruct <- multicoreFunDef "task" $ \s ->
     return [C.cedecl|struct $id:s {
@@ -451,8 +450,7 @@ compileOp (Task params e seq_code par_code tid retvals) = do
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
 
-  fseq_task <- generateFunction lexical_seq "seq_task" seq_code fstruct free retval tid
-  fpar_task <- generateFunction lexical_par "par_task" par_code fstruct free retval tid
+  fpar_task <- generateFunction lexical_par "par_task" seq_code fstruct free retval tid
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
@@ -462,9 +460,18 @@ compileOp (Task params e seq_code par_code tid retvals) = do
   let ftask_name = fstruct <> "_task"
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
-  GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fpar_task;|]
-  GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fseq_task;|]
+  GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
+
+  fnpar_task <- case par_code of
+        Just code -> do
+          let lexical_par = lexicalMemoryUsage $ Function False [] params code [] []
+          fnpar_task <- generateFunction lexical_par "nested_par_task" code fstruct free retval tid
+          GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
+          return $ zip [fnpar_task]  [True]
+        Nothing -> do
+          GC.stm [C.cstm|$id:ftask_name.par_fn=NULL;|]
+          return mempty
 
   let ftask_err = fpar_task <> "_err"
   let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name);
@@ -473,7 +480,7 @@ compileOp (Task params e seq_code par_code tid retvals) = do
                         }|]
 
   mapM_ GC.item code'
-  mapM_ GC.profileReport $ multiCoreReport $ zip [fseq_task, fpar_task] [True, True]
+  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
 
 
 

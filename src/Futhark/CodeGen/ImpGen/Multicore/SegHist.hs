@@ -325,7 +325,7 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
                 map fst segment_dims ++ [subhistogram_id, bucket_id])
 
       free_params_red <- freeParams red_code (segFlat space : retval_names)
-      emit $ Imp.Op $ Imp.Task free_params_red iterations mempty red_code (segFlat space) retval_params
+      emit $ Imp.Op $ Imp.Task free_params_red iterations red_code Nothing (segFlat space) retval_params
 
 
    where segment_dims = init $ unSegSpace space

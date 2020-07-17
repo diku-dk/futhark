@@ -72,8 +72,11 @@ compileMCOp pat (ParOp par_op op) = do
       compileSegOp pat nested_op
     Nothing -> return mempty
 
+  let maybe_par_code = case par_op of
+        Just _ -> Just par_code
+        Nothing -> Nothing
   free_params <- freeParams (par_code <> seq_code) (segFlat space : map Imp.paramName retvals)
-  emit $ Imp.Op $ Imp.Task free_params iterations seq_code par_code (segFlat space) retvals
+  emit $ Imp.Op $ Imp.Task free_params iterations seq_code maybe_par_code (segFlat space) retvals
 
 
 compileSegOp :: Pattern MCMem -> SegOp () MCMem

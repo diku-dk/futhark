@@ -30,7 +30,7 @@ data MulticoreInfo = MulticoreInfo VName Scheduling VName
 -- MulticoreInfo ntasks Sched tid
 
 -- | A multicore operation.
-data Multicore = Task [Param] Imp.Exp Code Code VName [Param]
+data Multicore = Task [Param] Imp.Exp Code (Maybe Code) VName [Param]
                | MCFunc VName Code Code [Param] MulticoreInfo
                | MulticoreCall (Maybe VName) String
 
