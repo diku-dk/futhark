@@ -264,9 +264,11 @@ compileSegScanBody idx pat space scan_ops kbody = do
   ns' <- mapM toExp ns
 
   idx' <- toExp $ Var idx
+
+  let per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
   collect $ do
     emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
-    forM_ scan_ops $ \scan_op -> do
+    forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op
 
@@ -282,13 +284,14 @@ compileSegScanBody idx pat space scan_ops kbody = do
           sComment "write to-scan values to parameters" $
             forM_ (zip scan_y_params scan_res) $ \(p, se) ->
               copyDWIMFix (paramName p) [] (kernelResultSubExp se) []
-          sComment "write mapped values results to global memory" $
+
+          sComment "write mapped values results to memory" $
             forM_ (zip (drop (length $ segBinOpNeutral scan_op) $ patternElements pat) map_res) $ \(pe, se) ->
               copyDWIMFix (patElemName pe) (map Imp.vi32 is) (kernelResultSubExp se) []
 
-          sComment "combine with carry and write to local memory" $
+          sComment "combine with carry and write to memory" $
             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
-            forM_ (zip3 scan_x_params (patternElements pat) (bodyResult $ lambdaBody $ segBinOpLambda scan_op)) $ \(p, pe, se) -> do
+            forM_ (zip3 scan_x_params scan_pes (bodyResult $ lambdaBody $ segBinOpLambda scan_op)) $ \(p, pe, se) -> do
               copyDWIMFix (patElemName pe) (map Imp.vi32 is)  se []
               copyDWIMFix (paramName p) [] se []
 
