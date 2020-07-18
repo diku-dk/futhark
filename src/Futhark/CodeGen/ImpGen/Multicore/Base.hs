@@ -76,12 +76,10 @@ compileThreadResult :: SegSpace
 compileThreadResult space pe (Returns _ what) = do
   let is = map (Imp.vi32 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-
 compileThreadResult _ _ ConcatReturns{} =
   compilerBugS "compileThreadResult: ConcatReturn nunhandled."
 compileThreadResult _ _ WriteReturns{} =
   compilerBugS "compileThreadResult: WriteReturns nunhandled."
-
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
 
