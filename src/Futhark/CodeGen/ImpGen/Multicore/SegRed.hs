@@ -87,89 +87,102 @@ nonsegmentedReduction :: Pattern MCMem
                       -> [SegBinOp MCMem]
                       -> DoSegBody
                       -> MulticoreGen Imp.Code
-nonsegmentedReduction pat space reds kbody = do
-  let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
+nonsegmentedReduction pat space reds kbody = collect $ do
+
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
 
+  ntasks <- dPrim "num_tasks" $ IntType Int32
+  -- Thread id for indexing into each threads accumulator element(s)
+  tid' <- toExp $ Var $ segFlat space
+  thread_red_arrs <- groupResultArrays (Var num_threads) reds
+  slugs1 <- mapM (segBinOpOpSlug tid') $ zip reds thread_red_arrs
 
-  collect $ do
-    let per_red_pes = segBinOpChunks reds $ patternValueElements pat
-    sComment "neutral-initialise the output" $
-     forM_ (zip reds per_red_pes) $ \(red, red_res) ->
-       forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
-         sLoopNest (segBinOpShape red) $ \vec_is ->
-           copyDWIMFix (patElemName pe) vec_is ne []
+  sFor "i" num_threads' $ \i -> do
+    segFlat space <-- i
+    sComment "neutral-initialise the acc used by tid" $
+      forM_ slugs1 $ \slug ->
+        forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
+          sLoopNest (slugShape slug) $ \vec_is ->
+            copyDWIMFix acc (acc_is++vec_is) ne []
 
+  reductionStage1 space ntasks slugs1 kbody
+  reds2 <- renameSegBinOp reds
+  slugs2 <- mapM (segBinOpOpSlug tid') $ zip reds2 thread_red_arrs
+  reductionStage2 pat space ntasks slugs2
 
-    flat_idx <- dPrim "iter" int32
-    emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
-    stage_one_red_arrs <- groupResultArrays (Var num_threads) reds
+reductionStage1 :: SegSpace
+                -> VName
+                -> [SegBinOpSlug]
+                -> DoSegBody
+                -> MulticoreGen ()
+reductionStage1 space ntasks slugs kbody = do
+  let (is, ns) = unzip $ unSegSpace space
+  ns' <- mapM toExp ns
 
-    -- Thread id for indexing into each threads accumulator element(s)
-    tid' <- toExp $ Var $ segFlat space
-    slugs <- mapM (segBinOpOpSlug tid') $ zip reds stage_one_red_arrs
+  flat_idx <- dPrim "iter" int32
+  emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
 
-    sFor "i" num_threads' $ \i -> do
-      segFlat space <-- i
-      sComment "neutral-initialise the acc used by tid" $
-        forM_ slugs $ \slug ->
-          forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
-            sLoopNest (slugShape slug) $ \vec_is ->
-              copyDWIMFix acc (acc_is++vec_is) ne []
-
-    fbody <- collect $ do
-      zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
-      dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
-      kbody $ \all_red_res -> do
-        let all_red_res' = segBinOpChunks reds all_red_res
-        forM_ (zip all_red_res' slugs) $ \(red_res, slug) ->
-          sLoopNest (slugShape slug) $ \vec_is -> do
-            sComment "load acc params" $
-              forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-                copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
-            sComment "load next params" $
-              forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
-                copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-            sComment "red body" $
-              compileStms mempty (bodyStms $ slugBody slug) $
-                  forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
-                    \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
-
-    free_params <- freeParams fbody (segFlat space : [flat_idx])
-    let scheduling = case slugsComm slugs of
-                     Commutative -> decideScheduling fbody
-                     Noncommutative -> Imp.Static
-
-    ntasks <- dPrim "num_tasks" $ IntType Int32
-    ntasks' <- toExp $ Var ntasks
-
-    let (body_allocs, fbody') = extractAllocations fbody
-
-    emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs fbody' free_params $
-      Imp.MulticoreInfo ntasks scheduling (segFlat space)
-    reds' <- renameSegBinOp reds
-    slugs' <- mapM (segBinOpOpSlug tid') $ zip reds' stage_one_red_arrs
-
-    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs'
-
-    sFor "i" ntasks' $ \i' -> do
-      emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
-      segFlat space <-- i'
-      sComment "Apply main thread reduction" $
-        forM_ (zip slugs' per_red_pes) $ \(slug, red_res) ->
-          sLoopNest (slugShape slug) $ \vec_is -> do
-            sComment "load acc params" $
-              forM_ (zip (accParams slug) red_res) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
-            sComment "load next params" $
-              forM_ (zip (nextParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+  fbody <- collect $ do
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+    kbody $ \all_red_res -> do
+      let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
+      forM_ (zip all_red_res' slugs) $ \(red_res, slug) ->
+        sLoopNest (slugShape slug) $ \vec_is -> do
+          sComment "load acc params" $
+            forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
               copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
-            sComment "red body" $
-              compileStms mempty (bodyStms $ slugBody slug) $
-                forM_ (zip red_res (bodyResult $ slugBody slug)) $
-                  \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
+          sComment "load next params" $
+            forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
+              copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
+          sComment "red body" $
+            compileStms mempty (bodyStms $ slugBody slug) $
+                forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
+                  \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
+
+  free_params <- freeParams fbody (segFlat space : [flat_idx])
+  let scheduling = case slugsComm slugs of
+                   Commutative -> decideScheduling fbody
+                   Noncommutative -> Imp.Static
+
+  let (body_allocs, fbody') = extractAllocations fbody
+
+  emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs fbody' free_params $
+    Imp.MulticoreInfo ntasks scheduling (segFlat space)
+
+reductionStage2 :: Pattern MCMem
+                -> SegSpace
+                -> VName
+                -> [SegBinOpSlug]
+                -> MulticoreGen ()
+reductionStage2 pat space ntasks slugs = do
+  let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternValueElements pat
+  ntasks' <- toExp $ Var ntasks
+  sComment "neutral-initialise the output" $
+   forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
+     forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
+       sLoopNest (segBinOpShape red) $ \vec_is ->
+         copyDWIMFix (patElemName pe) vec_is ne []
+
+  dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+
+  sFor "i" ntasks' $ \i' -> do
+    emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
+    segFlat space <-- i'
+    sComment "Apply main thread reduction" $
+      forM_ (zip slugs per_red_pes) $ \(slug, red_res) ->
+        sLoopNest (slugShape slug) $ \vec_is -> do
+          sComment "load acc params" $
+            forM_ (zip (accParams slug) red_res) $ \(p, pe) ->
+            copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
+          sComment "load next params" $
+            forM_ (zip (nextParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+            copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
+          sComment "red body" $
+            compileStms mempty (bodyStms $ slugBody slug) $
+              forM_ (zip red_res (bodyResult $ slugBody slug)) $
+                \(pe, se') -> copyDWIMFix (patElemName pe) vec_is se' []
 
 -- Each thread reduces over the number of segments
 -- each of which is done sequentially
@@ -204,30 +217,32 @@ compileSegRedBody n_segments pat space reds kbody = do
   let inner_bound = last ns'
 
   n_segments' <- toExp $ Var n_segments
+
+  let per_red_pes = segBinOpChunks reds $ patternValueElements pat
   -- Perform sequential reduce on inner most dimension
   collect $ do
     emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     flat_idx <- dPrimV "flat_idx" (n_segments' * inner_bound)
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     sComment "neutral-initialise the accumulators" $
-      forM_ reds $ \red->
-        forM_ (zip (patternElements pat) (segBinOpNeutral red)) $ \(pe, ne) ->
+      forM_ (zip per_red_pes reds) $ \(pes, red) ->
+        forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
           sLoopNest (segBinOpShape red) $ \vec_is ->
             copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) ne []
 
-    sComment "function main body" $ do
+    sComment "main body" $ do
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
       sFor "i" inner_bound $ \i -> do
         forM_ (zip (init is) $ unflattenIndex (init ns') n_segments') $ uncurry (<--)
         dPrimV_ (last is) i
         kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res
-          forM_ (zip reds red_res') $ \(red, res') ->
+          forM_ (zip3 per_red_pes reds red_res') $ \(pes, red, res') ->
             sLoopNest (segBinOpShape red) $ \vec_is -> do
 
             sComment "load accum" $ do
               let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
-              forM_ (zip acc_params (patternElements pat)) $ \(p, pe) ->
+              forM_ (zip acc_params pes) $ \(p, pe) ->
                 copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 (init is) ++ vec_is)
 
             sComment "load new val" $ do
@@ -239,7 +254,7 @@ compileSegRedBody n_segments pat space reds kbody = do
               let lbody = (lambdaBody . segBinOpLambda) red
               compileStms mempty (bodyStms lbody) $
                 sComment "write back to res" $
-                forM_ (zip (patternElements pat) (bodyResult lbody)) $
+                forM_ (zip pes (bodyResult lbody)) $
                   \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) se' []
 
 
