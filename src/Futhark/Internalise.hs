@@ -733,7 +733,7 @@ internaliseExp desc (E.Attr attr e _) =
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
-  c <- assert "assert_c" e1' (errorMsg [ErrorString check]) loc
+  c <- assert "assert_c" e1' (errorMsg [ErrorString $ "Assertion is false: " <> check]) loc
   -- Make sure there are some bindings to certify.
   certifying c $ mapM rebind =<< internaliseExp desc e2
   where rebind v = do
