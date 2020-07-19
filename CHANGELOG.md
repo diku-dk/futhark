@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * The `pyopencl` backend now works with OpenCL devices that have
+    multiple types (most importantly, oclgrind).
+
 ## [0.16.2]
 
 ### Added
