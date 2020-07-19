@@ -189,7 +189,7 @@ checkTypeExp ote@TEApply{} = do
   if length ps /= length targs
   then typeError tloc mempty $
        "Type constructor" <+> pquote (ppr tname) <+> "requires" <+> ppr (length ps) <+>
-       "arguments, but provided" <+> ppr (length targs) <+> "."
+       "arguments, but provided" <+> ppr (length targs) <> "."
   else do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
     return (foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
