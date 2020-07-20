@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `random` input blocks for `futhark test` and `futhark bench` now
+    support floating-point literals, which must always have either an
+    `f32` or `f64` suffix.
+
 ### Removed
 
 ### Changed
