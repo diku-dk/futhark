@@ -7,6 +7,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Multicore(..)
        , Scheduling(..)
        , MulticoreInfo(..)
+       , AtomicOp(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -33,6 +34,10 @@ data MulticoreInfo = MulticoreInfo VName Scheduling VName
 data Multicore = Task [Param] Imp.Exp Code (Maybe Code) VName [Param]
                | MCFunc VName Code Code [Param] MulticoreInfo
                | MulticoreCall (Maybe VName) String
+               | Atomic AtomicOp
+
+
+data AtomicOp =  AtomicCmpXchg PrimType VName VName (Count Elements Imp.Exp) VName Exp
 
 type Granularity = Int32
 
@@ -72,6 +77,7 @@ instance Pretty Multicore where
   ppr (MulticoreCall dests f) =
     ppr dests <+> ppr f
 
+  ppr (Atomic _) = text ""
 
 instance FreeIn Multicore where
   freeIn' (Task _ e par_code seq_code _ _) =
@@ -79,3 +85,4 @@ instance FreeIn Multicore where
   freeIn' (MCFunc _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests
+  freeIn' (Atomic _ ) = mempty

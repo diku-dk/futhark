@@ -188,3 +188,9 @@ estimateCost :: Imp.Code -> Int
 estimateCost code =  f code
   where f Imp.DeclareMem{} = 1
         f _  = 10
+
+-- renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
+-- renameHistOpLambda hist_ops =
+--   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
+--     lam' <- renameLambda lam
+--     return $ HistOp w rf dest neutral shape lam'
