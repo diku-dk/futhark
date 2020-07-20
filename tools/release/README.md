@@ -34,6 +34,8 @@ corresponds exactly to the state of the Git repository at some point.
  * Push the tag: `git push --tags`.  This counts as a release on
    GitHub.
 
+ * Wait for GitHub Actions to create the new release.
+
  * Go to `https://github.com/diku-dk/futhark/releases` and copy
    release notes from `CHANGELOG.md`.
 

@@ -526,6 +526,16 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_LOCAL_MEM_SIZE,
                                        sizeof(size_t), &max_local_memory, NULL));
 
+  // Futhark reserves 4 bytes for bookkeeping information.
+  max_local_memory -= 4;
+
+  // NVIDIA reserves some more bytes for who-knows-what.  The number
+  // of bytes here has been experimentally determined, but the
+  // overhead seems to vary a bit depending on what the kernel does.
+  if (strstr(device_option.platform_name, "NVIDIA CUDA") != NULL) {
+    max_local_memory -= 12;
+  }
+
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
@@ -563,6 +573,12 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = max_group_size; // Futhark assumes this constraint.
       default_value = ctx->cfg.default_num_groups;
+      // XXX: as a quick and dirty hack, use twice as many threads for
+      // histograms by default.  We really should just be smarter
+      // about sizes somehow.
+      if (strstr(size_name, ".seghist_") != NULL) {
+        default_value *= 2;
+      }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = sqrt(max_group_size);
       default_value = ctx->cfg.default_tile_size;
@@ -682,6 +698,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   }
 
   if (ctx->cfg.debugging) {
+    fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
     fprintf(stderr, "Building OpenCL program...\n");
   }
   OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));

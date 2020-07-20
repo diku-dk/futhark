@@ -5,7 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.16.0]
+## [0.17.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * The `pyopencl` backend now works with OpenCL devices that have
+    multiple types (most importantly, oclgrind).
+
+## [0.16.2]
+
+### Added
+
+  * `futhark autotune`: added `--pass-option`.
+
+### Fixed
+
+  * `futhark bench`: progress bar now correct when number of runs is
+    less than 10 (#1050).
+
+  * Aliases of arguments passed for consuming parameters are now
+    properly checked (#1053).
+
+  * When using a GPU backend, errors are now properly cleared.
+    Previously, once e.g. an out-of-bounds error had occurred, all
+    future operations would fail with the same error.
+
+  * Size-coercing a transposed array no longer leads to invalid code
+    generation (#1054).
+
+## [0.16.1]
 
 ### Added
 
@@ -48,6 +82,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Out-of-bounds literals are now an error rather than a warning.
 
+  * Type ascriptions on entry points now always result in opaque types
+    when the underlying concrete type is a tuple (#1048).
+
 ### Fixed
 
   * Fix bug in slice simplification (#992).
@@ -60,6 +97,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed exotic monomorphisation case involving lifted type
     parameters instantiated with functions that take named parameters
     (#1026).
+
+  * Further tightening of the causality restriction (#1042).
+
+  * Fixed alias tracking for right-operand operator sections (#1043).
 
 ## [0.15.8]
 

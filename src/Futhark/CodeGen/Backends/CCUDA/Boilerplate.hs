@@ -386,6 +386,14 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                    ctx->failure_is_an_option = 0;
 
                    if (failure_idx >= 0) {
+                     // We have to clear global_failure so that the next entry point
+                     // is not considered a failure from the start.
+                     typename int32_t no_failure = -1;
+                     CUDA_SUCCEED(
+                       cuMemcpyHtoD(ctx->global_failure,
+                                    &no_failure,
+                                    sizeof(int32_t)));
+
                      typename int32_t args[$int:max_failure_args+1];
                      CUDA_SUCCEED(
                        cuMemcpyDtoH(&args,

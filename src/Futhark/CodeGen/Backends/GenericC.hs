@@ -1685,6 +1685,7 @@ compileConstants (Constants ps init_consts) = do
                     mapM_ resetMemConst ps
                     compileCode init_consts
   libDecl [C.cedecl|int init_constants($ty:ctx_ty *ctx) {
+      (void)ctx;
       int err = 0;
       $items:defs
       $items:init_consts'
@@ -1695,6 +1696,7 @@ compileConstants (Constants ps init_consts) = do
 
   free_consts <- collect $ mapM_ freeConst ps
   libDecl [C.cedecl|int free_constants($ty:ctx_ty *ctx) {
+      (void)ctx;
       $items:free_consts
       return 0;
     }|]
@@ -2017,7 +2019,7 @@ compileCode (Allocate name (Count e) space) = do
   cached <- cacheMem name
   case cached of
     Just cur_size ->
-      stm [C.cstm|if ($exp:cur_size < $exp:size) {
+      stm [C.cstm|if ($exp:cur_size < (size_t)$exp:size) {
                     $exp:name = realloc($exp:name, $exp:size);
                     $exp:cur_size = $exp:size;
                   }|]

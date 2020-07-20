@@ -115,7 +115,7 @@ definition has been hidden via the module system (see `Module
 System`_).
 
 .. productionlist::
-   tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
+   tuple_type: "(" ")" | "(" `type` ("," `type`)+ ")"
 
 A tuple value or type is written as a sequence of comma-separated
 values or types enclosed in parentheses.  For example, ``(0, 1)`` is a
@@ -728,12 +728,14 @@ are:
   ``^``, ``&``, ``|``, ``>>``, ``<<``
 
     Bitwise operators, respectively bitwise xor, and, or, arithmetic
-    shift right and left, and logical shift right.  Shift amounts
-    must be non-negative and the operands must be integers.  Note
-    that, unlike in C, bitwise operators have *higher* priority than
-    arithmetic operators.  This means that ``x & y == z`` is
-    understood as ``(x & y) == z``, rather than ``x & (y == z)`` as
-    it would in C.  Note that the latter is a type error in Futhark
+    shift right and left, and logical shift right.  **Shifting is
+    undefined if the right operand is negative, or greater than or
+    equal to the length in bits of the left operand.**
+
+    Note that, unlike in C, bitwise operators have *higher* priority
+    than arithmetic operators.  This means that ``x & y == z`` is
+    understood as ``(x & y) == z``, rather than ``x & (y == z)`` as it
+    would in C.  Note that the latter is a type error in Futhark
     anyhow.
 
   ``==``, ``!=``
@@ -1173,8 +1175,9 @@ inferable.  Specifically, this value must have been used as the size
 of an array *before* the ``f x`` application is encountered.  The
 notion of "before" is subtle, as there is no evaluation ordering of a
 Futhark expression, *except* that a ``let``-binding is always
-evaluated before its body, and the argument to a function is always
-evaluated before the function.
+evaluated before its body, the argument to a function is always
+evaluated before the function itself, and the left operand to an
+operator is evaluated before the right.
 
 The causality restriction only occurs when a function has size
 parameters whose first use is *not* as a concrete array size.  For

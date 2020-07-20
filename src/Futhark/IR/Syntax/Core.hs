@@ -49,6 +49,7 @@ module Futhark.IR.Syntax.Core
          , sliceDims
          , unitSlice
          , fixSlice
+         , sliceSlice
          , PatElemT (..)
          ) where
 
@@ -301,6 +302,17 @@ fixSlice (DimFix j:mis') is' =
 fixSlice (DimSlice orig_k _ orig_s:mis') (i:is') =
   (orig_k+i*orig_s) : fixSlice mis' is'
 fixSlice _ _ = []
+
+-- | Further slice the 'DimSlice's of a slice.  The number of slices
+-- must equal the length of 'sliceDims' for the slice.
+sliceSlice :: Num d => Slice d -> Slice d -> Slice d
+sliceSlice (DimFix j:js') is' =
+  DimFix j : sliceSlice js' is'
+sliceSlice (DimSlice j _ s:js') (DimFix i:is') =
+  DimFix (j + (i*s)) : sliceSlice js' is'
+sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') =
+  DimSlice (j+(s0*i)) n (s0*s1) : sliceSlice js' is'
+sliceSlice _ _ = []
 
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to

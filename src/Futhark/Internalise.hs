@@ -199,7 +199,7 @@ entryPoint params (eret, crets) =
      (Just ts, Just (E.TETuple e_ts _)) ->
        concatMap entryPointType $
        zip (zipWith E.EntryType ts (map Just e_ts)) crets
-     (Just ts, _) ->
+     (Just ts, Nothing) ->
        concatMap entryPointType $
        zip (map (`E.EntryType` Nothing) ts) crets
      _ ->
@@ -222,7 +222,7 @@ entryPoint params (eret, crets) =
 
         -- | We remove dimension arguments such that we hopefully end
         -- up with a simpler type name for the entry point.  The
-        -- intend is that if an entry point uses a type 'nasty [w] [h]',
+        -- intent is that if an entry point uses a type 'nasty [w] [h]',
         -- then we should turn that into an opaque type just called
         -- 'nasty'.  Also, we try to give arrays of opaques a nicer name.
         typeExpOpaqueName (TEApply te TypeArgExpDim{} _) =
@@ -483,11 +483,12 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
 internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
 
-internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) _ loc) = do
-  es <- internaliseExp desc e
+internaliseExp desc (E.Coerce e (TypeDecl dt (Info et)) (Info ret, Info retext) loc) = do
+  ses <- internaliseExp desc e
   ts <- internaliseReturnType et
   dt' <- typeExpForError dt
-  forM (zip es ts) $ \(e',t') -> do
+  bindExtSizes (E.toStruct ret) retext ses
+  forM (zip ses ts) $ \(e',t') -> do
     dims <- arrayDims <$> subExpType e'
     let parts = ["Value of (core language) shape ("] ++
                 intersperse ", " (map ErrorInt32 dims) ++
@@ -732,7 +733,7 @@ internaliseExp desc (E.Attr attr e _) =
 
 internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
   e1' <- internaliseExp1 "assert_cond" e1
-  c <- assert "assert_c" e1' (errorMsg [ErrorString check]) loc
+  c <- assert "assert_c" e1' (errorMsg [ErrorString $ "Assertion is false: " <> check]) loc
   -- Make sure there are some bindings to certify.
   certifying c $ mapM rebind =<< internaliseExp desc e2
   where rebind v = do
@@ -1047,7 +1048,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
                    ErrorInt32 j'] ++
                    maybe mempty (const [":", ErrorInt32 s']) s
                 (_, Nothing, Nothing) ->
-                  [ErrorInt32 i']
+                  [ErrorInt32 i', ":"]
   return (I.DimSlice i' n s', ok_or_empty, parts)
   where zero = constant (0::Int32)
         negone = constant (-1::Int32)

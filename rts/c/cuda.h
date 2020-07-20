@@ -67,7 +67,7 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->load_ptx_from = NULL;
 
   cfg->default_block_size = 256;
-  cfg->default_grid_size = 256;
+  cfg->default_grid_size = 0; // Set properly later.
   cfg->default_tile_size = 32;
   cfg->default_threshold = 32*1024;
 
@@ -363,6 +363,13 @@ static void cuda_size_setup(struct cuda_context *ctx)
     ctx->cfg.default_tile_size = ctx->max_tile_size;
   }
 
+  if (!ctx->cfg.default_grid_size_changed) {
+    ctx->cfg.default_grid_size =
+      (device_query(ctx->dev, MULTIPROCESSOR_COUNT) *
+       device_query(ctx->dev, MAX_THREADS_PER_MULTIPROCESSOR))
+      / ctx->cfg.default_block_size;
+  }
+
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     const char *size_class, *size_name;
     size_t *size_value, max_value, default_value;
@@ -377,6 +384,12 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = ctx->max_grid_size;
       default_value = ctx->cfg.default_grid_size;
+      // XXX: as a quick and dirty hack, use twice as many threads for
+      // histograms by default.  We really should just be smarter
+      // about sizes somehow.
+      if (strstr(size_name, ".seghist_") != NULL) {
+        default_value *= 2;
+      }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
       default_value = ctx->cfg.default_tile_size;

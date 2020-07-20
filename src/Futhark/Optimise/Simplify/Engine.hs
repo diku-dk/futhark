@@ -483,6 +483,7 @@ cheapExp (BasicOp UnOp{})         = True
 cheapExp (BasicOp CmpOp{})        = True
 cheapExp (BasicOp ConvOp{})       = True
 cheapExp (BasicOp Copy{})         = False
+cheapExp (BasicOp Manifest{})     = False
 cheapExp DoLoop{}                 = False
 cheapExp (If _ tbranch fbranch _) = all cheapStm (bodyStms tbranch) &&
                                     all cheapStm (bodyStms fbranch)
@@ -513,10 +514,9 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       -- because in that case they will also be hoisted past that
       -- loop.
       --
-      -- "isNotHoistableBnd hoistbl_nms" ensures that only the
-      -- (transitive closure) of the bindings used for allocations,
-      -- shape computations, and expensive loop-invariant operations
-      -- are if-hoistable.
+      -- We also try very hard to hoist allocations or anything that
+      -- contributes to memory or array size, because that will allow
+      -- allocations to be hoisted.
       cond_loop_invariant =
         all (`nameIn` ST.availableAtClosestLoop vtable) $ namesToList $ freeIn cond
 

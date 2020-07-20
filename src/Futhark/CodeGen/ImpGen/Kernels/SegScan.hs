@@ -402,10 +402,22 @@ compileSegScan :: Pattern KernelsMem
 compileSegScan pat lvl space scans kbody = do
   emit $ Imp.DebugPrint "\n# SegScan" Nothing
 
+  -- Since stage 2 involves a group size equal to the number of groups
+  -- used for stage 1, we have to cap this number to the maximum group
+  -- size.
+  stage1_max_num_groups <-
+    dPrim "stage1_max_num_groups" int32
+  sOp $ Imp.GetSizeMax stage1_max_num_groups SizeGroup
+
+  stage1_num_groups <-
+    fmap (Imp.Count . Var) $ dPrimV "stage1_num_groups" $
+    Imp.BinOpExp (SMin Int32) (Imp.vi32 stage1_max_num_groups) $
+    toExp' int32 $ Imp.unCount $ segNumGroups lvl
+
   (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat (segNumGroups lvl) (segGroupSize lvl) space scans kbody
+    scanStage1 pat stage1_num_groups (segGroupSize lvl) space scans kbody
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just elems_per_group
 
-  scanStage2 pat stage1_num_threads elems_per_group (segNumGroups lvl) crossesSegment space scans
+  scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
   scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scans
