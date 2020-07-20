@@ -126,19 +126,25 @@ innermost space_dims t_dims =
       ixfun_rearranged = IxFun.permute ixfun_base perm_inv
   in ixfun_rearranged
 
-inGroupExpHints :: Exp KernelsMem -> AllocM Kernels KernelsMem [ExpHint]
+semiStatic :: S.Set VName -> SubExp -> Bool
+semiStatic _ Constant{} = True
+semiStatic consts (Var v) = v `S.member` consts
+
+inGroupExpHints :: Allocator KernelsMem m => Exp KernelsMem -> m [ExpHint]
 inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
-  | any private $ kernelBodyResult body = return $ do
-      (t, r) <- zip ts $ kernelBodyResult body
-      return $
-        if private r
-        then let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
-                 dims = seg_dims ++ map (primExpFromSubExp int32) (arrayDims t)
-                 nilSlice d = DimSlice 0 d 0
-           in Hint (IxFun.slice (IxFun.iota dims) $
-                    fullSliceNum dims $ map nilSlice seg_dims) $
-              ScalarSpace (arrayDims t) $ elemType t
-        else NoHint
+  | any private $ kernelBodyResult body = do
+      consts <- askConsts
+      return $ do
+        (t, r) <- zip ts $ kernelBodyResult body
+        return $
+          if private r && all (semiStatic consts) (arrayDims t)
+          then let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
+                   dims = seg_dims ++ map (primExpFromSubExp int32) (arrayDims t)
+                   nilSlice d = DimSlice 0 d 0
+             in Hint (IxFun.slice (IxFun.iota dims) $
+                      fullSliceNum dims $ map nilSlice seg_dims) $
+                ScalarSpace (arrayDims t) $ elemType t
+          else NoHint
   where private (Returns ResultPrivate _) = True
         private _                         = False
 inGroupExpHints e = return $ replicate (expExtTypeSize e) NoHint
@@ -155,9 +161,6 @@ inThreadExpHints e = do
               return $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
           | otherwise =
               return NoHint
-
-        semiStatic _ Constant{} = True
-        semiStatic consts (Var v) = v `S.member` consts
 
 -- | The pass from 'Kernels' to 'KernelsMem'.
 explicitAllocations :: Pass Kernels KernelsMem

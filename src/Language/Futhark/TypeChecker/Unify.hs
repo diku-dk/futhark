@@ -600,9 +600,17 @@ linkVarToType onDims usage bcs vn lvl tp = do
     Just (HasFields required_fields old_usage) ->
       case tp of
         Scalar (Record tp_fields)
-          | all (`M.member` tp_fields) $ M.keys required_fields ->
-              mapM_ (uncurry $ unify usage) $ M.elems $
-              M.intersectionWith (,) required_fields tp_fields
+          | all (`M.member` tp_fields) $ M.keys required_fields -> do
+              required_fields' <- mapM normTypeFully required_fields
+              let bcs' =
+                    breadCrumb
+                    (Matching $ pprName vn <+>
+                     "must be a record with at least the fields:" </>
+                     indent 2 (ppr (Record required_fields')) </>
+                    "due to" <+> ppr old_usage <> ".")
+                    bcs
+              mapM_ (uncurry $ unifyWith onDims usage bcs') $ M.elems $
+                M.intersectionWith (,) required_fields tp_fields
         Scalar (TypeVar _ _ (TypeName [] v) [])
           | not $ isRigid v constraints ->
               modifyConstraints $ M.insert v

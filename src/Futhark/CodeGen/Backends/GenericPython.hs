@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , compileVar
   , compileDim
   , compileExp
+  , compilePrimExp
   , compileCode
   , compilePrimValue
   , compilePrimType
@@ -293,7 +294,7 @@ compileProg :: MonadFreshNames m =>
             -> [Option]
             -> Imp.Definitions op
             -> m String
-compileProg module_name constructor imports defines ops userstate pre_timing options prog = do
+compileProg module_name constructor imports defines ops userstate sync options prog = do
   src <- getNameSource
   let prog' = runCompilerM ops src userstate compileProg'
       maybe_shebang =
@@ -320,14 +321,14 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
           case module_name of
             Just name -> do
               (entry_points, entry_point_types) <-
-                unzip <$> mapM compileEntryFun (filter (Imp.functionEntry . snd) funs)
+                unzip <$> mapM (compileEntryFun sync) (filter (Imp.functionEntry . snd) funs)
               return [ClassDef $ Class name $
                        Assign (Var "entry_points") (Dict entry_point_types) :
                        map FunDef (constructor' : definitions ++ entry_points)]
             Nothing -> do
               let classinst = Assign (Var "self") $ simpleCall "internal" []
               (entry_point_defs, entry_point_names, entry_points) <-
-                unzip3 <$> mapM (callEntryFun pre_timing)
+                unzip3 <$> mapM (callEntryFun sync)
                 (filter (Imp.functionEntry . snd) funs)
               return (parse_options ++
                       ClassDef (Class "internal" $ map FunDef $
@@ -603,14 +604,14 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
                      [srcmem, srcidx, Var "ct.c_byte"]
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, nbytes]
 
-compileEntryFun :: (Name, Imp.Function op)
+compileEntryFun :: [PyStmt] -> (Name, Imp.Function op)
                 -> CompilerM op s (PyFunDef, (PyExp, PyExp))
-compileEntryFun entry = do
+compileEntryFun sync entry = do
   (fname', params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
   let ret = Return $ tupleOrSingle $ map snd res
       (pts, rts) = entryTypes $ snd entry
   return (Def fname' ("self" : params) $
-           prepareIn ++ body_lib ++ prepareOut ++ [ret],
+           prepareIn ++ body_lib ++ prepareOut ++ sync ++ [ret],
           (String fname', Tuple [List (map String pts), List (map String rts)]))
 
 entryTypes :: Imp.Function op -> ([String], [String])
@@ -690,11 +691,12 @@ compileUnOp op =
     USignum{} -> "usignum"
 
 compileBinOpLike :: Monad m =>
-                    Imp.Exp -> Imp.Exp
-                 -> CompilerM op s (PyExp, PyExp, String -> m PyExp)
-compileBinOpLike x y = do
-  x' <- compileExp x
-  y' <- compileExp y
+                    (v -> m PyExp)
+                 -> Imp.PrimExp v -> Imp.PrimExp v
+                 -> m (PyExp, PyExp, String -> m PyExp)
+compileBinOpLike f x y = do
+  x' <- compilePrimExp f x
+  y' <- compilePrimExp f y
   let simple s = return $ BinOp s x' y'
   return (x', y', simple)
 
@@ -786,30 +788,15 @@ compileVar :: VName -> CompilerM op s PyExp
 compileVar v =
   asks $ fromMaybe (Var $ compileName v) . M.lookup v . envVarExp
 
-compileExp :: Imp.Exp -> CompilerM op s PyExp
+-- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
+compilePrimExp :: Monad m => (v -> m PyExp) -> Imp.PrimExp v -> m PyExp
 
-compileExp (Imp.ValueExp v) = return $ compilePrimValue v
+compilePrimExp _ (Imp.ValueExp v) = return $ compilePrimValue v
 
-compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
-  compileVar vname
+compilePrimExp f (Imp.LeafExp v _) = f v
 
-compileExp (Imp.LeafExp (Imp.SizeOf t) _) =
-  return $ simpleCall (compilePrimToNp $ IntType Int32) [Integer $ primByteSize t]
-
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
-  join $ asks envReadScalar
-    <*> compileVar src <*> compileExp iexp
-    <*> pure restype <*> pure space
-
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt _ _) _) = do
-  iexp' <- compileExp iexp
-  let bt' = compilePrimType bt
-      nptype = compilePrimToNp bt
-  src' <- compileVar src
-  return $ simpleCall "indexArray" [src', iexp', Var bt', Var nptype]
-
-compileExp (Imp.BinOpExp op x y) = do
-  (x', y', simple) <- compileBinOpLike x y
+compilePrimExp f (Imp.BinOpExp op x y) = do
+  (x', y', simple) <- compileBinOpLike f x y
   case op of
     Add{} -> simple "+"
     Sub{} -> simple "-"
@@ -827,12 +814,12 @@ compileExp (Imp.BinOpExp op x y) = do
     LogOr{} -> simple "or"
     _ -> return $ simpleCall (pretty op) [x', y']
 
-compileExp (Imp.ConvOpExp conv x) = do
-  x' <- compileExp x
+compilePrimExp f (Imp.ConvOpExp conv x) = do
+  x' <- compilePrimExp f x
   return $ simpleCall (pretty conv) [x']
 
-compileExp (Imp.CmpOpExp cmp x y) = do
-  (x', y', simple) <- compileBinOpLike x y
+compilePrimExp f (Imp.CmpOpExp cmp x y) = do
+  (x', y', simple) <- compileBinOpLike f x y
   case cmp of
     CmpEq{} -> simple "=="
     FCmpLt{} -> simple "<"
@@ -841,11 +828,31 @@ compileExp (Imp.CmpOpExp cmp x y) = do
     CmpLle -> simple "<="
     _ -> return $ simpleCall (pretty cmp) [x', y']
 
-compileExp (Imp.UnOpExp op exp1) =
-  UnOp (compileUnOp op) <$> compileExp exp1
+compilePrimExp f (Imp.UnOpExp op exp1) =
+  UnOp (compileUnOp op) <$> compilePrimExp f exp1
 
-compileExp (Imp.FunExp h args _) =
-  simpleCall (futharkFun (pretty h)) <$> mapM compileExp args
+compilePrimExp f (Imp.FunExp h args _) =
+  simpleCall (futharkFun (pretty h)) <$> mapM (compilePrimExp f) args
+
+compileExp :: Imp.Exp -> CompilerM op s PyExp
+compileExp = compilePrimExp compileLeaf
+  where compileLeaf (Imp.ScalarVar vname) =
+          compileVar vname
+
+        compileLeaf (Imp.SizeOf t) =
+          return $ simpleCall (compilePrimToNp $ IntType Int32) [Integer $ primByteSize t]
+
+        compileLeaf (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) =
+          join $ asks envReadScalar
+          <*> compileVar src <*> compileExp iexp
+          <*> pure restype <*> pure space
+
+        compileLeaf (Imp.Index src (Imp.Count iexp) bt _ _) = do
+          iexp' <- compileExp iexp
+          let bt' = compilePrimType bt
+              nptype = compilePrimToNp bt
+          src' <- compileVar src
+          return $ simpleCall "indexArray" [src', iexp', Var bt', Var nptype]
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 

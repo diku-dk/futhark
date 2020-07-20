@@ -1,7 +1,7 @@
 cabal-version: 2.4
 
 name:           futhark
-version:        0.16.0
+version:        0.17.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -24,7 +24,7 @@ description:    Futhark is a small programming language designed to be compiled 
                 * "Futhark.Construct" explains how to write code that
                   manipulates and creates AST fragments.
                 .
-                <<assets/ohyes.png You too can go fast once you rewrite your program in Futhark.>>
+                <<docs/assets/ohyes.png You too can go fast once you rewrite your program in Futhark.>>
 
 category:       Language
 homepage:       https://futhark-lang.org

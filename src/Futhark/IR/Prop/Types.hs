@@ -5,7 +5,6 @@ module Futhark.IR.Prop.Types
          rankShaped
        , arrayRank
        , arrayShape
-       , modifyArrayShape
        , setArrayShape
        , existential
        , uniqueness
