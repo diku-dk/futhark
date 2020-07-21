@@ -77,7 +77,10 @@ instance Pretty Multicore where
   ppr (MulticoreCall dests f) =
     ppr dests <+> ppr f
 
-  ppr (Atomic _) = text ""
+  ppr (Atomic _) = text "AtomicOp"
+
+instance FreeIn AtomicOp where
+  freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
 
 instance FreeIn Multicore where
   freeIn' (Task _ e par_code seq_code _ _) =
@@ -85,4 +88,4 @@ instance FreeIn Multicore where
   freeIn' (MCFunc _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests
-  freeIn' (Atomic _ ) = mempty
+  freeIn' (Atomic aop) = freeIn' aop

@@ -12,6 +12,7 @@ import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
 
+import Futhark.Util.IntegralExp (rem)
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
 import Futhark.MonadFreshNames
@@ -21,8 +22,18 @@ import Futhark.MonadFreshNames
 onOpCas :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.Exp] -> MulticoreGen())
 onOpCas op = do
   let lambda = histOp op
-  let do_op = atomicUpdateLocking lambda
-  return do_op
+      do_op = atomicUpdateLocking lambda
+  case do_op of
+    AtomicCAS f -> return f
+    AtomicLocking f -> do
+      let num_locks = 100151
+          dims = map (toExp' int32) $
+                 shapeDims (histShape op) ++ [histWidth op]
+      locks <-
+        sStaticArray "hist_locks" DefaultSpace int32 $
+        Imp.ArrayZeros num_locks
+      let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
+      return $ f l'
 
 
 nonsegmentedHist :: Pattern MCMem
@@ -122,6 +133,22 @@ casHistogram pat space histops kbody = do
       Imp.MulticoreInfo num_histos sched (segFlat space)
 
 
+-- | Locking strategy used for an atomic update.
+data Locking =
+  Locking { lockingArray :: VName
+            -- ^ Array containing the lock.
+          , lockingIsUnlocked :: Imp.Exp
+            -- ^ Value for us to consider the lock free.
+          , lockingToLock :: Imp.Exp
+            -- ^ What to write when we lock it.
+          , lockingToUnlock :: Imp.Exp
+            -- ^ What to write when we unlock it.
+          , lockingMapping :: [Imp.Exp] -> [Imp.Exp]
+            -- ^ A transformation from the logical lock index to the
+            -- physical position in the array.  This can also be used
+            -- to make the lock array smaller.
+          }
+
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
 type DoAtomicUpdate lore r =
@@ -131,22 +158,77 @@ type DoAtomicUpdate lore r =
 -- Approximates how efficient it will be.  Ordered from most to least
 -- efficient.
 data AtomicUpdate lore r
-  = AtomicPrim (DoAtomicUpdate lore r)
-    -- ^ Supported directly by primitive.
-  | AtomicCAS (DoAtomicUpdate lore r)
+  = AtomicCAS (DoAtomicUpdate lore r)
     -- ^ Can be done by efficient swaps.
-  -- | AtomicLocking (Locking -> DoAtomicUpdate lore r)
-  --   -- ^ Requires explicit locking.
+  | AtomicLocking (Locking -> DoAtomicUpdate lore r)
+    -- ^ Requires explicit locking.
 
 atomicUpdateLocking :: Lambda MCMem
-                    -> DoAtomicUpdate lore r
-atomicUpdateLocking op
-  | [Prim t] <- lambdaReturnType op,
-    [xp, _] <- lambdaParams op,
-    supportedPrims (primBitSize t) = \[arr] bucket -> do
-      old <- dPrim "old" t
-      atomicUpdateCAS t arr old bucket (paramName xp) $
-        compileBody' [xp] $ lambdaBody op
+                    -> AtomicUpdate MCMem ()
+-- atomicUpdateLocking op
+--   | [Prim t] <- lambdaReturnType op,
+--     [xp, _] <- lambdaParams op,
+--     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
+--       old <- dPrim "old" t
+--       atomicUpdateCAS t arr old bucket (paramName xp) $
+--         compileBody' [xp] $ lambdaBody op
+
+atomicUpdateLocking op = AtomicLocking $ \locking arrs bucket -> do
+  old <- dPrim "old" int32
+  continue <- newVName "continue"
+  dPrimVol_ continue int32
+  continue <-- 0
+
+  -- Correctly index into locks.
+  (locks', _locks_space, locks_offset) <-
+    fullyIndexArray (lockingArray locking) $ lockingMapping locking bucket
+
+  -- Critical section
+  let try_acquire_lock =
+        sOp $ Imp.Atomic $
+        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        continue (lockingToLock locking)
+      lock_acquired = Imp.var continue int32 -- .==. lockingIsUnlocked locking
+      -- Even the releasing is done with an atomic rather than a
+      -- simple write, for memory coherency reasons.
+      release_lock =
+        sOp $ Imp.Atomic $
+        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        continue (lockingToUnlock locking)
+      break_loop = continue <-- 1
+
+  -- Preparing parameters. It is assumed that the caller has already
+  -- filled the arr_params. We copy the current value to the
+  -- accumulator parameters.
+  let (acc_params, _arr_params) = splitAt (length arrs) $ lambdaParams op
+      bind_acc_params =
+        everythingVolatile $
+        sComment "bind lhs" $
+        forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
+        copyDWIMFix (paramName acc_p) [] (Var arr) bucket
+
+  let op_body = sComment "execute operation" $
+                compileBody' acc_params $ lambdaBody op
+
+      do_hist =
+        everythingVolatile $
+        sComment "update global result" $
+        zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
+
+
+  -- While-loop: Try to insert your value
+  sWhile (Imp.var continue int32 .==. 0) $ do
+    try_acquire_lock
+    sWhen lock_acquired $ do
+      dLParams acc_params
+      bind_acc_params
+      op_body
+      do_hist
+      release_lock
+      break_loop
+  where writeArray bucket arr val = copyDWIMFix arr bucket val []
+
+
 atomicUpdateLocking _ =
   error "Type of hist not suppoorted yet"
 
