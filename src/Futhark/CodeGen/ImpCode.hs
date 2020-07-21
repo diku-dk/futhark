@@ -206,13 +206,13 @@ data Code a = Skip
               -- all memory blocks will be freed with this statement.
               -- Backends are free to ignore it entirely.
             | Copy
-              VName (Count Bytes (TExp Int32)) Space
-              VName (Count Bytes (TExp Int32)) Space
+              VName (Count Bytes (TExp Int64)) Space
+              VName (Count Bytes (TExp Int64)) Space
               (Count Bytes (TExp Int64))
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName (Count Elements (TExp Int32)) PrimType Space Volatility Exp
+            | Write VName (Count Elements (TExp Int64)) PrimType Space Volatility Exp
               -- ^ @Write mem i t space vol v@ writes the value @v@ to
               -- @mem@ offset by @i@ elements of type @t@.  The
               -- 'Space' argument is the memory space of @mem@
@@ -310,7 +310,7 @@ data ExpLeaf = ScalarVar VName
                -- 'LeafExp' constructor itself.
              | SizeOf PrimType
                -- ^ The size of a primitive type.
-             | Index VName (Count Elements (TExp Int32)) PrimType Space Volatility
+             | Index VName (Count Elements (TExp Int64)) PrimType Space Volatility
                -- ^ Reading a value from memory.  The arguments have
                -- the same meaning as with 'Write'.
            deriving (Eq, Show)
@@ -356,7 +356,7 @@ vi32 :: VName -> TExp Int32
 vi32 = TPrimExp . flip var (IntType Int32)
 
 -- | Concise wrapper for using 'Index'.
-index :: VName -> Count Elements (TExp Int32) -> PrimType -> Space -> Volatility -> Exp
+index :: VName -> Count Elements (TExp Int64) -> PrimType -> Space -> Volatility -> Exp
 index arr i t s vol = LeafExp (Index arr i t s vol) t
 
 -- Prettyprinting definitions.

@@ -505,7 +505,7 @@ atomicUpdateLocking atomicBinOp lam
 
   (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
 
-  case opHasAtomicSupport space old arr' bucket_offset op of
+  case opHasAtomicSupport space old arr' (sExt32 <$> bucket_offset) op of
     Just f -> sOp $ f $ Imp.var y t
     Nothing -> atomicUpdateCAS space t a old bucket x $
       x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
@@ -544,14 +544,14 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
   -- Critical section
   let try_acquire_lock =
         sOp $ Imp.Atomic space $
-        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        Imp.AtomicCmpXchg int32 old locks' (sExt32 <$> locks_offset)
         (untyped $ lockingIsUnlocked locking) (untyped $ lockingToLock locking)
       lock_acquired = Imp.vi32 old .==. lockingIsUnlocked locking
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock =
         sOp $ Imp.Atomic space $
-        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        Imp.AtomicCmpXchg int32 old locks' (sExt32 <$> locks_offset)
         (untyped $ lockingToLock locking) (untyped $ lockingToUnlock locking)
       break_loop = continue <-- false
 
@@ -633,7 +633,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     do_op
     old_bits <- dPrim "old_bits" int32
     sOp $ Imp.Atomic space $
-      Imp.AtomicCmpXchg int32 old_bits arr' bucket_offset
+      Imp.AtomicCmpXchg int32 old_bits arr' (sExt32 <$> bucket_offset)
       (toBits (Imp.var assumed t)) (toBits (Imp.var x t))
     old <~~ fromBits (Imp.var old_bits int32)
     sWhen (isInt32 (toBits (Imp.var assumed t)) .==. Imp.vi32 old_bits)

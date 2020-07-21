@@ -637,8 +637,8 @@ reductionStageTwo constants segred_pes
     sOp $ Imp.MemFence Imp.FenceGlobal
     -- Increment the counter, thus stating that our result is
     -- available.
-    sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd Int32 old_counter counter_mem counter_offset $
-      untyped (1::Imp.TExp Int32)
+    sOp $ Imp.Atomic DefaultSpace $ Imp.AtomicAdd Int32 old_counter counter_mem
+      (sExt32 <$> counter_offset) $ untyped (1::Imp.TExp Int32)
     -- Now check if we were the last group to write our result.  If
     -- so, it is our responsibility to produce the final result.
     sWrite sync_arr [0] $ untyped $ Imp.vi32 old_counter .==. groups_per_segment - 1
@@ -656,7 +656,7 @@ reductionStageTwo constants segred_pes
     -- races in oclgrind.
     sWhen (local_tid .==. 0) $
       sOp $ Imp.Atomic DefaultSpace $
-      Imp.AtomicAdd Int32 old_counter counter_mem counter_offset $
+      Imp.AtomicAdd Int32 old_counter counter_mem (sExt32 <$> counter_offset) $
       untyped $ negate groups_per_segment
 
     sLoopNest (slugShape slug) $ \vec_is -> do
