@@ -1223,9 +1223,9 @@ copyInGroup pt destloc destslice srcloc srcslice = do
             takeLast (length srcds) srcslice
       copyElementWise pt destloc destslice' srcloc srcslice'
 
-    _ ->
-      groupCoverSpace (sliceDims destslice) $ \is -> do
-      copyElementWise pt
+    _ -> do
+      groupCoverSpace (sliceDims destslice) $ \is ->
+        copyElementWise pt
         destloc (map DimFix $ fixSlice destslice is)
         srcloc (map DimFix $ fixSlice srcslice is)
       sOp $ Imp.Barrier Imp.FenceLocal
