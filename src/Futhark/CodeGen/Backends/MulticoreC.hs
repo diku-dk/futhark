@@ -556,18 +556,15 @@ compileOp (Atomic aop) =
   atomicOps aop
 
 
-atomicCast t = do
-  return [C.cty|$ty:t|]
-
 atomicOps :: AtomicOp -> GC.CompilerM op s ()
 atomicOps (AtomicCmpXchg t old arr ind res val) = do
   ind' <- GC.compileExp $ unCount ind
   new_val' <- GC.compileExp val
-  let t' = GC.primTypeToCType t
-  cast <- atomicCast [C.cty|$ty:t'*|]
-
-  GC.stm [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], &$id:old,
-                 $exp:new_val',0,  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);|]
+  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  GC.stm [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
+                ($ty:cast)&$id:old,
+                 $exp:new_val',
+                 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);|]
   where
     op :: String
     op = "__atomic_compare_exchange_n"

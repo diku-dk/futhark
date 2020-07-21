@@ -143,7 +143,7 @@ atomicUpdateLocking :: Lambda MCMem
 atomicUpdateLocking op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t == 32 = \[arr] bucket -> do
+    supportedPrims (primBitSize t) = \[arr] bucket -> do
       old <- dPrim "old" t
       atomicUpdateCAS t arr old bucket (paramName xp) $
         compileBody' [xp] $ lambdaBody op
@@ -164,35 +164,48 @@ atomicUpdateCAS t arr old bucket x do_op = do
   --   x = do_op(assumed, y);
   --   old = atomicCAS(&d_his[idx], assumed, tmp);
   -- } while(assumed != old);
-  assumed <- dPrim "assumed" t
   run_loop <- dPrimV "run_loop" 0
-
-  -- XXX: CUDA may generate really bad code if this is not a volatile
-  -- read.  Unclear why.  The later reads are volatile, so maybe
-  -- that's it.
   everythingVolatile $ copyDWIMFix old [] (Var arr) bucket
-
   (arr', _a_space, bucket_offset) <- fullyIndexArray arr bucket
 
+  bytes <- toIntegral $ primBitSize t
+  (to, from) <- getBitConvertFunc $ primBitSize t
   -- While-loop: Try to insert your value
-  let (toBits, fromBits) =
-        case t of FloatType Float32 -> (\v -> Imp.FunExp "to_bits32" [v] int32,
-                                        \v -> Imp.FunExp "from_bits32" [v] t)
-                  _                 -> (id, id)
+  let (toBits, _fromBits) =
+        case t of FloatType _ ->
+                    (\v -> Imp.FunExp to [v] bytes,
+                     \v -> Imp.FunExp from [v] t)
+                  _           -> (id, id)
+
   sWhile (Imp.var run_loop int32 .==. 0) $ do
-    assumed <-- Imp.var old t
-    x <-- Imp.var assumed t
-    do_op
-    old_bits <- dPrim "old_bits" int32
+    x <-- Imp.var old t
+    do_op -- Writes result into x
     sOp $ Imp.Atomic $
-      Imp.AtomicCmpXchg int32 old_bits arr' bucket_offset
+      Imp.AtomicCmpXchg bytes old arr' bucket_offset
       run_loop (toBits (Imp.var x t))
-    old <-- fromBits (Imp.var old_bits int32)
+
+getBitConvertFunc :: Int -> MulticoreGen (String, String)
+-- getBitConvertFunc 8 = ("to_bits8, from_bits8")
+-- getBitConvertFunc 16 = ("to_bits8, from_bits8")
+getBitConvertFunc 32 = return  ("to_bits32", "from_bits32")
+getBitConvertFunc 64 = return  ("to_bits64", "from_bits64")
+getBitConvertFunc b = error $ "number of bytes is supported " ++ pretty b
 
 
+supportedPrims :: Int -> Bool
+supportedPrims 8  = True
+supportedPrims 16 = True
+supportedPrims 32 = True
+supportedPrims 64 = True
+supportedPrims _  = False
 
-
-
+-- Supported bytes lengths by GCC (and clang) compiler
+toIntegral :: Int -> MulticoreGen PrimType
+toIntegral 8  =  return int8
+toIntegral 16 =  return int16
+toIntegral 32 =  return int32
+toIntegral 64 = return int64
+toIntegral b  = error $ "number of bytes is supported for CAS - " ++ pretty b
 
 segmentedHist :: Pattern MCMem
               -> SegSpace
