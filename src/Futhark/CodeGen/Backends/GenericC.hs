@@ -2029,15 +2029,11 @@ compileCode (If cond tbranch fbranch) = do
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
-compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
-  destoffset' <- compileExp destoffset
-  srcoffset' <- compileExp srcoffset
-  size' <- compileExp size
-  dest' <- rawMem dest
-  src' <- rawMem src
-  stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
-                      $exp:src' + $exp:srcoffset',
-                      $exp:size');|]
+compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
+  join $ copyMemoryDefaultSpace
+  <$> rawMem dest <*> compileExp destoffset
+  <*> rawMem src <*> compileExp srcoffset
+  <*> compileExp size
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
