@@ -602,7 +602,12 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
 -- Options that are common to multiple GPU-like backends.
 commonOptions :: [Option]
 commonOptions =
-   [ Option { optionLongName = "default-group-size"
+   [ Option { optionLongName = "device"
+            , optionShortName = Just 'd'
+            , optionArgument = RequiredArgument "NAME"
+            , optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
+            }
+   , Option { optionLongName = "default-group-size"
             , optionShortName = Nothing
             , optionArgument = RequiredArgument "INT"
             , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
