@@ -112,19 +112,6 @@ casHistogram pat space histops kbody = do
                do_op (map patElemName dest_res) (bucket_is ++ is')
 
 
-           -- sComment "perform non-atomic updates" $
-           --   sWhen bucket_in_bounds $ do
-           --     dLParams $ lambdaParams lam
-           --     let segment_dims =  map Imp.vi32 $ init is
-           --     sLoopNest shape $ \is' -> do
-           --       forM_ (zip vs_params vs') $ \(p, res) ->
-           --         copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-           --       forM_ (zip is_params dest_res) $ \(acc_p, pe) ->
-           --         copyDWIMFix (paramName acc_p) [] (Var $ patElemName pe) (segment_dims ++ bucket' : is')
-           --       compileStms (freeIn $ bodyResult $ lambdaBody lam) (bodyStms $ lambdaBody lam) $
-           --         forM_ (zip dest_res $ bodyResult $ lambdaBody lam) $
-           --           \(pe, se) -> copyDWIMFix  (patElemName pe) (segment_dims ++ bucket' : is') se []
-
   free_params <- freeParams body (segFlat space : [idx])
   num_histos <- dPrim "num_histos" $ IntType Int32
 
@@ -186,14 +173,14 @@ atomicUpdateLocking op = AtomicLocking $ \locking arrs bucket -> do
   -- Critical section
   let try_acquire_lock =
         sOp $ Imp.Atomic $
-        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        Imp.AtomicCmpXchg int32 continue locks' locks_offset
         continue (lockingToLock locking)
       lock_acquired = Imp.var continue int32 -- .==. lockingIsUnlocked locking
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock =
         sOp $ Imp.Atomic $
-        Imp.AtomicCmpXchg int32 old locks' locks_offset
+        Imp.AtomicCmpXchg int32 continue locks' locks_offset
         continue (lockingToUnlock locking)
       break_loop = continue <-- 1
 
