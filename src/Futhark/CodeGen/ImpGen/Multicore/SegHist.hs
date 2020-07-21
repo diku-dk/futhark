@@ -20,27 +20,9 @@ import Futhark.MonadFreshNames
 
 onOpCas :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.Exp] -> MulticoreGen())
 onOpCas op = do
-  let mk_op arrs bucket = do
-        let acc_params = take (length arrs) $ lambdaParams $ histOp op
-            bind_acc_params =
-              sComment "bind lhs" $
-                forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
-                  copyDWIMFix (paramName acc_p) [] (Var arr) bucket
-            op_body = sComment "execute operation" $
-                      compileBody' acc_params $ lambdaBody $ histOp op
-            do_hist =
-              sComment "update result" $
-                zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
-
-        sComment "Start of body" $ do
-          dLParams acc_params
-          bind_acc_params
-          op_body
-          do_hist
-  return mk_op
-  where
-    writeArray bucket arr val = copyDWIMFix arr bucket val []
-
+  let lambda = histOp op
+  let do_op = atomicUpdateLocking lambda
+  return do_op
 
 
 nonsegmentedHist :: Pattern MCMem
@@ -100,7 +82,7 @@ casHistogram pat space histops kbody = do
       forM_ (zip5 histops (perOp vs) buckets atomicOps pes_per_op) $
          \(HistOp dest_w _ _ _ shape lam, vs', bucket, do_op, dest_res) -> do
 
-           let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
+           let (_is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
                bucket'   = toExp' int32 $ kernelResultSubExp bucket
                dest_w'   = toExp' int32 dest_w
                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
@@ -111,11 +93,12 @@ casHistogram pat space histops kbody = do
 
            sComment "perform updates" $
              sWhen bucket_in_bounds $ do
+             let bucket_is = map Imp.vi32 (init is) ++ [bucket']
              dLParams $ lambdaParams lam
              sLoopNest shape $ \is' -> do
                forM_ (zip vs_params vs') $ \(p, res) ->
                  copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-               do_op (map patElemName dest_res) (bucket' : is')
+               do_op (map patElemName dest_res) (bucket_is ++ is')
 
 
            -- sComment "perform non-atomic updates" $
@@ -156,15 +139,14 @@ data AtomicUpdate lore r
   --   -- ^ Requires explicit locking.
 
 atomicUpdateLocking :: Lambda MCMem
-                    -> AtomicUpdate lore r
+                    -> DoAtomicUpdate lore r
 atomicUpdateLocking op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t == 32 = AtomicCAS $ \[arr] bucket -> do
+    primBitSize t == 32 = \[arr] bucket -> do
       old <- dPrim "old" t
       atomicUpdateCAS t arr old bucket (paramName xp) $
         compileBody' [xp] $ lambdaBody op
-
 atomicUpdateLocking _ =
   error "Type of hist not suppoorted yet"
 
@@ -204,7 +186,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
     old_bits <- dPrim "old_bits" int32
     sOp $ Imp.Atomic $
       Imp.AtomicCmpXchg int32 old_bits arr' bucket_offset
-      (run_loop) (toBits (Imp.var x t))
+      run_loop (toBits (Imp.var x t))
     old <-- fromBits (Imp.var old_bits int32)
 
 
