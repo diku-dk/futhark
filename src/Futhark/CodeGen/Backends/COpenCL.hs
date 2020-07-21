@@ -67,11 +67,6 @@ cliOptions =
            , optionArgument = RequiredArgument "NAME"
            , optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
            }
-  , Option { optionLongName = "device"
-           , optionShortName = Just 'd'
-           , optionArgument = RequiredArgument "NAME"
-           , optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
-           }
   , Option { optionLongName = "dump-opencl"
            , optionShortName = Nothing
            , optionArgument = RequiredArgument "FILE"

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     support floating-point literals, which must always have either an
     `f32` or `f64` suffix.
 
+  * The `cuda` backend now supports the `-d` option for executables.
+
 ### Removed
 
 ### Changed
