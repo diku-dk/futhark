@@ -59,9 +59,6 @@ import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
 import Futhark.Construct (fullSliceNum)
 
-i32Toi64 :: PrimExp v -> PrimExp v
-i32Toi64 = ConvOpExp (SExt Int32 Int64)
-
 data SubhistosInfo = SubhistosInfo { subhistosArray :: VName
                                    , subhistosAlloc :: CallKernelGen ()
                                    }
@@ -76,7 +73,7 @@ data SegHistSlug = SegHistSlug
 histoSpaceUsage :: HistOp KernelsMem
                 -> Imp.Count Imp.Bytes Imp.Exp
 histoSpaceUsage op =
-  fmap (ConvOpExp (SExt Int64 Int32)) $ sum $
+  fmap (sExt Int32) $ sum $
   map (typeSize .
        (`arrayOfRow` histWidth op) .
        (`arrayOfShape` histShape op)) $
@@ -270,11 +267,11 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
     slugElSize (SegHistSlug op _ _ do_op) =
       case do_op of
         AtomicLocking{} ->
-          ConvOpExp (SExt Int64 Int32) $ unCount $
+          sExt Int32 $ unCount $
           sum $ map (typeSize . (`arrayOfShape` histShape op)) $
           Prim int32 : lambdaReturnType (histOp op)
         _ ->
-          ConvOpExp (SExt Int64 Int32) $ unCount $ sum $
+          sExt Int32 $ unCount $ sum $
           map (typeSize . (`arrayOfShape` histShape op)) $
           lambdaReturnType (histOp op)
 
@@ -355,7 +352,7 @@ histKernelGlobalPass :: [PatElem KernelsMem]
 histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms hist_S chk_i = do
 
   let (space_is, space_sizes) = unzip $ unSegSpace space
-      space_sizes_64 = map (i32Toi64 . toExp' int32) space_sizes
+      space_sizes_64 = map (sExt Int64 . toExp' int32) space_sizes
       total_w_64 = product space_sizes_64
 
   hist_H_chks <- forM (map (histWidth . slugOp) slugs) $ \w -> do
@@ -374,15 +371,15 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
     -- Loop over flat offsets into the input and output.  The
     -- calculation is done with 64-bit integers to avoid overflow,
     -- but the final unflattened segment indexes are 32 bit.
-    let gtid = i32Toi64 $ kernelGlobalThreadId constants
-        num_threads = i32Toi64 $ kernelNumThreads constants
+    let gtid = sExt Int64 $ kernelGlobalThreadId constants
+        num_threads = sExt Int64 $ kernelNumThreads constants
     kernelLoop gtid num_threads total_w_64 $ \offset -> do
 
       -- Construct segment indices.
       let setIndex v e = do dPrim_ v int32
                             v <-- e
       zipWithM_ setIndex space_is $
-        map (ConvOpExp (SExt Int64 Int32)) $ unflattenIndex space_sizes_64 offset
+        map (sExt Int32) $ unflattenIndex space_sizes_64 offset
 
       -- We execute the bucket function once and update each histogram serially.
       -- We apply the bucket function if j=offset+ltid is less than
@@ -761,8 +758,6 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
 
   let r64 = ConvOpExp (SIToFP Int32 Float64)
       t64 = ConvOpExp (FPToSI Float64 Int32)
-      i32_to_i64 = ConvOpExp (SExt Int32 Int64)
-      i64_to_i32 = ConvOpExp (SExt Int64 Int32)
 
   -- M approximation.
   hist_m' <- dPrimVE "hist_m_prime" $
@@ -791,11 +786,11 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
     if segmented then do
 
       hist_T_hist_min <- dPrimVE "hist_T_hist_min" $
-                         i64_to_i32 $
+                         sExt Int32 $
                          Imp.BinOpExp (SMin Int64)
-                         (i32_to_i64 hist_Nin * i32_to_i64 hist_Nout) (i32_to_i64 hist_T)
+                         (sExt Int64 hist_Nin * sExt Int64 hist_Nout) (sExt Int64 hist_T)
                          `divUp`
-                         i32_to_i64 hist_Nout
+                         sExt Int64 hist_Nout
 
       -- Number of groups, rounded up.
       let r = hist_T_hist_min `divUp` hist_B

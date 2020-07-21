@@ -48,7 +48,7 @@ import Control.Monad.RWS.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.List (zip4, partition, sort)
+import Data.List (foldl', zip4, partition, sort)
 
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplify.Lore (mkWiseBody)
@@ -231,18 +231,16 @@ runPatAllocM (PatAllocM m) mems =
 
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
-  product
-    [ toInt64 $ product $ map (primExpFromSubExp int32) (arrayDims t)
-    , ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t ]
-  where toInt64 = ConvOpExp $ SExt Int32 Int64
+  foldl' (*)
+  (ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t) $
+  map (sExt Int64 .primExpFromSubExp int32) (arrayDims t)
 
 arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   dims <- mapM dimAllocationSize (arrayDims t)
-  let dim_prod_i32 = product $ map (toInt64 . primExpFromSubExp int32) dims
+  let dim_prod_i32 = product $ map (sExt Int64 . primExpFromSubExp int32) dims
   let elm_size_i64 = ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t
   return $ product [ dim_prod_i32, elm_size_i64 ]
-  where toInt64 = ConvOpExp $ SExt Int32 Int64
 
 arraySizeInBytes :: Allocator lore m => Type -> m SubExp
 arraySizeInBytes = computeSize "bytes" <=< arraySizeInBytesExpM
@@ -377,7 +375,7 @@ summaryForBindage t@(Array bt shape u) NoHint = do
 summaryForBindage t (Hint ixfun space) = do
   let bt = elemType t
   bytes <- computeSize "bytes" $
-           product [ConvOpExp (SExt Int32 Int64) (product (IxFun.base ixfun)),
+           product [product $ map (sExt Int64) $ IxFun.base ixfun,
                     fromIntegral (primByteSize (elemType t)::Int64)]
   m <- allocateMemory "mem" bytes space
   return $ MemArray bt (arrayShape t) NoUniqueness $ ArrayIn m ixfun

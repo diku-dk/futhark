@@ -13,6 +13,7 @@ module Futhark.Analysis.PrimExp
   , constFoldPrimExp
 
   , module Futhark.IR.Primitive
+  , sExt
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
@@ -249,6 +250,14 @@ x .^. y = constFoldPrimExp $
 infix 4 .==., .<., .>., .<=., .>=.
 infixr 3 .&&.
 infixr 2 .||.
+
+-- | Smart constructor for sign extension that does a bit of constant
+-- folding.
+sExt :: IntType -> PrimExp v -> PrimExp v
+sExt it (ValueExp (IntValue v)) = ValueExp $ IntValue $ doSExt v it
+sExt it e
+  | primExpIntType e == it = e
+  | otherwise = ConvOpExp (SExt (primExpIntType e) it) e
 
 asIntOp :: (IntType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asIntOp f x y
