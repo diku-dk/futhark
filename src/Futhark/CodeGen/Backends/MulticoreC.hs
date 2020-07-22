@@ -564,7 +564,7 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
   GC.stm [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
                 ($ty:cast)&$id:old,
                  $exp:new_val',
-                 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);|]
+                 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);|]
   where
     op :: String
     op = "__atomic_compare_exchange_n"
