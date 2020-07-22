@@ -25,6 +25,7 @@ module Futhark.Analysis.PrimExp
   , bNot
   , sMax32, sMin32, sMax64, sMin64
   , sExt32, sExt64
+  , zExt32, zExt64
   , fMin64, fMax64
   ) where
 
@@ -474,6 +475,14 @@ sExt32 = isInt32 . sExt Int32 . untyped
 -- | Sign-extend to 64 bit integer.
 sExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
 sExt64 = isInt64 . sExt Int64 . untyped
+
+-- | Zero-extend to 32 bit integer.
+zExt32 :: IntExp t => TPrimExp t v -> TPrimExp Int32 v
+zExt32 = isInt32 . zExt Int32 . untyped
+
+-- | Zero-extend to 64 bit integer.
+zExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
+zExt64 = isInt64 . zExt Int64 . untyped
 
 -- | 64-bit float minimum.
 fMin64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
