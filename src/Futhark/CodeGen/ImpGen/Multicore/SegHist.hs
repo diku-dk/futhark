@@ -115,7 +115,7 @@ casHistogram pat space histops kbody = do
   free_params <- freeParams body (segFlat space : [idx])
   num_histos <- dPrim "num_histos" $ IntType Int32
 
-  let sched = decideScheduling body
+  let sched = Imp.Static -- decideScheduling body
   emit $ Imp.Op $ Imp.MCFunc idx mempty body free_params $
       Imp.MulticoreInfo num_histos sched (segFlat space)
 
@@ -171,17 +171,19 @@ atomicUpdateLocking op = AtomicLocking $ \locking arrs bucket -> do
     fullyIndexArray (lockingArray locking) $ lockingMapping locking bucket
 
   -- Critical section
-  let try_acquire_lock =
+  let try_acquire_lock = do
+        old <-- 0
         sOp $ Imp.Atomic $
-        Imp.AtomicCmpXchg int32 continue locks' locks_offset
-        continue (lockingToLock locking)
+          Imp.AtomicCmpXchg int32 old locks' locks_offset
+          continue (lockingToLock locking)
       lock_acquired = Imp.var continue int32 -- .==. lockingIsUnlocked locking
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
-      release_lock =
+      release_lock = do
+        old <-- lockingToLock locking
         sOp $ Imp.Atomic $
-        Imp.AtomicCmpXchg int32 continue locks' locks_offset
-        continue (lockingToUnlock locking)
+          Imp.AtomicCmpXchg int32 old locks' locks_offset
+          continue (lockingToUnlock locking)
       break_loop = continue <-- 1
 
   -- Preparing parameters. It is assumed that the caller has already
@@ -212,12 +214,9 @@ atomicUpdateLocking op = AtomicLocking $ \locking arrs bucket -> do
       op_body
       do_hist
       release_lock
-      break_loop
+      -- break_loop
   where writeArray bucket arr val = copyDWIMFix arr bucket val []
 
-
-atomicUpdateLocking _ =
-  error "Type of hist not suppoorted yet"
 
 atomicUpdateCAS :: PrimType
                 -> VName -> VName
