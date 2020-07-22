@@ -83,7 +83,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   int subtask_id = 0;
   int end = iter_pr_subtask + (int)(remainder != 0);
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
+    struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks, subtask_id);
     assert(subtask != NULL);
@@ -99,7 +99,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
 
   // Join (wait for subtasks to finish)
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-  while (shared_counter != 0) {
+  while (shared_counter != 0 && scheduler_error == 0)  {
     CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
   }
 
@@ -148,13 +148,13 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   long int subtask_id = 0;
   int end = iter_pr_subtask + (long int)(remainder != 0);
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
+    struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks, subtask_id);
     assert(subtask != NULL);
     CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
 #ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_nested] pushed %ld iterations onto q %d\n", (end - start), calling_worker->tid);
+    fprintf(stderr, "[scheduler_nested] pushed %ld iterations onto tid %d q's\n", (end - start), calling_worker->tid);
 #endif
     // Update range params
     start = end;
@@ -170,17 +170,22 @@ static inline int scheduler_nested(struct scheduler *scheduler,
 
     int err = subtask_queue_steal(calling_worker, &subtask);
     if (err == 0) {
-      // Do work
-      assert(subtask->fn != NULL);
-      assert(subtask->args != NULL);
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
-      if (err != 0) {
-        return err;
+      if (strcmp(subtask->name, task->name) == 0) {
+        // Only do work belonging to current subtask
+        assert(subtask->fn != NULL);
+        assert(subtask->args != NULL);
+        int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
+        if (err != 0) {
+          return err;
+        }
+        CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+        (*subtask->counter)--;
+        CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+        free(subtask);
+      } else {
+        CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
       }
-      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
-      (*subtask->counter)--;
-      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
-      free(subtask);
+
     } else if (err == 1){
       continue;
     } else {
