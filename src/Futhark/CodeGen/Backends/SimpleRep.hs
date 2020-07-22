@@ -179,7 +179,7 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name = "zext_"++pretty from_t++"_"++pretty to_t
                 from_ct = uintTypeToCType from_t
-                to_ct = uintTypeToCType to_t
+                to_ct = intTypeToCType to_t
 
         mkBToI to_t =
           [C.cedecl|static inline $ty:to_ct
