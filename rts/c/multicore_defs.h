@@ -40,6 +40,7 @@ struct subtask {
   sub_task_fn fn;
   void* args;
   int start, end;
+  const char *name;
   // How much of a task to take a the time
   // If it's zero , then the subtasks is not stealable
   int chunkable;
