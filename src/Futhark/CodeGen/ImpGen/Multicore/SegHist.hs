@@ -152,13 +152,13 @@ data AtomicUpdate lore r
 
 atomicUpdateLocking :: Lambda MCMem
                     -> AtomicUpdate MCMem ()
--- atomicUpdateLocking op
---   | [Prim t] <- lambdaReturnType op,
---     [xp, _] <- lambdaParams op,
---     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
---       old <- dPrim "old" t
---       atomicUpdateCAS t arr old bucket (paramName xp) $
---         compileBody' [xp] $ lambdaBody op
+atomicUpdateLocking op
+  | [Prim t] <- lambdaReturnType op,
+    [xp, _] <- lambdaParams op,
+    supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
+      old <- dPrim "old" t
+      atomicUpdateCAS t arr old bucket (paramName xp) $
+        compileBody' [xp] $ lambdaBody op
 
 atomicUpdateLocking op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
