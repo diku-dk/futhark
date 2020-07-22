@@ -169,7 +169,10 @@ static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *s
 {
   assert(worker != NULL);
   struct subtask_queue *subtask_queue = &worker->q;
+
+#ifdef MCPROFILE
   uint64_t start = get_wall_time();
+#endif
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Wait until there is room in the subtask_queue.
@@ -190,10 +193,11 @@ static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *s
   subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used) % subtask_queue->capacity] = subtask;
   subtask_queue->num_used++;
 
+#ifdef MCPROFILE
   uint64_t end = get_wall_time();
   subtask_queue->time_enqueue += (end - start);
   subtask_queue->n_enqueues++;
-
+#endif
   // Broadcast a reader (if any) that there is now an element.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
@@ -210,7 +214,10 @@ static inline int subtask_queue_enqueue_front(struct worker *worker, struct subt
 {
   assert(worker != NULL);
   struct subtask_queue *subtask_queue = &worker->q;
+
+#ifdef MCPROFILE
   uint64_t start = get_wall_time();
+#endif
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Wait until there is room in the subtask_queue.
@@ -239,9 +246,11 @@ static inline int subtask_queue_enqueue_front(struct worker *worker, struct subt
   subtask_queue->num_used++;
 
 
+#ifdef MCPROFILE
   uint64_t end = get_wall_time();
   subtask_queue->time_enqueue += (end - start);
   subtask_queue->n_enqueues++;
+#endif
 
   // Broadcast a reader (if any) that there is now an element.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
@@ -262,8 +271,9 @@ static inline int subtask_queue_steal(struct worker *worker,
   if (subtask_queue->initialized != 1)  {
     return 1;
   }
-
+#ifdef MCPROFILE
   uint64_t start = get_wall_time();
+#endif
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
 
   if (subtask_queue->num_used == 0) {
@@ -283,9 +293,11 @@ static inline int subtask_queue_steal(struct worker *worker,
     return -1;
   }
 
+#ifdef MCPROFILE
   uint64_t end = get_wall_time();
   subtask_queue->time_dequeue += (end - start);
   subtask_queue->n_dequeues++;
+#endif
 
   // Broadcast a writer (if any) that there is now room for more.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
@@ -297,7 +309,7 @@ static inline int subtask_queue_steal(struct worker *worker,
 
 
 /* Ask for a random subtask from another worker */
-const int MAX_NUM_TRIES = 5;
+const int MAX_NUM_TRIES = 1;
 static inline int query_a_subtask(struct scheduler* scheduler,
                                   int tid,
                                   struct worker *worker)
@@ -338,8 +350,9 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
 {
   assert(worker != NULL);
   struct subtask_queue *subtask_queue = &worker->q;
-
+#ifdef MCPROFILE
   uint64_t start = get_wall_time();
+#endif
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Try to steal some work while the subtask_queue is empty
@@ -372,10 +385,11 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
     return -1;
   }
 
+#ifdef MCPROFILE
   uint64_t end = get_wall_time();
   subtask_queue->time_dequeue += (end - start);
   subtask_queue->n_dequeues++;
-
+#endif
   // Broadcast a writer (if any) that there is now room for more.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
