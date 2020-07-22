@@ -261,10 +261,22 @@ sExt it e
 
 asIntOp :: (IntType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asIntOp f x y
+  -- If either of the operands is a constant, then we prefer the type
+  -- of the other operand.  This lets us use literals via fromInteger
+  -- without imposing a specific type.
+  | ValueExp{} <- x,
+    IntType y_t <- primExpType y,
+    Just x' <- asIntExp y_t x = Just $ BinOpExp (f y_t) x' y
+  | ValueExp{} <- y,
+    IntType x_t <- primExpType x,
+    Just y' <- asIntExp x_t y = Just $ BinOpExp (f x_t) x y'
+
+  -- Otherwise prefer the type of the leftmost operand.
   | IntType t <- primExpType x,
     Just y' <- asIntExp t y = Just $ BinOpExp (f t) x y'
   | IntType t <- primExpType y,
     Just x' <- asIntExp t x = Just $ BinOpExp (f t) x' y
+
   | otherwise = Nothing
 
 asIntExp :: IntType -> PrimExp v -> Maybe (PrimExp v)
