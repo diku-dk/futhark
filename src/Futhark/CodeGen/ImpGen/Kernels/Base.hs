@@ -1101,17 +1101,17 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
           | otherwise =
               copyDWIM (paramName y) [] (Var $ paramName x) []
 
-computeMapKernelGroups :: Imp.TExp Int32 -> CallKernelGen (Imp.TExp Int32, Imp.TExp Int32)
+computeMapKernelGroups :: Imp.TExp Int64 -> CallKernelGen (Imp.TExp Int64, Imp.TExp Int32)
 computeMapKernelGroups kernel_size = do
   group_size <- dPrim "group_size" int32
   fname <- askFunction
   let group_size_var = Imp.vi32 group_size
       group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty group_size
   sOp $ Imp.GetSize group_size group_size_key Imp.SizeGroup
-  num_groups <- dPrimV "num_groups" $ kernel_size `divUp` group_size_var
-  return (Imp.vi32 num_groups, Imp.vi32 group_size)
+  num_groups <- dPrimV "num_groups" $ kernel_size `divUp` sExt64 group_size_var
+  return (Imp.vi64 num_groups, Imp.vi32 group_size)
 
-simpleKernelConstants :: Imp.TExp Int32 -> String
+simpleKernelConstants :: Imp.TExp Int64 -> String
                       -> CallKernelGen (KernelConstants, InKernelGen ())
 simpleKernelConstants kernel_size desc = do
   thread_gtid <- newVName $ desc ++ "_gtid"
@@ -1130,8 +1130,8 @@ simpleKernelConstants kernel_size desc = do
   return (KernelConstants
           (Imp.vi32 thread_gtid) (Imp.vi32 thread_ltid) (Imp.vi32 group_id)
           thread_gtid thread_ltid group_id
-          num_groups group_size (group_size*num_groups) 0
-          (Imp.vi32 thread_gtid .<. kernel_size)
+          (sExt32 num_groups) group_size (group_size*sExt32 num_groups) 0
+          (Imp.vi64 thread_gtid .<. kernel_size)
           mempty,
 
           set_constants)
@@ -1262,7 +1262,7 @@ sReplicateKernel arr se = do
 
   let dims = map toInt32Exp $ ds ++ arrayDims t
   (constants, set_constants) <-
-    simpleKernelConstants (product dims) "replicate"
+    simpleKernelConstants (product $ map sExt64 dims) "replicate"
 
   fname <- askFunction
   let name = keyWithEntryPoint fname $ nameFromString $
@@ -1324,7 +1324,7 @@ sReplicate arr se = do
     Nothing -> sReplicateKernel arr se
 
 -- | Perform an Iota with a kernel.
-sIotaKernel :: VName -> Imp.TExp Int32 -> Imp.Exp -> Imp.Exp -> IntType
+sIotaKernel :: VName -> Imp.TExp Int64 -> Imp.Exp -> Imp.Exp -> IntType
             -> CallKernelGen ()
 sIotaKernel arr n x s et = do
   destloc <- entryArrayLocation <$> lookupArray arr
@@ -1372,7 +1372,7 @@ iotaForType bt = do
     function fname [] params $ do
       arr <- sArray "arr" (IntType bt) shape $ ArrayIn mem $ IxFun.iota $
              map pe32 $ shapeDims shape
-      sIotaKernel arr n' x' s' bt
+      sIotaKernel arr (sExt64 n') x' s' bt
 
   return fname
 
@@ -1385,7 +1385,7 @@ sIota arr n x s et = do
     fname <- iotaForType et
     emit $ Imp.Call [] fname
       [Imp.MemArg arr_mem, Imp.ExpArg $ untyped n, Imp.ExpArg x, Imp.ExpArg s]
-    else sIotaKernel arr n x s et
+    else sIotaKernel arr (sExt64 n) x s et
 
 sCopy :: CopyCompiler KernelsMem HostEnv Imp.HostOp
 sCopy bt
@@ -1395,7 +1395,7 @@ sCopy bt
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = sliceDims srcslice
-      kernel_size = product shape
+      kernel_size = product $ map sExt64 shape
 
   (constants, set_constants) <- simpleKernelConstants kernel_size "copy"
 
@@ -1415,7 +1415,7 @@ sCopy bt
     (_, srcspace, srcidx) <-
       fullyIndexArray' srcloc $ fixSlice srcslice src_is
 
-    sWhen (gtid .<. kernel_size) $ emit $
+    sWhen (gtid .<. sExt32 kernel_size) $ emit $
       Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
       Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 

@@ -33,7 +33,7 @@ module Futhark.CodeGen.ImpCode
   , Volatility (..)
   , Arg (..)
   , var
-  , vi32
+  , vi32, vi64
   , index
   , ErrorMsg(..)
   , ErrorMsgPart(..)
@@ -354,6 +354,10 @@ var = LeafExp . ScalarVar
 -- | Turn a 'VName' into a v'Int32' 'Imp.ScalarVar'.
 vi32 :: VName -> TExp Int32
 vi32 = TPrimExp . flip var (IntType Int32)
+
+-- | Turn a 'VName' into a v'Int64' 'Imp.ScalarVar'.
+vi64 :: VName -> TExp Int64
+vi64 = TPrimExp . flip var (IntType Int64)
 
 -- | Concise wrapper for using 'Index'.
 index :: VName -> Count Elements (TExp Int64) -> PrimType -> Space -> Volatility -> Exp
