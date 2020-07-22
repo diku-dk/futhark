@@ -13,7 +13,7 @@ module Futhark.Analysis.PrimExp
   , constFoldPrimExp
 
   , module Futhark.IR.Primitive
-  , sExt
+  , sExt, zExt
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
@@ -258,6 +258,14 @@ sExt it (ValueExp (IntValue v)) = ValueExp $ IntValue $ doSExt v it
 sExt it e
   | primExpIntType e == it = e
   | otherwise = ConvOpExp (SExt (primExpIntType e) it) e
+
+-- | Smart constructor for zero extension that does a bit of constant
+-- folding.
+zExt :: IntType -> PrimExp v -> PrimExp v
+zExt it (ValueExp (IntValue v)) = ValueExp $ IntValue $ doZExt v it
+zExt it e
+  | primExpIntType e == it = e
+  | otherwise = ConvOpExp (ZExt (primExpIntType e) it) e
 
 asIntOp :: (IntType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asIntOp f x y
