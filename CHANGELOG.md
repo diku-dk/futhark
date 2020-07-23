@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fix barrier divergence when generating code for group-level
     colletive copies in GPU backend.
 
+  * Intra-group flattening now looks properly inside of branches.
+
 ## [0.16.2]
 
 ### Added
