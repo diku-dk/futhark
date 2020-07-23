@@ -581,6 +581,8 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
               mapLike w lam'
           | DoLoop _ _ _ body <- stmExp stm =
               bodyInterest body * 10
+          | If _ tbody fbody _ <- stmExp stm =
+              bodyInterest tbody + bodyInterest fbody -- Ad-hoc.
           | Op (Screma w (ScremaForm _ _ lam') _) <- stmExp stm =
               zeroIfTooSmall w + bodyInterest (lambdaBody lam')
           | Op (Stream _ (Sequential _) lam' _) <- stmExp stm =
