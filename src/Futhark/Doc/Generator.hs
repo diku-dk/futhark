@@ -434,7 +434,7 @@ typeHtml t = case t of
   Scalar (TypeVar _ u et targs) -> do
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
-    return $ prettyU u <> et' <> joinBy " " targs'
+    return $ prettyU u <> et' <> mconcat (map (" "<>) targs')
   Scalar (Arrow _ pname t1 t2) -> do
     t1' <- typeHtml t1
     t2' <- typeHtml t2
