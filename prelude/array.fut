@@ -107,11 +107,11 @@ let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
 
 -- | True if all of the input elements are true.  Produces true on an
 -- empty array.
-let and: []bool -> bool = all id
+let and [n] (xs: [n]bool) = all id xs
 
 -- | True if any of the input elements are true.  Produces false on an
 -- empty array.
-let or: []bool -> bool = any id
+let or [n] (xs: [n]bool) = any id xs
 
 -- | Perform a *sequential* left-fold of an array.
 let foldl [n] 'a 'b (f: a -> b -> a) (acc: a) (bs: [n]b): a =
