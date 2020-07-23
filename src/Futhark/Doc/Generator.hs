@@ -614,8 +614,10 @@ typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d
 typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
 typeParamHtml :: TypeParam -> Html
-typeParamHtml (TypeParamDim name _) = brackets $ vnameHtml name
-typeParamHtml (TypeParamType l name _) = fromString (pretty l) <> vnameHtml name
+typeParamHtml (TypeParamDim name _) =
+  brackets $ vnameHtml name
+typeParamHtml (TypeParamType l name _) =
+  "'" <> fromString (pretty l) <> vnameHtml name
 
 typeAbbrevHtml :: Liftedness -> Html -> [TypeParam] -> Html
 typeAbbrevHtml l name params =
