@@ -261,6 +261,16 @@ def clz_T(x):
     x <<= np.int8(1)
   return n
 
+def ctz_T(x):
+  n = np.int32(0)
+  bits = x.itemsize * 8
+  for i in range(bits):
+    if (x & 1) == 1:
+      break
+    n += 1
+    x >>= np.int8(1)
+  return n
+
 def popc_T(x):
   c = np.int32(0)
   while x != 0:
@@ -270,6 +280,7 @@ def popc_T(x):
 
 futhark_popc8 = futhark_popc16 = futhark_popc32 = futhark_popc64 = popc_T
 futhark_clzz8 = futhark_clzz16 = futhark_clzz32 = futhark_clzz64 = clz_T
+futhark_ctzz8 = futhark_ctzz16 = futhark_ctzz32 = futhark_ctzz64 = ctz_T
 
 def ssignum(x):
   return np.sign(x)

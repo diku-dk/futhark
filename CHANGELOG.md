@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The `cuda` backend now supports the `-d` option for executables.
 
+  * The integer modules now contain a `ctz` function for counting
+    trailing zeroes.
+
 ### Removed
 
 ### Changed

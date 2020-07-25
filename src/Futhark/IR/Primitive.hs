@@ -953,6 +953,11 @@ primFuns = M.fromList
   , i32 "clz32" $ IntValue . Int32Value . fromIntegral . countLeadingZeros
   , i64 "clz64" $ IntValue . Int32Value . fromIntegral . countLeadingZeros
 
+  , i8 "ctz8" $ IntValue . Int32Value . fromIntegral . countTrailingZeros
+  , i16 "ctz16" $ IntValue . Int32Value . fromIntegral . countTrailingZeros
+  , i32 "ctz32" $ IntValue . Int32Value . fromIntegral . countTrailingZeros
+  , i64 "ctz64" $ IntValue . Int32Value . fromIntegral . countTrailingZeros
+
   , i8 "popc8" $ IntValue . Int32Value . fromIntegral . popCount
   , i16 "popc16" $ IntValue . Int32Value . fromIntegral . popCount
   , i32 "popc32" $ IntValue . Int32Value . fromIntegral . popCount
