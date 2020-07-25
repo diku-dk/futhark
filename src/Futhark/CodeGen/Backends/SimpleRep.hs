@@ -418,6 +418,61 @@ $esc:("#else")
     return n;
    }
 $esc:("#endif")
+
+$esc:("#if defined(__OPENCL_VERSION__)")
+   // OpenCL has ctz, but only from version 2.0, which we cannot assume we are using.
+   static typename int32_t $id:(funName' "ctz8") (typename int8_t x) {
+      int i = 0;
+      for (; i < 8 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+   static typename int32_t $id:(funName' "ctz16") (typename int16_t x) {
+      int i = 0;
+      for (; i < 16 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+   static typename int32_t $id:(funName' "ctz32") (typename int32_t x) {
+      int i = 0;
+      for (; i < 32 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+   static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
+      int i = 0;
+      for (; i < 64 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+$esc:("#elif defined(__CUDA_ARCH__)")
+   static typename int32_t $id:(funName' "ctz8") (typename int8_t x) {
+     int y = __ffs(x);
+     return y == 0 ? 8 : y-1;
+   }
+   static typename int32_t $id:(funName' "ctz16") (typename int16_t x) {
+     int y = __ffs(x);
+     return y == 0 ? 16 : y-1;
+   }
+   static typename int32_t $id:(funName' "ctz32") (typename int32_t x) {
+     int y = __ffs(x);
+     return y == 0 ? 32 : y-1;
+   }
+   static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
+     int y = __ffsll(x);
+     return y == 0 ? 64 : y-1;
+   }
+$esc:("#else")
+// FIXME: assumes GCC or clang.
+   static typename int32_t $id:(funName' "ctz8") (typename int8_t x) {
+     return smin32(8, __builtin_ctz((typename uint32_t)x));
+   }
+   static typename int32_t $id:(funName' "ctz16") (typename int16_t x) {
+     return smin32(16, __builtin_ctz((typename uint32_t)x));
+   }
+   static typename int32_t $id:(funName' "ctz32") (typename int32_t x) {
+     return __builtin_ctz(x);
+   }
+   static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
+     return __builtin_ctzl(x);
+   }
+$esc:("#endif")
                 |]
 
 cFloat32Ops :: [C.Definition]
