@@ -1365,14 +1365,36 @@ data CParts = CParts { cHeader :: String
                      , cLib :: String
                      }
 
+-- We may generate variables that are never used (e.g. for
+-- certificates) or functions that are never called (e.g. unused
+-- intrinsics), and generated code may have other cosmetic issues that
+-- compilers warn about.  We disable these warnings to not clutter the
+-- compilation logs.
+disableWarnings :: String
+disableWarnings = pretty [C.cunit|
+$esc:("#ifdef __GNUC__")
+$esc:("#pragma GCC diagnostic ignored \"-Wunused-function\"")
+$esc:("#pragma GCC diagnostic ignored \"-Wunused-variable\"")
+$esc:("#pragma GCC diagnostic ignored \"-Wparentheses\"")
+$esc:("#pragma GCC diagnostic ignored \"-Wunused-label\"")
+$esc:("#endif")
+
+$esc:("#ifdef __clang__")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
+$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
+$esc:("#endif")
+|]
+
 -- | Produce header and implementation files.
 asLibrary :: CParts -> (String, String)
 asLibrary parts = ("#pragma once\n\n" <> cHeader parts,
-                   cHeader parts <> cUtils parts <> cLib parts)
+                   disableWarnings <> cHeader parts <> cUtils parts <> cLib parts)
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
-asExecutable (CParts a b c d) = a <> b <> c <> d
+asExecutable (CParts a b c d) = disableWarnings <> a <> b <> c <> d
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
