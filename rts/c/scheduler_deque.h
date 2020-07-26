@@ -125,10 +125,9 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks, subtask_id);
     assert(subtask != NULL);
-    fprintf(stderr, "addres of %d is %p\n", subtask_id, subtask);
-    pushBottom(&scheduler->workers[0].q, subtask);
+    pushBottom(&scheduler->workers[worker_local->tid].q, subtask);
 #ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), subtask_id%scheduler->num_threads);
+    fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), worker_local->tid);
 #endif
     // Update range params
     start = end;
