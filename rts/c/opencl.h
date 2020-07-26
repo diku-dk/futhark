@@ -566,7 +566,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     const char *size_class = ctx->cfg.size_classes[i];
     size_t *size_value = &ctx->cfg.size_values[i];
     const char* size_name = ctx->cfg.size_names[i];
-    size_t max_value, default_value;
+    size_t max_value = 0, default_value = 0;
     if (strstr(size_class, "group_size") == size_class) {
       max_value = max_group_size;
       default_value = ctx->cfg.default_group_size;
@@ -583,11 +583,10 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       max_value = sqrt(max_group_size);
       default_value = ctx->cfg.default_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
-      max_value = 0; // No limit.
+      // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
-      max_value = 0;
     }
     if (*size_value == 0) {
       *size_value = default_value;
