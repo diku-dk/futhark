@@ -79,7 +79,7 @@ compileSegScan  (Pattern _ pes)
     --       return (unCount (typeSize (Array pt shape NoUniqueness)))
 
 
-    let eLMPT = 1::Integer
+    let eLMPT = 9::Integer
     -- intValueType :: IntValue -> IntType
     let eLEMS_PER_THREAD = IntValue $ intValue Int32 eLMPT
     let eLEMS_PER_THREAD_const = ValueExp eLEMS_PER_THREAD -- Constant eLEMS_PER_THREAD
