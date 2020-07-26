@@ -35,13 +35,13 @@ compileProg =
   ImpGen.compileProg
   where generateContext = do
 
-          let subtask_queue_h  = $(embedStringFile "rts/c/subtask_queue.h")
-              scheduler_h = $(embedStringFile "rts/c/scheduler.h")
+          let scheduler_h = $(embedStringFile "rts/c/scheduler_deque.h")
               multicore_h = $(embedStringFile "rts/c/multicore_defs.h")
+              deque_h = $(embedStringFile "rts/c/deque.h")
 
           mapM_ GC.earlyDecl [C.cunit|
                               $esc:multicore_h
-                              $esc:subtask_queue_h
+                              $esc:deque_h
                               $esc:scheduler_h
                              |]
 
@@ -123,20 +123,25 @@ compileProg =
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
 
-                 free_workers = ctx->scheduler.num_threads;
                  $stms:init_fields
 
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
 
-                 for (int i = 0; i < ctx->scheduler.num_threads; i++) {
+                 num_workers = ctx->scheduler.num_threads;
+                 worker_local = &ctx->scheduler.workers[0];
+                 worker_local->tid = 0;
+                 CHECK_ERR(deque_init(&worker_local->q, 2), "failed to init queue for worker %d\n", 0);
+
+                 for (int i = 1; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    cur_worker->tid = i;
                    cur_worker->time_spent_working = 0;
                    cur_worker->cur_working = 0;
                    cur_worker->scheduler = &ctx->scheduler;
-                   CHECK_ERR(subtask_queue_init(&cur_worker->q, 2),
-                             "failed to init jobqueue for worker %d\n", i);
+                   // CHECK_ERR(subtask_queue_init(&cur_worker->q, 2),
+                   // "failed to init jobqueue for worker %d\n", i);
+                   CHECK_ERR(deque_init(&cur_worker->q, 2), "failed to init queue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
                                             cur_worker),
                              "Failed to create worker %d\n", i);
@@ -152,8 +157,10 @@ compileProg =
             ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
-                 for (int i = 0; i < ctx->scheduler.num_threads; i++) {
-                   CHECK_ERR(subtask_queue_destroy(&ctx->scheduler.workers[i].q), "subtask_queue_destroy");
+                 should_exit = 1;
+
+                 for (int i = 1; i < ctx->scheduler.num_threads; i++) {
+                   // CHECK_ERR(subtask_queue_destroy(&ctx->scheduler.workers[i].q), "subtask_queue_destroy");
                    CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
                  }
                  free_lock(&ctx->lock);

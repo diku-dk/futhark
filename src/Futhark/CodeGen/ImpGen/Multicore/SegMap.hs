@@ -52,9 +52,9 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
       zipWithM_ (writeResult is) (patternElements pat) kres
 
 compileSegMap :: Pattern MCMem
-                      -> SegSpace
-                      -> KernelBody MCMem
-                      -> MulticoreGen Imp.Code
+              -> SegSpace
+              -> KernelBody MCMem
+              -> MulticoreGen Imp.Code
 compileSegMap pat space kbody =
   collect $ do
     flat_par_idx <- dPrim "iter" int32
