@@ -202,7 +202,7 @@ static int read_str_empty_array(char *buf, int bufsize,
 
     next_token(buf, bufsize);
 
-    if (sscanf(buf, "%"SCNu64, &shape[i]) != 1) {
+    if (sscanf(buf, "%"SCNu64, (uint64_t*)&shape[i]) != 1) {
       return 1;
     }
 
