@@ -40,15 +40,13 @@ void acquire (struct scheduler* scheduler)
     struct deque *deque_k = &scheduler->workers[k].q;
     struct subtask* subtask = steal(deque_k);
     if (subtask == STEAL_RES_EMPTY) {
-      // later: log
+      // TODO: log
     } else if (subtask == STEAL_RES_ABORT) {
-      // later: log
+      // TODO: log
     } else {
       assert(subtask != NULL);
-      subtask->been_stolen = 1;
+      /* subtask->been_stolen = 1; */
       pushBottom(&worker_local->q, subtask);
-      fprintf(stderr, "tid %d stole a task from %d with id %d and %p \n", my_id, k, subtask->id, subtask);
-
       return;
     }
   }
@@ -66,7 +64,10 @@ static inline void *scheduler_worker(void* arg)
         continue;
       }
 
-      fprintf(stderr, "tid %d running subtask %p with id %d\n", worker_local->tid, subtask, subtask->id);
+      /* if (subtask->has_been_run != 1) { */
+      /*   fprintf(stderr, "tid %d - subtask %s has already been run\n", worker_local->tid, subtask->name); */
+      /* } */
+      subtask->has_been_run = 1;
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       /* Only one error can be returned at the time now
@@ -121,7 +122,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   int subtask_id = 0;
   int end = iter_pr_subtask + (int)(remainder != 0);
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
+    struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks, subtask_id);
     assert(subtask != NULL);
@@ -144,6 +145,9 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
       // Do work
       assert(subtask->fn != NULL);
       assert(subtask->args != NULL);
+
+      assert(subtask->has_been_run != 1);
+      subtask->has_been_run = 1;
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
       if (err != 0) {
         return err;

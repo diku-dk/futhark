@@ -65,7 +65,7 @@ static inline void pushBottom(struct deque *q, struct subtask*subtask)
   int64_t b = __atomic_load_n(&q->bottom, mem_model); // load atomically
   int64_t t = __atomic_load_n(&q->top, mem_model);    // load atomically
   int64_t size = b - t;
-  if (size >= (q->size - 1)) {
+  if (size >= (__atomic_load_n(&q->size, mem_model) - 1)) {
     // grow_queue
     struct subtask **old_buf = q->buffer;
     int64_t old_capacity = __atomic_load_n(&q->size, mem_model);
@@ -87,9 +87,9 @@ static inline struct subtask* steal(struct deque *q) {
   if (t >= b) {
     return STEAL_RES_EMPTY;
   }
-  if (stealable(q->buffer, q->size, t)) {
-    return STEAL_RES_ABORT;
-  }
+  /* if (stealable(q->buffer, q->size, t)) { */
+  /*   return STEAL_RES_ABORT; */
+  /* } */
   struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, mem_model), t);
   /* if (item->been_stolen) { */
   /*   return STEAL_RES_ABORT; */
@@ -135,6 +135,7 @@ int empty(struct deque *q) {
 
 static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             void* args,
+                                            const char* name,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
                                             int* counter,
@@ -148,6 +149,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   }
   subtask->fn      = fn;
   subtask->args    = args;
+  subtask->name   = name;
   subtask->mutex   = mutex;
   subtask->cond    = cond;
   subtask->counter = counter;
@@ -157,6 +159,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   // This should start at the value of minimum work pr. subtask
   subtask->iterations = chunk;
   subtask->been_stolen = 0;
+  subtask->has_been_run = 0;
   subtask->id      = id;
   return subtask;
 }

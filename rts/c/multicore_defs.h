@@ -45,7 +45,10 @@ struct subtask {
   int chunkable;
   long int iterations;
   int been_stolen;
+  int has_been_run;
   int id;
+
+  const char* name;
 
   // Shared variables across subtasks
   int *counter; // Counter for ongoing subtasks
