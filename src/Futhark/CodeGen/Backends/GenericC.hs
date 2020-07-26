@@ -1665,7 +1665,10 @@ compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
   ctx_ty <- contextType
   const_fields <- mapM constParamField ps
-  contextField "constants" [C.cty|struct { $sdecls:const_fields }|] Nothing
+  -- Avoid an empty struct, as that is apparently undefined behaviour.
+  let const_fields' | null const_fields = [[C.csdecl|int dummy;|]]
+                    | otherwise = const_fields
+  contextField "constants" [C.cty|struct { $sdecls:const_fields' }|] Nothing
   earlyDecl [C.cedecl|int init_constants($ty:ctx_ty*);|]
   earlyDecl [C.cedecl|int free_constants($ty:ctx_ty*);|]
 
