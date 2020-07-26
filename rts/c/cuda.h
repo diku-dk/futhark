@@ -389,7 +389,7 @@ static void cuda_size_setup(struct cuda_context *ctx)
 
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     const char *size_class, *size_name;
-    size_t *size_value, max_value, default_value;
+    size_t *size_value, max_value = 0, default_value = 0;
 
     size_class = ctx->cfg.size_classes[i];
     size_value = &ctx->cfg.size_values[i];
@@ -411,11 +411,10 @@ static void cuda_size_setup(struct cuda_context *ctx)
       max_value = ctx->max_tile_size;
       default_value = ctx->cfg.default_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
-      max_value = ctx->max_threshold;
+      // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
-      max_value = 0;
     }
 
     if (*size_value == 0) {
