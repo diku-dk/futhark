@@ -44,8 +44,10 @@ struct subtask {
   // If it's zero , then the subtasks is not stealable
   int chunkable;
   long int iterations;
-  int been_stolen;
-  int has_been_run;
+  volatile int been_stolen;
+  volatile int has_been_run;
+  volatile int created_by;
+  volatile int ran_by;
   int id;
 
   const char* name;
@@ -112,6 +114,7 @@ struct worker {
   struct deque q;
   struct scheduler *scheduler;
   int cur_working;
+  volatile int dead;
 
   int tid;                     /* Just a thread id */
   uint64_t time_spent_working; /* Time spent in tasks functions */

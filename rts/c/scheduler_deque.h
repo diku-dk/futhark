@@ -7,7 +7,7 @@ static sig_atomic_t num_workers;
 
 __thread struct worker* worker_local = NULL;
 
-static int should_exit = 0;
+static volatile int should_exit = 0;
 
 static inline int is_finished() {
   return should_exit && empty(&worker_local->q);
@@ -32,11 +32,15 @@ int random_other_worker(struct scheduler *scheduler, int my_id) {
 void acquire (struct scheduler* scheduler)
 {
   /* assert(my_ready.empty() && my_suspended.empty() && my_buffer.empty()); */
-  /* assert(data::perworker::get_nb_workers() >= 2); */
+  assert(num_workers >= 2);
 
   int my_id = worker_local->tid;
   while (! is_finished()) {
     int k = random_other_worker(scheduler, my_id);
+    if (scheduler->workers[k].dead) {
+      continue;
+    }
+
     struct deque *deque_k = &scheduler->workers[k].q;
     struct subtask* subtask = steal(deque_k);
     if (subtask == STEAL_RES_EMPTY) {
@@ -45,8 +49,10 @@ void acquire (struct scheduler* scheduler)
       // TODO: log
     } else {
       assert(subtask != NULL);
-      /* subtask->been_stolen = 1; */
+      subtask->been_stolen = 1;
       pushBottom(&worker_local->q, subtask);
+      fprintf(stderr, "tid %d stole a task from %d with id %d and %p \n", my_id, k, subtask->id, subtask);
+
       return;
     }
   }
@@ -64,10 +70,15 @@ static inline void *scheduler_worker(void* arg)
         continue;
       }
 
-      /* if (subtask->has_been_run != 1) { */
-      /*   fprintf(stderr, "tid %d - subtask %s has already been run\n", worker_local->tid, subtask->name); */
-      /* } */
+      if (subtask->has_been_run == 1) {
+        fprintf(stderr, "tid %d - subtask created by %d(%p) has already been run by %d\n", worker_local->tid, subtask->created_by, subtask, subtask->ran_by);
+
+        /* continue; */
+      }
       subtask->has_been_run = 1;
+      subtask->ran_by = worker_local->tid;
+      /* fprintf(stderr, "tid %d running subtask %p with id %d\n", worker_local->tid, subtask, subtask->id); */
+
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       /* Only one error can be returned at the time now
@@ -85,6 +96,7 @@ static inline void *scheduler_worker(void* arg)
       acquire(worker_local->scheduler);
     }
   }
+  worker_local->dead = 1;
   assert(empty(&worker->q));
   num_workers--;
   return NULL;
@@ -124,8 +136,9 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
-                                            start, end, chunks, subtask_id);
+                                            start, end, chunks, subtask_id, worker_local->tid);
     assert(subtask != NULL);
+    /* fprintf(stderr, "tid %d created task %p with id %d\n", worker_local->tid, subtask, subtask_id ); */
     pushBottom(&scheduler->workers[worker_local->tid].q, subtask);
 #ifdef MCDEBUG
     fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), worker_local->tid);
@@ -135,9 +148,11 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
-  while(1) {
+  while(!is_finished()) {
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    if (shared_counter == 0) break;
+    if (shared_counter == 0) {
+      break;
+    }
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
 
     struct subtask * subtask = popBottom(&worker_local->q);
@@ -146,8 +161,13 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
       assert(subtask->fn != NULL);
       assert(subtask->args != NULL);
 
+      subtask->been_stolen = 1;
       assert(subtask->has_been_run != 1);
       subtask->has_been_run = 1;
+
+      subtask->ran_by = worker_local->tid;
+
+      /* fprintf(stderr, "[scheduler_parallel] tid %d running subtask %p with id %d\n", worker_local->tid, subtask, subtask->id); */
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
       if (err != 0) {
         return err;

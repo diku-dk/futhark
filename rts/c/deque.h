@@ -12,7 +12,28 @@ static struct subtask* const STEAL_RES_ABORT = (struct subtask*) 1;
 
 static const int mem_model = __ATOMIC_SEQ_CST;
 static const int strong = 0;
+static const int backoff_nb_cycles = 1l << 17;
 
+
+
+static inline
+uint64_t rdtsc() {
+  unsigned int hi, lo;
+  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+  return  ((uint64_t) lo) | (((uint64_t) hi) << 32);
+}
+
+static inline
+void rdtsc_wait(uint64_t n) {
+  const uint64_t start = rdtsc();
+  while (rdtsc() < (start + n)) {
+    __asm__("PAUSE");
+  }
+}
+static inline
+void spin_for(uint64_t nb_cycles) {
+  rdtsc_wait(nb_cycles);
+}
 
 static inline struct subtask* cb_get(struct subtask **buf, int64_t capacity, int64_t i)  {
   return (struct subtask*)__atomic_load_n(&buf[i % capacity], mem_model);
@@ -23,7 +44,7 @@ static inline void cb_put (struct subtask **buf, int64_t capacity, int64_t i, st
 }
 
 static inline int stealable(struct subtask **buf, int64_t capacity, int64_t i) {
-  return __atomic_load_n(&buf[i % capacity]->been_stolen, mem_model);
+  return __atomic_load_n(&buf[i % capacity]->been_stolen, mem_model) || __atomic_load_n(&buf[i % capacity]->has_been_run, mem_model);;
 }
 
 
@@ -54,7 +75,11 @@ static inline int deque_init(struct deque *q, int capacity) {
 
 static inline int cas_top (struct deque *q, int64_t old_val, int64_t new_val) {
   int64_t ov = old_val;
-  return __atomic_compare_exchange_n(&q->top, &ov, new_val, strong, mem_model, mem_model);
+  if(__atomic_compare_exchange_n(&q->top, &ov, new_val, strong, mem_model, mem_model)) {
+    return 1;
+  }
+  spin_for(backoff_nb_cycles);
+  return false;
 }
 
 
@@ -87,13 +112,11 @@ static inline struct subtask* steal(struct deque *q) {
   if (t >= b) {
     return STEAL_RES_EMPTY;
   }
-  /* if (stealable(q->buffer, q->size, t)) { */
-  /*   return STEAL_RES_ABORT; */
-  /* } */
+
+  if (stealable(q->buffer, q->size, t)) {
+    return STEAL_RES_ABORT;
+  }
   struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, mem_model), t);
-  /* if (item->been_stolen) { */
-  /*   return STEAL_RES_ABORT; */
-  /* } */
 
   if (!cas_top(q, t, t + 1)) {
     return STEAL_RES_ABORT;
@@ -105,6 +128,7 @@ static inline struct subtask* steal(struct deque *q) {
 
 
 static inline struct subtask * popBottom(struct deque *q) {
+
   int64_t b = __atomic_load_n(&q->bottom, mem_model) - 1; // load atomically
   __atomic_store_n(&q->bottom, b, mem_model);
 
@@ -140,7 +164,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             pthread_cond_t *cond,
                                             int* counter,
                                             int start, int end,
-                                            int chunk, int id)
+                                            int chunk, int id, int tid)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
@@ -160,6 +184,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->iterations = chunk;
   subtask->been_stolen = 0;
   subtask->has_been_run = 0;
+  subtask->created_by = tid;
   subtask->id      = id;
   return subtask;
 }
