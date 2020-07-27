@@ -282,7 +282,7 @@ compileSegScan  (Pattern _ pes)
         p1 <- dPrim "p1" int32
         p1 <-- 1
         let p1Var = Imp.var p1 int32
-        sOp Imp.LocalBarrier
+        sOp Imp.LocalBarrier -- REALLY?
 
         -- while p < array.size
         sWhile (p1Var .<. arraysize) $ do
@@ -369,7 +369,8 @@ compileSegScan  (Pattern _ pes)
             copyDWIMFix statusflgs [Imp.var wG_ID int32] (intConst Int8 1) []
             copyDWIMFix warpscan [0+32*4] (Var statusflgs) [Imp.var wG_ID int32 - 1]
 
-          sOp Imp.MemFenceGlobal
+          -- sOp Imp.MemFenceGlobal
+          sOp Imp.MemFenceLocal
           -- if (warpscan[0] == STATUS_P && tid == 0) prefix = incprefix[WG_ID-1];
           status1 <- dPrim "status1" int8
           copyDWIMFix status1 [] (Var warpscan) [0+32*4]
@@ -415,7 +416,8 @@ compileSegScan  (Pattern _ pes)
               -- combined_flg <-- (Imp.var used int8 * 4) .|. Imp.var flag int8
               combined_flg <-- Imp.BinOpExp (Shl Int8) (Imp.var used int8) 2 .|. Imp.var flag int8
               copyDWIMFix warpscan [ltid+32*4] (Var combined_flg) []
-              sOp Imp.MemFenceGlobal
+              -- sOp Imp.MemFenceGlobal
+              sOp Imp.MemFenceLocal
 
 
               -- Perform reduce
@@ -492,7 +494,8 @@ compileSegScan  (Pattern _ pes)
 
                   p <-- pVar * 2
 
-              sOp Imp.MemFenceGlobal
+              -- sOp Imp.MemFenceGlobal
+              sOp Imp.MemFenceLocal
               sWhen (ltid .==.0) $ do
                 -- read result from local data after warp reduce
                 usedflg_val <- dPrim "usedflg_val" int8
@@ -519,7 +522,8 @@ compileSegScan  (Pattern _ pes)
                 compileStms mempty (bodyStms $ lambdaBody scan_op) $
                   forM_ (zip prefix (bodyResult $ lambdaBody scan_op)) $ \(pre, sr) ->
                     copyDWIMFix pre [] sr []
-              sOp Imp.MemFenceGlobal
+              -- sOp Imp.MemFenceGlobal
+              sOp Imp.MemFenceLocal
               copyDWIMFix read_offset [] (Var block_id) [0]
 
           sWhen (ltid .==. 0) $ do
