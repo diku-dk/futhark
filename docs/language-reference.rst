@@ -79,7 +79,7 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    binary: 0 ("b" | "B") `bindigit` (`bindigit` | "_")*
 
 .. productionlist::
-   floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
+   floatnumber: (`pointfloat` | `exponentfloat` | `hexadecimalfloat`) [`float_type`]
    pointfloat: [`intpart`] `fraction`
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
    hexadecimalfloat: 0 ("x" | "X") `hexintpart` `hexfraction` ("p"|"P") ["+" | "-"] `decdigit`+
