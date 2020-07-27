@@ -7,31 +7,23 @@ static sig_atomic_t num_workers;
 
 __thread struct worker* worker_local = NULL;
 
-static volatile int should_exit = 0;
 
 static inline int is_finished() {
   return should_exit && empty(&worker_local->q);
 }
 
 int random_other_worker(struct scheduler *scheduler, int my_id) {
-  /* int nb_workers = data::perworker::get_nb_workers(); */
-  /* assert(nb_workers != 1); */
-  /* std::uniform_int_distribution<int> distribution(0, nb_workers - 2); */
-  /* int i = distribution(random_number_generators[my_id]); */
-
   int i = rand() % (scheduler->num_threads - 1);
   if (i == my_id) {
     i++;
   }
   assert(i >= 0);
-  /* assert(i < nb_workers); */
   assert(i != my_id);
   return i;
 }
 
 void acquire (struct scheduler* scheduler)
 {
-  /* assert(my_ready.empty() && my_suspended.empty() && my_buffer.empty()); */
   assert(num_workers >= 2);
 
   int my_id = worker_local->tid;
@@ -52,7 +44,6 @@ void acquire (struct scheduler* scheduler)
       subtask->been_stolen = 1;
       pushBottom(&worker_local->q, subtask);
       fprintf(stderr, "tid %d stole a task from %d with id %d and %p \n", my_id, k, subtask->id, subtask);
-
       return;
     }
   }
@@ -72,7 +63,6 @@ static inline void *scheduler_worker(void* arg)
 
       if (subtask->has_been_run == 1) {
         fprintf(stderr, "tid %d - subtask created by %d(%p) has already been run by %d\n", worker_local->tid, subtask->created_by, subtask, subtask->ran_by);
-
         /* continue; */
       }
       subtask->has_been_run = 1;
@@ -162,7 +152,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
       assert(subtask->args != NULL);
 
       subtask->been_stolen = 1;
-      assert(subtask->has_been_run != 1);
+      /* assert(subtask->has_been_run != 1); */
       subtask->has_been_run = 1;
 
       subtask->ran_by = worker_local->tid;
