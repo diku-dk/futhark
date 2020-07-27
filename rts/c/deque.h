@@ -60,7 +60,7 @@ struct subtask ** grow(struct subtask **old_buf,
   return new_buf;
 }
 
-static inline int deque_init(struct deque *q, int capacity) {
+static inline int deque_init(struct deque *q, int64_t capacity) {
   assert(q != NULL);
   memset(q, 0, sizeof(struct deque));
 
@@ -87,10 +87,13 @@ static inline void pushBottom(struct deque *q, struct subtask*subtask)
 {
   assert(subtask != NULL);
   assert(q != NULL);
+
   int64_t b = __atomic_load_n(&q->bottom, mem_model); // load atomically
   int64_t t = __atomic_load_n(&q->top, mem_model);    // load atomically
   int64_t size = b - t;
   if (size >= (__atomic_load_n(&q->size, mem_model) - 1)) {
+    fprintf(stderr, "ran out of %lld/%lld\n", size, q->size);
+    assert(!"ran out of space");
     // grow_queue
     struct subtask **old_buf = q->buffer;
     int64_t old_capacity = __atomic_load_n(&q->size, mem_model);
@@ -99,6 +102,7 @@ static inline void pushBottom(struct deque *q, struct subtask*subtask)
     __atomic_store_n(&q->size, new_capacity, mem_model);
   }
   cb_put(q->buffer, q->size , b, subtask);
+  __atomic_thread_fence(mem_model);
   __atomic_store_n(&q->bottom, b+1, mem_model);
   return;
 }
@@ -106,7 +110,9 @@ static inline void pushBottom(struct deque *q, struct subtask*subtask)
 // also called popTop
 static inline struct subtask* steal(struct deque *q) {
   assert(q != NULL);
+
   int64_t b = __atomic_load_n(&q->bottom, mem_model); // load atomically
+  __atomic_thread_fence(mem_model);
   int64_t t = __atomic_load_n(&q->top, mem_model);    // load atomically
 
   if (t >= b) {
@@ -116,6 +122,7 @@ static inline struct subtask* steal(struct deque *q) {
   if (stealable(q->buffer, q->size, t)) {
     return STEAL_RES_ABORT;
   }
+
   struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, mem_model), t);
 
   if (!cas_top(q, t, t + 1)) {
@@ -131,6 +138,7 @@ static inline struct subtask * popBottom(struct deque *q) {
 
   int64_t b = __atomic_load_n(&q->bottom, mem_model) - 1; // load atomically
   __atomic_store_n(&q->bottom, b, mem_model);
+	__atomic_thread_fence(mem_model);
 
   int64_t t = __atomic_load_n(&q->top, mem_model);
   if (b < t) {
