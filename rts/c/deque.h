@@ -111,9 +111,9 @@ static inline void pushBottom(struct deque *q, struct subtask*subtask)
 static inline struct subtask* steal(struct deque *q) {
   assert(q != NULL);
 
-  int64_t b = __atomic_load_n(&q->bottom, mem_model); // load atomically
-  __atomic_thread_fence(mem_model);
   int64_t t = __atomic_load_n(&q->top, mem_model);    // load atomically
+  __atomic_thread_fence(mem_model);
+  int64_t b = __atomic_load_n(&q->bottom, mem_model); // load atomically
 
   if (t >= b) {
     return STEAL_RES_EMPTY;
