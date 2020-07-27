@@ -44,7 +44,7 @@ import Futhark.Util.Loc hiding (L)
 @romlit = 0[rR][IVXLCDM][IVXLCDM_]*
 @intlit = @hexlit|@binlit|@declit|@romlit
 @reallit = (([0-9][0-9_]*("."[0-9][0-9_]*)?))([eE][\+\-]?[0-9]+)?
-@hexreallit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*"."[0-9a-fA-F][0-9a-fA-F_]*([pP][\+\-]?[0-9]+)
+@hexreallit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*"."[0-9a-fA-F][0-9a-fA-F_]*([pP][\+\-]?[0-9_]+)
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
