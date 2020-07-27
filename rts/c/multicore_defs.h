@@ -82,7 +82,7 @@ struct scheduler_subtask {
 };
 
 struct deque {
-  int size;
+  int64_t size;
   struct subtask **buffer;
   int64_t top, bottom;
 };
