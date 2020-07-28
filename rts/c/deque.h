@@ -12,7 +12,7 @@ static struct subtask* const STEAL_RES_ABORT = (struct subtask*) 1;
 
 static const int mem_model = __ATOMIC_SEQ_CST;
 static const int strong = 0;
-static const int backoff_nb_cycles = 1l << 17;
+static const int backoff_nb_cycles = 1l << 10;
 
 
 
@@ -36,15 +36,15 @@ void spin_for(uint64_t nb_cycles) {
 }
 
 static inline struct subtask* cb_get(struct subtask **buf, int64_t capacity, int64_t i)  {
-  return (struct subtask*)__atomic_load_n(&buf[i % capacity], mem_model);
+  return (struct subtask*)__atomic_load_n(&buf[i % capacity], __ATOMIC_RELAXED);
 }
 
 static inline void cb_put (struct subtask **buf, int64_t capacity, int64_t i, struct subtask* x) {
-  __atomic_store_n(&buf[i % capacity], x, mem_model);
+  __atomic_store_n(&buf[i % capacity], x, __ATOMIC_RELAXED);
 }
 
 static inline int stealable(struct subtask **buf, int64_t capacity, int64_t i) {
-  return __atomic_load_n(&buf[i % capacity]->been_stolen, mem_model) || __atomic_load_n(&buf[i % capacity]->has_been_run, mem_model);;
+  return __atomic_load_n(&buf[i % capacity]->been_stolen, __ATOMIC_RELAXED);
 }
 
 
@@ -75,7 +75,7 @@ static inline int deque_init(struct deque *q, int64_t capacity) {
 
 static inline int cas_top (struct deque *q, int64_t old_val, int64_t new_val) {
   int64_t ov = old_val;
-  if(__atomic_compare_exchange_n(&q->top, &ov, new_val, strong, mem_model, mem_model)) {
+  if(__atomic_compare_exchange_n(&q->top, &ov, new_val, strong, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
     return 1;
   }
   spin_for(backoff_nb_cycles);
@@ -83,69 +83,40 @@ static inline int cas_top (struct deque *q, int64_t old_val, int64_t new_val) {
 }
 
 
-static inline void pushBottom(struct deque *q, struct subtask*subtask)
+static inline void push_back(struct deque *q, struct subtask*subtask)
 {
   assert(subtask != NULL);
   assert(q != NULL);
 
-  int64_t b = __atomic_load_n(&q->bottom, mem_model); // load atomically
-  int64_t t = __atomic_load_n(&q->top, mem_model);    // load atomically
-  int64_t size = b - t;
-  if (size >= (__atomic_load_n(&q->size, mem_model) - 1)) {
-    fprintf(stderr, "ran out of %lld/%lld\n", size, q->size);
-    assert(!"ran out of space");
+  int64_t b = __atomic_load_n(&q->bottom, __ATOMIC_RELAXED); // load atomically
+  int64_t t = __atomic_load_n(&q->top, __ATOMIC_ACQUIRE);    // load atomically
+  if (b-t >= (__atomic_load_n(&q->size, __ATOMIC_RELAXED) - 1)) {
     // grow_queue
     struct subtask **old_buf = q->buffer;
-    int64_t old_capacity = __atomic_load_n(&q->size, mem_model);
-    int64_t new_capacity = __atomic_load_n(&q->size, mem_model) * 2;
-    __atomic_store_n(&q->buffer, grow(old_buf, old_capacity, new_capacity, b, t), mem_model);
-    __atomic_store_n(&q->size, new_capacity, mem_model);
+    int64_t old_capacity = __atomic_load_n(&q->size, __ATOMIC_RELAXED);
+    int64_t new_capacity = __atomic_load_n(&q->size, __ATOMIC_RELAXED) * 2;
+    __atomic_store_n(&q->buffer, grow(old_buf, old_capacity, new_capacity, b, t), __ATOMIC_RELAXED);
+    __atomic_store_n(&q->size, new_capacity, __ATOMIC_RELAXED);
   }
   cb_put(q->buffer, q->size , b, subtask);
-  __atomic_thread_fence(mem_model);
-  __atomic_store_n(&q->bottom, b+1, mem_model);
+  __atomic_thread_fence(__ATOMIC_RELEASE);
+  __atomic_store_n(&q->bottom, b+1, __ATOMIC_RELAXED);
   return;
 }
 
-// also called popTop
-static inline struct subtask* steal(struct deque *q) {
-  assert(q != NULL);
 
-  int64_t t = __atomic_load_n(&q->top, mem_model);    // load atomically
-  __atomic_thread_fence(mem_model);
-  int64_t b = __atomic_load_n(&q->bottom, mem_model); // load atomically
+static inline struct subtask * pop_back(struct deque *q)
+{
+  int64_t b = __atomic_load_n(&q->bottom, __ATOMIC_RELAXED) - 1; // load atomically
+  __atomic_store_n(&q->bottom, b, __ATOMIC_RELAXED);
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-  if (t >= b) {
-    return STEAL_RES_EMPTY;
-  }
-
-  if (stealable(q->buffer, q->size, t)) {
-    return STEAL_RES_ABORT;
-  }
-
-  struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, mem_model), t);
-
-  if (!cas_top(q, t, t + 1)) {
-    return STEAL_RES_ABORT;
-  }
-
-
-  return item;
-}
-
-
-static inline struct subtask * popBottom(struct deque *q) {
-
-  int64_t b = __atomic_load_n(&q->bottom, mem_model) - 1; // load atomically
-  __atomic_store_n(&q->bottom, b, mem_model);
-	__atomic_thread_fence(mem_model);
-
-  int64_t t = __atomic_load_n(&q->top, mem_model);
+  int64_t t = __atomic_load_n(&q->top, __ATOMIC_RELAXED);
   if (b < t) {
-    __atomic_store_n(&q->bottom, t, mem_model);
+    __atomic_store_n(&q->bottom, t, __ATOMIC_RELAXED);
     return NULL;
   }
-  struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, mem_model), b);
+  struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, __ATOMIC_RELAXED), b);
   if (b > t) {
     return item;
   }
@@ -153,15 +124,37 @@ static inline struct subtask * popBottom(struct deque *q) {
   if (!cas_top(q, t, t + 1)) {
     item = NULL;
   }
-  __atomic_store_n(&q->bottom, t+1, mem_model);
+  __atomic_store_n(&q->bottom, t+1, __ATOMIC_RELAXED);
   return item;
 }
 
-size_t nb_threads(struct deque *q) {
-  return (size_t)__atomic_load_n(&q->bottom, mem_model) - __atomic_load_n(&q->top, mem_model);
+static inline struct subtask* steal(struct deque *q)
+{
+  assert(q != NULL);
+
+  int64_t t = __atomic_load_n(&q->top, __ATOMIC_ACQUIRE);    // load atomically
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  int64_t b = __atomic_load_n(&q->bottom, __ATOMIC_ACQUIRE); // load atomically
+
+  if (t >= b) {
+    return STEAL_RES_EMPTY;
+  }
+  struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, __ATOMIC_RELAXED), t);
+
+  if (!cas_top(q, t, t + 1)) {
+    return STEAL_RES_ABORT;
+  }
+
+  return item;
 }
 
-int empty(struct deque *q) {
+
+
+static inline size_t nb_threads(struct deque *q) {
+  return (size_t)__atomic_load_n(&q->bottom, __ATOMIC_RELAXED) - __atomic_load_n(&q->top, __ATOMIC_RELAXED);
+}
+
+static inline int empty(struct deque *q) {
   return nb_threads(q) < 1;
 }
 
@@ -172,7 +165,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             pthread_cond_t *cond,
                                             int* counter,
                                             int start, int end,
-                                            int chunk, int id, int tid)
+                                            int chunk, int id)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
@@ -181,7 +174,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   }
   subtask->fn      = fn;
   subtask->args    = args;
-  subtask->name   = name;
+  subtask->name    = name;
   subtask->mutex   = mutex;
   subtask->cond    = cond;
   subtask->counter = counter;
@@ -190,9 +183,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->chunkable   = chunk;
   // This should start at the value of minimum work pr. subtask
   subtask->iterations = chunk;
-  subtask->been_stolen = 0;
-  subtask->has_been_run = 0;
-  subtask->created_by = tid;
   subtask->id      = id;
+  subtask->been_stolen = 0;
   return subtask;
 }
