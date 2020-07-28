@@ -27,7 +27,7 @@ main = compilerMain () []
            ToExecutable -> do
              liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
              ret <- liftIO $ runProgramWithExitCode "gcc"
-                    [cpath, "-O3", "-pthread", "-std=c99", "-lm", "-o", outpath] mempty
+                    [cpath, "-O3", "-pthread", "-std=c11", "-lm", "-o", outpath] mempty
              case ret of
                Left err ->
                  externalErrorS $ "Failed to run gcc: " ++ show err
