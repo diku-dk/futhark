@@ -66,7 +66,7 @@ test:
 test-simple:
 	$(FUTHARK) test --backend=opencl tests/scan/simple.fut
 
-test-cuda: $(SIZES:%=kA-%.data)
+test-cuda:
 	$(FUTHARK) test --backend=cuda tests/scan/simple.fut
 
 kA-%.data:
