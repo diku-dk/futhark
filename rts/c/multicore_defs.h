@@ -30,6 +30,7 @@ static long int ran_iter, start_iter = 0;
 
 static int scheduler_error = 0;
 
+static volatile int should_exit = 0;
 
 
 typedef int (*task_fn)(void* args, int iterations, int tid);
@@ -44,11 +45,8 @@ struct subtask {
   // If it's zero , then the subtasks is not stealable
   int chunkable;
   long int iterations;
-  volatile int been_stolen;
-  volatile int has_been_run;
-  volatile int created_by;
-  volatile int ran_by;
   int id;
+  int been_stolen;
 
   const char* name;
 
