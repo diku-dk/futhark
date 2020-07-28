@@ -1,5 +1,5 @@
 FUTHARK = ~/.local/bin/futhark
-SIZES = 100000000
+SIZES = 10 100 1000 10000
 #13 42 8704 32768 524288 1048576
 # 65536 131072 262144 524288 1048576 16777216
 # 33 1024 1025 2048 8704
@@ -43,16 +43,6 @@ dump-cuda:
 	./tests/scan/simple --dump-cuda tests/scan/simple-cuda-kernel.c
 
 load-cuda:
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
-	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
-	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
-	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
-	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
-	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
-	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
 	./tests/scan/simple --load-cuda tests/scan/simple-cuda-kernel.c < tests/scan/kA-$(SIZES).data > tests/scan/simple-cuda.result
 	cat tests/scan/kA-$(SIZES).data tests/scan/simple-cuda.result | ../futhark_singlepassscan_tests/compare
 
