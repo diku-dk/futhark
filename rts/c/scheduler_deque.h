@@ -13,11 +13,12 @@ static inline int is_finished() {
 }
 
 int random_other_worker(struct scheduler *scheduler, int my_id) {
-  int i = rand() % (scheduler->num_threads - 1);
+  int i = rand() % (num_workers - 1);
   if (i == my_id) {
     i++;
   }
   assert(i >= 0);
+  assert(i < num_workers);
   assert(i != my_id);
   return i;
 }
