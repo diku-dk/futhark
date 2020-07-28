@@ -107,7 +107,7 @@ compileSegScan  (Pattern _ pes)
 
       -- Local memory allocation
       let (xp, _yp) = splitAt (length nes) $ lambdaParams scan_op
-      let (Count gsz) = group_size
+      -- let (Count gsz) = group_size
       exchange <- forM xp $ \p -> do
             let pt = elemType $ paramType p
                 -- shape = Shape [gsz]                                                -- ShapeBase SubExp
