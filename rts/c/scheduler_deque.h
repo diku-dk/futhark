@@ -13,7 +13,7 @@ static inline int is_finished() {
 }
 
 int random_other_worker(struct scheduler *scheduler, int my_id) {
-  int i = rand() % (num_workers - 1);
+  int i = fast_rand() % (num_workers - 1);
   if (i == my_id) {
     i++;
   }
