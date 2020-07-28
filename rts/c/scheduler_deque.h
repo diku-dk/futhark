@@ -42,7 +42,7 @@ void acquire (struct scheduler* scheduler)
       // TODO: log
     } else {
       assert(subtask != NULL);
-      pushBottom(&worker_local->q, subtask);
+      push_back(&worker_local->q, subtask);
       return;
     }
   }
@@ -55,7 +55,7 @@ static inline void *scheduler_worker(void* arg)
   while (!is_finished())
   {
     if (! empty(&worker->q)) {
-      struct subtask* subtask = popBottom(&worker->q);
+      struct subtask* subtask = pop_back(&worker->q);
       if (subtask == NULL) {
         continue;
       }
@@ -77,6 +77,9 @@ static inline void *scheduler_worker(void* arg)
       acquire(worker_local->scheduler);
     }
   }
+#ifdef MCPROFILE
+  output_thread_usage(worker);
+#endif
   worker_local->dead = 1;
   assert(empty(&worker->q));
   num_workers--;
@@ -120,7 +123,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks, subtask_id);
     assert(subtask != NULL);
-    pushBottom(&scheduler->workers[worker_local->tid].q, subtask);
+    push_back(&scheduler->workers[worker_local->tid].q, subtask);
 #ifdef MCDEBUG
     fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), worker_local->tid);
 #endif
@@ -136,7 +139,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
     }
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
 
-    struct subtask * subtask = popBottom(&worker_local->q);
+    struct subtask * subtask = pop_back(&worker_local->q);
     if (subtask != NULL) {
       // Do work
       assert(subtask->fn != NULL);
