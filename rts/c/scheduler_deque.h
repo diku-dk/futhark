@@ -42,9 +42,7 @@ void acquire (struct scheduler* scheduler)
       // TODO: log
     } else {
       assert(subtask != NULL);
-      subtask->been_stolen = 1;
       pushBottom(&worker_local->q, subtask);
-      fprintf(stderr, "tid %d stole a task from %d with id %d and %p \n", my_id, k, subtask->id, subtask);
       return;
     }
   }
@@ -61,14 +59,6 @@ static inline void *scheduler_worker(void* arg)
       if (subtask == NULL) {
         continue;
       }
-
-      if (subtask->has_been_run == 1) {
-        fprintf(stderr, "tid %d - subtask created by %d(%p) has already been run by %d\n", worker_local->tid, subtask->created_by, subtask, subtask->ran_by);
-        /* continue; */
-      }
-      subtask->has_been_run = 1;
-      subtask->ran_by = worker_local->tid;
-      /* fprintf(stderr, "tid %d running subtask %p with id %d\n", worker_local->tid, subtask, subtask->id); */
 
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
       CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
@@ -92,6 +82,7 @@ static inline void *scheduler_worker(void* arg)
   num_workers--;
   return NULL;
 }
+
 
 
 static inline int scheduler_parallel(struct scheduler *scheduler,
@@ -127,9 +118,8 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
-                                            start, end, chunks, subtask_id, worker_local->tid);
+                                            start, end, chunks, subtask_id);
     assert(subtask != NULL);
-    /* fprintf(stderr, "tid %d created task %p with id %d\n", worker_local->tid, subtask, subtask_id ); */
     pushBottom(&scheduler->workers[worker_local->tid].q, subtask);
 #ifdef MCDEBUG
     fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), worker_local->tid);
@@ -152,11 +142,6 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
       assert(subtask->fn != NULL);
       assert(subtask->args != NULL);
 
-      subtask->been_stolen = 1;
-      /* assert(subtask->has_been_run != 1); */
-      subtask->has_been_run = 1;
-
-      subtask->ran_by = worker_local->tid;
 
       /* fprintf(stderr, "[scheduler_parallel] tid %d running subtask %p with id %d\n", worker_local->tid, subtask, subtask->id); */
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
