@@ -61,17 +61,13 @@ static inline void *scheduler_worker(void* arg)
       }
 
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
-      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
       /* Only one error can be returned at the time now
          Maybe we can provide a stack like structure for pushing errors onto
          if we wish to backpropagte multiple errors */
       if (err != 0) {
         scheduler_error = err;
       }
-      (*subtask->counter)--;
-      if (*subtask->counter == 0)
-        CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
-      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+      __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_SEQ_CST);
       free(subtask);
     } else { // steal
       acquire(worker_local->scheduler);
@@ -107,7 +103,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
 
   int nsubtasks = iter_pr_subtask == 0 ? remainder : ((task->iterations - remainder) / iter_pr_subtask);
 
-  int shared_counter = nsubtasks;
+  volatile int shared_counter = nsubtasks;
 
   /* Each subtasks is processed in chunks */
   int chunks = 0;
@@ -132,13 +128,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
-  while(!is_finished()) {
-    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    if (shared_counter == 0) {
-      break;
-    }
-    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-
+  while(shared_counter != 0) {
     struct subtask * subtask = pop_back(&worker_local->q);
     if (subtask != NULL) {
       // Do work
@@ -151,9 +141,10 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
       if (err != 0) {
         return err;
       }
-      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
-      (*subtask->counter)--;
-      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+      __atomic_fetch_sub(&shared_counter, 1, __ATOMIC_SEQ_CST);
+      /* CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock"); */
+      /* (*subtask->counter)--; */
+      /* CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock"); */
       free(subtask);
     }
   }

@@ -113,7 +113,7 @@ compileProg =
                  }
 
                  // Initialize rand()
-                 srand(time(0));
+                 fast_srand(time(0));
                  ctx->detail_memory = cfg->debugging;
                  ctx->debugging = cfg->debugging;
                  ctx->profiling = cfg->profiling;

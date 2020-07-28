@@ -51,7 +51,7 @@ struct subtask {
   const char* name;
 
   // Shared variables across subtasks
-  int *counter; // Counter for ongoing subtasks
+  volatile int *counter; // Counter for ongoing subtasks
   pthread_mutex_t *mutex;
   pthread_cond_t *cond;
 };

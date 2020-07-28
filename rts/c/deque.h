@@ -163,7 +163,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             const char* name,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
-                                            int* counter,
+                                            volatile int* counter,
                                             int start, int end,
                                             int chunk, int id)
 {
