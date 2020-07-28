@@ -46,6 +46,7 @@ struct subtask {
   long int iterations;
   int stolen_from;
   int id;
+  int been_stolen;
 
   // Shared variables across subtasks
   int *counter; // Counter for ongoing subtasks

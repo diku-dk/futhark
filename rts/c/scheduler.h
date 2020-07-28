@@ -42,8 +42,8 @@ static inline void *scheduler_worker(void* arg)
       subtask = NULL;
     } else {
 #ifdef MCPROFILE
-      output_thread_usage(worker);
 #endif
+      output_thread_usage(worker);
       break;
     }
   }
@@ -163,29 +163,50 @@ static inline int scheduler_nested(struct scheduler *scheduler,
 
 
   struct subtask *subtask = NULL;
-  while(1) {
+  int done = 0;
+  int stolen_tasks = 0;
+  while(!done) {
     CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    if (shared_counter == 0) break;
+    if (shared_counter == 0) done = 1;
     CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
 
-    int err = subtask_queue_steal(calling_worker, &subtask);
-    if (err == 0) {
-      // Do work
-      assert(subtask->fn != NULL);
-      assert(subtask->args != NULL);
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
-      if (err != 0) {
-        return err;
+    if (calling_worker->q.num_used != 0) {
+      int err = subtask_queue_steal(calling_worker, &subtask);
+      if (err == 0) {
+        // Do work
+        assert(subtask->fn != NULL);
+        assert(subtask->args != NULL);
+        int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
+        if (err != 0) {
+          return err;
+        }
+        CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+        (*subtask->counter)--;
+        CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+        free(subtask);
+      } else if (err == 1){
+        continue;
+      } else {
+        fprintf(stderr, "[scheduler_nested] Got error %d from \n", err);
+        assert(0);
       }
-      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
-      (*subtask->counter)--;
-      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
-      free(subtask);
-    } else if (err == 1){
-      continue;
     } else {
-      fprintf(stderr, "[scheduler_nested] Got error %d from \n", err);
-      assert(0);
+      int retval = query_a_subtask(scheduler, calling_worker->tid, calling_worker, &subtask);
+      if (retval == 0) {
+        assert(subtask->fn != NULL);
+        assert(subtask->args != NULL);
+        int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
+        if (err != 0) {
+          return err;
+        }
+        CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+        (*subtask->counter)--;
+        CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
+        free(subtask);
+      } else if (retval > 1) {
+        CHECK_ERR(retval, "query_a_subtask");
+      }
+      // We just stole a subtask, run it before we finish
     }
   }
 
@@ -222,21 +243,6 @@ static inline int scheduler_execute(struct scheduler *scheduler,
     if (ntask != NULL) *ntask = 0;
     return 0;
   }
-
-  // If there are no free workers, we just run the
-  // sequential version as it assumed that it's faster
-  // than the parallel algorithm, when both are executed using
-  // a single thread.
-  /* if (!free_workers) { */
-  /*   *ntask = 1; */
-  /*   return do_task_directly(task->fn, task->args, task->iterations); */
-  /* } */
-
-  /* Run task directly if below some threshold */
-  /* if (task->iterations < 50) { */
-  /*   *ntask = 1; */
-  /*   return do_task_directly(task->fn, task->args, task->iterations); */
-  /* } */
 
   /* This case indicates that we are inside a nested parallel operation */
   /* so we handle this differently */
