@@ -3,23 +3,28 @@
 #define _SCHEDULER_H_
 
 
-static sig_atomic_t num_workers;
+
+static volatile sig_atomic_t num_workers;
 
 __thread struct worker* worker_local = NULL;
 
 
 static inline int is_finished() {
-  return should_exit && empty(&worker_local->q);
+  return __atomic_load_n(&worker_local->dead, __ATOMIC_RELAXED) && empty(&worker_local->q);
 }
 
-int random_other_worker(struct scheduler *scheduler, int my_id) {
-  int i = fast_rand() % (num_workers - 1);
-  if (i == my_id) {
+int random_other_worker(struct scheduler *scheduler, int my_id)
+{
+  int my_num_workers = __atomic_load_n(&num_workers, __ATOMIC_RELAXED);
+  assert(my_num_workers != 1);
+  int i = fast_rand() % (my_num_workers - 1);
+  if (i >= my_id) {
     i++;
   }
   assert(i >= 0);
-  assert(i < num_workers);
+  assert(i < my_num_workers);
   assert(i != my_id);
+
   return i;
 }
 
@@ -40,6 +45,8 @@ void acquire (struct scheduler* scheduler)
       // TODO: log
     } else if (subtask == STEAL_RES_ABORT) {
       // TODO: log
+    } else if (subtask == STEAL_RES_DEAD){
+      fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
     } else {
       assert(subtask != NULL);
       push_back(&worker_local->q, subtask);
@@ -69,16 +76,16 @@ static inline void *scheduler_worker(void* arg)
       }
       __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_SEQ_CST);
       free(subtask);
+    } else if (__atomic_load_n(&num_workers, __ATOMIC_RELAXED) == 1) {
+      break;
     } else { // steal
       acquire(worker_local->scheduler);
     }
   }
-#ifdef MCPROFILE
-  output_thread_usage(worker);
-#endif
+
   worker_local->dead = 1;
   assert(empty(&worker->q));
-  num_workers--;
+  __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
   return NULL;
 }
 

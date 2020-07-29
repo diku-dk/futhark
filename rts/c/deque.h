@@ -9,6 +9,7 @@
 #define QUEUE_ABORT NULL
 static struct subtask* const STEAL_RES_EMPTY = (struct subtask*) 0;
 static struct subtask* const STEAL_RES_ABORT = (struct subtask*) 1;
+static struct subtask* const STEAL_RES_DEAD  = (struct subtask*) 2;
 
 static const int mem_model = __ATOMIC_SEQ_CST;
 static const int strong = 0;
@@ -64,6 +65,7 @@ static inline int deque_init(struct deque *q, int64_t capacity) {
   assert(q != NULL);
   memset(q, 0, sizeof(struct deque));
 
+  q->dead = 0;
   q->size = capacity;
   q->buffer = calloc(capacity, sizeof(struct subtask*));
 
@@ -71,6 +73,12 @@ static inline int deque_init(struct deque *q, int64_t capacity) {
     return -1;
   }
   return 0;
+}
+
+static inline void deque_destroy(struct deque* q)
+{
+  q->dead = 1;
+  free(q->buffer);
 }
 
 static inline int cas_top (struct deque *q, int64_t old_val, int64_t new_val) {
@@ -131,6 +139,8 @@ static inline struct subtask * pop_back(struct deque *q)
 static inline struct subtask* steal(struct deque *q)
 {
   assert(q != NULL);
+  if (q->dead)
+    return STEAL_RES_DEAD;
 
   int64_t t = __atomic_load_n(&q->top, __ATOMIC_ACQUIRE);    // load atomically
   __atomic_thread_fence(__ATOMIC_SEQ_CST);

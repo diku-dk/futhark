@@ -32,8 +32,6 @@ static long int ran_iter, start_iter = 0;
 
 static int scheduler_error = 0;
 
-static volatile int should_exit = 0;
-
 
 typedef int (*task_fn)(void* args, int iterations, int tid);
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
@@ -85,6 +83,7 @@ struct deque {
   int64_t size;
   struct subtask **buffer;
   int64_t top, bottom;
+  volatile int dead;
 };
 
 
