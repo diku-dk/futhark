@@ -244,6 +244,12 @@ static inline int scheduler_execute(struct scheduler *scheduler,
     return 0;
   }
 
+  /* Run task directly if below some threshold */
+  if (task->iterations < 50) {
+    *ntask = 1;
+    return do_task_directly(task->fn, task->args, task->iterations);
+  }
+
   /* This case indicates that we are inside a nested parallel operation */
   /* so we handle this differently */
   if (worker_local != NULL) {
