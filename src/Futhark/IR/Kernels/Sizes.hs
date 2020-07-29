@@ -4,6 +4,7 @@
 -- (run-time) constant.
 module Futhark.IR.Kernels.Sizes
   ( SizeClass (..)
+  , sizeDefault
   , KernelPath
   , Count(..)
   , NumGroups, GroupSize, NumThreads
@@ -25,7 +26,8 @@ type KernelPath = [(Name, Bool)]
 
 -- | The class of some kind of configurable size.  Each class may
 -- impose constraints on the valid values.
-data SizeClass = SizeThreshold KernelPath
+data SizeClass = SizeThreshold KernelPath (Maybe Int32)
+                 -- ^ A threshold with an optional default.
                | SizeGroup
                | SizeNumGroups
                | SizeTile
@@ -37,7 +39,7 @@ data SizeClass = SizeThreshold KernelPath
                deriving (Eq, Ord, Show)
 
 instance Pretty SizeClass where
-  ppr (SizeThreshold path) = text $ "threshold (" ++ unwords (map pStep path) ++ ")"
+  ppr (SizeThreshold path _) = text $ "threshold (" ++ unwords (map pStep path) ++ ")"
     where pStep (v, True) = pretty v
           pStep (v, False) = '!' : pretty v
   ppr SizeGroup = text "group_size"
@@ -45,6 +47,12 @@ instance Pretty SizeClass where
   ppr SizeTile = text "tile_size"
   ppr SizeLocalMemory = text "local_memory"
   ppr (SizeBespoke k _) = ppr k
+
+-- | The default value for the size.  If 'Nothing', that means the backend gets to decide.
+sizeDefault :: SizeClass -> Maybe Int32
+sizeDefault (SizeThreshold _ x) = x
+sizeDefault (SizeBespoke _ x) = Just x
+sizeDefault _ = Nothing
 
 -- | A wrapper supporting a phantom type for indicating what we are counting.
 newtype Count u e = Count { unCount :: e }
