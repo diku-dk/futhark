@@ -120,8 +120,8 @@ opCompiler pat e =
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 sizeClassWithEntryPoint :: Maybe Name -> Imp.SizeClass -> Imp.SizeClass
-sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
-  Imp.SizeThreshold $ map f path
+sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
+  Imp.SizeThreshold (map f path) def
   where f (name, x) = (keyWithEntryPoint fname name, x)
 sizeClassWithEntryPoint _ size_class = size_class
 

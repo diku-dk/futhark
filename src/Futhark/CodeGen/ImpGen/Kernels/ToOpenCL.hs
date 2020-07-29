@@ -78,8 +78,8 @@ translateKernels target prog =
 cleanSizes :: M.Map Name SizeClass -> M.Map Name SizeClass
 cleanSizes m = M.map clean m
   where known = M.keys m
-        clean (SizeThreshold path) =
-          SizeThreshold $ filter ((`elem` known) . fst) path
+        clean (SizeThreshold path def) =
+          SizeThreshold (filter ((`elem` known) . fst) path) def
         clean s = s
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]

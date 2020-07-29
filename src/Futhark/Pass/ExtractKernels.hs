@@ -438,7 +438,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
     then paralleliseOuter
     else do
     ((outer_suff, outer_suff_key), suff_stms) <-
-      sufficientParallelism "suff_outer_redomap" [w] path
+      sufficientParallelism "suff_outer_redomap" [w] path Nothing
 
     outer_stms <- outerParallelBody
     inner_stms <- innerParallelBody ((outer_suff_key, False):path)
@@ -460,7 +460,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Stream w (Parallel o comm re
       paralleliseOuter path
   | otherwise = do
       ((outer_suff, outer_suff_key), suff_stms) <-
-        sufficientParallelism "suff_outer_stream" [w] path
+        sufficientParallelism "suff_outer_stream" [w] path Nothing
 
       outer_stms <- outerParallelBody ((outer_suff_key, True) : path)
       inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
@@ -560,9 +560,10 @@ transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w ops bucket_fun imgs))) 
 transformStm _ bnd =
   runBinder_ $ FOT.transformStmRecursively bnd
 
-sufficientParallelism :: String -> [SubExp] -> KernelPath
+sufficientParallelism :: String -> [SubExp] -> KernelPath -> Maybe Int32
                       -> DistribM ((SubExp, Name), Out.Stms Out.Kernels)
-sufficientParallelism desc ws path = cmpSizeLe desc (Out.SizeThreshold path) ws
+sufficientParallelism desc ws path def =
+  cmpSizeLe desc (Out.SizeThreshold path def) ws
 
 -- | Intra-group parallelism is worthwhile if the lambda contains more
 -- than one instance of non-map nested parallelism, or any nested
@@ -685,6 +686,12 @@ mayExploitIntra attrs =
   AttrComp "incremental_flattening" ["no_intra"] `inAttrs` attrs ||
   AttrComp "incremental_flattening" ["only_inner"] `inAttrs` attrs
 
+-- The minimum amount of inner parallelism we require (by default) in
+-- intra-group versions.  Less than this is usually pointless on a GPU
+-- (but we allow tuning to change it).
+intraMinInnerPar :: Int32
+intraMinInnerPar = 32 -- One NVIDIA warp
+
 onMap' :: KernelNest -> KernelPath
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
        -> (KernelPath -> DistribM (Out.Stms Out.Kernels))
@@ -699,7 +706,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
 
   types <- askScope
   ((outer_suff, outer_suff_key), outer_suff_stms) <-
-    sufficientParallelism "suff_outer_par" nest_ws path
+    sufficientParallelism "suff_outer_par" nest_ws path Nothing
 
   intra <- if onlyExploitIntra (stmAuxAttrs aux) ||
               (worthIntraGroup lam && mayExploitIntra attrs) then
@@ -725,8 +732,8 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
       ((intra_ok, intra_suff_key), intra_suff_stms) <- do
 
         ((intra_suff, suff_key), check_suff_stms) <-
-          sufficientParallelism "suff_intra_par" (nest_ws ++ [intra_avail_par]) $
-          (outer_suff_key, False) : path
+          sufficientParallelism "suff_intra_par" [intra_avail_par]
+          ((outer_suff_key, False) : path) (Just intraMinInnerPar)
 
         runBinder $ do
 
