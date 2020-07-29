@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Intra-group flattening now looks properly inside of branches.
 
+  * Intra-group flattened code versions are no longer used when the
+    resulting workgroups would have less than 32 threads (with default
+    thresholds anyway) (#1064).
+
 ## [0.16.2]
 
 ### Added
