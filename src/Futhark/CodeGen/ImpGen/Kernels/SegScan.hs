@@ -44,7 +44,7 @@ compileSegScan  (Pattern _ pes)
     arraysize <- toExp arrsize
     let gtid = head gtids
 
-    let group_size = segGroupSize lvl                                  -- Subexp
+    -- let group_size = segGroupSize lvl                                  -- Subexp
     group_size' <- traverse toExp $ segGroupSize lvl                  -- Imp.Exp
 
     let apg = Imp.BinOpExp (Add Int32) arraysize (unCount group_size')
