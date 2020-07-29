@@ -283,49 +283,48 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
     bucket_id <- newVName "bucket_id"
     subhistogram_id <- newVName "subhistogram_id"
 
-    let unitHistoCase =
-       -- This is OK because the memory blocks are at least as
-       -- large as the ones we are supposed to use for the result.
-         forM_ (zip red_pes hists) $ \(pe, subhisto) -> do
-           emit $ Imp.DebugPrint "unitHistoCase" Nothing
-           pe_mem <- memLocationName . entryArrayLocation <$>
-                     lookupArray (patElemName pe)
-           subhisto_mem <- memLocationName . entryArrayLocation <$>
-                           lookupArray subhisto
-           emit $ Imp.SetMem pe_mem subhisto_mem DefaultSpace
+    -- let unitHistoCase =
+    --    -- This is OK because the memory blocks are at least as
+    --    -- large as the ones we are supposed to use for the result.
+    --      forM_ (zip red_pes hists) $ \(pe, subhisto) -> do
+    --        emit $ Imp.DebugPrint "unitHistoCase" Nothing
+    --        pe_mem <- memLocationName . entryArrayLocation <$>
+    --                  lookupArray (patElemName pe)
+    --        subhisto_mem <- memLocationName . entryArrayLocation <$>
+    --                        lookupArray subhisto
+    --        emit $ Imp.SetMem pe_mem subhisto_mem DefaultSpace
 
-    sIf (Imp.var num_histos int32 .==. 1) unitHistoCase $ do
+    -- sIf (Imp.var num_histos int32 .==. 1) unitHistoCase $ do
 
-      emit $ Imp.DebugPrint "multiHistocase" Nothing
+    emit $ Imp.DebugPrint "multiHistocase" Nothing
 
-      let num_buckets = histWidth op
+    let num_buckets = histWidth op
 
-      let segred_space =
-            SegSpace (segFlat space) $
-            segment_dims ++
-            [(bucket_id, num_buckets)] ++
-            [(subhistogram_id, Var num_histos)]
+    let segred_space =
+          SegSpace (segFlat space) $
+          segment_dims ++
+          [(bucket_id, num_buckets)] ++
+          [(subhistogram_id, Var num_histos)]
 
-      let segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
-          ns_red = map snd $ unSegSpace segred_space
-      ns_red' <- mapM toExp ns_red
+    let segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
+        ns_red = map snd $ unSegSpace segred_space
+    ns_red' <- mapM toExp ns_red
 
-      let iterations = case unSegSpace segred_space of
-                         [_] -> product ns_red'
-                         _   -> product $ init ns_red' -- Segmented reduction is over the inner most dimension
-      let retvals = map patElemName red_pes
-      retvals_ts <- mapM lookupType retvals
-      retval_params <- zipWithM toParam retvals retvals_ts
-      let retval_names = map Imp.paramName retval_params
+    let iterations = case unSegSpace segred_space of
+                       [_] -> product ns_red'
+                       _   -> product $ init ns_red' -- Segmented reduction is over the inner most dimension
+    let retvals = map patElemName red_pes
+    retvals_ts <- mapM lookupType retvals
+    retval_params <- zipWithM toParam retvals retvals_ts
+    let retval_names = map Imp.paramName retval_params
 
-      dPrimV_ (segFlat segred_space) 0
-      red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont ->
-        red_cont $ flip map hists $ \subhisto ->
-              (Var subhisto, map Imp.vi32 $
-                map fst segment_dims ++ [subhistogram_id, bucket_id])
+    red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont ->
+      red_cont $ flip map hists $ \subhisto ->
+            (Var subhisto, map Imp.vi32 $
+              map fst segment_dims ++ [subhistogram_id, bucket_id])
 
-      free_params_red <- freeParams red_code (segFlat space : retval_names)
-      emit $ Imp.Op $ Imp.Task free_params_red iterations red_code Nothing (segFlat space) retval_params
+    free_params_red <- freeParams red_code (segFlat space : retval_names)
+    emit $ Imp.Op $ Imp.Task free_params_red iterations red_code Nothing (segFlat space) retval_params
 
 
    where segment_dims = init $ unSegSpace space
