@@ -123,6 +123,7 @@ compileProg =
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
 
+                 // TODO: Need to free these at some point
                  $stms:init_fields
 
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
