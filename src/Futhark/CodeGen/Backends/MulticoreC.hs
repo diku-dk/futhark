@@ -166,6 +166,8 @@ compileProg =
                    deque_destroy(&cur_worker->q);
                  }
 
+                 deque_destroy(&worker_local->q);
+
                  free(ctx->scheduler.workers);
                  free_lock(&ctx->lock);
                  free(ctx);
