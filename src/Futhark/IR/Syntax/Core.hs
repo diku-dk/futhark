@@ -67,6 +67,21 @@ import Futhark.IR.Primitive
 newtype ShapeBase d = Shape { shapeDims :: [d] }
                     deriving (Eq, Ord, Show)
 
+instance Functor ShapeBase where
+  fmap = fmapDefault
+
+instance Foldable ShapeBase where
+  foldMap = foldMapDefault
+
+instance Traversable ShapeBase where
+  traverse f = fmap Shape . traverse f . shapeDims
+
+instance Semigroup (ShapeBase d) where
+  Shape l1 <> Shape l2 = Shape $ l1 `mappend` l2
+
+instance Monoid (ShapeBase d) where
+  mempty = Shape mempty
+
 -- | The size of an array as a list of subexpressions.  If a variable,
 -- that variable must be in scope where this array is used.
 type Shape = ShapeBase SubExp
@@ -101,15 +116,6 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   stripDims :: Int -> a -> a
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
-
-instance Semigroup (ShapeBase d) where
-  Shape l1 <> Shape l2 = Shape $ l1 `mappend` l2
-
-instance Monoid (ShapeBase d) where
-  mempty = Shape mempty
-
-instance Functor ShapeBase where
-  fmap f = Shape . map f . shapeDims
 
 instance ArrayShape (ShapeBase SubExp) where
   shapeRank (Shape l) = length l
