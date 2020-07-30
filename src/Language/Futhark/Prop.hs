@@ -399,6 +399,11 @@ combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
       Scalar $ Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
 combineTypeShapes (Scalar (Arrow als1 p1 a1 b1)) (Scalar (Arrow als2 _p2 a2 b2)) =
   Scalar $ Arrow (als1<>als2) p1 (combineTypeShapes a1 a2) (combineTypeShapes b1 b2)
+combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
+  Scalar $ TypeVar (als1<>als2) u1 v $ zipWith f targs1 targs2
+  where f (TypeArgType t1 loc) (TypeArgType t2 _) =
+          TypeArgType (combineTypeShapes t1 t2) loc
+        f targ _ = targ
 combineTypeShapes (Array als1 u1 et1 shape1) (Array als2 _u2 et2 _shape2) =
   arrayOfWithAliases (combineTypeShapes (Scalar et1) (Scalar et2)
                        `setAliases` mempty)
