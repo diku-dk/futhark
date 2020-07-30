@@ -7,6 +7,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Multicore(..)
        , Scheduling(..)
        , MulticoreInfo(..)
+       -- , SchedulerInfo(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -24,17 +25,23 @@ type Function = Imp.Function Multicore
 -- | A piece of imperative code, with multicore operations inside.
 type Code = Imp.Code Multicore
 
-type Cost = Int32
 
 data MulticoreInfo = MulticoreInfo VName Scheduling VName
 -- MulticoreInfo ntasks Sched tid
 
 -- | A multicore operation.
-data Multicore = Task [Param] Imp.Exp Code (Maybe Code) VName [Param]
+data Multicore = Task [Param] Imp.Exp Code (Maybe Code) VName VName [Param] Scheduling
                | MCFunc VName Code Code [Param] MulticoreInfo
                | MulticoreCall (Maybe VName) String
 
 type Granularity = Int32
+
+-- data SchedulerInfo = SchedulerInfo
+--   { nsubtasks  :: VName -- The variable that describes how many subtasks the scheduler created
+--   , tid        :: VName -- The variable for the tid execution the code
+--   , iterations :: Imp.Exp -- The number of total iterations for a task
+--   , sched      :: Scheduling -- The type scheduling that the task can be performed as
+--   }
 
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic
 -- or it is restainted to Static
@@ -54,7 +61,7 @@ instance Pretty MulticoreInfo where
     text "MulticoreInfo" <+> ppr sched
 
 instance Pretty Multicore where
-  ppr (Task free e par_code seq_code i retval) =
+  ppr (Task free e par_code seq_code i _ntasks retval _) =
     text "parfor" <+> ppr i <+> langle <+> ppr e <+>
     ppr free <+>
     text "par_code" <+> nestedBlock "{" "}" (ppr par_code) <+>
@@ -74,8 +81,8 @@ instance Pretty Multicore where
 
 
 instance FreeIn Multicore where
-  freeIn' (Task _ e par_code seq_code _ _) =
-    freeIn' e <> freeIn' par_code <> freeIn' seq_code
+  freeIn' (Task _ e par_code seq_code _ ntasks _ _) =
+    freeIn' e <> freeIn' par_code <> freeIn' seq_code  <> freeIn' ntasks
   freeIn' (MCFunc _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests

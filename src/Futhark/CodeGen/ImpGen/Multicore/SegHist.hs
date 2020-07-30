@@ -65,12 +65,13 @@ compileSegHist  :: Pattern MCMem
                 -> SegSpace
                 -> [HistOp MCMem]
                 -> KernelBody MCMem
+                -> VName
                 -> MulticoreGen Imp.Code
-compileSegHist pat space histops kbody
+compileSegHist pat space histops kbody ntasks
   | [_] <- unSegSpace space =
-      nonsegmentedHist pat space histops kbody
+      nonsegmentedHist pat space histops kbody ntasks
   | otherwise =
-      segmentedHist pat space histops kbody
+      segmentedHist pat space histops kbody ntasks
 
 -- | Split some list into chunks equal to the number of values
 -- returned by each 'SegBinOp'
@@ -139,15 +140,15 @@ segmentedHist :: Pattern MCMem
               -> SegSpace
               -> [HistOp MCMem]
               -> KernelBody MCMem
+              -> VName
               -> MulticoreGen Imp.Code
-segmentedHist pat space histops kbody = do
+segmentedHist pat space histops kbody ntasks = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
 
   -- iteration variable
   n_segments <- dPrim "segment_iter" $ IntType Int32
   collect $ do
     par_body <- compileSegHistBody n_segments pat space histops kbody
-    ntasks <- dPrim "num_tasks" $ IntType Int32
     free_params <- freeParams par_body [segFlat space, n_segments]
     let sched = decideScheduling par_body
     emit $ Imp.Op $ Imp.MCFunc n_segments mempty par_body free_params $
@@ -158,13 +159,13 @@ nonsegmentedHist :: Pattern MCMem
                 -> SegSpace
                 -> [HistOp MCMem]
                 -> KernelBody MCMem
+                -> VName
                 -> MulticoreGen Imp.Code
-nonsegmentedHist pat space histops kbody = do
+nonsegmentedHist pat space histops kbody ntasks  = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   -- let ns = map snd $ unSegSpace space
   -- ns' <- mapM toExp ns
 
-  num_threads <- getNumThreads
   -- num_threads' <- toExp $ Var num_threads
   -- hist_width <- toExp $ histWidth $ head histops
   -- TODO we should find a proper condition
@@ -174,7 +175,7 @@ nonsegmentedHist pat space histops kbody = do
   collect $ do
     flat_idx <- dPrim "iter" int32
     -- sIf use_small_dest_histogram
-    smallDestHistogram pat flat_idx space histops num_threads kbody
+    smallDestHistogram pat flat_idx space histops ntasks kbody
      -- (largeDestHistogram pat space histops' kbody)
 
 -- Generates num_threads sub histograms of the size
@@ -190,20 +191,20 @@ smallDestHistogram :: Pattern MCMem
                    -> VName
                    -> KernelBody MCMem
                    -> MulticoreGen ()
-smallDestHistogram pat flat_idx space histops num_threads kbody = do
+smallDestHistogram pat flat_idx space histops num_histos kbody = do
   emit $ Imp.DebugPrint "smallDestHistogram segHist" Nothing
 
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
 
-  num_threads' <- toExp $ Var num_threads
+  num_histos' <- toExp $ Var num_histos
   let pes = patternElements pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
       (_all_red_pes, map_pes) = splitAt num_red_res pes
 
   let per_red_pes = segHistOpChunks histops $ patternValueElements pat
-  hist_M <- dPrimV "hist_M" num_threads'
+  hist_M <- dPrimV "hist_M" num_histos'
 
   init_histograms <-
     prepareIntermediateArrays hist_M histops
@@ -272,8 +273,6 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
   free_params <- freeParams (prebody <> body) (segFlat space : [flat_idx])
   let sched = Imp.Static -- decideScheduling body
 
-  -- How many subtasks was used by scheduler
-  num_histos <- dPrim "num_histos" $ IntType Int32
   emit $ Imp.Op $ Imp.MCFunc flat_idx prebody body free_params $
       Imp.MulticoreInfo num_histos sched (segFlat space)
 
@@ -318,14 +317,14 @@ smallDestHistogram pat flat_idx space histops num_threads kbody = do
     retval_params <- zipWithM toParam retvals retvals_ts
     let retval_names = map Imp.paramName retval_params
 
-    red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] $ \red_cont ->
+    nsubtasks_red <- dPrim "num_tasks" $ IntType Int32
+    red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] nsubtasks_red $ \red_cont ->
       red_cont $ flip map hists $ \subhisto ->
             (Var subhisto, map Imp.vi32 $
               map fst segment_dims ++ [subhistogram_id, bucket_id])
 
-    free_params_red <- freeParams red_code (segFlat space : retval_names)
-    emit $ Imp.Op $ Imp.Task free_params_red iterations red_code Nothing (segFlat space) retval_params
-
+    free_params_red <- freeParams red_code ([segFlat space, nsubtasks_red] ++ retval_names )
+    emit $ Imp.Op $ Imp.Task free_params_red iterations red_code Nothing (segFlat space) nsubtasks_red retval_params Imp.Static
 
    where segment_dims = init $ unSegSpace space
 

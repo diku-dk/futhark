@@ -17,15 +17,16 @@ import Futhark.Util.IntegralExp (quot, rem)
 
 -- Compile a SegScan construct
 compileSegScan :: Pattern MCMem
-                -> SegSpace
-                -> [SegBinOp MCMem]
-                -> KernelBody MCMem
-                -> MulticoreGen Imp.Code
-compileSegScan pat space reds kbody
+               -> SegSpace
+               -> [SegBinOp MCMem]
+               -> KernelBody MCMem
+               -> VName
+               -> MulticoreGen Imp.Code
+compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
-      nonsegmentedScan pat space reds kbody
+      nonsegmentedScan pat space reds kbody nsubtasks
   | otherwise =
-      segmentedScan pat space reds kbody
+      segmentedScan pat space reds kbody nsubtasks
 
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
@@ -42,20 +43,20 @@ nonsegmentedScan :: Pattern MCMem
                  -> SegSpace
                  -> [SegBinOp MCMem]
                  -> KernelBody MCMem
+                 -> VName
                  -> MulticoreGen Imp.Code
-nonsegmentedScan pat space scan_ops kbody = do
+nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
 
   collect $ do
-    ntasks <- dPrim "ntasks" $ IntType Int32
-    scanStage1 pat space ntasks scan_ops kbody
+    scanStage1 pat space nsubtasks scan_ops kbody
 
-    ntasks' <- toExp $ Var ntasks
-    sWhen (ntasks' .>. 1) $ do
+    nsubtasks' <- toExp $ Var nsubtasks
+    sWhen (nsubtasks' .>. 1) $ do
       scan_ops2 <- renameSegBinOp scan_ops
-      scanStage2 pat ntasks space scan_ops2 kbody
+      scanStage2 pat nsubtasks space scan_ops2 kbody
       scan_ops3 <- renameSegBinOp scan_ops
-      scanStage3 pat ntasks space scan_ops3 kbody
+      scanStage3 pat nsubtasks space scan_ops3 kbody
 
 scanStage1 :: Pattern MCMem
            -> SegSpace
@@ -63,7 +64,7 @@ scanStage1 :: Pattern MCMem
            -> [SegBinOp MCMem]
            -> KernelBody MCMem
            -> MulticoreGen ()
-scanStage1 pat space ntasks scan_ops kbody = do
+scanStage1 pat space nsubtasks scan_ops kbody = do
   let (all_scan_res, map_res) = splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
       per_scan_res           = segBinOpChunks scan_ops all_scan_res
       per_scan_pes           = segBinOpChunks scan_ops $ patternValueElements pat
@@ -74,10 +75,9 @@ scanStage1 pat space ntasks scan_ops kbody = do
   -- Stage 1 : each thread partially scans a chunk of the input
   -- Writes directly to the resulting array
   tid' <- toExp $ Var $ segFlat space
-  num_threads <- getNumThreads
 
   -- Accumulator array for each thread to use
-  accs <- groupResultArrays (Var num_threads) scan_ops
+  accs <- groupResultArrays (Var nsubtasks) scan_ops
   prebody <- collect $
     forM_ (zip scan_ops accs) $ \(scan_op, acc) ->
       sLoopNest (segBinOpShape scan_op) $ \vec_is ->
@@ -113,7 +113,7 @@ scanStage1 pat space ntasks scan_ops kbody = do
 
   free_params <- freeParams (prebody <> body) (segFlat space : [iter])
   emit $ Imp.Op $ Imp.MCFunc iter prebody body free_params $
-    Imp.MulticoreInfo ntasks Imp.Static (segFlat space)
+    Imp.MulticoreInfo nsubtasks Imp.Static (segFlat space)
 
 
 scanStage2 :: Pattern MCMem
@@ -122,12 +122,12 @@ scanStage2 :: Pattern MCMem
            -> [SegBinOp MCMem]
            -> KernelBody MCMem
            -> MulticoreGen ()
-scanStage2 pat ntasks space scan_ops kbody = do
+scanStage2 pat nsubtasks space scan_ops kbody = do
   emit $ Imp.DebugPrint "nonsegmentedScan stage 2" Nothing
   let (is, ns) = unzip $ unSegSpace space
       per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
   ns' <- mapM toExp ns
-  ntasks' <- toExp $ Var ntasks
+  nsubtasks' <- toExp $ Var nsubtasks
 
   -- |
   -- Begin stage two of scan
@@ -139,8 +139,8 @@ scanStage2 pat ntasks space scan_ops kbody = do
   offset_index <- dPrimV "offset_index" 0
   offset_index' <- toExp $ Var offset_index
 
-  let iter_pr_subtask = product ns' `quot` ntasks'
-      remainder       = product ns' `rem` ntasks'
+  let iter_pr_subtask = product ns' `quot` nsubtasks'
+      remainder       = product ns' `rem` nsubtasks'
 
   accs <- resultArrays scan_ops
   forM_ (zip scan_ops accs) $ \(scan_op, acc) ->
@@ -148,7 +148,7 @@ scanStage2 pat ntasks space scan_ops kbody = do
     forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
       copyDWIMFix acc' vec_is ne []
 
-  sFor "i" (ntasks'-1) $ \i -> do
+  sFor "i" (nsubtasks'-1) $ \i -> do
      offset <-- iter_pr_subtask
      sWhen (i .<. remainder) (offset <-- offset' + 1)
      offset_index <-- offset_index' + offset'
@@ -181,7 +181,7 @@ scanStage3 :: Pattern MCMem
            -> [SegBinOp MCMem]
            -> KernelBody MCMem
            -> MulticoreGen ()
-scanStage3 pat ntasks space scan_ops kbody = do
+scanStage3 pat nsubtasks space scan_ops kbody = do
   emit $ Imp.DebugPrint "nonsegmentedScan stage 3" Nothing
 
   let (is, ns) = unzip $ unSegSpace space
@@ -194,7 +194,7 @@ scanStage3 pat ntasks space scan_ops kbody = do
   ns' <- mapM toExp ns
   tid' <- toExp $ Var $ segFlat space
 
-  accs <- groupResultArrays (Var ntasks) scan_ops
+  accs <- groupResultArrays (Var nsubtasks) scan_ops
   prebody <- collect $ do
     -- Read carry in or neutral element
     let read_carry_in = forM_ (zip3 scan_ops accs per_scan_pes) $ \(scan_op, acc, pes) ->
@@ -233,24 +233,24 @@ scanStage3 pat ntasks space scan_ops kbody = do
 
   free_params' <- freeParams (prebody <> body)  (segFlat space : [iter])
   emit $ Imp.Op $ Imp.MCFunc iter prebody body free_params' $
-    Imp.MulticoreInfo ntasks Imp.Static (segFlat space)
+    Imp.MulticoreInfo nsubtasks Imp.Static (segFlat space)
 
 segmentedScan :: Pattern MCMem
               -> SegSpace
               -> [SegBinOp MCMem]
               -> KernelBody MCMem
+              -> VName
               -> MulticoreGen Imp.Code
-segmentedScan pat space scan_ops kbody = do
+segmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     -- iteration variable
     fbody <- compileSegScanBody n_par_segments pat space scan_ops kbody
-    ntasks <- dPrim "num_tasks" $ IntType Int32
     free_params <- freeParams fbody  (segFlat space : [n_par_segments])
     let sched = decideScheduling fbody
     emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty fbody free_params $
-      Imp.MulticoreInfo ntasks sched (segFlat space)
+      Imp.MulticoreInfo nsubtasks sched (segFlat space)
 
 
 compileSegScanBody :: VName

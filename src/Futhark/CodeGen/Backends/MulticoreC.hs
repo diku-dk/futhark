@@ -404,8 +404,9 @@ generateFunction :: C.ToIdent a => M.Map VName Space
                   -> [(VName, (C.Type, ValueType))]
                   -> [(VName, (C.Type, ValueType))]
                   -> VName
+                  -> VName
                   -> GC.CompilerM Multicore s Name
-generateFunction lexical basename code fstruct free retval tid = do
+generateFunction lexical basename code fstruct free retval tid ntasks = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreFunDef basename $ \s -> do
@@ -418,8 +419,9 @@ generateFunction lexical basename code fstruct free retval tid = do
       code' <- GC.blockScope $ GC.compileCode code
       mapM_ GC.item [C.citems|$items:code'|]
       mapM_ GC.stm free_cached
-    return [C.cedecl|int $id:s(void *args, int iterations, int $id:tid) {
+    return [C.cedecl|int $id:s(void *args, int iterations, int $id:tid, struct scheduler_info info) {
                            int err = 0;
+                           int $id:ntasks = info.nsubtasks;
                            struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                            struct futhark_context *ctx = $id:fstruct->ctx;
                            $items:fbody
@@ -430,7 +432,7 @@ generateFunction lexical basename code fstruct free retval tid = do
 
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Task params e seq_code par_code tid retvals) = do
+compileOp (Task params e seq_code par_code tid ntasks retvals sched) = do
 
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
@@ -450,7 +452,8 @@ compileOp (Task params e seq_code par_code tid retvals) = do
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
 
-  fpar_task <- generateFunction lexical_par "par_task" seq_code fstruct free retval tid
+  fpar_task <- generateFunction lexical_par "par_task" seq_code fstruct free retval tid ntasks
+
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
@@ -462,11 +465,14 @@ compileOp (Task params e seq_code par_code tid retvals) = do
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
+  case sched of
+    Dynamic _ -> GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
+    Static    -> GC.stm  [C.cstm|$id:ftask_name.sched = STATIC;|]
 
   fnpar_task <- case par_code of
         Just code -> do
           let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
-          fnpar_task <- generateFunction lexical_npar "nested_par_task" code fstruct free retval tid
+          fnpar_task <- generateFunction lexical_npar "nested_par_task" code fstruct free retval tid ntasks
           GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
           return $ zip [fnpar_task]  [True]
         Nothing -> do
@@ -535,6 +541,7 @@ compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = iterations;|]
   GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
+  GC.stm  [C.cstm|$id:ftask_name.info = info;|]
 
   let ftask_err = ftask <> "_err"
   code' <- benchmarkCode ftask_name Nothing

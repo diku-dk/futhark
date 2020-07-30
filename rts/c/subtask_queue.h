@@ -284,22 +284,23 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Try to steal some work while the subtask_queue is empty
   while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
-    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
-    int retval = query_a_subtask(worker->scheduler, worker->tid, worker, subtask);
-    if (retval == 0) { // We got a task - just return it
-      return 0;
-    } else if (retval == 1) { // we didn't find anything so go back to sleep
-      CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_unlock");
-      struct timespec ts;
-      CHECK_ERR(clock_getres(CLOCK_REALTIME, &ts), "clock_getres");
-      ts.tv_nsec += 50000; // wait for 50 ms (ish)
-      int err = pthread_cond_timedwait(&subtask_queue->cond, &subtask_queue->mutex, &ts);
-      if (err != 0 && err != ETIMEDOUT) {
-        assert(!"pthread_cond_timedwait failed \n");
-      }
-    } else {
-      CHECK_ERR(retval, "steal_a_subtask");
-    }
+    pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex);
+    /* CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock"); */
+    /* int retval = query_a_subtask(worker->scheduler, worker->tid, worker, subtask); */
+    /* if (retval == 0) { // We got a task - just return it */
+    /*   return 0; */
+    /* } else if (retval == 1) { // we didn't find anything so go back to sleep */
+    /*   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_unlock"); */
+    /*   struct timespec ts; */
+    /*   CHECK_ERR(clock_getres(CLOCK_REALTIME, &ts), "clock_getres"); */
+    /*   ts.tv_nsec += 50000; // wait for 50 ms (ish) */
+    /*   int err = pthread_cond_timedwait(&subtask_queue->cond, &subtask_queue->mutex, &ts); */
+    /*   if (err != 0 && err != ETIMEDOUT) { */
+    /*     assert(!"pthread_cond_timedwait failed \n"); */
+    /*   } */
+    /* } else { */
+    /*   CHECK_ERR(retval, "steal_a_subtask"); */
+    /* } */
   }
 
   if (subtask_queue->dead) {

@@ -58,37 +58,42 @@ getReturnParams _ _ = return mempty
 compileMCOp :: Pattern MCMem -> MCOp MCMem ()
             -> ImpM MCMem Mode Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
-compileMCOp pat (ParOp par_op op) = do
+compileMCOp pat (ParOp _par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) 0
   iterations <- getIterationDomain op space
-  seq_code <- compileSegOp pat op
+  ntasks <- dPrim "num_tasks" $ IntType Int32
+  seq_code <- compileSegOp pat op ntasks
   retvals <- getReturnParams pat op
 
-  par_code <- case par_op of
-    Just nested_op -> do
-      let space' = getSpace nested_op
-      dPrimV_ (segFlat space') 0
-      compileSegOp pat nested_op
-    Nothing -> return mempty
 
-  let maybe_par_code = case par_op of
-        Just _ -> Just par_code
-        Nothing -> Nothing
-  free_params <- freeParams (par_code <> seq_code) (segFlat space : map Imp.paramName retvals)
-  emit $ Imp.Op $ Imp.Task free_params iterations seq_code maybe_par_code (segFlat space) retvals
+  -- par_code <- case par_op of
+  --   Just nested_op -> do
+  --     let space' = getSpace nested_op
+  --     dPrimV_ (segFlat space') 0
+  --     compileSegOp pat nested_op
+  --   Nothing -> return mempty
+
+  -- let maybe_par_code = case par_op of
+  --       Just _ -> Just par_code
+  --       Nothing -> Nothing
+
+  free_params <- freeParams seq_code ([segFlat space, ntasks] ++ map Imp.paramName retvals)
+  emit $ Imp.Op $ Imp.Task free_params iterations seq_code Nothing (segFlat space) ntasks retvals (decideScheduling seq_code)
 
 
-compileSegOp :: Pattern MCMem -> SegOp () MCMem
+compileSegOp :: Pattern MCMem
+             -> SegOp () MCMem
+             -> VName
              -> ImpM MCMem Mode Imp.Multicore Imp.Code
-compileSegOp pat (SegHist _ space histops _ kbody) =
-  compileSegHist pat space histops kbody
+compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
+  compileSegHist pat space histops kbody ntasks
 
-compileSegOp pat (SegScan _ space scans _ kbody) =
-  compileSegScan pat space scans kbody
+compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
+  compileSegScan pat space scans kbody ntasks
 
-compileSegOp pat (SegRed _ space reds _ kbody) =
-  compileSegRed pat space reds kbody
+compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
+  compileSegRed pat space reds kbody ntasks
 
-compileSegOp pat (SegMap _ space _ kbody) =
-  compileSegMap pat space kbody
+compileSegOp pat (SegMap _ space _ kbody) ntasks =
+  compileSegMap pat space kbody ntasks

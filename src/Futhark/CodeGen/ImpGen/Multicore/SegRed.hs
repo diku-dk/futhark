@@ -22,9 +22,10 @@ compileSegRed :: Pattern MCMem
               -> SegSpace
               -> [SegBinOp MCMem]
               -> KernelBody MCMem
+              -> VName
               -> MulticoreGen Imp.Code
-compileSegRed pat space reds kbody =
-  compileSegRed' pat space reds $ \red_cont ->
+compileSegRed pat space reds kbody nsubtasks =
+  compileSegRed' pat space reds nsubtasks $ \red_cont ->
     compileStms mempty (kernelBodyStms kbody) $ do
     let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult kbody
 
@@ -38,13 +39,14 @@ compileSegRed pat space reds kbody =
 compileSegRed' :: Pattern MCMem
                -> SegSpace
                -> [SegBinOp MCMem]
+               -> VName
                -> DoSegBody
                -> MulticoreGen Imp.Code
-compileSegRed' pat space reds kbody
+compileSegRed' pat space reds nsubtasks kbody
   | [_] <- unSegSpace space =
-      nonsegmentedReduction pat space reds kbody
+      nonsegmentedReduction pat space reds nsubtasks kbody
   | otherwise =
-      segmentedReduction pat space reds kbody
+      segmentedReduction pat space reds nsubtasks kbody
 
 
 -- | A SegBinOp with auxiliary information.
@@ -85,20 +87,18 @@ segBinOpOpSlug local_tid (op, param_arrs) =
 nonsegmentedReduction :: Pattern MCMem
                       -> SegSpace
                       -> [SegBinOp MCMem]
+                      -> VName
                       -> DoSegBody
                       -> MulticoreGen Imp.Code
-nonsegmentedReduction pat space reds kbody = collect $ do
+nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
 
-  num_threads <- getNumThreads
-  num_threads' <- toExp $ Var num_threads
-
-  ntasks <- dPrim "num_tasks" $ IntType Int32
   -- Thread id for indexing into each threads accumulator element(s)
   tid' <- toExp $ Var $ segFlat space
-  thread_red_arrs <- groupResultArrays (Var num_threads) reds
+  thread_red_arrs <- groupResultArrays (Var nsubtasks) reds
   slugs1 <- mapM (segBinOpOpSlug tid') $ zip reds thread_red_arrs
+  nsubtasks' <- toExp $ Var nsubtasks
 
-  sFor "i" num_threads' $ \i -> do
+  sFor "i" nsubtasks' $ \i -> do
     segFlat space <-- i
     sComment "neutral-initialise the acc used by tid" $
       forM_ slugs1 $ \slug ->
@@ -106,17 +106,17 @@ nonsegmentedReduction pat space reds kbody = collect $ do
           sLoopNest (slugShape slug) $ \vec_is ->
             copyDWIMFix acc (acc_is++vec_is) ne []
 
-  reductionStage1 space ntasks slugs1 kbody
+  reductionStage1 space nsubtasks slugs1 kbody
   reds2 <- renameSegBinOp reds
   slugs2 <- mapM (segBinOpOpSlug tid') $ zip reds2 thread_red_arrs
-  reductionStage2 pat space ntasks slugs2
+  reductionStage2 pat space nsubtasks slugs2
 
 reductionStage1 :: SegSpace
                 -> VName
                 -> [SegBinOpSlug]
                 -> DoSegBody
                 -> MulticoreGen ()
-reductionStage1 space ntasks slugs kbody = do
+reductionStage1 space nsubtasks slugs kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 
@@ -149,16 +149,16 @@ reductionStage1 space ntasks slugs kbody = do
   let (body_allocs, fbody') = extractAllocations fbody
 
   emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs fbody' free_params $
-    Imp.MulticoreInfo ntasks scheduling (segFlat space)
+    Imp.MulticoreInfo nsubtasks scheduling (segFlat space)
 
 reductionStage2 :: Pattern MCMem
                 -> SegSpace
                 -> VName
                 -> [SegBinOpSlug]
                 -> MulticoreGen ()
-reductionStage2 pat space ntasks slugs = do
+reductionStage2 pat space nsubtasks slugs = do
   let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternValueElements pat
-  ntasks' <- toExp $ Var ntasks
+  nsubtasks' <- toExp $ Var nsubtasks
   sComment "neutral-initialise the output" $
    forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
      forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
@@ -167,7 +167,7 @@ reductionStage2 pat space ntasks slugs = do
 
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
-  sFor "i" ntasks' $ \i' -> do
+  sFor "i" nsubtasks' $ \i' -> do
     emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
     segFlat space <-- i'
     sComment "Apply main thread reduction" $
@@ -191,18 +191,18 @@ reductionStage2 pat space ntasks slugs = do
 segmentedReduction :: Pattern MCMem
                    -> SegSpace
                    -> [SegBinOp MCMem]
+                   -> VName
                    -> DoSegBody
                    -> MulticoreGen Imp.Code
-segmentedReduction pat space reds kbody =
+segmentedReduction pat space reds nsubtasks kbody =
   collect $ do
     emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     par_body    <- compileSegRedBody n_par_segments pat space reds kbody
-    ntasks      <- dPrim "num_tasks" $ IntType Int32
     free_params <- freeParams par_body (segFlat space : [n_par_segments])
     let sched = decideScheduling par_body
     emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty par_body free_params $
-      Imp.MulticoreInfo ntasks sched (segFlat space)
+      Imp.MulticoreInfo nsubtasks sched (segFlat space)
 
 
 compileSegRedBody :: VName
@@ -258,6 +258,11 @@ compileSegRedBody n_segments pat space reds kbody = do
                   \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) se' []
 
 
+
+
+----------------------------------------------------------
+-------- ========= Dead code =========== -----------------
+----------------------------------------------------------
 -- segmentedReduction pat space reds kbody ModeSequential =
 --   collect $ do
 --     let ns = map snd $ unSegSpace space

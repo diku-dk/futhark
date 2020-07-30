@@ -30,11 +30,13 @@ static long int ran_iter, start_iter = 0;
 
 static int scheduler_error = 0;
 
-
-
-typedef int (*task_fn)(void* args, int iterations, int tid);
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
 
+
+enum scheduling {
+  DYNAMIC,
+  STATIC
+};
 /* A subtask that can be executed by a thread */
 struct subtask {
   sub_task_fn fn;
@@ -60,13 +62,12 @@ struct scheduler {
   int num_threads;
 };
 
-/* A task for the scheduler to execute */
-struct scheduler_task {
-  void *args;
-  task_fn par_fn;
-  task_fn seq_fn;
-  long int iterations;
+struct scheduler_info {
+  int iter_pr_subtask;
+  int remainder;
+  int nsubtasks;
 };
+
 
 /* Parallel task  */
 struct scheduler_subtask {
@@ -75,7 +76,23 @@ struct scheduler_subtask {
   void* args;
   long int iterations;
   int granularity;
+  struct scheduler_info info;
 };
+
+typedef int (*task_fn)(void* args, int iterations, int tid, struct scheduler_info info);
+
+
+
+/* A task for the scheduler to execute */
+struct scheduler_task {
+  void *args;
+  task_fn par_fn;
+  task_fn seq_fn;
+  long int iterations;
+  enum scheduling sched;
+};
+
+
 
 struct subtask_queue {
   int capacity; // Size of the buffer.
