@@ -140,8 +140,8 @@ compileSegScan  (Pattern _ pes)
       wG_ID <- dPrim "wG_ID" int32
       copyDWIMFix wG_ID [] (Var block_id) [0]
 
-      sOp Imp.LocalBarrier
       let wG_ID_var = Imp.var wG_ID int32
+      sOp Imp.LocalBarrier
 
       -- Read coalesced input data to registers
       -- Apply map function
