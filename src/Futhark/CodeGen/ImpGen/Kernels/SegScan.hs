@@ -95,7 +95,7 @@ compileSegScan  (Pattern _ pes)
                 -- -> VName
                 -- -> (KernelConstants -> InKernelGen ())
                 -- -> CallKernelGen ()
-    sKernelThread "Single pass decoupled look-back"
+    sKernelThread "Single_pass_decoupled_look-back"
       (Imp.Count num_groups_impexp) group_size' (segFlat space) $
       \constants -> everythingVolatile $ do
 
