@@ -9,7 +9,6 @@ module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 
 import Control.Monad.Identity
 import Data.FileEmbed
-import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Map as M
 import NeatInterpolation (text)
@@ -76,7 +75,7 @@ sizeClassesToPython = Dict . map f . M.toList
   where f (size_name, size_class) =
           (String $ pretty size_name,
            Dict [(String "class", String $ pretty size_class),
-                 (String "value", Integer $ fromIntegral $ fromMaybe 0 $
+                 (String "value", maybe None (Integer . fromIntegral) $
                                   sizeDefault size_class)])
 
 sizeHeuristicsToPython :: [SizeHeuristic] -> PyExp
