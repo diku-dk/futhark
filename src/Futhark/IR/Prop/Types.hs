@@ -43,6 +43,7 @@ module Futhark.IR.Prop.Types
        , fromDecl
 
        , isExt
+       , isFree
        , extractShapeContext
        , shapeContext
        , hasStaticShape
@@ -333,6 +334,11 @@ isExt :: Ext a -> Maybe Int
 isExt (Ext i) = Just i
 isExt _ = Nothing
 
+-- | If a known size, then return that size.
+isFree :: Ext a -> Maybe a
+isFree (Free d) = Just d
+isFree _ = Nothing
+
 -- | Given the existential return type of a function, and the shapes
 -- of the values returned by the function, return the existential
 -- shape context.  That is, those sizes that are existential in the
@@ -364,8 +370,6 @@ hasStaticShape (Prim bt) = Just $ Prim bt
 hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
-  where isFree (Free s) = Just s
-        isFree (Ext _)  = Nothing
 
 -- | Given two lists of 'ExtType's of the same length, return a list
 -- of 'ExtType's that is a subtype of the two operands.
