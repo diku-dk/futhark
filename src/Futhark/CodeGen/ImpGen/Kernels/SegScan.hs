@@ -119,14 +119,14 @@ compileSegScan  (Pattern _ pes)
 
       -- TODO: reuse exchange.
 -- sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
-      -- block_id <- sAllocArray "block_id" int32 (Shape [intConst Int32 1]) (Space "local")
+      block_id <- sAllocArray "block_id" int32 (Shape [intConst Int32 1]) (Space "local")
 
       -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn (head exchange) $ IxFun.iota [1]
       -- m <- lookupArray $ head exchange
       -- TODO: reuse exchange - Fails at 4096 elements list at element 512
 -- sArray :: String -> PrimType -> ShapeBase SubExp -> MemBind -> ImpM lore op VName
-      MemLocation m _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
-      block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn m $ IxFun.iota [1]
+      -- MemLocation m _ _ <- entryArrayLocation <$> (lookupArray $ head exchange)
+      -- block_id <- sArray "block_id" int32 (Shape [intConst Int32 1]) $ ArrayIn m $ IxFun.iota [1]
 
       -- Get dynamic block id
       sWhen (ltid .==. 0) $ do
@@ -141,7 +141,7 @@ compileSegScan  (Pattern _ pes)
       copyDWIMFix wG_ID [] (Var block_id) [0]
 
       let wG_ID_var = Imp.var wG_ID int32
-      sOp Imp.LocalBarrier
+      -- sOp Imp.LocalBarrier
 
       -- Read coalesced input data to registers
       -- Apply map function
