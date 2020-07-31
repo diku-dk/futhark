@@ -5,6 +5,7 @@
 
 static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             void* args,
+                                            const char *name,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
                                             int* counter,
@@ -18,6 +19,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   }
   subtask->fn      = fn;
   subtask->args    = args;
+  subtask->name    = name;
   subtask->mutex   = mutex;
   subtask->cond    = cond;
   subtask->counter = counter;
@@ -63,10 +65,6 @@ static inline struct subtask* jobqueue_get_subtask_chunk(struct worker *worker,
     cur_head = subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used - 1) % subtask_queue->capacity];
   } else {
     cur_head = subtask_queue->buffer[subtask_queue->first];
-  }
-
-  if (stealing && cur_head->been_stolen) {
-    return NULL;
   }
 
   int remaining_iter = cur_head->end - cur_head->start;

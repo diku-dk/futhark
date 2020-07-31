@@ -82,7 +82,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   int subtask_id = 0;
   int end = iter_pr_subtask + (int)(remainder != 0);
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
+    struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks, subtask_id);
     assert(subtask != NULL);
@@ -133,18 +133,24 @@ static inline int scheduler_nested(struct scheduler *scheduler,
   CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
   struct scheduler_info info = task->info;
+  int iter_pr_subtask = info.iter_pr_subtask;
+  int remainder = info.remainder;
+  int nsubtasks = info.nsubtasks;
+
+
 
   int shared_counter = info.nsubtasks;
 
   int chunks = 0;
   if (task->granularity > 0) {
-    chunks = info.iter_pr_subtask / task->granularity == 0 ? 1 : info.iter_pr_subtask / task->granularity;
+    chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
   }
+
   long int start = 0;
   long int subtask_id = 0;
-  int end = info.iter_pr_subtask + (long int)(info.remainder != 0);
-  for (subtask_id = 0; subtask_id < info.nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args,
+  int end = iter_pr_subtask + (long int)(remainder != 0);
+  for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
+    struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
                                             start, end, chunks, subtask_id);
     assert(subtask != NULL);
