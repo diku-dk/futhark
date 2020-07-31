@@ -135,6 +135,7 @@ isLoadBalanced (Imp.For _ _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b)    = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While{}       = False
+isLoadBalanced (Imp.Op (Imp.MCFunc _ _ code _ _)) = isLoadBalanced code
 isLoadBalanced _                 = True
 
 
