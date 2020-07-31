@@ -68,6 +68,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   int iter_pr_subtask = info.iter_pr_subtask;
   int remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
+
   free_workers -= nsubtasks;
 
   int shared_counter = nsubtasks;
@@ -100,13 +101,6 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
   while (shared_counter != 0) {
     CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
-  }
-
-  // As any thread can take any subtasks
-  // we are being safe with returning
-  // an upper bound on the number of tasks
-  if (ntask != NULL) {
-    *ntask = (task->granularity > 0) ? scheduler->num_threads : nsubtasks;
   }
 
   free_workers += nsubtasks;
@@ -160,7 +154,7 @@ static inline int scheduler_nested(struct scheduler *scheduler,
 #endif
     // Update range params
     start = end;
-    end += info.iter_pr_subtask + ((subtask_id + 1) < info.remainder);
+    end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
 
@@ -212,9 +206,6 @@ static inline int scheduler_nested(struct scheduler *scheduler,
     }
   }
 
-  if (ntask != NULL) {
-    *ntask = (task->granularity > 0) ? scheduler->num_threads : info.nsubtasks;
-  }
   return 0;
 }
 
@@ -247,8 +238,7 @@ static inline int scheduler_execute(struct scheduler *scheduler,
   }
 
   /* Run task directly if all other workers are occupied */
-  if (!free_workers) {
-    *ntask = 1;
+  if (task->info.nsubtasks == 1) {
     return do_task_directly(task->fn, task->args, task->iterations);
   }
 
@@ -277,6 +267,15 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
 
   struct scheduler_info info;
 
+  /* Run task directly if all other workers are occupied */
+  if (!free_workers) {
+    info.iter_pr_subtask = task->iterations;
+    info.remainder = 0;
+    info.nsubtasks = 1;
+    return task->seq_fn(task->args, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid, info);
+  }
+
+
   int max_num_tasks = scheduler->num_threads;
   switch (task->sched) {
   case STATIC:
@@ -287,7 +286,10 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
   case DYNAMIC:
     info.iter_pr_subtask = task->iterations / max_num_tasks;
     info.remainder = task->iterations % max_num_tasks;
-    info.nsubtasks = max_num_tasks;
+    // As any thread can take any subtasks
+    // we are being safe with returning
+    // an upper bound on the number of tasks
+    info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
     break;
   default:
     assert(!"Got unknown scheduling");
