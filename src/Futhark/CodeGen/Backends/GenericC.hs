@@ -71,6 +71,7 @@ module Futhark.CodeGen.Backends.GenericC
   , fatMemType
   -- * Building Blocks
   , primTypeToCType
+  , intTypeToCType
   , copyMemoryDefaultSpace
   ) where
 

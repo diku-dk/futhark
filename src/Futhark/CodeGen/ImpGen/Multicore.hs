@@ -32,6 +32,11 @@ gccAtomics = flip lookup cpu
                 , (And Int32               , Imp.AtomicAnd Int32)
                 , (Xor Int32               , Imp.AtomicXor Int32)
                 , (Or Int32                , Imp.AtomicOr Int32)
+                , (Add Int64 OverflowUndef , Imp.AtomicAdd Int64)
+                , (Sub Int64 OverflowUndef , Imp.AtomicSub Int64)
+                , (And Int64               , Imp.AtomicAnd Int64)
+                , (Xor Int64               , Imp.AtomicXor Int64)
+                , (Or Int64                , Imp.AtomicOr Int64)
                 ]
 
 

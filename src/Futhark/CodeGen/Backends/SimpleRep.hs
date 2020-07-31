@@ -5,6 +5,7 @@ module Futhark.CodeGen.Backends.SimpleRep
   ( tupleField
   , funName
   , defaultMemBlockType
+  , intTypeToCType
   , primTypeToCType
   , signedPrimTypeToCType
 

@@ -563,14 +563,11 @@ compileOp (Atomic aop) =
   atomicOps aop
 
 
-
-
 doAtomic t old arr ind val op ty = do
   ind' <- GC.compileExp $ unCount ind
   val' <- GC.compileExp val
-  GC.stm [C.cstm|$id:old = $id:op'(&(($ty:ty*)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_SEQ_CST);|]
+  GC.stm [C.cstm|$id:old = $id:op'(&(($ty:ty)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_SEQ_CST);|]
   where op' = op ++ ""
-
 
 
 atomicOps :: AtomicOp -> GC.CompilerM op s ()
@@ -587,16 +584,16 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
     op = "__atomic_compare_exchange_n"
 
 atomicOps (AtomicAdd t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_add" [C.cty|int|]
+  doAtomic t old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)*|]
 
-atomicOps (AtomicAdd t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_sub" [C.cty|int|]
+atomicOps (AtomicSub t old arr ind val) =
+  doAtomic t old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)*|]
 
 atomicOps (AtomicAnd t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_and" [C.cty|int|]
+  doAtomic t old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)*|]
 
 atomicOps (AtomicOr t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_or" [C.cty|int|]
+  doAtomic t old arr ind val "__atomic_fetch_or"  [C.cty|$ty:(GC.intTypeToCType t)*|]
 
 atomicOps (AtomicXor t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_xor" [C.cty|int|]
+  doAtomic t old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)*|]

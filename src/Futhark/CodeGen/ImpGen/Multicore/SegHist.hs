@@ -161,7 +161,7 @@ atomicUpdateLocking :: AtomicBinOp -> Lambda MCMem
                     -> AtomicUpdate MCMem ()
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- splitOp lam,
-    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts =
+    all (\(_, t, _, _) -> supportedPrims(primBitSize t)) ops_and_ts =
     primOrCas ops_and_ts $ \arrs bucket ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
@@ -222,7 +222,6 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
         sOp $ Imp.Atomic $
           Imp.AtomicCmpXchg int32 old locks' locks_offset
           continue (lockingToUnlock locking)
-      break_loop = continue <-- 1
 
   -- Preparing parameters. It is assumed that the caller has already
   -- filled the arr_params. We copy the current value to the
