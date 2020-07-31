@@ -22,9 +22,22 @@ import Futhark.MonadFreshNames
 
 import Control.Monad
 
+
+gccAtomics :: AtomicBinOp
+gccAtomics = flip lookup cpu
+    where
+        cpu =
+                [ (Add Int32 OverflowUndef , Imp.AtomicAdd Int32)
+                , (Sub Int32 OverflowUndef , Imp.AtomicSub Int32)
+                , (And Int32               , Imp.AtomicAnd Int32)
+                , (Xor Int32               , Imp.AtomicXor Int32)
+                , (Or Int32                , Imp.AtomicOr Int32)
+                ]
+
+
 compileProg :: MonadFreshNames m => Prog MCMem
             -> m (Warnings, Imp.Definitions Imp.Multicore)
-compileProg = Futhark.CodeGen.ImpGen.compileProg ModeParallel ops Imp.DefaultSpace
+compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics) ops Imp.DefaultSpace
   where ops = defaultOperations opCompiler
         opCompiler dest (Alloc e space) = compileAlloc dest e space
         opCompiler dest (Inner op) = compileMCOp dest op
@@ -36,7 +49,7 @@ getSpace (SegRed _ space _ _ _ ) = space
 getSpace (SegScan _ space _ _ _ ) = space
 getSpace (SegMap _ space _ _) = space
 
-getIterationDomain :: SegOp () MCMem -> SegSpace -> ImpM MCMem Mode Imp.Multicore Imp.Exp
+getIterationDomain :: SegOp () MCMem -> SegSpace -> ImpM MCMem HostEnv Imp.Multicore Imp.Exp
 getIterationDomain SegMap{} space = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
@@ -48,7 +61,7 @@ getIterationDomain _ space = do
      [_] -> return $ product ns'
      _   -> return $ product $ init ns' -- Segmented reduction is over the inner most dimension
 
-getReturnParams :: Pattern MCMem -> SegOp () MCMem -> ImpM MCMem Mode Imp.Multicore [Imp.Param]
+getReturnParams :: Pattern MCMem -> SegOp () MCMem -> ImpM MCMem HostEnv Imp.Multicore [Imp.Param]
 getReturnParams pat SegRed{} = do
   let retvals = map patElemName $ patternElements pat
   retvals_ts <- mapM lookupType retvals
@@ -56,7 +69,7 @@ getReturnParams pat SegRed{} = do
 getReturnParams _ _ = return mempty
 
 compileMCOp :: Pattern MCMem -> MCOp MCMem ()
-            -> ImpM MCMem Mode Imp.Multicore ()
+            -> ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
 compileMCOp pat (ParOp _par_op op) = do
   let space = getSpace op
@@ -85,7 +98,7 @@ compileMCOp pat (ParOp _par_op op) = do
 compileSegOp :: Pattern MCMem
              -> SegOp () MCMem
              -> VName
-             -> ImpM MCMem Mode Imp.Multicore Imp.Code
+             -> ImpM MCMem HostEnv Imp.Multicore Imp.Code
 compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
   compileSegHist pat space histops kbody ntasks
 

@@ -3,9 +3,9 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , compileKBody
  , extractAllocations
  , compileThreadResult
- , Mode(..)
+ , HostEnv(..)
+ , AtomicBinOp
  , MulticoreGen
- , localMode
  , getNumThreads
  , getNumThreads'
  , decideScheduling
@@ -35,10 +35,19 @@ data Mode
     -- ^ Generate only sequential code for 'SegOp'.
   deriving (Show, Eq)
 
-type MulticoreGen = ImpM MCMem Mode Imp.Multicore
+-- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
+type AtomicBinOp =
+  BinOp ->
+  Maybe (VName -> VName -> Imp.Count Imp.Elements Imp.Exp -> Imp.Exp -> Imp.AtomicOp)
 
-localMode :: Mode -> MulticoreGen a -> MulticoreGen a
-localMode m = localEnv (const m)
+
+newtype HostEnv = HostEnv
+  { hostAtomics :: AtomicBinOp }
+
+type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
+
+-- localMode :: Mode -> MulticoreGen a -> MulticoreGen a
+-- localMode m = localEnv (const m)
 
 toParam :: VName -> TypeBase shape u -> MulticoreGen Imp.Param
 toParam name (Prim pt)      = return $ Imp.ScalarParam name pt
@@ -189,3 +198,9 @@ estimateCost :: Imp.Code -> Int
 estimateCost code =  f code
   where f Imp.DeclareMem{} = 1
         f _  = 10
+
+-- renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
+-- renameHistOpLambda hist_ops =
+--   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
+--     lam' <- renameLambda lam
+--     return $ HistOp w rf dest neutral shape lam'

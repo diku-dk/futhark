@@ -558,3 +558,45 @@ compileOp (MulticoreCall Nothing f) =
 
 compileOp (MulticoreCall (Just retval) f) =
   GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
+
+compileOp (Atomic aop) =
+  atomicOps aop
+
+
+
+
+doAtomic t old arr ind val op ty = do
+  ind' <- GC.compileExp $ unCount ind
+  val' <- GC.compileExp val
+  GC.stm [C.cstm|$id:old = $id:op'(&(($ty:ty*)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_SEQ_CST);|]
+  where op' = op ++ ""
+
+
+
+atomicOps :: AtomicOp -> GC.CompilerM op s ()
+atomicOps (AtomicCmpXchg t old arr ind res val) = do
+  ind' <- GC.compileExp $ unCount ind
+  new_val' <- GC.compileExp val
+  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  GC.stm [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
+                ($ty:cast)&$id:old,
+                 $exp:new_val',
+                 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);|]
+  where
+    op :: String
+    op = "__atomic_compare_exchange_n"
+
+atomicOps (AtomicAdd t old arr ind val) =
+  doAtomic t old arr ind val "__atomic_fetch_add" [C.cty|int|]
+
+atomicOps (AtomicAdd t old arr ind val) =
+  doAtomic t old arr ind val "__atomic_fetch_sub" [C.cty|int|]
+
+atomicOps (AtomicAnd t old arr ind val) =
+  doAtomic t old arr ind val "__atomic_fetch_and" [C.cty|int|]
+
+atomicOps (AtomicOr t old arr ind val) =
+  doAtomic t old arr ind val "__atomic_fetch_or" [C.cty|int|]
+
+atomicOps (AtomicXor t old arr ind val) =
+  doAtomic t old arr ind val "__atomic_fetch_xor" [C.cty|int|]

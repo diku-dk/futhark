@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Scheduling(..)
        , MulticoreInfo(..)
        -- , SchedulerInfo(..)
+       , AtomicOp(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -33,6 +34,28 @@ data MulticoreInfo = MulticoreInfo VName Scheduling VName
 data Multicore = Task [Param] Imp.Exp Code (Maybe Code) VName VName [Param] Scheduling
                | MCFunc VName Code Code [Param] MulticoreInfo
                | MulticoreCall (Maybe VName) String
+               | Atomic AtomicOp
+
+
+-- | Atomic operations return the value stored before the update.
+-- This old value is stored in the first 'VName'.  The second 'VName'
+-- is the memory block to update.  The 'Exp' is the new value.
+data AtomicOp = AtomicAdd IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicSub IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicAnd IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicOr IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicXor IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicCmpXchg PrimType VName VName (Count Elements Imp.Exp) VName Exp
+              deriving (Show)
+
+instance FreeIn AtomicOp where
+  freeIn' (AtomicAdd _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicSub _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicAnd _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicOr _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicXor _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
+
 
 type Granularity = Int32
 
@@ -79,6 +102,8 @@ instance Pretty Multicore where
   ppr (MulticoreCall dests f) =
     ppr dests <+> ppr f
 
+  ppr (Atomic _) = text "AtomicOp"
+
 
 instance FreeIn Multicore where
   freeIn' (Task _ e par_code seq_code _ ntasks _ _) =
@@ -86,3 +111,4 @@ instance FreeIn Multicore where
   freeIn' (MCFunc _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests
+  freeIn' (Atomic aop) = freeIn' aop

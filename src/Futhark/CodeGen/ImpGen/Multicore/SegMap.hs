@@ -74,7 +74,7 @@ compileSequentialSegMap :: Pattern MCMem
 compileSequentialSegMap pat space kbody = do
   let ns = map snd $ unSegSpace space
   ns' <- mapM toExp ns
-  collect $ localMode ModeSequential $ do
+  collect $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
     flat_seq_idx <- dPrim "seq_iter" int32
     body <- compileSegMapBody flat_seq_idx pat space kbody

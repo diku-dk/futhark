@@ -99,7 +99,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
 
   // Join (wait for subtasks to finish)
   CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-  while (shared_counter != 0) {
+  while (shared_counter != 0 && scheduler_error == 0)  {
     CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
   }
 
@@ -150,7 +150,7 @@ static inline int scheduler_nested(struct scheduler *scheduler,
     assert(subtask != NULL);
     CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
 #ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_nested] pushed %ld iterations onto q %d\n", (end - start), calling_worker->tid);
+    fprintf(stderr, "[scheduler_nested] pushed %ld iterations onto tid %d q's\n", (end - start), calling_worker->tid);
 #endif
     // Update range params
     start = end;
@@ -185,27 +185,27 @@ static inline int scheduler_nested(struct scheduler *scheduler,
         fprintf(stderr, "[scheduler_nested] Got error %d from \n", err);
         assert(0);
       }
-    /* } else { */
-    /*   int retval = query_a_subtask(scheduler, calling_worker->tid, calling_worker, &subtask); */
+      /* } else { */
+      /*   int retval = query_a_subtask(scheduler, calling_worker->tid, calling_worker, &subtask); */
 
-    /*   if (retval == 0) { */
-    /*     assert(subtask->fn != NULL); */
-    /*     assert(subtask->args != NULL); */
-    /*     int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id); */
-    /*     if (err != 0) { */
-    /*       return err; */
-    /*     } */
-    /*     CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock"); */
-    /*     (*subtask->counter)--; */
-    /*     CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock"); */
-    /*     free(subtask); */
-    /*   } else if (retval > 1) { */
-    /*     CHECK_ERR(retval, "query_a_subtask"); */
-    /*   } */
-    /*   // We just stole a subtask, run it before we finish */
+      /*   if (retval == 0) { */
+      /*     assert(subtask->fn != NULL); */
+      /*     assert(subtask->args != NULL); */
+      /*     int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id); */
+      /*     if (err != 0) { */
+      /*       return err; */
+      /*     } */
+      /*     CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock"); */
+      /*     (*subtask->counter)--; */
+      /*     CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock"); */
+      /*     free(subtask); */
+      /*   } else if (retval > 1) { */
+      /*     CHECK_ERR(retval, "query_a_subtask"); */
+      /*   } */
+      /*   // We just stole a subtask, run it before we finish */
+
     }
   }
-
   return 0;
 }
 
