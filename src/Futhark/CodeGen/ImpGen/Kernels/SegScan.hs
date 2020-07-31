@@ -370,9 +370,8 @@ compileSegScan  (Pattern _ pes)
             sOp Imp.MemFenceGlobal
             copyDWIMFix statusflgs [Imp.var wG_ID int32] (intConst Int8 1) []
             copyDWIMFix warpscan [0+32*4] (Var statusflgs) [Imp.var wG_ID int32 - 1]
-
-          -- sOp Imp.MemFenceGlobal
           sOp Imp.MemFenceLocal
+
           -- if (warpscan[0] == STATUS_P && tid == 0) prefix = incprefix[WG_ID-1];
           status1 <- dPrim "status1" int8
           copyDWIMFix status1 [] (Var warpscan) [0+32*4]
