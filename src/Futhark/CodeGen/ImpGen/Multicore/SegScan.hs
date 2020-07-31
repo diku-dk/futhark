@@ -26,7 +26,7 @@ compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
       nonsegmentedScan pat space reds kbody nsubtasks
   | otherwise =
-      segmentedScan pat space reds kbody nsubtasks
+      segmentedScan pat space reds kbody
 
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
@@ -112,8 +112,8 @@ scanStage1 pat space nsubtasks scan_ops kbody = do
                 copyDWIMFix acc' (tid' : vec_is) se []
 
   free_params <- freeParams (prebody <> body) (segFlat space : [iter])
-  emit $ Imp.Op $ Imp.MCFunc iter prebody body free_params $
-    Imp.MulticoreInfo nsubtasks Imp.Static (segFlat space)
+  emit $ Imp.Op $ Imp.MCFunc "scan_stage_1" iter prebody body free_params $
+    Imp.MulticoreInfo Imp.Static (segFlat space)
 
 
 scanStage2 :: Pattern MCMem
@@ -232,16 +232,15 @@ scanStage3 pat nsubtasks space scan_ops kbody = do
                 copyDWIMFix acc' (tid' : vec_is) se []
 
   free_params' <- freeParams (prebody <> body)  (segFlat space : [iter])
-  emit $ Imp.Op $ Imp.MCFunc iter prebody body free_params' $
-    Imp.MulticoreInfo nsubtasks Imp.Static (segFlat space)
+  emit $ Imp.Op $ Imp.MCFunc "scan_stage_3" iter prebody body free_params' $
+    Imp.MulticoreInfo Imp.Static (segFlat space)
 
 segmentedScan :: Pattern MCMem
               -> SegSpace
               -> [SegBinOp MCMem]
               -> KernelBody MCMem
-              -> VName
               -> MulticoreGen Imp.Code
-segmentedScan pat space scan_ops kbody nsubtasks = do
+segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
@@ -249,8 +248,8 @@ segmentedScan pat space scan_ops kbody nsubtasks = do
     fbody <- compileSegScanBody n_par_segments pat space scan_ops kbody
     free_params <- freeParams fbody  (segFlat space : [n_par_segments])
     let sched = decideScheduling fbody
-    emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty fbody free_params $
-      Imp.MulticoreInfo nsubtasks sched (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc "seg_scan" n_par_segments mempty fbody free_params $
+      Imp.MulticoreInfo sched (segFlat space)
 
 
 compileSegScanBody :: VName

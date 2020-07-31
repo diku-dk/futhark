@@ -26,18 +26,17 @@ import Control.Monad
 gccAtomics :: AtomicBinOp
 gccAtomics = flip lookup cpu
     where
-        cpu =
-                [ (Add Int32 OverflowUndef , Imp.AtomicAdd Int32)
-                , (Sub Int32 OverflowUndef , Imp.AtomicSub Int32)
-                , (And Int32               , Imp.AtomicAnd Int32)
-                , (Xor Int32               , Imp.AtomicXor Int32)
-                , (Or Int32                , Imp.AtomicOr Int32)
-                , (Add Int64 OverflowUndef , Imp.AtomicAdd Int64)
-                , (Sub Int64 OverflowUndef , Imp.AtomicSub Int64)
-                , (And Int64               , Imp.AtomicAnd Int64)
-                , (Xor Int64               , Imp.AtomicXor Int64)
-                , (Or Int64                , Imp.AtomicOr Int64)
-                ]
+        cpu = [ (Add Int32 OverflowUndef , Imp.AtomicAdd Int32)
+              , (Sub Int32 OverflowUndef , Imp.AtomicSub Int32)
+              , (And Int32               , Imp.AtomicAnd Int32)
+              , (Xor Int32               , Imp.AtomicXor Int32)
+              , (Or Int32                , Imp.AtomicOr Int32)
+              , (Add Int64 OverflowUndef , Imp.AtomicAdd Int64)
+              , (Sub Int64 OverflowUndef , Imp.AtomicSub Int64)
+              , (And Int64               , Imp.AtomicAnd Int64)
+              , (Xor Int64               , Imp.AtomicXor Int64)
+              , (Or Int64                , Imp.AtomicOr Int64)
+              ]
 
 
 compileProg :: MonadFreshNames m => Prog MCMem
@@ -80,10 +79,11 @@ compileMCOp pat (ParOp _par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) 0
   iterations <- getIterationDomain op space
-  ntasks <- dPrim "num_tasks" $ IntType Int32
-  seq_code <- compileSegOp pat op ntasks
+  nsubtasks <- dPrim "num_tasks" $ IntType Int32
+  seq_code <- compileSegOp pat op nsubtasks
   retvals <- getReturnParams pat op
 
+  let scheduling_info = Imp.SchedulerInfo nsubtasks (segFlat space) iterations
 
   -- par_code <- case par_op of
   --   Just nested_op -> do
@@ -96,8 +96,8 @@ compileMCOp pat (ParOp _par_op op) = do
   --       Just _ -> Just par_code
   --       Nothing -> Nothing
 
-  free_params <- freeParams seq_code ([segFlat space, ntasks] ++ map Imp.paramName retvals)
-  emit $ Imp.Op $ Imp.Task free_params iterations seq_code Nothing (segFlat space) ntasks retvals (decideScheduling seq_code)
+  free_params <- freeParams seq_code ([segFlat space, nsubtasks] ++ map Imp.paramName retvals)
+  emit $ Imp.Op $ Imp.Task free_params seq_code Nothing retvals $ scheduling_info (decideScheduling seq_code)
 
 
 compileSegOp :: Pattern MCMem
@@ -113,5 +113,5 @@ compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
 compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
   compileSegRed pat space reds kbody ntasks
 
-compileSegOp pat (SegMap _ space _ kbody) ntasks =
-  compileSegMap pat space kbody ntasks
+compileSegOp pat (SegMap _ space _ kbody) _ =
+  compileSegMap pat space kbody

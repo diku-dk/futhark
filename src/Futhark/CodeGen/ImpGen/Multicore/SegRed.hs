@@ -46,7 +46,7 @@ compileSegRed' pat space reds nsubtasks kbody
   | [_] <- unSegSpace space =
       nonsegmentedReduction pat space reds nsubtasks kbody
   | otherwise =
-      segmentedReduction pat space reds nsubtasks kbody
+      segmentedReduction pat space reds kbody
 
 
 -- | A SegBinOp with auxiliary information.
@@ -148,8 +148,8 @@ reductionStage1 space nsubtasks slugs kbody = do
 
   let (body_allocs, fbody') = extractAllocations fbody
 
-  emit $ Imp.Op $ Imp.MCFunc flat_idx body_allocs fbody' free_params $
-    Imp.MulticoreInfo nsubtasks scheduling (segFlat space)
+  emit $ Imp.Op $ Imp.MCFunc "segred_stage_1" flat_idx body_allocs fbody' free_params $
+    Imp.MulticoreInfo scheduling (segFlat space)
 
 reductionStage2 :: Pattern MCMem
                 -> SegSpace
@@ -191,18 +191,17 @@ reductionStage2 pat space nsubtasks slugs = do
 segmentedReduction :: Pattern MCMem
                    -> SegSpace
                    -> [SegBinOp MCMem]
-                   -> VName
                    -> DoSegBody
                    -> MulticoreGen Imp.Code
-segmentedReduction pat space reds nsubtasks kbody =
+segmentedReduction pat space reds kbody =
   collect $ do
     emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     par_body    <- compileSegRedBody n_par_segments pat space reds kbody
     free_params <- freeParams par_body (segFlat space : [n_par_segments])
     let sched = decideScheduling par_body
-    emit $ Imp.Op $ Imp.MCFunc n_par_segments mempty par_body free_params $
-      Imp.MulticoreInfo nsubtasks sched (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc "segmented_segred" n_par_segments mempty par_body free_params $
+      Imp.MulticoreInfo sched (segFlat space)
 
 
 compileSegRedBody :: VName

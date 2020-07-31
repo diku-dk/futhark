@@ -51,8 +51,7 @@ static inline void *scheduler_worker(void* arg)
 
 
 static inline int scheduler_parallel(struct scheduler *scheduler,
-                                     struct scheduler_subtask *task,
-                                     int *ntask)
+                                     struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_parallel] Performing scheduling with granularity %d\n", task->granularity);
@@ -111,7 +110,6 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
 
 static inline int scheduler_nested(struct scheduler *scheduler,
                                    struct scheduler_subtask* task,
-                                   int *ntask,
                                    struct worker* calling_worker)
 {
 #ifdef MCDEBUG
@@ -210,21 +208,9 @@ static inline int scheduler_nested(struct scheduler *scheduler,
 }
 
 
-static inline int do_task_directly(sub_task_fn fn,
-                                   void *args,
-                                   int iterations)
-{
-#ifdef MCDEBUG
-  fprintf(stderr, "[do_task_directly] doing task directly\n");
-#endif
-  assert(fn != NULL);
-  return fn(args, 0, iterations, 0); // (worker_local == NULL) ? 0 : worker_local->tid);
-}
-
 
 static inline int scheduler_execute(struct scheduler *scheduler,
-                                    struct scheduler_subtask *task,
-                                    int *ntask)
+                                    struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_execute] starting task %s with %ld iterations \n", task->name, task->iterations);
@@ -233,24 +219,22 @@ static inline int scheduler_execute(struct scheduler *scheduler,
   assert(task != NULL);
 
   if (task->iterations == 0) {
-    if (ntask != NULL) *ntask = 0;
     return 0;
   }
 
   /* Run task directly if all other workers are occupied */
   if (task->info.nsubtasks == 1) {
-    return do_task_directly(task->fn, task->args, task->iterations);
+    return task->fn(task->args, 0, task->iterations, 0);
   }
-
 
   /* This case indicates that we are inside a nested parallel operation */
   /* so we handle this differently */
   if (worker_local != NULL) {
-    CHECK_ERR(scheduler_nested(scheduler, task, ntask, worker_local), "scheduler_nested");
+    CHECK_ERR(scheduler_nested(scheduler, task, worker_local), "scheduler_nested");
     return 0;
   }
 
-  return scheduler_parallel(scheduler, task, ntask);
+  return scheduler_parallel(scheduler, task);
 }
 
 #endif

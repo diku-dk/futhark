@@ -432,7 +432,7 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
 
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Task params e seq_code par_code tid ntasks retvals sched) = do
+compileOp (Task params seq_code par_code retvals (SchedulerInfo nsubtask tid e sched)) = do
 
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
@@ -452,7 +452,7 @@ compileOp (Task params e seq_code par_code tid ntasks retvals sched) = do
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
 
-  fpar_task <- generateFunction lexical_par "par_task" seq_code fstruct free retval tid ntasks
+  fpar_task <- generateFunction lexical_par "par_task" seq_code fstruct free retval tid nsubtask
 
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
@@ -472,7 +472,7 @@ compileOp (Task params e seq_code par_code tid ntasks retvals sched) = do
   fnpar_task <- case par_code of
         Just code -> do
           let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
-          fnpar_task <- generateFunction lexical_npar "nested_par_task" code fstruct free retval tid ntasks
+          fnpar_task <- generateFunction lexical_npar "nested_par_task" code fstruct free retval tid nsubtask
           GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
           return $ zip [fnpar_task]  [True]
         Nothing -> do
@@ -490,7 +490,7 @@ compileOp (Task params e seq_code par_code tid ntasks retvals sched) = do
 
 
 
-compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
+compileOp (MCFunc s' i prebody body free (MulticoreInfo sched tid)) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
   granularity <- compileSchedulingVal sched
@@ -498,12 +498,12 @@ compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
   let lexical = lexicalMemoryUsage $
                 Function False [] free body [] []
 
-  fstruct <- multicoreFunDef "parloop_struct" $ \s ->
+  fstruct <- multicoreFunDef (s' ++ "_struct") $ \s ->
     return [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                      };|]
-  ftask <- multicoreFunDef "parloop" $ \s -> do
+  ftask <- multicoreFunDef s' $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=<
              GC.inNewFunction False $ GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do
@@ -545,7 +545,7 @@ compileOp (MCFunc i prebody body free (MulticoreInfo ntasks sched tid)) = do
 
   let ftask_err = ftask <> "_err"
   code' <- benchmarkCode ftask_name Nothing
-    [C.citems|int $id:ftask_err = scheduler_execute(&ctx->scheduler, &$id:ftask_name, &$id:ntasks);
+    [C.citems|int $id:ftask_err = scheduler_execute(&ctx->scheduler, &$id:ftask_name);
               if ($id:ftask_err != 0) {
                 futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
               }|]
@@ -562,12 +562,17 @@ compileOp (MulticoreCall (Just retval) f) =
 compileOp (Atomic aop) =
   atomicOps aop
 
-
-doAtomic t old arr ind val op ty = do
+doAtomic :: (C.ToIdent a1, C.ToIdent a2) => a1
+         -> a2
+         -> Count u Exp
+         -> Exp
+         -> String
+         -> C.Type
+         -> GC.CompilerM op s ()
+doAtomic old arr ind val op ty = do
   ind' <- GC.compileExp $ unCount ind
   val' <- GC.compileExp val
-  GC.stm [C.cstm|$id:old = $id:op'(&(($ty:ty)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_SEQ_CST);|]
-  where op' = op ++ ""
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
 
 atomicOps :: AtomicOp -> GC.CompilerM op s ()
@@ -578,22 +583,22 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
   GC.stm [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
                 ($ty:cast)&$id:old,
                  $exp:new_val',
-                 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);|]
+                 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]
   where
     op :: String
     op = "__atomic_compare_exchange_n"
 
 atomicOps (AtomicAdd t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)*|]
+  doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)*|]
 
 atomicOps (AtomicSub t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)*|]
+  doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)*|]
 
 atomicOps (AtomicAnd t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)*|]
+  doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)*|]
 
 atomicOps (AtomicOr t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_or"  [C.cty|$ty:(GC.intTypeToCType t)*|]
+  doAtomic old arr ind val "__atomic_fetch_or"  [C.cty|$ty:(GC.intTypeToCType t)*|]
 
 atomicOps (AtomicXor t old arr ind val) =
-  doAtomic t old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)*|]
+  doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)*|]

@@ -7,7 +7,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Multicore(..)
        , Scheduling(..)
        , MulticoreInfo(..)
-       -- , SchedulerInfo(..)
+       , SchedulerInfo(..)
        , AtomicOp(..)
        , module Futhark.CodeGen.ImpCode
        )
@@ -27,12 +27,12 @@ type Function = Imp.Function Multicore
 type Code = Imp.Code Multicore
 
 
-data MulticoreInfo = MulticoreInfo VName Scheduling VName
+data MulticoreInfo = MulticoreInfo Scheduling VName
 -- MulticoreInfo ntasks Sched tid
 
 -- | A multicore operation.
-data Multicore = Task [Param] Imp.Exp Code (Maybe Code) VName VName [Param] Scheduling
-               | MCFunc VName Code Code [Param] MulticoreInfo
+data Multicore = Task [Param] Code (Maybe Code) [Param] SchedulerInfo
+               | MCFunc String VName Code Code [Param] MulticoreInfo
                | MulticoreCall (Maybe VName) String
                | Atomic AtomicOp
 
@@ -59,12 +59,12 @@ instance FreeIn AtomicOp where
 
 type Granularity = Int32
 
--- data SchedulerInfo = SchedulerInfo
---   { nsubtasks  :: VName -- The variable that describes how many subtasks the scheduler created
---   , tid        :: VName -- The variable for the tid execution the code
---   , iterations :: Imp.Exp -- The number of total iterations for a task
---   , sched      :: Scheduling -- The type scheduling that the task can be performed as
---   }
+data SchedulerInfo = SchedulerInfo
+  { nsubtasks  :: VName -- The variable that describes how many subtasks the scheduler created
+  , flatTid    :: VName -- The variable for the tid execution the code
+  , iterations :: Imp.Exp -- The number of total iterations for a task
+  , scheduling :: Scheduling -- The type scheduling that the task can be performed as
+  }
 
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic
 -- or it is restainted to Static
@@ -79,20 +79,28 @@ instance Pretty Scheduling where
     text "Static"
 
 
+instance Pretty SchedulerInfo where
+  ppr (SchedulerInfo nsubtask _ i sched) =
+    text "SchedulingInfo" <+>
+    text "number of subtasks" <+> ppr nsubtask <+>
+    text "scheduling" <+> ppr sched <+>
+    text "iter" <+> ppr i
+
 instance Pretty MulticoreInfo where
-  ppr (MulticoreInfo _ sched _) =
+  ppr (MulticoreInfo sched _) =
     text "MulticoreInfo" <+> ppr sched
 
 instance Pretty Multicore where
-  ppr (Task free e par_code seq_code i _ntasks retval _) =
-    text "parfor" <+> ppr i <+> langle <+> ppr e <+>
+  ppr (Task free par_code seq_code retval scheduler) =
+    text "parfor" <+>
+    ppr scheduler <+>
     ppr free <+>
     text "par_code" <+> nestedBlock "{" "}" (ppr par_code) <+>
     text "seq_code" <+> nestedBlock "{" "}" (ppr seq_code) <+>
     text "retvals" <+> ppr retval
 
-  ppr (MCFunc i prebody body params info) =
-    text "parfunc" <+> ppr i <+>
+  ppr (MCFunc s i prebody body params info) =
+    text "parloop" <+> ppr s <+> ppr i <+>
     ppr prebody <+>
     ppr params <+>
     ppr info <+>
@@ -104,11 +112,14 @@ instance Pretty Multicore where
 
   ppr (Atomic _) = text "AtomicOp"
 
+instance FreeIn SchedulerInfo where
+  freeIn' (SchedulerInfo nsubtask _ iter _) =
+    freeIn' iter <> freeIn' nsubtask
 
 instance FreeIn Multicore where
-  freeIn' (Task _ e par_code seq_code _ ntasks _ _) =
-    freeIn' e <> freeIn' par_code <> freeIn' seq_code  <> freeIn' ntasks
-  freeIn' (MCFunc _ prebody body _ _) =
+  freeIn' (Task _ par_code seq_code _ info) =
+    freeIn' par_code <> freeIn' seq_code  <> freeIn' info
+  freeIn' (MCFunc _  _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests
   freeIn' (Atomic aop) = freeIn' aop

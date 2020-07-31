@@ -54,18 +54,16 @@ compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
 compileSegMap :: Pattern MCMem
               -> SegSpace
               -> KernelBody MCMem
-              -> VName
               -> MulticoreGen Imp.Code
-compileSegMap pat space kbody ntasks =
+compileSegMap pat space kbody =
   collect $ do
     flat_par_idx <- dPrim "iter" int32
     body <- compileSegMapBody flat_par_idx pat space kbody
     free_params <- freeParams body [segFlat space, flat_par_idx]
     let (body_allocs, body') = extractAllocations body
         sched = decideScheduling body'
-    emit $ Imp.DebugPrint "SegMap " Nothing
-    emit $ Imp.Op $ Imp.MCFunc flat_par_idx body_allocs body' free_params $
-      Imp.MulticoreInfo ntasks sched (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc "segmap" flat_par_idx body_allocs body' free_params $
+      Imp.MulticoreInfo sched (segFlat space)
 
 compileSequentialSegMap :: Pattern MCMem
                         -> SegSpace
