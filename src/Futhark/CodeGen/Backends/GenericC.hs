@@ -740,8 +740,8 @@ primTypeInfo Cert _ = [C.cexp|bool_info|]
 copyMemoryDefaultSpace :: C.Exp -> C.Exp -> C.Exp -> C.Exp -> C.Exp ->
                           CompilerM op s ()
 copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
-  stm [C.cstm|memmove(($ty:defaultMemBlockType)$exp:destmem + $exp:destidx,
-                      ($ty:defaultMemBlockType)$exp:srcmem + $exp:srcidx,
+  stm [C.cstm|memmove($exp:destmem + $exp:destidx,
+                      $exp:srcmem + $exp:srcidx,
                       $exp:nbytes);|]
 
 --- Entry points.
@@ -1763,7 +1763,7 @@ cachingMemory lexical f = do
             [[C.citem|size_t $id:size = 0;|],
              [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]]
           Just e ->
-            [[C.citem|$ty:defaultMemBlockType $id:mem[$exp:e];|]]
+            [[C.citem|char $id:mem[$exp:e];|]]
 
       freeCached (mem, _, size') =
         case size' of
@@ -2078,8 +2078,8 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
   size' <- compileExp size
   dest' <- rawMem dest
   src' <- rawMem src
-  stm [C.cstm|memmove(($ty:defaultMemBlockType)$exp:dest' + $exp:destoffset',
-                      ($ty:defaultMemBlockType)$exp:src' + $exp:srcoffset',
+  stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
+                      $exp:src' + $exp:srcoffset',
                       $exp:size');|]
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
@@ -2114,15 +2114,12 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
 compileCode (DeclareMem name space) =
   declMem name space
 
-compileCode (DeclareStackMem name _space (Count size)) = do
+compileCode (DeclareStackMem name space (Count size)) = do
   cached <- isJust <$> cacheMem name
   unless cached $ do
     size' <- compileExp size
-    decl [C.cdecl|$ty:defaultMemBlockType $id:name[$exp:size'];|]
-    -- modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
-
-
-  -- decl [C.cdecl|$ty:defaultMemBlockType $id:name[$exp:size'];|]
+    decl [C.cdecl|char $id:name[$exp:size'];|]
+    modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
 
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
