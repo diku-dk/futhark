@@ -29,7 +29,6 @@ module Futhark.IR.Traversals
   , identityMapper
   , mapExpM
   , mapExp
-  , mapOnType
 
   -- * Walking
   , Walker(..)
@@ -45,6 +44,7 @@ import Data.Foldable (traverse_)
 
 import Futhark.IR.Syntax
 import Futhark.IR.Prop.Scope
+import Futhark.IR.Prop.Types (mapOnType)
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
@@ -162,14 +162,6 @@ mapOnLoopForm tv (WhileLoop cond) =
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
 
--- | Transform any t'SubExp's in the type.
-mapOnType :: Monad m =>
-             (SubExp -> m SubExp) -> Type -> m Type
-mapOnType _ (Prim bt) = return $ Prim bt
-mapOnType _ (Mem space) = pure $ Mem space
-mapOnType f (Array bt shape u) =
-  Array bt <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
-
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given
 -- child.
@@ -200,11 +192,10 @@ identityWalker = Walker {
 walkOnShape :: Monad m => Walker lore m -> Shape -> m ()
 walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
-walkOnType :: Monad m =>
-             (SubExp -> m ()) -> Type -> m ()
+walkOnType :: Monad m => Walker lore m -> Type -> m ()
 walkOnType _ Prim{} = return ()
 walkOnType _ Mem{} = return ()
-walkOnType f (Array _ shape _) = mapM_ f $ shapeDims shape
+walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
 walkOnLoopForm :: Monad m => Walker lore m -> LoopForm lore -> m ()
 walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
@@ -219,7 +210,7 @@ walkExpM :: Monad m => Walker lore m -> Exp lore -> m ()
 walkExpM tv (BasicOp (SubExp se)) =
   walkOnSubExp tv se
 walkExpM tv (BasicOp (ArrayLit els rowt)) =
-  mapM_ (walkOnSubExp tv) els >> walkOnType (walkOnSubExp tv) rowt
+  mapM_ (walkOnSubExp tv) els >> walkOnType tv rowt
 walkExpM tv (BasicOp (BinOp _ x y)) =
   walkOnSubExp tv x >> walkOnSubExp tv y
 walkExpM tv (BasicOp (CmpOp _ x y)) =

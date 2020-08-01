@@ -34,6 +34,9 @@ module Futhark.IR.Prop.Types
        , transposeType
        , rearrangeType
 
+       , mapOnExtType
+       , mapOnType
+
        , diet
 
        , subtypeOf
@@ -281,6 +284,28 @@ rearrangeType :: [Int] -> Type -> Type
 rearrangeType perm t =
   t `setArrayShape` Shape (rearrangeShape perm' $ arrayDims t)
   where perm' = perm ++ [length perm .. arrayRank t - 1]
+
+-- | Transform any t'SubExp's in the type.
+mapOnExtType :: Monad m =>
+                (SubExp -> m SubExp)
+             -> TypeBase ExtShape u
+             -> m (TypeBase ExtShape u)
+mapOnExtType _ (Prim bt) =
+  return $ Prim bt
+mapOnExtType _ (Mem space) =
+  pure $ Mem space
+mapOnExtType f (Array t shape u) =
+  Array t <$> (Shape <$> mapM (traverse f) (shapeDims shape)) <*> pure u
+
+-- | Transform any t'SubExp's in the type.
+mapOnType :: Monad m =>
+             (SubExp -> m SubExp)
+          -> TypeBase Shape u
+          -> m (TypeBase Shape u)
+mapOnType _ (Prim bt) = return $ Prim bt
+mapOnType _ (Mem space) = pure $ Mem space
+mapOnType f (Array t shape u) =
+  Array t <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
