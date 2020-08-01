@@ -29,14 +29,6 @@ module Futhark.Internalise.Monad
 
   , assert
 
-  -- * Type Handling
-  , InternaliseTypeM
-  , liftInternaliseM
-  , runInternaliseTypeM
-  , lookupDim
-  , withDims
-  , DimTable
-
     -- * Convenient reexports
   , module Futhark.Tools
   )
@@ -216,29 +208,3 @@ asserting m = do
 assertingOne :: InternaliseM VName
              -> InternaliseM Certificates
 assertingOne m = asserting $ Certificates . pure <$> m
-
-type DimTable = M.Map VName ExtSize
-
-newtype TypeEnv = TypeEnv { typeEnvDims  :: DimTable }
-
-type TypeState = Int
-
-newtype InternaliseTypeM a =
-  InternaliseTypeM (ReaderT TypeEnv (StateT TypeState InternaliseM) a)
-  deriving (Functor, Applicative, Monad,
-            MonadReader TypeEnv,
-            MonadState TypeState)
-
-liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
-liftInternaliseM = InternaliseTypeM . lift . lift
-
-runInternaliseTypeM :: InternaliseTypeM a
-                    -> InternaliseM a
-runInternaliseTypeM (InternaliseTypeM m) =
-  evalStateT (runReaderT m (TypeEnv mempty)) 0
-
-withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
-withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }
-
-lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
-lookupDim name = asks $ M.lookup name . typeEnvDims

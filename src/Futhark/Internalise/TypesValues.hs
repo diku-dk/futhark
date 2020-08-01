@@ -19,6 +19,7 @@ module Futhark.Internalise.TypesValues
   )
   where
 
+import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (delete, find, foldl')
 import qualified Data.Map.Strict as M
@@ -32,6 +33,32 @@ import Futhark.Internalise.Monad
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
+
+type DimTable = M.Map VName ExtSize
+
+newtype TypeEnv = TypeEnv { typeEnvDims  :: DimTable }
+
+type TypeState = Int
+
+newtype InternaliseTypeM a =
+  InternaliseTypeM (ReaderT TypeEnv (StateT TypeState InternaliseM) a)
+  deriving (Functor, Applicative, Monad,
+            MonadReader TypeEnv,
+            MonadState TypeState)
+
+liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
+liftInternaliseM = InternaliseTypeM . lift . lift
+
+runInternaliseTypeM :: InternaliseTypeM a
+                    -> InternaliseM a
+runInternaliseTypeM (InternaliseTypeM m) =
+  evalStateT (runReaderT m (TypeEnv mempty)) 0
+
+withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
+withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }
+
+lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
+lookupDim name = asks $ M.lookup name . typeEnvDims
 
 -- | The names that are bound for some types, either implicitly or
 -- explicitly.
