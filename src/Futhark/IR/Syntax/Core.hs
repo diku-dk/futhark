@@ -92,8 +92,14 @@ data Ext a = Ext Int
            deriving (Eq, Ord, Show)
 
 instance Functor Ext where
-  fmap _ (Ext i) = Ext i
-  fmap f (Free a) = Free $ f a
+  fmap = fmapDefault
+
+instance Foldable Ext where
+  foldMap = foldMapDefault
+
+instance Traversable Ext where
+  traverse _ (Ext i) = pure $ Ext i
+  traverse f (Free v) = Free <$> f v
 
 -- | The size of this dimension.
 type ExtSize = Ext SubExp

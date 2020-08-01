@@ -125,7 +125,11 @@ arraySizes :: StructType -> S.Set VName
 arraySizes (Scalar Arrow{}) = mempty
 arraySizes (Scalar (Record fields)) = foldMap arraySizes fields
 arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
-arraySizes (Scalar TypeVar{}) = mempty
+arraySizes (Scalar (TypeVar _ _ _ targs)) =
+  mconcat $ map f targs
+  where f (TypeArgDim (NamedDim d) _) = S.singleton $ qualLeaf d
+        f TypeArgDim{} = mempty
+        f (TypeArgType t _) = arraySizes t
 arraySizes (Scalar Prim{}) = mempty
 arraySizes (Array _ _ t shape) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
