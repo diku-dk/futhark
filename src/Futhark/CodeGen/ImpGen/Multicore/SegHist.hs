@@ -44,7 +44,7 @@ nonsegmentedHist :: Pattern MCMem
                 -> KernelBody MCMem
                 -> VName
                 -> MulticoreGen Imp.Code
-nonsegmentedHist pat space histops kbody _ = do
+nonsegmentedHist pat space histops kbody num_histos = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   -- let ns = map snd $ unSegSpace space
   -- ns' <- mapM toExp ns
@@ -56,10 +56,10 @@ nonsegmentedHist pat space histops kbody _ = do
   -- histops' <- renameHistOpLambda histops
 
   collect $ do
-    -- flat_idx <- dPrim "iter" int32
+    flat_idx <- dPrim "iter" int32
     -- sIf use_small_dest_histogram
-    -- smallDestHistogram pat flat_idx space histops num_threads kbody
-    casHistogram pat space histops kbody
+    smallDestHistogram pat flat_idx space histops num_histos kbody
+    -- casHistogram pat space histops kbody
 
 
 

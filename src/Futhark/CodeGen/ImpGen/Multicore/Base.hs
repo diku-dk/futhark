@@ -107,7 +107,7 @@ resultArrays reds =
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
         full_shape = shape <> arrayShape t
-    sAllocArray "res_arr" pt full_shape DefaultSpace
+    sDeclStackArray "res_arr" pt full_shape DefaultSpace
 
 
 -- | Arrays for storing group results shared between threads
@@ -119,7 +119,7 @@ groupResultArrays num_threads reds =
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
         full_shape = Shape [num_threads] <> shape <> arrayShape t
-    sAllocArray "group_res_arr" pt full_shape DefaultSpace
+    sDeclStackArray "group_res_arr" pt full_shape DefaultSpace
 
 
 getNumThreads' :: VName -> MulticoreGen ()

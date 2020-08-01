@@ -106,17 +106,16 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
           sLoopNest (slugShape slug) $ \vec_is ->
             copyDWIMFix acc (acc_is++vec_is) ne []
 
-  reductionStage1 space nsubtasks slugs1 kbody
+  reductionStage1 space slugs1 kbody
   reds2 <- renameSegBinOp reds
   slugs2 <- mapM (segBinOpOpSlug tid') $ zip reds2 thread_red_arrs
   reductionStage2 pat space nsubtasks slugs2
 
 reductionStage1 :: SegSpace
-                -> VName
                 -> [SegBinOpSlug]
                 -> DoSegBody
                 -> MulticoreGen ()
-reductionStage1 space nsubtasks slugs kbody = do
+reductionStage1 space slugs kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
 

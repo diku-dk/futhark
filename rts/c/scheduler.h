@@ -41,8 +41,8 @@ static inline void *scheduler_worker(void* arg)
       subtask = NULL;
     } else {
 #ifdef MCPROFILE
-#endif
       output_thread_usage(worker);
+#endif
       break;
     }
   }

@@ -397,7 +397,7 @@ multicoreFunDef s f = do
   GC.libDecl =<< f s'
   return s'
 
-generateFunction :: C.ToIdent a => M.Map VName Space
+generateFunction :: C.ToIdent a => M.Map VName (Count Bytes Exp, Space)
                   -> String
                   -> Code
                   -> a
@@ -453,7 +453,6 @@ compileOp (Task params seq_code par_code retvals (SchedulerInfo nsubtask tid e s
                      };|]
 
   fpar_task <- generateFunction lexical_par "par_task" seq_code fstruct free retval tid nsubtask
-
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]

@@ -186,6 +186,7 @@ data Code a = Skip
               -- distinct from allocation.  The memory block must be the
               -- target of either an 'Allocate' or a 'SetMem' before it
               -- can be used for reading or writing.
+            | DeclareStackMem VName Space (Count Bytes Exp)
             | DeclareScalar VName Volatility PrimType
               -- ^ Declare a scalar variable with an initially undefined value.
             | DeclareArray VName Space PrimType ArrayContents
@@ -265,7 +266,8 @@ instance Monoid (Code a) where
 --
 -- We do not look inside any 'Op's.  We assume that no 'Op' is going
 -- to 'SetMem' a memory block declared outside it.
-lexicalMemoryUsage :: Function a -> M.Map VName Space
+-- TODO find a way to distinguish between stack vs heap memory (instead of Count 0)
+lexicalMemoryUsage :: Function a -> M.Map VName (Count Bytes Exp, Space)
 lexicalMemoryUsage func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
   declared $ functionBody func
@@ -280,7 +282,8 @@ lexicalMemoryUsage func =
         go f (Comment _ x) = f x
         go _ _ = mempty
 
-        declared (DeclareMem mem space) = M.singleton mem space
+        declared (DeclareMem mem space ) = M.singleton mem (Count 0, space)
+        declared (DeclareStackMem mem space size) = M.singleton mem (size, space)
         declared x = go declared x
 
         set (SetMem x y _) = namesFromList [x,y]
@@ -417,6 +420,8 @@ instance Pretty op => Pretty (Code op) where
     text "}"
   ppr (DeclareMem name space) =
     text "var" <+> ppr name <> text ": mem" <> ppr space
+  ppr (DeclareStackMem name space size) =
+    text "var" <+> ppr name <> text ": mem" <> ppr space <> text "[size:" <> ppr size <> text "]"
   ppr (DeclareScalar name vol t) =
     text "var" <+> ppr name <> text ":" <+> vol' <> ppr t
     where vol' = case vol of Volatile -> text "volatile "
@@ -519,6 +524,8 @@ instance Traversable Code where
     pure Skip
   traverse _ (DeclareMem name space) =
     pure $ DeclareMem name space
+  traverse _ (DeclareStackMem name space size) =
+    pure $ DeclareStackMem name space size
   traverse _ (DeclareScalar name vol bt) =
     pure $ DeclareScalar name vol bt
   traverse _ (DeclareArray name space t vs) =
@@ -546,6 +553,7 @@ instance Traversable Code where
 
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = oneName name
+declaredIn (DeclareStackMem name _ _) = oneName name
 declaredIn (DeclareScalar name _ _) = oneName name
 declaredIn (DeclareArray name _ _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
@@ -570,6 +578,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' cond <> freeIn' body
   freeIn' (DeclareMem _ space) =
     freeIn' space
+  freeIn' (DeclareStackMem _ space size) =
+    freeIn' space <> freeIn' size
   freeIn' DeclareScalar{} =
     mempty
   freeIn' DeclareArray{} =

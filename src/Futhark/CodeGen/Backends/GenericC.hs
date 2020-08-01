@@ -80,7 +80,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
-import Data.Bifunctor (first)
 import Data.Bits (xor, shiftR)
 import Data.Char (ord, isDigit, isAlphaNum)
 import qualified Data.Map.Strict as M
@@ -741,8 +740,8 @@ primTypeInfo Cert _ = [C.cexp|bool_info|]
 copyMemoryDefaultSpace :: C.Exp -> C.Exp -> C.Exp -> C.Exp -> C.Exp ->
                           CompilerM op s ()
 copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
-  stm [C.cstm|memmove($exp:destmem + $exp:destidx,
-                      $exp:srcmem + $exp:srcidx,
+  stm [C.cstm|memmove(($ty:defaultMemBlockType)$exp:destmem + $exp:destidx,
+                      ($ty:defaultMemBlockType)$exp:srcmem + $exp:srcidx,
                       $exp:nbytes);|]
 
 --- Entry points.
@@ -1729,7 +1728,7 @@ compileConstants (Constants ps init_consts) = do
           ty <- memToCType name space
           return [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
 
-cachingMemory :: M.Map VName Space
+cachingMemory :: M.Map VName (Count Bytes Exp, Space)
               -> ([C.BlockItem] -> [C.Stm] -> CompilerM op s a)
               -> CompilerM op s a
 cachingMemory lexical f = do
@@ -1738,24 +1737,38 @@ cachingMemory lexical f = do
   -- heuristic based on GPU memory usually involving larger
   -- allocations, that do not suffer from the overhead of reference
   -- counting.
-  let cached = M.keys $ M.filter (==DefaultSpace) lexical
+  let mem_blocks = M.filter (\(_, s) -> s==DefaultSpace) lexical
+      cached = M.keys mem_blocks
+      sizes = map fst $ M.elems mem_blocks
 
-  cached' <- forM cached $ \mem -> do
+  cached' <- forM (zip cached sizes) $ \(mem, c) -> do
+    size' <- case c of
+      (Count 0) -> return Nothing
+      (Count s) -> do
+        s' <- compileExp s
+        return $ Just s'
+
     size <- newVName $ pretty mem <> "_cached_size"
-    return (mem, size)
+    return (mem, size, size')
 
   let lexMem env =
         env { envCachedMem =
-                M.fromList (map (first (`C.toExp` noLoc)) cached')
+                M.fromList (map (\(a ,b, _)-> (C.toExp a noLoc, b)) cached')
                 <> envCachedMem env
             }
 
-      declCached (mem, size) =
-        [[C.citem|size_t $id:size = 0;|],
-         [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]]
+      declCached (mem, size, size') =
+        case size' of
+          Nothing ->
+            [[C.citem|size_t $id:size = 0;|],
+             [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]]
+          Just e ->
+            [[C.citem|$ty:defaultMemBlockType $id:mem[$exp:e];|]]
 
-      freeCached (mem, _) =
-        [C.cstm|free($id:mem);|]
+      freeCached (mem, _, size') =
+        case size' of
+          Nothing ->  [C.cstm|free($id:mem);|]
+          _       ->  [C.cstm|;|]
 
   local lexMem $ f (concatMap declCached cached') (map freeCached cached')
 
@@ -2065,8 +2078,8 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
   size' <- compileExp size
   dest' <- rawMem dest
   src' <- rawMem src
-  stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
-                      $exp:src' + $exp:srcoffset',
+  stm [C.cstm|memmove(($ty:defaultMemBlockType)$exp:dest' + $exp:destoffset',
+                      ($ty:defaultMemBlockType)$exp:src' + $exp:srcoffset',
                       $exp:size');|]
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
@@ -2100,6 +2113,16 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
 
 compileCode (DeclareMem name space) =
   declMem name space
+
+compileCode (DeclareStackMem name _space (Count size)) = do
+  cached <- isJust <$> cacheMem name
+  unless cached $ do
+    size' <- compileExp size
+    decl [C.cdecl|$ty:defaultMemBlockType $id:name[$exp:size'];|]
+    -- modify $ \s -> s { compDeclaredMem = (name, space) : compDeclaredMem s }
+
+
+  -- decl [C.cdecl|$ty:defaultMemBlockType $id:name[$exp:size'];|]
 
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t

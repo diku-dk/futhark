@@ -77,6 +77,7 @@ module Futhark.CodeGen.ImpGen
   , sOp
   , sDeclareMem, sAlloc, sAlloc_
   , sArray, sArrayInMem, sAllocArray, sAllocArrayPerm, sStaticArray
+  , sDeclStackArray
   , sWrite, sUpdate
   , sLoopNest
   , (<--)
@@ -1375,6 +1376,24 @@ sStaticArray name space pt vs = do
   emit $ Imp.DeclareArray mem space pt vs
   addVar mem $ MemVar Nothing $ MemEntry space
   sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
+
+
+sDeclareMemStack :: String -> Space -> Count Bytes Imp.Exp -> ImpM lore r op VName
+sDeclareMemStack name space size = do
+  name' <- newVName name
+  emit $ Imp.DeclareStackMem name' space size
+  addVar name' $ MemVar Nothing $ MemEntry space
+  return name'
+
+sDeclStackArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore r op VName
+sDeclStackArray name pt shape space = do
+  let perm = [0..shapeRank shape-1]
+  let permuted_dims = rearrangeShape perm $ shapeDims shape
+  name' <- sDeclareMemStack name space (typeSize (Array pt shape NoUniqueness))
+  let iota_ixfun = IxFun.iota $ map (primExpFromSubExp int32) permuted_dims
+  sArray name pt shape $
+    ArrayIn name' $ IxFun.permute iota_ixfun $ rearrangeInverse perm
+
 
 sWrite :: VName -> [Imp.Exp] -> PrimExp Imp.ExpLeaf -> ImpM lore r op ()
 sWrite arr is v = do
