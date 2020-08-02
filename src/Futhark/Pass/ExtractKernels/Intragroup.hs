@@ -184,8 +184,12 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                             scopeForKernels (scopeOf lam) <> scope
                         , distOnInnerMap =
                             distributeMap
-                        , distOnTopLevelStms =
-                            lift . collectStms_ . intraGroupStms lvl
+                        , distOnTopLevelStms = \stms -> do
+                            -- Stuff might have happened before we got
+                            -- here.
+                            cur_scope <- askScope
+                            lift $ localScope cur_scope $ collectStms_ $
+                              intraGroupStms lvl stms
                         , distSegLevel = \minw _ _ -> do
                             lift $ parallelMin minw
                             return lvl

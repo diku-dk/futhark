@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixed compiler crash on certain patterns of nested parallelism
+    (#1068, #1069).
+
 ## [0.16.3]
 
 ### Added
