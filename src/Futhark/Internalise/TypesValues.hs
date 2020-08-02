@@ -4,12 +4,9 @@
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
-    BoundInTypes
-  , boundInTypes
-  , internaliseReturnType
+    internaliseReturnType
   , internaliseEntryReturnType
   , internaliseParamTypes
-  , internaliseType
   , internalisePrimType
   , internalisedTypeSize
   , internaliseSumType
@@ -23,8 +20,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (delete, find, foldl')
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
-import Data.Maybe
 
 import qualified Language.Futhark as E
 import Futhark.IR.SOACS as I
@@ -34,52 +29,24 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-type DimTable = M.Map VName ExtSize
-
-newtype TypeEnv = TypeEnv { typeEnvDims  :: DimTable }
-
 type TypeState = Int
 
 newtype InternaliseTypeM a =
-  InternaliseTypeM (ReaderT TypeEnv (StateT TypeState InternaliseM) a)
-  deriving (Functor, Applicative, Monad,
-            MonadReader TypeEnv,
-            MonadState TypeState)
+  InternaliseTypeM (StateT TypeState InternaliseM a)
+  deriving (Functor, Applicative, Monad, MonadState TypeState)
 
 liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
-liftInternaliseM = InternaliseTypeM . lift . lift
+liftInternaliseM = InternaliseTypeM . lift
 
 runInternaliseTypeM :: InternaliseTypeM a
                     -> InternaliseM a
 runInternaliseTypeM (InternaliseTypeM m) =
-  evalStateT (runReaderT m (TypeEnv mempty)) 0
+  evalStateT m 0
 
-withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
-withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }
-
-lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
-lookupDim name = asks $ M.lookup name . typeEnvDims
-
--- | The names that are bound for some types, either implicitly or
--- explicitly.
-newtype BoundInTypes = BoundInTypes (S.Set VName)
-                       deriving (Semigroup, Monoid)
-
--- | Determine the names bound for some types.
-boundInTypes :: [E.TypeParam] -> BoundInTypes
-boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
-  where isTypeParam (E.TypeParamDim v _) = Just v
-        isTypeParam _ = Nothing
-
-internaliseParamTypes :: BoundInTypes
-                      -> M.Map VName VName
-                      -> [E.TypeBase (E.DimDecl VName) ()]
+internaliseParamTypes :: [E.TypeBase (E.DimDecl VName) ()]
                       -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
-internaliseParamTypes (BoundInTypes bound) pnames ts =
-  runInternaliseTypeM $ withDims (bound' <> M.map (Free . Var) pnames) $
-  mapM internaliseTypeM ts
-  where bound' = M.fromList (zip (S.toList bound)
-                                 (map (Free . Var) $ S.toList bound))
+internaliseParamTypes ts =
+  runInternaliseTypeM $ mapM internaliseTypeM ts
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
                       -> InternaliseM [I.TypeBase ExtShape Uniqueness]
@@ -112,11 +79,8 @@ internaliseDim d =
     E.NamedDim name -> namedDim name
   where namedDim (E.QualName _ name) = do
           subst <- liftInternaliseM $ lookupSubst name
-          is_dim <- lookupDim name
-
-          case (is_dim, subst) of
-            (Just dim, _) -> return dim
-            (Nothing, Just [v]) -> return $ I.Free v
+          case subst of
+            Just [v] -> return $ I.Free v
             _ -> return $ I.Free $ I.Var name
 
 internaliseTypeM :: E.StructType

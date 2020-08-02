@@ -31,9 +31,7 @@ bindingParams :: [E.TypeParam] -> [E.Pattern]
 bindingParams tparams params m = do
   flattened_params <- mapM flattenPattern params
   let (params_idents, params_types) = unzip $ concat flattened_params
-      bound = boundInTypes tparams
-      param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
-  params_ts <- internaliseParamTypes bound param_names params_types
+  params_ts <- internaliseParamTypes params_types
   let num_param_idents = map length flattened_params
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
 
@@ -57,8 +55,7 @@ bindingLambdaParams :: [E.Pattern] -> [I.Type]
 bindingLambdaParams params ts m = do
   (params_idents, params_types) <-
     unzip . concat <$> mapM flattenPattern params
-  let param_names = M.fromList [ (E.identName x, y) | (x,y) <- params_idents ]
-  params_ts <- internaliseParamTypes mempty param_names params_types
+  params_ts <- internaliseParamTypes params_types
 
   let ascript_substs = lambdaShapeSubstitutions (concat params_ts) ts
 
@@ -66,7 +63,7 @@ bindingLambdaParams params ts m = do
     local (\env -> env { envSubsts = ascript_substs `M.union` envSubsts env }) $
     I.localScope (I.scopeOfLParams $ concat params') $ m $ concat params'
 
-processFlatPattern :: Show t => [(E.Ident,VName)] -> [t]
+processFlatPattern :: Show t => [E.Ident] -> [t]
                    -> InternaliseM ([[I.Param t]], VarSubstitutions)
 processFlatPattern x y = processFlatPattern' [] x y
   where
@@ -76,8 +73,8 @@ processFlatPattern x y = processFlatPattern' [] x y
           idents = reverse vs
       return (idents, substs')
 
-    processFlatPattern' pat ((p,name):rest) ts = do
-      (ps, subst, rest_ts) <- handleMapping ts <$> internaliseBindee (p, name)
+    processFlatPattern' pat (p:rest) ts = do
+      (ps, subst, rest_ts) <- handleMapping ts <$> internaliseBindee p
       processFlatPattern' ((ps, (E.identName p, map (I.Var . I.paramName) subst)) : pat) rest rest_ts
 
     handleMapping ts [] =
@@ -93,9 +90,10 @@ processFlatPattern x y = processFlatPattern' [] x y
     handleMapping' [] _ =
       error $ "processFlatPattern: insufficient identifiers in pattern." ++ show (x, y)
 
-    internaliseBindee :: (E.Ident, VName) -> InternaliseM [(VName, I.DeclExtType)]
-    internaliseBindee (bindee, name) = do
-      tss <- internaliseParamTypes nothing_bound mempty
+    internaliseBindee :: E.Ident -> InternaliseM [(VName, I.DeclExtType)]
+    internaliseBindee bindee = do
+      let name = E.identName bindee
+      tss <- internaliseParamTypes
              [flip E.setAliases () $ E.unInfo $ E.identType bindee]
       case concat tss of
         [t] -> return [(name, t)]
@@ -103,10 +101,7 @@ processFlatPattern x y = processFlatPattern' [] x y
           name' <- newVName $ baseString name
           return (name', t)
 
-    -- Fixed up later.
-    nothing_bound = boundInTypes []
-
-bindingFlatPattern :: Show t => [(E.Ident, VName)] -> [t]
+bindingFlatPattern :: Show t => [E.Ident] -> [t]
                    -> ([[I.Param t]] -> InternaliseM a)
                    -> InternaliseM a
 bindingFlatPattern idents ts m = do
@@ -116,16 +111,15 @@ bindingFlatPattern idents ts m = do
 
 -- | Flatten a pattern.  Returns a list of identifiers.  The
 -- structural type of each identifier is returned separately.
-flattenPattern :: MonadFreshNames m => E.Pattern -> m [((E.Ident, VName), E.StructType)]
+flattenPattern :: MonadFreshNames m => E.Pattern -> m [(E.Ident, E.StructType)]
 flattenPattern = flattenPattern'
   where flattenPattern' (E.PatternParens p _) =
           flattenPattern' p
         flattenPattern' (E.Wildcard t loc) = do
           name <- newVName "nameless"
           flattenPattern' $ E.Id name t loc
-        flattenPattern' (E.Id v (Info t) loc) = do
-          new_name <- newVName $ baseString v
-          return [((E.Ident v (Info t) loc, new_name),
+        flattenPattern' (E.Id v (Info t) loc) =
+          return [(E.Ident v (Info t) loc,
                    t `E.setAliases` ())]
         -- XXX: treat empty tuples and records as bool.
         flattenPattern' (E.TuplePattern [] loc) =
@@ -151,7 +145,7 @@ stmPattern :: E.Pattern -> [I.ExtType]
 stmPattern pat ts m = do
   (pat', pat_types) <- unzip <$> flattenPattern pat
   (ts',_) <- instantiateShapes' ts
-  pat_types' <- internaliseParamTypes mempty mempty pat_types
+  pat_types' <- internaliseParamTypes pat_types
   let pat_types'' = map I.fromDecl $ concat pat_types'
   let addShapeStms l =
         m (map I.paramName $ concat l) (matchPattern pat_types'')
