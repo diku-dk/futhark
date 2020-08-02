@@ -18,6 +18,24 @@ import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
 import Futhark.MonadFreshNames
 
 
+compileSegHist  :: Pattern MCMem
+                -> SegSpace
+                -> [HistOp MCMem]
+                -> KernelBody MCMem
+                -> VName
+                -> MulticoreGen Imp.Code
+compileSegHist pat space histops kbody nsubtasks
+  | [_] <- unSegSpace space =
+      nonsegmentedHist pat space histops kbody nsubtasks
+  | otherwise =
+      segmentedHist pat space histops kbody
+
+-- | Split some list into chunks equal to the number of values
+-- returned by each 'SegBinOp'
+segHistOpChunks :: [HistOp lore] -> [a] -> [[a]]
+segHistOpChunks = chunks . map (length . histNeutral)
+
+
 
 onOpCas :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.Exp] -> MulticoreGen())
 onOpCas op = do
@@ -26,7 +44,7 @@ onOpCas op = do
       do_op = atomicUpdateLocking atomics lambda
   case do_op of
     AtomicPrim f -> return f
-    AtomicCAS f -> return f
+    AtomicCAS f  -> return f
     AtomicLocking f -> do
       let num_locks = 100151
           dims = map (toExp' int32) $
@@ -46,20 +64,19 @@ nonsegmentedHist :: Pattern MCMem
                 -> MulticoreGen Imp.Code
 nonsegmentedHist pat space histops kbody num_histos = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
-  -- let ns = map snd $ unSegSpace space
-  -- ns' <- mapM toExp ns
-  -- num_threads <- getNumThreads
-  -- num_threads' <- toExp $ Var num_threads
-  -- hist_width <- toExp $ histWidth $ head histops
-  -- TODO we should find a proper condition
-  -- let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns'
-  -- histops' <- renameHistOpLambda histops
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+  num_threads <- getNumThreads
+  num_threads' <- toExp $ Var num_threads
+  hist_width <- toExp $ histWidth $ head histops
+  let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns'
+  histops' <- renameHistOpLambda histops
 
   collect $ do
     flat_idx <- dPrim "iter" int32
-    -- sIf use_small_dest_histogram
-    smallDestHistogram pat flat_idx space histops num_histos kbody
-    -- casHistogram pat space histops kbody
+    sIf use_small_dest_histogram
+      (smallDestHistogram pat flat_idx space histops num_histos kbody)
+      (casHistogram pat space histops' kbody)
 
 
 
@@ -73,8 +90,7 @@ casHistogram :: Pattern MCMem
              -> KernelBody MCMem
              -> MulticoreGen ()
 casHistogram pat space histops kbody = do
-  emit $ Imp.DebugPrint "largeDestHistogram segHist" Nothing
-
+  emit $ Imp.DebugPrint "Atomic segHist" Nothing
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
@@ -83,7 +99,6 @@ casHistogram pat space histops kbody = do
   atomicOps <- mapM onOpCas histops
 
   idx <- dPrim "iter" int32
-  emit $ Imp.DebugPrint "CAS segHist body" Nothing
   body <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 idx
     compileStms mempty (kernelBodyStms kbody) $ do
@@ -115,7 +130,7 @@ casHistogram pat space histops kbody = do
 
   free_params <- freeParams body (segFlat space : [idx])
   let sched = decideScheduling body
-  emit $ Imp.Op $ Imp.MCFunc "seg_hist" idx mempty body free_params $
+  emit $ Imp.Op $ Imp.MCFunc "atomic_seg_hist" idx mempty body free_params $
       Imp.MulticoreInfo sched (segFlat space)
 
 segmentedHist :: Pattern MCMem
@@ -135,29 +150,6 @@ segmentedHist pat space histops kbody = do
     emit $ Imp.Op $ Imp.MCFunc "segmented_hist" n_segments mempty par_body free_params $
       Imp.MulticoreInfo sched (segFlat space)
 
-
--- nonsegmentedHist :: Pattern MCMem
---                 -> SegSpace
---                 -> [HistOp MCMem]
---                 -> KernelBody MCMem
---                 -> VName
---                 -> MulticoreGen Imp.Code
--- nonsegmentedHist pat space histops kbody ntasks  = do
---   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
---   -- let ns = map snd $ unSegSpace space
---   -- ns' <- mapM toExp ns
-
---   -- num_threads' <- toExp $ Var num_threads
---   -- hist_width <- toExp $ histWidth $ head histops
---   -- TODO we should find a proper condition
---   -- let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns'
---   -- histops' <- renameHistOpLambda histops
-
---   collect $ do
---     flat_idx <- dPrim "iter" int32
---     -- sIf use_small_dest_histogram
---     smallDestHistogram pat flat_idx space histops ntasks kbody
---      -- (largeDestHistogram pat space histops' kbody)
 
 
 -- Generates num_threads sub histograms of the size
@@ -183,13 +175,12 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
   num_histos' <- toExp $ Var num_histos
   let pes = patternElements pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
-      (_all_red_pes, map_pes) = splitAt num_red_res pes
+      map_pes = drop num_red_res pes
 
   let per_red_pes = segHistOpChunks histops $ patternValueElements pat
   hist_M <- dPrimV "hist_M" num_histos'
 
-  init_histograms <-
-    prepareIntermediateArrays hist_M histops
+  init_histograms <- mapM (onOp hist_M) histops
 
   hist_H_chks <- forM (map histWidth histops) $ \w -> do
     w' <- toExp w
@@ -204,7 +195,6 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
     return (local_subhistos, hist_H_chk, do_op)
 
   prebody <- collect $ do
-    emit $ Imp.DebugPrint "nonsegmented segHist stage 1" Nothing
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     forM_ (zip4 per_red_pes histograms hist_H_chks histops) $ \(pes', (hists, _, _), hist_H_chk, histop) ->
       forM_ (zip3 pes' hists (histNeutral histop)) $ \(pe, hist, ne) -> do
@@ -259,25 +249,9 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
       Imp.MulticoreInfo sched (segFlat space)
 
 
-  emit $ Imp.DebugPrint "nonsegmented hist stage 2"  Nothing
   forM_ (zip3 per_red_pes histograms histops) $ \(red_pes, (hists,_,_),  op) -> do
     bucket_id <- newVName "bucket_id"
     subhistogram_id <- newVName "subhistogram_id"
-
-    -- let unitHistoCase =
-    --    -- This is OK because the memory blocks are at least as
-    --    -- large as the ones we are supposed to use for the result.
-    --      forM_ (zip red_pes hists) $ \(pe, subhisto) -> do
-    --        emit $ Imp.DebugPrint "unitHistoCase" Nothing
-    --        pe_mem <- memLocationName . entryArrayLocation <$>
-    --                  lookupArray (patElemName pe)
-    --        subhisto_mem <- memLocationName . entryArrayLocation <$>
-    --                        lookupArray subhisto
-    --        emit $ Imp.SetMem pe_mem subhisto_mem DefaultSpace
-
-    -- sIf (Imp.var num_histos int32 .==. 1) unitHistoCase $ do
-
-    emit $ Imp.DebugPrint "multiHistocase" Nothing
 
     let num_buckets = histWidth op
 
@@ -311,29 +285,6 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
    where segment_dims = init $ unSegSpace space
 
-
-prepareIntermediateArrays :: VName
-                          -> [HistOp MCMem]
-                          -> MulticoreGen [InitLocalHistograms]
-prepareIntermediateArrays num_subhistos_per_group =
-  mapM (onOp num_subhistos_per_group)
-
-compileSegHist  :: Pattern MCMem
-                -> SegSpace
-                -> [HistOp MCMem]
-                -> KernelBody MCMem
-                -> VName
-                -> MulticoreGen Imp.Code
-compileSegHist pat space histops kbody nsubtasks
-  | [_] <- unSegSpace space =
-      nonsegmentedHist pat space histops kbody nsubtasks
-  | otherwise =
-      segmentedHist pat space histops kbody
-
--- | Split some list into chunks equal to the number of values
--- returned by each 'SegBinOp'
-segHistOpChunks :: [HistOp lore] -> [a] -> [[a]]
-segHistOpChunks = chunks . map (length . histNeutral)
 
 
 compileSegHistBody :: VName

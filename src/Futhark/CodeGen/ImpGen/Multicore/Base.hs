@@ -14,6 +14,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , resultArrays
  , freeParams
  , estimateCost
+ , renameHistOpLambda
  , atomicUpdateLocking
  , AtomicUpdate(..)
  , Locking(..)
@@ -110,9 +111,9 @@ compileThreadResult space pe (Returns _ what) = do
   let is = map (Imp.vi32 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ _ ConcatReturns{} =
-  compilerBugS "compileThreadResult: ConcatReturn nunhandled."
+  compilerBugS "compileThreadResult: ConcatReturn unhandled."
 compileThreadResult _ _ WriteReturns{} =
-  compilerBugS "compileThreadResult: WriteReturns nunhandled."
+  compilerBugS "compileThreadResult: WriteReturns unhandled."
 compileThreadResult _ _ TileReturns{} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
 
@@ -223,14 +224,17 @@ estimateCost code =  f code
   where f Imp.DeclareMem{} = 1
         f _  = 10
 
--- renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
--- renameHistOpLambda hist_ops =
---   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
---     lam' <- renameLambda lam
---     return $ HistOp w rf dest neutral shape lam'
 
 
--- SegHist
+-------------------------
+------- SegHist ---------
+-------------------------
+
+renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
+renameHistOpLambda hist_ops =
+  forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
+    lam' <- renameLambda lam
+    return $ HistOp w rf dest neutral shape lam'
 
 
 -- | Locking strategy used for an atomic update.
@@ -270,7 +274,7 @@ atomicUpdateLocking :: AtomicBinOp -> Lambda MCMem
                     -> AtomicUpdate MCMem ()
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- splitOp lam,
-    all (\(_, t, _, _) -> supportedPrims(primBitSize t)) ops_and_ts =
+    all (\(_, t, _, _) -> supportedPrims $ primBitSize t) ops_and_ts =
     primOrCas ops_and_ts $ \arrs bucket ->
   -- If the operator is a vectorised binary operator on 32-bit values,
   -- we can use a particularly efficient implementation. If the
@@ -360,7 +364,6 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
       op_body
       do_hist
       release_lock
-      -- break_loop
   where writeArray bucket arr val = copyDWIMFix arr bucket val []
 
 
@@ -433,8 +436,8 @@ supportedPrims _  = False
 
 -- Supported bytes lengths by GCC (and clang) compiler
 toIntegral :: Int -> MulticoreGen PrimType
-toIntegral 8  =  return int8
-toIntegral 16 =  return int16
-toIntegral 32 =  return int32
+toIntegral 8  = return int8
+toIntegral 16 = return int16
+toIntegral 32 = return int32
 toIntegral 64 = return int64
-toIntegral b  = error $ "number of bytes is supported for CAS - " ++ pretty b
+toIntegral b  = error $ "number of bytes is not supported for CAS - " ++ pretty b
