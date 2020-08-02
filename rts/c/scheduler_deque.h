@@ -187,8 +187,7 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
   struct scheduler_info info;
 
   /* Run task directly if all other workers are occupied */
-  if (task->iterations < 50)
-  {
+  if (free_workers <= 0) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
@@ -213,7 +212,11 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
   default:
     assert(!"Got unknown scheduling");
   }
-  return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+
+  free_workers -= info.nsubtasks;
+  int err = task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+  free_workers += info.nsubtasks;
+  return err;
 }
 
 #endif
