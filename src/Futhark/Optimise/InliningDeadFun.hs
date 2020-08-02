@@ -125,14 +125,10 @@ inlineFunction pat aux args (safety,loc,locs) fun = do
     (bodyResult (funDefBody fun))
   let res_stms =
         certify (stmAuxCerts aux) <$>
-        zipWith (reshapeIfNecessary (patternNames pat))
-        (patternIdents pat) res
+        zipWith bindSubExp (patternIdents pat) res
   pure $ stmsToList stms <> res_stms
-  where param_names =
-          map paramName $ funDefParams fun
-
-        param_stms =
-          zipWith (reshapeIfNecessary param_names)
+  where param_stms =
+          zipWith bindSubExp
           (map paramIdent $ funDefParams fun) (map fst args)
 
         body_stms =
@@ -140,13 +136,11 @@ inlineFunction pat aux args (safety,loc,locs) fun = do
           addLocations (stmAuxAttrs aux) safety (filter notmempty (loc:locs)) $
           bodyStms $ funDefBody fun
 
-        reshapeIfNecessary dim_names ident se
-          | t@Array{} <- identType ident,
-            any (`elem` dim_names) (subExpVars $ arrayDims t),
-            Var v <- se =
-              mkLet [] [ident] $ shapeCoerce (arrayDims t) v
-          | otherwise =
-              mkLet [] [ident] $ BasicOp $ SubExp se
+        -- Note that the sizes of arrays may not be correct at this
+        -- point - it is crucial that we run copy propagation before
+        -- the type checker sees this!
+        bindSubExp ident se =
+          mkLet [] [ident] $ BasicOp $ SubExp se
 
         notmempty = (/=mempty) . locOf
 
