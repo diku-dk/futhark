@@ -17,6 +17,9 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , atomicUpdateLocking
  , AtomicUpdate(..)
  , Locking(..)
+ , getSpace
+ , getIterationDomain
+ , getReturnParams
  )
  where
 
@@ -53,6 +56,32 @@ toParam name Array{} = do
     ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
       return $ Imp.MemParam mem DefaultSpace
     _ -> error $ "[toParam] Could not handle array for " ++ show name
+
+
+getSpace :: SegOp () MCMem -> SegSpace
+getSpace (SegHist _ space _ _ _ ) = space
+getSpace (SegRed _ space _ _ _ ) = space
+getSpace (SegScan _ space _ _ _ ) = space
+getSpace (SegMap _ space _ _) = space
+
+getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen Imp.Exp
+getIterationDomain SegMap{} space = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+  return $ product ns'
+getIterationDomain _ space = do
+  let ns = map snd $ unSegSpace space
+  ns' <- mapM toExp ns
+  case unSegSpace space of
+     [_] -> return $ product ns'
+     _   -> return $ product $ init ns' -- Segmented reduction is over the inner most dimension
+
+getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
+getReturnParams pat SegRed{} = do
+  let retvals = map patElemName $ patternElements pat
+  retvals_ts <- mapM lookupType retvals
+  zipWithM toParam retvals retvals_ts
+getReturnParams _ _ = return mempty
 
 
 
@@ -101,25 +130,26 @@ freeParams code names = do
   zipWithM toParam freeVars ts
 
 -- | Arrays for storing group results.
-resultArrays :: [SegBinOp MCMem] -> MulticoreGen [[VName]]
-resultArrays reds =
+resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
+resultArrays s reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
         full_shape = shape <> arrayShape t
-    sDeclStackArray "res_arr" pt full_shape DefaultSpace
+    sDeclStackArray s pt full_shape DefaultSpace
 
 
 -- | Arrays for storing group results shared between threads
-groupResultArrays :: SubExp
+groupResultArrays :: String
+                  -> SubExp
                   -> [SegBinOp MCMem]
                   -> MulticoreGen [[VName]]
-groupResultArrays num_threads reds =
+groupResultArrays s num_threads reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
     let pt = elemType t
         full_shape = Shape [num_threads] <> shape <> arrayShape t
-    sDeclStackArray "group_res_arr" pt full_shape DefaultSpace
+    sDeclStackArray s pt full_shape DefaultSpace
 
 
 getNumThreads' :: VName -> MulticoreGen ()

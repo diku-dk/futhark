@@ -94,7 +94,7 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
 
   -- Thread id for indexing into each threads accumulator element(s)
   tid' <- toExp $ Var $ segFlat space
-  thread_red_arrs <- groupResultArrays (Var nsubtasks) reds
+  thread_red_arrs <- groupResultArrays "reduce_stage_1_tid_accum_arr" (Var nsubtasks) reds
   slugs1 <- mapM (segBinOpOpSlug tid') $ zip reds thread_red_arrs
   nsubtasks' <- toExp $ Var nsubtasks
 

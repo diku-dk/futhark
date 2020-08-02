@@ -20,9 +20,6 @@ import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 
-import Control.Monad
-
-
 gccAtomics :: AtomicBinOp
 gccAtomics = flip lookup cpu
     where
@@ -30,12 +27,12 @@ gccAtomics = flip lookup cpu
               , (Sub Int32 OverflowUndef , Imp.AtomicSub Int32)
               , (And Int32               , Imp.AtomicAnd Int32)
               , (Xor Int32               , Imp.AtomicXor Int32)
-              , (Or Int32                , Imp.AtomicOr Int32)
+              , (Or  Int32               , Imp.AtomicOr Int32)
               , (Add Int64 OverflowUndef , Imp.AtomicAdd Int64)
               , (Sub Int64 OverflowUndef , Imp.AtomicSub Int64)
               , (And Int64               , Imp.AtomicAnd Int64)
               , (Xor Int64               , Imp.AtomicXor Int64)
-              , (Or Int64                , Imp.AtomicOr Int64)
+              , (Or  Int64               , Imp.AtomicOr Int64)
               ]
 
 
@@ -46,32 +43,6 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg (HostEnv gccAtomics) ops Imp.De
         opCompiler dest (Alloc e space) = compileAlloc dest e space
         opCompiler dest (Inner op) = compileMCOp dest op
 
-
-getSpace :: SegOp () MCMem -> SegSpace
-getSpace (SegHist _ space _ _ _ ) = space
-getSpace (SegRed _ space _ _ _ ) = space
-getSpace (SegScan _ space _ _ _ ) = space
-getSpace (SegMap _ space _ _) = space
-
-getIterationDomain :: SegOp () MCMem -> SegSpace -> ImpM MCMem HostEnv Imp.Multicore Imp.Exp
-getIterationDomain SegMap{} space = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-  return $ product ns'
-getIterationDomain _ space = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-  case unSegSpace space of
-     [_] -> return $ product ns'
-     _   -> return $ product $ init ns' -- Segmented reduction is over the inner most dimension
-
-getReturnParams :: Pattern MCMem -> SegOp () MCMem -> ImpM MCMem HostEnv Imp.Multicore [Imp.Param]
-getReturnParams pat SegRed{} = do
-  let retvals = map patElemName $ patternElements pat
-  retvals_ts <- mapM lookupType retvals
-  zipWithM toParam retvals retvals_ts
-getReturnParams _ _ = return mempty
-
 compileMCOp :: Pattern MCMem -> MCOp MCMem ()
             -> ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
@@ -79,9 +50,9 @@ compileMCOp pat (ParOp _par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) 0
   iterations <- getIterationDomain op space
-  nsubtasks <- dPrim "num_tasks" $ IntType Int32
-  seq_code <- compileSegOp pat op nsubtasks
-  retvals <- getReturnParams pat op
+  nsubtasks  <- dPrim "num_tasks" $ IntType Int32
+  seq_code   <- compileSegOp pat op nsubtasks
+  retvals    <- getReturnParams pat op
 
   let scheduling_info = Imp.SchedulerInfo nsubtasks (segFlat space) iterations
 

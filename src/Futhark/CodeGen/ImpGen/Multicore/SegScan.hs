@@ -77,7 +77,7 @@ scanStage1 pat space nsubtasks scan_ops kbody = do
   tid' <- toExp $ Var $ segFlat space
 
   -- Accumulator array for each thread to use
-  accs <- groupResultArrays (Var nsubtasks) scan_ops
+  accs <- groupResultArrays "scan_stage_1_accum_arr" (Var nsubtasks) scan_ops
   prebody <- collect $
     forM_ (zip scan_ops accs) $ \(scan_op, acc) ->
       sLoopNest (segBinOpShape scan_op) $ \vec_is ->
@@ -142,7 +142,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
   let iter_pr_subtask = product ns' `quot` nsubtasks'
       remainder       = product ns' `rem` nsubtasks'
 
-  accs <- resultArrays scan_ops
+  accs <- resultArrays "scan_stage_2_accum" scan_ops
   forM_ (zip scan_ops accs) $ \(scan_op, acc) ->
     sLoopNest (segBinOpShape scan_op) $ \vec_is ->
     forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
@@ -194,7 +194,7 @@ scanStage3 pat nsubtasks space scan_ops kbody = do
   ns' <- mapM toExp ns
   tid' <- toExp $ Var $ segFlat space
 
-  accs <- groupResultArrays (Var nsubtasks) scan_ops
+  accs <- groupResultArrays "scan_stage_3_accum_arr" (Var nsubtasks) scan_ops
   prebody <- collect $ do
     -- Read carry in or neutral element
     let read_carry_in = forM_ (zip3 scan_ops accs per_scan_pes) $ \(scan_op, acc, pes) ->
