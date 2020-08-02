@@ -29,6 +29,7 @@ static long int ran_iter, start_iter = 0;
 #endif
 
 static int scheduler_error = 0;
+static volatile int stealing;
 
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
 
@@ -37,6 +38,7 @@ enum scheduling {
   DYNAMIC,
   STATIC
 };
+
 /* A subtask that can be executed by a thread */
 struct subtask {
   sub_task_fn fn;
@@ -52,7 +54,7 @@ struct subtask {
   int been_stolen;
 
   // Shared variables across subtasks
-  int *counter; // Counter for ongoing subtasks
+  volatile int *counter; // Counter for ongoing subtasks
   pthread_mutex_t *mutex;
   pthread_cond_t *cond;
 };
@@ -78,6 +80,13 @@ struct scheduler_subtask {
   long int iterations;
   int granularity;
   struct scheduler_info info;
+};
+
+struct deque {
+  int64_t size;
+  struct subtask **buffer;
+  int64_t top, bottom;
+  volatile int dead;
 };
 
 typedef int (*task_fn)(void* args, int iterations, int tid, struct scheduler_info info);
@@ -118,9 +127,10 @@ struct subtask_queue {
 
 struct worker {
   pthread_t thread;
-  struct subtask_queue q;
+  struct deque q;
   struct scheduler *scheduler;
   int cur_working;
+  int dead;
 
   int tid;                     /* Just a thread id */
   uint64_t time_spent_working; /* Time spent in tasks functions */
@@ -179,23 +189,24 @@ static const int num_processors()
 
 
 
+
 static inline void output_thread_usage(struct worker *worker)
 {
   struct rusage usage;
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
   struct timeval user_cpu_time = usage.ru_utime;
   struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %2d - work time %llu - user time: %llu us - sys: %10llu us - dequeue: (%8llu/%8llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
+  fprintf(stderr, "tid: %2d - work time %llu - user time: %llu us - sys: %10llu us\n",// - dequeue: (%8llu/%8llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
           worker->tid,
           worker->time_spent_working,
           (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
-          (uint64_t)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec),
-          worker->q.time_dequeue,
-          worker->q.n_dequeues,
-          worker->q.time_dequeue / (worker->q.n_dequeues == 0 ? 1 : worker->q.n_dequeues),
-          worker->q.time_enqueue,
-          worker->q.n_dequeues,
-          worker->q.time_enqueue / (worker->q.n_enqueues == 0 ? 1 : worker->q.n_enqueues));
+          (uint64_t)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec));
+          /* worker->q.time_dequeue, */
+          /* worker->q.n_dequeues, */
+          /* worker->q.time_dequeue / (worker->q.n_dequeues == 0 ? 1 : worker->q.n_dequeues), */
+          /* worker->q.time_enqueue, */
+          /* worker->q.n_dequeues, */
+          /* worker->q.time_enqueue / (worker->q.n_enqueues == 0 ? 1 : worker->q.n_enqueues)); */
 }
 
 

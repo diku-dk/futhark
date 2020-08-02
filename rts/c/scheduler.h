@@ -279,7 +279,10 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
     assert(!"Got unknown scheduling");
   }
 
-  return task->seq_fn(task->args, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid, info);
+  stealing = 1;
+  int err = task->seq_fn(task->args, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid, info);
+  stealing = 0;
+  return err;
 }
 
 
