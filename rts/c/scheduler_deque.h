@@ -232,11 +232,19 @@ static inline int scheduler_execute(struct scheduler *scheduler,
   }
 
   if (task->info.nsubtasks == 1) {
-    return task->fn(task->args, 0, task->iterations, 0);
+    int64_t start = get_wall_time();
+    int err = task->fn(task->args, 0, task->iterations, 0);
+    int64_t end = get_wall_time();
+    worker_local->time_spent_working += end - start;
+    return err;
   }
 
 
-  return scheduler_parallel(scheduler, task);
+  free_workers -= task->info.nsubtasks;
+  int err =  scheduler_parallel(scheduler, task);
+  free_workers += task->info.nsubtasks;
+
+  return err;
 }
 
 /* Decide whether to run sequential  or (potentially nested) parallel code body */
@@ -279,9 +287,7 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
     assert(!"Got unknown scheduling");
   }
 
-  free_workers -= info.nsubtasks;
   int err = task->seq_fn(task->args, task->iterations, worker_local->tid, info);
-  free_workers += info.nsubtasks;
   return err;
 }
 
