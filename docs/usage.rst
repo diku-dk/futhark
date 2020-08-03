@@ -107,8 +107,14 @@ Parallel Options
 ~~~~~~~~~~~~~~~~
 
 The following options are supported by executables generated with the
-parallel backends (``opencl``, ``pyopencl``, ``csopencl``, and
+GPU backends (``opencl``, ``pyopencl``, ``csopencl``, and
 ``cuda``).
+
+  ``-d DEVICE``
+
+    Pick the first device whose name contains the given string.  The
+    special string ``#k``, where ``k`` is an integer, can be used to
+    pick the *k*-th device, numbered from zero.
 
   ``--tuning=FILE``
 
@@ -149,7 +155,9 @@ OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
 
     Pick the first OpenCL platform whose name contains the given
     string.  The special string ``#k``, where ``k`` is an integer, can
-    be used to pick the *k*-th platform, numbered from zero.
+    be used to pick the *k*-th platform, numbered from zero.  If used
+    in conjunction with ``-d``, only the devices from matching
+    platforms are considered.
 
   ``-d DEVICE``
 

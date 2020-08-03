@@ -376,7 +376,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
         -- which is then offset by a thread-specific amount.
         newBase size_per_thread (old_shape, pt) =
           let pt_size = fromInt32 $ primByteSize pt
-              elems_per_thread = ConvOpExp (SExt Int64 Int32)
+              elems_per_thread = sExt Int32
                                  (primExpFromSubExp int64 size_per_thread)
                                  `quot` pt_size
               root_ixfun = IxFun.iota [elems_per_thread, num_threads']

@@ -271,12 +271,11 @@ indexExp :: (IndexOp (Op lore), ASTLore lore) =>
 indexExp vtable (Op op) k is =
   indexOp vtable k op is
 
-indexExp _ (BasicOp (Iota _ x s to_it)) _ [i]
-  | IntType from_it <- primExpType i =
-      Just $ Indexed mempty $
-       ConvOpExp (SExt from_it to_it) i
-       * primExpFromSubExp (IntType to_it) s
-       + primExpFromSubExp (IntType to_it) x
+indexExp _ (BasicOp (Iota _ x s to_it)) _ [i] =
+  Just $ Indexed mempty $
+  sExt to_it i
+  * primExpFromSubExp (IntType to_it) s
+  + primExpFromSubExp (IntType to_it) x
 
 indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,

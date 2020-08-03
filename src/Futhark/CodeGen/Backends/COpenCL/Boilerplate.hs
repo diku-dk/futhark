@@ -17,6 +17,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Control.Monad.State
 import Data.FileEmbed
 import qualified Data.Map as M
+import Data.Maybe
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
@@ -113,8 +114,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
   let size_value_inits = zipWith sizeInit [0..M.size sizes-1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
-         where val = case size of SizeBespoke _ x -> x
-                                  _               -> 0
+         where val = fromMaybe 0 $ sizeDefault size
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
@@ -602,7 +602,12 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
 -- Options that are common to multiple GPU-like backends.
 commonOptions :: [Option]
 commonOptions =
-   [ Option { optionLongName = "default-group-size"
+   [ Option { optionLongName = "device"
+            , optionShortName = Just 'd'
+            , optionArgument = RequiredArgument "NAME"
+            , optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
+            }
+   , Option { optionLongName = "default-group-size"
             , optionShortName = Nothing
             , optionArgument = RequiredArgument "INT"
             , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]

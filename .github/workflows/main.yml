@@ -306,6 +306,15 @@ jobs:
     - run: |
         cd pkgtests && sh test.sh
 
+    - run: |
+        futhark doc -o prelude-docs prelude
+        tar -Jcf prelude-docs.tar.xz prelude-docs
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: prelude-docs.tar.xz
+        path: prelude-docs.tar.xz
+
   benchmark-opencl:
     runs-on: ubuntu-latest
     needs: [build-linux-nix]
@@ -335,7 +344,7 @@ jobs:
 
   deploy-nightly:
     runs-on: ubuntu-latest
-    needs: [build-windows, build-linux-nix]
+    needs: [build-windows, build-linux-nix, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
@@ -353,5 +362,14 @@ jobs:
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
-    - name: scp to server
+    - uses: actions/download-artifact@v2
+      with:
+        name: prelude-docs.tar.xz
+
+    - name: scp tarballs to server
       run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+
+    - name: copy docs to server
+      run: |
+        tar -xf prelude-docs.tar.xz
+        rsync -rv -e 'ssh -o "StrictHostKeyChecking no"' prelude-docs/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/docs/prelude/

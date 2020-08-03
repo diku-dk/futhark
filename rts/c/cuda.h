@@ -27,6 +27,7 @@ struct cuda_config {
   int debugging;
   int logging;
   const char *preferred_device;
+  int preferred_device_num;
 
   const char *dump_program_to;
   const char *load_program_from;
@@ -58,8 +59,8 @@ static void cuda_config_init(struct cuda_config *cfg,
                              const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
+  cfg->preferred_device_num = 0;
   cfg->preferred_device = "";
-
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
 
@@ -129,7 +130,19 @@ static int _function_query(CUfunction dev, CUfunction_attribute attrib) {
 }
 
 static void set_preferred_device(struct cuda_config *cfg, const char *s) {
+  int x = 0;
+  if (*s == '#') {
+    s++;
+    while (isdigit(*s)) {
+      x = x * 10 + (*s++)-'0';
+    }
+    // Skip trailing spaces.
+    while (isspace(*s)) {
+      s++;
+    }
+  }
   cfg->preferred_device = s;
+  cfg->preferred_device_num = x;
 }
 
 static int cuda_device_setup(struct cuda_context *ctx) {
@@ -141,6 +154,8 @@ static int cuda_device_setup(struct cuda_context *ctx) {
 
   CUDA_SUCCEED(cuDeviceGetCount(&count));
   if (count == 0) { return 1; }
+
+  int num_device_matches = 0;
 
   // XXX: Current device selection policy is to choose the device with the
   // highest compute capability (if no preferred device is set).
@@ -174,8 +189,10 @@ static int cuda_device_setup(struct cuda_context *ctx) {
       cc_minor_best = cc_minor;
     }
 
-    if (chosen == -1 && strstr(name, ctx->cfg.preferred_device) == name) {
+    if (strstr(name, ctx->cfg.preferred_device) != NULL &&
+        num_device_matches++ == ctx->cfg.preferred_device_num) {
       chosen = i;
+      break;
     }
   }
 
@@ -372,7 +389,7 @@ static void cuda_size_setup(struct cuda_context *ctx)
 
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     const char *size_class, *size_name;
-    size_t *size_value, max_value, default_value;
+    size_t *size_value, max_value = 0, default_value = 0;
 
     size_class = ctx->cfg.size_classes[i];
     size_value = &ctx->cfg.size_values[i];
@@ -394,11 +411,10 @@ static void cuda_size_setup(struct cuda_context *ctx)
       max_value = ctx->max_tile_size;
       default_value = ctx->cfg.default_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
-      max_value = ctx->max_threshold;
+      // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
-      max_value = 0;
     }
 
     if (*size_value == 0) {

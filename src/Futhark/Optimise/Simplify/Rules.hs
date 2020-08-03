@@ -58,7 +58,7 @@ bottomUpRules = [ RuleDoLoop removeRedundantMergeVariables
 asInt32PrimExp :: PrimExp v -> PrimExp v
 asInt32PrimExp pe
   | IntType it <- primExpType pe, it /= Int32 =
-      ConvOpExp (SExt it Int32) pe
+      sExt Int32 pe
   | otherwise =
       pe
 
@@ -646,7 +646,7 @@ simplifyIndexing vtable seType idd inds consuming =
         Just (Prim (IntType from_it)) <- seType ii ->
           Just $
           fmap (SubExpResult cs) $ toSubExp "index_iota" $
-          ConvOpExp (SExt from_it to_it) (primExpFromSubExp (IntType from_it) ii)
+          sExt to_it (primExpFromSubExp (IntType from_it) ii)
           * primExpFromSubExp (IntType to_it) s
           + primExpFromSubExp (IntType to_it) x
       | [DimSlice i_offset i_n i_stride] <- inds ->

@@ -15,8 +15,35 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fixed compiler crash on certain patterns of nested parallelism
+    (#1068, #1069).
+
+## [0.16.3]
+
+### Added
+
+  * `random` input blocks for `futhark test` and `futhark bench` now
+    support floating-point literals, which must always have either an
+    `f32` or `f64` suffix.
+
+  * The `cuda` backend now supports the `-d` option for executables.
+
+  * The integer modules now contain a `ctz` function for counting
+    trailing zeroes.
+
+### Fixed
+
   * The `pyopencl` backend now works with OpenCL devices that have
     multiple types (most importantly, oclgrind).
+
+  * Fix barrier divergence when generating code for group-level
+    colletive copies in GPU backend.
+
+  * Intra-group flattening now looks properly inside of branches.
+
+  * Intra-group flattened code versions are no longer used when the
+    resulting workgroups would have less than 32 threads (with default
+    thresholds anyway) (#1064).
 
 ## [0.16.2]
 
