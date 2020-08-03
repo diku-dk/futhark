@@ -76,7 +76,6 @@ void acquire (struct worker *worker)
       // Split subtask into two (if dynamic)
       if (subtask->chunkable) {
         subtask->iterations = 1;
-        subtask->id = worker->tid;
       }
       struct subtask* subtask_new = split(worker, subtask);
       subtask_new->been_stolen = 1;
@@ -101,8 +100,7 @@ static inline void *scheduler_worker(void* arg)
       struct subtask* subtask_new = split(worker, subtask);
 
       int64_t start = get_wall_time();
-      /* fprintf(stderr, "number of time stolen %d\n", subtask->been_stolen); */
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
+      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->chunkable ? worker->tid : subtask->id);
       int64_t end = get_wall_time();
       worker->time_spent_working += end - start;
       /* Only one error can be returned at the time now
@@ -149,12 +147,8 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
 
   volatile int shared_counter = nsubtasks;
 
-  /* Each subtasks is processed in chunks */
-  int chunkable = 0;
-  if (sched == DYNAMIC)
-  {
-    chunkable = 1;
-  }
+  /* Each subtasks can be processed in chunks */
+  int chunkable = sched == STATIC ? 0 : 1;
 
   int start = 0;
   int subtask_id = 0;
@@ -184,7 +178,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
         struct subtask* subtask_new  = split(worker, subtask);
         int64_t start = get_wall_time();
         /* fprintf(stderr, "number of time stolen %d\n", subtask->been_stolen); */
-        int err = subtask_new->fn(subtask_new->args, subtask_new->start, subtask_new->end, subtask_new->id);
+        int err = subtask_new->fn(subtask_new->args, subtask_new->start, subtask_new->end, subtask->chunkable ? worker->tid : subtask_new->id);
         int64_t end = get_wall_time();
         worker->time_spent_working += end - start;
         if (err != 0) {
