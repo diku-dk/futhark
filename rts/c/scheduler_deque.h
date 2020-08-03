@@ -40,6 +40,7 @@ static inline struct subtask* split(struct worker* worker, struct subtask *subta
   int remaining_iter = subtask->end - subtask->start;
   if (subtask->chunkable && remaining_iter > subtask->iterations)
   {
+    subtask->id = worker->tid;
     struct subtask *new_subtask = malloc(sizeof(struct subtask));
     *new_subtask = *subtask;
     __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
