@@ -5,8 +5,10 @@ module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
     internaliseReturnType
+  , internaliseType
   , internaliseEntryReturnType
   , internaliseParamTypes
+  , internalisePatternTypes
   , internalisePrimType
   , internalisedTypeSize
   , internaliseSumType
@@ -19,6 +21,7 @@ module Futhark.Internalise.TypesValues
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (delete, find, foldl')
+import Data.Maybe
 import qualified Data.Map.Strict as M
 
 import qualified Language.Futhark as E
@@ -44,8 +47,15 @@ runInternaliseTypeM (InternaliseTypeM m) =
   evalStateT m 0
 
 internaliseParamTypes :: [E.TypeBase (E.DimDecl VName) ()]
-                      -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
+                      -> InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
+  runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM) ts
+  where onType = fromMaybe bad . hasStaticShape
+        bad = error $ "internaliseParamTypes: " ++ pretty ts
+
+internalisePatternTypes :: [E.TypeBase (E.DimDecl VName) ()]
+                        -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
+internalisePatternTypes ts =
   runInternaliseTypeM $ mapM internaliseTypeM ts
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
