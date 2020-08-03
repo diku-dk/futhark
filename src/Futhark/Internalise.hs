@@ -73,23 +73,25 @@ internaliseFunName ofname _  = do
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $ bindingParams tparams params $ \shapeparams params' -> do
-    rettype_bad <- internaliseReturnType rettype
-    let rettype' = zeroExts rettype_bad
-
     let shapenames = map I.paramName shapeparams
         normal_params = shapenames ++ map I.paramName (concat params')
         normal_param_names = namesFromList normal_params
 
     fname' <- internaliseFunName fname params
 
-    body' <- do
-      msg <- case retdecl of
-               Just dt -> errorMsg .
-                          ("Function return value does not match shape of type ":) <$>
-                          typeExpForError dt
-               Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
-      internaliseBody body >>=
-        ensureResultExtShape msg loc (map I.fromDecl rettype')
+    msg <- case retdecl of
+             Just dt -> errorMsg .
+                        ("Function return value does not match shape of type ":) <$>
+                        typeExpForError dt
+             Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
+
+    ((rettype', body_res), body_stms) <- collectStms $ do
+      body_res <- internaliseExp "res" body
+      rettype_bad <- internaliseReturnType rettype
+      let rettype' = zeroExts rettype_bad
+      return (rettype', body_res)
+    body' <- ensureResultExtShape msg loc (map I.fromDecl rettype') $
+             mkBody body_stms body_res
 
     constants <- allConsts
     let free_in_fun = freeIn body'
@@ -328,8 +330,8 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
 
   | otherwise = do
-      arr_t_ext <- internaliseReturnType $ E.toStruct arr_t
       es' <- mapM (internaliseExp "arr_elem") es
+      arr_t_ext <- internaliseReturnType (E.toStruct arr_t)
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -554,11 +556,9 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
   addStms initstms
   mergeinit_ts' <- mapM subExpType mergeinit'
 
-  let ctxinit = argShapes
-                (map I.paramName shapepat)
-                (map I.paramType mergepat')
-                mergeinit_ts'
-      ctxmerge = zip shapepat ctxinit
+  ctxinit <- argShapes (map I.paramName shapepat) mergepat' mergeinit_ts'
+
+  let ctxmerge = zip shapepat ctxinit
       valmerge = zip mergepat' mergeinit'
       dropCond = case form of E.While{} -> drop 1
                               _         -> id
@@ -587,15 +587,11 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
-    forLoop nested_mergepat shapepat mergeinit form' = do
-      let mergepat' = concat nested_mergepat
+    forLoop mergepat' shapepat mergeinit form' =
       bodyFromStms $ inScopeOf form' $ do
         ses <- internaliseExp "loopres" loopbody
         sets <- mapM subExpType ses
-        let shapeargs = argShapes
-                        (map I.paramName shapepat)
-                        (map I.paramType mergepat')
-                        sets
+        shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
         return (shapeargs ++ ses,
                 (form',
                  shapepat,
@@ -609,11 +605,11 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
 
       i <- newVName "i"
 
-      bindingParams sparams' [mergepat] $
-        \shapepat nested_mergepat ->
+      bindingLoopParams sparams' mergepat $
+        \shapepat mergepat' ->
         bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
           let loopvars = zip x_params arr'
-          forLoop nested_mergepat shapepat mergeinit $
+          forLoop mergepat' shapepat mergeinit $
             I.ForLoop i Int32 w loopvars
 
     handleForm mergeinit (E.For i num_iterations) = do
@@ -624,30 +620,26 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
               I.Prim (IntType it) -> return it
               _                   -> error "internaliseExp DoLoop: invalid type"
 
-      bindingParams sparams' [mergepat] $
-        \shapepat nested_mergepat ->
-          forLoop nested_mergepat shapepat mergeinit $
+      bindingLoopParams sparams' mergepat $
+        \shapepat mergepat' ->
+          forLoop mergepat' shapepat mergeinit $
           I.ForLoop i' it num_iterations' []
 
     handleForm mergeinit (E.While cond) =
-      bindingParams sparams' [mergepat] $ \shapepat nested_mergepat -> do
+      bindingLoopParams sparams' mergepat $ \shapepat mergepat' -> do
         mergeinit_ts <- mapM subExpType mergeinit
-        let mergepat' = concat nested_mergepat
         -- We need to insert 'cond' twice - once for the initial
         -- condition (do we enter the loop at all?), and once with the
         -- result values of the loop (do we continue into the next
         -- iteration?).  This is safe, as the type rules for the
         -- external language guarantees that 'cond' does not consume
         -- anything.
-        let shapeinit = argShapes
-                        (map I.paramName shapepat)
-                        (map I.paramType mergepat')
-                        mergeinit_ts
+        shapeinit <- argShapes (map I.paramName shapepat) mergepat' mergeinit_ts
 
         (loop_initial_cond, init_loop_cond_bnds) <- collectStms $ do
           forM_ (zip shapepat shapeinit) $ \(p, se) ->
             letBindNames [paramName p] $ BasicOp $ SubExp se
-          forM_ (zip (concat nested_mergepat) mergeinit) $ \(p, se) ->
+          forM_ (zip mergepat' mergeinit) $ \(p, se) ->
             unless (se == I.Var (paramName p)) $
             letBindNames [paramName p] $ BasicOp $
             case se of I.Var v | not $ primType $ paramType p ->
@@ -661,17 +653,14 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
           ses <- internaliseExp "loopres" loopbody
           sets <- mapM subExpType ses
           loop_while <- newParam "loop_while" $ I.Prim I.Bool
-          let shapeargs = argShapes
-                          (map I.paramName shapepat)
-                          (map I.paramType mergepat')
-                          sets
+          shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
 
           -- Careful not to clobber anything.
           loop_end_cond_body <- renameBody <=< insertStmsM $ do
             forM_ (zip shapepat shapeargs) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
               letBindNames [paramName p] $ BasicOp $ SubExp se
-            forM_ (zip (concat nested_mergepat) ses) $ \(p, se) ->
+            forM_ (zip mergepat' ses) $ \(p, se) ->
               unless (se == I.Var (paramName p)) $
               letBindNames [paramName p] $ BasicOp $
               case se of I.Var v | not $ primType $ paramType p ->
@@ -872,7 +861,7 @@ generateCond orig_p orig_ses = do
     -- Literals are always primitive values.
     compares (E.PatternLit e _ _) (se:ses) = do
       e' <- internaliseExp1 "constant" e
-      t' <- I.elemType <$> subExpType se
+      t' <- elemType <$> subExpType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
 
@@ -1389,9 +1378,9 @@ internaliseLambda (E.Parens e _) rowtypes =
 
 internaliseLambda (E.Lambda params body _ (Info (_, rettype)) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
-    rettype' <- internaliseReturnType rettype
     body' <- internaliseBody body
-    return (params', body', map I.fromDecl rettype')
+    rettype' <- internaliseLambdaReturnType rettype
+    return (params', body', rettype')
 
 internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
 
@@ -1625,6 +1614,7 @@ isOverloadedFunction qname args loc = do
            <*> internaliseExp (desc ++ "_zip_y") y
 
     handleRest [x] "unzip" = Just $ flip internaliseExp x
+
     handleRest [x] "trace" = Just $ flip internaliseExp x
     handleRest [x] "break" = Just $ flip internaliseExp x
 
@@ -1727,8 +1717,9 @@ funcall desc (QualName _ fname) args loc = do
     lookupFunction fname
   argts <- mapM subExpType args
   closure_ts <- mapM lookupType closure
-  let shapeargs = argShapes shapes value_paramts argts
-      diets = replicate (length closure + length shapeargs) I.ObservePrim ++
+
+  shapeargs <- argShapes shapes fun_params argts
+  let diets = replicate (length closure + length shapeargs) I.ObservePrim ++
               map I.diet value_paramts
       constOrShape = const $ I.Prim int32
       paramts = closure_ts ++

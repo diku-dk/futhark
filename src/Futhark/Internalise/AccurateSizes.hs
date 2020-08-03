@@ -10,21 +10,42 @@ module Futhark.Internalise.AccurateSizes
   where
 
 import Control.Monad
+import Data.List
+import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Futhark.Construct
 import Futhark.Internalise.Monad
 import Futhark.IR.SOACS
+import Futhark.Util (takeLast)
 
-argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
-argShapes shapes valts valargts =
-  map addShape shapes
-  where mapping = shapeMapping valts valargts
-        addShape name =
-          case M.lookup name mapping of
-            Just s | se:_ <- S.toList s -> se
-            _ -> intConst Int32 0
+shapeMapping :: (HasScope SOACS m, Monad m) =>
+                [FParam] -> [Type]
+             -> m (M.Map VName (S.Set SubExp))
+shapeMapping all_params value_arg_types =
+  mconcat <$> zipWithM f value_params value_arg_types
+  where value_params = takeLast (length value_arg_types) all_params
+
+        findArrParam arr = find ((==arr) . paramName) all_params
+
+        f (Param _ t1@Array{}) t2@Array{} =
+          pure $ M.fromList $ mapMaybe match $ zip (arrayDims t1) (arrayDims t2)
+        f _ _ =
+          pure mempty
+
+        match (Var v, se) = Just (v, S.singleton se)
+        match _ = Nothing
+
+argShapes :: (HasScope SOACS m, Monad m) =>
+             [VName] -> [FParam] -> [Type] -> m [SubExp]
+argShapes shapes all_params valargts = do
+  mapping <- shapeMapping all_params valargts
+  let addShape name =
+        case M.lookup name mapping of
+          Just s | se:_ <- S.toList s -> se
+          _ -> error $ "argShapes: no mapping for " ++ pretty name
+  return $ map addShape shapes
 
 ensureResultShape :: ErrorMsg SubExp -> SrcLoc -> [Type] -> Body
                   -> InternaliseM Body

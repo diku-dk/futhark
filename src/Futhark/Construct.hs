@@ -328,7 +328,7 @@ eWriteArray arr is v = do
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBinder m => Type -> m (Exp (Lore m))
 eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
-eBlank (Array pt shape _) = return $ BasicOp $ Scratch pt $ shapeDims shape
+eBlank (Array t shape _) = return $ BasicOp $ Scratch t $ shapeDims shape
 eBlank Mem{} = error "eBlank: cannot create blank memory"
 
 -- | Sign-extend to the given integer type.
