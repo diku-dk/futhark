@@ -12,7 +12,7 @@ static struct subtask* const STEAL_RES_DEAD  = (struct subtask*) 2;
 
 static const int mem_model = __ATOMIC_SEQ_CST;
 static const int strong = 0;
-static const int backoff_nb_cycles = 1l << 17;
+static const int backoff_nb_cycles = 1l << 10;
 
 
 
@@ -148,6 +148,7 @@ static inline struct subtask* steal(struct deque *q)
   if (t >= b) {
     return STEAL_RES_EMPTY;
   }
+
   struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, __ATOMIC_RELAXED), t);
 
   if (!cas_top(q, t, t + 1)) {
@@ -190,8 +191,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->start   = start;
   subtask->end     = end;
   subtask->chunkable   = chunk;
-  // This should start at the value of minimum work pr. subtask
-  subtask->iterations = chunk;
+  subtask->iterations = 1;
   subtask->id      = id;
   subtask->been_stolen = 0;
   return subtask;

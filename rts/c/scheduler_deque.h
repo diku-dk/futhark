@@ -29,6 +29,29 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
   return i;
 }
 
+static inline struct subtask* steal_from(struct scheduler* scheduler, int victim )
+{
+    struct deque *deque_k = &scheduler->workers[victim].q;
+    return steal(deque_k);
+}
+
+static inline struct subtask* split(struct worker* worker, struct subtask *subtask)
+{
+  int remaining_iter = subtask->end - subtask->start;
+  if (subtask->chunkable && remaining_iter > subtask->iterations)
+  {
+    struct subtask *new_subtask = malloc(sizeof(struct subtask));
+    *new_subtask = *subtask;
+    __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
+    subtask->end = subtask->start + subtask->iterations;
+    new_subtask->start = subtask->end;
+    new_subtask->iterations *= 2;
+    push_back(&worker->q, new_subtask);
+  }
+  return subtask;
+}
+
+
 void acquire (struct worker *worker)
 {
   assert(num_workers >= 2);
@@ -40,7 +63,6 @@ void acquire (struct worker *worker)
     if (scheduler->workers[k].dead) {
       continue;
     }
-
     struct deque *deque_k = &scheduler->workers[k].q;
     struct subtask* subtask = steal(deque_k);
     if (subtask == STEAL_RES_EMPTY) {
@@ -51,7 +73,11 @@ void acquire (struct worker *worker)
       fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
     } else {
       assert(subtask != NULL);
-      push_back(&worker->q, subtask);
+      // Split subtask into two (if dynamic)
+      subtask->iterations = 1;
+      struct subtask* subtask_new = split(worker, subtask);
+      subtask_new->been_stolen = 1;
+      push_back(&worker->q, subtask_new);
       return;
     }
   }
@@ -69,14 +95,20 @@ static inline void *scheduler_worker(void* arg)
         continue;
       }
 
+      struct subtask* subtask_new = split(worker, subtask);
+
+      int64_t start = get_wall_time();
+      /* fprintf(stderr, "number of time stolen %d\n", subtask->been_stolen); */
       int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
+      int64_t end = get_wall_time();
+      worker->time_spent_working += end - start;
       /* Only one error can be returned at the time now
          Maybe we can provide a stack like structure for pushing errors onto
          if we wish to backpropagte multiple errors */
       if (err != 0) {
         scheduler_error = err;
       }
-      __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_SEQ_CST);
+      __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
       free(subtask);
     } else if (__atomic_load_n(&num_workers, __ATOMIC_RELAXED) == 1) {
       break;
@@ -88,6 +120,7 @@ static inline void *scheduler_worker(void* arg)
   worker->dead = 1;
   assert(empty(&worker->q));
   __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
+  output_thread_usage(worker);
   return NULL;
 }
 
@@ -136,18 +169,49 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   }
 
   while(shared_counter != 0) {
-    struct subtask * subtask = pop_back(&worker->q);
-    if (subtask != NULL) {
-      // Do work
-      assert(subtask->fn != NULL);
-      assert(subtask->args != NULL);
+    if (!empty(&worker->q)) {
+      struct subtask * subtask = pop_back(&worker->q);
+      if (subtask != NULL) {
+        // Do work
+        assert(subtask->fn != NULL);
+        assert(subtask->args != NULL);
 
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
-      if (err != 0) {
-        return err;
+        struct subtask* subtask_new  = split(worker, subtask);
+        int64_t start = get_wall_time();
+        /* fprintf(stderr, "number of time stolen %d\n", subtask->been_stolen); */
+        int err = subtask_new->fn(subtask_new->args, subtask_new->start, subtask_new->end, subtask_new->id);
+        int64_t end = get_wall_time();
+        worker->time_spent_working += end - start;
+        if (err != 0) {
+          return err;
+        }
+        __atomic_fetch_sub(subtask_new->counter, 1, __ATOMIC_RELAXED);
+        free(subtask_new);
       }
-      __atomic_fetch_sub(&shared_counter, 1, __ATOMIC_RELAXED);
-      free(subtask);
+    } else {
+      struct scheduler* scheduler = worker->scheduler;
+      int my_id = worker->tid;
+      while (shared_counter != 0 && empty(&worker->q)) {
+        int k = random_other_worker(scheduler, my_id);
+        if (scheduler->workers[k].dead) {
+          continue;
+        }
+        struct deque *deque_k = &scheduler->workers[k].q;
+        struct subtask* subtask = steal(deque_k);
+        if (subtask == STEAL_RES_EMPTY) {
+          // TODO: log
+        } else if (subtask == STEAL_RES_ABORT) {
+          // TODO: log
+        } else if (subtask == STEAL_RES_DEAD){
+          fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
+        } else {
+          assert(subtask != NULL);
+          // Split subtask into two (if dynamic)
+          struct subtask* subtask_new = split(worker, subtask);
+          subtask_new->been_stolen = 1;
+          push_back(&worker->q, subtask_new);
+        }
+      }
     }
   }
   return scheduler_error;
