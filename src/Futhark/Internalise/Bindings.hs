@@ -6,7 +6,6 @@ module Futhark.Internalise.Bindings
     bindingParams
   , bindingLambdaParams
   , stmPattern
-  , MatchPattern
   )
   where
 
@@ -14,14 +13,12 @@ import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Language.Futhark as E hiding (matchDims)
 import qualified Futhark.IR.SOACS as I
 import Futhark.MonadFreshNames
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
-import Futhark.Internalise.AccurateSizes
 import Futhark.Util
 
 bindingParams :: [E.TypeParam] -> [E.Pattern]
@@ -75,21 +72,19 @@ processFlatPattern x y = processFlatPattern' [] x y
             (pss, repss, ts'') = handleMapping ts' rs
         in (ps++pss, reps:repss, ts'')
 
-    handleMapping' (t:ts) (vname,_) =
+    handleMapping' (t:ts) vname =
       let v' = I.Param vname t
       in ([v'], v', ts)
     handleMapping' [] _ =
       error $ "processFlatPattern: insufficient identifiers in pattern." ++ show (x, y)
 
-    internaliseBindee :: E.Ident -> InternaliseM [(VName, I.DeclExtType)]
+    internaliseBindee :: E.Ident -> InternaliseM [VName]
     internaliseBindee bindee = do
       let name = E.identName bindee
-      tss <- internaliseType $ flip E.setAliases () $ E.unInfo $ E.identType bindee
-      case tss of
-        [t] -> return [(name, t)]
-        tss' -> forM tss' $ \t -> do
-          name' <- newVName $ baseString name
-          return (name', t)
+      n <- internalisedTypeSize $ flip E.setAliases () $ E.unInfo $ E.identType bindee
+      case n of
+        1 -> return [name]
+        _ -> replicateM n $ newVName $ baseString name
 
 bindingFlatPattern :: Show t => [E.Ident] -> [t]
                    -> ([[I.Param t]] -> InternaliseM a)
@@ -127,37 +122,14 @@ flattenPattern = flattenPattern'
         flattenPattern' (E.PatternConstr _ _ ps _) =
           concat <$> mapM flattenPattern' ps
 
-type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
-
-stmPattern :: E.Pattern -> [I.ExtType]
-           -> ([VName] -> MatchPattern -> InternaliseM a)
+stmPattern :: E.Pattern -> [I.Type]
+           -> ([VName] -> InternaliseM a)
            -> InternaliseM a
 stmPattern pat ts m = do
-  (pat', pat_types) <- unzip <$> flattenPattern pat
-  (ts',_) <- instantiateShapes' ts
-  pat_types' <- internalisePatternTypes pat_types
-  let pat_types'' = map I.fromDecl $ concat pat_types'
-      addShapeStms l =
-        m (map I.paramName $ concat l) (matchPattern pat_types'')
-  bindingFlatPattern pat' ts' addShapeStms
-
-matchPattern :: [I.ExtType] -> MatchPattern
-matchPattern exts loc ses =
-  forM (zip exts ses) $ \(et, se) -> do
-  se_t <- I.subExpType se
-  et' <- unExistentialise mempty et se_t
-  ensureExtShape (I.ErrorMsg [I.ErrorString "value cannot match pattern"])
-    loc et' "correct_shape" se
-
-unExistentialise :: S.Set VName -> I.ExtType -> I.Type -> InternaliseM I.ExtType
-unExistentialise tparam_names et t = do
-  new_dims <- zipWithM inspectDim (I.shapeDims $ I.arrayShape et) (I.arrayDims t)
-  return $ t `I.setArrayShape` I.Shape new_dims
-  where inspectDim (I.Free (I.Var v)) d
-          | v `S.member` tparam_names = do
-              letBindNames [v] $ I.BasicOp $ I.SubExp d
-              return $ I.Free $ I.Var v
-        inspectDim ed _ = return ed
+  pat' <- map fst <$> flattenPattern pat
+  let addShapeStms l =
+        m (map I.paramName $ concat l)
+  bindingFlatPattern pat' ts addShapeStms
 
 lambdaShapeSubstitutions :: [I.DeclType]
                          -> [I.Type]
