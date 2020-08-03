@@ -375,8 +375,8 @@ binOpLambda bop t = binLambda (BinOp bop) t t
 
 -- | As 'binOpLambda', but for t'CmpOp's.
 cmpOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
-               CmpOp -> PrimType -> m (Lambda (Lore m))
-cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
+               CmpOp -> m (Lambda (Lore m))
+cmpOpLambda cop = binLambda (CmpOp cop) (cmpOpType cop) Bool
 
 binLambda :: (MonadBinder m, Bindable (Lore m)) =>
              (SubExp -> SubExp -> BasicOp) -> PrimType -> PrimType

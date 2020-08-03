@@ -1482,7 +1482,7 @@ isOverloadedFunction qname args loc = do
                       y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
                       -- Compare the elements.
-                      cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
+                      cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
                       cmps <- letExp "cmps" $ I.Op $
                               I.Screma x_num_elems (I.mapSOAC cmp_lam) [x_flat, y_flat]
 
