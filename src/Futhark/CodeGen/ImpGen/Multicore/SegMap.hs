@@ -62,8 +62,7 @@ compileSegMap pat space kbody =
     free_params <- freeParams body [segFlat space, flat_par_idx]
     let (body_allocs, body') = extractAllocations body
         sched = decideScheduling body'
-    emit $ Imp.Op $ Imp.MCFunc "segmap" flat_par_idx body_allocs body' free_params $
-      Imp.MulticoreInfo sched (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc "segmap" flat_par_idx body_allocs body' free_params $ segFlat space
 
 compileSequentialSegMap :: Pattern MCMem
                         -> SegSpace

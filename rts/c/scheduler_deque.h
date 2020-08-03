@@ -40,7 +40,6 @@ static inline struct subtask* split(struct worker* worker, struct subtask *subta
   int remaining_iter = subtask->end - subtask->start;
   if (subtask->chunkable && remaining_iter > subtask->iterations)
   {
-    subtask->id = worker->tid;
     struct subtask *new_subtask = malloc(sizeof(struct subtask));
     *new_subtask = *subtask;
     __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
@@ -75,7 +74,10 @@ void acquire (struct worker *worker)
     } else {
       assert(subtask != NULL);
       // Split subtask into two (if dynamic)
-      subtask->iterations = 1;
+      if (subtask->chunkable) {
+        subtask->iterations = 1;
+        subtask->id = worker->tid;
+      }
       struct subtask* subtask_new = split(worker, subtask);
       subtask_new->been_stolen = 1;
       push_back(&worker->q, subtask_new);
@@ -130,7 +132,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
                                      struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_parallel] Performing scheduling with granularity %d\n", task->granularity);
+  fprintf(stderr, "[scheduler_parallel] Performing scheduling with scheduling %s\n", info.sched == STATIC ? "STATIC" : "DYNAMIC");
 #endif
 
   struct worker * worker = worker_local;
@@ -143,13 +145,15 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   int iter_pr_subtask = info.iter_pr_subtask;
   int remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
+  enum scheduling sched = info.sched;
 
   volatile int shared_counter = nsubtasks;
 
   /* Each subtasks is processed in chunks */
-  int chunks = 0;
-  if (task->granularity > 0) {
-    chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
+  int chunkable = 0;
+  if (sched == DYNAMIC)
+  {
+    chunkable = 1;
   }
 
   int start = 0;
@@ -158,7 +162,7 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &mutex, &cond, &shared_counter,
-                                            start, end, chunks, subtask_id);
+                                            start, end, chunkable, subtask_id);
     assert(subtask != NULL);
     push_back(&scheduler->workers[worker->tid].q, subtask);
 #ifdef MCDEBUG
@@ -237,6 +241,7 @@ static inline int scheduler_execute(struct scheduler *scheduler,
     return task->fn(task->args, 0, task->iterations, 0);
   }
 
+
   return scheduler_parallel(scheduler, task);
 }
 
@@ -265,6 +270,7 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
     info.iter_pr_subtask = task->iterations / max_num_tasks;
     info.remainder = task->iterations % max_num_tasks;
     info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
+    info.sched = STATIC;
     break;
   case DYNAMIC:
     info.iter_pr_subtask = task->iterations / max_num_tasks;
@@ -273,6 +279,7 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
     // we are being safe with returning
     // an upper bound on the number of tasks
     info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
+    info.sched = DYNAMIC;
     break;
   default:
     assert(!"Got unknown scheduling");

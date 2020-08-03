@@ -6,7 +6,6 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Code
        , Multicore(..)
        , Scheduling(..)
-       , MulticoreInfo(..)
        , SchedulerInfo(..)
        , AtomicOp(..)
        , module Futhark.CodeGen.ImpCode
@@ -27,12 +26,9 @@ type Function = Imp.Function Multicore
 type Code = Imp.Code Multicore
 
 
-data MulticoreInfo = MulticoreInfo Scheduling VName
--- MulticoreInfo ntasks Sched tid
-
 -- | A multicore operation.
 data Multicore = Task [Param] Code (Maybe Code) [Param] SchedulerInfo
-               | MCFunc String VName Code Code [Param] MulticoreInfo
+               | MCFunc String VName Code Code [Param] VName
                | MulticoreCall (Maybe VName) String
                | Atomic AtomicOp
 
@@ -85,10 +81,6 @@ instance Pretty SchedulerInfo where
     text "number of subtasks" <+> ppr nsubtask <+>
     text "scheduling" <+> ppr sched <+>
     text "iter" <+> ppr i
-
-instance Pretty MulticoreInfo where
-  ppr (MulticoreInfo sched _) =
-    text "MulticoreInfo" <+> ppr sched
 
 instance Pretty Multicore where
   ppr (Task free par_code seq_code retval scheduler) =

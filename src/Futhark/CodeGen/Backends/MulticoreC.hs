@@ -290,10 +290,6 @@ compileWriteBackResVals struct = zipWith field
     field name (_, _) =
       [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
-compileSchedulingVal :: Scheduling -> GC.CompilerM op s C.Exp
-compileSchedulingVal Static =  return [C.cexp|0|]
-compileSchedulingVal (Dynamic granularity) =  return [C.cexp|$exp:granularity|]
-
 paramToCType :: Param -> GC.CompilerM op s (C.Type, ValueType)
 paramToCType (ScalarParam _ pt)     = do
   let t = GC.primTypeToCType pt
@@ -505,10 +501,9 @@ compileOp (Task params seq_code par_code retvals (SchedulerInfo nsubtask tid e s
 
 
 
-compileOp (MCFunc s' i prebody body free (MulticoreInfo sched tid)) = do
+compileOp (MCFunc s' i prebody body free tid) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
-  granularity <- compileSchedulingVal sched
 
   let lexical = lexicalMemoryUsage $
                 Function False [] free body [] []
@@ -555,7 +550,6 @@ compileOp (MCFunc s' i prebody body free (MulticoreInfo sched tid)) = do
   GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = iterations;|]
-  GC.stm  [C.cstm|$id:ftask_name.granularity = $exp:granularity;|]
   GC.stm  [C.cstm|$id:ftask_name.info = info;|]
 
   let ftask_err = ftask <> "_err"

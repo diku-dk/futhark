@@ -141,14 +141,9 @@ reductionStage1 space slugs kbody = do
                   \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
   free_params <- freeParams fbody (segFlat space : [flat_idx])
-  let scheduling = case slugsComm slugs of
-                   Commutative -> decideScheduling fbody
-                   Noncommutative -> Imp.Static
-
   let (body_allocs, fbody') = extractAllocations fbody
 
-  emit $ Imp.Op $ Imp.MCFunc "segred_stage_1" flat_idx body_allocs fbody' free_params $
-    Imp.MulticoreInfo scheduling (segFlat space)
+  emit $ Imp.Op $ Imp.MCFunc "segred_stage_1" flat_idx body_allocs fbody' free_params $ segFlat space
 
 reductionStage2 :: Pattern MCMem
                 -> SegSpace
@@ -198,9 +193,7 @@ segmentedReduction pat space reds kbody =
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     par_body    <- compileSegRedBody n_par_segments pat space reds kbody
     free_params <- freeParams par_body (segFlat space : [n_par_segments])
-    let sched = decideScheduling par_body
-    emit $ Imp.Op $ Imp.MCFunc "segmented_segred" n_par_segments mempty par_body free_params $
-      Imp.MulticoreInfo sched (segFlat space)
+    emit $ Imp.Op $ Imp.MCFunc "segmented_segred" n_par_segments mempty par_body free_params $ segFlat space
 
 
 compileSegRedBody :: VName

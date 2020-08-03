@@ -69,6 +69,7 @@ struct scheduler_info {
   int iter_pr_subtask;
   int remainder;
   int nsubtasks;
+  enum scheduling sched;
 };
 
 
@@ -78,7 +79,6 @@ struct scheduler_subtask {
   sub_task_fn fn;
   void* args;
   long int iterations;
-  int granularity;
   struct scheduler_info info;
 };
 
