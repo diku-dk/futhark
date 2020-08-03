@@ -2,8 +2,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Safe #-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -1757,8 +1757,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: E.StructType -> [VName] -> [SubExp] -> InternaliseM ()
 bindExtSizes ret retext ses = do
-  ts <- concat <$>
-        internaliseParamTypes mempty (M.fromList $ zip retext retext) [ret]
+  ts <- concat <$> internaliseParamTypes [ret]
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =
