@@ -1389,14 +1389,36 @@ data CParts = CParts { cHeader :: String
                      , cLib :: String
                      }
 
+-- We may generate variables that are never used (e.g. for
+-- certificates) or functions that are never called (e.g. unused
+-- intrinsics), and generated code may have other cosmetic issues that
+-- compilers warn about.  We disable these warnings to not clutter the
+-- compilation logs.
+disableWarnings :: String
+disableWarnings = pretty [C.cunit|
+$esc:("#ifdef __GNUC__")
+$esc:("#pragma GCC diagnostic ignored \"-Wunused-function\"")
+$esc:("#pragma GCC diagnostic ignored \"-Wunused-variable\"")
+$esc:("#pragma GCC diagnostic ignored \"-Wparentheses\"")
+$esc:("#pragma GCC diagnostic ignored \"-Wunused-label\"")
+$esc:("#endif")
+
+$esc:("#ifdef __clang__")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-function\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-variable\"")
+$esc:("#pragma clang diagnostic ignored \"-Wparentheses\"")
+$esc:("#pragma clang diagnostic ignored \"-Wunused-label\"")
+$esc:("#endif")
+|]
+
 -- | Produce header and implementation files.
 asLibrary :: CParts -> (String, String)
 asLibrary parts = ("#pragma once\n\n" <> cHeader parts,
-                   cHeader parts <> cUtils parts <> cLib parts)
+                   disableWarnings <> cHeader parts <> cUtils parts <> cLib parts)
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
-asExecutable (CParts a b c d) = a <> b <> c <> d
+asExecutable (CParts a b c d) = disableWarnings <> a <> b <> c <> d
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -1672,7 +1694,10 @@ compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
 compileConstants (Constants ps init_consts) = do
   ctx_ty <- contextType
   const_fields <- mapM constParamField ps
-  contextField "constants" [C.cty|struct { $sdecls:const_fields }|] Nothing
+  -- Avoid an empty struct, as that is apparently undefined behaviour.
+  let const_fields' | null const_fields = [[C.csdecl|int dummy;|]]
+                    | otherwise = const_fields
+  contextField "constants" [C.cty|struct { $sdecls:const_fields' }|] Nothing
   earlyDecl [C.cedecl|int init_constants($ty:ctx_ty*);|]
   earlyDecl [C.cedecl|int free_constants($ty:ctx_ty*);|]
 
@@ -2072,15 +2097,11 @@ compileCode (If cond tbranch fbranch) = do
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
-compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
-  destoffset' <- compileExp destoffset
-  srcoffset' <- compileExp srcoffset
-  size' <- compileExp size
-  dest' <- rawMem dest
-  src' <- rawMem src
-  stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
-                      $exp:src' + $exp:srcoffset',
-                      $exp:size');|]
+compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
+  join $ copyMemoryDefaultSpace
+  <$> rawMem dest <*> compileExp destoffset
+  <*> rawMem src <*> compileExp srcoffset
+  <*> compileExp size
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy

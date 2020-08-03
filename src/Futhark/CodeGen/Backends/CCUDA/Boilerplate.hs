@@ -20,6 +20,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.Util (chunk, zEncodeString)
 
 import qualified Data.Map as M
+import Data.Maybe
 import Data.FileEmbed (embedStringFile)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
@@ -117,8 +118,7 @@ generateConfigFuns sizes = do
 
   let size_value_inits = zipWith sizeInit [0..M.size sizes-1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
-         where val = case size of SizeBespoke _ x -> x
-                                  _               -> 0
+         where val = fromMaybe 0 $ sizeDefault size
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {

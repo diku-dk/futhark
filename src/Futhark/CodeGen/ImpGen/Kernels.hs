@@ -106,14 +106,11 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key
   -- issues.
   let num_groups_maybe_zero = BinOpExp (SMin Int64)
                               (toExp' int64 w64 `divUp`
-                               i64 (toExp' int32 group_size)) $
-                              i64 (Imp.vi32 max_num_groups)
+                               sExt Int64 (toExp' int32 group_size)) $
+                              sExt Int64 (Imp.vi32 max_num_groups)
   -- We also don't want zero groups.
   let num_groups = BinOpExp (SMax Int64) 1 num_groups_maybe_zero
-  patElemName pe <-- i32 num_groups
-
-  where i64 = ConvOpExp (SExt Int32 Int64)
-        i32 = ConvOpExp (SExt Int64 Int32)
+  patElemName pe <-- sExt Int32 num_groups
 
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
@@ -123,8 +120,8 @@ opCompiler pat e =
   pretty pat ++ "\nfor expression\n  " ++ pretty e
 
 sizeClassWithEntryPoint :: Maybe Name -> Imp.SizeClass -> Imp.SizeClass
-sizeClassWithEntryPoint fname (Imp.SizeThreshold path) =
-  Imp.SizeThreshold $ map f path
+sizeClassWithEntryPoint fname (Imp.SizeThreshold path def) =
+  Imp.SizeThreshold (map f path) def
   where f (name, x) = (keyWithEntryPoint fname name, x)
 sizeClassWithEntryPoint _ size_class = size_class
 
@@ -161,7 +158,7 @@ checkLocalMemoryReqs code = do
     sOp $ Imp.GetSizeMax local_memory_capacity SizeLocalMemory
 
     let local_memory_capacity_64 =
-          ConvOpExp (SExt Int32 Int64) $ Imp.vi32 local_memory_capacity
+          sExt Int64 $ Imp.vi32 local_memory_capacity
         fits size =
           unCount size .<=. local_memory_capacity_64
     return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)

@@ -204,7 +204,7 @@ callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
   in GC.stm [C.cstm|$id:v = ctx->cuda.$id:field;|]
   where
-    cudaSizeClass (SizeThreshold _) = "threshold"
+    cudaSizeClass SizeThreshold{} = "threshold"
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"

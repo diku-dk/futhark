@@ -111,6 +111,11 @@ module type integral = {
   -- | Count number of zero bits preceding the most significant set
   -- bit.
   val clz: t -> i32
+
+  -- | Count number of trailing zero bits following the least
+  -- significant set bit.  Returns the number of bits in the type if
+  -- the argument is all-zero.
+  val ctz: t -> i32
 }
 
 -- | An extension of `size`@mtype that further includes facilities for
@@ -298,6 +303,7 @@ module i8: (size with t = i8) = {
   let mul_hi a b = intrinsics.mul_hi8 (i8 a, i8 b)
   let mad_hi a b c = intrinsics.mad_hi8 (i8 a, i8 b, i8 c)
   let clz = intrinsics.clz8
+  let ctz = intrinsics.ctz8
 
   let iota (n: i8) = 0i8..1i8..<n
   let replicate 'v (n: i8) (x: v) = map (const x) (iota n)
@@ -372,6 +378,7 @@ module i16: (size with t = i16) = {
   let mul_hi a b = intrinsics.mul_hi16 (i16 a, i16 b)
   let mad_hi a b c = intrinsics.mad_hi16 (i16 a, i16 b, i16 c)
   let clz = intrinsics.clz16
+  let ctz = intrinsics.ctz16
 
   let iota (n: i16) = 0i16..1i16..<n
   let replicate 'v (n: i16) (x: v) = map (const x) (iota n)
@@ -449,6 +456,7 @@ module i32: (size with t = i32) = {
   let mul_hi a b = intrinsics.mul_hi32 (i32 a, i32 b)
   let mad_hi a b c = intrinsics.mad_hi32 (i32 a, i32 b, i32 c)
   let clz = intrinsics.clz32
+  let ctz = intrinsics.ctz32
 
   let iota (n: i32) = 0..1..<n
   let replicate 'v (n: i32) (x: v) = map (const x) (iota n)
@@ -526,6 +534,7 @@ module i64: (size with t = i64) = {
   let mul_hi a b = intrinsics.mul_hi64 (i64 a, i64 b)
   let mad_hi a b c = intrinsics.mad_hi64 (i64 a, i64 b, i64 c)
   let clz = intrinsics.clz64
+  let ctz = intrinsics.ctz64
 
   let iota (n: i64) = 0i64..1i64..<n
   let replicate 'v (n: i64) (x: v) = map (const x) (iota n)
@@ -603,6 +612,7 @@ module u8: (size with t = u8) = {
   let mul_hi a b = unsign (intrinsics.mul_hi8 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi8 (sign a, sign b, sign c))
   let clz x = intrinsics.clz8 (sign x)
+  let ctz x = intrinsics.ctz8 (sign x)
 
   let iota (n: u8) = 0u8..1u8..<n
   let replicate 'v (n: u8) (x: v) = map (const x) (iota n)
@@ -680,6 +690,7 @@ module u16: (size with t = u16) = {
   let mul_hi a b = unsign (intrinsics.mul_hi16 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi16 (sign a, sign b, sign c))
   let clz x = intrinsics.clz16 (sign x)
+  let ctz x = intrinsics.ctz16 (sign x)
 
   let iota (n: u16) = 0u16..1u16..<n
   let replicate 'v (n: u16) (x: v) = map (const x) (iota n)
@@ -757,6 +768,7 @@ module u32: (size with t = u32) = {
   let mul_hi a b = unsign (intrinsics.mul_hi32 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi32 (sign a, sign b, sign c))
   let clz x = intrinsics.clz32 (sign x)
+  let ctz x = intrinsics.ctz32 (sign x)
 
   let iota (n: u32) = 0u32..1u32..<n
   let replicate 'v (n: u32) (x: v) = map (const x) (iota n)
@@ -834,6 +846,7 @@ module u64: (size with t = u64) = {
   let mul_hi a b = unsign (intrinsics.mul_hi64 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi64 (sign a, sign b, sign c))
   let clz x = intrinsics.clz64 (sign x)
+  let ctz x = intrinsics.ctz64 (sign x)
 
   let iota (n: u64) = 0u64..1u64..<n
   let replicate 'v (n: u64) (x: v) = map (const x) (iota n)

@@ -34,6 +34,9 @@ module Futhark.IR.Prop.Types
        , transposeType
        , rearrangeType
 
+       , mapOnExtType
+       , mapOnType
+
        , diet
 
        , subtypeOf
@@ -43,6 +46,7 @@ module Futhark.IR.Prop.Types
        , fromDecl
 
        , isExt
+       , isFree
        , extractShapeContext
        , shapeContext
        , hasStaticShape
@@ -281,6 +285,28 @@ rearrangeType perm t =
   t `setArrayShape` Shape (rearrangeShape perm' $ arrayDims t)
   where perm' = perm ++ [length perm .. arrayRank t - 1]
 
+-- | Transform any t'SubExp's in the type.
+mapOnExtType :: Monad m =>
+                (SubExp -> m SubExp)
+             -> TypeBase ExtShape u
+             -> m (TypeBase ExtShape u)
+mapOnExtType _ (Prim bt) =
+  return $ Prim bt
+mapOnExtType _ (Mem space) =
+  pure $ Mem space
+mapOnExtType f (Array t shape u) =
+  Array t <$> (Shape <$> mapM (traverse f) (shapeDims shape)) <*> pure u
+
+-- | Transform any t'SubExp's in the type.
+mapOnType :: Monad m =>
+             (SubExp -> m SubExp)
+          -> TypeBase Shape u
+          -> m (TypeBase Shape u)
+mapOnType _ (Prim bt) = return $ Prim bt
+mapOnType _ (Mem space) = pure $ Mem space
+mapOnType f (Array t shape u) =
+  Array t <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
+
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase shape Uniqueness -> Diet
@@ -333,6 +359,11 @@ isExt :: Ext a -> Maybe Int
 isExt (Ext i) = Just i
 isExt _ = Nothing
 
+-- | If a known size, then return that size.
+isFree :: Ext a -> Maybe a
+isFree (Free d) = Just d
+isFree _ = Nothing
+
 -- | Given the existential return type of a function, and the shapes
 -- of the values returned by the function, return the existential
 -- shape context.  That is, those sizes that are existential in the
@@ -364,8 +395,6 @@ hasStaticShape (Prim bt) = Just $ Prim bt
 hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
-  where isFree (Free s) = Just s
-        isFree (Ext _)  = Nothing
 
 -- | Given two lists of 'ExtType's of the same length, return a list
 -- of 'ExtType's that is a subtype of the two operands.

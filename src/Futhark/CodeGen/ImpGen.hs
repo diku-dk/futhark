@@ -737,7 +737,7 @@ defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
   e' <- toExp e
   s' <- toExp s
   sFor "i" n' $ \i -> do
-    let i' = ConvOpExp (SExt Int32 it) i
+    let i' = sExt it i
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIM (patElemName pe) [DimFix i] (Var x) []
 
@@ -1272,9 +1272,8 @@ compileAlloc pat _ _ =
 -- straightforward contiguous format, as an 'Int64' expression.
 typeSize :: Type -> Count Bytes Imp.Exp
 typeSize t =
-  Imp.bytes $ i64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int32) *
-  product (map (i64 . toExp' int32) (arrayDims t))
-  where i64 = ConvOpExp (SExt Int32 Int64)
+  Imp.bytes $ sExt Int64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int32) *
+  product (map (sExt Int64 . toExp' int32) (arrayDims t))
 
 --- Building blocks for constructing code.
 

@@ -1105,7 +1105,7 @@ computeMapKernelGroups kernel_size = do
   let group_size_var = Imp.var group_size int32
       group_size_key = keyWithEntryPoint fname $ nameFromString $ pretty group_size
   sOp $ Imp.GetSize group_size group_size_key Imp.SizeGroup
-  num_groups <- dPrimV "num_groups" $ kernel_size `divUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
+  num_groups <- dPrimV "num_groups" $ kernel_size `divUp` group_size_var
   return (Imp.var num_groups int32, Imp.var group_size int32)
 
 simpleKernelConstants :: Imp.Exp -> String
@@ -1224,9 +1224,9 @@ copyInGroup pt destloc destslice srcloc srcslice = do
             takeLast (length srcds) srcslice
       copyElementWise pt destloc destslice' srcloc srcslice'
 
-    _ ->
-      groupCoverSpace (sliceDims destslice) $ \is -> do
-      copyElementWise pt
+    _ -> do
+      groupCoverSpace (sliceDims destslice) $ \is ->
+        copyElementWise pt
         destloc (map DimFix $ fixSlice destslice is)
         srcloc (map DimFix $ fixSlice srcslice is)
       sOp $ Imp.Barrier Imp.FenceLocal
@@ -1338,7 +1338,7 @@ sIotaKernel arr n x s et = do
 
       emit $
         Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
-        Imp.ConvOpExp (SExt Int32 et) gtid * s + x
+        Imp.sExt et gtid * s + x
 
 iotaName :: IntType -> String
 iotaName bt = "iota_" ++ pretty bt
