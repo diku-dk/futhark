@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE Safe #-}
 -- |
 --
 -- This module implements a transformation from source to core

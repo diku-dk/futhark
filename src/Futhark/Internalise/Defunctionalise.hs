@@ -191,8 +191,11 @@ defuncFun tparams pats e0 (closure, ret) loc = do
       env' = M.fromList env
       closure_dims = S.toList sizes_of_arrays
 
+  global <- asks fst
+
   return (RecordLit fields loc,
-          LambdaSV (nub $ dims<>closure_dims) pat ret' e0' env')
+          LambdaSV (nub $ filter (`S.notMember` global) $
+                    dims<>closure_dims) pat ret' e0' env')
 
   where closureFromDynamicFun (vn, DynamicFun (clsr_env, sv) _) =
           let name = nameFromString $ pretty vn
@@ -570,6 +573,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
       let closure_pat = buildEnvPattern closure_env
           pat' = updatePattern pat sv2
 
+      globals <- asks fst
+
       -- Lift lambda to top-level function definition.  We put in
       -- a lot of effort to try to infer the uniqueness attributes
       -- of the lifted function, but this is ultimately all a sham
@@ -580,7 +585,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           svParams _                         = []
           rettype = buildRetType closure_env params_for_rettype e0_t $ typeOf e0'
 
-          already_bound = S.fromList dims <>
+          already_bound = globals <> S.fromList dims <>
                           S.map identName (foldMap patternIdents params)
           more_dims = S.toList $
                       S.filter (`S.notMember` already_bound) $
@@ -601,7 +606,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
       (missing_dims, params') <- sizesForAll params
 
       fname <- newNameFromString $ liftedName (0::Int) e1
-      liftValDec fname rettype (dims ++ more_dims ++ missing_dims) params' e0'
+      liftValDec fname rettype (dims ++ more_dims ++ missing_dims)
+        params' e0'
 
       let t1 = toStruct $ typeOf e1'
           t2 = toStruct $ typeOf e2'
@@ -1059,6 +1065,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
                    }
          , M.singleton name sv
          , case sv of DynamicFun{} -> True
+                      Dynamic{}    -> True
                       _            -> False)
 
 -- | Defunctionalize a list of top-level declarations.
