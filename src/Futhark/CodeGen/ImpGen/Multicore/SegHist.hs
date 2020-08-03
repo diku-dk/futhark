@@ -129,7 +129,7 @@ casHistogram pat space histops kbody = do
                do_op (map patElemName dest_res) (bucket_is ++ is')
 
   free_params <- freeParams body (segFlat space : [idx])
-  let sched = decideScheduling body
+  let sched = Imp.Static
   emit $ Imp.Op $ Imp.MCFunc "atomic_seg_hist" idx mempty body free_params $
       Imp.MulticoreInfo sched (segFlat space)
 
