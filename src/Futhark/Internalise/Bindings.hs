@@ -1,8 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Safe #-}
+-- | Internalising bindings.
 module Futhark.Internalise.Bindings
   (
-  -- * Internalising bindings
     bindingParams
   , bindingLambdaParams
   , stmPattern
@@ -26,8 +26,9 @@ bindingParams :: [E.TypeParam] -> [E.Pattern]
               -> InternaliseM a
 bindingParams tparams params m = do
   flattened_params <- mapM flattenPattern params
-  let (params_idents, params_types) = unzip $ concat flattened_params
-  params_ts <- internaliseParamTypes params_types
+  let params_idents = concat flattened_params
+  params_ts <- internaliseParamTypes $
+               map (flip E.setAliases () . E.unInfo . E.identType) params_idents
   let num_param_idents = map length flattened_params
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
 
@@ -41,14 +42,9 @@ bindingLambdaParams :: [E.Pattern] -> [I.Type]
                     -> ([I.LParam] -> InternaliseM a)
                     -> InternaliseM a
 bindingLambdaParams params ts m = do
-  (params_idents, params_types) <-
-    unzip . concat <$> mapM flattenPattern params
-  params_ts <- internaliseParamTypes params_types
-
-  let ascript_substs = lambdaShapeSubstitutions (concat params_ts) ts
+  params_idents <- concat <$> mapM flattenPattern params
 
   bindingFlatPattern params_idents ts $ \params' ->
-    local (\env -> env { envSubsts = ascript_substs `M.union` envSubsts env }) $
     I.localScope (I.scopeOfLParams $ concat params') $ m $ concat params'
 
 processFlatPattern :: Show t => [E.Ident] -> [t]
@@ -96,7 +92,7 @@ bindingFlatPattern idents ts m = do
 
 -- | Flatten a pattern.  Returns a list of identifiers.  The
 -- structural type of each identifier is returned separately.
-flattenPattern :: MonadFreshNames m => E.Pattern -> m [(E.Ident, E.StructType)]
+flattenPattern :: MonadFreshNames m => E.Pattern -> m [E.Ident]
 flattenPattern = flattenPattern'
   where flattenPattern' (E.PatternParens p _) =
           flattenPattern' p
@@ -104,8 +100,7 @@ flattenPattern = flattenPattern'
           name <- newVName "nameless"
           flattenPattern' $ E.Id name t loc
         flattenPattern' (E.Id v (Info t) loc) =
-          return [(E.Ident v (Info t) loc,
-                   t `E.setAliases` ())]
+          return [E.Ident v (Info t) loc]
         -- XXX: treat empty tuples and records as bool.
         flattenPattern' (E.TuplePattern [] loc) =
           flattenPattern' (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc)
@@ -126,17 +121,7 @@ stmPattern :: E.Pattern -> [I.Type]
            -> ([VName] -> InternaliseM a)
            -> InternaliseM a
 stmPattern pat ts m = do
-  pat' <- map fst <$> flattenPattern pat
+  pat' <- flattenPattern pat
   let addShapeStms l =
         m (map I.paramName $ concat l)
   bindingFlatPattern pat' ts addShapeStms
-
-lambdaShapeSubstitutions :: [I.DeclType]
-                         -> [I.Type]
-                         -> VarSubstitutions
-lambdaShapeSubstitutions param_ts ts =
-  mconcat $ zipWith matchTypes param_ts ts
-  where matchTypes pt t =
-          mconcat $ zipWith matchDims (I.shapeDims $ I.arrayShape pt) (I.arrayDims t)
-        matchDims (I.Var v) d = M.singleton v [d]
-        matchDims _ _ = mempty
