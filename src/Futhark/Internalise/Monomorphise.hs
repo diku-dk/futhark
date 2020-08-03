@@ -197,6 +197,16 @@ transformType t = do
            then second (mconcat . map replace . S.toList) t
            else t
 
+sizesForPat :: MonadFreshNames m => Pattern -> m ([VName], Pattern)
+sizesForPat pat = do
+  (params', sizes) <- runStateT (astMap tv pat) []
+  return (sizes, params')
+  where tv = identityMapper { mapOnPatternType = bitraverse onDim pure }
+        onDim AnyDim = do v <- lift $ newVName "size"
+                          modify (v:)
+                          pure $ NamedDim $ qualName v
+        onDim d = pure d
+
 -- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
 transformExp e@Literal{} = return e
@@ -329,7 +339,11 @@ transformExp (DoLoop sparams pat e1 form e3 ret loc) = do
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
     While e2      -> While <$> transformExp e2
   e3' <- transformExp e3
-  return $ DoLoop sparams pat e1' form' e3' ret loc
+  -- Maybe monomorphisation introduced new arrays to the loop, and
+  -- maybe they have AnyDim sizes.  This is not allowed.  Invent some
+  -- sizes for them.
+  (pat_sizes, pat') <- sizesForPat pat
+  return $ DoLoop (sparams++pat_sizes) pat' e1' form' e3' ret loc
 
 transformExp (BinOp (fname, oploc) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
   fname' <- transformFName loc fname $ toStruct t
