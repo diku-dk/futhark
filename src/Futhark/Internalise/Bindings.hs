@@ -12,7 +12,6 @@ module Futhark.Internalise.Bindings
 
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
-import Control.Monad.Writer hiding (mapM)
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -35,17 +34,9 @@ bindingParams tparams params m = do
   let num_param_idents = map length flattened_params
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
 
-  (params_ts', unnamed_shape_params) <-
-    fmap unzip $ forM params_ts $ \param_ts -> do
-      (param_ts', param_unnamed_dims) <- instantiateShapesWithDecls mempty param_ts
-
-      return (param_ts',
-              param_unnamed_dims)
-
-  let named_shape_params = [ I.Param v $ I.Prim I.int32 | E.TypeParamDim v _ <- tparams ]
-      shape_params = named_shape_params ++ concat unnamed_shape_params
+  let shape_params = [ I.Param v $ I.Prim I.int32 | E.TypeParamDim v _ <- tparams ]
       shape_subst = M.fromList [ (I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params ]
-  bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
+  bindingFlatPattern params_idents (concat params_ts) $ \valueparams ->
     I.localScope (I.scopeOfFParams $ shape_params++concat valueparams) $
     substitutingVars shape_subst $ m shape_params $ chunks num_param_ts (concat valueparams)
 
@@ -93,9 +84,8 @@ processFlatPattern x y = processFlatPattern' [] x y
     internaliseBindee :: E.Ident -> InternaliseM [(VName, I.DeclExtType)]
     internaliseBindee bindee = do
       let name = E.identName bindee
-      tss <- internaliseParamTypes
-             [flip E.setAliases () $ E.unInfo $ E.identType bindee]
-      case concat tss of
+      tss <- internaliseType $ flip E.setAliases () $ E.unInfo $ E.identType bindee
+      case tss of
         [t] -> return [(name, t)]
         tss' -> forM tss' $ \t -> do
           name' <- newVName $ baseString name
@@ -145,9 +135,9 @@ stmPattern :: E.Pattern -> [I.ExtType]
 stmPattern pat ts m = do
   (pat', pat_types) <- unzip <$> flattenPattern pat
   (ts',_) <- instantiateShapes' ts
-  pat_types' <- internaliseParamTypes pat_types
+  pat_types' <- internalisePatternTypes pat_types
   let pat_types'' = map I.fromDecl $ concat pat_types'
-  let addShapeStms l =
+      addShapeStms l =
         m (map I.paramName $ concat l) (matchPattern pat_types'')
   bindingFlatPattern pat' ts' addShapeStms
 
@@ -169,31 +159,12 @@ unExistentialise tparam_names et t = do
               return $ I.Free $ I.Var v
         inspectDim ed _ = return ed
 
-instantiateShapesWithDecls :: MonadFreshNames m =>
-                              M.Map Int I.Ident
-                           -> [I.DeclExtType]
-                           -> m ([I.DeclType], [I.FParam])
-instantiateShapesWithDecls ctx ts =
-  runWriterT $ instantiateShapes instantiate ts
-  where instantiate x
-          | Just v <- M.lookup x ctx =
-            return $ I.Var $ I.identName v
-
-          | otherwise = do
-            v <- lift $ nonuniqueParamFromIdent <$> newIdent "size" (I.Prim I.int32)
-            tell [v]
-            return $ I.Var $ I.paramName v
-
-lambdaShapeSubstitutions :: [I.TypeBase I.ExtShape Uniqueness]
+lambdaShapeSubstitutions :: [I.DeclType]
                          -> [I.Type]
                          -> VarSubstitutions
 lambdaShapeSubstitutions param_ts ts =
   mconcat $ zipWith matchTypes param_ts ts
   where matchTypes pt t =
           mconcat $ zipWith matchDims (I.shapeDims $ I.arrayShape pt) (I.arrayDims t)
-        matchDims (I.Free (I.Var v)) d = M.singleton v [d]
+        matchDims (I.Var v) d = M.singleton v [d]
         matchDims _ _ = mempty
-
-nonuniqueParamFromIdent :: I.Ident -> I.FParam
-nonuniqueParamFromIdent (I.Ident name t) =
-  I.Param name $ I.toDecl t Nonunique

@@ -1757,7 +1757,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: E.StructType -> [VName] -> [SubExp] -> InternaliseM ()
 bindExtSizes ret retext ses = do
-  ts <- concat <$> internaliseParamTypes [ret]
+  ts <- internaliseType ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =

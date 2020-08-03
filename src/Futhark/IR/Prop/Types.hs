@@ -388,9 +388,9 @@ shapeContext = S.fromList
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
--- | If all dimensions of the given 'ExtType' are statically known,
--- return the corresponding list of 'Type'.
-hasStaticShape :: ExtType -> Maybe Type
+-- | If all dimensions of the given 'ExtShape' are statically known,
+-- change to the corresponding 'Shape'.
+hasStaticShape :: TypeBase ExtShape u -> Maybe (TypeBase Shape u)
 hasStaticShape (Prim bt) = Just $ Prim bt
 hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
