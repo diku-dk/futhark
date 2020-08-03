@@ -8,7 +8,6 @@ module Futhark.Internalise.TypesValues
   , internaliseType
   , internaliseEntryReturnType
   , internaliseParamTypes
-  , internalisePatternTypes
   , internalisePrimType
   , internalisedTypeSize
   , internaliseSumType
@@ -52,11 +51,6 @@ internaliseParamTypes ts =
   runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM) ts
   where onType = fromMaybe bad . hasStaticShape
         bad = error $ "internaliseParamTypes: " ++ pretty ts
-
-internalisePatternTypes :: [E.TypeBase (E.DimDecl VName) ()]
-                        -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
-internalisePatternTypes ts =
-  runInternaliseTypeM $ mapM internaliseTypeM ts
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
                       -> InternaliseM [I.TypeBase ExtShape Uniqueness]

@@ -536,8 +536,8 @@ internaliseExp desc e@E.Apply{} = do
   bindExtSizes ret retext ses
   return ses
 
-internaliseExp desc (E.LetPat pat e body (Info ret, Info retext) loc) = do
-  ses <- internalisePat desc pat e body loc (internaliseExp desc)
+internaliseExp desc (E.LetPat pat e body (Info ret, Info retext) _) = do
+  ses <- internalisePat desc pat e body (internaliseExp desc)
   bindExtSizes (E.toStruct ret) retext ses
   return ses
 
@@ -771,14 +771,14 @@ internaliseExp desc (E.Match e cs (Info ret, Info retext) _) = do
   ses <- internaliseExp (desc ++ "_scrutinee") e
   res <-
     case NE.uncons cs of
-    (CasePat pCase eCase locCase, Nothing) -> do
+    (CasePat pCase eCase _, Nothing) -> do
       (_, pertinent) <- generateCond pCase ses
-      internalisePat' pCase pertinent eCase locCase (internaliseExp desc)
+      internalisePat' pCase pertinent eCase (internaliseExp desc)
     (c, Just cs') -> do
-      let CasePat pLast eLast locLast = NE.last cs'
+      let CasePat pLast eLast _ = NE.last cs'
       bFalse <- do
         (_, pertinent) <- generateCond pLast ses
-        eLast' <- internalisePat' pLast pertinent eLast locLast internaliseBody
+        eLast' <- internalisePat' pLast pertinent eLast internaliseBody
         foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
           reverse $ NE.init cs'
       letTupExp' desc =<< generateCaseIf ses c bFalse
@@ -923,29 +923,28 @@ generateCond orig_p orig_ses = do
               ses'')
 
 generateCaseIf :: [I.SubExp] -> Case -> I.Body -> InternaliseM I.Exp
-generateCaseIf ses (CasePat p eCase loc) bFail = do
+generateCaseIf ses (CasePat p eCase _) bFail = do
   (cond, pertinent) <- generateCond p ses
-  eCase' <- internalisePat' p pertinent eCase loc internaliseBody
+  eCase' <- internalisePat' p pertinent eCase internaliseBody
   eIf (eSubExp cond) (return eCase') (return bFail)
 
 internalisePat :: String -> E.Pattern -> E.Exp
-               -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a)
+               -> E.Exp -> (E.Exp -> InternaliseM a)
                -> InternaliseM a
-internalisePat desc p e body loc m = do
+internalisePat desc p e body m = do
   ses <- internaliseExp desc' e
-  internalisePat' p ses body loc m
+  internalisePat' p ses body m
   where desc' = case S.toList $ E.patternIdents p of
                   [v] -> baseString $ E.identName v
                   _ -> desc
 
 internalisePat' :: E.Pattern -> [I.SubExp]
-                -> E.Exp -> SrcLoc -> (E.Exp -> InternaliseM a)
+                -> E.Exp -> (E.Exp -> InternaliseM a)
                 -> InternaliseM a
-internalisePat' p ses body loc m = do
-  t <- I.staticShapes <$> mapM I.subExpType ses
-  stmPattern p t $ \pat_names match -> do
-    ses' <- match loc ses
-    forM_ (zip pat_names ses') $ \(v,se) ->
+internalisePat' p ses body m = do
+  ses_ts <- mapM subExpType ses
+  stmPattern p ses_ts $ \pat_names -> do
+    forM_ (zip pat_names ses) $ \(v,se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se
     m body
 
