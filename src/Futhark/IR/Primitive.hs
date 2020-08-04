@@ -210,8 +210,22 @@ valueIntegral (Int64Value v) = fromIntegral v
 -- | A floating-point value.
 data FloatValue = Float32Value !Float
                 | Float64Value !Double
-               deriving (Eq, Ord, Show)
+               deriving (Eq, Show)
 
+-- The derived Ord instance does not handle NaNs correctly.
+instance Ord FloatValue where
+  Float32Value x <= Float32Value y = x <= y
+  Float64Value x <= Float64Value y = x <= y
+  Float32Value _ <= Float64Value _ = True
+  Float64Value _ <= Float32Value _ = False
+
+  Float32Value x < Float32Value y = x < y
+  Float64Value x < Float64Value y = x < y
+  Float32Value _ < Float64Value _ = True
+  Float64Value _ < Float32Value _ = False
+
+  (>) = flip (<)
+  (>=) = flip (<=)
 
 instance Pretty FloatValue where
   ppr (Float32Value v)
