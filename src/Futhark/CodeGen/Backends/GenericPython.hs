@@ -436,6 +436,16 @@ badInput i e t =
                           , "Futhark type: {}"
                           , "Argument has Python type {} and value: {}"]
 
+badInputType :: Int -> PyExp -> String -> PyExp -> PyExp -> PyStmt
+badInputType i e t de dg =
+  Raise $ simpleCall "TypeError"
+  [Call (Field (String err_msg) "format")
+   [Arg (String t), Arg $ simpleCall "type" [e], Arg e, Arg de, Arg dg]]
+  where err_msg = unlines [ "Argument #" ++ show i ++ " has invalid value"
+                          , "Futhark type: {}"
+                          , "Argument has Python type {} and value: {}"
+                          , "Expected array with elements of dtype: {}"
+                          , "The array given has elements of dtype: {}"]
 
 entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
 entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
@@ -470,14 +480,17 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt 
      prettySigned (ept==Imp.TypeUnsigned) bt]]
 
 entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = do
-  let type_is_wrong =
-        UnOp "not" $
-        BinOp "and"
-        (BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"]))
-        (BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s)))
+  let type_is_wrong = UnOp "not" $ BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"])
+  let dtype_is_wrong = UnOp "not" $ BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s))
   stm $ If type_is_wrong
     [badInput i e $ concat (replicate (length dims) "[]") ++
      prettySigned (s==Imp.TypeUnsigned) t]
+    []
+  stm $ If dtype_is_wrong
+    [badInputType i e
+     (concat (replicate (length dims) "[]") ++ prettySigned (s==Imp.TypeUnsigned) t)
+     (simpleCall "np.dtype" [Var (compilePrimToExtNp t s)])
+     (Field e "dtype")]
     []
 
   zipWithM_ (unpackDim e) dims [0..]
