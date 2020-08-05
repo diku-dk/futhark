@@ -123,7 +123,8 @@ scanStage1 pat space nsubtasks scan_ops kbody = do
                   _ -> copyDWIMFix acc' (tid' : vec_is) se []
 
   free_params <- freeParams (prebody <> body) (segFlat space : [iter])
-  emit $ Imp.Op $ Imp.MCFunc "scan_stage_1" iter prebody body free_params $ segFlat space
+  let (body_allocs, body') = extractAllocations body
+  emit $ Imp.Op $ Imp.MCFunc "scan_stage_1" iter (body_allocs <> prebody) body' free_params $ segFlat space
 
 
 scanStage2 :: Pattern MCMem
@@ -251,7 +252,8 @@ scanStage3 pat nsubtasks space scan_ops kbody = do
                   _ -> copyDWIMFix acc' (tid' : vec_is) se []
 
   free_params' <- freeParams (prebody <> body)  (segFlat space : [iter])
-  emit $ Imp.Op $ Imp.MCFunc "scan_stage_3" iter prebody body free_params' $ segFlat space
+  let (body_allocs, body') = extractAllocations body
+  emit $ Imp.Op $ Imp.MCFunc "scan_stage_3" iter (body_allocs <> prebody) body' free_params' $ segFlat space
 
 segmentedScan :: Pattern MCMem
               -> SegSpace
@@ -263,9 +265,10 @@ segmentedScan pat space scan_ops kbody = do
   collect $ do
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     -- iteration variable
-    fbody <- compileSegScanBody n_par_segments pat space scan_ops kbody
-    free_params <- freeParams fbody  (segFlat space : [n_par_segments])
-    emit $ Imp.Op $ Imp.MCFunc "seg_scan" n_par_segments mempty fbody free_params $ segFlat space
+    body <- compileSegScanBody n_par_segments pat space scan_ops kbody
+    free_params <- freeParams body (segFlat space : [n_par_segments])
+    let (body_allocs, body') = extractAllocations body
+    emit $ Imp.Op $ Imp.MCFunc "seg_scan" n_par_segments body_allocs body' free_params $ segFlat space
 
 
 compileSegScanBody :: VName

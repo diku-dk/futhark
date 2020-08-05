@@ -183,9 +183,10 @@ segmentedReduction :: Pattern MCMem
 segmentedReduction pat space reds kbody =
   collect $ do
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
-    par_body    <- compileSegRedBody n_par_segments pat space reds kbody
-    free_params <- freeParams par_body (segFlat space : [n_par_segments])
-    emit $ Imp.Op $ Imp.MCFunc "segmented_segred" n_par_segments mempty par_body free_params $ segFlat space
+    body    <- compileSegRedBody n_par_segments pat space reds kbody
+    free_params <- freeParams body (segFlat space : [n_par_segments])
+    let (body_allocs, body') = extractAllocations body
+    emit $ Imp.Op $ Imp.MCFunc "segmented_segred" n_par_segments body_allocs body' free_params $ segFlat space
 
 
 compileSegRedBody :: VName
