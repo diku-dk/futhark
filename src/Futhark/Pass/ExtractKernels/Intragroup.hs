@@ -63,8 +63,12 @@ intraGroupParallelise knest lam = runMaybeT $ do
     intraGroupParalleliseBody intra_lvl body
 
   outside_scope <- lift askScope
-  unless (all (`M.member` outside_scope) $ namesToList $
-          freeIn (wss_min ++ wss_avail)) $
+  -- outside_scope may also contain the inputs, even though those are
+  -- not actually available outside the kernel.
+  let available v =
+        v `M.member` outside_scope &&
+        v `notElem` map kernelInputName inps
+  unless (all available $ namesToList $ freeIn (wss_min ++ wss_avail)) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
