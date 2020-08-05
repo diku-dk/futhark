@@ -73,9 +73,6 @@ accParams, nextParams :: SegBinOpSlug -> [LParam MCMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
-slugsComm :: [SegBinOpSlug] -> Commutativity
-slugsComm = mconcat . map (segBinOpComm . slugOp)
-
 segBinOpOpSlug :: Imp.Exp
                -> (SegBinOp MCMem, [VName])
                -> MulticoreGen SegBinOpSlug
