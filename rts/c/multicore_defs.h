@@ -71,6 +71,8 @@ struct scheduler_info {
   int remainder;
   int nsubtasks;
   enum scheduling sched;
+
+
 };
 
 
@@ -99,8 +101,13 @@ struct scheduler_task {
   void *args;
   task_fn par_fn;
   task_fn seq_fn;
+  const char* name;
   long int iterations;
   enum scheduling sched;
+  int min_cost;
+
+  int64_t total_time;
+  int64_t total_iterations;
 };
 
 

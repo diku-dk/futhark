@@ -189,21 +189,31 @@ segBinOpComm' :: [SegBinOp lore] -> Commutativity
 segBinOpComm' = mconcat . map segBinOpComm
 
 decideScheduling' :: SegOp () lore -> Imp.Code -> Imp.Scheduling
-decideScheduling' SegHist{} _ = Imp.Static
-decideScheduling' SegScan{} _ = Imp.Static
+decideScheduling' SegHist{} code = Imp.Static $ estimateCost code
+decideScheduling' SegScan{} code = Imp.Static $ estimateCost code
 decideScheduling' (SegRed _ _ reds _ _) code =
   case segBinOpComm' reds of
     Commutative -> decideScheduling code
-    Noncommutative ->  Imp.Static
+    Noncommutative ->  Imp.Static $ estimateCost code
 decideScheduling' SegMap{} code = decideScheduling code
 
 
 decideScheduling :: Imp.Code -> Imp.Scheduling
 decideScheduling code  =
   if isLoadBalanced code then
-    Imp.Static
+    Imp.Static $ estimateCost code
   else
-    Imp.Dynamic 10
+    Imp.Dynamic $ estimateCost code
+
+
+estimateCost :: Imp.Code -> Int
+estimateCost (a Imp.:>>: b)    = estimateCost a + estimateCost b
+estimateCost (Imp.For _ _ _ a) = estimateCost a + 1
+estimateCost (Imp.If _ a b)    = estimateCost a + estimateCost b + 1
+estimateCost (Imp.Comment _ a) = estimateCost a
+estimateCost (Imp.Op (Imp.MCFunc _ _ _ body _ _)) = estimateCost body
+estimateCost _                 = 1
+
 
 -- | Try to extract invariant allocations.  If we assume that the
 -- given 'Code' is the body of a 'SegOp', then it is always safe to
@@ -242,11 +252,6 @@ extractAllocations segop_code = f segop_code
         f code =
           (mempty, code)
 
-
-estimateCost :: Imp.Code -> Int
-estimateCost code =  f code
-  where f Imp.DeclareMem{} = 1
-        f _  = 10
 
 
 

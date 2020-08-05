@@ -53,7 +53,7 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
 
 
-type Granularity = Int32
+type Granularity = Int
 
 data SchedulerInfo = SchedulerInfo
   { nsubtasks  :: VName -- The variable that describes how many subtasks the scheduler created
@@ -67,12 +67,12 @@ data SchedulerInfo = SchedulerInfo
 -- or it is restainted to Static
 -- This could carry more information
 data Scheduling = Dynamic Granularity
-                | Static
+                | Static Granularity
 
 instance Pretty Scheduling where
   ppr (Dynamic granularity) =
     text "Dynamic" <+> ppr granularity
-  ppr Static =
+  ppr (Static _) =
     text "Static"
 
 -- TODO fix all of this!
@@ -84,11 +84,11 @@ instance Pretty SchedulerInfo where
     text "iter" <+> ppr i
 
 instance Pretty Multicore where
-  ppr (Task s free par_code seq_code retval scheduler) =
+  ppr (Task s free _par_code seq_code retval scheduler) =
     text "parfor" <+>
     ppr scheduler <+>
     ppr free <+>
-    text "par_code" <+> nestedBlock "{" "}" (ppr par_code) <+>
+    text s <+>
     text "seq_code" <+> nestedBlock "{" "}" (ppr seq_code) <+>
     text "retvals" <+> ppr retval
 

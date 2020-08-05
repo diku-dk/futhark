@@ -3,7 +3,6 @@
 #define _SCHEDULER_H_
 
 
-
 static volatile sig_atomic_t num_workers;
 static volatile sig_atomic_t free_workers;
 
@@ -27,12 +26,6 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
   assert(i != my_id);
 
   return i;
-}
-
-static inline struct subtask* steal_from(struct scheduler* scheduler, int victim )
-{
-    struct deque *deque_k = &scheduler->workers[victim].q;
-    return steal(deque_k);
 }
 
 static inline struct subtask* split(struct worker* worker, struct subtask *subtask)
@@ -239,15 +232,11 @@ static inline int scheduler_execute(struct scheduler *scheduler,
     return err;
   }
 
-
-  free_workers -= task->info.nsubtasks;
-  int err =  scheduler_parallel(scheduler, task);
-  free_workers += task->info.nsubtasks;
-
-  return err;
+  return scheduler_parallel(scheduler, task);
 }
 
-/* Decide whether to run sequential  or (potentially nested) parallel code body */
+/* Decide on how schedule the incoming task i.e. how many subtasks and
+   to run sequential or (potentially nested) parallel code body */
 static inline int scheduler_do_task(struct scheduler* scheduler,
                                     struct scheduler_task *task)
 {
@@ -258,13 +247,20 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
 
   struct scheduler_info info;
 
-  /* Run task directly if all other workers are occupied */
-  if (free_workers <= 0) {
-    info.iter_pr_subtask = task->iterations;
-    info.remainder = 0;
-    info.nsubtasks = 1;
-    return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+  // Decide if task should be scheduled sequentially
+  if (task->total_iterations > 0 && task->sched != DYNAMIC) {
+    double avg = (double)task->total_time / (double)task->total_iterations;
+    double kappa = 10;
+
+    /* fprintf(stderr, "task %s has %f with avg %f and iter %lld \n", task->name, (double)task->iterations *avg, avg, task->iterations); */
+    if (((double)task->iterations * avg) < kappa) {
+      info.iter_pr_subtask = task->iterations;
+      info.remainder = 0;
+      info.nsubtasks = 1;
+      return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+    }
   }
+
 
   int max_num_tasks = scheduler->num_threads;
   switch (task->sched) {
@@ -286,7 +282,6 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
   default:
     assert(!"Got unknown scheduling");
   }
-
   int err = task->seq_fn(task->args, task->iterations, worker_local->tid, info);
   return err;
 }
