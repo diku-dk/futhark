@@ -115,9 +115,7 @@ reductionStage1 :: SegSpace
 reductionStage1 space slugs kbody = do
   let (is, ns) = unzip $ unSegSpace space
   ns' <- mapM toExp ns
-
   flat_idx <- dPrim "iter" int32
-  emit $ Imp.DebugPrint "nonsegmented segBinOp " Nothing
 
   fbody <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
@@ -139,7 +137,6 @@ reductionStage1 space slugs kbody = do
 
   free_params <- freeParams fbody (segFlat space : [flat_idx])
   let (body_allocs, fbody') = extractAllocations fbody
-
   emit $ Imp.Op $ Imp.MCFunc "segred_stage_1" flat_idx body_allocs fbody' free_params $ segFlat space
 
 reductionStage2 :: Pattern MCMem
@@ -159,7 +156,6 @@ reductionStage2 pat space nsubtasks slugs = do
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
   sFor "i" nsubtasks' $ \i' -> do
-    emit $ Imp.DebugPrint "nonsegmented segBinOp stage 2" Nothing
     segFlat space <-- i'
     sComment "Apply main thread reduction" $
       forM_ (zip slugs per_red_pes) $ \(slug, red_res) ->
@@ -186,7 +182,6 @@ segmentedReduction :: Pattern MCMem
                    -> MulticoreGen Imp.Code
 segmentedReduction pat space reds kbody =
   collect $ do
-    emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     n_par_segments <- dPrim "segment_iter" $ IntType Int32
     par_body    <- compileSegRedBody n_par_segments pat space reds kbody
     free_params <- freeParams par_body (segFlat space : [n_par_segments])
@@ -209,7 +204,6 @@ compileSegRedBody n_segments pat space reds kbody = do
   let per_red_pes = segBinOpChunks reds $ patternValueElements pat
   -- Perform sequential reduce on inner most dimension
   collect $ do
-    emit $ Imp.DebugPrint "segmented segBinOp " Nothing
     flat_idx <- dPrimV "flat_idx" (n_segments' * inner_bound)
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     sComment "neutral-initialise the accumulators" $
