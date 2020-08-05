@@ -9,6 +9,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , getNumThreads
  , getNumThreads'
  , decideScheduling
+ , decideScheduling'
  , groupResultArrays
  , renameSegBinOp
  , resultArrays
@@ -21,6 +22,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , getSpace
  , getIterationDomain
  , getReturnParams
+ , segOpString
  )
  where
 
@@ -47,6 +49,15 @@ newtype HostEnv = HostEnv
   { hostAtomics :: AtomicBinOp }
 
 type MulticoreGen = ImpM MCMem HostEnv Imp.Multicore
+
+
+
+segOpString :: SegOp () MCMem -> MulticoreGen String
+segOpString SegMap{} = return "segmap"
+segOpString SegRed{} = return "segred"
+segOpString SegScan{} = return "segscan"
+segOpString SegHist{} = return "seghist"
+
 
 toParam :: VName -> TypeBase shape u -> MulticoreGen Imp.Param
 toParam name (Prim pt)      = return $ Imp.ScalarParam name pt
@@ -172,6 +183,19 @@ isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While{}       = False
 isLoadBalanced (Imp.Op (Imp.MCFunc _ _ _ code _ _)) = isLoadBalanced code
 isLoadBalanced _                 = True
+
+
+segBinOpComm' :: [SegBinOp lore] -> Commutativity
+segBinOpComm' = mconcat . map segBinOpComm
+
+decideScheduling' :: SegOp () lore -> Imp.Code -> Imp.Scheduling
+decideScheduling' SegHist{} _ = Imp.Static
+decideScheduling' SegScan{} _ = Imp.Static
+decideScheduling' (SegRed _ _ reds _ _) code =
+  case segBinOpComm' reds of
+    Commutative -> decideScheduling code
+    Noncommutative ->  Imp.Static
+decideScheduling' SegMap{} code = decideScheduling code
 
 
 decideScheduling :: Imp.Code -> Imp.Scheduling

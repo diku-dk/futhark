@@ -274,7 +274,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
     let scheduler_info = Imp.SchedulerInfo nsubtasks_red (segFlat space) iterations Imp.Static
     free_params_red <- freeParams red_code ([segFlat space, nsubtasks_red] ++ retval_names )
-    emit $ Imp.Op $ Imp.Task free_params_red red_code Nothing  retval_params scheduler_info
+    emit $ Imp.Op $ Imp.Task "seghist_red" free_params_red red_code Nothing  retval_params scheduler_info
 
    where segment_dims = init $ unSegSpace space
 

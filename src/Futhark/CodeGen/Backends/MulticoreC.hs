@@ -444,7 +444,7 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
 
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Task params seq_code par_code retvals (SchedulerInfo nsubtask tid e sched)) = do
+compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask tid e sched)) = do
 
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
@@ -464,7 +464,7 @@ compileOp (Task params seq_code par_code retvals (SchedulerInfo nsubtask tid e s
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
 
-  fpar_task <- generateFunction lexical_par "par_task" seq_code fstruct free retval tid nsubtask
+  fpar_task <- generateFunction lexical_par (name ++ "_par_task") seq_code fstruct free retval tid nsubtask
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
@@ -475,7 +475,9 @@ compileOp (Task params seq_code par_code retvals (SchedulerInfo nsubtask tid e s
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
+  GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
+
   case sched of
     Dynamic _ -> GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
     Static    -> GC.stm  [C.cstm|$id:ftask_name.sched = STATIC;|]
@@ -484,6 +486,7 @@ compileOp (Task params seq_code par_code retvals (SchedulerInfo nsubtask tid e s
         Just code -> do
           let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
           fnpar_task <- generateFunction lexical_npar "nested_par_task" code fstruct free retval tid nsubtask
+          fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") code fstruct free retval tid nsubtask
           GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
           return $ zip [fnpar_task]  [True]
         Nothing -> do

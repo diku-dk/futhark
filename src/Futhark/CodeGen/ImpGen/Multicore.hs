@@ -67,8 +67,9 @@ compileMCOp pat (ParOp _par_op op) = do
   --       Just _ -> Just par_code
   --       Nothing -> Nothing
 
+  s <- segOpString op
   free_params <- freeParams seq_code ([segFlat space, nsubtasks] ++ map Imp.paramName retvals)
-  emit $ Imp.Op $ Imp.Task free_params seq_code Nothing retvals $ scheduling_info (decideScheduling seq_code)
+  emit $ Imp.Op $ Imp.Task s free_params seq_code Nothing retvals $ scheduling_info (decideScheduling' op seq_code)
 
 
 compileSegOp :: Pattern MCMem

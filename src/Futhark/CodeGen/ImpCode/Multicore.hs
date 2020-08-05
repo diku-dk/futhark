@@ -27,7 +27,7 @@ type Code = Imp.Code Multicore
 
 
 -- | A multicore operation.
-data Multicore = Task [Param] Code (Maybe Code) [Param] SchedulerInfo
+data Multicore = Task String [Param] Code (Maybe Code) [Param] SchedulerInfo
                | MCFunc String VName Code Code [Param] VName
                | MulticoreCall (Maybe VName) String
                | Atomic AtomicOp
@@ -60,6 +60,7 @@ data SchedulerInfo = SchedulerInfo
   , flatTid    :: VName -- The variable for the tid execution the code
   , iterations :: Imp.Exp -- The number of total iterations for a task
   , scheduling :: Scheduling -- The type scheduling that the task can be performed as
+  -- , nested     :: Int        --
   }
 
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic
@@ -74,7 +75,7 @@ instance Pretty Scheduling where
   ppr Static =
     text "Static"
 
-
+-- TODO fix all of this!
 instance Pretty SchedulerInfo where
   ppr (SchedulerInfo nsubtask _ i sched) =
     text "SchedulingInfo" <+>
@@ -83,7 +84,7 @@ instance Pretty SchedulerInfo where
     text "iter" <+> ppr i
 
 instance Pretty Multicore where
-  ppr (Task free par_code seq_code retval scheduler) =
+  ppr (Task s free par_code seq_code retval scheduler) =
     text "parfor" <+>
     ppr scheduler <+>
     ppr free <+>
@@ -109,7 +110,7 @@ instance FreeIn SchedulerInfo where
     freeIn' iter <> freeIn' nsubtask
 
 instance FreeIn Multicore where
-  freeIn' (Task _ par_code seq_code _ info) =
+  freeIn' (Task _ _ par_code seq_code _ info) =
     freeIn' par_code <> freeIn' seq_code  <> freeIn' info
   freeIn' (MCFunc _  _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
