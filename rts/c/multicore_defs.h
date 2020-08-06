@@ -30,10 +30,9 @@ static long int ran_iter, start_iter = 0;
 #endif
 
 static int scheduler_error = 0;
-static volatile int stealing;
+float kappa = 10.0;
 
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
-
 
 enum scheduling {
   DYNAMIC,
@@ -52,13 +51,12 @@ struct subtask {
   long int iterations;
   int stolen_from;
   int id;
-  int been_stolen;
 
   // Shared variables across subtasks
   volatile int *counter; // Counter for ongoing subtasks
-  pthread_mutex_t *mutex;
-  pthread_cond_t *cond;
+  int64_t *timing;
 };
+
 
 
 struct scheduler {
@@ -72,7 +70,7 @@ struct scheduler_info {
   int nsubtasks;
   enum scheduling sched;
 
-
+  int64_t *timing;
 };
 
 
@@ -106,32 +104,9 @@ struct scheduler_task {
   enum scheduling sched;
   int min_cost;
 
-  int64_t total_time;
-  int64_t total_iterations;
+  int64_t *timing;
+
 };
-
-
-
-struct subtask_queue {
-  int capacity; // Size of the buffer.
-  int first; // Index of the start of the ring buffer.
-  int num_used; // Number of used elements in the buffer.
-  struct subtask **buffer;
-
-  pthread_mutex_t mutex; // Mutex used for synchronisation.
-  pthread_cond_t cond;   // Condition variable used for synchronisation.
-  int dead;
-
-
-  int initialized;
-
-  /* Profiling fields */
-  uint64_t time_enqueue;
-  uint64_t time_dequeue;
-  uint64_t n_dequeues;
-  uint64_t n_enqueues;
-};
-
 
 struct worker {
   pthread_t thread;
@@ -232,7 +207,57 @@ static inline int fast_rand(void) {
     return (g_seed>>16)&0x7FFF;
 }
 
+int64_t pick_bits(int lsb, int sz, int64_t value) {
+    uint64_t v = value;
+    v >>= lsb;
+    if (sz < 64) {
+        uint64_t mask = 1;
+        mask <<= sz;
+        mask -= 1;
+        v &= mask;
+    }
+    return v;
+}
+
+int64_t put_bits(int lsb, int size, int64_t val) {
+  int32_t masked = pick_bits(0, size, val);
+  return masked << lsb;
+}
+
+int64_t pack_vals (float C, int32_t nmax)
+{
+  int64_t nmax_64_shifted = (int64_t) nmax << 32;
+  return nmax_64_shifted | (int32_t)C;
+}
+
+float get_C (int64_t val) {
+  return (float)pick_bits(0, 32, val);
+}
+int32_t get_nmax (int64_t val) {
+  return (int32_t)pick_bits(32, 32, val);
+}
+
 #endif
 
 
 // end of multicore_defs.h
+
+/* struct subtask_queue { */
+/*   int capacity; // Size of the buffer. */
+/*   int first; // Index of the start of the ring buffer. */
+/*   int num_used; // Number of used elements in the buffer. */
+/*   struct subtask **buffer; */
+
+/*   pthread_mutex_t mutex; // Mutex used for synchronisation. */
+/*   pthread_cond_t cond;   // Condition variable used for synchronisation. */
+/*   int dead; */
+
+
+/*   int initialized; */
+
+/*   /\* Profiling fields *\/ */
+/*   uint64_t time_enqueue; */
+/*   uint64_t time_dequeue; */
+/*   uint64_t n_dequeues; */
+/*   uint64_t n_enqueues; */
+/* }; */

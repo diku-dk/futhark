@@ -321,11 +321,11 @@ multiCoreReport names = report_kernels
         format_string name True =
           let name_s = nameToString name
               padding = replicate (max_name_len_pad - length name_s) ' '
-          in unwords ["tid %2d -", name_s ++ padding, "ran %7d times; avg: %10ldus; total: %10ldus; iterations %9ld; avg %ld\n"]
+          in unwords ["tid %2d -", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %4.4f; iters %9ld; avg %ld\n"]
         format_string name False =
           let name_s = nameToString name
               padding = replicate (max_name_len_pad - length name_s) ' '
-          in unwords ["", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %f; iters %9ld; avg iter %ld\n"]
+          in unwords ["        ", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %4.4f; iters %9ld; avg iter %ld\n"]
         reportKernel (name, is_array) =
           let runs = functionRuns name
               total_runtime = functionRuntime name
@@ -339,6 +339,7 @@ multiCoreReport names = report_kernels
                          ctx->$id:runs[i],
                          (long int) ctx->$id:total_runtime[i] / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1),
                          (long int) ctx->$id:total_runtime[i],
+                         (double) ctx->$id:total_runtime[i] /  (ctx->$id:iters[i] == 0 ? 1 : (double)ctx->$id:iters[i]),
                          (long int) (ctx->$id:iters[i]),
                          (long int) (ctx->$id:iters[i]) / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1)
                          );
@@ -352,7 +353,7 @@ multiCoreReport names = report_kernels
                        ctx->$id:runs,
                        (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
                        (long int) ctx->$id:total_runtime,
-                       (double) ctx->$id:total_runtime /(double)ctx->$id:iters,
+                       (double) ctx->$id:total_runtime /  (ctx->$id:iters == 0 ? 1 : (double)ctx->$id:iters),
                        (long int) (ctx->$id:iters),
                        (long int) (ctx->$id:iters) / (ctx->$id:runs != 0 ? ctx->$id:runs : 1));
                    |],
@@ -375,19 +376,16 @@ benchmarkCode :: Name -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.Bl
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
   return [C.citems|
-
      typename uint64_t $id:start;
-     if (ctx->$id:(functionIter name) < 10000) {
+     if (ctx->profiling && !ctx->profiling_paused) {
        $id:start = get_wall_time();
      }
      $items:code
-
-     if (ctx->$id:(functionIter name) < 10000) {
+     if (ctx->profiling && !ctx->profiling_paused) {
        typename uint64_t $id:end = get_wall_time();
        typename uint64_t elapsed = $id:end - $id:start;
        $items:(updateFields tid)
      }
-
      |]
 
   where start = name <> "_start"
@@ -398,6 +396,12 @@ benchmarkCode name tid code = do
         updateFields (Just tid') = [C.citems|ctx->$id:(functionRuns name)[$id:tid']++;
                                             ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;
                                             ctx->$id:(functionIter name)[$id:tid'] += iterations;|]
+functionTiming :: Name -> C.Id
+functionTiming = (`C.toIdent` mempty) . (<>"_timing")
+
+addTimingFields :: Name -> GC.CompilerM op s ()
+addTimingFields name =
+  GC.contextField (functionTiming name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
 
 multicoreName :: String -> GC.CompilerM op s Name
@@ -424,7 +428,7 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreFunDef basename $ \s -> do
-    fbody <- benchmarkCode s Nothing <=< GC.inNewFunction False $
+    fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction False $
              GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do
       mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
@@ -467,6 +471,7 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
                      };|]
 
   fpar_task <- generateFunction lexical_par (name ++ "_par_task") seq_code fstruct free retval tid nsubtask
+  addTimingFields fpar_task
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
   GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
@@ -479,8 +484,7 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
   GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  GC.stm  [C.cstm|$id:ftask_name.total_time = ctx->$id:(functionRuntime fpar_task);|]
-  GC.stm  [C.cstm|$id:ftask_name.total_iterations = ctx->$id:(functionIter fpar_task);|]
+  GC.stm  [C.cstm|$id:ftask_name.timing = &ctx->$id:(functionTiming fpar_task);|]
 
   case sched of
     Dynamic n -> do GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
@@ -493,19 +497,19 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
           let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
           fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") code fstruct free retval tid nsubtask
           GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
-          return $ zip [fnpar_task] [False]
+          return $ zip [fnpar_task] [True]
         Nothing -> do
           GC.stm [C.cstm|$id:ftask_name.par_fn=NULL;|]
           return mempty
 
   let ftask_err = fpar_task <> "_err"
-  let code' = [C.citems|int $id:ftask_err = scheduler_do_task(&ctx->scheduler, &$id:ftask_name);
+  let code' = [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                         if ($id:ftask_err != 0) {
                           futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                         }|]
 
   mapM_ GC.item code'
-  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, False) : fnpar_task
+  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
 
 
 
@@ -522,7 +526,8 @@ compileOp (MCFunc s' i prebody body free tid) = do
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                      };|]
   ftask <- multicoreFunDef s' $ \s -> do
-    fbody <- GC.inNewFunction False $ GC.cachingMemory lexical $
+    fbody <- benchmarkCode s (Just tid) <=<
+             GC.inNewFunction False $ GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do
       mapM_ GC.item
         [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
@@ -560,12 +565,15 @@ compileOp (MCFunc s' i prebody body free tid) = do
   GC.stm  [C.cstm|$id:ftask_name.info = info;|]
 
   let ftask_err = ftask <> "_err"
-  let code' = [C.citems|int $id:ftask_err = scheduler_execute(&ctx->scheduler, &$id:ftask_name);
+  code' <- benchmarkCode ftask_name Nothing
+    [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler, &$id:ftask_name);
               if ($id:ftask_err != 0) {
                 futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
               }|]
 
   mapM_ GC.item code'
+  mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_name] [True, False]
+
 compileOp (MulticoreCall Nothing f) =
   GC.stm [C.cstm|$id:f(ctx);|]
 

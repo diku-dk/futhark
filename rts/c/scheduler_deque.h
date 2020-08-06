@@ -28,6 +28,59 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
   return i;
 }
 
+static inline int is_small(struct scheduler_task *task)
+{
+  if (task->sched == DYNAMIC) return 0;
+  int64_t timing = *task->timing;
+  float C = get_C(timing);
+  int32_t nmax = get_nmax(timing);
+  int32_t n = task->iterations;
+  if (n <= nmax) return 1;
+  if (nmax > 0 && C * (float)n < kappa) return 1;
+
+  return 0;
+}
+
+static inline int run_subtask(struct worker* worker, struct subtask* subtask)
+{
+  assert(subtask != NULL);
+  assert(worker != NULL);
+  int64_t start = get_wall_time();
+  int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->chunkable ? worker->tid : subtask->id);
+  if (err != 0)
+    return err;
+  __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
+
+  int64_t end = get_wall_time();
+  int64_t time_elapsed = end - start;
+  worker->time_spent_working += time_elapsed;
+  int32_t iter = subtask->end - subtask->start;
+
+  // Do you need atomic load here???
+  int64_t timing = __atomic_load_n(subtask->timing, __ATOMIC_RELAXED);
+  float C = get_C(timing);
+  int32_t nmax  = get_nmax(timing);
+
+  // atomically update
+  if ((float)time_elapsed < kappa && iter > nmax) {
+    float new_C = time_elapsed / iter;
+    int32_t new_nmax = iter;
+    int update_done = 0;
+    while (!update_done && new_nmax > nmax) {
+      int64_t new_timing = pack_vals(new_C, new_nmax);
+      if (__atomic_compare_exchange_n(subtask->timing, &timing, new_timing, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
+        update_done = 1;
+      } else {
+        nmax = get_nmax(timing);
+      }
+    }
+  }
+  free(subtask);
+
+  return 0;
+}
+
+
 static inline struct subtask* split(struct worker* worker, struct subtask *subtask)
 {
   int remaining_iter = subtask->end - subtask->start;
@@ -67,11 +120,10 @@ void acquire (struct worker *worker)
     } else {
       assert(subtask != NULL);
       // Split subtask into two (if dynamic)
-      if (subtask->chunkable) {
-        subtask->iterations = 1;
+      if (subtask->chunkable && subtask->iterations > 1) {
+        subtask->iterations = 100;
       }
       struct subtask* subtask_new = split(worker, subtask);
-      subtask_new->been_stolen = 1;
       push_back(&worker->q, subtask_new);
       return;
     }
@@ -89,21 +141,14 @@ static inline void *scheduler_worker(void* arg)
       if (subtask == NULL) {
         continue;
       }
-
       struct subtask* subtask_new = split(worker, subtask);
-
-      int64_t start = get_wall_time();
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->chunkable ? worker->tid : subtask->id);
-      int64_t end = get_wall_time();
-      worker->time_spent_working += end - start;
+      int err = run_subtask(worker,subtask_new);
       /* Only one error can be returned at the time now
          Maybe we can provide a stack like structure for pushing errors onto
          if we wish to backpropagte multiple errors */
       if (err != 0) {
         scheduler_error = err;
       }
-      __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
-      free(subtask);
     } else if (__atomic_load_n(&num_workers, __ATOMIC_RELAXED) == 1) {
       break;
     } else { // steal
@@ -119,37 +164,37 @@ static inline void *scheduler_worker(void* arg)
 }
 
 
-static inline int scheduler_parallel(struct scheduler *scheduler,
-                                     struct scheduler_subtask *task)
+static inline int scheduler_execute_parallel(struct scheduler *scheduler,
+                                             struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_parallel] Performing scheduling with scheduling %s\n", info.sched == STATIC ? "STATIC" : "DYNAMIC");
 #endif
 
   struct worker * worker = worker_local;
-  pthread_mutex_t mutex;
-  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
-  pthread_cond_t cond;
-  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
 
   struct scheduler_info info = task->info;
   int iter_pr_subtask = info.iter_pr_subtask;
   int remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
+  int64_t *timing = info.timing;
   enum scheduling sched = info.sched;
 
   volatile int shared_counter = nsubtasks;
 
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
+  int iter = 100;
 
   int start = 0;
   int subtask_id = 0;
   int end = iter_pr_subtask + (int)(remainder != 0);
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
-                                            &mutex, &cond, &shared_counter,
-                                            start, end, chunkable, subtask_id);
+                                            &shared_counter,
+                                            timing,
+                                            start, end,
+                                            chunkable, iter, subtask_id);
     assert(subtask != NULL);
     push_back(&scheduler->workers[worker->tid].q, subtask);
 #ifdef MCDEBUG
@@ -167,18 +212,11 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
         // Do work
         assert(subtask->fn != NULL);
         assert(subtask->args != NULL);
-
         struct subtask* subtask_new  = split(worker, subtask);
-        int64_t start = get_wall_time();
-        /* fprintf(stderr, "number of time stolen %d\n", subtask->been_stolen); */
-        int err = subtask_new->fn(subtask_new->args, subtask_new->start, subtask_new->end, subtask->chunkable ? worker->tid : subtask_new->id);
-        int64_t end = get_wall_time();
-        worker->time_spent_working += end - start;
+        int err = run_subtask(worker, subtask_new);
         if (err != 0) {
           return err;
         }
-        __atomic_fetch_sub(subtask_new->counter, 1, __ATOMIC_RELAXED);
-        free(subtask_new);
       }
     } else {
       struct scheduler* scheduler = worker->scheduler;
@@ -200,7 +238,6 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
           assert(subtask != NULL);
           // Split subtask into two (if dynamic)
           struct subtask* subtask_new = split(worker, subtask);
-          subtask_new->been_stolen = 1;
           push_back(&worker->q, subtask_new);
         }
       }
@@ -210,9 +247,8 @@ static inline int scheduler_parallel(struct scheduler *scheduler,
 }
 
 
-
-static inline int scheduler_execute(struct scheduler *scheduler,
-                                    struct scheduler_subtask *task)
+static inline int scheduler_execute_task(struct scheduler *scheduler,
+                                         struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_execute] starting task %s with %ld iterations \n", task->name, task->iterations);
@@ -228,17 +264,41 @@ static inline int scheduler_execute(struct scheduler *scheduler,
     int64_t start = get_wall_time();
     int err = task->fn(task->args, 0, task->iterations, 0);
     int64_t end = get_wall_time();
-    worker_local->time_spent_working += end - start;
+    int64_t time_elapsed = end - start;
+    worker_local->time_spent_working += time_elapsed;
+    // Do you need atomic load here???
+    int64_t timing = __atomic_load_n(task->info.timing, __ATOMIC_RELAXED);
+    float C = get_C(timing);
+    int32_t nmax  = get_nmax(timing);
+    int32_t iter = task->iterations;
+
+    // atomically update
+    if ((float)time_elapsed < kappa && iter > nmax) {
+      float new_C = (float)time_elapsed / iter;
+      int32_t new_nmax = iter;
+      int update_done = 0;
+      while (!update_done && new_nmax > nmax) {
+        int64_t new_timing = pack_vals(new_C, new_nmax);
+        if (__atomic_compare_exchange_n(task->info.timing, &timing, new_timing, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
+          update_done = 1;
+        } else {
+          nmax = get_nmax(timing);
+        }
+      }
+    }
     return err;
   }
 
-  return scheduler_parallel(scheduler, task);
+  free_workers -= task->info.nsubtasks;
+  int err = scheduler_execute_parallel(scheduler, task);
+  free_workers += task->info.nsubtasks;
+  return err;
 }
 
 /* Decide on how schedule the incoming task i.e. how many subtasks and
    to run sequential or (potentially nested) parallel code body */
-static inline int scheduler_do_task(struct scheduler* scheduler,
-                                    struct scheduler_task *task)
+static inline int scheduler_prepare_task(struct scheduler* scheduler,
+                                         struct scheduler_task *task)
 {
   assert(task != NULL);
 #ifdef MCDEBUG
@@ -246,21 +306,15 @@ static inline int scheduler_do_task(struct scheduler* scheduler,
 #endif
 
   struct scheduler_info info;
+  info.timing = task->timing;
 
   // Decide if task should be scheduled sequentially
-  if (task->total_iterations > 0 && task->sched != DYNAMIC) {
-    double avg = (double)task->total_time / (double)task->total_iterations;
-    double kappa = 10;
-
-    /* fprintf(stderr, "task %s has %f with avg %f and iter %lld \n", task->name, (double)task->iterations *avg, avg, task->iterations); */
-    if (((double)task->iterations * avg) < kappa) {
-      info.iter_pr_subtask = task->iterations;
-      info.remainder = 0;
-      info.nsubtasks = 1;
-      return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
-    }
+  if (is_small(task) || free_workers <= 0) {
+    info.iter_pr_subtask = task->iterations;
+    info.remainder = 0;
+    info.nsubtasks = 1;
+    return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
   }
-
 
   int max_num_tasks = scheduler->num_threads;
   switch (task->sched) {

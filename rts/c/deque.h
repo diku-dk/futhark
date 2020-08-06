@@ -12,7 +12,7 @@ static struct subtask* const STEAL_RES_DEAD  = (struct subtask*) 2;
 
 static const int mem_model = __ATOMIC_SEQ_CST;
 static const int strong = 0;
-static const int backoff_nb_cycles = 1l << 10;
+static const int backoff_nb_cycles = 1l << 17;
 
 
 
@@ -43,9 +43,9 @@ static inline void cb_put (struct subtask **buf, int64_t capacity, int64_t i, st
   __atomic_store_n(&buf[i % capacity], x, __ATOMIC_RELAXED);
 }
 
-static inline int stealable(struct subtask **buf, int64_t capacity, int64_t i) {
-  return __atomic_load_n(&buf[i % capacity]->been_stolen, __ATOMIC_RELAXED);
-}
+/* static inline int been_stolen(struct subtask **buf, int64_t capacity, int64_t i) { */
+/*   return __atomic_load_n(&buf[i % capacity]->been_stolen, __ATOMIC_RELAXED); */
+/* } */
 
 
 struct subtask ** grow(struct subtask **old_buf,
@@ -149,6 +149,10 @@ static inline struct subtask* steal(struct deque *q)
     return STEAL_RES_EMPTY;
   }
 
+  /* if (been_stolen(q->buffer,__atomic_load_n(&q->size, __ATOMIC_RELAXED),t)) { */
+  /*   return STEAL_RES_ABORT; */
+  /* } */
+
   struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, __ATOMIC_RELAXED), t);
 
   if (!cas_top(q, t, t + 1)) {
@@ -160,39 +164,42 @@ static inline struct subtask* steal(struct deque *q)
 
 
 
-static inline size_t nb_threads(struct deque *q) {
+static inline size_t nb_threads(struct deque *q)
+{
   return (size_t)__atomic_load_n(&q->bottom, __ATOMIC_RELAXED) - __atomic_load_n(&q->top, __ATOMIC_RELAXED);
 }
 
-static inline int empty(struct deque *q) {
+static inline int empty(struct deque *q)
+{
   return nb_threads(q) < 1;
 }
 
 static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             void* args,
                                             const char* name,
-                                            pthread_mutex_t *mutex,
-                                            pthread_cond_t *cond,
                                             volatile int* counter,
+                                            int64_t *timing,
                                             int start, int end,
-                                            int chunk, int id)
+                                            int chunk,
+                                            int iterations,
+                                            int id)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
     assert(!"malloc failed in setup_subtask");
     return  NULL;
   }
-  subtask->fn      = fn;
-  subtask->args    = args;
-  subtask->name    = name;
-  subtask->mutex   = mutex;
-  subtask->cond    = cond;
-  subtask->counter = counter;
-  subtask->start   = start;
-  subtask->end     = end;
-  subtask->chunkable   = chunk;
-  subtask->iterations = 1;
-  subtask->id      = id;
-  subtask->been_stolen = 0;
+  subtask->fn         = fn;
+  subtask->args       = args;
+  subtask->name       = name;
+
+  subtask->counter    = counter;
+  subtask->timing     = timing;
+
+  subtask->start      = start;
+  subtask->end        = end;
+  subtask->chunkable  = chunk;
+  subtask->iterations = iterations;
+  subtask->id         = id;
   return subtask;
 }
