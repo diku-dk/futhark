@@ -12,7 +12,6 @@ module Futhark.Internalise.AccurateSizes
 import Control.Monad
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 
 import Futhark.Construct
 import Futhark.Internalise.Monad
@@ -21,7 +20,7 @@ import Futhark.Util (takeLast)
 
 shapeMapping :: HasScope SOACS m =>
                 [FParam] -> [Type]
-             -> m (M.Map VName (S.Set SubExp))
+             -> m (M.Map VName SubExp)
 shapeMapping all_params value_arg_types =
   mconcat <$> zipWithM f value_params value_arg_types
   where value_params = takeLast (length value_arg_types) all_params
@@ -31,7 +30,7 @@ shapeMapping all_params value_arg_types =
         f _ _ =
           pure mempty
 
-        match (Var v, se) = Just (v, S.singleton se)
+        match (Var v, se) = Just (v, se)
         match _ = Nothing
 
 argShapes :: (HasScope SOACS m, Monad m) =>
@@ -40,7 +39,7 @@ argShapes shapes all_params valargts = do
   mapping <- shapeMapping all_params valargts
   let addShape name =
         case M.lookup name mapping of
-          Just s | se:_ <- S.toList s -> se
+          Just se -> se
           _ -> error $ "argShapes: no mapping for " ++ pretty name
   return $ map addShape shapes
 
