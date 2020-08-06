@@ -1716,17 +1716,13 @@ funcall desc (QualName _ fname) args loc = do
   (fname', closure, shapes, value_paramts, fun_params, rettype_fun) <-
     lookupFunction fname
   argts <- mapM subExpType args
-  closure_ts <- mapM lookupType closure
 
   shapeargs <- argShapes shapes fun_params argts
   let diets = replicate (length closure + length shapeargs) I.ObservePrim ++
               map I.diet value_paramts
-      constOrShape = const $ I.Prim int32
-      paramts = closure_ts ++
-                map constOrShape shapeargs ++ map I.fromDecl value_paramts
   args' <- ensureArgShapes "function arguments of wrong shape"
            loc (map I.paramName fun_params)
-           paramts (map I.Var closure ++ shapeargs ++ args)
+           (map I.paramType fun_params) (map I.Var closure ++ shapeargs ++ args)
   argts' <- mapM subExpType args'
   case rettype_fun $ zip args' argts' of
     Nothing -> error $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
