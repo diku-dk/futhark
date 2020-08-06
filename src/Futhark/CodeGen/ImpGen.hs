@@ -44,6 +44,7 @@ module Futhark.CodeGen.ImpGen
   , lookupVar
   , lookupArray
   , lookupMemory
+  , lookupAcc
 
     -- * Building Blocks
   , ToExp(..)
@@ -63,6 +64,7 @@ module Futhark.CodeGen.ImpGen
   , copyDWIMFix
   , copyElementWise
   , typeSize
+  , inBounds
 
   -- * Constructing code.
   , dLParams
@@ -821,27 +823,24 @@ defCompileBasicOp _ UnAcc{} =
   return ()
 
 defCompileBasicOp _ (UpdateAcc acc is vs) = do
-  acc_t <- lookupType acc
   is' <- mapM (fmap DimFix . toExp) is
 
   -- We need to figure out whether we are updating a scatter-like
   -- accumulator or a generalised reduction.
-  let arrs = accArrs acc_t
-  op <- gets $ M.lookup arrs . stateAccs
+  (arrs, dims, op) <- lookupAcc acc
 
-  case op of
-    Nothing ->
-      -- Scatter-like.
-      forM_ (zip arrs vs) $ \(arr, v) -> copyDWIM arr is' v []
-    Just (lam, _) ->
-      -- Generalised reduction.
-      --
-      -- We are abusing the comment mechanism to wrap the operator in
-      -- braces when we end up generating code.  This is necessary
-      -- because we might otherwise end up declaring these parameters
-      -- multiple times, as they are duplicated every time we do an
-      -- UpdateAcc for the same accumulator.
-      sComment "UpdateAcc" $ do
+  -- We are abusing the comment mechanism to wrap the operator in
+  -- braces when we end up generating code.  This is necessary because
+  -- we might otherwise end up declaring lambda parameters (if any) multiple
+  -- times, as they are duplicated every time we do an UpdateAcc for
+  -- the same accumulator.
+  sWhen (inBounds is' dims) $ sComment "UpdateAcc" $ do
+    case op of
+      Nothing ->
+        -- Scatter-like.
+        forM_ (zip arrs vs) $ \(arr, v) -> copyDWIM arr is' v []
+      Just (lam, _) -> do
+        -- Generalised reduction.
         dLParams $ lambdaParams lam
         let (x_params, y_params) =
               splitAt (length vs) $ map paramName $ lambdaParams lam
@@ -855,10 +854,6 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = do
         compileStms mempty (bodyStms $ lambdaBody lam) $
           forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
           copyDWIM arr is' se []
-
-  where accArrs (Acc arrs) = arrs
-        accArrs (Array (ElemAcc arrs) _ _) = arrs
-        accArrs t = error $ unwords ["accArrs:", pretty acc, pretty t]
 
 defCompileBasicOp pat e =
   error $ "ImpGen.defCompileBasicOp: Invalid pattern\n  " ++
@@ -1094,6 +1089,17 @@ lookupMemory name = do
   case res of
     MemVar _ entry -> return entry
     _              -> error $ "Unknown memory block: " ++ pretty name
+
+lookupAcc :: VName -> ImpM lore r op ([VName],
+                                      [Imp.Exp],
+                                      Maybe (Lambda lore, [SubExp]))
+lookupAcc name = do
+  res <- lookupVar name
+  case res of
+    AccVar _ arrs _ -> do op <- gets $ M.lookup arrs . stateAccs
+                          ds <- mapM toExp . arrayDims =<< lookupType (head arrs)
+                          return (arrs, ds, op)
+    _               -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
 destinationFromPattern :: Mem lore => Pattern lore -> ImpM lore r op Destination
 destinationFromPattern pat =
@@ -1357,6 +1363,17 @@ typeSize t =
   where elem_size = case elemType t of
                       ElemPrim t' -> Imp.LeafExp (Imp.SizeOf t') int32
                       ElemAcc{} -> 0
+
+-- | Is this indexing in-bounds for an array of the given shape?  This
+-- is useful for things like scatter, which ignores out-of-bounds
+-- writes.
+inBounds :: Slice Imp.Exp -> [Imp.Exp] -> Imp.Exp
+inBounds slice dims =
+  let condInBounds (DimFix i) d =
+        0 .<=. i .&&. i .<. d
+      condInBounds (DimSlice i n s) d =
+        0 .<=. i .&&. i+n*s .<. d
+  in foldl1 (.&&.) $ zipWith condInBounds slice dims
 
 --- Building blocks for constructing code.
 

@@ -138,7 +138,40 @@ splitSpace (Pattern [] [size]) o w i elems_per_thread = do
 splitSpace pat _ _ _ _ =
   error $ "Invalid target for splitSpace: " ++ pretty pat
 
+updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
+updateAcc acc is vs = do
+  is' <- mapM toExp is
+
+  -- We need to figure out whether we are updating a scatter-like
+  -- accumulator or a generalised reduction.
+  (arrs, dims, op) <- lookupAcc acc
+
+  sWhen (inBounds (map DimFix is') dims) $ sComment "UpdateAcc" $ do
+    case op of
+      Nothing ->
+        -- Scatter-like, so no need for synchronisation.
+        forM_ (zip arrs vs) $ \(arr, v) -> copyDWIM arr (map DimFix is') v []
+      Just (lam, _) -> do
+        -- Generalised reduction.
+
+        dLParams $ lambdaParams lam
+
+        let (_x_params, y_params) =
+              splitAt (length vs) $ map paramName $ lambdaParams lam
+
+        forM_ (zip y_params vs) $ \(yp, v) ->
+          copyDWIM yp [] v []
+
+        atomicBinOp <- kernelAtomics <$> askEnv
+
+        case atomicUpdateLocking atomicBinOp lam of
+          AtomicPrim f -> f DefaultSpace arrs is'
+          AtomicCAS f -> f DefaultSpace arrs is'
+          _ -> error $ "UpdateAcc cannot handle operator: " ++ pretty lam
+
 compileThreadExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
+compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
+  updateAcc acc is vs
 compileThreadExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
@@ -186,6 +219,9 @@ compileGroupExp :: ExpCompiler KernelsMem KernelEnv Imp.KernelOp
 compileGroupExp (Pattern _ [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIMFix (patElemName dest) [fromIntegral (i::Int32)] e []
+compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) = do
+  updateAcc acc is vs
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp (Pattern _ [dest]) (BasicOp (Replicate ds se)) = do
   ds' <- mapM toExp $ shapeDims ds
   groupCoverSpace ds' $ \is ->
@@ -1495,12 +1531,7 @@ compileThreadResult _ pe (WriteReturns rws _arr dests) = do
   rws' <- mapM toExp rws
   forM_ dests $ \(slice, e) -> do
     slice' <- mapM (traverse toExp) slice
-    let condInBounds (DimFix i) rw =
-          0 .<=. i .&&. i .<. rw
-        condInBounds (DimSlice i n s) rw =
-          0 .<=. i .&&. i+n*s .<. rw
-        write = foldl (.&&.) (kernelThreadActive constants) $
-                zipWith condInBounds slice' rws'
+    let write = kernelThreadActive constants .&&. inBounds slice' rws'
     sWhen write $ copyDWIM (patElemName pe) slice' e []
 
 compileThreadResult _ _ TileReturns{} =
