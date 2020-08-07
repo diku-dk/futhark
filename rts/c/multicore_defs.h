@@ -32,7 +32,7 @@ static long int ran_iter, start_iter = 0;
 static int scheduler_error = 0;
 float kappa = 5.f;
 
-typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
+typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id, int tid);
 
 enum scheduling {
   DYNAMIC,

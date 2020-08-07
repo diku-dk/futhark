@@ -59,7 +59,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   assert(subtask != NULL);
   assert(worker != NULL);
   int64_t start = get_wall_time();
-  int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->chunkable ? worker->tid : subtask->id);
+  int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->chunkable ? worker->tid : subtask->id, worker->tid);
   if (err != 0)
     return err;
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
@@ -259,7 +259,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 
   if (task->info.nsubtasks == 1) {
     int64_t start = get_wall_time();
-    int err = task->fn(task->args, 0, task->iterations, 0);
+    int err = task->fn(task->args, 0, task->iterations, 0, worker_local->tid);
     int64_t end = get_wall_time();
     int64_t time_elapsed = end - start;
     worker_local->time_spent_working += time_elapsed;

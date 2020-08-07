@@ -393,9 +393,9 @@ benchmarkCode name tid code = do
         updateFields Nothing    = [C.citems|__atomic_fetch_add(&ctx->$id:(functionRuns name), 1, __ATOMIC_RELAXED);
                                             __atomic_fetch_add(&ctx->$id:(functionRuntime name), elapsed, __ATOMIC_RELAXED);
                                             __atomic_fetch_add(&ctx->$id:(functionIter name), iterations, __ATOMIC_RELAXED);|]
-        updateFields (Just tid') = [C.citems|ctx->$id:(functionRuns name)[$id:tid']++;
-                                            ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;
-                                            ctx->$id:(functionIter name)[$id:tid'] += iterations;|]
+        updateFields (Just _tid') = [C.citems|ctx->$id:(functionRuns name)[tid]++;
+                                            ctx->$id:(functionRuntime name)[tid] += elapsed;
+                                            ctx->$id:(functionIter name)[tid] += iterations;|]
 functionTiming :: Name -> C.Id
 functionTiming = (`C.toIdent` mempty) . (<>"_total_time")
 
@@ -442,8 +442,9 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
       code' <- GC.blockScope $ GC.compileCode code
       mapM_ GC.item [C.citems|$items:code'|]
       mapM_ GC.stm free_cached
-    return [C.cedecl|int $id:s(void *args, int iterations, int $id:tid, struct scheduler_info info) {
+    return [C.cedecl|int $id:s(void *args, int iterations, int tid, struct scheduler_info info) {
                            int err = 0;
+                           int $id:tid = tid;
                            int $id:ntasks = info.nsubtasks;
                            struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                            struct futhark_context *ctx = $id:fstruct->ctx;
@@ -550,7 +551,7 @@ compileOp (MCFunc s' i prebody body free tid) = do
       GC.stm [C.cstm|cleanup: {}|]
       mapM_ GC.stm free_cached
 
-    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid) {
+    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid, int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
@@ -571,14 +572,15 @@ compileOp (MCFunc s' i prebody body free tid) = do
   GC.stm  [C.cstm|$id:ftask_name.info = info;|]
 
   let ftask_err = ftask <> "_err"
-  code' <- benchmarkCode ftask_name Nothing
+      ftask_total = ftask <> "_total"
+  code' <- benchmarkCode ftask_total Nothing
     [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler, &$id:ftask_name);
               if ($id:ftask_err != 0) {
                 futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
               }|]
 
   mapM_ GC.item code'
-  mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_name] [True, False]
+  mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
 
 compileOp (MulticoreCall Nothing f) =
   GC.stm [C.cstm|$id:f(ctx);|]
