@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpCode.Multicore
        , Scheduling(..)
        , SchedulerInfo(..)
        , AtomicOp(..)
+       , Time(..)
        , module Futhark.CodeGen.ImpCode
        )
        where
@@ -25,6 +26,8 @@ type Function = Imp.Function Multicore
 -- | A piece of imperative code, with multicore operations inside.
 type Code = Imp.Code Multicore
 
+
+data Time = NoTime | Time
 
 -- | A multicore operation.
 data Multicore = Task String [Param] Code (Maybe Code) [Param] SchedulerInfo
@@ -60,7 +63,6 @@ data SchedulerInfo = SchedulerInfo
   , flatTid    :: VName -- The variable for the tid execution the code
   , iterations :: Imp.Exp -- The number of total iterations for a task
   , scheduling :: Scheduling -- The type scheduling that the task can be performed as
-  -- , nested     :: Int        --
   }
 
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic

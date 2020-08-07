@@ -317,15 +317,15 @@ functionIter = (`C.toIdent` mempty) . (<>"_iter")
 multiCoreReport :: [(Name, Bool)] -> [C.BlockItem]
 multiCoreReport names = report_kernels
   where report_kernels = concatMap reportKernel names
-        max_name_len_pad = 30
+        max_name_len_pad = 40
         format_string name True =
           let name_s = nameToString name
               padding = replicate (max_name_len_pad - length name_s) ' '
-          in unwords ["tid %2d -", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %4.4f; iters %9ld; avg %ld\n"]
+          in unwords ["tid %2d -", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
         format_string name False =
           let name_s = nameToString name
               padding = replicate (max_name_len_pad - length name_s) ' '
-          in unwords ["        ", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %4.4f; iters %9ld; avg iter %ld\n"]
+          in unwords ["        ", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
         reportKernel (name, is_array) =
           let runs = functionRuns name
               total_runtime = functionRuntime name
@@ -397,12 +397,17 @@ benchmarkCode name tid code = do
                                             ctx->$id:(functionRuntime name)[$id:tid'] += elapsed;
                                             ctx->$id:(functionIter name)[$id:tid'] += iterations;|]
 functionTiming :: Name -> C.Id
-functionTiming = (`C.toIdent` mempty) . (<>"_timing")
+functionTiming = (`C.toIdent` mempty) . (<>"_total_time")
+
+functionIterations :: Name -> C.Id
+functionIterations = (`C.toIdent` mempty) . (<>"_total_iter")
+
+
 
 addTimingFields :: Name -> GC.CompilerM op s ()
-addTimingFields name =
+addTimingFields name = do
   GC.contextField (functionTiming name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
-
+  GC.contextField (functionIterations name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
 multicoreName :: String -> GC.CompilerM op s Name
 multicoreName s = do
@@ -470,7 +475,7 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
                      };|]
 
-  fpar_task <- generateFunction lexical_par (name ++ "_par_task") seq_code fstruct free retval tid nsubtask
+  fpar_task <- generateFunction lexical_par (name ++ "_task") seq_code fstruct free retval tid nsubtask
   addTimingFields fpar_task
 
   GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
@@ -484,7 +489,8 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
   GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  GC.stm  [C.cstm|$id:ftask_name.timing = &ctx->$id:(functionTiming fpar_task);|]
+  GC.stm  [C.cstm|$id:ftask_name.total_iter = &ctx->$id:(functionTiming fpar_task);|]
+  GC.stm  [C.cstm|$id:ftask_name.total_time = &ctx->$id:(functionIterations fpar_task);|]
 
   case sched of
     Dynamic n -> do GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]

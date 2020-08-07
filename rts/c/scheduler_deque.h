@@ -30,13 +30,26 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
 
 static inline int is_small(struct scheduler_task *task)
 {
+  int64_t time = *task->total_time;
+  int64_t iter = *task->total_iter;
+
   if (task->sched == DYNAMIC) return 0;
-  int64_t timing = *task->timing;
-  float C = get_C(timing);
-  int32_t nmax = get_nmax(timing);
-  int32_t n = task->iterations;
-  if (n <= nmax) return 1;
-  if (nmax > 0 && C * (float)n < kappa) return 1;
+  if (*task->total_iter == 0) return 0;
+
+  // Estimate the constant C
+  double C = (double)time / (double)iter;
+  double cur_task_iter = (double) task->iterations;
+
+  if (C * cur_task_iter < kappa)  {
+    return 1;
+  }
+
+  /* int64_t timing = *task->timing; */
+  /* float C = get_C(timing); */
+  /* int32_t nmax = get_nmax(timing); */
+  /* int32_t n = task->iterations; */
+  /* if (n <= nmax) return 1; */
+  /* if (nmax > 0 && C * (float)n < kappa) return 1; */
 
   return 0;
 }
@@ -50,31 +63,14 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   if (err != 0)
     return err;
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
-
   int64_t end = get_wall_time();
   int64_t time_elapsed = end - start;
   worker->time_spent_working += time_elapsed;
   int32_t iter = subtask->end - subtask->start;
+  // report time measurements
+  __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
+  __atomic_fetch_add(subtask->total_iter, iter,         __ATOMIC_RELAXED);
 
-  // Do you need atomic load here???
-  int64_t timing = __atomic_load_n(subtask->timing, __ATOMIC_RELAXED);
-  float C = get_C(timing);
-  int32_t nmax  = get_nmax(timing);
-
-  // atomically update
-  if ((float)time_elapsed < kappa && iter > nmax) {
-    float new_C = time_elapsed / iter;
-    int32_t new_nmax = iter;
-    int update_done = 0;
-    while (!update_done && new_nmax > nmax) {
-      int64_t new_timing = pack_vals(new_C, new_nmax);
-      if (__atomic_compare_exchange_n(subtask->timing, &timing, new_timing, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
-        update_done = 1;
-      } else {
-        nmax = get_nmax(timing);
-      }
-    }
-  }
   free(subtask);
 
   return 0;
@@ -177,7 +173,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   int iter_pr_subtask = info.iter_pr_subtask;
   int remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
-  int64_t *timing = info.timing;
+  int64_t *total_time = info.total_time;
+  int64_t *total_iter = info.total_iter;
   enum scheduling sched = info.sched;
 
   volatile int shared_counter = nsubtasks;
@@ -192,7 +189,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &shared_counter,
-                                            timing,
+                                            total_time, total_iter,
                                             start, end,
                                             chunkable, iter, subtask_id);
     assert(subtask != NULL);
@@ -266,26 +263,9 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     int64_t end = get_wall_time();
     int64_t time_elapsed = end - start;
     worker_local->time_spent_working += time_elapsed;
-    // Do you need atomic load here???
-    int64_t timing = __atomic_load_n(task->info.timing, __ATOMIC_RELAXED);
-    float C = get_C(timing);
-    int32_t nmax  = get_nmax(timing);
-    int32_t iter = task->iterations;
+    __atomic_fetch_add(task->info.total_time, time_elapsed,     __ATOMIC_RELAXED);
+    __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
 
-    // atomically update
-    if ((float)time_elapsed < kappa && iter > nmax) {
-      float new_C = (float)time_elapsed / iter;
-      int32_t new_nmax = iter;
-      int update_done = 0;
-      while (!update_done && new_nmax > nmax) {
-        int64_t new_timing = pack_vals(new_C, new_nmax);
-        if (__atomic_compare_exchange_n(task->info.timing, &timing, new_timing, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
-          update_done = 1;
-        } else {
-          nmax = get_nmax(timing);
-        }
-      }
-    }
     return err;
   }
 
@@ -306,7 +286,8 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 #endif
 
   struct scheduler_info info;
-  info.timing = task->timing;
+  info.total_time = task->total_time;
+  info.total_iter = task->total_iter;
 
   // Decide if task should be scheduled sequentially
   if (is_small(task) || free_workers <= 0) {

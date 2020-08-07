@@ -248,7 +248,6 @@ extractAllocations segop_code = f segop_code
                               Imp.paramName) free
           in (free_allocs, here_allocs <>
               Imp.Op (Imp.MCFunc s i prebody body' free' info))
-
         f code =
           (mempty, code)
 

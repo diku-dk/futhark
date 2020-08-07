@@ -178,7 +178,8 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             void* args,
                                             const char* name,
                                             volatile int* counter,
-                                            int64_t *timing,
+                                            int64_t *total_time,
+                                            int64_t *total_iter,
                                             int start, int end,
                                             int chunk,
                                             int iterations,
@@ -194,7 +195,8 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->name       = name;
 
   subtask->counter    = counter;
-  subtask->timing     = timing;
+  subtask->total_time = total_time;
+  subtask->total_iter = total_iter;
 
   subtask->start      = start;
   subtask->end        = end;

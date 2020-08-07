@@ -30,7 +30,7 @@ static long int ran_iter, start_iter = 0;
 #endif
 
 static int scheduler_error = 0;
-float kappa = 10.0;
+float kappa = 5.f;
 
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id);
 
@@ -54,7 +54,9 @@ struct subtask {
 
   // Shared variables across subtasks
   volatile int *counter; // Counter for ongoing subtasks
-  int64_t *timing;
+  int64_t *total_time;
+  int64_t *total_iter;
+  int measure_time;
 };
 
 
@@ -70,7 +72,9 @@ struct scheduler_info {
   int nsubtasks;
   enum scheduling sched;
 
-  int64_t *timing;
+  int64_t *total_time;
+  int64_t *total_iter;
+  int measure_time;
 };
 
 
@@ -104,8 +108,9 @@ struct scheduler_task {
   enum scheduling sched;
   int min_cost;
 
-  int64_t *timing;
-
+  int64_t *total_time;
+  int64_t *total_iter;
+  int measure_time;
 };
 
 struct worker {
@@ -179,7 +184,7 @@ static inline void output_thread_usage(struct worker *worker)
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
   struct timeval user_cpu_time = usage.ru_utime;
   struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %2d - work time %llu - user time: %llu us - sys: %10llu us\n",// - dequeue: (%8llu/%8llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
+  fprintf(stderr, "tid: %2d - work time %10llu - user time: %10llu us - sys: %10llu us\n",// - dequeue: (%8llu/%8llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
           worker->tid,
           worker->time_spent_working,
           (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
