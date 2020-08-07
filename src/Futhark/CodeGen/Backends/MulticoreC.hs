@@ -158,6 +158,7 @@ compileProg =
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
 
+                 should_exit = 1;
                  for (int i = 1; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    cur_worker->dead = 1;

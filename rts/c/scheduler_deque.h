@@ -9,8 +9,10 @@ static volatile sig_atomic_t free_workers;
 __thread struct worker* worker_local = NULL;
 
 
+static volatile sig_atomic_t should_exit = 0;
+
 static inline int is_finished(struct worker *worker) {
-  return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && empty(&worker->q);
+  return should_exit && empty(&worker->q);
 }
 
 int random_other_worker(struct scheduler *scheduler, int my_id)
