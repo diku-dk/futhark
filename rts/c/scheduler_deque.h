@@ -202,7 +202,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
-  while(shared_counter != 0) {
+  while(shared_counter != 0 && scheduler_error == 0)
+  {
     if (!empty(&worker->q)) {
       struct subtask * subtask = pop_back(&worker->q);
       if (subtask != NULL) {
@@ -218,7 +219,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     } else {
       struct scheduler* scheduler = worker->scheduler;
       int my_id = worker->tid;
-      while (shared_counter != 0 && empty(&worker->q)) {
+      while (shared_counter != 0 && empty(&worker->q) && scheduler_error == 0)
+      {
         int k = random_other_worker(scheduler, my_id);
         if (scheduler->workers[k].dead) {
           continue;
