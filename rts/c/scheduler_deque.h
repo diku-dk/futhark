@@ -3,11 +3,11 @@
 #define _SCHEDULER_H_
 
 
-static volatile sig_atomic_t num_workers;
 static volatile sig_atomic_t free_workers;
+static volatile sig_atomic_t num_workers;
 __thread struct worker* worker_local = NULL;
 
-static inline int is_finished(struct worker *worker) {
+static inline volatile int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && empty(&worker->q);
 }
 
@@ -38,17 +38,10 @@ static inline int is_small(struct scheduler_task *task)
   double C = (double)time / (double)iter;
   double cur_task_iter = (double) task->iterations;
 
-  if (C * cur_task_iter < kappa)  {
+  if (C * cur_task_iter < kappa)
+  {
     return 1;
   }
-
-  /* int64_t timing = *task->timing; */
-  /* float C = get_C(timing); */
-  /* int32_t nmax = get_nmax(timing); */
-  /* int32_t n = task->iterations; */
-  /* if (n <= nmax) return 1; */
-  /* if (nmax > 0 && C * (float)n < kappa) return 1; */
-
   return 0;
 }
 
@@ -57,10 +50,10 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   assert(subtask != NULL);
   assert(worker != NULL);
   int64_t start = get_wall_time();
-  int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->chunkable ? worker->tid : subtask->id, worker->tid);
+  int err = subtask->fn(subtask->args, subtask->start, subtask->end,
+                        subtask->chunkable ? worker->tid : subtask->id, worker->tid);
   if (err != 0)
     return err;
-  __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   int64_t end = get_wall_time();
   int64_t time_elapsed = end - start;
   worker->time_spent_working += time_elapsed;
@@ -68,9 +61,9 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   // report time measurements
   __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->total_iter, iter,         __ATOMIC_RELAXED);
-
+  __atomic_thread_fence(__ATOMIC_RELEASE);
+  __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);
-
   return 0;
 }
 
@@ -98,18 +91,17 @@ void acquire (struct worker *worker)
 
   struct scheduler* scheduler = worker->scheduler;
   int my_id = worker->tid;
-  while (! is_finished(worker)) {
+  while (! is_finished(worker))
+  {
     int k = random_other_worker(scheduler, my_id);
-    if (scheduler->workers[k].dead) {
-      continue;
-    }
+
     struct deque *deque_k = &scheduler->workers[k].q;
     struct subtask* subtask = steal(deque_k);
     if (subtask == STEAL_RES_EMPTY) {
       // TODO: log
     } else if (subtask == STEAL_RES_ABORT) {
       // TODO: log
-    } else if (subtask == STEAL_RES_DEAD){
+    } else if (subtask == STEAL_RES_DEAD) {
       fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
     } else {
       assert(subtask != NULL);
@@ -128,6 +120,7 @@ static inline void *scheduler_worker(void* arg)
 {
   struct worker *worker = (struct worker*) arg;
   worker_local = worker;
+  /* pthread_detach(pthread_self()); */
   while (!is_finished(worker))
   {
     if (! empty(&worker->q)) {
@@ -136,12 +129,12 @@ static inline void *scheduler_worker(void* arg)
         continue;
       }
       struct subtask* subtask_new = split(worker, subtask);
-      int err = run_subtask(worker,subtask_new);
+      int err = run_subtask(worker, subtask_new);
       /* Only one error can be returned at the time now
          Maybe we can provide a stack like structure for pushing errors onto
          if we wish to backpropagte multiple errors */
       if (err != 0) {
-        scheduler_error = err;
+        __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
       }
     } else if (__atomic_load_n(&num_workers, __ATOMIC_RELAXED) == 1) {
       break;
@@ -150,7 +143,6 @@ static inline void *scheduler_worker(void* arg)
     }
   }
 
-  worker->dead = 1;
   assert(empty(&worker->q));
   __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
   output_thread_usage(worker);
@@ -162,7 +154,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
                                              struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_parallel] Performing scheduling with scheduling %s\n", info.sched == STATIC ? "STATIC" : "DYNAMIC");
+  fprintf(stderr, "[scheduler_parallel] Performing scheduling with scheduling %s\n", task->info.sched == STATIC ? "STATIC" : "DYNAMIC");
 #endif
 
   struct worker * worker = worker_local;
@@ -189,7 +181,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
                                             &shared_counter,
                                             total_time, total_iter,
                                             start, end,
-                                            chunkable, iter, subtask_id);
+                                            chunkable, iter,
+                                            subtask_id);
     assert(subtask != NULL);
     push_back(&scheduler->workers[worker->tid].q, subtask);
 #ifdef MCDEBUG
@@ -265,7 +258,6 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     worker_local->time_spent_working += time_elapsed;
     __atomic_fetch_add(task->info.total_time, time_elapsed,     __ATOMIC_RELAXED);
     __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
-
     return err;
   }
 

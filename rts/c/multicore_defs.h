@@ -29,8 +29,9 @@
 static long int ran_iter, start_iter = 0;
 #endif
 
-static int scheduler_error = 0;
-float kappa = 5.f;
+static volatile int scheduler_error = 0;
+
+static double kappa = 5.f;
 
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id, int tid);
 
@@ -56,7 +57,6 @@ struct subtask {
   volatile int *counter; // Counter for ongoing subtasks
   int64_t *total_time;
   int64_t *total_iter;
-  int measure_time;
 };
 
 
@@ -74,7 +74,6 @@ struct scheduler_info {
 
   int64_t *total_time;
   int64_t *total_iter;
-  int measure_time;
 };
 
 
@@ -90,7 +89,7 @@ struct scheduler_subtask {
 struct deque {
   int64_t size;
   struct subtask **buffer;
-  int64_t top, bottom;
+  uint64_t top, bottom;
   volatile int dead;
 };
 
@@ -110,7 +109,6 @@ struct scheduler_task {
 
   int64_t *total_time;
   int64_t *total_iter;
-  int measure_time;
 };
 
 struct worker {
@@ -118,7 +116,7 @@ struct worker {
   struct deque q;
   struct scheduler *scheduler;
   int cur_working;
-  int dead;
+  volatile int dead;
 
   int tid;                     /* Just a thread id */
   uint64_t time_spent_working; /* Time spent in tasks functions */
@@ -162,7 +160,7 @@ static const int num_processors()
     SYSTEM_INFO sysinfo;
     GetSystemInfo(&sysinfo);
     int ncores = sysinfo.dwNumberOfProcessors;
-    fprintf(stdout, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
+    fprintf(stderr, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
     return ncores;
 #elif __APPLE__
     int ncores;
@@ -184,7 +182,7 @@ static inline void output_thread_usage(struct worker *worker)
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
   struct timeval user_cpu_time = usage.ru_utime;
   struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %2d - work time %10llu - user time: %10llu us - sys: %10llu us\n",// - dequeue: (%8llu/%8llu) = %llu - enqueue: (%llu/%llu) = %llu \n",
+  fprintf(stderr, "tid: %2d - work time %10llu - user time: %10llu us - sys: %10llu us\n",
           worker->tid,
           worker->time_spent_working,
           (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
