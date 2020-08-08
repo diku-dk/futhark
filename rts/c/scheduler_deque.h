@@ -7,7 +7,7 @@ static volatile sig_atomic_t free_workers;
 static volatile sig_atomic_t num_workers;
 __thread struct worker* worker_local = NULL;
 
-static inline volatile int is_finished(struct worker *worker) {
+static inline int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && empty(&worker->q);
 }
 
@@ -61,7 +61,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   // report time measurements
   __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->total_iter, iter,         __ATOMIC_RELAXED);
-  __atomic_thread_fence(__ATOMIC_RELEASE);
+  /* __atomic_thread_fence(__ATOMIC_RELEASE); */
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);
   return 0;
@@ -78,7 +78,7 @@ static inline struct subtask* split(struct worker* worker, struct subtask *subta
     __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
     subtask->end = subtask->start + subtask->iterations;
     new_subtask->start = subtask->end;
-    new_subtask->iterations *= 2;
+    /* new_subtask->iterations *= 2; */
     push_back(&worker->q, new_subtask);
   }
   return subtask;
@@ -105,10 +105,14 @@ void acquire (struct worker *worker)
       fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
     } else {
       assert(subtask != NULL);
-      // Split subtask into two (if dynamic)
-      if (subtask->chunkable && subtask->iterations > 1) {
-        subtask->iterations = 100;
+      // We stole a task, so we reset it's iteration counter
+      if (subtask->chunkable && *subtask->total_iter > 0)
+      {
+        double C = (double)*subtask->total_time / (double)*subtask->total_iter;
+        subtask->iterations = C > 0.0f ? kappa / C : 1;
+        subtask->iterations = subtask->iterations <= 0 ? 1 : subtask->iterations * 10;
       }
+      // Split subtask into two (if dynamic)
       struct subtask* subtask_new = split(worker, subtask);
       push_back(&worker->q, subtask_new);
       return;
@@ -171,7 +175,13 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
-  int iter = 100;
+  int iter = 1;
+  if (chunkable && *total_iter > 0)
+  {
+    double C = (double)*total_time / (double)*total_iter;
+    iter = kappa / C;
+    iter = iter <= 0 ? 1 : iter;
+  }
 
   int start = 0;
   int subtask_id = 0;
@@ -226,6 +236,13 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
           fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
         } else {
           assert(subtask != NULL);
+          // We stole a task, so we reset it's iteration counter
+          if (subtask->chunkable && *subtask->total_iter > 0)
+          {
+            double C = (double)*subtask->total_time / (double)*subtask->total_iter;
+            subtask->iterations = C > 0.0f ? kappa / C : 1;
+            subtask->iterations = subtask->iterations <= 0 ? 1 : subtask->iterations * 10;
+          }
           // Split subtask into two (if dynamic)
           struct subtask* subtask_new = split(worker, subtask);
           push_back(&worker->q, subtask_new);
@@ -280,9 +297,10 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   struct scheduler_info info;
   info.total_time = task->total_time;
   info.total_iter = task->total_iter;
+  info.min_cost = task->min_cost;
 
   // Decide if task should be scheduled sequentially
-  if (is_small(task) || free_workers <= 0) {
+  if (is_small(task)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;

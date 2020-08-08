@@ -31,7 +31,7 @@ static long int ran_iter, start_iter = 0;
 
 static volatile int scheduler_error = 0;
 
-static double kappa = 5.f;
+static double kappa = 4.2f;
 
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id, int tid);
 
@@ -60,7 +60,6 @@ struct subtask {
 };
 
 
-
 struct scheduler {
   struct worker *workers;
   int num_threads;
@@ -74,6 +73,7 @@ struct scheduler_info {
 
   int64_t *total_time;
   int64_t *total_iter;
+  int min_cost;
 };
 
 
@@ -89,8 +89,8 @@ struct scheduler_subtask {
 struct deque {
   int64_t size;
   struct subtask **buffer;
-  uint64_t top, bottom;
-  volatile int dead;
+  int64_t top, bottom;
+  int dead;
 };
 
 typedef int (*task_fn)(void* args, int iterations, int tid, struct scheduler_info info);
@@ -116,7 +116,7 @@ struct worker {
   struct deque q;
   struct scheduler *scheduler;
   int cur_working;
-  volatile int dead;
+  int dead;
 
   int tid;                     /* Just a thread id */
   uint64_t time_spent_working; /* Time spent in tasks functions */
@@ -187,12 +187,7 @@ static inline void output_thread_usage(struct worker *worker)
           worker->time_spent_working,
           (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
           (uint64_t)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec));
-          /* worker->q.time_dequeue, */
-          /* worker->q.n_dequeues, */
-          /* worker->q.time_dequeue / (worker->q.n_dequeues == 0 ? 1 : worker->q.n_dequeues), */
-          /* worker->q.time_enqueue, */
-          /* worker->q.n_dequeues, */
-          /* worker->q.time_enqueue / (worker->q.n_enqueues == 0 ? 1 : worker->q.n_enqueues)); */
+
 }
 
 
@@ -242,25 +237,4 @@ int32_t get_nmax (int64_t val) {
 
 #endif
 
-
 // end of multicore_defs.h
-
-/* struct subtask_queue { */
-/*   int capacity; // Size of the buffer. */
-/*   int first; // Index of the start of the ring buffer. */
-/*   int num_used; // Number of used elements in the buffer. */
-/*   struct subtask **buffer; */
-
-/*   pthread_mutex_t mutex; // Mutex used for synchronisation. */
-/*   pthread_cond_t cond;   // Condition variable used for synchronisation. */
-/*   int dead; */
-
-
-/*   int initialized; */
-
-/*   /\* Profiling fields *\/ */
-/*   uint64_t time_enqueue; */
-/*   uint64_t time_dequeue; */
-/*   uint64_t n_dequeues; */
-/*   uint64_t n_enqueues; */
-/* }; */
