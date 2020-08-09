@@ -67,7 +67,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 }
 
 
-static inline struct subtask* split(struct worker* worker, struct subtask *subtask)
+static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
 {
   int remaining_iter = subtask->end - subtask->start;
   if (subtask->chunkable && remaining_iter > subtask->iterations)
@@ -80,6 +80,32 @@ static inline struct subtask* split(struct worker* worker, struct subtask *subta
     push_back(&worker->q, new_subtask);
   }
   return subtask;
+}
+
+
+static inline int chunk_dynamic_subtask(struct subtask* subtask, struct worker *worker)
+{
+  struct scheduler* scheduler = worker->scheduler;
+  long int rem_iter = subtask->end-subtask->start;
+  int nsubtasks;
+
+  double C = (double)*subtask->total_time / (double)*subtask->total_iter;
+  if (C <= 0.0f) {
+    // Should we be careful or nah?
+    return subtask->iterations;
+  } else {
+    int min_iter_pr_subtask = (int) (kappa / C);
+    min_iter_pr_subtask = min_iter_pr_subtask == 0 ? 1 : min_iter_pr_subtask;
+    nsubtasks = rem_iter / min_iter_pr_subtask;
+    if (nsubtasks == 0) {
+      return rem_iter;
+    }
+    else if (nsubtasks > scheduler->num_threads) {
+      nsubtasks = scheduler->num_threads;
+    }
+  }
+  int iter_pr_subtask = rem_iter / nsubtasks;
+  return iter_pr_subtask;
 }
 
 
@@ -106,23 +132,19 @@ void acquire (struct worker *worker)
       // We stole a task, so we reset it's iteration counter
       if (subtask->chunkable && *subtask->total_iter > 0)
       {
-        double C = (double)*subtask->total_time / (double)*subtask->total_iter;
-        subtask->iterations = C > 0.0f ? kappa / C : 1;
-        subtask->iterations = subtask->iterations <= 0 ? 1 : subtask->iterations * 10;
+        subtask->iterations = chunk_dynamic_subtask(subtask, worker);
       }
-      // Split subtask into two (if dynamic)
-      struct subtask* subtask_new = split(worker, subtask);
-      push_back(&worker->q, subtask_new);
+      push_back(&worker->q, subtask);
       return;
     }
   }
 }
 
+
 static inline void *scheduler_worker(void* arg)
 {
   struct worker *worker = (struct worker*) arg;
   worker_local = worker;
-  /* pthread_detach(pthread_self()); */
   while (!is_finished(worker))
   {
     if (! empty(&worker->q)) {
@@ -130,7 +152,7 @@ static inline void *scheduler_worker(void* arg)
       if (subtask == NULL) {
         continue;
       }
-      struct subtask* subtask_new = split(worker, subtask);
+      struct subtask* subtask_new = chunk_subtask(worker, subtask);
       int err = run_subtask(worker, subtask_new);
       /* Only one error can be returned at the time now
          Maybe we can provide a stack like structure for pushing errors onto
@@ -174,11 +196,6 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
   int iter = 1;
-  if (chunkable && *total_iter > 0) {
-    double C = (double)*total_time / (double)*total_iter;
-    iter = kappa / C;
-    iter = iter <= 0 ? 1 : iter;
-  }
 
   int start = 0;
   int subtask_id = 0;
@@ -205,10 +222,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     if (!empty(&worker->q)) {
       struct subtask * subtask = pop_back(&worker->q);
       if (subtask != NULL) {
-        // Do work
-        assert(subtask->fn != NULL);
-        assert(subtask->args != NULL);
-        struct subtask* subtask_new  = split(worker, subtask);
+        struct subtask* subtask_new = chunk_subtask(worker, subtask);
         int err = run_subtask(worker, subtask_new);
         if (err != 0) {
           return err;
@@ -233,16 +247,12 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
           fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
         } else {
           assert(subtask != NULL);
-          // We stole a task, so we reset it's iteration counter
+          // We stole a task, so we compute it's iteration counter
           if (subtask->chunkable && *subtask->total_iter > 0)
           {
-            double C = (double)*subtask->total_time / (double)*subtask->total_iter;
-            subtask->iterations = C > 0.0f ? kappa / C : 1;
-            subtask->iterations = subtask->iterations <= 0 ? 1 : subtask->iterations * 10;
+            subtask->iterations = chunk_dynamic_subtask(subtask, worker);
           }
-          // Split subtask into two (if dynamic)
-          struct subtask* subtask_new = split(worker, subtask);
-          push_back(&worker->q, subtask_new);
+          push_back(&worker->q, subtask);
         }
       }
     }
