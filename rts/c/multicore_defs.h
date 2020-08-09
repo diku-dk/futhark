@@ -31,7 +31,8 @@ static long int ran_iter, start_iter = 0;
 
 static volatile int scheduler_error = 0;
 
-static double kappa = 4.2f;
+/* static double kappa = 4.2f; */
+static double kappa = 0.35f; // 4.2f / 12.0;
 
 typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id, int tid);
 

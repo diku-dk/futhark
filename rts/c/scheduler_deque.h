@@ -26,7 +26,7 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
   return i;
 }
 
-static inline int is_small(struct scheduler_task *task)
+static inline int is_small(struct scheduler_task *task, int ntasks)
 {
   int64_t time = *task->total_time;
   int64_t iter = *task->total_iter;
@@ -38,10 +38,9 @@ static inline int is_small(struct scheduler_task *task)
   double C = (double)time / (double)iter;
   double cur_task_iter = (double) task->iterations;
 
-  if (C * cur_task_iter < kappa)
-  {
+  if (C * cur_task_iter < kappa * ntasks)
     return 1;
-  }
+
   return 0;
 }
 
@@ -297,15 +296,35 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   info.total_iter = task->total_iter;
   info.min_cost = task->min_cost;
 
+  int max_num_tasks = scheduler->num_threads;
+  if (*task->total_iter > 0 && task->sched == STATIC) {
+    double C = (double)*task->total_time / (double)*task->total_iter;
+    if (C <= 0.0f) {
+      max_num_tasks = 1;
+    } else {
+      int min_iter_pr_subtask = (int)(kappa / C) ;
+      if (min_iter_pr_subtask == 0) min_iter_pr_subtask += 1;
+      max_num_tasks = task->iterations / min_iter_pr_subtask;
+      if (max_num_tasks == 0) {
+        info.iter_pr_subtask = task->iterations;
+        info.remainder = 0;
+        info.nsubtasks = 1;
+        return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+      } else if (max_num_tasks > scheduler->num_threads) {
+        max_num_tasks = scheduler->num_threads;
+      }
+    }
+  }
+
   // Decide if task should be scheduled sequentially
-  if (is_small(task) || free_workers <= 0) {
+  if (is_small(task, max_num_tasks)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
     return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
   }
 
-  int max_num_tasks = scheduler->num_threads;
+
   switch (task->sched) {
   case STATIC:
     info.iter_pr_subtask = task->iterations / max_num_tasks;

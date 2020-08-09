@@ -97,9 +97,9 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 
     uint64_t futhark_segred_tuning_program_end = get_wall_time();
     uint64_t elapsed = futhark_segred_tuning_program_end - futhark_segred_tuning_program_start;
-    double k = (double)(elapsed - ctx->tuning_timing) / iterations;
+    kappa = (double)(elapsed - ctx->tuning_timing) / iterations;
 
-    kappa = k * num_threads;
+    /* kappa = k * num_threads; */
     fprintf(stderr, "found kappa is %f\n", kappa);
 
     return err;
