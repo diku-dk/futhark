@@ -78,7 +78,6 @@ static inline struct subtask* split(struct worker* worker, struct subtask *subta
     __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
     subtask->end = subtask->start + subtask->iterations;
     new_subtask->start = subtask->end;
-    /* new_subtask->iterations *= 2; */
     push_back(&worker->q, new_subtask);
   }
   return subtask;
@@ -176,8 +175,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
   int iter = 1;
-  if (chunkable && *total_iter > 0)
-  {
+  if (chunkable && *total_iter > 0) {
     double C = (double)*total_time / (double)*total_iter;
     iter = kappa / C;
     iter = iter <= 0 ? 1 : iter;
@@ -300,7 +298,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   info.min_cost = task->min_cost;
 
   // Decide if task should be scheduled sequentially
-  if (is_small(task)) {
+  if (is_small(task) || free_workers <= 0) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
