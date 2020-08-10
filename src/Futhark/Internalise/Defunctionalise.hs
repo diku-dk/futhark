@@ -4,7 +4,7 @@
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise
   ( transformProg ) where
-
+import Debug.Trace
 import qualified Control.Arrow as Arrow
 import           Control.Monad.Identity
 import           Control.Monad.State
@@ -22,7 +22,8 @@ import qualified Data.Sequence as Seq
 import           Futhark.MonadFreshNames
 import           Language.Futhark
 import           Language.Futhark.Traversals
-import           Futhark.IR.Pretty ()
+import           Futhark.IR.Pretty()
+import           Futhark.Util.Pretty
 
 -- | An expression or an extended 'Lambda' (with size parameters,
 -- which AST lambdas do not support).
@@ -30,12 +31,22 @@ data ExtExp = ExtLambda [TypeParam] [Pattern] Exp (Aliasing, StructType) SrcLoc
             | ExtExp Exp
   deriving (Show)
 
+instance Pretty ExtExp where
+  pprPrec p (ExtLambda tparams params body (_, rettype) _) =
+    parensIf (p /= -1) $
+    text "\\" <> spread (map ppr tparams ++ map ppr params) <+>
+    colon <+> align (pprPrec 2 rettype) <+>
+    text "->" </> indent 2 (ppr body)
+  pprPrec p (ExtExp e) = pprPrec p e
+
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal = Dynamic PatternType
                | LambdaSV [VName] Pattern StructType ExtExp Env
                  -- ^ The 'VName's are shape parameters that are bound
                  -- by the 'Pattern'.
+                 --
+                 -- The Env is the closure of the lambda.
                | RecordSV [(Name, StaticVal)]
                | SumSV Name [StaticVal] [(Name, [PatternType])]
                  -- ^ The constructor that is actually present, plus
@@ -43,6 +54,26 @@ data StaticVal = Dynamic PatternType
                | DynamicFun (Exp, StaticVal) StaticVal
                | IntrinsicSV
   deriving (Show)
+
+instance Pretty StaticVal where
+  ppr (Dynamic t) =
+    text "dynamic" <> parens (ppr t)
+  ppr (LambdaSV dims p t e env) =
+    text "\\" <>
+    spread (env' : map (brackets . ppr) dims ++ [ppr p]) <+>
+    colon <+> align (pprPrec 2 t) <+>
+    text "->" </> indent 2 (ppr e)
+    where env' =
+            ppr $ braces $ commasep $ map ppr $ M.toList env
+  ppr (RecordSV fs) =
+    ppr $ braces $ commasep $ map ppr fs
+  ppr SumSV{} =
+    text "#<sumsv>"
+  ppr (DynamicFun (e, sv1) sv2) =
+    text "dynamicfun" <+> parens (align $ ppr e <> comma </> ppr sv1) </>
+    indent 2 (ppr sv2)
+  ppr IntrinsicSV =
+    text "#<intrinsic>"
 
 -- | Environment mapping variable names to their associated static value.
 type Env = M.Map VName StaticVal
@@ -108,11 +139,20 @@ collectFuns m = pass $ do
   return ((x, decs), const mempty)
 
 -- | Looks up the associated static value for a given name in the environment.
-lookupVar :: SrcLoc -> VName -> DefM StaticVal
-lookupVar loc x = do
+lookupVar :: SrcLoc -> VName -> PatternType -> DefM StaticVal
+lookupVar loc x t = do
   env <- askEnv
   case M.lookup x env of
-    Just sv -> return sv
+    Just sv -> do
+      let sv' = instStaticVal t sv
+      traceM $ unlines ["lookupVar " ++ prettyName x,
+                        pretty t,
+                        "BEFORE",
+                        pretty sv,
+                        "AFTER",
+                        pretty sv',
+                        "THE END"]
+      return sv'
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
             -- module, which we will have to treat specially.
       | baseTag x <= maxIntrinsicTag -> return IntrinsicSV
@@ -242,8 +282,8 @@ defuncExp (RecordLit fs loc) = do
   where defuncField (RecordFieldExplicit vn e loc') = do
           (e', sv) <- defuncExp e
           return (RecordFieldExplicit vn e' loc', (vn, sv))
-        defuncField (RecordFieldImplicit vn _ loc') = do
-          sv <- lookupVar loc' vn
+        defuncField (RecordFieldImplicit vn (Info t) loc') = do
+          sv <- lookupVar loc' vn t
           case sv of
             -- If the implicit field refers to a dynamic function, we
             -- convert it to an explicit field with a record closing over
@@ -266,8 +306,8 @@ defuncExp (Range e1 me incl t@(Info t', _) loc) = do
   incl' <- mapM defuncExp' incl
   return (Range e1' me' incl' t loc, Dynamic t')
 
-defuncExp e@(Var qn _ loc) = do
-  sv <- lookupVar loc (qualLeaf qn)
+defuncExp e@(Var qn t loc) = do
+  sv <- lookupVar loc (qualLeaf qn) (unInfo t)
   case sv of
     -- If the variable refers to a dynamic function, we return its closure
     -- representation (i.e., a record expression capturing the free variables
@@ -278,8 +318,8 @@ defuncExp e@(Var qn _ loc) = do
     IntrinsicSV -> do
       (pats, body, tp) <- etaExpand (typeOf e) e
       defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
-    _ -> let tp = typeFromSV' sv
-         in return (Var qn (Info tp) loc, sv)
+    _ -> do let tp = typeFromSV' sv
+            return (Var qn (Info tp) loc, sv)
 
 defuncExp (Ascript e0 tydecl loc)
   | orderZero (typeOf e0) = do (e0', sv) <- defuncExp e0
@@ -378,7 +418,7 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
 
 defuncExp (LetWith id1 id2 idxs e1 body t loc) = do
   e1' <- defuncExp' e1
-  sv1 <- lookupVar (identSrcLoc id2) $ identName id2
+  sv1 <- lookupVar (identSrcLoc id2) (identName id2) (unInfo (identType id2))
   idxs' <- mapM defuncDimIndex idxs
   (body', sv) <- extendEnv (identName id1) sv1 $ defuncExp body
   return (LetWith id1 id2 idxs' e1' body' t loc, sv)
@@ -530,7 +570,10 @@ defuncLet dims ps@(pat:pats) body rettype
           env = envFromPattern pat <> envFromShapeParams pat_dims
       (rest_dims', pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body rettype
       closure <- defuncFun dims ps body (mempty, rettype) mempty
-      return (pat_dims ++ rest_dims', pat : pats', body', DynamicFun closure sv)
+      return (pat_dims ++ rest_dims',
+              pat : pats',
+              body',
+              DynamicFun closure sv)
   | otherwise = do
       (e, sv) <- defuncFun dims ps body (mempty, rettype) mempty
       return ([], [], e, sv)
@@ -609,6 +652,12 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
       liftValDec fname rettype (dims ++ more_dims ++ missing_dims)
         params' e0'
 
+      traceM $ unlines ["GENERATE",
+                        prettyName fname,
+                        pretty closure_pat,
+                        pretty sv1,
+                        pretty sv]
+
       let t1 = toStruct $ typeOf e1'
           t2 = toStruct $ typeOf e2'
           fname' = qualName fname
@@ -661,14 +710,15 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
 
 defuncApply depth e@(Var qn (Info t) loc) = do
     let (argtypes, _) = unfoldFunType t
-    sv <- lookupVar loc (qualLeaf qn)
+    sv <- lookupVar loc (qualLeaf qn) t
+
     case sv of
       DynamicFun _ _
-        | fullyApplied sv depth ->
+        | fullyApplied sv depth -> do
             -- We still need to update the types in case the dynamic
             -- function returns a higher-order term.
             let (argtypes', rettype) = dynamicFunType sv argtypes
-            in return (Var qn (Info (foldFunType argtypes' rettype)) loc, sv)
+            return (Var qn (Info (foldFunType argtypes' rettype)) loc, sv)
 
         | otherwise -> do
             fname <- newName $ qualLeaf qn
@@ -677,9 +727,15 @@ defuncApply depth e@(Var qn (Info t) loc) = do
                 notInPats = (`S.notMember` pats_names)
                 dims' = filter notInPats dims
                 (argtypes', rettype) = dynamicFunType sv' argtypes
+                fname_t = foldFunType argtypes' $ fromStruct rettype
+
+            traceM $ unlines ["adding " ++ prettyName fname,
+                              pretty sv,
+                              pretty e0]
+
             liftValDec fname (fromStruct rettype) dims' pats e0
-            return (Var (qualName fname)
-                    (Info (foldFunType argtypes' $ fromStruct rettype)) loc, sv')
+            return (Var (qualName fname) (Info fname_t) loc,
+                    sv')
 
       IntrinsicSV -> return (e, IntrinsicSV)
 
@@ -798,6 +854,99 @@ buildRetType env pats = comb
           | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
         descend (Scalar (Record t)) = Scalar $ Record $ fmap descend t
         descend t = t
+
+dimMapping2 :: Monoid a =>
+              TypeBase (DimDecl VName) a
+           -> TypeBase (DimDecl VName) a
+           -> M.Map VName (DimDecl VName)
+dimMapping2 t1 t2 = execState (matchDims f t1 t2) mempty
+  where f (NamedDim d1) d2 = do
+          modify $ M.insert (qualLeaf d1) d2
+          return $ NamedDim d1
+        f d _ = return d
+
+updateType :: M.Map VName (DimDecl VName)
+           -> TypeBase (DimDecl VName) a
+           -> TypeBase (DimDecl VName) a
+updateType m = first f
+  where f (NamedDim d) =
+          fromMaybe (NamedDim d) $ M.lookup (qualLeaf d) m
+        f d =
+          d
+
+origTypeFromSV :: StaticVal -> StructType
+origTypeFromSV (Dynamic t) =
+  toStruct t
+origTypeFromSV (RecordSV fs) =
+  Scalar $ Record $ M.map origTypeFromSV $ M.fromList fs
+origTypeFromSV (DynamicFun (_, sv) _) =
+  origTypeFromSV sv
+origTypeFromSV (LambdaSV _ p ret _ _) =
+  Scalar $ Arrow mempty Unnamed (patternStructType p) $ toStruct ret
+
+-- Update the sizes in a polymorphic StaticVal based on the type at
+-- which is used (i.e. instantiate size parameters).
+--
+-- I feel we write essentially this function far too often in the
+-- frontend.  One particular quirk of this variant is that since
+-- StaticVals also contain the entire definition as an expression, we
+-- have to replace any uses of the size parameters.  Fortunately, any
+-- well-typed use of a size parameter (always a variable name) can be
+-- replaced with either a new variable name or a constant (which is
+-- what a DimDecl contains).
+instStaticVal :: PatternType -> StaticVal -> StaticVal
+instStaticVal = update
+  where update t sv =
+          updateSV (dimMapping2 (origTypeFromSV sv) $ toStruct t) sv
+
+        updateSV m (LambdaSV dims sv_p sv_ret e env) =
+          let m' = foldl' (flip M.delete) m $ patternNames sv_p
+              sv_p' = runIdentity $ astMap (mapper m') sv_p
+              sv_ret' = updateType m' sv_ret
+              updateKV (k, sv) =
+                (case M.lookup k m' of
+                   Just (NamedDim v) ->
+                     qualLeaf v
+                   _ -> k,
+                 updateSV m' sv)
+          in LambdaSV [] sv_p' sv_ret' (updateExtExp m' e) $
+             M.fromList $ map updateKV $ M.toList env
+        updateSV m (DynamicFun (e, sv1) sv2) =
+          DynamicFun (updateExp m e, updateSV m sv1) (updateSV m sv2)
+        updateSV m (Dynamic t) =
+          Dynamic $ updateType m t
+        updateSV _ sv =
+          sv
+
+        mapper m = identityMapper
+                   { mapOnPatternType =
+                       pure . updateType m
+                   , mapOnStructType =
+                       pure . updateType m
+                   , mapOnExp =
+                       pure . updateExp m
+                   }
+
+        updateExp m (Var v t loc) =
+          case M.lookup (qualLeaf v) m of
+            Just (NamedDim v') ->
+              Var v' t' loc
+            Just (ConstDim x) ->
+              Literal (SignedValue (Int32Value (fromIntegral x))) loc
+            _ ->
+              Var v t' loc
+          where t' = updateType m <$> t
+        updateExp m e = runIdentity $ astMap (mapper m) e
+
+        updateExtExp m (ExtLambda _ ps body (aliasing, body_ret) loc) =
+          let m' = foldl' (flip M.delete) m $
+                   mconcat $ map patternNames ps
+              ps' = runIdentity $ astMap (mapper m') ps
+              body' = updateExp m' body
+              body_ret' = updateType m' body_ret
+          in ExtLambda [] ps' body' (aliasing, body_ret') loc
+        updateExtExp m (ExtExp e) =
+          ExtExp $ updateExp m e
 
 -- | Compute the corresponding type for a given static value.
 typeFromSV :: StaticVal -> ([VName], PatternType)
