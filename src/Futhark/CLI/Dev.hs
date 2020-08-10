@@ -11,15 +11,15 @@ import qualified Data.Text.IO as T
 import System.IO
 import System.Exit
 import System.Console.GetOpt
+import System.FilePath
 
 import Prelude hiding (id)
 
+import Futhark.Compiler.CLI
 import Futhark.Pass
 import Futhark.Actions
-import Futhark.Compiler
 import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
-import Futhark.Pipeline
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.Seq as Seq
@@ -125,15 +125,15 @@ data AllActions = AllActions
 
 data UntypedAction = SOACSAction (Action SOACS.SOACS)
                    | KernelsAction (Action Kernels.Kernels)
-                   | KernelsMemAction (Action KernelsMem.KernelsMem)
-                   | SeqMemAction (Action SeqMem.SeqMem)
+                   | KernelsMemAction (FilePath -> Action KernelsMem.KernelsMem)
+                   | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
                    | PolyAction AllActions
 
 untypedActionName :: UntypedAction -> String
 untypedActionName (SOACSAction a) = actionName a
 untypedActionName (KernelsAction a) = actionName a
-untypedActionName (SeqMemAction a) = actionName a
-untypedActionName (KernelsMemAction a) = actionName a
+untypedActionName (SeqMemAction a) = actionName $ a ""
+untypedActionName (KernelsMemAction a) = actionName $ a ""
 untypedActionName (PolyAction a) = actionName (actionSOACS a)
 
 instance Representation UntypedAction where
@@ -319,12 +319,20 @@ commandLineOptions =
 
   , Option [] ["compile-imperative"]
     (NoArg $ Right $ \opts ->
-       opts { futharkAction = SeqMemAction impCodeGenAction })
+       opts { futharkAction = SeqMemAction $ const impCodeGenAction })
     "Translate program into the imperative IL and write it on standard output."
   , Option [] ["compile-imperative-kernels"]
     (NoArg $ Right $ \opts ->
-       opts { futharkAction = KernelsMemAction kernelImpCodeGenAction })
+       opts { futharkAction = KernelsMemAction $ const kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
+  , Option [] ["compile-opencl"]
+    (NoArg $ Right $ \opts ->
+       opts { futharkAction = KernelsMemAction $ compileOpenCLAction newFutharkConfig ToExecutable })
+    "Compile the program using the OpenCL backend."
+  , Option [] ["compile-c"]
+    (NoArg $ Right $ \opts ->
+       opts { futharkAction = SeqMemAction $ compileCAction newFutharkConfig ToExecutable })
+    "Compile the program using the C backend."
   , Option "p" ["print"]
     (NoArg $ Right $ \opts ->
         opts { futharkAction = PolyAction $ AllActions printAction printAction printAction printAction printAction })
@@ -439,11 +447,11 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 >>= Defunctionalise.transformProg
             Pipeline{} -> do
               prog <- runPipelineOnProgram (futharkConfig config) id file
-              runPolyPasses config prog
+              runPolyPasses config (file `replaceExtension` "") (SOACS prog)
 
-runPolyPasses :: Config -> Prog SOACS.SOACS -> FutharkM ()
-runPolyPasses config initial_prog = do
-    end_prog <- foldM (runPolyPass pipeline_config) (SOACS initial_prog)
+runPolyPasses :: Config -> FilePath -> UntypedPassState -> FutharkM ()
+runPolyPasses config base initial_prog = do
+    end_prog <- foldM (runPolyPass pipeline_config) initial_prog
                 (getFutharkPipeline config)
     logMsg $ "Running action " ++ untypedActionName (futharkAction config)
     case (end_prog, futharkAction config) of
@@ -452,9 +460,9 @@ runPolyPasses config initial_prog = do
       (Kernels prog, KernelsAction action) ->
         actionProcedure action prog
       (SeqMem prog, SeqMemAction action) ->
-        actionProcedure action prog
+        actionProcedure (action base) prog
       (KernelsMem prog, KernelsMemAction action) ->
-        actionProcedure action prog
+        actionProcedure (action base) prog
 
       (SOACS soacs_prog, PolyAction acs) ->
         actionProcedure (actionSOACS acs) soacs_prog
