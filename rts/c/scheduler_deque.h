@@ -117,10 +117,31 @@ void acquire (struct worker *worker)
   int my_id = worker->tid;
   while (! is_finished(worker))
   {
-    int k = random_other_worker(scheduler, my_id);
 
-    struct deque *deque_k = &scheduler->workers[k].q;
+    // Try to steal from queue 0 first (high priority)
+    struct deque *deque_k = &scheduler->workers[0].q;
     struct subtask* subtask = steal(deque_k);
+    if (subtask == STEAL_RES_EMPTY) {
+      // TODO: log
+    } else if (subtask == STEAL_RES_ABORT) {
+      // TODO: log
+    } else if (subtask == STEAL_RES_DEAD) {
+      fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, 0);
+    } else {
+      assert(subtask != NULL);
+      // We stole a task, so we reset it's iteration counter
+      if (subtask->chunkable && *subtask->total_iter > 0)
+      {
+        subtask->iterations = chunk_dynamic_subtask(subtask, worker);
+      }
+      push_back(&worker->q, subtask);
+      return;
+    }
+
+    // otherwise try to steal from
+    int k = random_other_worker(scheduler, my_id);
+    deque_k = &scheduler->workers[k].q;
+    subtask = steal(deque_k);
     if (subtask == STEAL_RES_EMPTY) {
       // TODO: log
     } else if (subtask == STEAL_RES_ABORT) {
