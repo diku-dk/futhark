@@ -2,42 +2,13 @@
 -- | @futhark cuda@
 module Futhark.CLI.CUDA (main) where
 
-import Control.Monad.IO.Class
-import System.FilePath
-import System.Exit
-
-import Futhark.Passes
-import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
-import Futhark.Util
+import Futhark.Actions (compileCUDAAction)
+import Futhark.Passes (gpuPipeline)
 import Futhark.Compiler.CLI
 
 -- | Run @futhark cuda@.
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile CUDA" "Generate CUDA/C code from optimised Futhark program."
-       gpuPipeline $ \fcfg () mode outpath prog -> do
-         cprog <- handleWarnings fcfg $ CCUDA.compileProg prog
-         let cpath = outpath `addExtension` "c"
-             hpath = outpath `addExtension` "h"
-             extra_options = [ "-lcuda"
-                             , "-lcudart"
-                             , "-lnvrtc"
-                             ]
-         case mode of
-           ToLibrary -> do
-             let (header, impl) = CCUDA.asLibrary cprog
-             liftIO $ writeFile hpath header
-             liftIO $ writeFile cpath impl
-           ToExecutable -> do
-             liftIO $ writeFile cpath $ CCUDA.asExecutable cprog
-             let args = [cpath, "-O", "-std=c99", "-lm", "-o", outpath]
-                        ++ extra_options
-             ret <- liftIO $ runProgramWithExitCode "gcc" args mempty
-             case ret of
-               Left err ->
-                 externalErrorS $ "Failed to run gcc: " ++ show err
-               Right (ExitFailure code, _, gccerr) ->
-                 externalErrorS $ "gcc failed with code " ++
-                 show code ++ ":\n" ++ gccerr
-               Right (ExitSuccess, _, _) ->
-                 return ()
+       gpuPipeline $ \fcfg () mode outpath prog ->
+  actionProcedure (compileCUDAAction fcfg mode outpath) prog
