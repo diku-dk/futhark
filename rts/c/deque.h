@@ -8,9 +8,7 @@
 #define QUEUE_ABORT NULL
 static struct subtask* const STEAL_RES_EMPTY = (struct subtask*) 0;
 static struct subtask* const STEAL_RES_ABORT = (struct subtask*) 1;
-static struct subtask* const STEAL_RES_DEAD  = (struct subtask*) 2;
 
-static const int mem_model = __ATOMIC_SEQ_CST;
 static const int strong = 0;
 static const int backoff_nb_cycles = 1l << 10;
 
