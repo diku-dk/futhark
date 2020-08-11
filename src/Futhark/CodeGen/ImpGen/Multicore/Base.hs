@@ -188,8 +188,8 @@ segBinOpComm' :: [SegBinOp lore] -> Commutativity
 segBinOpComm' = mconcat . map segBinOpComm
 
 decideScheduling' :: SegOp () lore -> Imp.Code -> Imp.Scheduling
-decideScheduling' SegHist{} code = Imp.Static
-decideScheduling' SegScan{} code = Imp.Static
+decideScheduling' SegHist{} _ = Imp.Static
+decideScheduling' SegScan{} _ = Imp.Static
 decideScheduling' (SegRed _ _ reds _ _) code =
   case segBinOpComm' reds of
     Commutative -> decideScheduling code
