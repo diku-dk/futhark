@@ -291,7 +291,6 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   struct scheduler_info info;
   info.total_time = task->total_time;
   info.total_iter = task->total_iter;
-  info.min_cost = task->min_cost;
 
   int max_num_tasks = task->sched == STATIC ?
     compute_max_num_subtasks(scheduler->num_threads, info, task->iterations):
