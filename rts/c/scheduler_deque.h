@@ -48,17 +48,15 @@ static inline int chunk_dynamic_subtask(struct subtask* subtask, struct worker *
 {
   struct scheduler* scheduler = worker->scheduler;
   long int rem_iter = subtask->end-subtask->start;
-  int nsubtasks;
 
   double C = (double)*subtask->total_time / (double)*subtask->total_iter;
   // Should we be careful or nah?
   int min_iter_pr_subtask = (int) (kappa / (C + DBL_EPSILON));
   min_iter_pr_subtask = min_iter_pr_subtask == 0 ? 1 : min_iter_pr_subtask;
-  nsubtasks = rem_iter / min_iter_pr_subtask;
+  int nsubtasks = rem_iter / min_iter_pr_subtask;
   if (nsubtasks == 0) {
     return rem_iter;
-  }
-  else if (nsubtasks > scheduler->num_threads) {
+  } else if (nsubtasks > scheduler->num_threads) {
     nsubtasks = scheduler->num_threads;
   }
 
@@ -156,9 +154,7 @@ static inline void *scheduler_worker(void* arg)
   {
     if (! empty(&worker->q)) {
       struct subtask* subtask = pop_back(&worker->q);
-      if (subtask == NULL) {
-        continue;
-      }
+      if (subtask == NULL) continue;
       struct subtask* subtask_new = chunk_subtask(worker, subtask);
       int err = run_subtask(worker, subtask_new);
       /* Only one error can be returned at the time now
@@ -177,7 +173,6 @@ static inline void *scheduler_worker(void* arg)
       }
     }
   }
-
   assert(empty(&worker->q));
   __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
   output_thread_usage(worker);
@@ -233,12 +228,11 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   {
     if (!empty(&worker->q)) {
       struct subtask * subtask = pop_back(&worker->q);
-      if (subtask != NULL) {
-        struct subtask* subtask_new = chunk_subtask(worker, subtask);
-        int err = run_subtask(worker, subtask_new);
-        if (err != 0) {
-          return err;
-        }
+      if (subtask == NULL) continue;
+      struct subtask* subtask_new = chunk_subtask(worker, subtask);
+      int err = run_subtask(worker, subtask_new);
+      if (err != 0) {
+        return err;
       }
     } else {
       while (shared_counter != 0 && empty(&worker->q) && scheduler_error == 0) {
