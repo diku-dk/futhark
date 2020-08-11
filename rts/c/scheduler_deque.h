@@ -109,56 +109,33 @@ static inline int chunk_dynamic_subtask(struct subtask* subtask, struct worker *
 }
 
 
-void acquire (struct worker *worker)
+static inline void steal_from_random_worker(struct worker* worker)
 {
-  assert(num_workers >= 2);
-
-  struct scheduler* scheduler = worker->scheduler;
   int my_id = worker->tid;
-  while (! is_finished(worker))
-  {
-
-    // Try to steal from queue 0 first (high priority)
-    struct deque *deque_k = &scheduler->workers[0].q;
-    struct subtask* subtask = steal(deque_k);
-    if (subtask == STEAL_RES_EMPTY) {
-      // TODO: log
-    } else if (subtask == STEAL_RES_ABORT) {
-      // TODO: log
-    } else if (subtask == STEAL_RES_DEAD) {
-      fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, 0);
-    } else {
-      assert(subtask != NULL);
-      // We stole a task, so we reset it's iteration counter
-      if (subtask->chunkable && *subtask->total_iter > 0)
-      {
-        subtask->iterations = chunk_dynamic_subtask(subtask, worker);
-      }
-      push_back(&worker->q, subtask);
-      return;
+  struct scheduler* scheduler = worker->scheduler;
+  int k = random_other_worker(scheduler, my_id);
+  // Try to steal from queue 0 first (high priority)
+  struct deque *deque_k = &scheduler->workers[k].q;
+  struct subtask* subtask = steal(deque_k);
+  // otherwise try to steal from
+  if (subtask == STEAL_RES_EMPTY) {
+    // TODO: log
+  } else if (subtask == STEAL_RES_ABORT) {
+    // TODO: log
+  } else if (subtask == STEAL_RES_DEAD) {
+    fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
+  } else {
+    assert(subtask != NULL);
+    // We stole a task, so we re-compute it's iteration counter
+    if (subtask->chunkable && *subtask->total_iter > 0)
+    {
+      subtask->iterations = chunk_dynamic_subtask(subtask, worker);
     }
-
-    // otherwise try to steal from
-    int k = random_other_worker(scheduler, my_id);
-    deque_k = &scheduler->workers[k].q;
-    subtask = steal(deque_k);
-    if (subtask == STEAL_RES_EMPTY) {
-      // TODO: log
-    } else if (subtask == STEAL_RES_ABORT) {
-      // TODO: log
-    } else if (subtask == STEAL_RES_DEAD) {
-      fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
-    } else {
-      assert(subtask != NULL);
-      // We stole a task, so we reset it's iteration counter
-      if (subtask->chunkable && *subtask->total_iter > 0)
-      {
-        subtask->iterations = chunk_dynamic_subtask(subtask, worker);
-      }
-      push_back(&worker->q, subtask);
-      return;
-    }
+    push_back(&worker->q, subtask);
+    return;
   }
+
+  return;
 }
 
 
@@ -183,8 +160,11 @@ static inline void *scheduler_worker(void* arg)
       }
     } else if (__atomic_load_n(&num_workers, __ATOMIC_RELAXED) == 1) {
       break;
-    } else { // steal
-      acquire(worker);
+    } else { // try to steal
+      assert(num_workers >= 2);
+      while (!is_finished(worker)) {
+        steal_from_random_worker(worker);
+      }
     }
   }
 
@@ -252,29 +232,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     } else {
       struct scheduler* scheduler = worker->scheduler;
       int my_id = worker->tid;
-      while (shared_counter != 0 && empty(&worker->q) && scheduler_error == 0)
-      {
-        int k = random_other_worker(scheduler, my_id);
-        if (scheduler->workers[k].dead) {
-          continue;
-        }
-        struct deque *deque_k = &scheduler->workers[k].q;
-        struct subtask* subtask = steal(deque_k);
-        if (subtask == STEAL_RES_EMPTY) {
-          // TODO: log
-        } else if (subtask == STEAL_RES_ABORT) {
-          // TODO: log
-        } else if (subtask == STEAL_RES_DEAD){
-          fprintf(stderr, "tid %d tried to steal from dead queue %d\n", my_id, k);
-        } else {
-          assert(subtask != NULL);
-          // We stole a task, so we compute it's iteration counter
-          if (subtask->chunkable && *subtask->total_iter > 0)
-          {
-            subtask->iterations = chunk_dynamic_subtask(subtask, worker);
-          }
-          push_back(&worker->q, subtask);
-        }
+      while (shared_counter != 0 && empty(&worker->q) && scheduler_error == 0) {
+        steal_from_random_worker(worker);
       }
     }
   }
