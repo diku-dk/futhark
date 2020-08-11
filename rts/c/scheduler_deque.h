@@ -2,6 +2,7 @@
 #ifndef _SCHEDULER_H_
 #define _SCHEDULER_H_
 
+#include <float.h>
 
 static volatile sig_atomic_t free_workers;
 static volatile sig_atomic_t num_workers;
@@ -24,46 +25,6 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
   assert(i != my_id);
 
   return i;
-}
-
-static inline int is_small(struct scheduler_task *task, int ntasks)
-{
-  int64_t time = *task->total_time;
-  int64_t iter = *task->total_iter;
-
-  if (task->sched == DYNAMIC) return 0;
-  if (*task->total_iter == 0) return 0;
-
-  // Estimate the constant C
-  double C = (double)time / (double)iter;
-  double cur_task_iter = (double) task->iterations;
-
-  if (C * cur_task_iter < kappa * ntasks)
-    return 1;
-
-  return 0;
-}
-
-static inline int run_subtask(struct worker* worker, struct subtask* subtask)
-{
-  assert(subtask != NULL);
-  assert(worker != NULL);
-  int64_t start = get_wall_time();
-  int err = subtask->fn(subtask->args, subtask->start, subtask->end,
-                        subtask->chunkable ? worker->tid : subtask->id, worker->tid);
-  if (err != 0)
-    return err;
-  int64_t end = get_wall_time();
-  int64_t time_elapsed = end - start;
-  worker->time_spent_working += time_elapsed;
-  int32_t iter = subtask->end - subtask->start;
-  // report time measurements
-  __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
-  __atomic_fetch_add(subtask->total_iter, iter,         __ATOMIC_RELAXED);
-  /* __atomic_thread_fence(__ATOMIC_RELEASE); */
-  __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
-  free(subtask);
-  return 0;
 }
 
 
@@ -90,20 +51,17 @@ static inline int chunk_dynamic_subtask(struct subtask* subtask, struct worker *
   int nsubtasks;
 
   double C = (double)*subtask->total_time / (double)*subtask->total_iter;
-  if (C <= 0.0f) {
-    // Should we be careful or nah?
-    return subtask->iterations;
-  } else {
-    int min_iter_pr_subtask = (int) (kappa / C);
-    min_iter_pr_subtask = min_iter_pr_subtask == 0 ? 1 : min_iter_pr_subtask;
-    nsubtasks = rem_iter / min_iter_pr_subtask;
-    if (nsubtasks == 0) {
-      return rem_iter;
-    }
-    else if (nsubtasks > scheduler->num_threads) {
-      nsubtasks = scheduler->num_threads;
-    }
+  // Should we be careful or nah?
+  int min_iter_pr_subtask = (int) (kappa / (C + DBL_EPSILON));
+  min_iter_pr_subtask = min_iter_pr_subtask == 0 ? 1 : min_iter_pr_subtask;
+  nsubtasks = rem_iter / min_iter_pr_subtask;
+  if (nsubtasks == 0) {
+    return rem_iter;
   }
+  else if (nsubtasks > scheduler->num_threads) {
+    nsubtasks = scheduler->num_threads;
+  }
+
   int iter_pr_subtask = rem_iter / nsubtasks;
   return iter_pr_subtask;
 }
@@ -134,6 +92,60 @@ static inline int steal_from_random_worker(struct worker* worker)
   }
   return 0;
 }
+
+
+static inline int run_subtask(struct worker* worker, struct subtask* subtask)
+{
+  assert(subtask != NULL);
+  assert(worker != NULL);
+  int64_t start = get_wall_time();
+  int err = subtask->fn(subtask->args, subtask->start, subtask->end,
+                        subtask->chunkable ? worker->tid : subtask->id, worker->tid);
+  if (err != 0)
+    return err;
+  int64_t end = get_wall_time();
+  int64_t time_elapsed = end - start;
+  worker->time_spent_working += time_elapsed;
+  int32_t iter = subtask->end - subtask->start;
+  // report time measurements
+  __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
+  __atomic_fetch_add(subtask->total_iter, iter,         __ATOMIC_RELAXED);
+  /* __atomic_thread_fence(__ATOMIC_RELEASE); */
+  __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
+  free(subtask);
+  return 0;
+}
+
+static inline int compute_max_num_subtasks(int nthreads,
+                                           struct scheduler_info info,
+                                           long int iterations)
+{
+  if (*info.total_iter == 0) return nthreads;
+  double C = (double)*info.total_time / (double)*info.total_iter;
+  int min_iter_pr_subtask = (int)(kappa / (C + DBL_EPSILON));
+  if (min_iter_pr_subtask == 0) return nthreads; // => kappa < C
+  int nsubtasks = iterations / min_iter_pr_subtask;
+  return nsubtasks > nthreads ? nthreads : nsubtasks;
+}
+
+static inline int is_small(struct scheduler_task *task, int ntasks)
+{
+  int64_t time = *task->total_time;
+  int64_t iter = *task->total_iter;
+
+  if (task->sched == DYNAMIC) return 0;
+  if (*task->total_iter == 0) return 0;
+
+  // Estimate the constant C
+  double C = (double)time / (double)iter;
+  double cur_task_iter = (double) task->iterations;
+
+  if (C * cur_task_iter < kappa * ntasks)
+    return 1;
+
+  return 0;
+}
+
 
 
 static inline void *scheduler_worker(void* arg)
@@ -177,7 +189,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
                                              struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_parallel] Performing scheduling with scheduling %s\n", task->info.sched == STATIC ? "STATIC" : "DYNAMIC");
+  fprintf(stderr, "[scheduler_parallel] Performing scheduling with scheduling %s\n",
+          task->info.sched == STATIC ? "STATIC" : "DYNAMIC");
 #endif
 
   struct worker * worker = worker_local;
@@ -241,7 +254,8 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
                                          struct scheduler_subtask *task)
 {
 #ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_execute] starting task %s with %ld iterations \n", task->name, task->iterations);
+  fprintf(stderr, "[scheduler_execute] starting task %s with %ld iterations \n",
+          task->name, task->iterations);
 #endif
   assert(scheduler != NULL);
   assert(task != NULL);
@@ -261,10 +275,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     return err;
   }
 
-  free_workers -= task->info.nsubtasks;
-  int err = scheduler_execute_parallel(scheduler, task);
-  free_workers += task->info.nsubtasks;
-  return err;
+  return scheduler_execute_parallel(scheduler, task);
 }
 
 /* Decide on how schedule the incoming task i.e. how many subtasks and
@@ -282,28 +293,12 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   info.total_iter = task->total_iter;
   info.min_cost = task->min_cost;
 
-  int max_num_tasks = scheduler->num_threads;
-  if (*task->total_iter > 0 && task->sched == STATIC) {
-    double C = (double)*task->total_time / (double)*task->total_iter;
-    if (C <= 0.0f) {
-      max_num_tasks = 1;
-    } else {
-      int min_iter_pr_subtask = (int)(kappa / C) ;
-      if (min_iter_pr_subtask == 0) min_iter_pr_subtask += 1;
-      max_num_tasks = task->iterations / min_iter_pr_subtask;
-      if (max_num_tasks == 0) {
-        info.iter_pr_subtask = task->iterations;
-        info.remainder = 0;
-        info.nsubtasks = 1;
-        return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
-      } else if (max_num_tasks > scheduler->num_threads) {
-        max_num_tasks = scheduler->num_threads;
-      }
-    }
-  }
+  int max_num_tasks = task->sched == STATIC ?
+    compute_max_num_subtasks(scheduler->num_threads, info, task->iterations):
+    scheduler->num_threads;
 
   // Decide if task should be scheduled sequentially
-  if (is_small(task, max_num_tasks)) {
+  if (max_num_tasks == 0 || is_small(task, max_num_tasks)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
@@ -321,8 +316,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   case DYNAMIC:
     info.iter_pr_subtask = task->iterations / max_num_tasks;
     info.remainder = task->iterations % max_num_tasks;
-    // As any thread can take any subtasks
-    // we are being safe with returning
+    // As any thread can take any subtasks, we are being safe with returning
     // an upper bound on the number of tasks
     info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
     info.sched = DYNAMIC;
