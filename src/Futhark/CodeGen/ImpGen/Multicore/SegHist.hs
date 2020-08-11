@@ -274,7 +274,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
             (Var subhisto, map Imp.vi32 $
               map fst segment_dims ++ [subhistogram_id, bucket_id])
 
-    let scheduler_info = Imp.SchedulerInfo nsubtasks_red (segFlat space) iterations $ Imp.Static 0
+    let scheduler_info = Imp.SchedulerInfo nsubtasks_red (segFlat space) iterations $ Imp.Static
     free_params_red <- freeParams red_code ([segFlat space, nsubtasks_red] ++ retval_names )
     emit $ Imp.Op $ Imp.Task "seghist_red" free_params_red red_code Nothing  retval_params scheduler_info
 

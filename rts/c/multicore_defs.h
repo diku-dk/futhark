@@ -74,7 +74,6 @@ struct scheduler_info {
 
   int64_t *total_time;
   int64_t *total_iter;
-  int min_cost;
 };
 
 
@@ -106,7 +105,6 @@ struct scheduler_task {
   const char* name;
   long int iterations;
   enum scheduling sched;
-  int min_cost;
 
   int64_t *total_time;
   int64_t *total_iter;

@@ -68,14 +68,12 @@ data SchedulerInfo = SchedulerInfo
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic
 -- or it is restainted to Static
 -- This could carry more information
-data Scheduling = Dynamic Granularity
-                | Static Granularity
+data Scheduling = Dynamic
+                | Static
 
 instance Pretty Scheduling where
-  ppr (Dynamic granularity) =
-    text "Dynamic" <+> ppr granularity
-  ppr (Static _) =
-    text "Static"
+  ppr (Dynamic) = text "Dynamic"
+  ppr (Static) = text "Static"
 
 -- TODO fix all of this!
 instance Pretty SchedulerInfo where

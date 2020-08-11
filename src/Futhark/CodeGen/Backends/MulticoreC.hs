@@ -513,10 +513,8 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
   GC.stm  [C.cstm|$id:ftask_name.total_time = &ctx->$id:(functionIterations fpar_task);|]
 
   case sched of
-    Dynamic n -> do GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
-                    GC.stm  [C.cstm|$id:ftask_name.min_cost = $exp:n;|]
-    Static n  -> do GC.stm  [C.cstm|$id:ftask_name.sched = STATIC;|]
-                    GC.stm  [C.cstm|$id:ftask_name.min_cost = $exp:n;|]
+    Dynamic -> GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
+    Static  -> GC.stm  [C.cstm|$id:ftask_name.sched = STATIC;|]
 
   fnpar_task <- case par_code of
         Just code -> do

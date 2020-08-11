@@ -14,7 +14,6 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
  , renameSegBinOp
  , resultArrays
  , freeParams
- , estimateCost
  , renameHistOpLambda
  , atomicUpdateLocking
  , AtomicUpdate(..)
@@ -189,30 +188,21 @@ segBinOpComm' :: [SegBinOp lore] -> Commutativity
 segBinOpComm' = mconcat . map segBinOpComm
 
 decideScheduling' :: SegOp () lore -> Imp.Code -> Imp.Scheduling
-decideScheduling' SegHist{} code = Imp.Static $ estimateCost code
-decideScheduling' SegScan{} code = Imp.Static $ estimateCost code
+decideScheduling' SegHist{} code = Imp.Static
+decideScheduling' SegScan{} code = Imp.Static
 decideScheduling' (SegRed _ _ reds _ _) code =
   case segBinOpComm' reds of
     Commutative -> decideScheduling code
-    Noncommutative ->  Imp.Static $ estimateCost code
+    Noncommutative ->  Imp.Static
 decideScheduling' SegMap{} code = decideScheduling code
 
 
 decideScheduling :: Imp.Code -> Imp.Scheduling
 decideScheduling code  =
   if isLoadBalanced code then
-    Imp.Static $ estimateCost code
+    Imp.Static
   else
-    Imp.Dynamic $ estimateCost code
-
-
-estimateCost :: Imp.Code -> Int
-estimateCost (a Imp.:>>: b)    = estimateCost a + estimateCost b
-estimateCost (Imp.For _ _ _ a) = estimateCost a + 1
-estimateCost (Imp.If _ a b)    = estimateCost a + estimateCost b + 1
-estimateCost (Imp.Comment _ a) = estimateCost a
-estimateCost (Imp.Op (Imp.MCFunc _ _ _ body _ _)) = estimateCost body
-estimateCost _                 = 1
+    Imp.Dynamic
 
 
 -- | Try to extract invariant allocations.  If we assume that the
@@ -257,7 +247,6 @@ extractAllocations segop_code = f segop_code
 -------------------------
 ------- SegHist ---------
 -------------------------
-
 renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
 renameHistOpLambda hist_ops =
   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
@@ -448,8 +437,8 @@ splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
 
 
 getBitConvertFunc :: Int -> MulticoreGen (String, String)
--- getBitConvertFunc 8 = ("to_bits8, from_bits8")
--- getBitConvertFunc 16 = ("to_bits8, from_bits8")
+-- getBitConvertFunc 8 = return $ ("to_bits8, from_bits8")
+-- getBitConvertFunc 16 = return $ ("to_bits8, from_bits8")
 getBitConvertFunc 32 = return  ("to_bits32", "from_bits32")
 getBitConvertFunc 64 = return  ("to_bits64", "from_bits64")
 getBitConvertFunc b = error $ "number of bytes is supported " ++ pretty b
