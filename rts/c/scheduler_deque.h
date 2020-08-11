@@ -67,12 +67,12 @@ static inline int chunk_dynamic_subtask(struct subtask* subtask, struct worker *
 }
 
 
+// Try to steal from a random queue
 static inline int steal_from_random_worker(struct worker* worker)
 {
   int my_id = worker->tid;
   struct scheduler* scheduler = worker->scheduler;
   int k = random_other_worker(scheduler, my_id);
-  // Try to steal from queue 0 first (high priority)
   struct deque *deque_k = &scheduler->workers[k].q;
   struct subtask* subtask = steal(deque_k);
   // otherwise try to steal from
@@ -324,8 +324,8 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   default:
     assert(!"Got unknown scheduling");
   }
-  int err = task->seq_fn(task->args, task->iterations, worker_local->tid, info);
-  return err;
+
+  return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
 }
 
 #endif
