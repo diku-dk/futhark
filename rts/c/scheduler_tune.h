@@ -66,7 +66,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
       cur_worker->time_spent_working = 0;
       cur_worker->cur_working = 0;
       cur_worker->scheduler = &ctx->scheduler;
-      cur_worker->output_usage = 1;
+      cur_worker->output_usage = 0;
       CHECK_ERR(deque_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
       CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
                                cur_worker),
@@ -125,6 +125,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     int64_t elapsed = futhark_segred_tuning_program_end - futhark_segred_tuning_program_start;
 
     kappa = (double)(elapsed - sum) / iterations;
+
     fprintf(stderr, "found kappa is %f\n", kappa);
 
     // Teardown again
