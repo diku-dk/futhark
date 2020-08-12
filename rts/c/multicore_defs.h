@@ -86,9 +86,16 @@ struct scheduler_subtask {
   struct scheduler_info info;
 };
 
-struct deque {
+
+struct deque_buffer {
+  struct subtask** array;
   int64_t size;
-  struct subtask **buffer;
+};
+
+struct deque {
+  /* int64_t size; */
+  /* struct subtask **buffer; */
+  struct deque_buffer *buffer;
   int64_t top, bottom;
   int dead;
 };

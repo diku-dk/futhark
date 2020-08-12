@@ -38,26 +38,36 @@ static inline void cb_put (struct subtask **buf, int64_t capacity, int64_t i, st
   __atomic_store_n(&buf[i % capacity], x, __ATOMIC_RELAXED);
 }
 
-struct subtask **grow(struct subtask **old_buf,
-                      int64_t old_capacity,
-                      int64_t new_capacity,
-                      int64_t b,
-                      int64_t t)
+struct deque_buffer* grow(struct subtask **old_array,
+                          int64_t old_capacity,
+                          int64_t new_capacity,
+                          int64_t b,
+                          int64_t t)
 {
-  struct subtask **new_buf = calloc(new_capacity, sizeof(struct subtask*));
+  fprintf(stderr, "growing q from %lld to %lld\n", old_capacity, new_capacity);
+  struct deque_buffer* new_deque_buffer = malloc(sizeof(struct deque_buffer));
+  new_deque_buffer->size = new_capacity;
+  new_deque_buffer->array = calloc(new_capacity,  sizeof(struct subtask*));
+
   for (int64_t i = t; i < b; i++) {
-    cb_put(new_buf, new_capacity, i, cb_get(old_buf, old_capacity, i));
+    cb_put(new_deque_buffer->array, new_capacity, i, cb_get(old_array, old_capacity, i));
   }
-  return new_buf;
+  return new_deque_buffer;
 }
 
 static inline int deque_init(struct deque *q, int64_t capacity) {
   assert(q != NULL);
   memset(q, 0, sizeof(struct deque));
 
+  q->buffer = malloc(sizeof(struct deque_buffer));
+  q->buffer->array = calloc(capacity, sizeof(struct subtask*));
+  q->buffer->size = capacity;
+
   q->dead = 0;
-  q->size = capacity;
-  q->buffer = calloc(capacity, sizeof(struct subtask*));
+
+  if (q->buffer->array == NULL) {
+    return -1;
+  }
 
   if (q->buffer == NULL) {
     return -1;
@@ -68,12 +78,14 @@ static inline int deque_init(struct deque *q, int64_t capacity) {
 static inline void deque_destroy(struct deque* q)
 {
   q->dead = 1;
+  free(q->buffer->array);
   free(q->buffer);
 }
 
 static inline int cas_top (struct deque *q, int64_t old_val, int64_t new_val) {
   int64_t ov = old_val;
-  if(__atomic_compare_exchange_n(&q->top, &ov, new_val, strong, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
+  if(__atomic_compare_exchange_n(&q->top, &ov, new_val, strong,
+                                 __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
     return 1;
   }
   spin_for(backoff_nb_cycles);
@@ -81,44 +93,51 @@ static inline int cas_top (struct deque *q, int64_t old_val, int64_t new_val) {
 }
 
 
-static inline void push_back(struct deque *q, struct subtask*subtask)
+void push_back(struct deque *q, struct subtask*subtask)
 {
   assert(subtask != NULL);
   assert(q != NULL);
 
   int64_t b = __atomic_load_n(&q->bottom, __ATOMIC_RELAXED); // load atomically
   int64_t t = __atomic_load_n(&q->top, __ATOMIC_ACQUIRE);    // load atomically
-  if (b-t >= (__atomic_load_n(&q->size, __ATOMIC_RELAXED) - 1)) {
+  struct deque_buffer *buffer = __atomic_load_n(&q->buffer, __ATOMIC_RELAXED);
+  if (b-t >= (buffer->size - 1)) {
     // grow_queue
-    struct subtask **old_buf = q->buffer;
-    int64_t old_capacity = __atomic_load_n(&q->size, __ATOMIC_RELAXED);
-    int64_t new_capacity = __atomic_load_n(&q->size, __ATOMIC_RELAXED) * 2;
-    __atomic_store_n(&q->buffer, grow(old_buf, old_capacity, new_capacity, b, t), __ATOMIC_RELAXED);
-    __atomic_store_n(&q->size, new_capacity, __ATOMIC_RELAXED);
+    struct subtask **old_array = buffer->array;
+    int64_t old_capacity = __atomic_load_n(&buffer->size, __ATOMIC_RELAXED);
+    int64_t new_capacity = old_capacity * 2;
+    struct deque_buffer *new_buffer = grow(old_array, old_capacity, new_capacity, b, t);
+    __atomic_store_n(&q->buffer, new_buffer, __ATOMIC_RELEASE);
+    buffer = __atomic_load_n(&q->buffer, __ATOMIC_RELAXED);
+    memset(old_array, 0, sizeof(struct subtask*) * old_capacity);
+    // free(old_array);  Not safe!!
   }
-  cb_put(q->buffer, q->size, b, subtask);
+
+  cb_put(buffer->array, buffer->size, b, subtask);
   __atomic_thread_fence(__ATOMIC_RELEASE);
   __atomic_store_n(&q->bottom, b+1, __ATOMIC_RELAXED);
   return;
 }
 
 
-static inline struct subtask * pop_back(struct deque *q)
+struct subtask * pop_back(struct deque *q)
 {
   int64_t b = __atomic_load_n(&q->bottom, __ATOMIC_RELAXED) - 1; // load atomically
+  struct deque_buffer *buffer = __atomic_load_n(&q->buffer, __ATOMIC_RELAXED);
   __atomic_store_n(&q->bottom, b, __ATOMIC_RELAXED);
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
-
   int64_t t = __atomic_load_n(&q->top, __ATOMIC_RELAXED);
   if (b < t) {
     __atomic_store_n(&q->bottom, t, __ATOMIC_RELAXED);
     return NULL;
   }
-  struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, __ATOMIC_RELAXED), b);
+  struct subtask* item = cb_get(buffer->array, buffer->size, b);
   if (b > t) {
     return item;
   }
 
+  // else there's only one item left
+  // Did we win the race?
   if (!cas_top(q, t, t + 1)) {
     item = NULL;
   }
@@ -126,9 +145,10 @@ static inline struct subtask * pop_back(struct deque *q)
   return item;
 }
 
-static inline struct subtask* steal(struct deque *q)
+struct subtask* steal(struct deque *q)
 {
   assert(q != NULL);
+
   int64_t t = __atomic_load_n(&q->top, __ATOMIC_ACQUIRE);    // load atomically
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
   int64_t b = __atomic_load_n(&q->bottom, __ATOMIC_ACQUIRE); // load atomically
@@ -136,14 +156,14 @@ static inline struct subtask* steal(struct deque *q)
     return STEAL_RES_EMPTY;
   }
 
-  struct subtask* item = cb_get(q->buffer, __atomic_load_n(&q->size, __ATOMIC_RELAXED), t);
+  struct deque_buffer *buffer = __atomic_load_n(&q->buffer, __ATOMIC_CONSUME);
+  struct subtask* item = cb_get(buffer->array, buffer->size, t);
   if (!cas_top(q, t, t + 1)) {
     return STEAL_RES_ABORT;
   }
 
   return item;
 }
-
 
 
 static inline size_t nb_subtasks(struct deque *q)
