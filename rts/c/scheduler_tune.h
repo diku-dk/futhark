@@ -42,6 +42,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 {
     int err = 0;
 
+    int iterations = 100000;
     ctx->futhark_tuning_mc_segred_stage_1_runtime = calloc(sizeof(int64_t), ctx->scheduler.num_threads);
     ctx->futhark_tuning_mc_segred_stage_1_iter = calloc(sizeof(int64_t), ctx->scheduler.num_threads);
     ctx->tuning_timing = 0;
@@ -58,7 +59,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 
 
     // Initialize queues and threads
-    CHECK_ERR(deque_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
+    CHECK_ERR(deque_init(&worker_local->q, iterations), "failed to init queue for worker %d\n", 0);
     for (int i = 1; i < ctx->scheduler.num_threads; i++) {
       struct worker *cur_worker = &ctx->scheduler.workers[i];
       cur_worker->tid = i;
@@ -75,7 +76,6 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 
 
     struct scheduler_info info;
-    int iterations = 100000;
     info.nsubtasks = iterations;
     info.iter_pr_subtask = 1;
     info.remainder = 0;
