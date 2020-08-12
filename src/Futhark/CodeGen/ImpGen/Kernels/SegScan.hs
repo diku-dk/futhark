@@ -47,9 +47,22 @@ compileSegScan  (Pattern _ pes)
     -- let group_size = segGroupSize lvl                                  -- Subexp
     group_size' <- traverse toExp $ segGroupSize lvl                  -- Imp.Exp
 
-    let apg = Imp.BinOpExp (Add Int32) arraysize (unCount group_size')
+
+
+    let eLMPT = 9::Integer
+    -- intValueType :: IntValue -> IntType
+    let eLEMS_PER_THREAD = IntValue $ intValue Int32 eLMPT
+    let eLEMS_PER_THREAD_const = ValueExp eLEMS_PER_THREAD -- Constant eLEMS_PER_THREAD
+    let eLM_shape = Shape [Constant eLEMS_PER_THREAD]
+    let numelems_group = unCount group_size' * eLEMS_PER_THREAD_const
+    numelems_group_var <- dPrimV "numelems_group_var" numelems_group
+
+
+    -- let apg = Imp.BinOpExp (Add Int32) arraysize (unCount group_size')
+    let apg = Imp.BinOpExp (Add Int32) arraysize numelems_group
     let apgmone = Imp.BinOpExp (Sub Int32) apg 1
-    let num_groups_impexp = Imp.BinOpExp (SDiv Int32) apgmone (unCount group_size')
+    -- let num_groups_impexp = Imp.BinOpExp (SDiv Int32) apgmone (unCount group_size')
+    let num_groups_impexp = Imp.BinOpExp (SDiv Int32) apgmone numelems_group
     ng <- dPrimV "num_groups" num_groups_impexp
 
     let (hxp, _hyp) = splitAt (length nes) $ lambdaParams scan_op
@@ -78,13 +91,6 @@ compileSegScan  (Pattern _ pes)
     --           shape = Shape [Constant eLEMS_PER_THREAD]
     --       return (unCount (typeSize (Array pt shape NoUniqueness)))
 
-
-    let eLMPT = 9::Integer
-    -- intValueType :: IntValue -> IntType
-    let eLEMS_PER_THREAD = IntValue $ intValue Int32 eLMPT
-    let eLEMS_PER_THREAD_const = ValueExp eLEMS_PER_THREAD -- Constant eLEMS_PER_THREAD
-    let eLM_shape = Shape [Constant eLEMS_PER_THREAD]
-    gsize <- dPrimV "gsize" (unCount group_size' * eLEMS_PER_THREAD_const)
 
 
 
@@ -116,7 +122,7 @@ compileSegScan  (Pattern _ pes)
                 -- shape = Shape [kernelGroupSize constants * eLEMS_PER_THREAD_const] -- ShapeBase Imp.Exp
                 -- shape = Shape [gsz * (Constant eLEMS_PER_THREAD)] -- No instance for (Num SubExp) arising from a use of ‘*’
                 -- shape = Shape [gsz * (intConst Int32 eLMPT)] -- No instance for (Num SubExp) arising from a use of ‘*’
-                shape = Shape [Var gsize]
+                shape = Shape [Var numelems_group_var]
             sAllocArray "exchange" pt shape $ Space "local"
 
       -- sAllocArray :: String -> PrimType -> ShapeBase SubExp -> Space -> ImpM lore op VName
