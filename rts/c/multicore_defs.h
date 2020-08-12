@@ -123,6 +123,7 @@ struct worker {
   struct scheduler *scheduler;
   int cur_working;
   int dead;
+  int output_usage;
 
   int tid;                     /* Just a thread id */
   uint64_t time_spent_working; /* Time spent in tasks functions */
