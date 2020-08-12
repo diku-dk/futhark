@@ -210,7 +210,13 @@ valueIntegral (Int64Value v) = fromIntegral v
 -- | A floating-point value.
 data FloatValue = Float32Value !Float
                 | Float64Value !Double
-               deriving (Eq, Show)
+               deriving (Show)
+
+instance Eq FloatValue where
+  Float32Value x == Float32Value y = isNaN x && isNaN y || x == y
+  Float64Value x == Float64Value y = isNaN x && isNaN y || x == y
+  Float32Value _ == Float64Value _ = False
+  Float64Value _ == Float32Value _ = False
 
 -- The derived Ord instance does not handle NaNs correctly.
 instance Ord FloatValue where
@@ -804,6 +810,8 @@ doCmpOp _ _ _                                    = Nothing
 
 -- | Compare any two primtive values for exact equality.
 doCmpEq :: PrimValue -> PrimValue -> Bool
+doCmpEq (FloatValue (Float32Value v1)) (FloatValue (Float32Value v2)) = v1 == v2
+doCmpEq (FloatValue (Float64Value v1)) (FloatValue (Float64Value v2)) = v1 == v2
 doCmpEq v1 v2 = v1 == v2
 
 -- | Unsigned less than.
