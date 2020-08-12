@@ -4,7 +4,6 @@
 
 #include <float.h>
 
-static volatile sig_atomic_t free_workers;
 static volatile sig_atomic_t num_workers;
 __thread struct worker* worker_local = NULL;
 
@@ -72,6 +71,7 @@ static inline int steal_from_random_worker(struct worker* worker)
   struct scheduler* scheduler = worker->scheduler;
   int k = random_other_worker(scheduler, my_id);
   struct deque *deque_k = &scheduler->workers[k].q;
+  if (empty(deque_k)) return 0;
   struct subtask* subtask = steal(deque_k);
   // otherwise try to steal from
   if (subtask == STEAL_RES_EMPTY) {
@@ -152,7 +152,7 @@ static inline void *scheduler_worker(void* arg)
   worker_local = worker;
   while (!is_finished(worker))
   {
-    if (! empty(&worker->q)) {
+    if (!empty(&worker->q)) {
       struct subtask* subtask = pop_back(&worker->q);
       if (subtask == NULL) continue;
       struct subtask* subtask_new = chunk_subtask(worker, subtask);
@@ -175,7 +175,8 @@ static inline void *scheduler_worker(void* arg)
   }
   assert(empty(&worker->q));
   __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
-  output_thread_usage(worker);
+  if (worker->output_usage)
+    output_thread_usage(worker);
   return NULL;
 }
 

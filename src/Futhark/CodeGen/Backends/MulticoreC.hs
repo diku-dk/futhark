@@ -138,10 +138,10 @@ compileProg =
 
                  $stms:init_fields
 
+                 futhark_segred_tuning_program(ctx);
+
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
-
-                 free_workers = ctx->scheduler.num_threads;
                  num_workers = ctx->scheduler.num_threads;
                  worker_local = &ctx->scheduler.workers[0];
                  worker_local->tid = 0;
@@ -150,9 +150,11 @@ compileProg =
 
                  for (int i = 1; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
+                   memset(cur_worker, 0, sizeof(struct worker));
                    cur_worker->tid = i;
                    cur_worker->time_spent_working = 0;
                    cur_worker->cur_working = 0;
+                   cur_worker->output_usage = 1;
                    cur_worker->scheduler = &ctx->scheduler;
                    CHECK_ERR(deque_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
@@ -161,11 +163,7 @@ compileProg =
                  }
 
                  init_constants(ctx);
-                 ctx->futhark_tuning_mc_segred_stage_1_runtime = calloc(sizeof(typename int64_t), ctx->scheduler.num_threads);
-                 ctx->futhark_tuning_mc_segred_stage_1_iter = calloc(sizeof(typename int64_t), ctx->scheduler.num_threads);
-                 //ctx->tuning_timing = 0;
-                 //ctx->tuning_iter = 0;
-                 //futhark_segred_tuning_program(ctx);
+
 
                  return ctx;
               }|])
@@ -177,6 +175,8 @@ compileProg =
 
                  output_thread_usage(worker_local);
                  worker_local->dead = 1;
+                 worker_local->q.dead = 1;
+                 __atomic_thread_fence(__ATOMIC_SEQ_CST);
                  for (int i = 1; i < ctx->scheduler.num_threads; i++)
                  {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
