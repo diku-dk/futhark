@@ -96,19 +96,21 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 {
   assert(subtask != NULL);
   assert(worker != NULL);
+#ifdef MCPROFILE
   int64_t start = get_wall_time();
+#endif
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
-                        subtask->chunkable ? worker->tid : subtask->id, worker->tid);
+                        subtask->chunkable ? worker->tid : subtask->id, worker->tid, subtask->total_time);
   if (err != 0)
     return err;
+#ifdef MCPROFILE
   int64_t end = get_wall_time();
   int64_t time_elapsed = end - start;
   worker->time_spent_working += time_elapsed;
+#endif
   int32_t iter = subtask->end - subtask->start;
-  // report time measurements
-  __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
+  // report measurements
   __atomic_fetch_add(subtask->total_iter, iter,         __ATOMIC_RELAXED);
-  /* __atomic_thread_fence(__ATOMIC_RELEASE); */
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);
   return 0;
@@ -260,12 +262,15 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
   }
 
   if (task->info.nsubtasks == 1) {
+#ifdef MCPROFILE
     int64_t start = get_wall_time();
-    int err = task->fn(task->args, 0, task->iterations, 0, worker_local->tid);
+#endif
+    int err = task->fn(task->args, 0, task->iterations, 0, worker_local->tid, task->info.total_time);
+#ifdef MCPROFILE
     int64_t end = get_wall_time();
     int64_t time_elapsed = end - start;
     worker_local->time_spent_working += time_elapsed;
-    __atomic_fetch_add(task->info.total_time, time_elapsed,     __ATOMIC_RELAXED);
+#endif
     __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
     return err;
   }

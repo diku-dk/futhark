@@ -568,11 +568,15 @@ compileOp (MCFunc s' i prebody body free tid) = do
       GC.stm [C.cstm|cleanup: {}|]
       mapM_ GC.stm free_cached
 
-    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid, int tid) {
+    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid, int tid, typename int64_t*time) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
+                       typename int64_t start_time = get_wall_time();
                        struct futhark_context *ctx = $id:fstruct->ctx;
                        $items:fbody
+                       typename int64_t end_time = get_wall_time();
+                       typename int64_t elapsed = end_time - start_time;
+                       __atomic_fetch_add(time, elapsed, __ATOMIC_RELAXED);
                        return err;
                      }|]
 

@@ -28,13 +28,11 @@
 #ifdef MCDEBUG
 static long int ran_iter, start_iter = 0;
 #endif
-
 static volatile int scheduler_error = 0;
 
-/* static double kappa = 4.2f; */
-static double kappa = 0.35f; // 4.2f / 12.0;
+static double kappa = 0.35f;
 
-typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id, int tid);
+typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id, int tid, int64_t* time);
 
 enum scheduling {
   DYNAMIC,
@@ -93,15 +91,12 @@ struct deque_buffer {
 };
 
 struct deque {
-  /* int64_t size; */
-  /* struct subtask **buffer; */
   struct deque_buffer *buffer;
   int64_t top, bottom;
   int dead;
 };
 
 typedef int (*task_fn)(void* args, int iterations, int tid, struct scheduler_info info);
-
 
 
 /* A task for the scheduler to execute */
@@ -210,36 +205,6 @@ static inline void fast_srand(int seed) {
 static inline int fast_rand(void) {
     g_seed = (214013*g_seed+2531011);
     return (g_seed>>16)&0x7FFF;
-}
-
-int64_t pick_bits(int lsb, int sz, int64_t value) {
-    uint64_t v = value;
-    v >>= lsb;
-    if (sz < 64) {
-        uint64_t mask = 1;
-        mask <<= sz;
-        mask -= 1;
-        v &= mask;
-    }
-    return v;
-}
-
-int64_t put_bits(int lsb, int size, int64_t val) {
-  int32_t masked = pick_bits(0, size, val);
-  return masked << lsb;
-}
-
-int64_t pack_vals (float C, int32_t nmax)
-{
-  int64_t nmax_64_shifted = (int64_t) nmax << 32;
-  return nmax_64_shifted | (int32_t)C;
-}
-
-float get_C (int64_t val) {
-  return (float)pick_bits(0, 32, val);
-}
-int32_t get_nmax (int64_t val) {
-  return (int32_t)pick_bits(32, 32, val);
 }
 
 #endif
