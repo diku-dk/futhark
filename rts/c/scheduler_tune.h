@@ -34,9 +34,6 @@ int futhark_mc_tuning_segred_stage_1(void *args, int start, int end,
 
     __atomic_fetch_add(time, elapsed, __ATOMIC_RELAXED);
 
-    ctx->futhark_tuning_mc_segred_stage_1_runtime[tid] += elapsed;
-    ctx->futhark_tuning_mc_segred_stage_1_iter[tid] += end - start;
-
     return err;
 }
 
@@ -45,8 +42,6 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     int err = 0;
 
     int iterations = 1000000;
-    ctx->futhark_tuning_mc_segred_stage_1_runtime = calloc(sizeof(int64_t), ctx->scheduler.num_threads);
-    ctx->futhark_tuning_mc_segred_stage_1_iter = calloc(sizeof(int64_t), ctx->scheduler.num_threads);
     ctx->tuning_timing = 0;
     ctx->tuning_iter = 0;
 
@@ -116,23 +111,15 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     assert(futhark_segred_tuning_program_err == 0);
     assert(ctx->tuning_iter == iterations);
 
-    int64_t sum = 0;
-    for (int i = 0; i < num_threads; i++) {
-        sum += ctx->futhark_tuning_mc_segred_stage_1_runtime[i];
-    }
-
     int64_t futhark_segred_tuning_program_end = get_wall_time();
     int64_t elapsed = futhark_segred_tuning_program_end - futhark_segred_tuning_program_start;
 
-    double kappa2  = (double)(elapsed - ctx->tuning_timing) / info.nsubtasks;
-    kappa = (double)(elapsed - sum) / info.nsubtasks;
+    kappa = (double)(elapsed - ctx->tuning_timing) / info.nsubtasks;
 
-    fprintf(stderr, "found kappa is %f\n", kappa);
-    fprintf(stderr, "found kappa2 is %f\n", kappa2);
-    fprintf(stderr, "elapsed : %lld\n", elapsed);
-    fprintf(stderr, "timing : %lld\n", ctx->tuning_timing);
-    fprintf(stderr, "sum : %lld\n", sum);
-    fprintf(stderr, "time pr iter : %f\n", (double)sum / (double)iterations);
+    fprintf(stderr, "Found kappa is %f\n", kappa);
+    fprintf(stderr, "Elapsed : %lld\n", elapsed);
+    fprintf(stderr, "Timing : %lld\n", ctx->tuning_timing);
+    fprintf(stderr, "Time pr iter : %f\n", (double)ctx->tuning_timing/ (double)iterations);
 
     // Teardown again
     for (int i = 1; i < ctx->scheduler.num_threads; i++) {

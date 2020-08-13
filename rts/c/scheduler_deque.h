@@ -100,7 +100,8 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   int64_t start = get_wall_time();
 #endif
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
-                        subtask->chunkable ? worker->tid : subtask->id, worker->tid, subtask->total_time);
+                        subtask->chunkable ? worker->tid : subtask->id,
+                        worker->tid, subtask->total_time);
   if (err != 0)
     return err;
 #ifdef MCPROFILE

@@ -113,8 +113,6 @@ compileProg =
                           // Tuning parameters
                           typename int64_t tuning_timing;
                           typename int64_t tuning_iter;
-                          typename int64_t *futhark_tuning_mc_segred_stage_1_runtime;
-                          typename int64_t *futhark_tuning_mc_segred_stage_1_iter;
                         };|])
 
           GC.publicDef_ "context_new" GC.InitDecl $ \s ->
