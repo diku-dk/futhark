@@ -133,7 +133,9 @@ transformMap (MapLoop pat cs w lam arrs) = do
             { distNest = singleNesting (Nesting mempty loopnest)
             , distScope = scopeOfPattern pat <> castScope (scopeOf lam) <> scope
             , distOnInnerMap = distributeMap
-            , distOnTopLevelStms = liftInner . transformStms
+            , distOnTopLevelStms = \m -> do
+                local_scope <- askScope
+                lift $ localScope local_scope $ transformStms m
             , distSegLevel = \_ _ _ -> pure ()
             , distOnSOACSStms = runExtract . transformStm
             , distOnSOACSLambda = runExtract . transformLambda

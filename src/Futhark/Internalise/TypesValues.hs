@@ -5,11 +5,8 @@ module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
     internaliseReturnType
-  , internaliseLambdaReturnType
   , internaliseEntryReturnType
-  , internaliseType
   , internaliseParamTypes
-  , internaliseLoopParamType
   , internalisePrimType
   , internalisedTypeSize
   , internaliseSumType
@@ -18,10 +15,10 @@ module Futhark.Internalise.TypesValues
   , internalisePrimValue
   )
   where
+
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (delete, find, foldl')
-import Data.Maybe
 import qualified Data.Map.Strict as M
 
 import qualified Language.Futhark as E
@@ -47,35 +44,22 @@ runInternaliseTypeM (InternaliseTypeM m) =
   evalStateT m 0
 
 internaliseParamTypes :: [E.TypeBase (E.DimDecl VName) ()]
-                      -> InternaliseM [[I.TypeBase Shape Uniqueness]]
+                      -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
 internaliseParamTypes ts =
-  runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM) ts
-  where onType = fromMaybe bad . hasStaticShape
-        bad = error $ "internaliseParamTypes: " ++ pretty ts
-
-internaliseLoopParamType :: E.TypeBase (E.DimDecl VName) ()
-                         -> InternaliseM [I.TypeBase Shape Uniqueness]
-internaliseLoopParamType et =
-  concat <$> internaliseParamTypes [et]
+  runInternaliseTypeM $ mapM internaliseTypeM ts
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
                       -> InternaliseM [I.TypeBase ExtShape Uniqueness]
-internaliseReturnType et =
-  runInternaliseTypeM (internaliseTypeM et)
-
-internaliseLambdaReturnType :: E.TypeBase (E.DimDecl VName) ()
-                            -> InternaliseM [I.TypeBase Shape NoUniqueness]
-internaliseLambdaReturnType = fmap (map fromDecl) . internaliseLoopParamType
+internaliseReturnType = fmap concat . internaliseEntryReturnType
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
 internaliseEntryReturnType :: E.TypeBase (E.DimDecl VName) ()
                            -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
-internaliseEntryReturnType et =
-  runInternaliseTypeM $ mapM internaliseTypeM $
-  case E.isTupleRecord et of
-    Just ets | not $ null ets -> ets
-    _ -> [et]
+internaliseEntryReturnType t = do
+  let ts = case E.isTupleRecord t of Just tts | not $ null tts -> tts
+                                     _ -> [t]
+  runInternaliseTypeM $ mapM internaliseTypeM ts
 
 internaliseType :: E.TypeBase (E.DimDecl VName) ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]

@@ -462,16 +462,16 @@ $esc:("#elif defined(__CUDA_ARCH__)")
 $esc:("#else")
 // FIXME: assumes GCC or clang.
    static typename int32_t $id:(funName' "ctz8") (typename int8_t x) {
-     return x == 0 ? 8 : __builtin_ctz((typename uint32_t)x);
+     return smin32(8, __builtin_ctz((typename uint32_t)x));
    }
    static typename int32_t $id:(funName' "ctz16") (typename int16_t x) {
-     return x == 0 ? 16 : __builtin_ctz((typename uint32_t)x);
+     return smin32(16, __builtin_ctz((typename uint32_t)x));
    }
    static typename int32_t $id:(funName' "ctz32") (typename int32_t x) {
-     return x == 0 ? 32 :  __builtin_ctz(x);
+     return __builtin_ctz(x);
    }
    static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
-     return x == 0 ? 64 : __builtin_ctzl(x);
+     return __builtin_ctzl(x);
    }
 $esc:("#endif")
                 |]

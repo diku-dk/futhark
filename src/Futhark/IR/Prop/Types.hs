@@ -52,6 +52,7 @@ module Futhark.IR.Prop.Types
        , hasStaticShape
        , generaliseExtTypes
        , existentialiseExtTypes
+       , shapeMapping
        , shapeExtMapping
 
          -- * Abbreviations
@@ -387,9 +388,9 @@ shapeContext = S.fromList
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
--- | If all dimensions of the given 'ExtShape' are statically known,
--- change to the corresponding 'Shape'.
-hasStaticShape :: TypeBase ExtShape u -> Maybe (TypeBase Shape u)
+-- | If all dimensions of the given 'ExtType' are statically known,
+-- return the corresponding list of 'Type'.
+hasStaticShape :: ExtType -> Maybe Type
 hasStaticShape (Prim bt) = Just $ Prim bt
 hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
@@ -434,7 +435,26 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
               Ext i
         checkDim d = d
 
--- | Produce a mapping for the dimensions context.
+-- | In the call @shapeMapping ts1 ts2@, the lists @ts1@ and @ts@ must
+-- be of equal length and their corresponding elements have the same
+-- types modulo exact dimensions (but matching array rank is
+-- important).  The result is a mapping from named dimensions of @ts1@
+-- to a set of the corresponding dimensions in @ts2@ (because they may
+-- not fit exactly).
+--
+-- This function is useful when @ts1@ are the value parameters of some
+-- function and @ts2@ are the value arguments, and we need to figure
+-- out which shape context to pass.
+shapeMapping :: [TypeBase Shape u0] -> [TypeBase Shape u1] -> M.Map VName (S.Set SubExp)
+shapeMapping ts = shapeMapping' ts . map arrayDims
+
+-- | Like @shapeMapping@, but works with explicit dimensions.
+shapeMapping' :: Ord a => [TypeBase Shape u] -> [[a]] -> M.Map VName (S.Set a)
+shapeMapping' = dimMapping arrayDims id match (M.unionWith (<>))
+  where match Constant{} _ = M.empty
+        match (Var v) dim  = M.singleton v $ S.singleton dim
+
+-- | Like 'shapeMapping', but produces a mapping for the dimensions context.
 shapeExtMapping :: [TypeBase ExtShape u] -> [TypeBase Shape u1] -> M.Map Int SubExp
 shapeExtMapping = dimMapping arrayExtDims arrayDims match mappend
   where match Free{} _ =  mempty
