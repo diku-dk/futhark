@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed compiler crash on certain patterns of nested parallelism
     (#1068, #1069).
 
+  * NaN comparisons are now done properly in interpreter (#1070).
+
+  * Fix incorrect movement of array indexing into branches `if`s
+    (#1073).
+
 ## [0.16.3]
 
 ### Added
