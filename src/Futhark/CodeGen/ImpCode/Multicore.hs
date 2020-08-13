@@ -56,8 +56,6 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
 
 
-type Granularity = Int
-
 data SchedulerInfo = SchedulerInfo
   { nsubtasks  :: VName -- The variable that describes how many subtasks the scheduler created
   , flatTid    :: VName -- The variable for the tid execution the code
@@ -72,8 +70,8 @@ data Scheduling = Dynamic
                 | Static
 
 instance Pretty Scheduling where
-  ppr (Dynamic) = text "Dynamic"
-  ppr (Static) = text "Static"
+  ppr Dynamic = text "Dynamic"
+  ppr Static = text "Static"
 
 -- TODO fix all of this!
 instance Pretty SchedulerInfo where
