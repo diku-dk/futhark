@@ -17,7 +17,6 @@ import Futhark.IR.SOACS
   hiding (Body, Exp, Lambda, LParam, Pattern, Stm)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.SOACS.Simplify as SOACS
-import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.ToKernels (injectSOACS)
 import qualified Futhark.Transform.FirstOrderTransform as FOT
@@ -121,32 +120,6 @@ transformFunDef (FunDef entry attrs name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $ transformBody body
   return $ FunDef entry attrs name rettype params body'
 
-transformMap :: MapLoop -> ExtractM (Stms MC)
-transformMap (MapLoop pat cs w lam arrs) = do
-  scope <- askScope
-  let loopnest =
-        MapNesting pat cs w $ zip (lambdaParams lam) arrs
-      runExtract (ExtractM m) = do
-        local_scope <- castScope <$> askScope
-        modifyNameSource $ runState (runReaderT m local_scope)
-      env = DistEnv
-            { distNest = singleNesting (Nesting mempty loopnest)
-            , distScope = scopeOfPattern pat <> castScope (scopeOf lam) <> scope
-            , distOnInnerMap = distributeMap
-            , distOnTopLevelStms = liftInner . transformStms
-            , distSegLevel = \_ _ _ -> pure ()
-            , distOnSOACSStms = runExtract . transformStm
-            , distOnSOACSLambda = runExtract . transformLambda
-            }
-      acc = DistAcc { distTargets =
-                        singleTarget (pat, bodyResult $ lambdaBody lam)
-                    , distStms =
-                        mempty
-                    }
-
-  runDistNestT env $
-    distributeMapBodyStms acc $ bodyStms $ lambdaBody lam
-
 -- Sets the chunk size to one.
 unstreamLambda :: Attrs -> [SubExp] -> Lambda SOACS -> ExtractM (Lambda SOACS)
 unstreamLambda attrs nes lam = do
@@ -200,6 +173,15 @@ renameIfNeeded :: Rename a => NeedsRename -> a -> ExtractM a
 renameIfNeeded DoRename = renameSomething
 renameIfNeeded DoNotRename = pure
 
+transformMap :: NeedsRename -> (Body SOACS -> ExtractM (Body MC))
+             -> SubExp -> Lambda SOACS -> [VName]
+             -> ExtractM (SegOp () MC)
+transformMap rename onBody w map_lam arrs = do
+  (gtid, space) <- mkSegSpace w
+  kbody <- mapLambdaToKernelBody onBody gtid map_lam arrs
+  renameIfNeeded rename $
+    SegMap () space (lambdaReturnType map_lam) kbody
+
 transformRedomap :: NeedsRename -> (Body SOACS -> ExtractM (Body MC))
                  -> SubExp -> [Reduce SOACS] -> Lambda SOACS -> [VName]
                  -> ExtractM ([Stms MC], SegOp () MC)
@@ -226,8 +208,14 @@ transformParStream rename onBody w comm red_lam red_nes map_lam arrs = do
 transformSOAC :: Pattern SOACS -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
 
 transformSOAC pat _ (Screma w form arrs)
-  | Just lam <- isMapSOAC form =
-      transformMap $ MapLoop pat (defAux ()) w lam arrs
+  | Just lam <- isMapSOAC form = do
+      seq_op <- transformMap DoNotRename sequentialiseBody w lam arrs
+      if lambdaContainsParallelism lam
+        then do
+        par_op <- transformMap DoRename transformBody w lam arrs
+        return $ oneStm (Let pat (defAux ()) $ Op $ ParOp (Just par_op) seq_op)
+        else
+        return $ oneStm (Let pat (defAux ()) $ Op $ ParOp Nothing seq_op)
 
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       (seq_reds_stms, seq_op) <-
