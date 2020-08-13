@@ -84,10 +84,6 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     char reduce_stage_1_tid_accum_arr[sizeof(int32_t) * ctx->scheduler.num_threads];
     memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * ctx->scheduler.num_threads);
 
-    for (int32_t i = 0; i < num_threads; i++) {
-        ((int32_t *) reduce_stage_1_tid_accum_arr)[i] = 0;
-    }
-
     struct futhark_mc_segred_stage_1_struct futhark_mc_segred_stage_1_struct;
 
     futhark_mc_segred_stage_1_struct.ctx = ctx;
