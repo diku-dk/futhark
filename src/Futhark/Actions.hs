@@ -69,7 +69,6 @@ kernelImpCodeGenAction =
          , actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
          }
 
-
 multicoreImpCodeGenAction :: Action MCMem
 multicoreImpCodeGenAction =
   Action { actionName = "Compile to imperative multicore"
