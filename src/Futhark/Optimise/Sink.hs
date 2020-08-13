@@ -83,9 +83,9 @@ multiplicity stm =
 optimiseBranch :: Constraints lore =>
                   Sinker lore (Op lore)
                -> Sinker lore (Body lore)
-optimiseBranch onOp vtable sinking (Body attr stms res) =
+optimiseBranch onOp vtable sinking (Body dec stms res) =
   let (stms', stms_sunk) = optimiseStms onOp vtable sinking' stms $ freeIn res
-  in (Body attr (sunk_stms <> stms') res,
+  in (Body dec (sunk_stms <> stms') res,
       sunk <> stms_sunk)
   where free_in_stms = freeIn stms <> freeIn res
         (sinking_here, sinking') = M.partitionWithKey sunkHere sinking
