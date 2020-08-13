@@ -222,9 +222,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pprPrec _ (Parens e _) = align $ parens $ ppr e
   pprPrec _ (QualParens (v, _) e _) = ppr v <> text "." <> align (parens $ ppr e)
   pprPrec p (Ascript e t _) =
-    parensIf (p /= -1) $ pprPrec 0 e <+> text ":" <+> align (pprPrec 0 t)
+    parensIf (p /= -1) $ pprPrec 0 e <+> text ":" <+> pprPrec 0 t
   pprPrec p (Coerce e t _ _) =
-    parensIf (p /= -1) $ pprPrec 0 e <+> text ":>" <+> align (pprPrec 0 t)
+    parensIf (p /= -1) $ pprPrec 0 e <+> text ":>" <+> pprPrec 0 t
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (IntLit v _ _) = ppr v
   pprPrec _ (FloatLit v _ _) = ppr v
@@ -281,7 +281,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     retdecl' <+> equals </> indent 2 (ppr e) </>
     letBody body
     where retdecl' = case (ppr <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
-                       Just rettype' -> colon <+> align rettype'
+                       Just rettype' -> text ":" <+> rettype'
                        Nothing       -> mempty
   pprPrec _ (LetWith dest src idxs ve body _ _)
     | dest == src =
@@ -349,10 +349,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
     text "while" <+> ppr cond
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
-  ppr (PatternAscription p t _) = ppr p <> colon <+> align (ppr t)
+  ppr (PatternAscription p t _) = ppr p <> text ":" <+> ppr t
   ppr (PatternParens p _)       = parens $ ppr p
   ppr (Id v t _)                = case unAnnot t of
-                                    Just t' -> parens $ pprName v <> colon <+> align (ppr t')
+                                    Just t' -> parens $ pprName v <> colon <+> ppr t'
                                     Nothing -> pprName v
   ppr (TuplePattern pats _)     = parens $ commasep $ map ppr pats
   ppr (RecordPattern fs _)      = braces $ commasep $ map ppField fs
@@ -365,7 +365,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
 
 ppAscription :: Pretty t => Maybe t -> Doc
 ppAscription Nothing  = mempty
-ppAscription (Just t) = colon <> align (ppr t)
+ppAscription (Just t) = text ":" <> ppr t
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ProgBase f vn) where
   ppr = stack . punctuate line . map ppr . progDecs
@@ -415,7 +415,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
     where fun | isJust entry = "entry"
               | otherwise    = "let"
           retdecl' = case (ppr . fst <$> unAnnot rettype) `mplus` (ppr <$> retdecl) of
-                       Just rettype' -> colon <+> align rettype'
+                       Just rettype' -> text ":" <+> rettype'
                        Nothing       -> mempty
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where

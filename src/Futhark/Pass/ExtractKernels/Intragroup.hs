@@ -63,12 +63,8 @@ intraGroupParallelise knest lam = runMaybeT $ do
     intraGroupParalleliseBody intra_lvl body
 
   outside_scope <- lift askScope
-  -- outside_scope may also contain the inputs, even though those are
-  -- not actually available outside the kernel.
-  let available v =
-        v `M.member` outside_scope &&
-        v `notElem` map kernelInputName inps
-  unless (all available $ namesToList $ freeIn (wss_min ++ wss_avail)) $
+  unless (all (`M.member` outside_scope) $ namesToList $
+          freeIn (wss_min ++ wss_avail)) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
@@ -148,7 +144,7 @@ parallelMin ws = tell mempty { accMinPar = S.singleton ws
 
 intraGroupBody :: SegLevel -> Body -> IntraGroupM (Out.Body Out.Kernels)
 intraGroupBody lvl body = do
-  stms <- collectStms_ $ intraGroupStms lvl $ bodyStms body
+  stms <- collectStms_ $ mapM_ (intraGroupStm lvl) $ bodyStms body
   return $ mkBody stms $ bodyResult body
 
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
@@ -175,7 +171,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
 
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
-          intraGroupStms lvl . fmap (certify (stmAuxCerts aux)) =<<
+          mapM_ (intraGroupStm lvl) . fmap (certify (stmAuxCerts aux)) =<<
           runBinder_ (FOT.transformSOAC pat soac)
 
     Op (Screma w form arrs)
@@ -188,8 +184,12 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                             scopeForKernels (scopeOf lam) <> scope
                         , distOnInnerMap =
                             distributeMap
-                        , distOnTopLevelStms =
-                            liftInner . collectStms_ . intraGroupStms lvl
+                        , distOnTopLevelStms = \stms -> do
+                            -- Stuff might have happened before we got
+                            -- here.
+                            cur_scope <- askScope
+                            lift $ localScope cur_scope $ collectStms_ $
+                              intraGroupStms lvl stms
                         , distSegLevel = \minw _ _ -> do
                             lift $ parallelMin minw
                             return lvl
@@ -244,7 +244,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           replace se = se
           replaceSets (Acc x y log) =
             Acc (S.map (map replace) x) (S.map (map replace) y) log
-      censor replaceSets $ intraGroupStms lvl stream_bnds
+      censor replaceSets $ mapM_ (intraGroupStm lvl) stream_bnds
 
     Op (Scatter w lam ivs dests) -> do
       write_i <- newVName "write_i"

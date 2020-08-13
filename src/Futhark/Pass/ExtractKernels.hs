@@ -637,8 +637,9 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
 
 onTopLevelStms :: KernelPath -> Stms SOACS
                -> DistNestT Out.Kernels DistribM KernelsStms
-onTopLevelStms path stms =
-  liftInner $ transformStms path $ stmsToList stms
+onTopLevelStms path stms = do
+  scope <- askScope
+  lift $ localScope scope $ transformStms path $ stmsToList stms
 
 onMap :: KernelPath -> MapLoop -> DistribM KernelsStms
 onMap path (MapLoop pat aux w lam arrs) = do
@@ -787,8 +788,9 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
       -- parallelism.
       dist_env <- ask
       let extra_scope = targetsScope $ distTargets acc'
+      scope <- (extra_scope<>) <$> askScope
 
-      stms <- liftInner $ localScope extra_scope $ do
+      stms <- lift $ localScope scope $ do
         let maploop' = MapLoop pat aux w lam arrs
 
             exploitInnerParallelism path' = do

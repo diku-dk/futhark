@@ -14,4 +14,4 @@ nix:
 # By default, stack doesn't compile multiple modules in parallel.
 # This makes it do so.
 ghc-options:
-  $locals: -j -optP-Wno-nonportable-include-path
+  $locals: -j

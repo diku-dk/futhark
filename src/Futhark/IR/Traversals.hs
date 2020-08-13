@@ -167,7 +167,7 @@ mapExp m = runIdentity . mapExpM m
 -- child.
 data Walker lore m = Walker {
     walkOnSubExp :: SubExp -> m ()
-  , walkOnBody :: Scope lore -> Body lore -> m ()
+  , walkOnBody :: Body lore -> m ()
   , walkOnVName :: VName -> m ()
   , walkOnRetType :: RetType lore -> m ()
   , walkOnBranchType :: BranchType lore -> m ()
@@ -180,7 +180,7 @@ data Walker lore m = Walker {
 identityWalker :: Monad m => Walker lore m
 identityWalker = Walker {
                    walkOnSubExp = const $ return ()
-                 , walkOnBody = const $ const $ return ()
+                 , walkOnBody = const $ return ()
                  , walkOnVName = const $ return ()
                  , walkOnRetType = const $ return ()
                  , walkOnBranchType = const $ return ()
@@ -219,11 +219,9 @@ walkExpM tv (BasicOp (ConvOp _ x)) =
   walkOnSubExp tv x
 walkExpM tv (BasicOp (UnOp _ x)) =
   walkOnSubExp tv x
-walkExpM tv (If c texp fexp (IfDec ts _)) = do
-  walkOnSubExp tv c
-  walkOnBody tv mempty texp
-  walkOnBody tv mempty fexp
-  mapM_ (walkOnBranchType tv) ts
+walkExpM tv (If c texp fexp (IfDec ts _)) =
+  walkOnSubExp tv c >> walkOnBody tv texp >>
+  walkOnBody tv fexp >> mapM_ (walkOnBranchType tv) ts
 walkExpM tv (Apply _ args ret _) =
   mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
 walkExpM tv (BasicOp (Index arr slice)) =
@@ -260,8 +258,7 @@ walkExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   walkOnLoopForm tv form
   mapM_ (walkOnSubExp tv) ctxinits
   mapM_ (walkOnSubExp tv) valinits
-  let scope = scopeOfFParams (ctxparams++valparams) <> scopeOf form
-  walkOnBody tv scope loopbody
+  walkOnBody tv loopbody
   where (ctxparams,ctxinits) = unzip ctxmerge
         (valparams,valinits) = unzip valmerge
 walkExpM tv (Op op) =
