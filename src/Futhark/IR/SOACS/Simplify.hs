@@ -656,7 +656,7 @@ arrayOps = mconcat . map onStm . stmsToList . bodyStms
         onOp = execWriter . mapSOACM identitySOACMapper { mapOnSOACLambda = onLambda }
         onLambda lam = do tell $ arrayOps $ lambdaBody lam
                           return lam
-        walker = identityWalker { walkOnBody = modify . (<>) . arrayOps
+        walker = identityWalker { walkOnBody = const $ modify . (<>) . arrayOps
                                 , walkOnOp = modify . (<>) . onOp }
 
 replaceArrayOps :: M.Map ArrayOp ArrayOp

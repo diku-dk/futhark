@@ -17,7 +17,7 @@ import Futhark.Internalise.AccurateSizes
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
-  E.Exp -> [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
+  E.Exp -> [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.Type])
 
 internaliseMapLambda :: InternaliseLambda
                      -> E.Exp
@@ -27,12 +27,11 @@ internaliseMapLambda internaliseLambda lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda lam rowtypes
-  (rettype', _) <- instantiateShapes' rettype
   body' <- localScope (scopeOfLParams params) $
            ensureResultShape
            (ErrorMsg [ErrorString "not all iterations produce same shape"])
-           (srclocOf lam) rettype' body
-  return $ I.Lambda params body' rettype'
+           (srclocOf lam) rettype body
+  return $ I.Lambda params body' rettype
 
 internaliseStreamMapLambda :: InternaliseLambda
                            -> E.Exp
@@ -50,13 +49,12 @@ internaliseStreamMapLambda internaliseLambda lam args = do
     body <- runBodyBinder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       return orig_body
-    (rettype', _) <- instantiateShapes' rettype
     body' <- localScope (scopeOfLParams params) $ insertStmsM $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
       ensureResultShape
         (ErrorMsg [ErrorString "not all iterations produce same shape"])
-        (srclocOf lam) (map outer rettype') body
-    return $ I.Lambda (chunk_param:params) body' (map outer rettype')
+        (srclocOf lam) (map outer rettype) body
+    return $ I.Lambda (chunk_param:params) body' (map outer rettype)
 
 internaliseFoldLambda :: InternaliseLambda
                       -> E.Exp

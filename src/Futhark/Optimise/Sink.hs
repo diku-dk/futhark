@@ -74,11 +74,12 @@ multiplicity :: Constraints lore => Stm lore -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
     If cond tbranch fbranch _ ->
-      free cond 1 <> M.unionWith (+) (free tbranch 1) (free fbranch 1)
+      free cond 1 `comb` free tbranch 1 `comb` free fbranch 1
     Op{} -> free stm 2
     DoLoop{} -> free stm 2
     _ -> free stm 1
   where free x k = M.fromList $ zip (namesToList $ freeIn x) $ repeat k
+        comb = M.unionWith (+)
 
 optimiseBranch :: Constraints lore =>
                   Sinker lore (Op lore)
@@ -106,7 +107,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
   in (stmsFromList all_stms', sunk)
   where
     multiplicities = foldl' (M.unionWith (+))
-                     (M.fromList (zip (namesToList free_in_res) [1..]))
+                     (M.fromList (zip (namesToList free_in_res) (repeat 1)))
                      (map multiplicity $ stmsToList all_stms)
 
     optimiseStms' _ _ [] = ([], mempty)
