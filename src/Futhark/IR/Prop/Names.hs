@@ -131,7 +131,9 @@ freeWalker :: (FreeDec (ExpDec lore),
               Walker lore (State FV)
 freeWalker = identityWalker {
                walkOnSubExp = modify . (<>) . freeIn'
-             , walkOnBody = modify . (<>) . freeIn'
+             , walkOnBody = \scope body -> do
+                 modify $ (<>) $ freeIn' body
+                 modify $ fvBind (namesFromList (M.keys scope))
              , walkOnVName = modify . (<>) . fvName
              , walkOnOp = modify . (<>) . freeIn'
              }
