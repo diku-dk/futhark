@@ -114,12 +114,11 @@ reductionStage1 :: SegSpace
                 -> MulticoreGen ()
 reductionStage1 space slugs kbody = do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+  ns' <- mapM toExp ns
   flat_idx <- dPrim "iter" int64
-  flat_idx' <- toExp $ Var flat_idx
 
   fbody <- collect $ do
-    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
     kbody $ \all_red_res -> do
       let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res

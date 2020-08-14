@@ -207,8 +207,8 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
           sIf is_first_tid
               (copyDWIMFix hist (tid' : [i])
                            (Var $ patElemName pe) (map Imp.vi32 (init is) ++ [i]))
-              (sLoopNest (histShape histop) $ \is' ->
-                 copyDWIMFix hist (tid' : i : is') ne [])
+              (sLoopNest (histShape histop) $ \vec_is ->
+                 copyDWIMFix hist (tid' : i : vec_is) ne [])
 
 
   -- Generate loop body of parallel function

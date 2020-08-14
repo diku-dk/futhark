@@ -43,12 +43,11 @@ compileSegMapBody :: VName
                   -> MulticoreGen Imp.Code
 compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+  ns' <- mapM toExp ns
   kstms' <- mapM renameStm kstms
-  flat_idx' <- toExp $ Var flat_idx
   collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
-    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
     compileStms (freeIn kres) kstms' $
       zipWithM_ (writeResult is) (patternElements pat) kres
 
