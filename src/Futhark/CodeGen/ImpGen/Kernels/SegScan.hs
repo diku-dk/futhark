@@ -49,7 +49,7 @@ compileSegScan  (Pattern _ pes)
 
 
 
-    let eLMPT = 12::Integer
+    let eLMPT = 24::Integer
     -- intValueType :: IntValue -> IntType
     let eLEMS_PER_THREAD = IntValue $ intValue Int32 eLMPT
     let eLEMS_PER_THREAD_const = ValueExp eLEMS_PER_THREAD -- Constant eLEMS_PER_THREAD
