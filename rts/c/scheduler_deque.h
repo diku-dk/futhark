@@ -30,12 +30,12 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
 static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
 {
   int remaining_iter = subtask->end - subtask->start;
-  if (subtask->chunkable && remaining_iter > subtask->iterations)
+  if (subtask->chunkable && remaining_iter > subtask->chunk_size)
   {
     struct subtask *new_subtask = malloc(sizeof(struct subtask));
     *new_subtask = *subtask;
     __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
-    subtask->end = subtask->start + subtask->iterations;
+    subtask->end = subtask->start + subtask->chunk_size;
     new_subtask->start = subtask->end;
     push_back(&worker->q, new_subtask);
   }
@@ -43,7 +43,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
 }
 
 
-static inline int64_t chunk_dynamic_subtask(struct subtask* subtask, struct worker *worker)
+static inline int64_t compute_chunk_size(struct subtask* subtask, struct worker *worker)
 {
   struct scheduler* scheduler = worker->scheduler;
   int64_t rem_iter = subtask->end-subtask->start;
@@ -58,7 +58,6 @@ static inline int64_t chunk_dynamic_subtask(struct subtask* subtask, struct work
   } else if (nsubtasks > scheduler->num_threads) {
     nsubtasks = scheduler->num_threads;
   }
-
   int64_t iter_pr_subtask = rem_iter / nsubtasks;
   return iter_pr_subtask;
 }
@@ -83,7 +82,7 @@ static inline int steal_from_random_worker(struct worker* worker)
     // We stole a task, so we re-compute it's iteration counter
     if (subtask->chunkable && *subtask->total_iter > 0)
     {
-      subtask->iterations = chunk_dynamic_subtask(subtask, worker);
+      subtask->chunk_size = compute_chunk_size(subtask, worker);
     }
     push_back(&worker->q, subtask);
     return 1;

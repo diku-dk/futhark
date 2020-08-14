@@ -184,7 +184,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             int64_t *total_iter,
                                             int64_t start, int64_t end,
                                             int chunkable,
-                                            int64_t iterations,
+                                            int64_t chunk_size,
                                             int id)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
@@ -203,7 +203,7 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->start      = start;
   subtask->end        = end;
   subtask->chunkable  = chunkable;
-  subtask->iterations = iterations;
+  subtask->chunk_size = chunk_size;
   subtask->id         = id;
   return subtask;
 }
