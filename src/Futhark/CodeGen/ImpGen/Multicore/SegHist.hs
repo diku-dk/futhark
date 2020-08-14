@@ -170,35 +170,32 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map (sExt Int64 . toExp' int32) ns
 
-
-  num_histos' <- toExp $ Var num_histos
   let pes = patternElements pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
       map_pes = drop num_red_res pes
 
   let per_red_pes = segHistOpChunks histops $ patternValueElements pat
-  hist_M <- dPrimV "hist_M" num_histos'
 
-  init_histograms <- mapM (onOp hist_M) histops
+  init_histograms <- mapM (onOp num_histos) histops
 
-  hist_H_chks <- forM (map histWidth histops) $ \w -> do
+  hist_widths <- forM (map histWidth histops) $ \w -> do
     w' <- toExp w
-    dPrimV "hist_H_chk" w'
+    dPrimV "hist_width" w'
 
   tid' <- toExp $ Var $ segFlat space
   flat_idx' <- toExp $ Var  flat_idx
 
   -- Actually allocate subhistograms
-  histograms <- forM (zip init_histograms hist_H_chks) $
-                \(init_local_subhistos, hist_H_chk) -> do
-    (local_subhistos, do_op) <- init_local_subhistos (Var hist_H_chk)
-    return (local_subhistos, hist_H_chk, do_op)
+  histograms <- forM (zip init_histograms hist_widths) $
+                \(init_local_subhistos, hist_width) -> do
+    (local_subhistos, do_op) <- init_local_subhistos (Var hist_width)
+    return (local_subhistos, hist_width, do_op)
 
   prebody <- collect $ do
     zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
-    forM_ (zip4 per_red_pes histograms hist_H_chks histops) $ \(pes', (hists, _, _), hist_H_chk, histop) ->
+    forM_ (zip4 per_red_pes histograms hist_widths histops) $ \(pes', (hists, _, _), hist_width, histop) ->
       forM_ (zip3 pes' hists (histNeutral histop)) $ \(pe, hist, ne) -> do
-        hist_H_chk' <- toExp $ Var hist_H_chk
+        hist_H_chk' <- toExp $ Var hist_width
 
         -- First thread initializes histrogram wtih dest vals
         -- Others initialize with neutral element
