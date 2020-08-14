@@ -32,7 +32,7 @@ static volatile int scheduler_error = 0;
 
 static double kappa = 0.35f;
 
-typedef int (*sub_task_fn)(void* args, int start, int end, int subtask_id, int tid, int64_t* time);
+typedef int (*sub_task_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid, int64_t* time);
 
 enum scheduling {
   DYNAMIC,
@@ -48,7 +48,7 @@ struct subtask {
   // How much of a task to take a the time
   // If it's zero , then the subtasks is not stealable
   int chunkable;
-  long int iterations;
+  int64_t iterations;
   int stolen_from;
   int id;
 
@@ -65,8 +65,8 @@ struct scheduler {
 };
 
 struct scheduler_info {
-  int iter_pr_subtask;
-  int remainder;
+  int64_t iter_pr_subtask;
+  int64_t remainder;
   int nsubtasks;
   enum scheduling sched;
 
@@ -80,7 +80,7 @@ struct scheduler_subtask {
   const char* name;
   sub_task_fn fn;
   void* args;
-  long int iterations;
+  int64_t iterations;
   struct scheduler_info info;
 };
 
@@ -96,7 +96,7 @@ struct deque {
   int dead;
 };
 
-typedef int (*task_fn)(void* args, int iterations, int tid, struct scheduler_info info);
+typedef int (*task_fn)(void* args, int64_t iterations, int tid, struct scheduler_info info);
 
 
 /* A task for the scheduler to execute */
@@ -105,7 +105,7 @@ struct scheduler_task {
   task_fn par_fn;
   task_fn seq_fn;
   const char* name;
-  long int iterations;
+  int64_t iterations;
   enum scheduling sched;
 
   int64_t *total_time;

@@ -65,15 +65,16 @@ nonsegmentedHist :: Pattern MCMem
 nonsegmentedHist pat space histops kbody num_histos = do
   emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
+      ns_64 = map (sExt Int64 . toExp' int32) ns
+
   num_threads <- getNumThreads
   num_threads' <- toExp $ Var num_threads
   hist_width <- toExp $ histWidth $ head histops
-  let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns'
+  let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns_64
   histops' <- renameHistOpLambda histops
 
   collect $ do
-    flat_idx <- dPrim "iter" int32
+    flat_idx <- dPrim "iter" int64
     -- sIf use_small_dest_histogram
     smallDestHistogram pat flat_idx space histops num_histos kbody
     -- casHistogram pat space histops' kbody
@@ -92,15 +93,16 @@ casHistogram :: Pattern MCMem
 casHistogram pat space histops kbody = do
   emit $ Imp.DebugPrint "Atomic segHist" Nothing
   let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
+      ns_64 = map (sExt Int64 . toExp' int32) ns
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
   atomicOps <- mapM onOpCas histops
 
-  idx <- dPrim "iter" int32
+  idx <- dPrim "iter" int64
+  idx' <- toExp $ Var idx
   body <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 idx
+    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 idx'
     compileStms mempty (kernelBodyStms kbody) $ do
       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
           (buckets, vs) = splitAt (length histops) red_res
@@ -140,7 +142,7 @@ segmentedHist pat space histops kbody = do
   emit $ Imp.DebugPrint "Segmented segHist" Nothing
 
   -- iteration variable
-  n_segments <- dPrim "segment_iter" $ IntType Int32
+  n_segments <- dPrim "segment_iter" $ IntType Int64
   collect $ do
     par_body <- compileSegHistBody n_segments pat space histops kbody
     free_params <- freeParams par_body [segFlat space, n_segments]
@@ -166,7 +168,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
   emit $ Imp.DebugPrint "smallDestHistogram segHist" Nothing
 
   let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
+      ns_64 = map (sExt Int64 . toExp' int32) ns
 
 
   num_histos' <- toExp $ Var num_histos
@@ -184,6 +186,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
     dPrimV "hist_H_chk" w'
 
   tid' <- toExp $ Var $ segFlat space
+  flat_idx' <- toExp $ Var  flat_idx
 
   -- Actually allocate subhistograms
   histograms <- forM (zip init_histograms hist_H_chks) $
@@ -192,7 +195,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
     return (local_subhistos, hist_H_chk, do_op)
 
   prebody <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
     forM_ (zip4 per_red_pes histograms hist_H_chks histops) $ \(pes', (hists, _, _), hist_H_chk, histop) ->
       forM_ (zip3 pes' hists (histNeutral histop)) $ \(pe, hist, ne) -> do
         hist_H_chk' <- toExp $ Var hist_H_chk
@@ -210,7 +213,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
   -- Generate loop body of parallel function
   body <- collect $ do
-     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+     zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
      compileStms mempty (kernelBodyStms kbody) $ do
        let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
            (buckets, vs) = splitAt (length histops) red_res
@@ -274,7 +277,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
             (Var subhisto, map Imp.vi32 $
               map fst segment_dims ++ [subhistogram_id, bucket_id])
 
-    let scheduler_info = Imp.SchedulerInfo nsubtasks_red (segFlat space) iterations $ Imp.Static
+    let scheduler_info = Imp.SchedulerInfo nsubtasks_red (segFlat space) iterations Imp.Static
     free_params_red <- freeParams red_code ([segFlat space, nsubtasks_red] ++ retval_names )
     emit $ Imp.Op $ Imp.Task "seghist_red" free_params_red red_code Nothing  retval_params scheduler_info
 
@@ -290,7 +293,7 @@ compileSegHistBody :: VName
                    -> MulticoreGen Imp.Code
 compileSegHistBody idx pat space histops kbody = do
   let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
+      ns_64 = map (sExt Int64 . toExp' int32) ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
@@ -299,11 +302,11 @@ compileSegHistBody idx pat space histops kbody = do
   idx' <- toExp $ Var idx
   collect $ do
     emit $ Imp.DebugPrint "Segmented segHist" Nothing
-    let inner_bound = last ns'
+    let inner_bound = last ns_64
 
     sFor "i" inner_bound $ \i -> do
-      zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns') idx'
-      dPrimV_ (last is) i
+      zipWithM_ dPrimV_ (init is) $ map (sExt Int32) $ unflattenIndex (init ns_64) idx'
+      dPrimV_ (last is) $ sExt Int32 i
 
       compileStms mempty (kernelBodyStms kbody) $ do
         let (_red_res, map_res) = splitFromEnd (length map_pes) $

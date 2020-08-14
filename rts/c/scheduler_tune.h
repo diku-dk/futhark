@@ -4,7 +4,7 @@ struct futhark_mc_segred_stage_1_struct {
     char *free_reduce_stage_1_tid_accum_arr;
 };
 
-int futhark_mc_tuning_segred_stage_1(void *args, int start, int end,
+int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
                                      int flat_tid_22, int tid, int64_t *time)
 {
     int64_t futhark_mc_segred_stage_1_start = get_wall_time();
@@ -41,7 +41,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 {
     int err = 0;
 
-    int iterations = 1000000;
+    int64_t iterations = 1000000;
     ctx->tuning_timing = 0;
     ctx->tuning_iter = 0;
 

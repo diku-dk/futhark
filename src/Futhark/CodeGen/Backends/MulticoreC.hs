@@ -459,7 +459,7 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
       code' <- GC.blockScope $ GC.compileCode code
       mapM_ GC.item [C.citems|$items:code'|]
       mapM_ GC.stm free_cached
-    return [C.cedecl|int $id:s(void *args, int iterations, int tid, struct scheduler_info info) {
+    return [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
                            int $id:tid = tid;
                            int $id:ntasks = info.nsubtasks;
@@ -556,8 +556,8 @@ compileOp (MCFunc s' i prebody body free tid) = do
 
       mapM_ GC.item decl_cached
 
-      GC.decl [C.cdecl|int iterations = end - start;|]
-      GC.decl [C.cdecl|int $id:i = start;|]
+      GC.decl [C.cdecl|typename int64_t iterations = end - start;|]
+      GC.decl [C.cdecl|typename int64_t $id:i = start;|]
       GC.compileCode prebody
       body' <- GC.blockScope $ GC.compileCode body
       GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
@@ -566,7 +566,7 @@ compileOp (MCFunc s' i prebody body free tid) = do
       GC.stm [C.cstm|cleanup: {}|]
       mapM_ GC.stm free_cached
 
-    return [C.cedecl|int $id:s(void *args, int start, int end, int $id:tid, int tid, typename int64_t*time) {
+    return [C.cedecl|int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid, typename int64_t*time) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        typename int64_t start_time = get_wall_time();

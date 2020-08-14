@@ -114,11 +114,12 @@ reductionStage1 :: SegSpace
                 -> MulticoreGen ()
 reductionStage1 space slugs kbody = do
   let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
-  flat_idx <- dPrim "iter" int32
+      ns_64 = map (sExt Int64 . toExp' int32) ns
+  flat_idx <- dPrim "iter" int64
+  flat_idx' <- toExp $ Var flat_idx
 
   fbody <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
     kbody $ \all_red_res -> do
       let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
@@ -182,7 +183,7 @@ segmentedReduction :: Pattern MCMem
                    -> MulticoreGen Imp.Code
 segmentedReduction pat space reds kbody =
   collect $ do
-    n_par_segments <- dPrim "segment_iter" $ IntType Int32
+    n_par_segments <- dPrim "segment_iter" $ IntType Int64
     body    <- compileSegRedBody n_par_segments pat space reds kbody
     free_params <- freeParams body (segFlat space : [n_par_segments])
     let (body_allocs, body') = extractAllocations body
@@ -197,8 +198,8 @@ compileSegRedBody :: VName
                   -> MulticoreGen Imp.Code
 compileSegRedBody n_segments pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
-  let inner_bound = last ns'
+      ns_64 = map (sExt Int64 . toExp' int32) ns
+  let inner_bound = last ns_64
 
   n_segments' <- toExp $ Var n_segments
 
@@ -206,7 +207,8 @@ compileSegRedBody n_segments pat space reds kbody = do
   -- Perform sequential reduce on inner most dimension
   collect $ do
     flat_idx <- dPrimV "flat_idx" (n_segments' * inner_bound)
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    flat_idx' <- toExp $ Var flat_idx
+    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
     sComment "neutral-initialise the accumulators" $
       forM_ (zip per_red_pes reds) $ \(pes, red) ->
         forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
@@ -216,7 +218,7 @@ compileSegRedBody n_segments pat space reds kbody = do
     sComment "main body" $ do
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
       sFor "i" inner_bound $ \i -> do
-        forM_ (zip (init is) $ unflattenIndex (init ns') n_segments') $ uncurry (<--)
+        forM_ (zip (init is) $ map (sExt Int32) $ unflattenIndex (init ns_64) n_segments') $ uncurry (<--)
         dPrimV_ (last is) i
         kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res

@@ -78,14 +78,14 @@ getSpace (SegMap _ space _ _) = space
 getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen Imp.Exp
 getIterationDomain SegMap{} space = do
   let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-  return $ product ns'
+      ns_64 = map (sExt Int64 . toExp' int32) ns
+  return $ product ns_64
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
+      ns_64 = map (sExt Int64 . toExp' int32) ns
   case unSegSpace space of
-     [_] -> return $ product ns'
-     _   -> return $ product $ init ns' -- Segmented reduction is over the inner most dimension
+     [_] -> return $ product ns_64
+     _   -> return $ product $ init ns_64 -- Segmented reduction is over the inner most dimension
 
 getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed{} = do
