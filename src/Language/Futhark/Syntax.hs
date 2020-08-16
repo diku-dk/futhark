@@ -994,8 +994,11 @@ data ModExpBase f vn
   | ModImport FilePath (f FilePath) SrcLoc
     -- ^ The contents of another file as a module.
   | ModDecs [DecBase f vn] SrcLoc
-  | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
-    -- ^ Functor application.
+  | ModApply (ModExpBase f vn) (ModExpBase f vn)
+    (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
+    -- ^ Functor application.  The first mapping is from parameter
+    -- names to argument names, while the second maps names in the
+    -- constructed module to the names inside the functor.
   | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
   | ModLambda (ModParamBase f vn)
     (Maybe (SigExpBase f vn, f (M.Map VName VName)))
