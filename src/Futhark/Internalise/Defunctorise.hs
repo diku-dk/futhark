@@ -1,7 +1,6 @@
 -- | Partially evaluate all modules away from a source Futhark
 -- program.  This is implemented as a source-to-source transformation.
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Defunctorise (transformProg) where
 
@@ -91,13 +90,14 @@ extendScope (Scope substs mods) = localScope $ \scope ->
 substituting :: Substitutions -> TransformM a -> TransformM a
 substituting substs = extendScope mempty { scopeSubsts = substs }
 
-boundName :: VName -> TransformM (Maybe (VName, VName))
+boundName :: VName -> TransformM VName
 boundName v = do g <- asks envGenerating
-                 if g then Just . (v,) <$> newName v else return Nothing
+                 if g then newName v else return v
 
 bindingNames :: [VName] -> TransformM Scope -> TransformM Scope
 bindingNames names m = do
-  substs <- M.fromList . catMaybes <$> mapM boundName names
+  names' <- mapM boundName names
+  let substs = M.fromList (zip names names')
   substituting substs $ mappend <$> m <*> pure (Scope substs mempty)
 
 generating :: TransformM a -> TransformM a
@@ -170,20 +170,11 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
       error $ "Cannot apply non-parametric module at " ++ locStr loc
     ModFun f_abs f_closure f_p f_body ->
       bindingAbs (f_abs <> S.fromList (unInfo (modParamAbs f_p))) $
-      extendAbsTypes b_substs $ extendScope f_closure $
-      generating $ do
+      extendAbsTypes b_substs $ extendScope f_closure $ generating $ do
         outer_substs <- scopeSubsts <$> askScope
         abs <- asks envAbs
-        let forward (k,v) =
-              (lookupSubst k outer_substs, v)
-            forwardAbsFromArg (k,v)
-              | k `S.member` abs =
-                  (k, lookupSubst v $ scopeSubsts $ modScope arg_mod)
-              | otherwise =
-                  (k,v)
-
-            p_substs' =
-              M.fromList $ map (forward . forwardAbsFromArg) $ M.toList p_substs
+        let forward (k,v) = (lookupSubst k outer_substs, v)
+            p_substs' = M.fromList $ map forward $ M.toList p_substs
             abs_substs = M.filterWithKey (const . flip S.member abs) $
                          p_substs' <>
                          scopeSubsts f_closure <>
