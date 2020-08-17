@@ -447,6 +447,19 @@ badInputType i e t de dg =
                           , "Expected array with elements of dtype: {}"
                           , "The array given has elements of dtype: {}"]
 
+badInputDim :: Int -> PyExp -> String -> Int -> PyStmt
+badInputDim i e typ dimf =
+  Raise $ simpleCall "TypeError"
+  [Call (Field (String err_msg) "format")
+   [Arg eft, Arg aft]]
+  where eft = String (concat (replicate dimf "[]") ++ typ)
+        aft = BinOp "+" (BinOp "*" (String "[]") (Field e "ndim")) (String typ)
+        err_msg = unlines [ "Argument #" ++ show i ++ " has invalid value"
+                          , "Dimensionality mismatch"
+                          , "Expected Futhark type: {}"
+                          , "Bad Python value passed"
+                          , "Actual Futhark type: {}"]
+
 entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
 entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
   let type_is_ok = BinOp "and" (simpleCall "isinstance" [e, Var "opaque"])
@@ -480,8 +493,9 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt 
      prettySigned (ept==Imp.TypeUnsigned) bt]]
 
 entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = do
-  let type_is_wrong = UnOp "not" $ BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"])
-  let dtype_is_wrong = UnOp "not" $ BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s))
+  let type_is_wrong = UnOp "not" $ BinOp "in" (simpleCall "type" [e]) $ List [Var "np.ndarray"]
+  let dtype_is_wrong = UnOp "not" $ BinOp "==" (Field e "dtype") $ Var $ compilePrimToExtNp t s
+  let dim_is_wrong = UnOp "not" $ BinOp "==" (Field e "ndim") $ Integer $ toInteger $ length dims
   stm $ If type_is_wrong
     [badInput i e $ concat (replicate (length dims) "[]") ++
      prettySigned (s==Imp.TypeUnsigned) t]
@@ -491,6 +505,9 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = d
      (concat (replicate (length dims) "[]") ++ prettySigned (s==Imp.TypeUnsigned) t)
      (simpleCall "np.dtype" [Var (compilePrimToExtNp t s)])
      (Field e "dtype")]
+    []
+  stm $ If dim_is_wrong
+    [badInputDim i e (prettySigned (s==Imp.TypeUnsigned) t ) (length dims)]
     []
 
   zipWithM_ (unpackDim e) dims [0..]
