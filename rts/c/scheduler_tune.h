@@ -25,7 +25,7 @@ int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
       int32_t x = ((int32_t *) reduce_stage_1_tid_accum_arr.mem)[tid];
       int32_t y = gtid_23;
 
-      int32_t res = add32(x, y);
+      int32_t res = 2 + add32(x, y) / 2;
       ((int32_t *) reduce_stage_1_tid_accum_arr.mem)[tid] = res;
     }
 
@@ -39,99 +39,77 @@ int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
 
 int futhark_segred_tuning_program(struct futhark_context *ctx)
 {
-    int err = 0;
+  int err = 0;
 
-    int64_t iterations = 1000000;
-    ctx->tuning_timing = 0;
-    ctx->tuning_iter = 0;
-
-    ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
-    if (ctx->scheduler.workers == NULL) return 1;
-
-    num_workers = ctx->scheduler.num_threads;
-    worker_local = &ctx->scheduler.workers[0];
-    worker_local->tid = 0;
-    worker_local->scheduler = &ctx->scheduler;
+  int64_t iterations = 100000000;
+  ctx->tuning_timing = 0;
+  ctx->tuning_iter = iterations;
 
 
-    // Initialize queues and threads
-    CHECK_ERR(deque_init(&worker_local->q, iterations), "failed to init queue for worker %d\n", 0);
-    for (int i = 1; i < ctx->scheduler.num_threads; i++) {
-      struct worker *cur_worker = &ctx->scheduler.workers[i];
-      cur_worker->tid = i;
-      cur_worker->time_spent_working = 0;
-      cur_worker->cur_working = 0;
-      cur_worker->scheduler = &ctx->scheduler;
-      cur_worker->output_usage = 0;
-      CHECK_ERR(deque_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
-      CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
-                               cur_worker),
-                "Failed to create worker %d\n", i);
-    }
+  // Run sequential ''reduce'' first'
+  int64_t tuning_sequentiual_start = get_wall_time();
+  char reduce_stage_1_tid_accum_arr[sizeof(int32_t) * ctx->scheduler.num_threads];
+  memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * ctx->scheduler.num_threads);
+
+  struct futhark_mc_segred_stage_1_struct futhark_mc_segred_stage_1_struct;
+
+  futhark_mc_segred_stage_1_struct.ctx = ctx;
+  futhark_mc_segred_stage_1_struct.free_reduce_stage_1_tid_accum_arr =
+    reduce_stage_1_tid_accum_arr;
+
+  err = futhark_mc_tuning_segred_stage_1(&futhark_mc_segred_stage_1_struct, 0, iterations,
+                                         0, 0, &ctx->tuning_timing);
+  int64_t tuning_sequentiual_end = get_wall_time();
+  int64_t sequential_elapsed = tuning_sequentiual_end - tuning_sequentiual_start;
+  fprintf(stderr, "Time Elapsed %lld\n", sequential_elapsed);
+
+  double C = (double)ctx->tuning_timing / (double) ctx->tuning_iter;
+  fprintf(stderr, "Found C is %f\n", C);
 
 
-    struct scheduler_info info;
-    info.iter_pr_subtask = 10;
-    info.nsubtasks = iterations/info.iter_pr_subtask;
-    info.remainder = 0;
+  // Start tuning for kappa
+  worker_local = malloc(sizeof(struct worker));
+  worker_local->tid = 0;
+  CHECK_ERR(deque_init(&worker_local->q, iterations), "failed to init queue for worker %d\n", 0);
 
-    info.total_time = &ctx->tuning_timing;
-    info.total_iter = &ctx->tuning_iter;
-    info.sched = STATIC;
+  int tuned = 0;
+  double kappa_tune = 18.0;
+  /* while (!tuned) { */
 
-    int num_threads = ctx->scheduler.num_threads;
+  memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * ctx->scheduler.num_threads);
+  int64_t min_iter_pr_subtask = kappa_tune / C;
+  int nsubtasks = iterations / min_iter_pr_subtask;
+  struct scheduler_info info;
+  info.iter_pr_subtask = min_iter_pr_subtask;
+  info.nsubtasks = iterations / min_iter_pr_subtask;
+  info.remainder = iterations % min_iter_pr_subtask;
 
-    char reduce_stage_1_tid_accum_arr[sizeof(int32_t) * ctx->scheduler.num_threads];
-    memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * ctx->scheduler.num_threads);
+  fprintf(stderr, "min iter %lld\n", info.iter_pr_subtask);
+  fprintf(stderr, "num subtask %d\n", info.nsubtasks);
+  info.total_time = &ctx->tuning_timing;
+  info.total_iter = &ctx->tuning_iter;
+  info.sched = STATIC;
 
-    struct futhark_mc_segred_stage_1_struct futhark_mc_segred_stage_1_struct;
+  struct scheduler_subtask futhark_segred_tuning_scheduler_subtask;
+  futhark_segred_tuning_scheduler_subtask.name = "futhark_mc_tuning_segred_stage_1";
+  futhark_segred_tuning_scheduler_subtask.fn = futhark_mc_tuning_segred_stage_1;
+  futhark_segred_tuning_scheduler_subtask.args = &futhark_mc_segred_stage_1_struct;
+  futhark_segred_tuning_scheduler_subtask.iterations = iterations;
+  futhark_segred_tuning_scheduler_subtask.info = info;
 
-    futhark_mc_segred_stage_1_struct.ctx = ctx;
-    futhark_mc_segred_stage_1_struct.free_reduce_stage_1_tid_accum_arr =
-        reduce_stage_1_tid_accum_arr;
+  int64_t tuning_chunked_start = get_wall_time();
+  int futhark_segred_tuning_program_err =
+    scheduler_execute_task(&ctx->scheduler,
+                           &futhark_segred_tuning_scheduler_subtask);
+  assert(futhark_segred_tuning_program_err == 0);
+  int64_t tuning_chunked_end = get_wall_time();
+  int64_t time_elapsed =  tuning_chunked_end- tuning_chunked_start;
 
-    struct scheduler_subtask futhark_segred_tuning_scheduler_subtask;
+  fprintf(stderr, "kappa %f\n", kappa_tune);
+  fprintf(stderr, "time elapsed %lld\n", time_elapsed);
+  fprintf(stderr, "ratio %f\n", (double)time_elapsed / (double)sequential_elapsed);
+  /* } */
 
-    futhark_segred_tuning_scheduler_subtask.name = "futhark_mc_tuning_segred_stage_1";
-    futhark_segred_tuning_scheduler_subtask.fn = futhark_mc_tuning_segred_stage_1;
-    futhark_segred_tuning_scheduler_subtask.args = &futhark_mc_segred_stage_1_struct;
-    futhark_segred_tuning_scheduler_subtask.iterations = iterations;
-    futhark_segred_tuning_scheduler_subtask.info = info;
-
-    int64_t futhark_segred_tuning_program_start = get_wall_time();
-
-    int futhark_segred_tuning_program_err =
-        scheduler_execute_task(&ctx->scheduler,
-                               &futhark_segred_tuning_scheduler_subtask);
-
-    assert(futhark_segred_tuning_program_err == 0);
-    assert(ctx->tuning_iter == iterations);
-
-    int64_t futhark_segred_tuning_program_end = get_wall_time();
-    int64_t elapsed = futhark_segred_tuning_program_end - futhark_segred_tuning_program_start;
-
-    kappa = (double)(elapsed - ctx->tuning_timing) / info.nsubtasks;
-
-    fprintf(stderr, "Found kappa is %f\n", kappa);
-    fprintf(stderr, "Elapsed : %lld\n", elapsed);
-    fprintf(stderr, "Timing : %lld\n", ctx->tuning_timing);
-    fprintf(stderr, "Time pr iter : %f\n", (double)ctx->tuning_timing/ (double)iterations);
-
-    // Teardown again
-    for (int i = 1; i < ctx->scheduler.num_threads; i++) {
-      struct worker *cur_worker = &ctx->scheduler.workers[i];
-      cur_worker->dead = 1;
-      CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
-    }
-
-    deque_destroy(&worker_local->q);
-    for (int i = 1; i < ctx->scheduler.num_threads; i++) {
-      struct worker *cur_worker = &ctx->scheduler.workers[i];
-      deque_destroy(&cur_worker->q);
-    }
-
-    num_workers = num_threads;
-    free(ctx->scheduler.workers);
-
-    return err;
+  kappa = kappa_tune;
+  return err;
 }

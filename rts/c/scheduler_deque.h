@@ -30,8 +30,7 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
 static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
 {
   int remaining_iter = subtask->end - subtask->start;
-  if (subtask->chunkable && remaining_iter > subtask->chunk_size)
-  {
+  if (subtask->chunkable && remaining_iter > subtask->chunk_size) {
     struct subtask *new_subtask = malloc(sizeof(struct subtask));
     *new_subtask = *subtask;
     __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
@@ -80,8 +79,7 @@ static inline int steal_from_random_worker(struct worker* worker)
   } else {
     assert(subtask != NULL);
     // We stole a task, so we re-compute it's iteration counter
-    if (subtask->chunkable && *subtask->total_iter > 0)
-    {
+    if (subtask->chunkable && *subtask->total_iter > 0) {
       subtask->chunk_size = compute_chunk_size(subtask, worker);
     }
     push_back(&worker->q, subtask);
@@ -110,7 +108,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 #endif
   int64_t iter = subtask->end - subtask->start;
   // report measurements
-  __atomic_fetch_add(subtask->total_iter, iter,         __ATOMIC_RELAXED);
+  __atomic_fetch_add(subtask->total_iter, iter, __ATOMIC_RELAXED);
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);
   return 0;
@@ -177,8 +175,10 @@ static inline void *scheduler_worker(void* arg)
   }
   assert(empty(&worker->q));
   __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
+#ifdef MCPROFILE
   if (worker->output_usage)
     output_thread_usage(worker);
+#endif
   return NULL;
 }
 
@@ -218,7 +218,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
                                             chunkable, iter,
                                             subtask_id);
     assert(subtask != NULL);
-    push_back(&scheduler->workers[worker->tid].q, subtask);
+    push_back(&worker->q, subtask);
 #ifdef MCDEBUG
     fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), worker->tid);
 #endif
@@ -227,8 +227,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
-  while(shared_counter != 0 && scheduler_error == 0)
-  {
+  while(shared_counter != 0 && scheduler_error == 0) {
     if (!empty(&worker->q)) {
       struct subtask * subtask = pop_back(&worker->q);
       if (subtask == NULL) continue;
