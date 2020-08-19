@@ -30,7 +30,7 @@ static long int ran_iter, start_iter = 0;
 #endif
 static volatile int scheduler_error = 0;
 
-static double kappa = 0.35f;
+static double kappa = 4.0f;
 
 struct scheduler_info;
 typedef int (*sub_task_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid, int64_t* time);
