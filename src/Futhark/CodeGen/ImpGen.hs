@@ -110,6 +110,7 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util
+import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
 
 -- | How to compile an t'Op'.
@@ -644,6 +645,10 @@ defCompileExp pat (Apply fname args _ _) = do
 defCompileExp pat (BasicOp op) = defCompileBasicOp pat op
 
 defCompileExp pat (DoLoop ctx val form body) = do
+  attrs <- askAttrs
+  when ("unroll" `inAttrs` attrs) $
+    warn (noLoc::SrcLoc) [] "#[unroll] on loop with unknown number of iterations." -- FIXME: no location.
+
   dFParams mergepat
   forM_ merge $ \(p, se) ->
     when ((==0) $ arrayRank $ paramType p) $
