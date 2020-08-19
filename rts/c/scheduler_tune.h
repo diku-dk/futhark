@@ -104,8 +104,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     time_elapsed =  tuning_chunked_end- tuning_chunked_start;
 
     ratio = (double)time_elapsed / (double)sequential_elapsed;
-    fprintf(stderr, "kappa %f - time %lld - ratio %f\n", kappa_tune, time_elapsed,  ratio);
-    if (ratio > 1.05 && ratio < 1.053) {
+    if (ratio < 1.06) {
       break;
     }
     kappa_tune += 0.1;
