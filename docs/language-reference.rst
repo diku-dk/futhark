@@ -1661,6 +1661,17 @@ preserve any inner parallelism.
 
 Exploit only outer parallelism in the attributed SOAC.
 
+``unroll``
+..........
+
+Fully unroll the attributed ``loop``.  If the compiler cannot
+determine the exact number of iterations (possibly after other
+optimisations and simplifications have taken place), then this
+attribute has no code generation effect, but instead results in a
+warning.  Be very careful with this attribute: it can massively
+increase program size (possibly crashing the compiler) if the loop has
+a huge number of iterations.
+
 ``unsafe``
 ..........
 

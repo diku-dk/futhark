@@ -3,6 +3,7 @@
 {-# LANGUAGE Safe #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | This module defines a collection of simplification rules, as per
 -- "Futhark.Optimise.Simplify.Rule".  They are used in the
 -- simplifier.
@@ -34,13 +35,14 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
+import Futhark.Transform.Rename
 import Futhark.Construct
 import Futhark.Util
 
 topDownRules :: (BinderOps lore, Aliased lore) => [TopDownRule lore]
 topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , RuleDoLoop simplifyClosedFormLoop
-               , RuleDoLoop simplifKnownIterationLoop
+               , RuleDoLoop simplifyKnownIterationLoop
                , RuleDoLoop simplifyLoopVariables
                , RuleGeneric constantFoldPrimFun
                , RuleIf ruleIf
@@ -76,7 +78,7 @@ standardRules = ruleBook topDownRules bottomUpRules
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
 removeRedundantMergeVariables :: BinderOps lore => BottomUpRuleDoLoop lore
-removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
+removeRedundantMergeVariables (_, used) pat aux (ctx, val, form, body)
   | not $ all (usedAfterLoop . fst) val,
     null ctx = -- FIXME: things get tricky if we can remove all vals
                -- but some ctxs are still used.  We take the easy way
@@ -126,7 +128,7 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
          mapM_ (uncurry letBindNames) $ dummyStms discard_ctx
          mapM_ (uncurry letBindNames) $ dummyStms discard_val
          return body'
-       letBind pat' $ DoLoop ctx' val' form body''
+       auxing aux $ letBind pat' $ DoLoop ctx' val' form body''
   where pat_used = map (`UT.isUsedDirectly` used) $ patternValueNames pat
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
         usedAfterLoop = flip elem used_vals . paramName
@@ -147,7 +149,7 @@ removeRedundantMergeVariables _ _ _ _ =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: BinderOps lore => TopDownRuleDoLoop lore
-hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
+hoistLoopInvariantMergeVariables _ pat aux (ctx, val, form, loopbody) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $
@@ -168,7 +170,7 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
           (ctx', val') = splitAt (length implpat') merge'
       forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
         letBindNames [identName v1] $ BasicOp $ SubExp v2
-      letBind (Pattern implpat'' explpat'') $
+      auxing aux $ letBind (Pattern implpat'' explpat'') $
         DoLoop ctx' val' form loopbody'
   where merge = ctx ++ val
         res = bodyResult loopbody
@@ -250,7 +252,7 @@ simplifyClosedFormLoop _ pat _ ([], val, ForLoop i _ bound [], body) =
 simplifyClosedFormLoop _ _ _ _ = Skip
 
 simplifyLoopVariables :: (BinderOps lore, Aliased lore) => TopDownRuleDoLoop lore
-simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_vars), body)
+simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loop_vars), body)
   | simplifiable <- map checkIfSimplifiable loop_vars,
     not $ all isNothing simplifiable = Simplify $ do
       -- Check if the simplifications throw away more information than
@@ -263,7 +265,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
         else do body' <- insertStmsM $ do
                   addStms $ mconcat body_prefix_stms
                   resultBodyM =<< bodyBind body
-                letBind pat $ DoLoop ctx val
+                auxing aux $ letBind pat $ DoLoop ctx val
                   (ForLoop i it num_iters $ catMaybes maybe_loop_vars) body'
 
   where seType (Var v)
@@ -310,30 +312,46 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
         notIndex _                 = True
 simplifyLoopVariables _ _ _ _ = Skip
 
-simplifKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
-simplifKnownIterationLoop _ pat _ (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
-  | zeroIsh iters = Simplify $ do
-      let bindResult p r = letBindNames [patElemName p] $ BasicOp $ SubExp r
-      zipWithM_ bindResult (patternContextElements pat) (map snd ctx)
-      zipWithM_ bindResult (patternValueElements pat) (map snd val)
+unroll :: BinderOps lore =>
+          Integer
+       -> [(FParam lore, SubExp)]
+       -> (VName, IntType, Integer)
+       -> [(LParam lore, VName)]
+       -> Body lore
+       -> RuleM lore [SubExp]
+unroll n merge (iv, it, i) loop_vars body
+  | i >= n =
+      return $ map snd merge
+  | otherwise = do
+      iter_body <- insertStmsM $ do
+        forM_ merge $ \(mergevar, mergeinit) ->
+          letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
 
-  | oneIsh iters = Simplify $ do
+        letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
 
-  forM_ (ctx++val) $ \(mergevar, mergeinit) ->
-    letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
+        forM_ loop_vars $ \(p,arr) ->
+          letBindNames [paramName p] $ BasicOp $ Index arr $
+          DimFix (intConst Int32 i) : fullSlice (paramType p) []
 
-  letBindNames [i] $ BasicOp $ SubExp $ intConst it 0
+        -- Some of the sizes in the types here might be temporarily wrong
+        -- until copy propagation fixes it up.
+        pure body
 
-  forM_ loop_vars $ \(p,arr) ->
-    letBindNames [paramName p] $ BasicOp $ Index arr $
-    DimFix (intConst Int32 0) : fullSlice (paramType p) []
+      iter_body' <- renameBody iter_body
+      addStms $ bodyStms iter_body'
 
-  -- Some of the sizes in the types here might be temporarily wrong
-  -- until copy propagation fixes it up.
-  res <- bodyBind body
-  forM_ (zip (patternNames pat) res) $ \(v, se) ->
-    letBindNames [v] $ BasicOp $ SubExp se
-simplifKnownIterationLoop _ _ _ _ =
+      let merge' = zip (map fst merge) $ bodyResult iter_body'
+      unroll n merge' (iv, it, i+1) loop_vars body
+
+simplifyKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
+simplifyKnownIterationLoop _ pat aux (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
+  | IntValue n <- iters,
+    zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
+      res <- unroll (valueIntegral n) (ctx++val) (i, it, 0) loop_vars body
+      forM_ (zip (patternNames pat) res) $ \(v, se) ->
+        letBindNames [v] $ BasicOp $ SubExp se
+
+simplifyKnownIterationLoop _ _ _ _ =
   Skip
 
 -- | Turn @copy(x)@ into @x@ iff @x@ is not used after this copy
