@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fix incorrect movement of array indexing into branches `if`s
     (#1073).
 
+  * Fix defunctorisation bug (#1088).
+
 ## [0.16.3]
 
 ### Added
