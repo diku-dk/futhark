@@ -579,8 +579,9 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
         loc (map (I.paramName . fst) ctxmerge) merge_ts
     =<< bodyBind loopbody'
 
-  loop_res <- map I.Var . dropCond <$>
-              letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody'')
+  attrs <- asks envAttrs
+  loop_res <- map I.Var . dropCond <$> attributing attrs
+              (letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody''))
   bindExtSizes (E.toStruct ret) retext loop_res
   return loop_res
 
