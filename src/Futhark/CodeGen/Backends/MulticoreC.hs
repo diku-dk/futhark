@@ -636,6 +636,17 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
     op :: String
     op = "__atomic_compare_exchange_n"
 
+atomicOps (AtomicXchg t old arr ind val) = do
+  ind' <- GC.compileExp $ unCount ind
+  val' <- GC.compileExp val
+  let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]
+  where
+    op :: String
+    op = "__atomic_exchange"
+
+
+
 atomicOps (AtomicAdd t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|]
 

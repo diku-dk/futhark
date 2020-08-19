@@ -44,6 +44,7 @@ data AtomicOp = AtomicAdd IntType VName VName (Count Elements Imp.Exp) Exp
               | AtomicAnd IntType VName VName (Count Elements Imp.Exp) Exp
               | AtomicOr IntType VName VName (Count Elements Imp.Exp) Exp
               | AtomicXor IntType VName VName (Count Elements Imp.Exp) Exp
+              | AtomicXchg PrimType VName VName (Count Elements Imp.Exp) Exp
               | AtomicCmpXchg PrimType VName VName (Count Elements Imp.Exp) VName Exp
               deriving (Show)
 
@@ -54,6 +55,7 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicOr _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicXor _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicCmpXchg _ _ arr i retval x) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' retval
+  freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 
 data SchedulerInfo = SchedulerInfo
