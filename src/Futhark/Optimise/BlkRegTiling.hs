@@ -17,7 +17,7 @@
 --          the redomap produces one scalar result
 --          the kernel produces one scalar result
 module Futhark.Optimise.BlkRegTiling
-       ( mm_BlkRegTiling )
+       ( mmBlkRegTiling )
        where
 import Control.Monad.State
 import Control.Monad.Reader
@@ -35,8 +35,8 @@ import Futhark.Transform.Rename
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 type VarianceTable = M.Map VName Names
 
-mm_BlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
-mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
+mmBlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
+mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
   | KernelBody () kstms [Returns ResultMaySimplify (Var res_nm)] <- old_kbody,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
@@ -393,7 +393,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
       --trace ("COSMIN kernel: "++pretty new_kernel) $
       return $ Just (host_stms, new_kernel)
 
-mm_BlkRegTiling _ = return Nothing
+mmBlkRegTiling _ = return Nothing
 
 primFromSe :: SubExp -> PrimExp VName
 primFromSe = primExpFromSubExp int32
@@ -581,8 +581,8 @@ segMap2D :: String           -- desc
          -> Binder Kernels [VName]
 segMap2D desc lvl manifest (dim_x, dim_y) f = do
   ltid_x    <- newVName "ltid_x"
-  ltid_y    <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
+  ltid_y    <- newVName "ltid_y"
   let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
   ((ts, res), stms) <- runBinder $ do
