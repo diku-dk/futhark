@@ -371,8 +371,19 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
           let regtile_ret_dims =
                 map (\(_, sz) -> (sz, one_se, one_se)) rem_outer_dims ++
                 [(height_A, ty, ry), (width_B, tx, rx)]
+
+          -- Add dummy dimensions to tile to reflect the outer dimensions.
+          epilogue_res' <-
+            if null rem_outer_dims then return epilogue_res
+            else do
+              epilogue_t <- lookupType epilogue_res
+              let (block_dims, rest_dims) = splitAt 2 $ arrayDims epilogue_t
+                  ones = map (const $ intConst Int32 1) rem_outer_dims
+                  new_shape = concat [ones, block_dims, ones, rest_dims]
+              letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
+
           -- TODO: RegTileReturns is still missing boundary checks.
-          return [RegTileReturns regtile_ret_dims epilogue_res]
+          return [RegTileReturns regtile_ret_dims epilogue_res']
 
         let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
