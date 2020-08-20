@@ -16,7 +16,6 @@ module Futhark.Pass.ExtractKernels.Interchange
 
 import Control.Monad.RWS.Strict
 import Data.Maybe
-import qualified Data.Map as M
 import Data.List (find)
 
 import Futhark.Pass.ExtractKernels.Distribution
@@ -61,9 +60,7 @@ interchangeLoop
       runBinder $ localScope (scopeOfLParams new_params) $
       unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
-    body' <- mkDummyStms (params'<>new_params) body
-
-    let lam = Lambda (params'<>new_params) body' rettype
+    let lam = Lambda (params'<>new_params) body rettype
         map_bnd = Let loop_pat_expanded aux $
                   Op $ Screma w (mapSOAC lam) $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
@@ -99,22 +96,6 @@ interchangeLoop
         expandPatElem (PatElem name t) =
           PatElem name $ arrayOfRow t w
 
-        -- | The kernel extractor cannot handle identity mappings, so
-        -- insert dummy statements for body results that are just a
-        -- lambda parameter.
-        mkDummyStms params (Body _ stms res) = do
-          (res', extra_stms) <- unzip <$> mapM dummyStm res
-          return $ Body () (stms<>mconcat extra_stms) res'
-          where dummyStm (Var v)
-                  | Just p <- find ((==v) . paramName) params = do
-                      dummy <- newVName (baseString v ++ "_dummy")
-                      return (Var dummy,
-                              oneStm $
-                                Let (Pattern [] [PatElem dummy $ paramType p])
-                                    (defAux ()) $
-                                     BasicOp $ SubExp $ Var $ paramName p)
-                dummyStm se = return (se, mempty)
-
 -- | Given a (parallel) map nesting and an inner sequential loop, move
 -- the maps inside the sequential loop.  The result is several
 -- statements - one of these will be the loop, which will then contain
@@ -137,7 +118,7 @@ branchStm :: Branch -> Stm
 branchStm (Branch _ pat cond tbranch fbranch ret) =
   Let pat (defAux ()) $ If cond tbranch fbranch ret
 
-interchangeBranch1 :: (MonadBinder m, LocalScope SOACS m) =>
+interchangeBranch1 :: (MonadBinder m) =>
                       Branch -> LoopNesting -> m Branch
 interchangeBranch1
   (Branch perm branch_pat cond tbranch fbranch (IfDec ret if_sort))
@@ -146,20 +127,13 @@ interchangeBranch1
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
         (params, arrs) = unzip params_and_arrs
-        lam_ret = map rowType $ patternTypes pat
+        lam_ret = rearrangeShape perm $ map rowType $ patternTypes pat
 
         branch_pat' =
           Pattern [] $ map (fmap (`arrayOfRow` w)) $ patternElements branch_pat
 
         mkBranch branch = (renameBody=<<) $ do
-          let bound_in_branch = scopeOf (bodyStms branch)
-          branch' <-
-            -- XXX: We may need dummys binding to prevent identity
-            -- mappings.  The kernel extractor does not like identity
-            -- mappings.
-            runBodyBinder $
-            resultBody <$> (mapM (dummyBindIfNotIn bound_in_branch) =<< bodyBind branch)
-          let lam = Lambda params branch' lam_ret
+          let lam = Lambda params branch lam_ret
               res = map Var $ patternNames branch_pat'
               map_bnd = Let branch_pat' aux $ Op $ Screma w (mapSOAC lam) arrs
           return $ mkBody (oneStm map_bnd) res
@@ -168,15 +142,6 @@ interchangeBranch1
     fbranch' <- mkBranch fbranch
     return $ Branch [0..patternSize pat-1] pat' cond tbranch' fbranch' $
       IfDec ret' if_sort
-  where dummyBind se = do
-          dummy <- newVName "dummy"
-          letBindNames [dummy] (BasicOp $ SubExp se)
-          return $ Var dummy
-
-        dummyBindIfNotIn bound_in_branch se
-          | Var v <- se,
-            v `M.member` bound_in_branch = return se
-          | otherwise = dummyBind se
 
 interchangeBranch :: (MonadFreshNames m, HasScope SOACS m) =>
                      KernelNest -> Branch -> m (Stms SOACS)

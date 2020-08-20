@@ -17,6 +17,13 @@ non-zero value on error.  Others return a ``NULL`` pointer.  Use
 :c:func:`futhark_context_get_error` to get a (possibly) more precise
 error message.
 
+.. c:macro:: FUTHARK_BACKEND_foo
+
+   A preprocessor macro identifying that the backend *foo* was used to
+   generate the code; e.g. ``c``, ``opencl``, or ``cuda``.  This can
+   be used for conditional compilation of code that only works with
+   specific backends.
+
 Configuration
 -------------
 
@@ -26,7 +33,7 @@ changes to the configuration must be made *before* calling
 freed before any context objects for which it is used.  The same
 configuration may be used for multiple concurrent contexts.
 
-.. c:type:: struct futhark_context_config
+.. c:struct:: futhark_context_config
 
    An opaque struct representing a Futhark configuration.
 
@@ -62,7 +69,7 @@ configuration may be used for multiple concurrent contexts.
 Context
 -------
 
-.. c:type:: struct futhark_context
+.. c:struct:: futhark_context
 
    An opaque struct representing a Futhark context.
 
@@ -74,6 +81,13 @@ Context
    you must not pass values between them.  They have the same C type,
    so this is an easy mistake to make.
 
+   After you have created a context object, you must immediately call
+   :c:func:`futhark_context_get_error`, which will return non-``NULL``
+   if initialisation failed.  If initialisation has failed, then you
+   still need to call :c:func:`futhark_context_free` to release
+   resources used for the context object, but you may not use the
+   context object for anything else.
+
 .. c:function:: void futhark_context_free(struct futhark_context *ctx)
 
    Free the context object.  It must not be used again.  The
@@ -82,8 +96,9 @@ Context
 
 .. c:function:: int futhark_context_sync(struct futhark_context *ctx)
 
-   Block until all outstanding operations have finished executing.
-   Many API functions are asynchronous on their own.
+   Block until all outstanding operations, including copies, have
+   finished executing.  Many API functions are asynchronous on their
+   own.
 
 .. c:function:: void futhark_context_pause_profiling(struct futhark_context *ctx)
 
@@ -143,7 +158,7 @@ reference counted, so even for entry points that return their input
 unchanged, you should still free both the input and the output - this
 will not result in a double free.
 
-.. c:type:: struct futhark_i32_1d
+.. c:struct:: futhark_i32_1d
 
    An opaque struct representing a Futhark value of type ``[]i32``.
 
@@ -171,8 +186,9 @@ will not result in a double free.
 
 .. c:function:: int futhark_values_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr, int32_t *data)
 
-   Copy data from the value into ``data``, which must be of sufficient
-   size.  Multi-dimensional arrays are written in row-major form.
+   Asynchronously copy data from the value into ``data``, which must
+   be of sufficient size.  Multi-dimensional arrays are written in
+   row-major form.
 
 .. c:function:: const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -197,6 +213,17 @@ Results in the following C function:
    Asynchronously call the entry point with the given arguments.  Make
    sure to call :c:func:`futhark_context_sync` before using the value
    of ``out0``.
+
+The exact behaviour of the exit code depends on the backend.  For the
+sequential C backend, errors will always be available when the entry
+point returns, and :c:func:`futhark_context_sync` will always return
+success.  When using a GPU backend such as ``cuda`` or ``opencl``, the
+entry point may still be running asynchronous operations when it
+returns, in which case the entry point may return zero successfully,
+even though execution has already (or will) fail.  These problems will
+be reported when :c:func:`futhark_context_sync` is called.  When using
+GPU backends, be careful to check the return code of *both* the entry
+point itself, and :c:func:`futhark_context_sync`.
 
 GPU
 ---
@@ -230,6 +257,16 @@ The following functions are not interesting to most users.
 
    Set the default tile size used when executing kernels that have
    been block tiled.
+
+.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
+
+   During :c:func:`futhark_context_new`, dump the OpenCL or CUDA
+   program source to the given file.
+
+.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
+
+   During :c:func:`futhark_context_new`, read OpenCL or CUDA program
+   source from the given file instead of using the embedded program.
 
 OpenCL
 ------
@@ -270,16 +307,6 @@ advanced usage.
    Add a build option to the OpenCL kernel compiler.  See the OpenCL
    specification for `clBuildProgram` for available options.
 
-.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, dump the OpenCL program
-   source to the given file.
-
-.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, read OpenCL program source
-   from the given file instead of using the embedded program.
-
 .. c:function:: void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path)
 
    During :c:func:`futhark_context_new`, dump the compiled OpenCL
@@ -307,16 +334,6 @@ advanced usage.
    Add a build option to the NVRTC compiler.  See the CUDA
    documentation for ``nvrtcCompileProgram`` for available options.
 
-.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, dump the CUDA program
-   source to the given file.
-
-.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
-
-   During :c:func:`futhark_context_new`, read CUDA program source
-   from the given file instead of using the embedded program.
-
 .. c:function:: void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
 
    During :c:func:`futhark_context_new`, dump the generated PTX code
@@ -326,3 +343,30 @@ advanced usage.
 
    During :c:func:`futhark_context_new`, read PTX code from the given
    file instead of using the embedded program.
+
+General guarantees
+------------------
+
+Calling an entry point, or interacting with Futhark values through the
+functions listed above, has no system-wide side effects, such as
+writing to the file system, launching processes, or performing network
+connections.  Defects in the program or Futhark compiler itself can
+with high probability result only in the consumption of CPU or GPU
+resources, or a process crash.
+
+Using the ``#[unsafe]`` attribute with in-place updates can result in
+writes to arbitrary memory locations.  A malicious program can likely
+exploit this to obtain arbitrary code execution, just as with any
+insecure C program.  If you must run untrusted code, consider using
+the ``--safe`` command line option to instruct the compiler to disable
+``#[unsafe]``.
+
+Initialising a Futhark context likewise has no side effects, except if
+explicitly configured differently, such as by using
+:c:func:`futhark_context_config_dump_program_to`.  In its default
+configuration, Futhark will not access the file system.
+
+Note that for the GPU backends, the underlying API (such as CUDA or
+OpenCL) may perform file system operations during startup, and perhaps
+for caching GPU kernels in some cases.  This is beyond Futhark's
+control.

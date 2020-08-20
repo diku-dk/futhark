@@ -22,14 +22,14 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass
-import Futhark.IR.SOACS.Simplify (simplifySOAC)
+import qualified Futhark.IR.SOACS.Simplify as SOAC
 import qualified Futhark.Optimise.Simplify as Simplify
 import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 
 simpleKernels :: Simplify.SimpleOps Kernels
-simpleKernels = Simplify.bindableSimpleOps $ simplifyKernelOp simplifySOAC
+simpleKernels = Simplify.bindableSimpleOps $ simplifyKernelOp SOAC.simplifySOAC
 
 simplifyKernels :: Prog Kernels -> PassM (Prog Kernels)
 simplifyKernels =
@@ -78,11 +78,19 @@ instance HasSegOp (Wise Kernels) where
   asSegOp _ = Nothing
   segOp = SegOp
 
+instance SOAC.HasSOAC (Wise Kernels) where
+  asSOAC (OtherOp soac) = Just soac
+  asSOAC _ = Nothing
+  soacOp = OtherOp
+
 kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <> segOpRules <>
               ruleBook
-              [ RuleOp redomapIotaToLoop ]
-              [ RuleBasicOp removeUnnecessaryCopy ]
+              [ RuleOp redomapIotaToLoop
+              , RuleOp SOAC.simplifyKnownIterationSOAC
+              , RuleOp SOAC.removeReplicateMapping ]
+              [ RuleBasicOp removeUnnecessaryCopy
+              , RuleOp SOAC.liftIdentityMapping ]
 
 -- We turn reductions over (solely) iotas into do-loops, because there
 -- is no useful structure here anyway.  This is mostly a hack to work

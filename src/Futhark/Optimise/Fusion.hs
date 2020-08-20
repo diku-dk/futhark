@@ -30,6 +30,7 @@ import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Pass
+import Futhark.Util (maxinum)
 
 data VarEntry = IsArray VName (NameInfo SOACS) Names SOAC.Input
               | IsNotArray (NameInfo SOACS)
@@ -470,7 +471,7 @@ horizontGreedyFuse rem_bnds res (out_idds, aux, soac, consumed) = do
     ker <- lookupKernel ker_nm
     case mapMaybe (\out_nm -> L.findIndex (elem out_nm) bnd_nms) (outNames ker) of
       [] -> return Nothing
-      is -> return $ Just (ker,ker_nm,maximum is)
+      is -> return $ Just (ker,ker_nm,maxinum is)
 
   scope <- askScope
   let kernminds' = L.sortBy (\(_,_,i1) (_,_,i2)->compare i1 i2) $ catMaybes kernminds

@@ -296,9 +296,11 @@ instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (HostOp lore op) where
   opMetrics (OtherOp op) = opMetrics op
   opMetrics (SizeOp op) = opMetrics op
 
-checkSegLevel :: Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
-checkSegLevel Nothing _ =
-  return ()
+checkSegLevel :: TC.Checkable lore =>
+                 Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
+checkSegLevel Nothing lvl = do
+  TC.require [Prim int32] $ unCount $ segNumGroups lvl
+  TC.require [Prim int32] $ unCount $ segGroupSize lvl
 checkSegLevel (Just SegThread{}) _ =
   TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
 checkSegLevel (Just x) y

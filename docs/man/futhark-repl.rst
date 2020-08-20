@@ -9,7 +9,7 @@ futhark-repl
 SYNOPSIS
 ========
 
-futhark repl
+futhark repl [program.fut]
 
 DESCRIPTION
 ===========

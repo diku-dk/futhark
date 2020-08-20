@@ -1,4 +1,4 @@
-resolver: nightly-2020-03-10
+resolver: lts-16.7
 packages:
 - .
 
@@ -14,4 +14,4 @@ nix:
 # By default, stack doesn't compile multiple modules in parallel.
 # This makes it do so.
 ghc-options:
-  $locals: -j
+  $locals: -j -optP-Wno-nonportable-include-path

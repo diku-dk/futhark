@@ -344,7 +344,7 @@ synopsisValBind vb = Just $ do
   return $ specRow lhs (mhs <> " : ") rhs
 
 valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
-valBindHtml name (ValBind _ _ retdecl (Info (rettype, _)) tparams params _ _ _) = do
+valBindHtml name (ValBind _ _ retdecl (Info (rettype, _)) tparams params _ _ _ _) = do
   let tparams' = mconcat $ map ((" "<>) . typeParamHtml) tparams
       noLink' = noLink $ map typeParamName tparams ++
                 map identName (S.toList $ mconcat $ map patternIdents params)
@@ -434,7 +434,7 @@ typeHtml t = case t of
   Scalar (TypeVar _ u et targs) -> do
     targs' <- mapM typeArgHtml targs
     et' <- typeNameHtml et
-    return $ prettyU u <> et' <> joinBy " " targs'
+    return $ prettyU u <> et' <> mconcat (map (" "<>) targs')
   Scalar (Arrow _ pname t1 t2) -> do
     t1' <- typeHtml t1
     t2' <- typeHtml t2
@@ -614,8 +614,10 @@ typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d
 typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
 typeParamHtml :: TypeParam -> Html
-typeParamHtml (TypeParamDim name _) = brackets $ vnameHtml name
-typeParamHtml (TypeParamType l name _) = fromString (pretty l) <> vnameHtml name
+typeParamHtml (TypeParamDim name _) =
+  brackets $ vnameHtml name
+typeParamHtml (TypeParamType l name _) =
+  "'" <> fromString (pretty l) <> vnameHtml name
 
 typeAbbrevHtml :: Liftedness -> Html -> [TypeParam] -> Html
 typeAbbrevHtml l name params =

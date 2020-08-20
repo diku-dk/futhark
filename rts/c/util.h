@@ -2,7 +2,7 @@
 //
 // Various helper functions that are useful in all generated C code.
 
-static const char *fut_progname = "(some Futhark code)";
+static const char *fut_progname = "(embedded Futhark)";
 
 static void futhark_panic(int eval, const char *fmt, ...) {
   va_list ap;
@@ -26,14 +26,14 @@ static char* msgprintf(const char *s, ...) {
 }
 
 // Read a file into a NUL-terminated string; returns NULL on error.
-static char* slurp_file(const char *filename, size_t *size) {
-  char *s;
+static void* slurp_file(const char *filename, size_t *size) {
+  unsigned char *s;
   FILE *f = fopen(filename, "rb"); // To avoid Windows messing with linebreaks.
   if (f == NULL) return NULL;
   fseek(f, 0, SEEK_END);
   size_t src_size = ftell(f);
   fseek(f, 0, SEEK_SET);
-  s = (char*) malloc(src_size + 1);
+  s = (unsigned char*) malloc(src_size + 1);
   if (fread(s, 1, src_size, f) != src_size) {
     free(s);
     s = NULL;
@@ -51,7 +51,7 @@ static char* slurp_file(const char *filename, size_t *size) {
 
 // Dump 'n' bytes from 'buf' into the file at the designated location.
 // Returns 0 on success.
-static int dump_file(const char *file, const char *buf, size_t n) {
+static int dump_file(const char *file, const void *buf, size_t n) {
   FILE *f = fopen(file, "w");
 
   if (f == NULL) {

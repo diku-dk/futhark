@@ -49,6 +49,7 @@ module Futhark.IR.Syntax.Core
          , sliceDims
          , unitSlice
          , fixSlice
+         , sliceSlice
          , PatElemT (..)
          ) where
 
@@ -66,6 +67,21 @@ import Futhark.IR.Primitive
 newtype ShapeBase d = Shape { shapeDims :: [d] }
                     deriving (Eq, Ord, Show)
 
+instance Functor ShapeBase where
+  fmap = fmapDefault
+
+instance Foldable ShapeBase where
+  foldMap = foldMapDefault
+
+instance Traversable ShapeBase where
+  traverse f = fmap Shape . traverse f . shapeDims
+
+instance Semigroup (ShapeBase d) where
+  Shape l1 <> Shape l2 = Shape $ l1 `mappend` l2
+
+instance Monoid (ShapeBase d) where
+  mempty = Shape mempty
+
 -- | The size of an array as a list of subexpressions.  If a variable,
 -- that variable must be in scope where this array is used.
 type Shape = ShapeBase SubExp
@@ -76,8 +92,14 @@ data Ext a = Ext Int
            deriving (Eq, Ord, Show)
 
 instance Functor Ext where
-  fmap _ (Ext i) = Ext i
-  fmap f (Free a) = Free $ f a
+  fmap = fmapDefault
+
+instance Foldable Ext where
+  foldMap = foldMapDefault
+
+instance Traversable Ext where
+  traverse _ (Ext i) = pure $ Ext i
+  traverse f (Free v) = Free <$> f v
 
 -- | The size of this dimension.
 type ExtSize = Ext SubExp
@@ -100,15 +122,6 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   stripDims :: Int -> a -> a
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
-
-instance Semigroup (ShapeBase d) where
-  Shape l1 <> Shape l2 = Shape $ l1 `mappend` l2
-
-instance Monoid (ShapeBase d) where
-  mempty = Shape mempty
-
-instance Functor ShapeBase where
-  fmap f = Shape . map f . shapeDims
 
 instance ArrayShape (ShapeBase SubExp) where
   shapeRank (Shape l) = length l
@@ -166,7 +179,7 @@ type SpaceId = String
 data NoUniqueness = NoUniqueness
                   deriving (Eq, Ord, Show)
 
--- | An Futhark type is either an array or an element type.  When
+-- | A Futhark type is either an array or an element type.  When
 -- comparing types for equality with '==', shapes must match.
 data TypeBase shape u = Prim PrimType
                       | Array PrimType shape u
@@ -301,6 +314,17 @@ fixSlice (DimFix j:mis') is' =
 fixSlice (DimSlice orig_k _ orig_s:mis') (i:is') =
   (orig_k+i*orig_s) : fixSlice mis' is'
 fixSlice _ _ = []
+
+-- | Further slice the 'DimSlice's of a slice.  The number of slices
+-- must equal the length of 'sliceDims' for the slice.
+sliceSlice :: Num d => Slice d -> Slice d -> Slice d
+sliceSlice (DimFix j:js') is' =
+  DimFix j : sliceSlice js' is'
+sliceSlice (DimSlice j _ s:js') (DimFix i:is') =
+  DimFix (j + (i*s)) : sliceSlice js' is'
+sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') =
+  DimSlice (j+(s0*i)) n (s0*s1) : sliceSlice js' is'
+sliceSlice _ _ = []
 
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to

@@ -115,6 +115,7 @@ module Futhark.IR.Syntax
   , Attrs(..)
   , oneAttr
   , inAttrs
+  , withoutAttrs
 
   -- * Abstract syntax tree
   , Ident (..)
@@ -173,7 +174,9 @@ import Futhark.IR.Decorations
 import Futhark.IR.Syntax.Core
 
 -- | A single attribute.
-newtype Attr = AttrAtom Name
+data Attr
+  = AttrAtom Name
+  | AttrComp Name [Attr]
   deriving (Ord, Show, Eq)
 
 instance IsString Attr where
@@ -191,6 +194,10 @@ oneAttr = Attrs . S.singleton
 -- | Is the given attribute to be found in the attribute set?
 inAttrs :: Attr -> Attrs -> Bool
 inAttrs attr (Attrs attrs) = attr `S.member` attrs
+
+-- | @x `withoutAttrs` y@ gives @x@ except for any attributes also in @y@.
+withoutAttrs :: Attrs -> Attrs -> Attrs
+withoutAttrs (Attrs x) (Attrs y) = Attrs $ x `S.difference` y
 
 -- | A type alias for namespace control.
 type PatElem lore = PatElemT (LetDec lore)
@@ -419,13 +426,6 @@ deriving instance Decorations lore => Eq (ExpT lore)
 deriving instance Decorations lore => Show (ExpT lore)
 deriving instance Decorations lore => Ord (ExpT lore)
 
--- | Whether something is safe or unsafe (mostly function calls, and
--- in the context of whether operations are dynamically checked).
--- When we inline an 'Unsafe' function, we remove all safety checks in
--- its body.  The 'Ord' instance picks 'Unsafe' as being less than
--- 'Safe'.
-data Safety = Unsafe | Safe deriving (Eq, Ord, Show)
-
 -- | For-loop or while-loop?
 data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
                    | WhileLoop VName
@@ -448,7 +448,7 @@ data IfSort = IfNormal
               -- ^ A branch where the "true" case is what we are
               -- actually interested in, and the "false" case is only
               -- present as a fallback for when the true case cannot
-              -- be safely evaluated.  the compiler is permitted to
+              -- be safely evaluated.  The compiler is permitted to
               -- optimise away the branch if the true case contains
               -- only safe statements.
             | IfEquiv
@@ -484,6 +484,7 @@ type LParam lore = Param (LParamInfo lore)
 data FunDef lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
                             -- ^ Contains a value if this function is
                             -- an entry point.
+                          , funDefAttrs :: Attrs
                           , funDefName :: Name
                           , funDefRetType :: [RetType lore]
                           , funDefParams :: [FParam lore]

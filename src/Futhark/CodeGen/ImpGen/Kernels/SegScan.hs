@@ -1,5 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+-- | Code generation for segmented and non-segmented scans.  Uses a
+-- fairly inefficient two-pass algorithm.
 module Futhark.CodeGen.ImpGen.Kernels.SegScan
   ( compileSegScan )
   where
@@ -17,7 +19,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem)
+import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Futhark.Util (takeLast)
 
 -- Aggressively try to reuse memory for different SegBinOps, because
@@ -140,7 +142,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
   let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
   let num_elements = product dims'
-      elems_per_thread = num_elements `quotRoundingUp` Imp.vi32 num_threads
+      elems_per_thread = num_elements `divUp` Imp.vi32 num_threads
       elems_per_group = unCount group_size' * elems_per_thread
 
   let crossesSegment =
@@ -333,7 +335,7 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
   let (gtids, dims) = unzip $ unSegSpace space
   dims' <- mapM toExp dims
   required_groups <- dPrimVE "required_groups" $
-                     product dims' `quotRoundingUp` unCount group_size'
+                     product dims' `divUp` unCount group_size'
 
   sKernelThread "scan_stage3" num_groups' group_size' (segFlat space) $
     virtualiseGroups SegVirt required_groups $ \virt_group_id -> do
@@ -400,10 +402,22 @@ compileSegScan :: Pattern KernelsMem
 compileSegScan pat lvl space scans kbody = do
   emit $ Imp.DebugPrint "\n# SegScan" Nothing
 
+  -- Since stage 2 involves a group size equal to the number of groups
+  -- used for stage 1, we have to cap this number to the maximum group
+  -- size.
+  stage1_max_num_groups <-
+    dPrim "stage1_max_num_groups" int32
+  sOp $ Imp.GetSizeMax stage1_max_num_groups SizeGroup
+
+  stage1_num_groups <-
+    fmap (Imp.Count . Var) $ dPrimV "stage1_num_groups" $
+    Imp.BinOpExp (SMin Int32) (Imp.vi32 stage1_max_num_groups) $
+    toExp' int32 $ Imp.unCount $ segNumGroups lvl
+
   (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat (segNumGroups lvl) (segGroupSize lvl) space scans kbody
+    scanStage1 pat stage1_num_groups (segGroupSize lvl) space scans kbody
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just elems_per_group
 
-  scanStage2 pat stage1_num_threads elems_per_group (segNumGroups lvl) crossesSegment space scans
+  scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
   scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scans

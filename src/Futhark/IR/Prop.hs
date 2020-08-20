@@ -1,4 +1,8 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, ConstraintKinds #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Safe #-}
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
@@ -31,6 +35,7 @@ module Futhark.IR.Prop
   , stmCerts
   , certify
   , expExtTypesFromPattern
+  , attrsForAssert
 
   , ASTConstraints
   , IsOp (..)
@@ -41,6 +46,7 @@ module Futhark.IR.Prop
 import Data.List (find)
 import Data.Maybe (mapMaybe, isJust)
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.Rearrange
@@ -76,10 +82,23 @@ asBasicOp _            = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: IsOp (Op lore) => Exp lore -> Bool
 safeExp (BasicOp op) = safeBasicOp op
-  where safeBasicOp (BinOp SDiv{} _ (Constant y)) = not $ zeroIsh y
+  where safeBasicOp (BinOp (SDiv _ Safe) _ _) = True
+        safeBasicOp (BinOp (SDivUp _ Safe) _ _) = True
+        safeBasicOp (BinOp (SQuot _ Safe) _ _) = True
+        safeBasicOp (BinOp (UDiv _ Safe) _ _) = True
+        safeBasicOp (BinOp (UDivUp _ Safe) _ _) = True
+        safeBasicOp (BinOp (SMod _ Safe) _ _) = True
+        safeBasicOp (BinOp (SRem _ Safe) _ _) = True
+        safeBasicOp (BinOp (UMod _ Safe) _ _) = True
+
+        safeBasicOp (BinOp SDiv{} _ (Constant y)) = not $ zeroIsh y
         safeBasicOp (BinOp SDiv{} _ _) = False
+        safeBasicOp (BinOp SDivUp{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp SDivUp{} _ _) = False
         safeBasicOp (BinOp UDiv{} _ (Constant y)) = not $ zeroIsh y
         safeBasicOp (BinOp UDiv{} _ _) = False
+        safeBasicOp (BinOp UDivUp{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp UDivUp{} _ _) = False
         safeBasicOp (BinOp SMod{} _ (Constant y)) = not $ zeroIsh y
         safeBasicOp (BinOp SMod{} _ _) = False
         safeBasicOp (BinOp UMod{} _ (Constant y)) = not $ zeroIsh y
@@ -221,3 +240,10 @@ expExtTypesFromPattern :: Typed dec => PatternT dec -> [ExtType]
 expExtTypesFromPattern pat =
   existentialiseExtTypes (patternContextNames pat) $
   staticShapes $ map patElemType $ patternValueElements pat
+
+-- | Keep only those attributes that are relevant for 'Assert'
+-- expressions.
+attrsForAssert :: Attrs -> Attrs
+attrsForAssert (Attrs attrs) =
+  Attrs $ S.filter attrForAssert attrs
+  where attrForAssert = (==AttrComp "warn" ["safety_checks"])

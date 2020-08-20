@@ -27,7 +27,6 @@ import qualified Futhark.IR as AST
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.IR.Prop.Aliases
 import Futhark.Util (chunks, splitAt3)
 
 -- | The constraints that must hold for a lore in order to be the
@@ -35,16 +34,15 @@ import Futhark.Util (chunks, splitAt3)
 type FirstOrderLore lore =
   (Bindable lore, BinderOps lore,
    LetDec SOACS ~ LetDec lore,
-   LParamInfo SOACS ~ LParamInfo lore,
-   CanBeAliased (Op lore))
+   LParamInfo SOACS ~ LParamInfo lore)
 
 -- | First-order-transform a single function, with the given scope
 -- provided by top-level constants.
 transformFunDef :: (MonadFreshNames m, FirstOrderLore tolore) =>
                    Scope tolore -> FunDef SOACS -> m (AST.FunDef tolore)
-transformFunDef consts_scope (FunDef entry fname rettype params body) = do
+transformFunDef consts_scope (FunDef entry attrs fname rettype params body) = do
   (body',_) <- modifyNameSource $ runState $ runBinderT m consts_scope
-  return $ FunDef entry fname rettype params body'
+  return $ FunDef entry attrs fname rettype params body'
   where m = localScope (scopeOfFParams params) $ insertStmsM $ transformBody body
 
 -- | First-order-transform these top-level constants.
@@ -58,8 +56,7 @@ transformConsts stms =
 -- first-order transformation.
 type Transformer m = (MonadBinder m, LocalScope (Lore m) m,
                       Bindable (Lore m), BinderOps (Lore m),
-                      LParamInfo SOACS ~ LParamInfo (Lore m),
-                      CanBeAliased (Op (Lore m)))
+                      LParamInfo SOACS ~ LParamInfo (Lore m))
 
 transformBody :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                  Body -> m (AST.Body (Lore m))
@@ -73,13 +70,11 @@ transformStmRecursively :: (Transformer m, LetDec (Lore m) ~ LetDec SOACS) =>
                            Stm -> m ()
 
 transformStmRecursively (Let pat aux (Op soac)) =
-  certifying (stmAuxCerts aux) $
-  transformSOAC pat =<< mapSOACM soacTransform soac
+  auxing aux $ transformSOAC pat =<< mapSOACM soacTransform soac
   where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda }
 
 transformStmRecursively (Let pat aux e) =
-  certifying (stmAuxCerts aux) $
-  letBind pat =<< mapExpM transform e
+  auxing aux $ letBind pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
                                    , mapOnBranchType = return
@@ -169,9 +164,51 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
            <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ DoLoop [] merge loopform loop_body
 
-transformSOAC pat (Stream w form lam arrs) =
-  sequentialStreamWholeArray pat w nes lam arrs
-  where nes = getStreamAccums form
+transformSOAC pat (Stream w stream_form lam arrs) = do
+  -- Create a loop that repeatedly applies the lambda body to a
+  -- chunksize of 1.  Hopefully this will lead to this outer loop
+  -- being the only one, as all the innermost one can be simplified
+  -- array (as they will have one iteration each).
+  let nes = getStreamAccums stream_form
+      (chunk_size_param, fold_params, chunk_params) =
+        partitionChunkedFoldParameters (length nes) $ lambdaParams lam
+
+  mapout_merge <- forM (drop (length nes) $ lambdaReturnType lam) $ \t ->
+    let t' = t `setOuterSize` w
+        scratch = BasicOp $ Scratch (elemType t') (arrayDims t')
+    in (,)
+       <$> newParam "stream_mapout" (toDecl t' Unique)
+       <*> letSubExp "stream_mapout_scratch" scratch
+
+  let merge = zip (map (fmap (`toDecl` Nonunique)) fold_params) nes ++
+              mapout_merge
+      merge_params = map fst merge
+      mapout_params = map fst mapout_merge
+
+  i <- newVName "i"
+
+  let loop_form = ForLoop i Int32 w []
+
+  letBindNames [paramName chunk_size_param] $
+    BasicOp $ SubExp $ intConst Int32 1
+
+  loop_body <- runBodyBinder $ localScope (scopeOf loop_form <>
+                                           scopeOfFParams merge_params) $ do
+    let slice =
+          [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int32 1)]
+    forM_ (zip chunk_params arrs) $ \(p, arr) ->
+      letBindNames [paramName p] $ BasicOp $ Index arr $
+      fullSlice (paramType p) slice
+
+    (res, mapout_res) <- splitAt (length nes) <$> bodyBind (lambdaBody lam)
+
+    mapout_res' <- forM (zip mapout_params mapout_res) $ \(p, se) ->
+      letSubExp "mapout_res" $ BasicOp $ Update (paramName p)
+      (fullSlice (paramType p) slice) se
+
+    resultBodyM $ res ++ mapout_res'
+
+  letBind pat $ DoLoop [] merge loop_form loop_body
 
 transformSOAC pat (Scatter len lam ivs as) = do
   iter <- newVName "write_iter"
@@ -265,8 +302,7 @@ transformLambda :: (MonadFreshNames m,
                     Bindable lore, BinderOps lore,
                     LocalScope somelore m,
                     SameScope somelore lore,
-                    LetDec lore ~ LetDec SOACS,
-                    CanBeAliased (Op lore)) =>
+                    LetDec lore ~ LetDec SOACS) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda params body rettype) = do
   body' <- runBodyBinder $

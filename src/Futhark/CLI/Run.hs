@@ -32,7 +32,7 @@ import qualified Language.Futhark.Interpreter as I
 
 -- | Run @futhark run@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions interpreterConfig options "options... program" run
+main = mainWithOptions interpreterConfig options "options... <program.fut>" run
   where run [prog] config = Just $ interpret config prog
         run _      _      = Nothing
 
@@ -108,7 +108,7 @@ newFutharkiState cfg file = runExceptT $ do
             `catch` \(err::IOException) ->
                return (externalErrorS (show err)))
   when (interpreterPrintWarnings cfg) $
-    liftIO $ hPrint stderr ws
+    liftIO $ hPutStr stderr $ show ws
 
   let imp = T.mkInitialImport "."
   ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
@@ -133,4 +133,4 @@ runInterpreter' m = runF m (return . Right) intOp
         intOp (I.ExtOpTrace w v c) = do
           liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
           c
-        intOp (I.ExtOpBreak _ c) = c
+        intOp (I.ExtOpBreak _ _ c) = c

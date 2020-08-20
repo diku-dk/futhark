@@ -3,6 +3,7 @@
 {-# LANGUAGE Safe #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | This module defines a collection of simplification rules, as per
 -- "Futhark.Optimise.Simplify.Rule".  They are used in the
 -- simplifier.
@@ -34,13 +35,14 @@ import Futhark.Optimise.Simplify.Rule
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
+import Futhark.Transform.Rename
 import Futhark.Construct
 import Futhark.Util
 
 topDownRules :: (BinderOps lore, Aliased lore) => [TopDownRule lore]
 topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , RuleDoLoop simplifyClosedFormLoop
-               , RuleDoLoop simplifKnownIterationLoop
+               , RuleDoLoop simplifyKnownIterationLoop
                , RuleDoLoop simplifyLoopVariables
                , RuleGeneric constantFoldPrimFun
                , RuleIf ruleIf
@@ -58,7 +60,7 @@ bottomUpRules = [ RuleDoLoop removeRedundantMergeVariables
 asInt32PrimExp :: PrimExp v -> PrimExp v
 asInt32PrimExp pe
   | IntType it <- primExpType pe, it /= Int32 =
-      ConvOpExp (SExt it Int32) pe
+      sExt Int32 pe
   | otherwise =
       pe
 
@@ -76,7 +78,7 @@ standardRules = ruleBook topDownRules bottomUpRules
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
 removeRedundantMergeVariables :: BinderOps lore => BottomUpRuleDoLoop lore
-removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
+removeRedundantMergeVariables (_, used) pat aux (ctx, val, form, body)
   | not $ all (usedAfterLoop . fst) val,
     null ctx = -- FIXME: things get tricky if we can remove all vals
                -- but some ctxs are still used.  We take the easy way
@@ -126,7 +128,7 @@ removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
          mapM_ (uncurry letBindNames) $ dummyStms discard_ctx
          mapM_ (uncurry letBindNames) $ dummyStms discard_val
          return body'
-       letBind pat' $ DoLoop ctx' val' form body''
+       auxing aux $ letBind pat' $ DoLoop ctx' val' form body''
   where pat_used = map (`UT.isUsedDirectly` used) $ patternValueNames pat
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
         usedAfterLoop = flip elem used_vals . paramName
@@ -147,7 +149,7 @@ removeRedundantMergeVariables _ _ _ _ =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: BinderOps lore => TopDownRuleDoLoop lore
-hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
+hoistLoopInvariantMergeVariables _ pat aux (ctx, val, form, loopbody) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $
@@ -168,7 +170,7 @@ hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
           (ctx', val') = splitAt (length implpat') merge'
       forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
         letBindNames [identName v1] $ BasicOp $ SubExp v2
-      letBind (Pattern implpat'' explpat'') $
+      auxing aux $ letBind (Pattern implpat'' explpat'') $
         DoLoop ctx' val' form loopbody'
   where merge = ctx ++ val
         res = bodyResult loopbody
@@ -250,7 +252,7 @@ simplifyClosedFormLoop _ pat _ ([], val, ForLoop i _ bound [], body) =
 simplifyClosedFormLoop _ _ _ _ = Skip
 
 simplifyLoopVariables :: (BinderOps lore, Aliased lore) => TopDownRuleDoLoop lore
-simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_vars), body)
+simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loop_vars), body)
   | simplifiable <- map checkIfSimplifiable loop_vars,
     not $ all isNothing simplifiable = Simplify $ do
       -- Check if the simplifications throw away more information than
@@ -263,7 +265,7 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
         else do body' <- insertStmsM $ do
                   addStms $ mconcat body_prefix_stms
                   resultBodyM =<< bodyBind body
-                letBind pat $ DoLoop ctx val
+                auxing aux $ letBind pat $ DoLoop ctx val
                   (ForLoop i it num_iters $ catMaybes maybe_loop_vars) body'
 
   where seType (Var v)
@@ -310,30 +312,46 @@ simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_
         notIndex _                 = True
 simplifyLoopVariables _ _ _ _ = Skip
 
-simplifKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
-simplifKnownIterationLoop _ pat _ (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
-  | zeroIsh iters = Simplify $ do
-      let bindResult p r = letBindNames [patElemName p] $ BasicOp $ SubExp r
-      zipWithM_ bindResult (patternContextElements pat) (map snd ctx)
-      zipWithM_ bindResult (patternValueElements pat) (map snd val)
+unroll :: BinderOps lore =>
+          Integer
+       -> [(FParam lore, SubExp)]
+       -> (VName, IntType, Integer)
+       -> [(LParam lore, VName)]
+       -> Body lore
+       -> RuleM lore [SubExp]
+unroll n merge (iv, it, i) loop_vars body
+  | i >= n =
+      return $ map snd merge
+  | otherwise = do
+      iter_body <- insertStmsM $ do
+        forM_ merge $ \(mergevar, mergeinit) ->
+          letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
 
-  | oneIsh iters = Simplify $ do
+        letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
 
-  forM_ (ctx++val) $ \(mergevar, mergeinit) ->
-    letBindNames [paramName mergevar] $ BasicOp $ SubExp mergeinit
+        forM_ loop_vars $ \(p,arr) ->
+          letBindNames [paramName p] $ BasicOp $ Index arr $
+          DimFix (intConst Int32 i) : fullSlice (paramType p) []
 
-  letBindNames [i] $ BasicOp $ SubExp $ intConst it 0
+        -- Some of the sizes in the types here might be temporarily wrong
+        -- until copy propagation fixes it up.
+        pure body
 
-  forM_ loop_vars $ \(p,arr) ->
-    letBindNames [paramName p] $ BasicOp $ Index arr $
-    DimFix (intConst Int32 0) : fullSlice (paramType p) []
+      iter_body' <- renameBody iter_body
+      addStms $ bodyStms iter_body'
 
-  -- Some of the sizes in the types here might be temporarily wrong
-  -- until copy propagation fixes it up.
-  res <- bodyBind body
-  forM_ (zip (patternNames pat) res) $ \(v, se) ->
-    letBindNames [v] $ BasicOp $ SubExp se
-simplifKnownIterationLoop _ _ _ _ =
+      let merge' = zip (map fst merge) $ bodyResult iter_body'
+      unroll n merge' (iv, it, i+1) loop_vars body
+
+simplifyKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
+simplifyKnownIterationLoop _ pat aux (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
+  | IntValue n <- iters,
+    zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
+      res <- unroll (valueIntegral n) (ctx++val) (i, it, 0) loop_vars body
+      forM_ (zip (patternNames pat) res) $ \(v, se) ->
+        letBindNames [v] $ BasicOp $ SubExp se
+
+simplifyKnownIterationLoop _ _ _ _ =
   Skip
 
 -- | Turn @copy(x)@ into @x@ iff @x@ is not used after this copy
@@ -430,7 +448,7 @@ simplifyBinOp _ _ (BinOp FMul{} e1 e2)
   | isCt1 e1 = subExpRes e2
   | isCt1 e2 = subExpRes e1
 
-simplifyBinOp look _ (BinOp (SMod t) e1 e2)
+simplifyBinOp look _ (BinOp (SMod t _) e1 e2)
   | isCt1 e2 = constRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = constRes $ IntValue $ intValue t (0 :: Int)
   | Var v1 <- e1,
@@ -442,12 +460,17 @@ simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt1 e2 = subExpRes e1
   | isCt0 e2 = Nothing
 
+simplifyBinOp _ _ (BinOp SDivUp{} e1 e2)
+  | isCt0 e1 = subExpRes e1
+  | isCt1 e2 = subExpRes e1
+  | isCt0 e2 = Nothing
+
 simplifyBinOp _ _ (BinOp FDiv{} e1 e2)
   | isCt0 e1 = subExpRes e1
   | isCt1 e2 = subExpRes e1
   | isCt0 e2 = Nothing
 
-simplifyBinOp _ _ (BinOp (SRem t) e1 e2)
+simplifyBinOp _ _ (BinOp (SRem t _) e1 e2)
   | isCt1 e2 = constRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = constRes $ IntValue $ intValue t (1 :: Int)
 
@@ -641,7 +664,7 @@ simplifyIndexing vtable seType idd inds consuming =
         Just (Prim (IntType from_it)) <- seType ii ->
           Just $
           fmap (SubExpResult cs) $ toSubExp "index_iota" $
-          ConvOpExp (SExt from_it to_it) (primExpFromSubExp (IntType from_it) ii)
+          sExt to_it (primExpFromSubExp (IntType from_it) ii)
           * primExpFromSubExp (IntType to_it) s
           + primExpFromSubExp (IntType to_it) x
       | [DimSlice i_offset i_n i_stride] <- inds ->
@@ -661,7 +684,7 @@ simplifyIndexing vtable seType idd inds consuming =
       dims <- arrayDims <$> lookupType a
       let adjustI i o d = do
             i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int32 OverflowWrap) i o
-            letSubExp "rot_i" (BasicOp $ BinOp (SMod Int32) i_p_o d)
+            letSubExp "rot_i" (BasicOp $ BinOp (SMod Int32 Unsafe) i_p_o d)
           adjust (DimFix i, o, d) =
             DimFix <$> adjustI i o d
           adjust (DimSlice i n s, o, d) =
@@ -669,7 +692,8 @@ simplifyIndexing vtable seType idd inds consuming =
       IndexResult cs a <$> mapM adjust (zip3 inds offsets dims)
 
     Just (Index aa ais, cs) ->
-      Just $ IndexResult cs aa <$> sliceSlice ais inds
+      Just $ IndexResult cs aa <$>
+      subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice inds))
 
     Just (Replicate (Shape [_]) (Var vv), cs)
       | [DimFix{}]   <- inds, not consuming -> Just $ pure $ SubExpResult cs $ Var vv
@@ -778,21 +802,6 @@ simplifyIndexing vtable seType idd inds consuming =
           worthInlining' (UnOpExp _ x) = worthInlining' x
           worthInlining' FunExp{} = False
           worthInlining' _ = True
-
-sliceSlice :: MonadBinder m =>
-              [DimIndex SubExp] -> [DimIndex SubExp] -> m [DimIndex SubExp]
-sliceSlice (DimFix j:js') is' = (DimFix j:) <$> sliceSlice js' is'
-sliceSlice (DimSlice j _ s:js') (DimFix i:is') = do
-  i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32 OverflowWrap) i s
-  j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32 OverflowWrap) j i_t_s
-  (DimFix j_p_i_t_s:) <$> sliceSlice js' is'
-sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
-  s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32 OverflowWrap) s0 i
-  j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32 OverflowWrap) j s0_t_i
-  s2 <- toSubExp "s0_t_s1" $ primExpFromSubExp int32 s0 * primExpFromSubExp int32 s1
-  (DimSlice j_p_s0_t_i n s2:) <$> sliceSlice js' is'
-sliceSlice _ _ = return []
-
 
 simplifyConcat :: BinderOps lore => BottomUpRuleBasicOp lore
 
@@ -1053,6 +1062,17 @@ ruleBasicOp vtable pat _ (Update src _ (Var v))
   | Just (BasicOp Scratch{}, _) <- ST.lookupExp v vtable =
       Simplify $ letBind pat $ BasicOp $ SubExp $ Var src
 
+-- If we are writing a single-element slice from some array, and the
+-- element of that array can be computed as a PrimExp based on the
+-- index, let's just write that instead.
+ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
+  | isCt1 n, isCt1 s,
+    Just (ST.Indexed cs e) <- ST.index v [intConst Int32 0] vtable =
+      Simplify $ do
+        e' <- toSubExp "update_elem" e
+        auxing aux $ certifying cs $
+          letBind pat $ BasicOp $ Update src [DimFix i] e'
+
 ruleBasicOp vtable pat _ (Update dest destis (Var v))
   | Just (e, _) <- ST.lookupExp v vtable,
     arrayFrom e =
@@ -1091,7 +1111,7 @@ ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update dest1 is1 (Var v1))
     Just (Index v4 is4, cs4) <- ST.lookupBasicOp v3 vtable,
     is4 == is1, v4 == dest1 =
       Simplify $ certifying (cs1 <> cs2 <> cs3 <> cs4) $ do
-      is5 <- sliceSlice is1 is2
+      is5 <- subExpSlice $ sliceSlice (primExpSlice is1) (primExpSlice is2)
       attributing attrs $ letBind pat $ BasicOp $ Update dest1 is5 se2
 
 -- | If we are comparing X against the result of a branch of the form
@@ -1105,7 +1125,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se1 se2 = Simplify m
   | Just m <- simplifyWith se2 se1 = Simplify m
   where simplifyWith (Var v) x
-          | Just bnd <- ST.entryStm =<< ST.lookup v vtable,
+          | Just bnd <- ST.lookupStm v vtable,
             If p tbranch fbranch _ <- stmExp bnd,
             Just (y, z) <-
               returns v (stmPattern bnd) tbranch fbranch,
@@ -1247,19 +1267,25 @@ ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
       certifying cs_y $ auxing aux $
         letBind pat $ BasicOp $ Update arr_x slice_x' $ Var v'
 
--- Simplify away 0<i when 'i' is from a loop of form 'for i < n'.
-ruleBasicOp vtable pat aux (CmpOp (CmpSle Int32) x y)
+-- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
+ruleBasicOp vtable pat aux (CmpOp CmpSle{} x y)
   | Constant (IntValue (Int32Value 0)) <- x,
     Var v <- y,
     Just _ <- ST.lookupLoopVar v vtable =
       Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True
 
 -- Simplify away i<n when 'i' is from a loop of form 'for i < n'.
-ruleBasicOp vtable pat aux (CmpOp (CmpSlt Int32) x y)
+ruleBasicOp vtable pat aux (CmpOp CmpSlt{} x y)
   | Var v <- x,
     Just n <- ST.lookupLoopVar v vtable,
     n == y =
       Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True
+
+-- Simplify away x<0 when 'x' has been used as array size.
+ruleBasicOp vtable pat aux (CmpOp CmpSlt{} (Var x) y)
+  | isCt0 y,
+    maybe False ST.entryIsSize $ ST.lookup x vtable =
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant False
 
 ruleBasicOp _ _ _ _ =
   Skip

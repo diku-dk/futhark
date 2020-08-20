@@ -77,9 +77,9 @@ cIntOps :: [C.Definition]
 cIntOps = concatMap (`map` [minBound..maxBound]) ops
           ++ cIntPrimFuns
   where ops = [mkAdd, mkSub, mkMul,
-               mkUDiv, mkUMod,
-               mkSDiv, mkSMod,
-               mkSQuot, mkSRem,
+               mkUDiv, mkUDivUp, mkUMod, mkUDivSafe, mkUDivUpSafe, mkUModSafe,
+               mkSDiv, mkSDivUp, mkSMod, mkSDivSafe, mkSDivUpSafe, mkSModSafe,
+               mkSQuot, mkSRem, mkSQuotSafe, mkSRemSafe,
                mkSMin, mkUMin,
                mkSMax, mkUMax,
                mkShl, mkLShr, mkAShr,
@@ -102,7 +102,11 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         mkSub = simpleUintOp "sub" [C.cexp|x - y|]
         mkMul = simpleUintOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
+        mkUDivUp = simpleUintOp "udiv_up" [C.cexp|(x+y-1) / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
+        mkUDivSafe = simpleUintOp "udiv_safe" [C.cexp|y == 0 ? 0 : x / y|]
+        mkUDivUpSafe = simpleUintOp "udiv_up_safe" [C.cexp|y == 0 ? 0 : (x+y-1) / y|]
+        mkUModSafe = simpleUintOp "umod_safe" [C.cexp|y == 0 ? 0 : x % y|]
         mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
         mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
 
@@ -114,6 +118,8 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                          return q -
                            (((r != 0) && ((r < 0) != (y < 0))) ? 1 : 0);
              }|]
+        mkSDivUp t =
+          simpleIntOp "sdiv_up" [C.cexp|$id:(taggedI "sdiv" t)(x+y-1,y)|] t
         mkSMod t =
           let ct = intTypeToCType t
           in [C.cedecl|static inline $ty:ct $id:(taggedI "smod" t)($ty:ct x, $ty:ct y) {
@@ -121,9 +127,17 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                          return r +
                            ((r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0)) ? 0 : y);
               }|]
+        mkSDivSafe t =
+          simpleIntOp "sdiv_safe" [C.cexp|y == 0 ? 0 : $id:(taggedI "sdiv" t)(x,y)|] t
+        mkSDivUpSafe t =
+          simpleIntOp "sdiv_up_safe" [C.cexp|$id:(taggedI "sdiv_safe" t)(x+y-1,y)|] t
+        mkSModSafe t =
+          simpleIntOp "smod_safe" [C.cexp|y == 0 ? 0 : $id:(taggedI "smod" t)(x,y)|] t
 
         mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
         mkSRem = simpleIntOp "srem" [C.cexp|x % y|]
+        mkSQuotSafe = simpleIntOp "squot_safe" [C.cexp|y == 0 ? 0 : x / y|]
+        mkSRemSafe = simpleIntOp "srem_safe" [C.cexp|y == 0 ? 0 : x % y|]
         mkSMax = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
         mkSMin = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
         mkShl = simpleUintOp "shl" [C.cexp|x << y|]
@@ -165,7 +179,7 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
           where name = "zext_"++pretty from_t++"_"++pretty to_t
                 from_ct = uintTypeToCType from_t
-                to_ct = uintTypeToCType to_t
+                to_ct = intTypeToCType to_t
 
         mkBToI to_t =
           [C.cedecl|static inline $ty:to_ct
@@ -402,6 +416,61 @@ $esc:("#else")
         x <<= 1;
     }
     return n;
+   }
+$esc:("#endif")
+
+$esc:("#if defined(__OPENCL_VERSION__)")
+   // OpenCL has ctz, but only from version 2.0, which we cannot assume we are using.
+   static typename int32_t $id:(funName' "ctz8") (typename int8_t x) {
+      int i = 0;
+      for (; i < 8 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+   static typename int32_t $id:(funName' "ctz16") (typename int16_t x) {
+      int i = 0;
+      for (; i < 16 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+   static typename int32_t $id:(funName' "ctz32") (typename int32_t x) {
+      int i = 0;
+      for (; i < 32 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+   static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
+      int i = 0;
+      for (; i < 64 && (x&1)==0; i++, x>>=1);
+      return i;
+   }
+$esc:("#elif defined(__CUDA_ARCH__)")
+   static typename int32_t $id:(funName' "ctz8") (typename int8_t x) {
+     int y = __ffs(x);
+     return y == 0 ? 8 : y-1;
+   }
+   static typename int32_t $id:(funName' "ctz16") (typename int16_t x) {
+     int y = __ffs(x);
+     return y == 0 ? 16 : y-1;
+   }
+   static typename int32_t $id:(funName' "ctz32") (typename int32_t x) {
+     int y = __ffs(x);
+     return y == 0 ? 32 : y-1;
+   }
+   static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
+     int y = __ffsll(x);
+     return y == 0 ? 64 : y-1;
+   }
+$esc:("#else")
+// FIXME: assumes GCC or clang.
+   static typename int32_t $id:(funName' "ctz8") (typename int8_t x) {
+     return x == 0 ? 8 : __builtin_ctz((typename uint32_t)x);
+   }
+   static typename int32_t $id:(funName' "ctz16") (typename int16_t x) {
+     return x == 0 ? 16 : __builtin_ctz((typename uint32_t)x);
+   }
+   static typename int32_t $id:(funName' "ctz32") (typename int32_t x) {
+     return x == 0 ? 32 :  __builtin_ctz(x);
+   }
+   static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
+     return x == 0 ? 64 : __builtin_ctzl(x);
    }
 $esc:("#endif")
                 |]

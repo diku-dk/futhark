@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | Extract limited nested parallelism for execution inside
 -- individual kernel workgroups.
 module Futhark.Pass.ExtractKernels.Intragroup
@@ -25,6 +26,7 @@ import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.ToKernels
+import qualified Futhark.Transform.FirstOrderTransform as FOT
 import Futhark.Util (chunks)
 import Futhark.Util.Log
 
@@ -61,8 +63,12 @@ intraGroupParallelise knest lam = runMaybeT $ do
     intraGroupParalleliseBody intra_lvl body
 
   outside_scope <- lift askScope
-  unless (all (`M.member` outside_scope) $ namesToList $
-          freeIn (wss_min ++ wss_avail)) $
+  -- outside_scope may also contain the inputs, even though those are
+  -- not actually available outside the kernel.
+  let available v =
+        v `M.member` outside_scope &&
+        v `notElem` map kernelInputName inps
+  unless (all available $ namesToList $ freeIn (wss_min ++ wss_avail)) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
@@ -142,7 +148,7 @@ parallelMin ws = tell mempty { accMinPar = S.singleton ws
 
 intraGroupBody :: SegLevel -> Body -> IntraGroupM (Out.Body Out.Kernels)
 intraGroupBody lvl body = do
-  stms <- collectStms_ $ mapM_ (intraGroupStm lvl) $ bodyStms body
+  stms <- collectStms_ $ intraGroupStms lvl $ bodyStms body
   return $ mkBody stms $ bodyResult body
 
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
@@ -167,6 +173,11 @@ intraGroupStm lvl stm@(Let pat aux e) = do
       certifying (stmAuxCerts aux) $
         letBind pat $ If cond tbody' fbody' ifdec
 
+    Op soac
+      | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
+          intraGroupStms lvl . fmap (certify (stmAuxCerts aux)) =<<
+          runBinder_ (FOT.transformSOAC pat soac)
+
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
       let loopnest = MapNesting pat aux w $ zip (lambdaParams lam) arrs
@@ -178,7 +189,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                         , distOnInnerMap =
                             distributeMap
                         , distOnTopLevelStms =
-                            lift . collectStms_ . intraGroupStms lvl
+                            liftInner . collectStms_ . intraGroupStms lvl
                         , distSegLevel = \minw _ _ -> do
                             lift $ parallelMin minw
                             return lvl
@@ -233,7 +244,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
           replace se = se
           replaceSets (Acc x y log) =
             Acc (S.map (map replace) x) (S.map (map replace) y) log
-      censor replaceSets $ mapM_ (intraGroupStm lvl) stream_bnds
+      censor replaceSets $ intraGroupStms lvl stream_bnds
 
     Op (Scatter w lam ivs dests) -> do
       write_i <- newVName "write_i"

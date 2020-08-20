@@ -96,10 +96,12 @@ buildFGexp e = execWriter $ mapExpM folder e
                                     return body
           }
 
--- | The set of all functions that are called noinline somewhere.
+-- | The set of all functions that are called noinline somewhere, or
+-- have a noinline attribute on their definition.
 findNoninlined :: Prog SOACS -> S.Set Name
 findNoninlined prog =
-  foldMap onStm $ foldMap (bodyStms . funDefBody) (progFuns prog) <> progConsts prog
+  foldMap noinlineDef (progFuns prog) <>
+  foldMap onStm (foldMap (bodyStms . funDefBody) (progFuns prog) <> progConsts prog)
   where onStm :: Stm -> S.Set Name
         onStm (Let _ aux (Apply fname _ _ _))
           | "noinline" `inAttrs` stmAuxAttrs aux =
@@ -116,3 +118,9 @@ findNoninlined prog =
                                   return lam
                               }
                   }
+
+        noinlineDef fd
+          | "noinline" `inAttrs` funDefAttrs fd =
+              S.singleton $ funDefName fd
+          | otherwise =
+              mempty

@@ -176,7 +176,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
         let forward (k,v) = (lookupSubst k outer_substs, v)
             p_substs' = M.fromList $ map forward $ M.toList p_substs
             abs_substs = M.filterWithKey (const . flip S.member abs) $
-                         p_substs' <>
+                         M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs' <>
                          scopeSubsts f_closure <>
                          scopeSubsts (modScope arg_mod)
         extendScope (Scope abs_substs (M.singleton (modParamName f_p) $
@@ -239,14 +239,14 @@ transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
 
 transformValBind :: ValBind -> TransformM ()
-transformValBind (ValBind entry name tdecl (Info (t, retext)) tparams params e doc loc) = do
+transformValBind (ValBind entry name tdecl (Info (t, retext)) tparams params e doc attrs loc) = do
   name' <- transformName name
   tdecl' <- traverse transformTypeExp tdecl
   t' <- transformStructType t
   e' <- transformExp e
   tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ ValDec $ ValBind entry name' tdecl' (Info (t', retext)) tparams' params' e' doc loc
+  emit $ ValDec $ ValBind entry name' tdecl' (Info (t', retext)) tparams' params' e' doc attrs loc
 
 transformTypeDecl :: TypeDecl -> TransformM TypeDecl
 transformTypeDecl (TypeDecl dt (Info et)) =

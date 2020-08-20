@@ -4,4 +4,4 @@
 
 type pair 'a 'b = (a,b)
 
-let main (x: i32) (y: f64): pair f64 i32 = (y,x)
+let main (x: i32) (y: f64) = (y,x) : pair f64 i32

@@ -39,7 +39,7 @@ mm_BlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
 mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
   | KernelBody () kstms [Returns ResultMaySimplify (Var res_nm)] <- old_kbody,
     -- check kernel has one result of primitive type
-    res_tp : [] <- ts,
+    [res_tp] <- ts,
     primType res_tp,
 
     -- build the variance table, that records, for
@@ -59,9 +59,9 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     -- check that exactly two 1D arrays are streamed thorugh redomap,
     -- and the result of redomap is one scalar
     length arrs == 2 && length red_nes == 1,
-    inp_A  : inp_B  : [] <- arrs,
-    map_t1t : map_t2t : [] <- map paramDec $ lambdaParams map_lam,
-    red_t1 : _ : [] <- map paramDec $ lambdaParams red_lam,
+    [inp_A, inp_B] <- arrs,
+    [map_t1t, map_t2t] <- map paramDec $ lambdaParams map_lam,
+    [red_t1, _] <- map paramDec $ lambdaParams red_lam,
     primType map_t1t && primType map_t2t && primType red_t1,
     map_t1 <- elemType map_t1t,
     map_t2 <- elemType map_t2t,
@@ -72,7 +72,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     Just _ <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
 
     -- get the variables on which the first result of redomap depends on
-    redomap_orig_res : [] <- patternValueElements pat_redomap,
+    [redomap_orig_res] <- patternValueElements pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
 
     -- we furthermore check that code1 is only formed by
@@ -83,17 +83,17 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
     Just (code2'', tab_inv_stm) <- foldl(processIndirections (namesFromList arrs) res_red_var)
                                         (Just (Seq.empty, M.empty)) code1,
     -- identify load_A, load_B
-    tmp_stms <- mapMaybe (\nm -> M.lookup nm tab_inv_stm) arrs,
+    tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
     length tmp_stms == length arrs,
-    load_A : load_B : [] <- tmp_stms,
+    [load_A, load_B] <- tmp_stms,
 
-    code1' <- stmsFromList $ (stmsToList code1) \\ (stmsToList code2''),
+    code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
     trace ("Cosmin debug: code1':\n"++pretty code1'++"\ncode 2:\n"++pretty code2++
            "\ncode2': \n"++pretty code2'++"\n load_A: "++pretty load_A++
            "\n load_B: "++pretty load_B++"\n redomap orig result"++pretty redomap_orig_res++
-           "\n Cosmin Kernel return: "++pretty res_nm++" type: "++pretty ts) $
-      True, -- TODO: remove the need for these assumptions !
+           "\n Cosmin Kernel return: "++pretty res_nm++" type: "++pretty ts) True,
+    -- TODO: remove the need for these assumptions !
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
@@ -235,7 +235,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                  resultBodyM [Var loop_b_loc]
 
                -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
-               thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] -> do
+               thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] ->
                  resultBodyM =<< letTupExp' "foo" =<<
                    eIf (toExp $ if epilogue then LeafExp kk int32 + LeafExp k int32
                                                  .<. primFromSe common_dim
@@ -278,7 +278,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
 
                              css <- forLoop ry [css_init] $ \i [css_merge] -> do
 
-                               css <- forLoop rx [css_merge] $ \j [css_merge'] -> do
+                               css <- forLoop rx [css_merge] $ \j [css_merge'] ->
                                  resultBodyM =<< letTupExp' "foo" =<<
                                    eIf ( toExp $ LeafExp iii int32 + LeafExp i int32 +
                                                    primFromSe ry * LeafExp ltid_y int32
@@ -312,7 +312,8 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                return [thd_acc, a_loc, b_loc]
 
           -- build prologue.
-          full_tiles <- letExp "full_tiles" $ BasicOp $ BinOp (SQuot Int32) common_dim tk
+          full_tiles <- letExp "full_tiles" $
+                        BasicOp $ BinOp (SQuot Int32 Unsafe) common_dim tk
           prologue_res_list <-
             forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
             \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
@@ -338,7 +339,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
           --        final_res[i,j] = res
           epilogue_res <-
             if patElemName redomap_orig_res == res_nm
-            then do return redomap_res -- epilogue_res_list
+            then return redomap_res -- epilogue_res_list
             else do
               rssss_list <- segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
                 rss_init <- scratch "rss_init" (elemType res_tp) [ry, rx]
@@ -359,7 +360,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                                     )
                                     (do addStms code2'
                                         resultBodyM [Var res_nm])
-                                    (eBody [eBlank $ res_tp])
+                                    (eBody [eBlank res_tp])
                     rss'' <- update' "rss" rss_merge' [i, j] res_el
                     resultBodyM [Var rss'']
                   resultBodyM [Var rss']
@@ -368,7 +369,7 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
               return rssss
 
           let regtile_ret_dims =
-                ( map (\(_, sz) -> (sz, one_se, one_se)) rem_outer_dims ) ++
+                map (\(_, sz) -> (sz, one_se, one_se)) rem_outer_dims ++
                 [(height_A, ty, ry), (width_B, tx, rx)]
           -- TODO: RegTileReturns is still missing boundary checks.
           return [RegTileReturns regtile_ret_dims epilogue_res]
@@ -381,13 +382,13 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
       --trace ("COSMIN kernel: "++pretty new_kernel) $
       return $ Just (host_stms, new_kernel)
 
-mm_BlkRegTiling _ = do return Nothing
+mm_BlkRegTiling _ = return Nothing
 
 primFromSe :: SubExp -> PrimExp VName
-primFromSe se = primExpFromSubExp int32 se
+primFromSe = primExpFromSubExp int32
 
 ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
-ceilDiv x y = eDivRoundingUp Int32 (eSubExp x) (eSubExp y)
+ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int32 Unsafe) x y
 
 scratch :: MonadBinder m => String -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
@@ -450,10 +451,10 @@ rebindLambda :: Lambda Kernels
              -> VName
              -> Stms Kernels
 rebindLambda lam new_params res_name =
-  (stmsFromList $
-    map (\(ident, new_param) ->
+  stmsFromList
+  (zipWith (\ident new_param ->
               mkLet [] [ident] $ BasicOp $ SubExp $ Var new_param)
-        $ zip idents new_params)
+    idents new_params)
   <> bodyStms lam_body
   <> oneStm (mkLet [] [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res)
   where
@@ -470,7 +471,7 @@ matchCodeStreamCode :: Stms Kernels ->
 matchCodeStreamCode kstms =
   let (code1, screma, code2) = foldl (\acc stmt ->
                 case (acc, stmt) of
-                  ((cd1, Nothing, cd2), Let _ _ (Op (OtherOp (Screma _ _ _)))) ->
+                  ((cd1, Nothing, cd2), Let _ _ (Op (OtherOp Screma{}))) ->
                    (cd1, Just stmt, cd2)
 
                   ((cd1, Nothing, cd2), _) ->
@@ -531,7 +532,7 @@ varianceInStms = foldl varianceInStm
 -- just in case you need the Screma being treated differently than
 -- by default; previously Cosmin had to enhance it when dealing with stream.
 varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-varianceInStm v0 bnd@(Let _ _ (Op (OtherOp (Screma _ _ _))))
+varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma{})))
   | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap bnd =
     let v = defVarianceInStm v0 bnd
         red_args  = lambdaParams red_lam
@@ -539,7 +540,7 @@ varianceInStm v0 bnd@(Let _ _ (Op (OtherOp (Screma _ _ _))))
         card_red  = length red_nes
         acc_lam_f = take (card_red `quot` 2) red_args
         arr_lam_f = drop (card_red `quot` 2) red_args
-        stm_lam   = (bodyStms $ lambdaBody map_lam) <> (bodyStms $ lambdaBody red_lam)
+        stm_lam   = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
 
         v' = foldl' (\vacc (v_a, v_fm, v_fr_acc, v_fr_var) ->
                       let vrc   = oneName v_a <> M.findWithDefault mempty v_a vacc

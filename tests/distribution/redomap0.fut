@@ -1,19 +1,6 @@
 -- Distribute a redomap inside of a map.
---
--- One possible structure:
---
--- map
---   map
--- map
---   reduce
---
--- Currently expected structure:
---
--- map
---   loop
 -- ==
---
--- structure distributed { SegMap 1 }
+-- structure distributed { SegRed 1 }
 
 let main(a: [][]i32): []i32 =
   map (\(a_r: []i32): i32  ->

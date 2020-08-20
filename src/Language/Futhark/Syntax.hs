@@ -204,7 +204,9 @@ instance IsPrimValue Bool where
   primValue = BoolValue
 
 -- | The payload of an attribute.
-newtype AttrInfo = AttrInfo Name
+data AttrInfo
+  = AttrAtom Name
+  | AttrComp Name [AttrInfo]
   deriving (Eq, Ord, Show)
 
 -- | A type class for things that can be array dimensions.
@@ -868,6 +870,7 @@ data ValBindBase f vn = ValBind
   , valBindParams     :: [PatternBase f vn]
   , valBindBody       :: ExpBase f vn
   , valBindDoc        :: Maybe DocComment
+  , valBindAttrs      :: [AttrInfo]
   , valBindLocation   :: SrcLoc
   }
 deriving instance Showable f vn => Show (ValBindBase f vn)
@@ -991,8 +994,11 @@ data ModExpBase f vn
   | ModImport FilePath (f FilePath) SrcLoc
     -- ^ The contents of another file as a module.
   | ModDecs [DecBase f vn] SrcLoc
-  | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
-    -- ^ Functor application.
+  | ModApply (ModExpBase f vn) (ModExpBase f vn)
+    (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
+    -- ^ Functor application.  The first mapping is from parameter
+    -- names to argument names, while the second maps names in the
+    -- constructed module to the names inside the functor.
   | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
   | ModLambda (ModParamBase f vn)
     (Maybe (SigExpBase f vn, f (M.Map VName VName)))

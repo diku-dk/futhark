@@ -27,6 +27,7 @@ struct cuda_config {
   int debugging;
   int logging;
   const char *preferred_device;
+  int preferred_device_num;
 
   const char *dump_program_to;
   const char *load_program_from;
@@ -59,8 +60,8 @@ static void cuda_config_init(struct cuda_config *cfg,
                              const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
+  cfg->preferred_device_num = 0;
   cfg->preferred_device = "";
-
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
 
@@ -68,7 +69,7 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->load_ptx_from = NULL;
 
   cfg->default_block_size = 256;
-  cfg->default_grid_size = 256;
+  cfg->default_grid_size = 0; // Set properly later.
   cfg->default_tile_size = 32;
   cfg->default_reg_tile_size = 2;
   cfg->default_threshold = 32*1024;
@@ -131,7 +132,19 @@ static int _function_query(CUfunction dev, CUfunction_attribute attrib) {
 }
 
 static void set_preferred_device(struct cuda_config *cfg, const char *s) {
+  int x = 0;
+  if (*s == '#') {
+    s++;
+    while (isdigit(*s)) {
+      x = x * 10 + (*s++)-'0';
+    }
+    // Skip trailing spaces.
+    while (isspace(*s)) {
+      s++;
+    }
+  }
   cfg->preferred_device = s;
+  cfg->preferred_device_num = x;
 }
 
 static int cuda_device_setup(struct cuda_context *ctx) {
@@ -143,6 +156,8 @@ static int cuda_device_setup(struct cuda_context *ctx) {
 
   CUDA_SUCCEED(cuDeviceGetCount(&count));
   if (count == 0) { return 1; }
+
+  int num_device_matches = 0;
 
   // XXX: Current device selection policy is to choose the device with the
   // highest compute capability (if no preferred device is set).
@@ -176,8 +191,10 @@ static int cuda_device_setup(struct cuda_context *ctx) {
       cc_minor_best = cc_minor;
     }
 
-    if (chosen == -1 && strstr(name, ctx->cfg.preferred_device) == name) {
+    if (strstr(name, ctx->cfg.preferred_device) != NULL &&
+        num_device_matches++ == ctx->cfg.preferred_device_num) {
       chosen = i;
+      break;
     }
   }
 
@@ -365,9 +382,16 @@ static void cuda_size_setup(struct cuda_context *ctx)
     ctx->cfg.default_tile_size = ctx->max_tile_size;
   }
 
+  if (!ctx->cfg.default_grid_size_changed) {
+    ctx->cfg.default_grid_size =
+      (device_query(ctx->dev, MULTIPROCESSOR_COUNT) *
+       device_query(ctx->dev, MAX_THREADS_PER_MULTIPROCESSOR))
+      / ctx->cfg.default_block_size;
+  }
+
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     const char *size_class, *size_name;
-    size_t *size_value, max_value, default_value;
+    size_t *size_value, max_value = 0, default_value = 0;
 
     size_class = ctx->cfg.size_classes[i];
     size_value = &ctx->cfg.size_values[i];
@@ -379,6 +403,12 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = ctx->max_grid_size;
       default_value = ctx->cfg.default_grid_size;
+      // XXX: as a quick and dirty hack, use twice as many threads for
+      // histograms by default.  We really should just be smarter
+      // about sizes somehow.
+      if (strstr(size_name, ".seghist_") != NULL) {
+        default_value *= 2;
+      }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
       default_value = ctx->cfg.default_tile_size;
@@ -386,11 +416,10 @@ static void cuda_size_setup(struct cuda_context *ctx)
       max_value = 0; // No limit.
       default_value = ctx->cfg.default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
-      max_value = ctx->max_threshold;
+      // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
-      max_value = 0;
     }
 
     if (*size_value == 0) {
@@ -532,7 +561,7 @@ static CUresult cuda_alloc(struct cuda_context *ctx, size_t min_size,
   }
 
   size_t size;
-  if (free_list_find(&ctx->free_list, tag, min_size, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, min_size, &size, mem_out) == 0) {
     if (size >= min_size) {
       return CUDA_SUCCESS;
     } else {
@@ -566,7 +595,7 @@ static CUresult cuda_free(struct cuda_context *ctx, CUdeviceptr mem,
   CUdeviceptr existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, -1, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->free_list, -1, &size, &existing_mem) == 0) {
     CUresult res = cuMemFree(existing_mem);
     if (res != CUDA_SUCCESS) {
       return res;

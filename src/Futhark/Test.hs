@@ -72,7 +72,8 @@ import Prelude
 
 import Futhark.Analysis.Metrics
 import Futhark.IR.Primitive
-       (IntType(..), intValue, FloatType(..), intByteSize, floatByteSize)
+       (IntType(..), intValue, intByteSize,
+        FloatType(..), floatValue, floatByteSize)
 import Futhark.Test.Values
 import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
@@ -292,6 +293,7 @@ parseGenValue :: Parser GenValue
 parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
                        , lexeme $ GenPrim <$> choice [i8, i16, i32, i64,
                                                       u8, u16, u32, u64,
+                                                      f32, f64,
                                                       int SignedValue Int32 ""]
                        ]
   where digits = some (satisfy isDigit)
@@ -300,6 +302,9 @@ parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
 
         readint :: String -> Integer
         readint = read -- To avoid warnings.
+
+        readfloat :: String -> Double
+        readfloat = read -- To avoid warnings.
 
         int f t s = try $ lexeme $ f . intValue t  . readint <$> digits <*
                     string s <*
@@ -312,6 +317,17 @@ parseGenValue = choice [ GenValue <$> many dim <*> parsePrimType
         u16 = int UnsignedValue Int16 "u16"
         u32 = int UnsignedValue Int32 "u32"
         u64 = int UnsignedValue Int64 "u64"
+
+        optSuffix s suff = do
+          s' <- s
+          ((s'<>) <$> suff) <|> pure s'
+
+        float f t s = try $ lexeme $ f . floatValue t  . readfloat <$>
+                      (digits `optSuffix` (char '.' *> (("."<>) <$> digits))) <*
+                      string s <*
+                      notFollowedBy (satisfy isAlphaNum)
+        f32 = float FloatValue Float32 "f32"
+        f64 = float FloatValue Float64 "f64"
 
 parsePrimType :: Parser PrimType
 parsePrimType =

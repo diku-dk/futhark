@@ -33,7 +33,7 @@ import qualified Data.Map.Strict as M
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.Aliases
-  (unNames, Names' (..), VarAliases, ConsumedInExp)
+  (unAliases, AliasDec (..), VarAliases, ConsumedInExp)
 import qualified Futhark.IR.Aliases as Aliases
 import Futhark.Binder
 import Futhark.Transform.Rename
@@ -58,7 +58,7 @@ instance FreeIn VarWisdom where
 
 -- | Wisdom about an expression.
 data ExpWisdom = ExpWisdom { _expWisdomConsumed :: ConsumedInExp
-                           , expWisdomFree :: Names'
+                           , expWisdomFree :: AliasDec
                            }
                  deriving (Eq, Ord, Show)
 
@@ -66,7 +66,7 @@ instance FreeIn ExpWisdom where
   freeIn' = mempty
 
 instance FreeDec ExpWisdom where
-  precomputed = const . fvNames . unNames . expWisdomFree
+  precomputed = const . fvNames . unAliases . expWisdomFree
 
 instance Substitute ExpWisdom where
   substituteNames substs (ExpWisdom cons free) =
@@ -80,7 +80,7 @@ instance Rename ExpWisdom where
 -- | Wisdom about a body.
 data BodyWisdom = BodyWisdom { bodyWisdomAliases :: [VarAliases]
                              , bodyWisdomConsumed :: ConsumedInExp
-                             , bodyWisdomFree :: Names'
+                             , bodyWisdomFree :: AliasDec
                              }
                   deriving (Eq, Ord, Show)
 
@@ -99,7 +99,7 @@ instance FreeIn BodyWisdom where
     freeIn' als <> freeIn' cons <> freeIn' free
 
 instance FreeDec BodyWisdom where
-  precomputed = const . fvNames . unNames . bodyWisdomFree
+  precomputed = const . fvNames . unAliases . bodyWisdomFree
 
 instance (Decorations lore,
           CanBeWise (Op lore)) => Decorations (Wise lore) where
@@ -130,11 +130,11 @@ instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
   ppExpLore (_, dec) = ppExpLore dec . removeExpWisdom
 
 instance AliasesOf (VarWisdom, dec) where
-  aliasesOf = unNames . varWisdomAliases . fst
+  aliasesOf = unAliases . varWisdomAliases . fst
 
 instance (ASTLore lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
-  bodyAliases = map unNames . bodyWisdomAliases . fst . bodyDec
-  consumedInBody = unNames . bodyWisdomConsumed . fst . bodyDec
+  bodyAliases = map unAliases . bodyWisdomAliases . fst . bodyDec
+  consumedInBody = unAliases . bodyWisdomConsumed . fst . bodyDec
 
 removeWisdom :: CanBeWise (Op lore) => Rephraser Identity (Wise lore) lore
 removeWisdom = Rephraser { rephraseExpLore = return . snd
@@ -192,7 +192,7 @@ addWisdomToPattern pat e =
 mkWiseBody :: (ASTLore lore, CanBeWise (Op lore)) =>
               BodyDec lore -> Stms (Wise lore) -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
-  Body (BodyWisdom aliases consumed (Names' $ freeIn $ freeInStmsAndRes bnds res),
+  Body (BodyWisdom aliases consumed (AliasDec $ freeIn $ freeInStmsAndRes bnds res),
         innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
 
@@ -209,8 +209,8 @@ mkWiseExpDec :: (ASTLore lore, CanBeWise (Op lore)) =>
               -> ExpDec (Wise lore)
 mkWiseExpDec pat explore e =
   (ExpWisdom
-    (Names' $ consumedInExp e)
-    (Names' $ freeIn pat <> freeIn explore <> freeIn e),
+    (AliasDec $ consumedInExp e)
+    (AliasDec $ freeIn pat <> freeIn explore <> freeIn e),
    explore)
 
 instance (Bindable lore,

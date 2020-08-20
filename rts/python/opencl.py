@@ -65,14 +65,11 @@ def check_types(self, required_types):
             raise Exception('Program uses double-precision floats, but this is not supported on chosen device: %s' % self.device.name)
 
 def apply_size_heuristics(self, size_heuristics, sizes):
-    for (platform_name, device_type, size, value) in size_heuristics:
+    for (platform_name, device_type, size, valuef) in size_heuristics:
         if sizes[size] == None \
            and self.platform.name.find(platform_name) >= 0 \
-           and self.device.type == device_type:
-               if type(value) == str:
-                   sizes[size] = self.device.get_info(getattr(cl.device_info,value))
-               else:
-                   sizes[size] = value
+           and (self.device.type & device_type) == device_type:
+               sizes[size] = valuef(self.device)
     return sizes
 
 def initialise_opencl_object(self,
@@ -109,7 +106,16 @@ def initialise_opencl_object(self,
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
     self.max_num_groups = 0
+
     self.max_local_memory = int(self.device.local_mem_size)
+
+    # Futhark reserves 4 bytes of local memory for its own purposes.
+    self.max_local_memory -= 4
+
+    # See comment in rts/c/opencl.h.
+    if self.platform.name.find('NVIDIA CUDA') >= 0:
+        self.max_local_memory -= 12
+
     self.free_list = {}
 
     self.global_failure = self.pool.allocate(np.int32().itemsize)
@@ -198,7 +204,7 @@ def initialise_opencl_object(self,
     if (len(program_src) >= 0):
         return cl.Program(self.ctx, program_src).build(
             ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
-            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi'),v) for (s,v) in self.sizes.items()])
+            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi').replace('#', 'zh'),v) for (s,v) in self.sizes.items()])
 
 def opencl_alloc(self, min_size, tag):
     min_size = 1 if min_size == 0 else min_size
@@ -213,6 +219,11 @@ def sync(self):
     cl.enqueue_copy(self.queue, failure, self.global_failure, is_blocking=True)
     self.failure_is_an_option = np.int32(0)
     if failure[0] >= 0:
+        # Reset failure information.
+        cl.enqueue_fill_buffer(self.queue, self.global_failure, np.int32(-1), 0, np.int32().itemsize)
+
+        # Read failure args.
         failure_args = np.empty(self.global_failure_args_max+1, dtype=np.int32)
         cl.enqueue_copy(self.queue, failure_args, self.global_failure_args, is_blocking=True)
+
         raise Exception(self.failure_msgs[failure[0]].format(*failure_args))

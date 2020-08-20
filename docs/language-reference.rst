@@ -79,7 +79,7 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    binary: 0 ("b" | "B") `bindigit` (`bindigit` | "_")*
 
 .. productionlist::
-   floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
+   floatnumber: (`pointfloat` | `exponentfloat` | `hexadecimalfloat`) [`float_type`]
    pointfloat: [`intpart`] `fraction`
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
    hexadecimalfloat: 0 ("x" | "X") `hexintpart` `hexfraction` ("p"|"P") ["+" | "-"] `decdigit`+
@@ -115,7 +115,7 @@ definition has been hidden via the module system (see `Module
 System`_).
 
 .. productionlist::
-   tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
+   tuple_type: "(" ")" | "(" `type` ("," `type`)+ ")"
 
 A tuple value or type is written as a sequence of comma-separated
 values or types enclosed in parentheses.  For example, ``(0, 1)`` is a
@@ -212,6 +212,7 @@ names bound by preceding declarations.
       : | "open" `mod_exp`
       : | "import" `stringlit`
       : | "local" `dec`
+      : | "#[" attr "]" dec
 
 The ``open`` declaration brings names defined in another module into
 scope (see also `Module System`_).  For the meaning of ``import``, see
@@ -451,7 +452,7 @@ literals and variables, but also more complicated forms.
       : | "(" `pat` ")"
       : | "(" `pat` ("," `pat`)+ ")"
       : | "{" "}"
-      : | "{" `fieldid` ["=" `pat`] ["," `fieldid` ["=" `pat`]] "}"
+      : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
    loopform :   "for" `id` "<" `exp`
@@ -727,12 +728,14 @@ are:
   ``^``, ``&``, ``|``, ``>>``, ``<<``
 
     Bitwise operators, respectively bitwise xor, and, or, arithmetic
-    shift right and left, and logical shift right.  Shift amounts
-    must be non-negative and the operands must be integers.  Note
-    that, unlike in C, bitwise operators have *higher* priority than
-    arithmetic operators.  This means that ``x & y == z`` is
-    understood as ``(x & y) == z``, rather than ``x & (y == z)`` as
-    it would in C.  Note that the latter is a type error in Futhark
+    shift right and left, and logical shift right.  **Shifting is
+    undefined if the right operand is negative, or greater than or
+    equal to the length in bits of the left operand.**
+
+    Note that, unlike in C, bitwise operators have *higher* priority
+    than arithmetic operators.  This means that ``x & y == z`` is
+    understood as ``(x & y) == z``, rather than ``x & (y == z)`` as it
+    would in C.  Note that the latter is a type error in Futhark
     anyhow.
 
   ``==``, ``!=``
@@ -1172,8 +1175,9 @@ inferable.  Specifically, this value must have been used as the size
 of an array *before* the ``f x`` application is encountered.  The
 notion of "before" is subtle, as there is no evaluation ordering of a
 Futhark expression, *except* that a ``let``-binding is always
-evaluated before its body, and the argument to a function is always
-evaluated before the function.
+evaluated before its body, the argument to a function is always
+evaluated before the function itself, and the left operand to an
+operator is evaluated before the right.
 
 The causality restriction only occurs when a function has size
 parameters whose first use is *not* as a concrete array size.  For
@@ -1538,6 +1542,7 @@ Module Type Expressions
        : | "type" ["^"] `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
+       : | "#[" attr "]" spec
    spec_type: `type` | `type` "->" `spec_type`
 
 Module types classify modules, with the only (unimportant) difference
@@ -1582,66 +1587,121 @@ Attributes
 
 .. productionlist::
    attr:   `id`
+       : | `id` "(" [`attr` ("," `attr`)*] ")"
 
-An expression can be prefixed with an attribute, written as
-``#[attr]``.  This may affect how it is treated by the compiler or
-other tools.  In no case will attributes affect or change the
-*semantics* of a program, but it may affect how well it compiles (or
-in some cases, whether it compiles at all).  Unknown attributes are
-silently ignored.  Most have no effect in the interpreter.
+An expression, declaration, or module type spec can be prefixed with
+an attribute, written as ``#[attr]``.  This may affect how it is
+treated by the compiler or other tools.  In no case will attributes
+affect or change the *semantics* of a program, but it may affect how
+well it compiles and runs (or in some cases, whether it compiles or
+runs at all).  Unknown attributes are silently ignored.  Most have no
+effect in the interpreter.  An attribute can be either an *atom*,
+written as just an identifier, or *compound*, consisting of an
+identifier and a comma-separated sequence of attributes.  The latter
+is used for grouping and encoding of more complex information.
 
-Many attributes affect second-order array combinators (*SOACS*).
-These must be applied to a fully saturated function application or
-they will have no effect.  If two SOACs with contradictory attributes
-are combined through fusion, it is unspecified which attributes take
-precedence.
+Expression attributes
+~~~~~~~~~~~~~~~~~~~~~
+
+Many expression attributes affect second-order array combinators
+(*SOACS*).  These must be applied to a fully saturated function
+application or they will have no effect.  If two SOACs with
+contradictory attributes are combined through fusion, it is
+unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
-``incremental_flattening_no_outer``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``incremental_flattening(no_outer)``
+....................................
 
 When using incremental flattening, do not generate the "only outer
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening_no_intra``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``incremental_flattening(no_intra)``
+....................................
 
 When using incremental flattening, do not generate the "intra-group
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening_only_inner``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``incremental_flattening(only_intra)``
+......................................
+
+When using incremental flattening, *only* generate the "intra-group
+parallelism" version of the attributed SOACs.  **Beware**: the
+resulting program will fail to run if the inner parallelism does not
+fit on the device.
+
+``incremental_flattening(only_inner)``
+......................................
 
 When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise
 to multiple versions at deeper levels).
 
 ``noinline``
-~~~~~~~~~~~~
+............
 
 Do not inline the attributed function application.  If used within a
 parallel construct (e.g. ``map``), this will likely prevent the GPU
 backends from generating working code.
 
 ``sequential``
-~~~~~~~~~~~~~~
+..............
 
 *Fully* sequentialise the attributed SOAC.
 
 ``sequential_outer``
-~~~~~~~~~~~~~~~~~~~~
+....................
 
 Turn the outer parallelism in the attributed SOAC sequential, but
 preserve any inner parallelism.
 
 ``sequential_inner``
-~~~~~~~~~~~~~~~~~~~~
+....................
 
 Exploit only outer parallelism in the attributed SOAC.
 
+``unroll``
+..........
+
+Fully unroll the attributed ``loop``.  If the compiler cannot
+determine the exact number of iterations (possibly after other
+optimisations and simplifications have taken place), then this
+attribute has no code generation effect, but instead results in a
+warning.  Be very careful with this attribute: it can massively
+increase program size (possibly crashing the compiler) if the loop has
+a huge number of iterations.
+
 ``unsafe``
-~~~~~~~~~~
+..........
 
 Do not perform any dynamic safety checks (such as bound checks) during
 execution of the attributed expression.
+
+``warn(safety_checks)``
+.......................
+
+Make the compiler issue a warning if the attributed expression (or its
+subexpressions) requires safety checks (such as bounds checking) at
+run-time.  This is used for performance-critical code where you want
+to be told when the compiler is unable to statically verify the safety
+of all operations.
+
+Declaration attributes
+~~~~~~~~~~~~~~~~~~~~~~
+
+The following declaration attributes are supported.
+
+``noinline``
+............
+
+Do not inline any calls to this function.  If the function is then
+used within a parallel construct (e.g. ``map``), this will likely
+prevent the GPU backends from generating working code.
+
+Spec attributes
+~~~~~~~~~~~~~~~
+
+No spec attributes are currently supported by the compiler itself,
+although they are syntactically permitted and may be used by other
+tools.

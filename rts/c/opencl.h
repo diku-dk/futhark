@@ -528,6 +528,16 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_LOCAL_MEM_SIZE,
                                        sizeof(size_t), &max_local_memory, NULL));
 
+  // Futhark reserves 4 bytes for bookkeeping information.
+  max_local_memory -= 4;
+
+  // NVIDIA reserves some more bytes for who-knows-what.  The number
+  // of bytes here has been experimentally determined, but the
+  // overhead seems to vary a bit depending on what the kernel does.
+  if (strstr(device_option.platform_name, "NVIDIA CUDA") != NULL) {
+    max_local_memory -= 12;
+  }
+
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
@@ -558,13 +568,19 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     const char *size_class = ctx->cfg.size_classes[i];
     size_t *size_value = &ctx->cfg.size_values[i];
     const char* size_name = ctx->cfg.size_names[i];
-    size_t max_value, default_value;
+    size_t max_value = 0, default_value = 0;
     if (strstr(size_class, "group_size") == size_class) {
       max_value = max_group_size;
       default_value = ctx->cfg.default_group_size;
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = max_group_size; // Futhark assumes this constraint.
       default_value = ctx->cfg.default_num_groups;
+      // XXX: as a quick and dirty hack, use twice as many threads for
+      // histograms by default.  We really should just be smarter
+      // about sizes somehow.
+      if (strstr(size_name, ".seghist_") != NULL) {
+        default_value *= 2;
+      }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = sqrt(max_group_size);
       default_value = ctx->cfg.default_tile_size;
@@ -572,11 +588,10 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
       max_value = 0; // No limit.
       default_value = ctx->cfg.default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
-      max_value = 0; // No limit.
+      // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
-      max_value = 0;
     }
     if (*size_value == 0) {
       *size_value = default_value;
@@ -687,6 +702,7 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   }
 
   if (ctx->cfg.debugging) {
+    fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
     fprintf(stderr, "Building OpenCL program...\n");
   }
   OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
@@ -838,7 +854,7 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
 
   size_t size;
 
-  if (free_list_find(&ctx->free_list, tag, min_size, &size, mem_out) == 0) {
+  if (free_list_find(&ctx->free_list, min_size, &size, mem_out) == 0) {
     // Successfully found a free block.  Is it big enough?
     //
     // FIXME: we might also want to check whether the block is *too
@@ -853,8 +869,16 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
     // expose OpenCL pointer values directly to the application, but
     // instead rely on a level of indirection.
     if (size >= min_size) {
+      if (ctx->cfg.debugging) {
+        fprintf(stderr, "No need to allocate: Found a block in the free list.\n");
+      }
+
       return CL_SUCCESS;
     } else {
+      if (ctx->cfg.debugging) {
+        fprintf(stderr, "Found a free block, but it was too small.\n");
+      }
+
       // Not just right - free it.
       int error = clReleaseMemObject(*mem_out);
       if (error != CL_SUCCESS) {
@@ -870,6 +894,10 @@ static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char 
   // Since we don't know how far the allocation is from fitting, we
   // have to check after every deallocation.  This might be pretty
   // expensive.  Let's hope that this case is hit rarely.
+
+  if (ctx->cfg.debugging) {
+    fprintf(stderr, "Actually allocating the desired block.\n");
+  }
 
   int error = opencl_alloc_actual(ctx, min_size, mem_out);
 
@@ -897,7 +925,7 @@ static int opencl_free(struct opencl_context *ctx, cl_mem mem, const char *tag) 
   cl_mem existing_mem;
 
   // If there is already a block with this tag, then remove it.
-  if (free_list_find(&ctx->free_list, tag, -1, &size, &existing_mem) == 0) {
+  if (free_list_find(&ctx->free_list, -1, &size, &existing_mem) == 0) {
     int error = clReleaseMemObject(existing_mem);
     if (error != CL_SUCCESS) {
       return error;

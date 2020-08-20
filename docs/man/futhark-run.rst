@@ -9,7 +9,7 @@ futhark-run
 SYNOPSIS
 ========
 
-futhark run [program]
+futhark run <program.fut>
 
 DESCRIPTION
 ===========

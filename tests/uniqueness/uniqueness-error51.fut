@@ -1,6 +1,6 @@
 -- Type inference should not eliminate uniqueness checking.
 -- ==
--- error: Attempt to consume variable "xs"
+-- error: Would consume variable "xs"
 
 let f {xs: []i32} : {xs: []i32} = {xs}
 

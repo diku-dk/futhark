@@ -14,11 +14,11 @@ import Futhark.Compiler.CLI
 main :: String -> [String] -> IO ()
 main = compilerMain () []
        "Compile PyOpenCL" "Generate Python + OpenCL code from optimised Futhark program."
-       gpuPipeline $ \() mode outpath prog -> do
+       gpuPipeline $ \fcfg () mode outpath prog -> do
           let class_name =
                 case mode of ToLibrary -> Just $ takeBaseName outpath
                              ToExecutable -> Nothing
-          pyprog <- PyOpenCL.compileProg class_name prog
+          pyprog <- handleWarnings fcfg $ PyOpenCL.compileProg class_name prog
 
           case mode of
             ToLibrary ->

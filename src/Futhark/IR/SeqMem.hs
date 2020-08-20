@@ -76,9 +76,8 @@ instance BinderOps (Engine.Wise SeqMem) where
   mkLetNamesB = mkLetNamesB''
 
 simplifyProg :: Prog SeqMem -> PassM (Prog SeqMem)
-simplifyProg =
-  simplifyProgGeneric $ const $ return ((), mempty)
+simplifyProg = simplifyProgGeneric simpleSeqMem
 
 simpleSeqMem :: Engine.SimpleOps SeqMem
 simpleSeqMem =
-  simpleGeneric $ const $ return ((), mempty)
+  simpleGeneric (const mempty) $ const $ return ((), mempty)

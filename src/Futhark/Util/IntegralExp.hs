@@ -17,7 +17,6 @@
 module Futhark.Util.IntegralExp
        ( IntegralExp (..)
        , Wrapped (..)
-       , quotRoundingUp
        )
        where
 
@@ -32,6 +31,12 @@ class Num e => IntegralExp e where
   div :: e -> e -> e
   mod :: e -> e -> e
   sgn :: e -> Maybe Int
+
+  -- | Like 'Futhark.Util.IntegralExp.div', but rounds towards
+  -- positive infinity.
+  divUp :: e -> e -> e
+  divUp x y =
+    (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
   fromInt8  :: Int8 -> e
   fromInt16 :: Int16 -> e
@@ -71,8 +76,3 @@ instance Integral a => IntegralExp (Wrapped a) where
   fromInt16 = fromInteger . toInteger
   fromInt32 = fromInteger . toInteger
   fromInt64 = fromInteger . toInteger
-
--- | Like 'Prelude.quot', but rounds up.
-quotRoundingUp :: IntegralExp num => num -> num -> num
-quotRoundingUp x y =
-  (x + y - 1) `Futhark.Util.IntegralExp.quot` y
