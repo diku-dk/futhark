@@ -56,6 +56,8 @@ struct subtask {
   volatile int *counter; // Counter for ongoing subtasks
   int64_t *total_time;
   int64_t *total_iter;
+  pthread_mutex_t *mutex; // Mutex used for synchronisation.
+  pthread_cond_t *cond;   // Condition variable used for synchronisation.
 };
 
 
@@ -111,9 +113,29 @@ struct scheduler_task {
   int64_t *total_iter;
 };
 
+struct subtask_queue {
+  int capacity; // Size of the buffer.
+  int first; // Index of the start of the ring buffer.
+  int num_used; // Number of used elements in the buffer.
+  struct subtask **buffer;
+
+  pthread_mutex_t mutex; // Mutex used for synchronisation.
+  pthread_cond_t cond;   // Condition variable used for synchronisation.
+  int dead;
+
+
+  int initialized;
+
+  /* Profiling fields */
+  uint64_t time_enqueue;
+  uint64_t time_dequeue;
+  uint64_t n_dequeues;
+  uint64_t n_enqueues;
+};
+
 struct worker {
   pthread_t thread;
-  struct deque q;
+  struct subtask_queue q;
   struct scheduler *scheduler;
   int cur_working;
   int dead;

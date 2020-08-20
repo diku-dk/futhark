@@ -5,34 +5,41 @@
 
 static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             void* args,
-                                            const char *name,
+                                            const char* name,
+                                            volatile int* counter,
+                                            int64_t *total_time,
+                                            int64_t *total_iter,
                                             pthread_mutex_t *mutex,
                                             pthread_cond_t *cond,
-                                            int* counter,
-                                            int start, int end,
-                                            int chunk, int id)
+                                            int64_t start, int64_t end,
+                                            int chunkable,
+                                            int64_t chunk_size,
+                                            int id)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
     assert(!"malloc failed in setup_subtask");
     return  NULL;
   }
-  subtask->fn      = fn;
-  subtask->args    = args;
-  subtask->name    = name;
+  subtask->fn         = fn;
+  subtask->args       = args;
+  subtask->name       = name;
+
+  subtask->counter    = counter;
   subtask->mutex   = mutex;
   subtask->cond    = cond;
-  subtask->counter = counter;
-  subtask->start   = start;
-  subtask->end     = end;
-  subtask->chunkable = chunk;
-  // This should start at the value of minimum work pr. subtask
-  subtask->iterations = chunk;
-  subtask->id      = id;
-  subtask->been_stolen = 0;
+
+  subtask->total_time = total_time;
+  subtask->total_iter = total_iter;
+
+
+  subtask->start      = start;
+  subtask->end        = end;
+  subtask->chunkable  = chunkable;
+  subtask->chunk_size = chunk_size;
+  subtask->id         = id;
   return subtask;
 }
-
 
 /* Doubles the size of the queue */
 static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) {
@@ -69,31 +76,31 @@ static inline struct subtask* jobqueue_get_subtask_chunk(struct worker *worker,
   int remaining_iter = cur_head->end - cur_head->start;
   assert(remaining_iter > 0);
 
-  if (cur_head->chunkable && remaining_iter > cur_head->iterations)
-  {
-    /* fprintf(stderr, "%d - chuink %d - rem %d\n", pthread_self(), cur_head->chunk, remaining_iter); */
-    struct subtask *new_subtask = malloc(sizeof(struct subtask));
-    *new_subtask = *cur_head;
+  /* if (cur_head->chunkable && remaining_iter > cur_head->iterations) */
+  /* { */
+  /*   /\* fprintf(stderr, "%d - chuink %d - rem %d\n", pthread_self(), cur_head->chunk, remaining_iter); *\/ */
+  /*   struct subtask *new_subtask = malloc(sizeof(struct subtask)); */
+  /*   *new_subtask = *cur_head; */
 
-    // Update ranges on new subtasks
-    if (stealing) {
-      /* int new_iter = (remaining_iter > 1) ? remaining_iter / 2 : remaining_iter; */
-      /* new_subtask->iterations = 1; */
-      new_subtask->start = cur_head->end - cur_head->iterations;
-      cur_head->end = new_subtask->start;
-    } else {
-      new_subtask->end = cur_head->start + cur_head->iterations;
-      cur_head->start += cur_head->iterations;
-      /* cur_head->iterations *= 2; */
-    }
-    new_subtask->id = worker->tid;
+  /*   // Update ranges on new subtasks */
+  /*   if (stealing) { */
+  /*     /\* int new_iter = (remaining_iter > 1) ? remaining_iter / 2 : remaining_iter; *\/ */
+  /*     /\* new_subtask->iterations = 1; *\/ */
+  /*     new_subtask->start = cur_head->end - cur_head->iterations; */
+  /*     cur_head->end = new_subtask->start; */
+  /*   } else { */
+  /*     new_subtask->end = cur_head->start + cur_head->iterations; */
+  /*     cur_head->start += cur_head->iterations; */
+  /*     /\* cur_head->iterations *= 2; *\/ */
+  /*   } */
+  /*   new_subtask->id = worker->tid; */
 
-    CHECK_ERR(pthread_mutex_lock(cur_head->mutex), "pthread_mutex_lock");
-    (*cur_head->counter)++;
-    CHECK_ERR(pthread_mutex_unlock(cur_head->mutex), "pthread_mutex_unlock");
+  /*   CHECK_ERR(pthread_mutex_lock(cur_head->mutex), "pthread_mutex_lock"); */
+  /*   (*cur_head->counter)++; */
+  /*   CHECK_ERR(pthread_mutex_unlock(cur_head->mutex), "pthread_mutex_unlock"); */
 
-    return new_subtask;
-  }
+  /*   return new_subtask; */
+  /* } */
 
   if (stealing) {
     subtask_queue->num_used--;
@@ -348,22 +355,24 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
   // Try to steal some work while the subtask_queue is empty
   while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
-    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
-    int retval = query_a_subtask(worker->scheduler, worker->tid, worker, subtask);
-    if (retval == 0) { // We got a task - just return it
-      return 0;
-    } else if (retval == 1) { // we didn't find anything so go back to sleep
-      CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_unlock");
-      struct timespec ts;
-      CHECK_ERR(clock_getres(CLOCK_REALTIME, &ts), "clock_getres");
-      ts.tv_nsec += 50000; // wait for 50 ms (ish)
-      int err = pthread_cond_timedwait(&subtask_queue->cond, &subtask_queue->mutex, &ts);
-      if (err != 0 && err != ETIMEDOUT) {
-        assert(!"pthread_cond_timedwait failed \n");
-      }
-    } else {
-      CHECK_ERR(retval, "steal_a_subtask");
-    }
+    pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex);
+
+    /* CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock"); */
+    /* int retval = query_a_subtask(worker->scheduler, worker->tid, worker, subtask); */
+    /* if (retval == 0) { // We got a task - just return it */
+    /*   return 0; */
+    /* } else if (retval == 1) { // we didn't find anything so go back to sleep */
+    /*   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_unlock"); */
+    /*   struct timespec ts; */
+    /*   CHECK_ERR(clock_getres(CLOCK_REALTIME, &ts), "clock_getres"); */
+    /*   ts.tv_nsec += 50000; // wait for 50 ms (ish) */
+    /*   int err = pthread_cond_timedwait(&subtask_queue->cond, &subtask_queue->mutex, &ts); */
+    /*   if (err != 0 && err != ETIMEDOUT) { */
+    /*     assert(!"pthread_cond_timedwait failed \n"); */
+    /*   } */
+    /* } else { */
+    /*   CHECK_ERR(retval, "steal_a_subtask"); */
+    /* } */
   }
 
   if (subtask_queue->dead) {
