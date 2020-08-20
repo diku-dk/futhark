@@ -1450,7 +1450,7 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
   constants <- kernelConstants <$> askEnv
 
   let gids = map fst $ unSegSpace space
-      (_dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
+      (dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
       group_tiles' = map (toExp' int32) group_tiles
       reg_tiles' = map (toExp' int32) reg_tiles
 
@@ -1473,10 +1473,12 @@ compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
     zipWithM regTileSliceDim
     (zip group_tiles' group_tile_is) (zip reg_tiles' reg_tile_is)
 
-  -- TODO: add missing bounds check !
-  localOps threadOperations $ -- TODO: simply putting an sWhen isActive
-                              --       here does not work. troels pls
-    copyDWIM (patElemName pe) reg_tile_slices (Var what) (map DimFix reg_tile_is)
+  localOps threadOperations $
+    sLoopNest (Shape reg_tiles) $ \is_in_reg_tile -> do
+    let dest_is = fixSlice reg_tile_slices is_in_reg_tile
+        src_is = reg_tile_is ++ is_in_reg_tile
+    sWhen (foldl1 (.&&.) $ zipWith (.<.) dest_is $ map (toExp' int32) dims) $
+      copyDWIMFix (patElemName pe) dest_is (Var what) src_is
 
 compileGroupResult space pe (Returns _ what) = do
   constants <- kernelConstants <$> askEnv
