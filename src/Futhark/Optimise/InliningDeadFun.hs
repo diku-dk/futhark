@@ -30,6 +30,10 @@ import Futhark.Binder
 import Futhark.Pass
 
 parMapM :: MonadFreshNames m => (a -> State VNameSource b) -> [a] -> m [b]
+-- The special-casing of [] is quite important here!  If 'as' is
+-- empty, then we might otherwise create an empty name source below,
+-- which can wreak all kinds of havoc.
+parMapM _ [] = pure []
 parMapM f as =
   modifyNameSource $ \src ->
   let f' a = runState (f a) src
@@ -97,7 +101,8 @@ aggInlineFunctions prog =
               (vtable', consts', not_to_inline_in <> to_inline_in')
 
         keep fd =
-          isJust (funDefEntryPoint fd) || funDefName fd `S.member` noninlined
+          isJust (funDefEntryPoint fd) ||
+          funDefName fd `S.member` noninlined
 
 -- | @inlineInFunDef constf fdmap caller@ inlines in @calleer@ the
 -- functions in @fdmap@ that are called as @constf@. At this point the
@@ -107,8 +112,8 @@ aggInlineFunctions prog =
 inlineInFunDef :: MonadFreshNames m =>
                   M.Map Name (FunDef SOACS) -> FunDef SOACS
                -> m (FunDef SOACS)
-inlineInFunDef fdmap (FunDef entry name rtp args body) =
-  FunDef entry name rtp args <$> inlineInBody fdmap body
+inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
+  FunDef entry attrs name rtp args <$> inlineInBody fdmap body
 
 inlineFunction :: MonadFreshNames m =>
                   Pattern
@@ -124,14 +129,10 @@ inlineFunction pat aux args (safety,loc,locs) fun = do
     (bodyResult (funDefBody fun))
   let res_stms =
         certify (stmAuxCerts aux) <$>
-        zipWith (reshapeIfNecessary (patternNames pat))
-        (patternIdents pat) res
+        zipWith bindSubExp (patternIdents pat) res
   pure $ stmsToList stms <> res_stms
-  where param_names =
-          map paramName $ funDefParams fun
-
-        param_stms =
-          zipWith (reshapeIfNecessary param_names)
+  where param_stms =
+          zipWith bindSubExp
           (map paramIdent $ funDefParams fun) (map fst args)
 
         body_stms =
@@ -139,13 +140,11 @@ inlineFunction pat aux args (safety,loc,locs) fun = do
           addLocations (stmAuxAttrs aux) safety (filter notmempty (loc:locs)) $
           bodyStms $ funDefBody fun
 
-        reshapeIfNecessary dim_names ident se
-          | t@Array{} <- identType ident,
-            any (`elem` dim_names) (subExpVars $ arrayDims t),
-            Var v <- se =
-              mkLet [] [ident] $ shapeCoerce (arrayDims t) v
-          | otherwise =
-              mkLet [] [ident] $ BasicOp $ SubExp se
+        -- Note that the sizes of arrays may not be correct at this
+        -- point - it is crucial that we run copy propagation before
+        -- the type checker sees this!
+        bindSubExp ident se =
+          mkLet [] [ident] $ BasicOp $ SubExp se
 
         notmempty = (/=mempty) . locOf
 
@@ -159,9 +158,9 @@ inlineInBody :: MonadFreshNames m =>
 inlineInBody fdmap = onBody
   where inline (Let pat aux (Apply fname args _ what) : rest)
           | Just fd <- M.lookup fname fdmap,
-            not noinline =
+            not $ "noinline" `inAttrs` funDefAttrs fd,
+            not $ "noinline" `inAttrs` stmAuxAttrs aux =
               (<>) <$> inlineFunction pat aux args what fd <*> inline rest
-          where noinline = "noinline" `inAttrs` stmAuxAttrs aux
 
         inline (stm : rest) =
           (:) <$> onStm stm <*> inline rest
@@ -197,23 +196,25 @@ addLocations attrs caller_safety more_locs = fmap onStm
           Apply fname args t (min caller_safety safety, loc,locs++more_locs)
           where aux' = aux { stmAuxAttrs = attrs <> stmAuxAttrs aux }
         onStm (Let pat aux (BasicOp (Assert cond desc (loc,locs)))) =
-          Let pat aux $
+          Let pat (withAttrs (attrsForAssert attrs) aux) $
           case caller_safety of
             Safe -> BasicOp $ Assert cond desc (loc,locs++more_locs)
             Unsafe -> BasicOp $ SubExp $ Constant Checked
         onStm (Let pat aux (Op soac)) =
-          Let pat (withAttrs aux) $ Op $ runIdentity $ mapSOACM
+          Let pat (withAttrs attrs' aux) $ Op $ runIdentity $ mapSOACM
           identitySOACMapper { mapOnSOACLambda = return . onLambda
                              } soac
-          where onLambda lam =
-                  lam { lambdaBody = onBody mempty $ lambdaBody lam }
+          where attrs' = attrs `withoutAttrs` for_assert
+                for_assert = attrsForAssert attrs
+                onLambda lam =
+                  lam { lambdaBody = onBody for_assert $ lambdaBody lam }
         onStm (Let pat aux e) =
           Let pat aux $ onExp e
 
         onExp = mapExp identityMapper
                 { mapOnBody = const $ return . onBody attrs }
 
-        withAttrs aux = aux { stmAuxAttrs = attrs <> stmAuxAttrs aux }
+        withAttrs attrs' aux = aux { stmAuxAttrs = attrs' <> stmAuxAttrs aux }
 
         onBody attrs' body =
           body { bodyStms = addLocations attrs' caller_safety more_locs $

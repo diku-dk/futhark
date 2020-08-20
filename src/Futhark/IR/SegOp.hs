@@ -684,7 +684,7 @@ mapSegOpM tv (SegHist lvl space ops ts body) =
 
 mapOnSegOpType :: Monad m =>
                   SegOpMapper lvl flore tlore m -> Type -> m Type
-mapOnSegOpType _tv (Prim pt) = pure $ Prim pt
+mapOnSegOpType _tv t@Prim{} = pure t
 mapOnSegOpType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnSegOpSubExp tv) dims
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
@@ -913,7 +913,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
   where scope_vtable = segSpaceSymbolTable space
         bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
-segSpaceSymbolTable :: SegSpace -> ST.SymbolTable lore
+segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
   foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int32) gtids_and_dims
   where f vtable (gtid, dim) = ST.insertLoopVar gtid Int32 dim vtable

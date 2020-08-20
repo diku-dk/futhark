@@ -32,6 +32,8 @@ let main(md_vols: [][]f64,
          md_drifts: [][]f64,
          md_starts: []f64,
          noises_mat: [][][]f64): [][][]f64 =
+  #[incremental_flattening(only_inner)]
   map  (\(noises: [][]f64) ->
-         mkPrices(md_starts, md_vols, md_drifts, noises)) (
+          #[incremental_flattening(only_inner)]
+          mkPrices(md_starts, md_vols, md_drifts, noises)) (
        noises_mat)

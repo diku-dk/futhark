@@ -10,10 +10,13 @@ module Futhark.Analysis.UsageTable
   , isConsumed
   , isInResult
   , isUsedDirectly
+  , isSize
   , usages
   , usage
   , consumedUsage
   , inResultUsage
+  , sizeUsage
+  , sizeUsages
   , Usages
   , usageInStm
   )
@@ -21,8 +24,8 @@ module Futhark.Analysis.UsageTable
 
 import Data.Bits
 import qualified Data.Foldable as Foldable
+import qualified Data.IntMap.Strict as IM
 import Data.List (foldl')
-import qualified Data.Map.Strict as M
 
 import Prelude hiding (lookup)
 
@@ -30,23 +33,24 @@ import Futhark.IR
 import Futhark.IR.Prop.Aliases
 
 -- | A usage table.
-newtype UsageTable = UsageTable (M.Map VName Usages)
+newtype UsageTable = UsageTable (IM.IntMap Usages)
                    deriving (Eq, Show)
 
 instance Semigroup UsageTable where
   UsageTable table1 <> UsageTable table2 =
-    UsageTable $ M.unionWith (<>) table1 table2
+    UsageTable $ IM.unionWith (<>) table1 table2
 
 instance Monoid UsageTable where
   mempty = UsageTable mempty
 
 -- | Remove these entries from the usage table.
 without :: UsageTable -> [VName] -> UsageTable
-without (UsageTable table) = UsageTable . Foldable.foldl (flip M.delete) table
+without (UsageTable table) =
+  UsageTable . Foldable.foldl (flip IM.delete) table . map baseTag
 
 -- | Look up a variable in the usage table.
 lookup :: VName -> UsageTable -> Maybe Usages
-lookup name (UsageTable table) = M.lookup name table
+lookup name (UsageTable table) = IM.lookup (baseTag name) table
 
 lookupPred :: (Usages -> Bool) -> VName -> UsageTable -> Bool
 lookupPred f name = maybe False f . lookup name
@@ -57,10 +61,10 @@ used = lookupPred $ const True
 
 -- | Expand the usage table based on aliasing information.
 expand :: (VName -> Names) -> UsageTable -> UsageTable
-expand look (UsageTable m) = UsageTable $ foldl' grow m $ M.toList m
+expand look (UsageTable m) = UsageTable $ foldl' grow m $ IM.toList m
   where grow m' (k, v) = foldl' (grow'' $ v `withoutU` presentU) m' $
-                         namesToList $ look k
-        grow'' v m'' k = M.insertWith (<>) k v m''
+                         namesIntMap $ look $ VName (nameFromString "") k
+        grow'' v m'' k = IM.insertWith (<>) (baseTag k) v m''
 
 is :: Usages -> VName -> UsageTable -> Bool
 is = lookupPred . matches
@@ -78,24 +82,38 @@ isInResult = is inResultU
 isUsedDirectly :: VName -> UsageTable -> Bool
 isUsedDirectly = is presentU
 
+-- | Is this name used as the size of something (array or memory block)?
+isSize :: VName -> UsageTable -> Bool
+isSize = is sizeU
+
 -- | Construct a usage table reflecting that these variables have been
 -- used.
 usages :: Names -> UsageTable
-usages names = UsageTable $ M.fromList [ (name, presentU) | name <- namesToList names ]
+usages = UsageTable . IM.map (const presentU) . namesIntMap
 
 -- | Construct a usage table where the given variable has been used in
 -- this specific way.
 usage :: VName -> Usages -> UsageTable
-usage name uses = UsageTable $ M.singleton name uses
+usage name uses = UsageTable $ IM.singleton (baseTag name) uses
 
 -- | Construct a usage table where the given variable has been consumed.
 consumedUsage :: VName -> UsageTable
-consumedUsage name = UsageTable $ M.singleton name consumedU
+consumedUsage name = UsageTable $ IM.singleton (baseTag name) consumedU
 
 -- | Construct a usage table where the given variable has been used in
 -- the 'Result' of a body.
 inResultUsage :: VName -> UsageTable
-inResultUsage name = UsageTable $ M.singleton name inResultU
+inResultUsage name = UsageTable $ IM.singleton (baseTag name) inResultU
+
+-- | Construct a usage table where the given variable has been used as
+-- an array or memory size.
+sizeUsage :: VName -> UsageTable
+sizeUsage name = UsageTable $ IM.singleton (baseTag name) sizeU
+
+-- | Construct a usage table where the given names have been used as
+-- an array or memory size.
+sizeUsages :: Names -> UsageTable
+sizeUsages = UsageTable . IM.map (const sizeU) . namesIntMap
 
 -- | A description of how a single variable has been used.
 newtype Usages = Usages Int -- Bitmap representation for speed.
@@ -107,10 +125,11 @@ instance Semigroup Usages where
 instance Monoid Usages where
   mempty = Usages 0
 
-consumedU, inResultU, presentU :: Usages
+consumedU, inResultU, presentU, sizeU :: Usages
 consumedU = Usages 1
 inResultU = Usages 2
 presentU = Usages 4
+sizeU = Usages 8
 
 -- | Check whether the bits that are set in the first argument are
 -- also set in the second.
@@ -131,8 +150,9 @@ usageInStm (Let pat lore e) =
            usages (freeIn e)]
   where usageInPat =
           usages (mconcat (map freeIn $ patternElements pat)
-                     `namesSubtract`
-                     namesFromList (patternNames pat))
+                  `namesSubtract`
+                  namesFromList (patternNames pat)) <>
+          sizeUsages (foldMap (freeIn . patElemType) (patternElements pat))
         usageInExpLore =
           usages $ freeIn lore
 

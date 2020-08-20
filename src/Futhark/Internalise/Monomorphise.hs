@@ -26,6 +26,7 @@
 module Futhark.Internalise.Monomorphise
   ( transformProg ) where
 
+import           Control.Monad.Identity
 import           Control.Monad.RWS hiding (Sum)
 import           Control.Monad.State
 import           Control.Monad.Writer hiding (Sum)
@@ -56,7 +57,8 @@ i32 = Scalar $ Prim $ Signed Int32
 -- in local functions.
 data PolyBinding = PolyBinding RecordReplacements
                    (VName, [TypeParam], [Pattern],
-                     Maybe (TypeExp VName), StructType, [VName], Exp, SrcLoc)
+                     Maybe (TypeExp VName), StructType, [VName], Exp,
+                     [AttrInfo], SrcLoc)
 
 -- Mapping from record names to the variable names that contain the
 -- fields.  This is used because the monomorphiser also expands all
@@ -118,13 +120,16 @@ type InferSizeArgs = StructType -> [Exp]
 
 -- The kind of type relative to which we monomorphise.  What is
 -- important to us is not the specific dimensions, but merely whether
--- they are known or anonymous (the latter False).
+-- they are known or anonymous/local (the latter False).
 type MonoType = TypeBase Bool ()
 
 monoType :: TypeBase (DimDecl VName) als -> MonoType
-monoType = bimap onDim (const ())
-  where onDim AnyDim = False
-        onDim _      = True
+monoType = runIdentity . traverseDims onDim . toStruct
+  where onDim bound _ (NamedDim d)
+          -- A locally bound size.
+          | qualLeaf d `S.member` bound = pure False
+        onDim _ _ AnyDim = pure False
+        onDim _ _ _      = pure True
 
 -- Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
@@ -191,6 +196,16 @@ transformType t = do
   return $ if any ((`M.member` rrs) . aliasVar) $ aliases t
            then second (mconcat . map replace . S.toList) t
            else t
+
+sizesForPat :: MonadFreshNames m => Pattern -> m ([VName], Pattern)
+sizesForPat pat = do
+  (params', sizes) <- runStateT (astMap tv pat) []
+  return (sizes, params')
+  where tv = identityMapper { mapOnPatternType = bitraverse onDim pure }
+        onDim AnyDim = do v <- lift $ newVName "size"
+                          modify (v:)
+                          pure $ NamedDim $ qualName v
+        onDim d = pure d
 
 -- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -260,7 +275,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e e_t loc)
       -- filter those that are monomorphic versions of the current let-bound
       -- function and insert them at this point, and propagate the rest.
       rr <- asks envRecordReplacements
-      let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, [], body, loc)
+      let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, [], body, mempty, loc)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
         -- Do not remember this one for next time we monomorphise this
@@ -324,7 +339,11 @@ transformExp (DoLoop sparams pat e1 form e3 ret loc) = do
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
     While e2      -> While <$> transformExp e2
   e3' <- transformExp e3
-  return $ DoLoop sparams pat e1' form' e3' ret loc
+  -- Maybe monomorphisation introduced new arrays to the loop, and
+  -- maybe they have AnyDim sizes.  This is not allowed.  Invent some
+  -- sizes for them.
+  (pat_sizes, pat') <- sizesForPat pat
+  return $ DoLoop (sparams++pat_sizes) pat' e1' form' e3' ret loc
 
 transformExp (BinOp (fname, oploc) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
   fname' <- transformFName loc fname $ toStruct t
@@ -463,7 +482,7 @@ noticeDims = mapM_ notice . nestedDims
 -- monomorphic functions with the given expression at the bottom.
 unfoldLetFuns :: [ValBind] -> Exp -> Exp
 unfoldLetFuns [] e = e
-unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ loc : rest) e =
+unfoldLetFuns (ValBind _ fname _ (Info (rettype, _)) dim_params params body _ _ loc : rest) e =
   LetFun fname (dim_params, params, Nothing, Info rettype, body) e' (Info e_t) loc
   where e' = unfoldLetFuns rest e
         e_t = typeOf e'
@@ -562,7 +581,7 @@ noNamedParams = f
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphiseBinding :: Bool -> PolyBinding -> MonoType
                     -> MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, retext, body, loc)) t =
+monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, retext, body, attrs, loc)) t =
   replaceRecordReplacements rr $ do
   let bind_t = foldFunType (map patternStructType params) rettype
   (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams t
@@ -615,6 +634,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
                   , valBindParams     = params''
                   , valBindBody       = body''
                   , valBindDoc        = Nothing
+                  , valBindAttrs      = attrs
                   , valBindLocation   = loc
                   }
 
@@ -671,12 +691,12 @@ substPattern entry f pat = case pat of
   PatternConstr n (Info tp) ps loc -> PatternConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ loc) =
-  PolyBinding mempty (name, tparams, params, retdecl, rettype, retext, body, loc)
+toPolyBinding (ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ attrs loc) =
+  PolyBinding mempty (name, tparams, params, retdecl, rettype, retext, body, attrs, loc)
 
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
-removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats body _ _) = do
+removeTypeVariables entry valbind@(ValBind _ _ _ (Info (rettype, retext)) _ pats body _ _ _) = do
   subs <- asks $ M.map TypeSub . envTypeBindings
   let mapper = ASTMapper {
           mapOnExp         = astMap mapper

@@ -354,7 +354,7 @@ expandAliases :: Names -> Env lore -> Names
 expandAliases names env = names <> aliasesOfAliases
   where aliasesOfAliases =  mconcat . map look . namesToList $ names
         look k = case M.lookup k $ envVtable env of
-          Just (LetName (als, _)) -> unNames als
+          Just (LetName (als, _)) -> unAliases als
           _                       -> mempty
 
 binding :: Checkable lore =>
@@ -365,11 +365,11 @@ binding bnds = check . local (`bindVars` bnds)
   where bindVars = M.foldlWithKey' bindVar
         boundnames = M.keys bnds
 
-        bindVar env name (LetName (Names' als, dec)) =
+        bindVar env name (LetName (AliasDec als, dec)) =
           let als' | primType (typeOf dec) = mempty
                    | otherwise = expandAliases als env
           in env { envVtable =
-                     M.insert name (LetName (Names' als', dec)) $ envVtable env
+                     M.insert name (LetName (AliasDec als', dec)) $ envVtable env
                  }
         bindVar env name dec =
           env { envVtable = M.insert name dec $ envVtable env }
@@ -397,7 +397,7 @@ lookupAliases name = do
            else oneName name <> aliases info
 
 aliases :: NameInfo (Aliases lore) -> Names
-aliases (LetName (als, _)) = unNames als
+aliases (LetName (als, _)) = unAliases als
 aliases _ = mempty
 
 subExpAliasesM :: Checkable lore => SubExp -> TypeM lore Names
@@ -470,7 +470,7 @@ checkProg (Prog consts funs) = do
   where
     buildFtable = do table <- initialFtable
                      foldM expand table funs
-    expand ftable (FunDef _ name ret params _)
+    expand ftable (FunDef _ _ name ret params _)
       | M.member name ftable =
           bad $ DupDefinitionError name
       | otherwise =
@@ -486,7 +486,7 @@ initialFtable = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
 
 checkFun :: Checkable lore =>
             FunDef (Aliases lore) -> TypeM lore ()
-checkFun (FunDef _ fname rettype params body) =
+checkFun (FunDef _ _ fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
                map declExtTypeOf rettype,
@@ -507,18 +507,9 @@ funParamsToNameInfos = map nameTypeAndLore
 
 checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
-checkFunParams params = foldM_ check mempty params
-  where param_bound = namesFromList $ map paramName params
-        check prev param =
-          context ("In function parameter " ++ pretty param) $ do
-            checkFParamLore (paramName param) (paramDec param)
-            case namesToList $
-                 (freeIn param `namesIntersection` param_bound)
-                 `namesSubtract` prev of
-              [] -> return ()
-              v:_ ->
-                bad $ TypeError $ pretty v ++ " bound in a later parameter."
-            return $ oneName (paramName param) <> prev
+checkFunParams = mapM_ $ \param ->
+  context ("In function parameter " ++ pretty param) $
+    checkFParamLore (paramName param) (paramDec param)
 
 checkLambdaParams :: Checkable lore =>
                      [LParam lore] -> TypeM lore ()

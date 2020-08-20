@@ -4,12 +4,12 @@
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
-    BoundInTypes
-  , boundInTypes
-  , internaliseReturnType
+    internaliseReturnType
+  , internaliseLambdaReturnType
   , internaliseEntryReturnType
-  , internaliseParamTypes
   , internaliseType
+  , internaliseParamTypes
+  , internaliseLoopParamType
   , internalisePrimType
   , internalisedTypeSize
   , internaliseSumType
@@ -18,12 +18,11 @@ module Futhark.Internalise.TypesValues
   , internalisePrimValue
   )
   where
-
+import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (delete, find, foldl')
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Maybe
+import qualified Data.Map.Strict as M
 
 import qualified Language.Futhark as E
 import Futhark.IR.SOACS as I
@@ -33,39 +32,50 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
--- | The names that are bound for some types, either implicitly or
--- explicitly.
-newtype BoundInTypes = BoundInTypes (S.Set VName)
-                       deriving (Semigroup, Monoid)
+type TypeState = Int
 
--- | Determine the names bound for some types.
-boundInTypes :: [E.TypeParam] -> BoundInTypes
-boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
-  where isTypeParam (E.TypeParamDim v _) = Just v
-        isTypeParam _ = Nothing
+newtype InternaliseTypeM a =
+  InternaliseTypeM (StateT TypeState InternaliseM a)
+  deriving (Functor, Applicative, Monad, MonadState TypeState)
 
-internaliseParamTypes :: BoundInTypes
-                      -> M.Map VName VName
-                      -> [E.TypeBase (E.DimDecl VName) ()]
-                      -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
-internaliseParamTypes (BoundInTypes bound) pnames ts =
-  runInternaliseTypeM $ withDims (bound' <> M.map (Free . Var) pnames) $
-  mapM internaliseTypeM ts
-  where bound' = M.fromList (zip (S.toList bound)
-                                 (map (Free . Var) $ S.toList bound))
+liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
+liftInternaliseM = InternaliseTypeM . lift
+
+runInternaliseTypeM :: InternaliseTypeM a
+                    -> InternaliseM a
+runInternaliseTypeM (InternaliseTypeM m) =
+  evalStateT m 0
+
+internaliseParamTypes :: [E.TypeBase (E.DimDecl VName) ()]
+                      -> InternaliseM [[I.TypeBase Shape Uniqueness]]
+internaliseParamTypes ts =
+  runInternaliseTypeM $ mapM (fmap (map onType) . internaliseTypeM) ts
+  where onType = fromMaybe bad . hasStaticShape
+        bad = error $ "internaliseParamTypes: " ++ pretty ts
+
+internaliseLoopParamType :: E.TypeBase (E.DimDecl VName) ()
+                         -> InternaliseM [I.TypeBase Shape Uniqueness]
+internaliseLoopParamType et =
+  concat <$> internaliseParamTypes [et]
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
                       -> InternaliseM [I.TypeBase ExtShape Uniqueness]
-internaliseReturnType = fmap concat . internaliseEntryReturnType
+internaliseReturnType et =
+  runInternaliseTypeM (internaliseTypeM et)
+
+internaliseLambdaReturnType :: E.TypeBase (E.DimDecl VName) ()
+                            -> InternaliseM [I.TypeBase Shape NoUniqueness]
+internaliseLambdaReturnType = fmap (map fromDecl) . internaliseLoopParamType
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
 internaliseEntryReturnType :: E.TypeBase (E.DimDecl VName) ()
                            -> InternaliseM [[I.TypeBase ExtShape Uniqueness]]
-internaliseEntryReturnType t = do
-  let ts = case E.isTupleRecord t of Just tts | not $ null tts -> tts
-                                     _ -> [t]
-  runInternaliseTypeM $ mapM internaliseTypeM ts
+internaliseEntryReturnType et =
+  runInternaliseTypeM $ mapM internaliseTypeM $
+  case E.isTupleRecord et of
+    Just ets | not $ null ets -> ets
+    _ -> [et]
 
 internaliseType :: E.TypeBase (E.DimDecl VName) ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
@@ -85,11 +95,8 @@ internaliseDim d =
     E.NamedDim name -> namedDim name
   where namedDim (E.QualName _ name) = do
           subst <- liftInternaliseM $ lookupSubst name
-          is_dim <- lookupDim name
-
-          case (is_dim, subst) of
-            (Just dim, _) -> return dim
-            (Nothing, Just [v]) -> return $ I.Free v
+          case subst of
+            Just [v] -> return $ I.Free v
             _ -> return $ I.Free $ I.Var name
 
 internaliseTypeM :: E.StructType

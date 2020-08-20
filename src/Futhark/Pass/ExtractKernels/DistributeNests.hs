@@ -14,13 +14,13 @@ module Futhark.Pass.ExtractKernels.DistributeNests
   , bodyContainsParallelism
   , lambdaContainsParallelism
   , determineReduceOp
-  , incrementalFlattening
   , histKernel
 
   , DistEnv (..)
   , DistAcc (..)
   , runDistNestT
   , DistNestT
+  , liftInner
 
   , distributeMap
 
@@ -44,12 +44,13 @@ import Control.Monad.Writer.Strict
 import Control.Monad.Trans.Maybe
 import Data.Maybe
 import Data.List (find, partition, tails)
+import qualified Data.Map as M
 
 import Futhark.IR
 import qualified Futhark.IR.SOACS as SOACS
 import Futhark.IR.SOACS.SOAC hiding (HistOp, histDest)
 import Futhark.IR.SOACS (SOACS)
-import Futhark.IR.SOACS.Simplify (simpleSOACS)
+import Futhark.IR.SOACS.Simplify (simpleSOACS, simplifyStms)
 import Futhark.IR.SegOp
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -135,8 +136,12 @@ newtype DistNestT lore m a =
             MonadReader (DistEnv lore m),
             MonadWriter (DistRes lore))
 
-instance MonadTrans (DistNestT lore) where
-  lift = DistNestT . lift . lift
+liftInner :: (LocalScope lore m, DistLore lore) => m a -> DistNestT lore m a
+liftInner m = do
+  outer_scope <- askScope
+  DistNestT $ lift $ lift $ do
+    inner_scope <- askScope
+    localScope (outer_scope `M.difference` inner_scope) m
 
 instance MonadFreshNames m => MonadFreshNames (DistNestT lore m) where
   getNameSource = DistNestT $ lift getNameSource
@@ -195,17 +200,71 @@ withStm stm = local $ \env ->
       }
   where provided = namesFromList $ patternNames $ stmPattern stm
 
-mapNesting :: (Monad m, DistLore lore) =>
+leavingNesting :: (MonadFreshNames m, DistLore lore) =>
+                  DistAcc lore -> DistNestT lore m (DistAcc lore)
+
+leavingNesting acc =
+  case popInnerTarget $ distTargets acc of
+   Nothing ->
+     error "The kernel targets list is unexpectedly small"
+
+   Just ((pat, res), newtargets)
+     | not $ null $ distStms acc -> do
+         -- Any statements left over correspond to something that
+         -- could not be distributed because it would cause irregular
+         -- arrays.  These must be reconstructed into a a Map SOAC
+         -- that will be sequentialised. XXX: life would be better if
+         -- we were able to distribute irregular parallelism.
+         (Nesting _ inner, _) <- asks distNest
+         let MapNesting _ aux w params_and_arrs = inner
+             body = Body () (distStms acc) res
+             used_in_body = freeIn body
+             (used_params, used_arrs) =
+               unzip $
+               filter ((`nameIn` used_in_body) . paramName . fst) params_and_arrs
+             lam' = Lambda { lambdaParams = used_params
+                           , lambdaBody = body
+                           , lambdaReturnType = map rowType $ patternTypes pat
+                           }
+         stms <- runBinder_ $ auxing aux $ FOT.transformSOAC pat $
+                 Screma w (mapSOAC lam') used_arrs
+
+         return $ acc { distTargets = newtargets, distStms = stms }
+
+     | otherwise -> do
+         -- Any results left over correspond to a Replicate or a Copy in
+         -- the parent nesting, depending on whether the argument is a
+         -- parameter of the innermost nesting.
+         (Nesting _ inner_nesting, _) <- asks distNest
+         let w = loopNestingWidth inner_nesting
+             aux = loopNestingAux inner_nesting
+             inps = loopNestingParamsAndArrs inner_nesting
+
+             remnantStm pe (Var v)
+               | Just (_, arr) <- find ((==v) . paramName . fst) inps =
+                   Let (Pattern [] [pe]) aux $
+                   BasicOp $ Copy arr
+             remnantStm pe se =
+               Let (Pattern [] [pe]) aux $
+               BasicOp $ Replicate (Shape [w]) se
+
+             stms =
+               stmsFromList $ zipWith remnantStm (patternElements pat) res
+
+         return $ acc { distTargets = newtargets, distStms = stms }
+
+mapNesting :: (MonadFreshNames m, DistLore lore) =>
               PatternT Type -> StmAux () -> SubExp -> Lambda SOACS -> [VName]
-           -> DistNestT lore m a
-           -> DistNestT lore m a
-mapNesting pat aux w lam arrs = local $ \env ->
-  env { distNest = pushInnerNesting nest $ distNest env
-      , distScope =  castScope (scopeOf lam) <> distScope env
-      }
+           -> DistNestT lore m (DistAcc lore)
+           -> DistNestT lore m (DistAcc lore)
+mapNesting pat aux w lam arrs m =
+  local extend $ leavingNesting =<< m
   where nest = Nesting mempty $
                MapNesting pat aux w $
                zip (lambdaParams lam) arrs
+        extend env = env { distNest = pushInnerNesting nest $ distNest env
+                         , distScope =  castScope (scopeOf lam) <> distScope env
+                         }
 
 inNesting :: (Monad m, DistLore lore) =>
              KernelNest -> DistNestT lore m a -> DistNestT lore m a
@@ -220,28 +279,18 @@ inNesting (outer, nests) = local $ \env ->
         asNesting = Nesting mempty
 
 bodyContainsParallelism :: Body SOACS -> Bool
-bodyContainsParallelism = any (isMap . stmExp) . bodyStms
-  where isMap Op{} = True
+bodyContainsParallelism = any isParallelStm . bodyStms
+  where isParallelStm stm =
+          isMap (stmExp stm) &&
+          not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
+        isMap Op{} = True
         isMap _ = False
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
--- Enable if you want the cool new versioned code.  Beware: may be
--- slower in practice.  Caveat emptor (and you are the emptor).
-incrementalFlattening :: Bool
-incrementalFlattening = isJust $ lookup "FUTHARK_INCREMENTAL_FLATTENING" unixEnvironment
-
-leavingNesting :: MonadFreshNames m =>
-                  DistAcc lore -> DistNestT lore m (DistAcc lore)
-leavingNesting acc =
-  case popInnerTarget $ distTargets acc of
-   Nothing ->
-     error "The kernel targets list is unexpectedly small"
-   Just (_, newtargets) ->
-     return acc { distTargets = newtargets }
-
-distributeMapBodyStms :: (MonadFreshNames m, DistLore lore) => DistAcc lore -> Stms SOACS -> DistNestT lore m (DistAcc lore)
+distributeMapBodyStms :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
+                         DistAcc lore -> Stms SOACS -> DistNestT lore m (DistAcc lore)
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = return acc
@@ -270,7 +319,7 @@ onTopLevelStms stms = do
   f <- asks distOnTopLevelStms
   postStm =<< f stms
 
-maybeDistributeStm :: (MonadFreshNames m, DistLore lore) =>
+maybeDistributeStm :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                       Stm SOACS -> DistAcc lore
                    -> DistNestT lore m (DistAcc lore)
 
@@ -304,9 +353,14 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
           nest' <- expandKernelNest pat_unused nest
           types <- asksScope scopeForSOACs
 
-          bnds <- runReaderT
-                  (interchangeLoops nest' (SeqLoop perm pat val form body)) types
-          onTopLevelStms bnds
+          -- Simplification is key to hoisting out statements that
+          -- were variant to the loop, but invariant to the outer maps
+          -- (which are now innermost).
+          stms <-
+            (`runReaderT` types) $
+            fmap snd . simplifyStms =<<
+            interchangeLoops nest' (SeqLoop perm pat val form body)
+          onTopLevelStms stms
           return acc'
     _ ->
       addStmToAcc bnd acc
@@ -327,7 +381,10 @@ maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
             addPostStms kernels
             types <- asksScope scopeForSOACs
             let branch = Branch perm pat cond tbranch fbranch ret
-            stms <- runReaderT (interchangeBranch nest' branch) types
+            stms <-
+              (`runReaderT` types) $
+              fmap snd . simplifyStms =<<
+              interchangeBranch nest' branch
             onTopLevelStms stms
             return acc'
       _ ->
@@ -368,6 +425,23 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Hist w ops lam as))) acc =
     _ ->
       addStmToAcc bnd acc
 
+-- Parallelise Index slices if the result is going to be returned
+-- directly from the kernel.  This is because we would otherwise have
+-- to sequentialise writing the result, which may be costly.
+maybeDistributeStm stm@(Let (Pattern [] [pe])
+                        aux
+                        (BasicOp (Index arr slice))) acc
+  | not $ null $ sliceDims slice,
+    Var (patElemName pe) `elem`  snd (innerTarget (distTargets acc)) =
+      distributeSingleStm acc stm >>= \case
+      Just (kernels, _res, nest, acc') ->
+        localScope (typeEnvFromDistAcc acc') $ do
+        addPostStms kernels
+        postStm =<< segmentedGatherKernel nest (stmAuxCerts aux) arr slice
+        return acc'
+      _ ->
+        addStmToAcc stm acc
+
 -- If the scan can be distributed by itself, we will turn it into a
 -- segmented scan.
 --
@@ -398,8 +472,7 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
 -- sequentialised in the default case for this function.
 maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
   | Just (reds, map_lam) <- isRedomapSOAC form,
-    Reduce comm lam nes <- singleReduce reds,
-    isIdentityLambda map_lam || incrementalFlattening =
+    Reduce comm lam nes <- singleReduce reds =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -419,9 +492,8 @@ maybeDistributeStm bnd@(Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
     _ ->
       addStmToAcc bnd acc
 
-maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
-  | incrementalFlattening || isNothing (isRedomapSOAC form) = do
-  -- This with-loop is too complicated for us to immediately do
+maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc = do
+  -- This Screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
   distributeMapBodyStms acc . fmap (certify cs) . snd =<<
@@ -429,9 +501,6 @@ maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w form arrs))) acc
 
 maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d:ds)) v))) acc
   | [t] <- patternTypes pat = do
-      -- XXX: We need a temporary dummy binding to prevent an empty
-      -- map body.  The kernel extractor does not like empty map
-      -- bodies.
       tmp <- newVName "tmp"
       let rowt = rowType t
           newbnd = Let pat aux $ Op $ Screma d (mapSOAC lam) []
@@ -534,7 +603,7 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d x xs w))) acc =
 maybeDistributeStm bnd acc =
   addStmToAcc bnd acc
 
-distributeSingleUnaryStm :: (MonadFreshNames m, DistLore lore) =>
+distributeSingleUnaryStm :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                             DistAcc lore -> Stm SOACS
                          -> (KernelNest -> PatternT Type -> VName -> DistNestT lore m (Stms lore))
                          -> DistNestT lore m (DistAcc lore)
@@ -562,20 +631,22 @@ distributeSingleUnaryStm acc bnd f =
           | otherwise =
               False
 
-distribute :: (MonadFreshNames m, DistLore lore) => DistAcc lore -> DistNestT lore m (DistAcc lore)
+distribute :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
+              DistAcc lore -> DistNestT lore m (DistAcc lore)
 distribute acc =
   fromMaybe acc <$> distributeIfPossible acc
 
-mkSegLevel :: (MonadFreshNames m, DistLore lore) => DistNestT lore m (MkSegLevel lore (DistNestT lore m))
+mkSegLevel :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
+              DistNestT lore m (MkSegLevel lore (DistNestT lore m))
 mkSegLevel = do
   mk_lvl <- asks distSegLevel
   return $ \w desc r -> do
-    scope <- askScope
-    (lvl, stms) <- lift $ lift $ runBinderT (mk_lvl w desc r) scope
+    (lvl, stms) <- lift $ liftInner $ runBinderT' $ mk_lvl w desc r
     addStms stms
     return lvl
 
-distributeIfPossible :: (MonadFreshNames m, DistLore lore) => DistAcc lore -> DistNestT lore m (Maybe (DistAcc lore))
+distributeIfPossible :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
+                        DistAcc lore -> DistNestT lore m (Maybe (DistAcc lore))
 distributeIfPossible acc = do
   nest <- asks distNest
   mk_lvl <- mkSegLevel
@@ -587,7 +658,7 @@ distributeIfPossible acc = do
                             , distStms = mempty
                             }
 
-distributeSingleStm :: (MonadFreshNames m, DistLore lore) =>
+distributeSingleStm :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                        DistAcc lore -> Stm SOACS
                     -> DistNestT lore m (Maybe (PostStms lore,
                                                 Result,
@@ -609,7 +680,7 @@ distributeSingleStm acc bnd = do
                                  , distStms = mempty
                                  })
 
-segmentedScatterKernel :: (MonadFreshNames m, DistLore lore) =>
+segmentedScatterKernel :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                           KernelNest
                        -> [Int]
                        -> PatternT Type
@@ -675,7 +746,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
           [ (map DimFix $ map Var (init gtids)++[i], v) | (i,v) <- is_vs ]
           where (gtids,ws) = unzip ispace
 
-segmentedUpdateKernel :: (MonadFreshNames m, DistLore lore) =>
+segmentedUpdateKernel :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                          KernelNest
                       -> [Int]
                       -> Certificates
@@ -719,7 +790,40 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 
     letBind pat $ Op $ segOp k
 
-segmentedHistKernel :: (MonadFreshNames m, DistLore lore) =>
+segmentedGatherKernel :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
+                         KernelNest
+                      -> Certificates
+                      -> VName
+                      -> Slice SubExp
+                      -> DistNestT lore m (Stms lore)
+segmentedGatherKernel nest cs arr slice = do
+  let slice_dims = sliceDims slice
+  slice_gtids <- replicateM (length slice_dims) (newVName "gtid_slice")
+
+  (base_ispace, kernel_inps) <- flatKernel nest
+  let ispace = base_ispace ++ zip slice_gtids slice_dims
+
+  ((res_t, res), kstms) <- runBinder $ do
+    -- Compute indexes into full array.
+    slice'' <- subExpSlice $
+               sliceSlice (primExpSlice slice) $
+               primExpSlice $ map (DimFix . Var) slice_gtids
+    v' <- certifying cs $ letSubExp "v" $ BasicOp $ Index arr slice''
+    v_t <- subExpType v'
+    return (v_t, Returns ResultMaySimplify v')
+
+  mk_lvl <- mkSegLevel
+  (k, prestms) <- mapKernel mk_lvl ispace kernel_inps [res_t] $
+                  KernelBody () kstms [res]
+
+  traverse renameStm <=< runBinder_ $ do
+    addStms prestms
+
+    let pat = Pattern [] $ patternValueElements $ loopNestingPattern $ fst nest
+
+    letBind pat $ Op $ segOp k
+
+segmentedHistKernel :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                        KernelNest
                     -> [Int]
                     -> Certificates
@@ -746,10 +850,9 @@ segmentedHistKernel nest perm cs hist_w ops lam arrs = do
     <*> pure op
 
   mk_lvl <- asks distSegLevel
-  scope <- askScope
   onLambda <- asks distOnSOACSLambda
   let onLambda' = fmap fst . runBinder . onLambda
-  lift $ flip runBinderT_ scope $ do
+  liftInner $ runBinderT'_ $ do
     -- It is important not to launch unnecessarily many threads for
     -- histograms, because it may mean we unnecessarily need to reduce
     -- subhistograms as well.
@@ -810,7 +913,7 @@ isVectorMap lam
       in (Shape [w] <> shape, lam')
   | otherwise = (mempty, lam)
 
-segmentedScanomapKernel :: (MonadFreshNames m, DistLore lore) =>
+segmentedScanomapKernel :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                            KernelNest
                         -> [Int]
                         -> SubExp
@@ -826,7 +929,7 @@ segmentedScanomapKernel nest perm segment_size lam map_lam nes arrs = do
     addStms =<< traverse renameStm =<<
       segScan lvl pat segment_size [scan_op] map_lam arrs ispace inps
 
-regularSegmentedRedomapKernel :: (MonadFreshNames m, DistLore lore) =>
+regularSegmentedRedomapKernel :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                                  KernelNest
                               -> [Int]
                               -> SubExp -> Commutativity
@@ -842,7 +945,7 @@ regularSegmentedRedomapKernel nest perm segment_size comm lam map_lam nes arrs =
       addStms =<< traverse renameStm =<<
         segRed lvl pat segment_size [red_op] map_lam arrs ispace inps
 
-isSegmentedOp :: (MonadFreshNames m, DistLore lore) =>
+isSegmentedOp :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                  KernelNest
               -> [Int]
               -> Names -> Names
@@ -893,9 +996,8 @@ isSegmentedOp nest perm free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
   nes' <- mapM prepareNe nes
 
   mk_arrs <- mapM prepareArr arrs
-  scope <- lift askScope
 
-  lift $ lift $ flip runBinderT_ scope $ do
+  lift $ liftInner $ runBinderT'_ $ do
     nested_arrs <- sequence mk_arrs
 
     let pat = Pattern [] $ rearrangeShape perm $
@@ -946,12 +1048,11 @@ kernelOrNot cs _ _ kernels acc' (Just bnds) = do
   postStm $ fmap (certify cs) bnds
   return acc'
 
-distributeMap :: (MonadFreshNames m, DistLore lore) =>
+distributeMap :: (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
                  MapLoop -> DistAcc lore
               -> DistNestT lore m (DistAcc lore)
 distributeMap (MapLoop pat aux w lam arrs) acc =
   distribute =<<
-  leavingNesting =<<
   mapNesting pat aux w lam arrs
   (distribute =<< distributeMapBodyStms acc' lam_bnds)
 

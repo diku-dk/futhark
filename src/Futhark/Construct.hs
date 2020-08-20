@@ -71,7 +71,6 @@ module Futhark.Construct
   , eAssert
   , eBody
   , eLambda
-  , eDivRoundingUp
   , eRoundToMultipleOf
   , eSliceArray
   , eBlank
@@ -267,18 +266,11 @@ eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
                       bodyBind $ lambdaBody lam
   where bindParam param arg = letBindNames [paramName param] =<< arg
 
--- | Note: unsigned division.
-eDivRoundingUp :: MonadBinder m =>
-                  IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
-eDivRoundingUp t x y =
-  eBinOp (SQuot t) (eBinOp (Add t OverflowWrap) x (eBinOp (Sub t OverflowWrap) y (eSubExp one))) y
-  where one = intConst t 1
-
 eRoundToMultipleOf :: MonadBinder m =>
                       IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
 eRoundToMultipleOf t x d =
   ePlus x (eMod (eMinus d (eMod x d)) d)
-  where eMod = eBinOp (SMod t)
+  where eMod = eBinOp (SMod t Unsafe)
         eMinus = eBinOp (Sub t OverflowWrap)
         ePlus = eBinOp (Add t OverflowWrap)
 
@@ -336,7 +328,7 @@ eWriteArray arr is v = do
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBinder m => Type -> m (Exp (Lore m))
 eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
-eBlank (Array pt shape _) = return $ BasicOp $ Scratch pt $ shapeDims shape
+eBlank (Array t shape _) = return $ BasicOp $ Scratch t $ shapeDims shape
 eBlank Mem{} = error "eBlank: cannot create blank memory"
 
 -- | Sign-extend to the given integer type.
@@ -383,8 +375,8 @@ binOpLambda bop t = binLambda (BinOp bop) t t
 
 -- | As 'binOpLambda', but for t'CmpOp's.
 cmpOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
-               CmpOp -> PrimType -> m (Lambda (Lore m))
-cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
+               CmpOp -> m (Lambda (Lore m))
+cmpOpLambda cop = binLambda (CmpOp cop) (cmpOpType cop) Bool
 
 binLambda :: (MonadBinder m, Bindable (Lore m)) =>
              (SubExp -> SubExp -> BasicOp) -> PrimType -> PrimType

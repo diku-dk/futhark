@@ -50,6 +50,11 @@ import Futhark.Transform.Substitute
 import Futhark.Pass
 
 -- | Perform CSE on every function in a program.
+--
+-- If the boolean argument is false, the pass will not perform CSE on
+-- expressions producing arrays. This should be disabled when the lore has
+-- memory information, since at that point arrays have identity beyond their
+-- value.
 performCSE :: (ASTLore lore, CanBeAliased (Op lore),
                CSEInOp (OpWithAliases (Op lore))) =>
               Bool -> Pass lore lore
@@ -65,6 +70,11 @@ performCSE cse_arrays =
         onFun _ = pure . cseInFunDef cse_arrays
 
 -- | Perform CSE on a single function.
+--
+-- If the boolean argument is false, the pass will not perform CSE on
+-- expressions producing arrays. This should be disabled when the lore has
+-- memory information, since at that point arrays have identity beyond their
+-- value.
 performCSEOnFunDef :: (ASTLore lore, CanBeAliased (Op lore),
                        CSEInOp (OpWithAliases (Op lore))) =>
                       Bool -> FunDef lore -> FunDef lore
@@ -72,6 +82,11 @@ performCSEOnFunDef cse_arrays =
   removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 -- | Perform CSE on some statements.
+--
+-- If the boolean argument is false, the pass will not perform CSE on
+-- expressions producing arrays. This should be disabled when the lore has
+-- memory information, since at that point arrays have identity beyond their
+-- value.
 performCSEOnStms :: (ASTLore lore, CanBeAliased (Op lore),
                      CSEInOp (OpWithAliases (Op lore))) =>
                     Bool -> Stms lore -> Stms lore

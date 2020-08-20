@@ -1,12 +1,15 @@
 module Futhark.CodeGen.ImpGen.CUDA
   ( compileProg
+  , Warnings
   ) where
 
+import Data.Bifunctor (second)
+
 import Futhark.IR.KernelsMem
-import qualified Futhark.CodeGen.ImpCode.OpenCL as OpenCL
-import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
+import Futhark.CodeGen.ImpCode.OpenCL
+import Futhark.CodeGen.ImpGen.Kernels
 import Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m OpenCL.Program
-compileProg prog = kernelsToCUDA <$> ImpGenKernels.compileProgCUDA prog
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (Warnings, Program)
+compileProg prog = second kernelsToCUDA <$> compileProgCUDA prog

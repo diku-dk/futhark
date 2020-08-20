@@ -5,9 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.16.0]
+## [0.17.0]
 
 ### Added
+
+  * `#[unroll]` attribute.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Fixed compiler crash on certain patterns of nested parallelism
+    (#1068, #1069).
+
+  * NaN comparisons are now done properly in interpreter (#1070).
+
+  * Fix incorrect movement of array indexing into branches `if`s
+    (#1073).
+
+  * Fix defunctorisation bug (#1088).
+
+## [0.16.3]
+
+### Added
+
+  * `random` input blocks for `futhark test` and `futhark bench` now
+    support floating-point literals, which must always have either an
+    `f32` or `f64` suffix.
+
+  * The `cuda` backend now supports the `-d` option for executables.
+
+  * The integer modules now contain a `ctz` function for counting
+    trailing zeroes.
+
+### Fixed
+
+  * The `pyopencl` backend now works with OpenCL devices that have
+    multiple types (most importantly, oclgrind).
+
+  * Fix barrier divergence when generating code for group-level
+    colletive copies in GPU backend.
+
+  * Intra-group flattening now looks properly inside of branches.
+
+  * Intra-group flattened code versions are no longer used when the
+    resulting workgroups would have less than 32 threads (with default
+    thresholds anyway) (#1064).
+
+## [0.16.2]
+
+### Added
+
+  * `futhark autotune`: added `--pass-option`.
+
+### Fixed
+
+  * `futhark bench`: progress bar now correct when number of runs is
+    less than 10 (#1050).
+
+  * Aliases of arguments passed for consuming parameters are now
+    properly checked (#1053).
+
+  * When using a GPU backend, errors are now properly cleared.
+    Previously, once e.g. an out-of-bounds error had occurred, all
+    future operations would fail with the same error.
+
+  * Size-coercing a transposed array no longer leads to invalid code
+    generation (#1054).
+
+## [0.16.1]
+
+### Added
+
+  * Incremental flattening is now performed by default.  Use
+    attributes to constrain and direct the flattening if you have
+    exotic needs.  This will likely need further iteration and
+    refinement.
 
   * Better code generation for `reverse` (and the equivalent explicit
     slice).
@@ -18,6 +93,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     option, although it is likely slightly less accurate in the
     presence of concurrent operations.
 
+  * A preprocessor macro `FUTHARK_BACKEND_foo` is now defined in
+    generated header files, where *foo* is the name of the backend
+    used.
+
+  * Non-inlined functions (via `#[noinline]`) are now supported in GPU
+    code, but only for functions that *exclusively* operate on
+    scalars.
+
+  * `futhark repl` now accepts a command line argument to load a
+    program initially.
+
+  * Attributes are now also permitted on declarations and specs.
+
+  * `futhark repl` now has a `:nanbreak` command (#839).
+
 ### Removed
 
   * The C# backend has been removed (#984).
@@ -25,6 +115,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `unsafe` keyword has been removed.  Use `#[unsafe]` instead.
 
 ### Changed
+
+  * Out-of-bounds literals are now an error rather than a warning.
+
+  * Type ascriptions on entry points now always result in opaque types
+    when the underlying concrete type is a tuple (#1048).
 
 ### Fixed
 
@@ -34,6 +129,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     (#995).
 
   * Fixed handling of dumb terminals in futhark test (#1000).
+
+  * Fixed exotic monomorphisation case involving lifted type
+    parameters instantiated with functions that take named parameters
+    (#1026).
+
+  * Further tightening of the causality restriction (#1042).
+
+  * Fixed alias tracking for right-operand operator sections (#1043).
 
 ## [0.15.8]
 

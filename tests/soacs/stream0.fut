@@ -10,6 +10,6 @@ let main(num_mc_it: i32)
         (num_und: i32): [][]i32 =
   let sobvctsz  = num_dates*num_und in
   map_stream (\chunk (ns: [chunk]i32): [chunk][1]i32 ->
-               map (\(k: i32): [1]i32 -> if k==0 then [0] else [1])
+               map (\(k: i32): [1]i32 -> if ns[k]==0 then [0] else [1])
                    (iota chunk))
             (iota num_mc_it)

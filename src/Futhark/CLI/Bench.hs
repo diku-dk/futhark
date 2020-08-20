@@ -25,7 +25,7 @@ import Text.Regex.TDFA
 
 import Futhark.Bench
 import Futhark.Test
-import Futhark.Util (fancyTerminal, maybeNth, pmapIO)
+import Futhark.Util (fancyTerminal, maybeNth, maxinum, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 
@@ -165,15 +165,19 @@ runOptions f opts =
 progressBar :: Int -> Int -> Int -> String
 progressBar cur bound steps =
   "[" ++ map cell [1..steps] ++ "] " ++ show cur ++ "/" ++ show bound
-  where step_size = bound `div` steps
+  where step_size :: Double
+        step_size = fromIntegral bound / fromIntegral steps
+        cur' = fromIntegral cur
         chars = " ▏▎▍▍▌▋▊▉█"
         char i = fromMaybe ' ' $ maybeNth (i::Int) chars
+        num_chars = fromIntegral $ length chars
 
         cell :: Int -> Char
         cell i
-          | i * step_size <= cur = char 9
-          | otherwise = char (((cur - (i-1) * step_size) * length chars)
-                              `div` step_size)
+          | i' * step_size <= cur' = char 9
+          | otherwise = char (floor (((cur' - (i'-1) * step_size) * num_chars)
+                                     / step_size))
+          where i' = fromIntegral i
 
 descString :: String -> Int -> String
 descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
@@ -202,7 +206,7 @@ reportResult results = do
       avg = sum runtimes / fromIntegral (length runtimes)
       rsd = stddevp runtimes / mean runtimes :: Double
   putStrLn $ printf "%10.0fμs (RSD: %.3f; min: %3.0f%%; max: %+3.0f%%)"
-    avg rsd ((minimum runtimes / avg - 1) * 100) ((maximum runtimes / avg - 1) * 100)
+    avg rsd ((minimum runtimes / avg - 1) * 100) ((maxinum runtimes / avg - 1) * 100)
 
 runBenchmarkCase :: BenchOptions -> FilePath -> T.Text -> Int -> TestRun
                  -> IO (Maybe DataResult)
@@ -228,6 +232,7 @@ runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds ex
 
   case res of
     Left err -> do
+      liftIO $ putStrLn $ descString dataset_desc pad_to
       liftIO $ putStrLn $ inRed $ T.unpack err
       return $ Just $ DataResult dataset_desc $ Left err
     Right (runtimes, errout) -> do

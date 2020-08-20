@@ -1,5 +1,4 @@
 -- ==
--- tags { no_opencl }
 -- structure { Apply 1 }
 
 let f (x: i32) = x + 2

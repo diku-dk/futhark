@@ -22,6 +22,7 @@ import System.Console.GetOpt
 
 import Futhark.Bench
 import Futhark.Test
+import Futhark.Util (maxinum)
 import Futhark.Util.Options
 
 data AutotuneOptions = AutotuneOptions
@@ -32,11 +33,12 @@ data AutotuneOptions = AutotuneOptions
                     , optExtraOptions :: [String]
                     , optVerbose :: Int
                     , optTimeout :: Int
+                    , optDefaultThreshold :: Int
                     }
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
-  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60
+  AutotuneOptions "opencl" Nothing 10 (Just "tuning") [] 0 60 thresholdMax
 
 compileOptions :: AutotuneOptions -> IO CompileOptions
 compileOptions opts = do
@@ -50,7 +52,11 @@ runOptions :: Path -> Int -> AutotuneOptions -> RunOptions
 runOptions path timeout_s opts =
   RunOptions { runRunner = ""
              , runRuns = optRuns opts
-             , runExtraOptions = "-L" : map opt path ++ optExtraOptions opts
+             , runExtraOptions = "--default-threshold" :
+                                 show (optDefaultThreshold opts) :
+                                 "-L" :
+                                 map opt path ++
+                                 optExtraOptions opts
              , runTimeout = timeout_s
              , runVerbose = optVerbose opts
              , runResultAction = Nothing
@@ -243,7 +249,7 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
 
             newMax <- binarySearch runner (t, tMax) ePars
             let newMinIdx = pred <$> elemIndex newMax ePars
-            let newMin = maximum $ catMaybes [Just tMin, newMinIdx]
+            let newMin = maxinum $ catMaybes [Just tMin, newMinIdx]
             return (newMin, newMax)
 
     bestPair :: [(Int, Int)] -> (Int, Int)
@@ -342,6 +348,12 @@ commandLineOptions = [
     (ReqArg (\prog -> Right $ \config -> config { optFuthark = Just prog })
      "PROGRAM")
     "The binary used for operations (defaults to 'futhark')."
+  , Option [] ["pass-option"]
+    (ReqArg (\opt ->
+               Right $ \config ->
+               config { optExtraOptions = opt : optExtraOptions config })
+     "OPT")
+    "Pass this option to programs being run."
   , Option [] ["tuning"]
     (ReqArg (\s -> Right $ \config -> config { optTuning = Just s })
     "EXTENSION")

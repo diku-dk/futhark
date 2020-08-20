@@ -13,6 +13,7 @@ module Futhark.Analysis.PrimExp
   , constFoldPrimExp
 
   , module Futhark.IR.Primitive
+  , sExt, zExt
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
@@ -184,18 +185,24 @@ instance Pretty v => Fractional (PrimExp v) where
   fromRational = ValueExp . FloatValue . Float64Value . fromRational
 
 instance Pretty v => IntegralExp (PrimExp v) where
-  x `div` y | Just z <- msum [asIntOp SDiv x y, asFloatOp FDiv x y] = constFoldPrimExp z
+  x `div` y | Just z <- msum [asIntOp (`SDiv` Unsafe) x y,
+                              asFloatOp FDiv x y] =
+                constFoldPrimExp z
             | otherwise = numBad "div" (x,y)
 
-  x `mod` y | Just z <- msum [asIntOp SMod x y] = z
+  x `mod` y | Just z <- msum [asIntOp (`SMod` Unsafe) x y] = z
             | otherwise = numBad "mod" (x,y)
 
   x `quot` y | oneIshExp y = x
-             | Just z <- msum [asIntOp SQuot x y] = constFoldPrimExp z
+             | Just z <- msum [asIntOp (`SQuot` Unsafe) x y] = constFoldPrimExp z
              | otherwise = numBad "quot" (x,y)
 
-  x `rem` y | Just z <- msum [asIntOp SRem x y] = constFoldPrimExp z
+  x `rem` y | Just z <- msum [asIntOp (`SRem` Unsafe) x y] = constFoldPrimExp z
             | otherwise = numBad "rem" (x,y)
+
+  x `divUp` y | Just z <- msum [asIntOp (`SDivUp` Unsafe) x y] =
+                  constFoldPrimExp z
+              | otherwise = numBad "divRoundingUp" (x,y)
 
   sgn (ValueExp (IntValue i)) = Just $ signum $ valueIntegral i
   sgn _ = Nothing
@@ -244,12 +251,40 @@ infix 4 .==., .<., .>., .<=., .>=.
 infixr 3 .&&.
 infixr 2 .||.
 
+-- | Smart constructor for sign extension that does a bit of constant
+-- folding.
+sExt :: IntType -> PrimExp v -> PrimExp v
+sExt it (ValueExp (IntValue v)) = ValueExp $ IntValue $ doSExt v it
+sExt it e
+  | primExpIntType e == it = e
+  | otherwise = ConvOpExp (SExt (primExpIntType e) it) e
+
+-- | Smart constructor for zero extension that does a bit of constant
+-- folding.
+zExt :: IntType -> PrimExp v -> PrimExp v
+zExt it (ValueExp (IntValue v)) = ValueExp $ IntValue $ doZExt v it
+zExt it e
+  | primExpIntType e == it = e
+  | otherwise = ConvOpExp (ZExt (primExpIntType e) it) e
+
 asIntOp :: (IntType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asIntOp f x y
+  -- If either of the operands is a constant, then we prefer the type
+  -- of the other operand.  This lets us use literals via fromInteger
+  -- without imposing a specific type.
+  | ValueExp{} <- x,
+    IntType y_t <- primExpType y,
+    Just x' <- asIntExp y_t x = Just $ BinOpExp (f y_t) x' y
+  | ValueExp{} <- y,
+    IntType x_t <- primExpType x,
+    Just y' <- asIntExp x_t y = Just $ BinOpExp (f x_t) x y'
+
+  -- Otherwise prefer the type of the leftmost operand.
   | IntType t <- primExpType x,
     Just y' <- asIntExp t y = Just $ BinOpExp (f t) x y'
   | IntType t <- primExpType y,
     Just x' <- asIntExp t x = Just $ BinOpExp (f t) x' y
+
   | otherwise = Nothing
 
 asIntExp :: IntType -> PrimExp v -> Maybe (PrimExp v)

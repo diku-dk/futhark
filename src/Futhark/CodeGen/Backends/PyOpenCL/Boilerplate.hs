@@ -7,16 +7,18 @@ module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   , openClPrelude
   ) where
 
+import Control.Monad.Identity
 import Data.FileEmbed
-import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.Map as M
 import NeatInterpolation (text)
 
 import Futhark.CodeGen.ImpCode.OpenCL
-  (PrimType(..), SizeClass(..),
+  (PrimType(..), SizeClass(..), sizeDefault,
    FailureMsg(..), ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.Backends.GenericPython.AST
+import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import Futhark.Util.Pretty (prettyText)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
@@ -73,9 +75,8 @@ sizeClassesToPython = Dict . map f . M.toList
   where f (size_name, size_class) =
           (String $ pretty size_name,
            Dict [(String "class", String $ pretty size_class),
-                 (String "value", defValue size_class)])
-        defValue (SizeBespoke _ x) = Integer $ toInteger x
-        defValue _ = None
+                 (String "value", maybe None (Integer . fromIntegral) $
+                                  sizeDefault size_class)])
 
 sizeHeuristicsToPython :: [SizeHeuristic] -> PyExp
 sizeHeuristicsToPython = List . map f
@@ -95,6 +96,8 @@ sizeHeuristicsToPython = List . map f
                                        RegTileSize   -> String "reg_tile_size"
                                        Threshold     -> String "threshold"
 
-                what' = case what of
-                          HeuristicConst x -> Integer $ toInteger x
-                          HeuristicDeviceInfo s -> String s
+                what' = Lambda "device" $ runIdentity $ Py.compilePrimExp onLeaf what
+
+                onLeaf (DeviceInfo s) =
+                  pure $ Py.simpleCall "device.get_info"
+                  [Py.simpleCall "getattr" [Var "cl.device_info", String s]]

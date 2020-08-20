@@ -1,4 +1,6 @@
-{-# LANGUAGE QuasiQuotes, FlexibleContexts #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 -- | Code generation for C with OpenCL.
 module Futhark.CodeGen.Backends.COpenCL
   ( compileProg
@@ -23,14 +25,15 @@ import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
 -- | Compile the program to C with calls to OpenCL.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
-  (Program opencl_code opencl_prelude kernels
-    types sizes failures prog') <- ImpGen.compileProg prog
+  (ws, Program opencl_code opencl_prelude kernels
+       types sizes failures prog') <- ImpGen.compileProg prog
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
-  GC.compileProg operations
+  (ws,) <$>
+    GC.compileProg "opencl" operations
     (generateBoilerplate opencl_code opencl_prelude
      cost_centres kernels types sizes failures)
     include_opencl_h [Space "device", DefaultSpace]
@@ -63,11 +66,6 @@ cliOptions =
            , optionShortName = Just 'p'
            , optionArgument = RequiredArgument "NAME"
            , optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
-           }
-  , Option { optionLongName = "device"
-           , optionShortName = Just 'd'
-           , optionArgument = RequiredArgument "NAME"
-           , optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
            }
   , Option { optionLongName = "dump-opencl"
            , optionShortName = Nothing
@@ -225,7 +223,7 @@ staticOpenCLArray name "device" t vs = do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
       return n
   -- Fake a memory block.
-  GC.contextField (pretty name) [C.cty|struct memblock_device|] Nothing
+  GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
   GC.atInit [C.cstm|{
     typename cl_int success;
@@ -307,7 +305,7 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
         localBytes cur _ = return cur
 
 launchKernel :: C.ToExp a =>
-                String -> [a] -> [a] -> a -> GC.CompilerM op s ()
+                KernelName -> [a] -> [a] -> a -> GC.CompilerM op s ()
 launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
   global_work_size <- newVName "global_work_size"
   time_start <- newVName "time_start"
@@ -321,7 +319,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
+        fprintf(stderr, "Launching %s with global work size [", $string:(pretty kernel_name));
         $stms:(printKernelSize global_work_size)
         fprintf(stderr, "] and local work size [");
         $stms:(printKernelSize local_work_size)
@@ -337,7 +335,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
         $id:time_end = get_wall_time();
         long int $id:time_diff = $id:time_end - $id:time_start;
         fprintf(stderr, "kernel %s runtime: %ldus\n",
-                $string:kernel_name, $id:time_diff);
+                $string:(pretty kernel_name), $id:time_diff);
       }
     }|]
   where kernel_rank = length kernel_dims

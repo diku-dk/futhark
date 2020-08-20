@@ -29,4 +29,4 @@
 -- }
 
 let main [m] (n: i32) (is: [m]i32) (image: [m]i32) : [n]i32 =
-  reduce_by_index (replicate n 0xFFFFFFFF) (i32.&) 0xFFFFFFFF is image
+  reduce_by_index (replicate n (-1)) (i32.&) (-1) is image

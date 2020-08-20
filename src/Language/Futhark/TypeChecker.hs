@@ -143,8 +143,8 @@ checkForDuplicateDecs =
               dupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
-        f (ValDec (ValBind _ name _ _ _ _ _ _ loc)) =
-          check Term name loc
+        f (ValDec vb) =
+          check Term (valBindName vb) (srclocOf vb)
 
         f (TypeDec (TypeBind name _ _ _ _ loc)) =
           check Type name loc
@@ -173,8 +173,8 @@ bindingTypeParams tparams = localEnv env
 
 emptyDimParam :: StructType -> Bool
 emptyDimParam = isNothing . traverseDims onDim
-  where onDim pos AnyDim | pos `elem` [PosImmediate, PosParam] = Nothing
-        onDim _ d = Just d
+  where onDim _ pos AnyDim | pos `elem` [PosImmediate, PosParam] = Nothing
+        onDim _ _ d = Just d
 
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive
@@ -515,7 +515,7 @@ entryPoint params orig_ret_te orig_ret =
           ([], EntryType t te)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
-checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
+checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
@@ -558,7 +558,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
-           ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc loc)
+           ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs loc)
 
 nastyType :: Monoid als => TypeBase dim als -> Bool
 nastyType (Scalar Prim{}) = False

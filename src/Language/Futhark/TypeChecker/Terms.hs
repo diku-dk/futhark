@@ -1087,12 +1087,12 @@ unscopeType :: SrcLoc
 unscopeType tloc unscoped t = do
   (t', m) <- runStateT (traverseDims onDim t) mempty
   return (t' `addAliases` S.map unAlias, M.elems m)
-  where onDim p (NamedDim d)
+  where onDim _ p (NamedDim d)
           | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped =
               if p == PosImmediate || p == PosParam
               then inst loc $ qualLeaf d
               else return AnyDim
-        onDim _ d = return d
+        onDim _ _ d = return d
 
         inst loc d = do
           prev <- gets $ M.lookup d
@@ -1561,11 +1561,12 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   e_arg <- checkArg e
   case ftype of
     Scalar (Arrow as1 m1 t1 (Scalar (Arrow as2 m2 t2 ret))) -> do
-      (t2', _, argext, _) <-
+      (t2', ret', argext, _) <-
         checkApply loc (Just op', 1)
         (Scalar $ Arrow as2 m2 t2 $ Scalar $ Arrow as1 m1 t1 ret) e_arg
       return $ OpSectionRight op' (Info ftype) (argExp e_arg)
-        (Info $ toStruct t1, Info (toStruct t2', argext)) (Info ret) loc
+        (Info $ toStruct t1, Info (toStruct t2', argext))
+        (Info $ addAliases ret (<>aliases ret')) loc
     _ -> typeError loc mempty $
          "Operator section with invalid operator of type" <+> ppr ftype
 
@@ -2192,7 +2193,6 @@ checkApply loc (fname, _)
   occur [observation as loc]
 
   checkOccurences dflow
-  occurs <- consumeArg argloc argtype' (diet tp1')
 
   case anyConsumption dflow of
     Just c ->
@@ -2200,7 +2200,11 @@ checkApply loc (fname, _)
       in zeroOrderType (mkUsage argloc "potential consumption in expression") msg tp1
     _ -> return ()
 
-  occur $ dflow `seqOccurences` occurs
+  occurs <- (dflow `seqOccurences`) <$> consumeArg argloc argtype' (diet tp1')
+
+  checkIfConsumable loc $ S.map AliasBound $ allConsumed occurs
+  occur occurs
+
   (argext, parsubst) <-
     case pname of
       Named pname' -> do
@@ -2350,7 +2354,7 @@ causalityCheck binding_body = do
 
   let checkCausality what known t loc
         | (d,dloc):_ <- mapMaybe (unknown constraints known) $
-                        S.toList $ mustBeExplicit $ toStruct t =
+                        S.toList $ typeDimNames $ toStruct t =
             Just $ lift $ causality what loc d dloc t
         | otherwise = Nothing
 
@@ -2371,6 +2375,11 @@ causalityCheck binding_body = do
       onExp known (Lambda params _ _ _ _)
         | bad : _ <- mapMaybe (checkParamCausality known) params =
             bad
+
+      onExp known e@(Coerce what _ (_, Info ext) _) = do
+        modify (S.fromList ext<>)
+        void $ onExp known what
+        return e
 
       onExp known e@(LetPat _ bindee_e body_e (_, Info ext) _) = do
         sequencePoint known bindee_e body_e ext
@@ -2464,7 +2473,8 @@ literalOverflowCheck = void . check
         inBoundsF x Float32 = not $ isInfinite (realToFrac x :: Float)
         inBoundsF x Float64 = not $ isInfinite x
         warnBounds inBounds x ty loc = unless inBounds
-          $ warn loc $ "Literal " <> show x <> " out of bounds for inferred type " <> pretty ty <> "."
+          $ typeError loc mempty $ "Literal " <> ppr x <>
+          " out of bounds for inferred type " <> ppr ty <> "."
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
@@ -2771,10 +2781,10 @@ verifyFunctionParams fname params =
 -- the sizes of parameter types, and the sizes of return types.
 dimUses :: StructType -> (Names, Names, Names)
 dimUses = execWriter . traverseDims f
-  where f PosImmediate (NamedDim v) = tell (S.singleton (qualLeaf v), mempty, mempty)
-        f PosParam (NamedDim v) = tell (mempty, S.singleton (qualLeaf v), mempty)
-        f PosReturn (NamedDim v) = tell (mempty, mempty, S.singleton (qualLeaf v))
-        f _ _ = return ()
+  where f _ PosImmediate (NamedDim v) = tell (S.singleton (qualLeaf v), mempty, mempty)
+        f _ PosParam (NamedDim v) = tell (mempty, S.singleton (qualLeaf v), mempty)
+        f _ PosReturn (NamedDim v) = tell (mempty, mempty, S.singleton (qualLeaf v))
+        f _ _ _ = return ()
 
 -- | Find at all type variables in the given type that are covered by
 -- the constraints, and produce type parameters that close over them.
@@ -2921,9 +2931,8 @@ observe (Ident nm (Info t) loc) =
   let als = AliasBound nm `S.insert` aliases t
   in occur [observation als loc]
 
--- | Proclaim that we have written to the given variable.
-consume :: SrcLoc -> Aliasing -> TermTypeM ()
-consume loc als = do
+checkIfConsumable :: SrcLoc -> Aliasing -> TermTypeM ()
+checkIfConsumable loc als = do
   vtable <- asks $ scopeVtable . termScope
   let consumable v = case M.lookup v vtable of
                        Just (BoundV Local _ t)
@@ -2933,9 +2942,15 @@ consume loc als = do
                        _ -> False
   case filter (not . consumable) $ map aliasVar $ S.toList als of
     v:_ -> typeError loc mempty $
-           "Attempt to consume variable" <+> pquote (pprName v)
+           "Would consume variable" <+> pquote (pprName v)
            <> ", which is not allowed."
-    [] -> occur [consumption als loc]
+    [] -> return ()
+
+-- | Proclaim that we have written to the given variable.
+consume :: SrcLoc -> Aliasing -> TermTypeM ()
+consume loc als = do
+  checkIfConsumable loc als
+  occur [consumption als loc]
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given

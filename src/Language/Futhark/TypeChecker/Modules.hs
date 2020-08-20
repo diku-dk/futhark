@@ -254,8 +254,8 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
 
         emptyDims :: StructType -> Bool
         emptyDims = isNothing . traverseDims onDim
-          where onDim PosImmediate AnyDim = Nothing
-                onDim _ d = Just d
+          where onDim _ PosImmediate AnyDim = Nothing
+                onDim _ _ d = Just d
 
 resolveMTyNames :: MTy -> MTy
                 -> M.Map VName (QualName VName)
@@ -434,13 +434,17 @@ matchMTys orig_mty orig_mty_sig =
       unless (length spec_ps == length ps) $ nomatch spec_t
       param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
 
-      case S.toList (mustBeExplicitInType t) `intersect` map typeParamName ps of
-        [] -> return ()
-        d:_ -> Left $ TypeError loc mempty $
-               "Type" </>
-               indent 2 (ppTypeAbbr [] name (l, ps, t)) </>
-               textwrap "cannot be made abstract because size parameter" <+/> pquote (pprName d) <+/>
-               textwrap "is not used as an array size in the definition."
+      -- Abstract types have a particular restriction to ensure that
+      -- if we have a value of an abstract type 't [n]', then there is
+      -- an array of size 'n' somewhere inside.
+      when (M.member spec_name abs_subst_to_type) $
+        case S.toList (mustBeExplicitInType t) `intersect` map typeParamName ps of
+          [] -> return ()
+          d:_ -> Left $ TypeError loc mempty $
+                 "Type" </>
+                 indent 2 (ppTypeAbbr [] name (l, ps, t)) </>
+                 textwrap "cannot be made abstract because size parameter" <+/> pquote (pprName d) <+/>
+                 textwrap "is not used as an array size in the definition."
 
       let spec_t' = substituteTypes (param_substs<>abs_subst_to_type) spec_t
       if spec_t' == t

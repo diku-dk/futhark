@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE Strict #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
@@ -22,6 +23,7 @@ module Futhark.CodeGen.ImpGen
     -- * Monadic Compiler Interface
   , ImpM
   , localDefaultSpace, askFunction
+  , newVNameForFun, nameForFun
   , askEnv, localEnv
   , localOps
   , VTable
@@ -80,12 +82,16 @@ module Futhark.CodeGen.ImpGen
   , (<--)
 
   , function
+
+  , warn
+  , module Language.Futhark.Warnings
   )
   where
 
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
+import Control.Parallel.Strategies
 import Data.Bifunctor (first)
 import qualified Data.DList as DL
 import Data.Either
@@ -104,6 +110,8 @@ import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util
+import Futhark.Util.Loc (noLoc)
+import Language.Futhark.Warnings
 
 -- | How to compile an t'Op'.
 type OpCompiler lore r op = Pattern lore -> Op lore -> ImpM lore r op ()
@@ -200,6 +208,9 @@ data Env lore r op = Env {
     -- ^ User-extensible environment.
   , envFunction :: Maybe Name
     -- ^ Name of the function we are compiling, if any.
+  , envAttrs :: Attrs
+    -- ^ The set of attributes that are active on the enclosing
+    -- statements (including the one we are currently compiling).
   }
 
 newEnv :: r -> Operations lore r op -> Imp.Space -> Env lore r op
@@ -213,6 +224,7 @@ newEnv r ops ds =
       , envVolatility = Imp.Nonvolatile
       , envEnv = r
       , envFunction = Nothing
+      , envAttrs = mempty
       }
 
 -- | The symbol table used during compilation.
@@ -222,11 +234,12 @@ data ImpState lore r op =
   ImpState { stateVTable :: VTable lore
            , stateFunctions :: Imp.Functions op
            , stateCode :: Imp.Code op
+           , stateWarnings :: Warnings
            , stateNameSource :: VNameSource
            }
 
 newState :: VNameSource -> ImpState lore r op
-newState = ImpState mempty mempty mempty
+newState = ImpState mempty mempty mempty mempty
 
 newtype ImpM lore r op a =
   ImpM (ReaderT (Env lore r op) (State (ImpState lore r op)) a)
@@ -278,10 +291,12 @@ subImpM r ops (ImpM m) = do
                     , stateFunctions = mempty
                     , stateCode = mempty
                     , stateNameSource = stateNameSource s
+                    , stateWarnings = mempty
                     }
       (x, s'') = runState (runReaderT m env') s'
 
   putNameSource $ stateNameSource s''
+  warnings $ stateWarnings s''
   return (x, stateCode s'')
 
 -- | Execute a code generation action, returning the code that was
@@ -308,6 +323,14 @@ comment desc m = do code <- collect m
 emit :: Imp.Code op -> ImpM lore r op ()
 emit code = modify $ \s -> s { stateCode = stateCode s <> code }
 
+warnings :: Warnings -> ImpM lore r op ()
+warnings ws = modify $ \s -> s { stateWarnings = ws <> stateWarnings s}
+
+-- | Emit a warning about something the user should be aware of.
+warn :: Located loc => loc -> [loc] -> String -> ImpM lore r op ()
+warn loc locs problem =
+  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) problem
+
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM lore r op ()
 emitFunction fname fun = do
@@ -328,22 +351,31 @@ constsVTable = foldMap stmVtable
 
 compileProg :: (Mem lore, FreeIn op, MonadFreshNames m) =>
                r -> Operations lore r op -> Imp.Space
-            -> Prog lore -> m (Imp.Definitions op)
+            -> Prog lore -> m (Warnings, Imp.Definitions op)
 compileProg r ops space (Prog consts funs) =
   modifyNameSource $ \src ->
-  let (consts', s') =
-        runImpM compile r ops space
-        (newState src) { stateVTable = constsVTable consts }
-  in (Imp.Definitions consts' (stateFunctions s'),
+    let (_, ss) =
+          unzip $ parMap rpar (compileFunDef' src) funs
+        free_in_funs =
+          freeIn $ mconcat $ map stateFunctions ss
+        (consts', s') =
+          runImpM (compileConsts free_in_funs consts) r ops space $
+          combineStates ss
+  in ((stateWarnings s',
+       Imp.Definitions consts' (stateFunctions s')),
       stateNameSource s')
-  where compile = do
-          mapM_ compileFunDef' funs
-          free_in_funs <- gets (freeIn . stateFunctions)
-          compileConsts free_in_funs consts
+  where compileFunDef' src fdef =
+          runImpM (compileFunDef fdef) r ops space
+          (newState src) { stateVTable = constsVTable consts }
 
-        compileFunDef' fdef =
-          local (\env -> env { envFunction = Just $ funDefName fdef }) $
-          compileFunDef fdef
+        combineStates ss =
+          let Imp.Functions funs' = mconcat $ map stateFunctions ss
+              src = mconcat (map stateNameSource ss)
+          in (newState src) { stateFunctions =
+                                Imp.Functions $ M.toList $ M.fromList funs'
+                            , stateWarnings =
+                                mconcat $ map stateWarnings ss
+                            }
 
 compileConsts :: Names -> Stms lore -> ImpM lore r op (Imp.Constants op)
 compileConsts used_consts stms = do
@@ -495,7 +527,8 @@ compileOutParams orig_rts orig_epts = do
 compileFunDef :: Mem lore =>
                  FunDef lore
               -> ImpM lore r op ()
-compileFunDef (FunDef entry fname rettype params body) = do
+compileFunDef (FunDef entry _ fname rettype params body) =
+  local (\env -> env { envFunction = Just fname }) $ do
   ((outparams, inparams, results, args), body') <- collect' compile
   emitFunction fname $ Imp.Function (isJust entry) outparams inparams body' results args
   where params_entry = maybe (replicate (length params) TypeDirect) fst entry
@@ -559,10 +592,11 @@ defCompileStms alive_after_stms all_stms m =
   -- Free.  This is very conservative, but can cut down on lifetimes
   -- in some cases.
   void $ compileStms' mempty $ stmsToList all_stms
-  where compileStms' allocs (Let pat _ e:bs) = do
+  where compileStms' allocs (Let pat aux e:bs) = do
           dVars (Just e) (patternElements pat)
 
-          e_code <- collect $ compileExp pat e
+          e_code <- localAttrs (stmAuxAttrs aux) $
+                    collect $ compileExp pat e
           (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
           let dies_here v = not (v `nameIn` live_after) &&
                             v `nameIn` freeIn e_code
@@ -611,6 +645,10 @@ defCompileExp pat (Apply fname args _ _) = do
 defCompileExp pat (BasicOp op) = defCompileBasicOp pat op
 
 defCompileExp pat (DoLoop ctx val form body) = do
+  attrs <- askAttrs
+  when ("unroll" `inAttrs` attrs) $
+    warn (noLoc::SrcLoc) [] "#[unroll] on loop with unknown number of iterations." -- FIXME: no location.
+
   dFParams mergepat
   forM_ merge $ \(p, se) ->
     when ((==0) $ arrayRank $ paramType p) $
@@ -675,6 +713,10 @@ defCompileBasicOp _ (Assert e msg loc) = do
   msg' <- traverse toExp msg
   emit $ Imp.Assert e' msg' loc
 
+  attrs <- askAttrs
+  when (AttrComp "warn" ["safety_checks"] `inAttrs` attrs) $
+    uncurry warn loc "Safety check required at run-time."
+
 defCompileBasicOp (Pattern _ [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
       copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toExp' int32) idxs
@@ -699,7 +741,7 @@ defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
   e' <- toExp e
   s' <- toExp s
   sFor "i" n' $ \i -> do
-    let i' = ConvOpExp (SExt Int32 it) i
+    let i' = sExt it i
     x <- dPrimV "x" $ e' + i' * s'
     copyDWIM (patElemName pe) [DimFix i] (Var x) []
 
@@ -730,7 +772,7 @@ defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
       dest_mem <- entryArrayLocation <$> lookupArray (patElemName pe)
       dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
       let t = primValueType v
-      static_array <- newVName "static_array"
+      static_array <- newVNameForFun "static_array"
       emit $ Imp.DeclareArray static_array dest_space t $ Imp.ArrayValues vs
       let static_src = MemLocation static_array [intConst Int32 $ fromIntegral $ length es] $
                        IxFun.iota [fromIntegral $ length es]
@@ -911,11 +953,32 @@ localDefaultSpace space = local (\env -> env { envDefaultSpace = space })
 askFunction :: ImpM lore r op (Maybe Name)
 askFunction = asks envFunction
 
+-- | Generate a 'VName', prefixed with 'askFunction' if it exists.
+newVNameForFun :: String -> ImpM lore r op VName
+newVNameForFun s = do
+  fname <- fmap nameToString <$> askFunction
+  newVName $ maybe "" (++".") fname ++ s
+
+-- | Generate a 'Name', prefixed with 'askFunction' if it exists.
+nameForFun :: String -> ImpM lore r op Name
+nameForFun s = do
+  fname <- askFunction
+  return $ maybe "" (<>".") fname <> nameFromString s
+
 askEnv :: ImpM lore r op r
 askEnv = asks envEnv
 
 localEnv :: (r -> r) -> ImpM lore r op a -> ImpM lore r op a
 localEnv f = local $ \env -> env { envEnv = f $ envEnv env }
+
+-- | The active attributes, including those for the statement
+-- currently being compiled.
+askAttrs :: ImpM lore r op Attrs
+askAttrs = asks envAttrs
+
+-- | Add more attributes to what is returning by 'askAttrs'.
+localAttrs :: Attrs -> ImpM lore r op a -> ImpM lore r op a
+localAttrs attrs = local $ \env -> env { envAttrs = attrs <> envAttrs env }
 
 localOps :: Operations lore r op -> ImpM lore r op a -> ImpM lore r op a
 localOps ops = local $ \env ->
@@ -1148,7 +1211,8 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
           emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
       | otherwise ->
           error $
-          unwords ["copyDWIMDest: prim-typed target and array-typed source", pretty src,
+          unwords ["copyDWIMDest: prim-typed target", pretty name,
+                   "and array-typed source", pretty src,
                    "with slice", pretty src_slice]
 
     (ArrayDestination (Just dest_loc), ArrayVar _ src_arr) -> do
@@ -1211,10 +1275,11 @@ compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ pretty pat
 
 -- | The number of bytes needed to represent the array in a
--- straightforward contiguous format.
+-- straightforward contiguous format, as an 'Int64' expression.
 typeSize :: Type -> Count Bytes Imp.Exp
-typeSize t = Imp.bytes $ Imp.LeafExp (Imp.SizeOf $ elemType t) int32 *
-             product (map (toExp' int32) (arrayDims t))
+typeSize t =
+  Imp.bytes $ sExt Int64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int32) *
+  product (map (sExt Int64 . toExp' int32) (arrayDims t))
 
 --- Building blocks for constructing code.
 
@@ -1311,7 +1376,7 @@ sStaticArray name space pt vs = do
   let num_elems = case vs of Imp.ArrayValues vs' -> length vs'
                              Imp.ArrayZeros n -> fromIntegral n
       shape = Shape [intConst Int32 $ toInteger num_elems]
-  mem <- newVName $ name ++ "_mem"
+  mem <- newVNameForFun $ name ++ "_mem"
   emit $ Imp.DeclareArray mem space pt vs
   addVar mem $ MemVar Nothing $ MemEntry space
   sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
@@ -1339,15 +1404,17 @@ sLoopNest = sLoopNest' [] . shapeDims
 x <-- e = emit $ Imp.SetScalar x e
 infixl 3 <--
 
--- | Constructing a non-entry point function.
-function :: [Imp.Param] -> [Imp.Param] -> ImpM lore r op ()
-         -> ImpM lore r op (Imp.Function op)
-function outputs inputs m = do
+-- | Constructing an ad-hoc function that does not
+-- correspond to any of the IR functions in the input program.
+function :: Name -> [Imp.Param] -> [Imp.Param] -> ImpM lore r op ()
+         -> ImpM lore r op ()
+function fname outputs inputs m = local newFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
-  return $ Imp.Function False outputs inputs body [] []
+  emitFunction fname $ Imp.Function False outputs inputs body [] []
   where addParam (Imp.MemParam name space) =
           addVar name $ MemVar Nothing $ MemEntry space
         addParam (Imp.ScalarParam name bt) =
           addVar name $ ScalarVar Nothing $ ScalarEntry bt
+        newFunction env = env { envFunction = Just fname }

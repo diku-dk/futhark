@@ -24,16 +24,17 @@ import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GenericC.Options
 
 -- | Compile the program to C with calls to CUDA.
-compileProg :: MonadFreshNames m => Prog KernelsMem -> m GC.CParts
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
-  (Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
+  (ws, Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
     ImpGen.compileProg prog
   let cost_centres =
         [copyDevToDev, copyDevToHost, copyHostToDev,
          copyScalarToDev, copyScalarFromDev]
       extra = generateBoilerplate cuda_code cuda_prelude
               cost_centres kernels sizes failures
-  GC.compileProg operations extra cuda_includes
+  (ws,) <$>
+    GC.compileProg "cuda" operations extra cuda_includes
     [Space "device", DefaultSpace] cliOptions prog'
   where
     operations :: GC.Operations OpenCL ()
@@ -171,7 +172,7 @@ staticCUDAArray name "device" t vs = do
       GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
       return n
   -- Fake a memory block.
-  GC.contextField (pretty name) [C.cty|struct memblock_device|] Nothing
+  GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
   GC.atInit [C.cstm|{
     ctx->$id:name.references = NULL;
@@ -203,7 +204,7 @@ callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
   in GC.stm [C.cstm|$id:v = ctx->cuda.$id:field;|]
   where
-    cudaSizeClass (SizeThreshold _) = "threshold"
+    cudaSizeClass SizeThreshold{} = "threshold"
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
@@ -240,12 +241,12 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     if ($exp:sizes_nonzero) {
       int perm[3] = { 0, 1, 2 };
 
-      if ($exp:grid_y > (1<<16)) {
+      if ($exp:grid_y >= (1<<16)) {
         perm[1] = perm[0];
         perm[0] = 1;
       }
 
-      if ($exp:grid_z > (1<<16)) {
+      if ($exp:grid_z >= (1<<16)) {
         perm[2] = perm[0];
         perm[0] = 2;
       }
@@ -258,7 +259,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       void *$id:args_arr[] = { $inits:args'' };
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(stderr, "Launching %s with grid size (", $string:kernel_name);
+        fprintf(stderr, "Launching %s with grid size (", $string:(pretty kernel_name));
         $stms:(printSizes [grid_x, grid_y, grid_z])
         fprintf(stderr, ") and block size (");
         $stms:(printSizes [block_x, block_y, block_z])
@@ -277,7 +278,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
         CUDA_SUCCEED(cuCtxSynchronize());
         $id:time_end = get_wall_time();
         fprintf(stderr, "Kernel %s runtime: %ldus\n",
-                $string:kernel_name, $id:time_end - $id:time_start);
+                $string:(pretty kernel_name), $id:time_end - $id:time_start);
       }
     }|]
 

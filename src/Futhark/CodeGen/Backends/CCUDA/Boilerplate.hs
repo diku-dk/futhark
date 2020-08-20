@@ -20,13 +20,14 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.Util (chunk, zEncodeString)
 
 import qualified Data.Map as M
+import Data.Maybe
 import Data.FileEmbed (embedStringFile)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
 -- | Block items to put before and after a thing to be profiled.
-profilingEnclosure :: String -> ([C.BlockItem], [C.BlockItem])
+profilingEnclosure :: Name -> ([C.BlockItem], [C.BlockItem])
 profilingEnclosure name =
   ([C.citems|
       typename cudaEvent_t *pevents = NULL;
@@ -45,7 +46,7 @@ profilingEnclosure name =
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
-generateBoilerplate :: String -> String -> [String] -> M.Map KernelName Safety
+generateBoilerplate :: String -> String -> [Name] -> M.Map KernelName KernelSafety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
@@ -117,8 +118,7 @@ generateConfigFuns sizes = do
 
   let size_value_inits = zipWith sizeInit [0..M.size sizes-1] (M.elems sizes)
       sizeInit i size = [C.cstm|cfg->sizes[$int:i] = $int:val;|]
-         where val = case size of SizeBespoke _ x -> x
-                                  _               -> 0
+         where val = fromMaybe 0 $ sizeDefault size
   GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
     ([C.cedecl|struct $id:cfg* $id:s(void);|],
      [C.cedecl|struct $id:cfg* $id:s(void) {
@@ -269,7 +269,7 @@ generateConfigFuns sizes = do
                        }|])
   return cfg
 
-generateContextFuns :: String -> [String] -> M.Map KernelName Safety
+generateContextFuns :: String -> [Name] -> M.Map KernelName KernelSafety
                     -> M.Map Name SizeClass
                     -> [FailureMsg]
                     -> GC.CompilerM OpenCL () ()
@@ -284,8 +284,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
       forKernel name =
         ([C.csdecl|typename CUfunction $id:name;|],
-         [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(&ctx->$id:name,
-                                ctx->cuda.module, $string:name));|])
+         [C.cstm|CUDA_SUCCEED(cuModuleGetFunction(
+                                &ctx->$id:name,
+                                ctx->cuda.module,
+                                $string:(pretty (C.toIdent name mempty))));|])
         : forCostCentre name
 
       (kernel_fields, init_kernel_fields) =
@@ -390,6 +392,14 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                    ctx->failure_is_an_option = 0;
 
                    if (failure_idx >= 0) {
+                     // We have to clear global_failure so that the next entry point
+                     // is not considered a failure from the start.
+                     typename int32_t no_failure = -1;
+                     CUDA_SUCCEED(
+                       cuMemcpyHtoD(ctx->global_failure,
+                                    &no_failure,
+                                    sizeof(int32_t)));
+
                      typename int32_t args[$int:max_failure_args+1];
                      CUDA_SUCCEED(
                        cuMemcpyDtoH(&args,

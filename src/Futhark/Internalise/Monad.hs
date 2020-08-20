@@ -1,4 +1,8 @@
-{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
@@ -23,16 +27,7 @@ module Futhark.Internalise.Monad
 
   , localConstsScope
 
-  , asserting
-  , assertingOne
-
-  -- * Type Handling
-  , InternaliseTypeM
-  , liftInternaliseM
-  , runInternaliseTypeM
-  , lookupDim
-  , withDims
-  , DimTable
+  , assert
 
     -- * Convenient reexports
   , module Futhark.Tools
@@ -188,6 +183,16 @@ localConstsScope m = do
   scope <- gets stateConstScope
   localScope scope m
 
+-- | Construct an 'Assert' statement, but taking attributes into
+-- account.  Always use this function, and never construct 'Assert'
+-- directly in the internaliser!
+assert :: String -> SubExp -> ErrorMsg SubExp -> SrcLoc
+       -> InternaliseM Certificates
+assert desc se msg loc = assertingOne $ do
+  attrs <- asks $ attrsForAssert . envAttrs
+  attributing attrs $ letExp desc $
+    BasicOp $ Assert se msg (loc, mempty)
+
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
 asserting :: InternaliseM Certificates
@@ -203,29 +208,3 @@ asserting m = do
 assertingOne :: InternaliseM VName
              -> InternaliseM Certificates
 assertingOne m = asserting $ Certificates . pure <$> m
-
-type DimTable = M.Map VName ExtSize
-
-newtype TypeEnv = TypeEnv { typeEnvDims  :: DimTable }
-
-type TypeState = Int
-
-newtype InternaliseTypeM a =
-  InternaliseTypeM (ReaderT TypeEnv (StateT TypeState InternaliseM) a)
-  deriving (Functor, Applicative, Monad,
-            MonadReader TypeEnv,
-            MonadState TypeState)
-
-liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
-liftInternaliseM = InternaliseTypeM . lift . lift
-
-runInternaliseTypeM :: InternaliseTypeM a
-                    -> InternaliseM a
-runInternaliseTypeM (InternaliseTypeM m) =
-  evalStateT (runReaderT m (TypeEnv mempty)) 0
-
-withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
-withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }
-
-lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
-lookupDim name = asks $ M.lookup name . typeEnvDims

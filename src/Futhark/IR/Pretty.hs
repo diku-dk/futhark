@@ -120,10 +120,14 @@ instance PrettyLore lore => Pretty (Body lore) where
 
 instance Pretty Attr where
   ppr (AttrAtom v) = ppr v
+  ppr (AttrComp f attrs) = ppr f <> parens (commasep $ map ppr attrs)
 
-attrAnnots :: Stm lore -> [Doc]
-attrAnnots = map f . toList . unAttrs . stmAuxAttrs . stmAux
+attrAnnots :: Attrs -> [Doc]
+attrAnnots = map f . toList . unAttrs
   where f v = text "#[" <> ppr v <> text "]"
+
+stmAttrAnnots :: Stm lore -> [Doc]
+stmAttrAnnots = attrAnnots . stmAuxAttrs . stmAux
 
 instance Pretty (PatElemT dec) => Pretty (PatternT dec) where
   ppr pat = ppPattern (patternContextElements pat) (patternValueElements pat)
@@ -167,10 +171,10 @@ instance PrettyLore lore => Pretty (Stm lore) where
                         _                  -> cs /= mempty
 
           stmannot =
-            case attrAnnots bnd <>
-            mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
+            case stmAttrAnnots bnd <>
+                 mapMaybe ppAnnot (patternElements $ stmPattern bnd) of
               []     -> id
-              annots -> (stack annots </>)
+              annots -> (align (stack annots) </>)
 
 instance Pretty BasicOp where
   ppr (SubExp se) = ppr se
@@ -263,8 +267,8 @@ instance PrettyLore lore => Pretty (Lambda lore) where
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDef lore) where
-  ppr (FunDef entry name rettype fparams body) =
-    annot (mapMaybe ppAnnot fparams) $
+  ppr (FunDef entry attrs name rettype fparams body) =
+    annot (mapMaybe ppAnnot fparams <> attrAnnots attrs) $
     text fun <+> ppTuple' rettype <+/>
     text (nameToString name) <+>
     apply (map ppr fparams) <+>

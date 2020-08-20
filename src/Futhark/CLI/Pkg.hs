@@ -29,7 +29,7 @@ import Futhark.Util.Options
 import Futhark.Pkg.Types
 import Futhark.Pkg.Info
 import Futhark.Pkg.Solve
-import Futhark.Util (directoryContents)
+import Futhark.Util (directoryContents, maxinum)
 import Futhark.Util.Log
 
 --- Installing packages
@@ -386,7 +386,7 @@ main prog args = do
                     m (unwords [prog, cmd]) args'
     _ -> do
       let bad _ () = Just $ do
-            let k = maximum (map (length . fst) commands) + 3
+            let k = maxinum (map (length . fst) commands) + 3
             usageMsg $ T.unlines $
               ["<command> ...:", "", "Commands:"] ++
               [ "   " <> T.pack cmd <> T.pack (replicate (k - length cmd) ' ') <> desc
