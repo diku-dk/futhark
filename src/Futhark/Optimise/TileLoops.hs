@@ -43,7 +43,7 @@ optimiseBody (Body () bnds res) = localScope (scopeOf bnds) $
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
-  blkRegTiling_res <- mm_BlkRegTiling stm
+  blkRegTiling_res <- mmBlkRegTiling stm
   -- let blkRegTiling_res = Nothing
   case blkRegTiling_res of
     Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
