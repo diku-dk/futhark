@@ -47,7 +47,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
   if (subtask->chunkable) {
     if (*subtask->total_iter > 0) {
       subtask->chunk_size = compute_chunk_size(subtask, worker);
-      assert(subtask->chunk_size > 0.0f);
+      assert(subtask->chunk_size > 0);
     }
     int64_t remaining_iter = subtask->end - subtask->start;
     assert(remaining_iter > 0);
