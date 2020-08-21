@@ -78,7 +78,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   double ratio;
   int64_t time_elapsed;
   while(1) {
-    memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * ctx->scheduler.num_threads);
+    memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * num_threads);
     int64_t min_iter_pr_subtask = kappa_tune / C;
     int nsubtasks = iterations / min_iter_pr_subtask;
     struct scheduler_info info;

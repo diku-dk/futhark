@@ -136,7 +136,7 @@ compileProg =
 
                  $stms:init_fields
 
-                 futhark_segred_tuning_program(ctx);
+                 // futhark_segred_tuning_program(ctx);
 
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
