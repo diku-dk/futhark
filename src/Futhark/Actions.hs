@@ -197,6 +197,7 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
+          -- let debug_flags = ["-g", "-fno-omit-frame-pointer", "-fsanitize=address", "-fsanitize=integer", "-fsanitize=undefined", "-fno-sanitize-recover=null"]
           ret <- liftIO $ runProgramWithExitCode "gcc"
                  [cpath, "-O3", "-pthread", "-std=c11", "-lm", "-o", outpath] mempty
           case ret of
