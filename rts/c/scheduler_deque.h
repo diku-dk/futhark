@@ -32,14 +32,14 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
 static inline int64_t compute_chunk_size(struct subtask* subtask, struct worker *worker)
 {
   struct scheduler* scheduler = worker->scheduler;
-  int64_t rem_iter = subtask->end-subtask->start;
+  int64_t rem_iter = subtask->end - subtask->start;
   double C = (double)*subtask->total_time / (double)*subtask->total_iter;
+  assert( C >= 0.0f);
   // Should we be careful or nah?
-  int64_t min_iter_pr_subtask = (int) (kappa / (C + DBL_EPSILON));
+  int64_t min_iter_pr_subtask = (int64_t) (kappa / (C + DBL_EPSILON));
   min_iter_pr_subtask = min_iter_pr_subtask == 0 ? 1 : min_iter_pr_subtask;
   return min_iter_pr_subtask;
 }
-
 
 
 static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
@@ -47,8 +47,10 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
   if (subtask->chunkable) {
     if (*subtask->total_iter > 0) {
       subtask->chunk_size = compute_chunk_size(subtask, worker);
+      assert(subtask->chunk_size > 0.0f);
     }
-    int remaining_iter = subtask->end - subtask->start;
+    int64_t remaining_iter = subtask->end - subtask->start;
+    assert(remaining_iter > 0);
     if (remaining_iter > subtask->chunk_size) {
       struct subtask *new_subtask = malloc(sizeof(struct subtask));
       *new_subtask = *subtask;
@@ -72,7 +74,6 @@ static inline int steal_from_random_worker(struct worker* worker)
   struct subtask* subtask =  NULL;
   int retval = subtask_queue_steal(worker_k, &subtask);
   if (retval == 0) {
-
     subtask_queue_enqueue(worker, subtask);
     return 1;
   }

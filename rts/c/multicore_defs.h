@@ -45,7 +45,7 @@ enum scheduling {
 struct subtask {
   sub_task_fn fn;
   void* args;
-  int start, end;
+  int64_t start, end;
   const char *name;
   int chunkable;
   int64_t chunk_size;
