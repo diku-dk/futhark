@@ -45,7 +45,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   ctx->tuning_timing = 0;
   ctx->tuning_iter = iterations;
 
-
+  int64_t start_tuning = get_wall_time();
   // Run sequential ''reduce'' first'
   int64_t tuning_sequentiual_start = get_wall_time();
   char reduce_stage_1_tid_accum_arr[sizeof(int32_t) * ctx->scheduler.num_threads];
@@ -66,13 +66,15 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   double C = (double)ctx->tuning_timing / (double) ctx->tuning_iter;
   fprintf(stderr, "Found C is %f\n", C);
 
-  // Start tuning for kappa
-  worker_local = malloc(sizeof(struct worker));
+  int num_threads = ctx->scheduler.num_threads;
+  ctx->scheduler.num_threads = 1;
+  ctx->scheduler.workers = malloc(sizeof(struct worker));
+  worker_local = &ctx->scheduler.workers[0];
   worker_local->tid = 0;
-  CHECK_ERR(deque_init(&worker_local->q, iterations), "failed to init queue for worker %d\n", 0);
+  CHECK_ERR(subtask_queue_init(&ctx->scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
 
+  // Start tuning for kappa
   double kappa_tune = 0.1;
-  double optimal_kappa = -1;
   double ratio;
   int64_t time_elapsed;
   while(1) {
@@ -101,7 +103,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
                              &futhark_segred_tuning_scheduler_subtask);
     assert(futhark_segred_tuning_program_err == 0);
     int64_t tuning_chunked_end = get_wall_time();
-    time_elapsed =  tuning_chunked_end- tuning_chunked_start;
+    time_elapsed =  tuning_chunked_end - tuning_chunked_start;
 
     ratio = (double)time_elapsed / (double)sequential_elapsed;
     if (ratio < 1.06) {
@@ -110,9 +112,13 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     kappa_tune += 0.1;
   }
 
-  fprintf(stderr, "kappa %f - time %lld - ratio %f\n", kappa_tune, time_elapsed,  ratio);
+  int64_t end_tuning = get_wall_time();
+  fprintf(stderr, "tuning took %lld us and found kappa %f - time %lld - ratio %f\n",
+          end_tuning- start_tuning, kappa_tune, time_elapsed,  ratio);
 
   kappa = kappa_tune;
-  free(worker_local);
+  subtask_queue_destroy(&ctx->scheduler.workers[0].q);
+  free(ctx->scheduler.workers);
+  ctx->scheduler.num_threads = num_threads;
   return err;
 }
