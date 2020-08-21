@@ -9,8 +9,6 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             volatile int* counter,
                                             int64_t *total_time,
                                             int64_t *total_iter,
-                                            pthread_mutex_t *mutex,
-                                            pthread_cond_t *cond,
                                             int64_t start, int64_t end,
                                             int chunkable,
                                             int64_t chunk_size,
@@ -26,9 +24,6 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->name       = name;
 
   subtask->counter    = counter;
-  subtask->mutex   = mutex;
-  subtask->cond    = cond;
-
   subtask->total_time = total_time;
   subtask->total_iter = total_iter;
 
@@ -60,55 +55,6 @@ static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) 
   subtask_queue->first = 0;
 
   return 0;
-}
-
-static inline struct subtask* jobqueue_get_subtask_chunk(struct worker *worker,
-                                                         struct subtask_queue *subtask_queue,
-                                                         int stealing)
-{
-
-  struct subtask *cur_head;
-  if (stealing) {
-    cur_head = subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used - 1) % subtask_queue->capacity];
-  } else {
-    cur_head = subtask_queue->buffer[subtask_queue->first];
-  }
-  int remaining_iter = cur_head->end - cur_head->start;
-  assert(remaining_iter > 0);
-
-  /* if (cur_head->chunkable && remaining_iter > cur_head->iterations) */
-  /* { */
-  /*   /\* fprintf(stderr, "%d - chuink %d - rem %d\n", pthread_self(), cur_head->chunk, remaining_iter); *\/ */
-  /*   struct subtask *new_subtask = malloc(sizeof(struct subtask)); */
-  /*   *new_subtask = *cur_head; */
-
-  /*   // Update ranges on new subtasks */
-  /*   if (stealing) { */
-  /*     /\* int new_iter = (remaining_iter > 1) ? remaining_iter / 2 : remaining_iter; *\/ */
-  /*     /\* new_subtask->iterations = 1; *\/ */
-  /*     new_subtask->start = cur_head->end - cur_head->iterations; */
-  /*     cur_head->end = new_subtask->start; */
-  /*   } else { */
-  /*     new_subtask->end = cur_head->start + cur_head->iterations; */
-  /*     cur_head->start += cur_head->iterations; */
-  /*     /\* cur_head->iterations *= 2; *\/ */
-  /*   } */
-  /*   new_subtask->id = worker->tid; */
-
-  /*   CHECK_ERR(pthread_mutex_lock(cur_head->mutex), "pthread_mutex_lock"); */
-  /*   (*cur_head->counter)++; */
-  /*   CHECK_ERR(pthread_mutex_unlock(cur_head->mutex), "pthread_mutex_unlock"); */
-
-  /*   return new_subtask; */
-  /* } */
-
-  if (stealing) {
-    subtask_queue->num_used--;
-  } else {
-    subtask_queue->num_used--;
-    subtask_queue->first = (subtask_queue->first + 1) % subtask_queue->capacity;
-  }
-  return cur_head;
 }
 
 // Initialise a job queue with the given capacity.  The queue starts out
@@ -165,6 +111,7 @@ static inline void dump_queue(struct worker *worker)
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
 }
+
 // Push an element onto the end of the job queue.  Blocks if the
 // subtask_queue is full (its size is equal to its capacity).  Returns
 // non-zero on error.  It is an error to push a job onto a queue that
@@ -237,16 +184,9 @@ static inline int subtask_queue_enqueue_front(struct worker *worker, struct subt
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
     return -1;
   }
-  // If we made it past the loop, there is room in the subtask_queue.
-  /* int new_first; */
-  /* if (subtask_queue->first == 0) { */
-  /*   new_first = subtask_queue->capacity - 1; */
-  /* } else { */
-  /*   new_first = subtask_queue->first - 1; */
-  /* } */
+
   subtask_queue->first = (subtask_queue->first == 0) ? subtask_queue->capacity - 1 : subtask_queue->first - 1;
   subtask_queue->buffer[subtask_queue->first] = subtask;
-  /* subtask_queue->first = new_first; */
   subtask_queue->num_used++;
 
 
@@ -291,7 +231,23 @@ static inline int subtask_queue_steal(struct worker *worker,
     return -1;
   }
 
-  *subtask = jobqueue_get_subtask_chunk(worker, subtask_queue, 1);
+  // Tasks get stolen from the "back"
+  struct subtask *cur_back = subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used - 1) % subtask_queue->capacity];
+  struct subtask *new_subtask = NULL;
+  int remaining_iter = cur_back->end - cur_back->start;
+  if (cur_back->chunkable && remaining_iter > 1) {
+      int half = remaining_iter / 2;
+      new_subtask = malloc(sizeof(struct subtask));
+      *new_subtask = *cur_back;
+      new_subtask->start = cur_back->end - half;
+      cur_back->end = new_subtask->start;
+      __atomic_fetch_add(cur_back->counter, 1, __ATOMIC_RELAXED);
+  } else {
+    new_subtask = cur_back;
+    subtask_queue->num_used--;
+  }
+  *subtask = new_subtask;
+
   if (*subtask == NULL) {
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
     return 1;
@@ -343,7 +299,7 @@ static inline int query_a_subtask(struct scheduler* scheduler,
 // subtask_queue contains zero elements.  Returns non-zero on error.  If
 // subtask_queue_destroy() has been called (possibly after the call to
 // subtask_queue_pop() blocked), this function will return -1.
-static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **subtask)
+static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **subtask, int blocking)
 {
   assert(worker != NULL);
   struct subtask_queue *subtask_queue = &worker->q;
@@ -353,26 +309,13 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
 #endif
 
   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+  if (subtask_queue->num_used == 0 && !blocking) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return 1;
+  }
   // Try to steal some work while the subtask_queue is empty
   while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
     pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex);
-
-    /* CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock"); */
-    /* int retval = query_a_subtask(worker->scheduler, worker->tid, worker, subtask); */
-    /* if (retval == 0) { // We got a task - just return it */
-    /*   return 0; */
-    /* } else if (retval == 1) { // we didn't find anything so go back to sleep */
-    /*   CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_unlock"); */
-    /*   struct timespec ts; */
-    /*   CHECK_ERR(clock_getres(CLOCK_REALTIME, &ts), "clock_getres"); */
-    /*   ts.tv_nsec += 50000; // wait for 50 ms (ish) */
-    /*   int err = pthread_cond_timedwait(&subtask_queue->cond, &subtask_queue->mutex, &ts); */
-    /*   if (err != 0 && err != ETIMEDOUT) { */
-    /*     assert(!"pthread_cond_timedwait failed \n"); */
-    /*   } */
-    /* } else { */
-    /*   CHECK_ERR(retval, "steal_a_subtask"); */
-    /* } */
   }
 
   if (subtask_queue->dead) {
@@ -380,7 +323,10 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
     return -1;
   }
 
-  *subtask = jobqueue_get_subtask_chunk(worker, subtask_queue, 0);
+  *subtask = subtask_queue->buffer[subtask_queue->first];
+  subtask_queue->num_used--;
+  subtask_queue->first = (subtask_queue->first + 1) % subtask_queue->capacity;
+
   if (*subtask == NULL) {
     assert(!"got NULL ptr");
     CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
@@ -402,7 +348,7 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
 /* TODO: Do I need to acquire locks here? */
 static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 {
-  return ((volatile int)subtask_queue->num_used) == 0 && !subtask_queue->dead;
+  return subtask_queue->num_used == 0;
 }
 #endif
 

@@ -56,8 +56,6 @@ struct subtask {
   volatile int *counter; // Counter for ongoing subtasks
   int64_t *total_time;
   int64_t *total_iter;
-  pthread_mutex_t *mutex; // Mutex used for synchronisation.
-  pthread_cond_t *cond;   // Condition variable used for synchronisation.
 };
 
 

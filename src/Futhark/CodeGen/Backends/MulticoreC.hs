@@ -141,7 +141,13 @@ compileProg =
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
                  num_workers = ctx->scheduler.num_threads;
-                 for (int i = 0; i < ctx->scheduler.num_threads; i++) {
+
+                 worker_local = &ctx->scheduler.workers[0];
+                 worker_local->tid = 0;
+                 worker_local->scheduler = &ctx->scheduler;
+                 CHECK_ERR(subtask_queue_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
+
+                 for (int i = 1; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    memset(cur_worker, 0, sizeof(struct worker));
                    cur_worker->tid = i;
@@ -166,13 +172,15 @@ compileProg =
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
 
-                 for (int i = 0; i < ctx->scheduler.num_threads; i++)
+                 output_thread_usage(worker_local);
+                 for (int i = 1; i < ctx->scheduler.num_threads; i++)
                  {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    cur_worker->dead = 1;
                    subtask_queue_destroy(&cur_worker->q);
                    CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
                  }
+
 
                  free(ctx->scheduler.workers);
                  free_lock(&ctx->lock);
