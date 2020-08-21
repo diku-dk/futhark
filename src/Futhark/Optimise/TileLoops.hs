@@ -485,7 +485,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
                   localScope (scopeOfFParams $ map fst merge) $ do
 
         -- Collectively read a tile.
-        tile <- tilingReadTile tiling TileFull privstms (Var tile_id) arrs_and_perms
+        tile <- tilingReadTile tiling TilePartial privstms (Var tile_id) arrs_and_perms
 
         -- Now each thread performs a traversal of the tile and
         -- updates its accumulator.
