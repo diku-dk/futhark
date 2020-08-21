@@ -34,9 +34,9 @@ static inline int64_t compute_chunk_size(struct subtask* subtask, struct worker 
   struct scheduler* scheduler = worker->scheduler;
   int64_t rem_iter = subtask->end - subtask->start;
   double C = (double)*subtask->total_time / (double)*subtask->total_iter;
-  assert( C >= 0.0f);
+  assert(C >= 0.0f);
   // Should we be careful or nah?
-  int64_t min_iter_pr_subtask = (int64_t) (kappa / (C + DBL_EPSILON));
+  int64_t min_iter_pr_subtask = (int64_t)(kappa / (C + DBL_EPSILON));
   min_iter_pr_subtask = min_iter_pr_subtask == 0 ? 1 : min_iter_pr_subtask;
   return min_iter_pr_subtask;
 }
