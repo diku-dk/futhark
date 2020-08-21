@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix defunctorisation bug (#1088).
 
+  * Fix issue where loop tiling might generate out-of-bounds reads
+    (#1094).
+
 ## [0.16.3]
 
 ### Added
