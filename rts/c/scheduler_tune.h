@@ -5,9 +5,8 @@ struct futhark_mc_segred_stage_1_struct {
 };
 
 int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
-                                     int flat_tid_22, int tid, int64_t *time)
+                                     int flat_tid_22, int tid)
 {
-    int64_t futhark_mc_segred_stage_1_start = get_wall_time();
     int err = 0;
     struct futhark_mc_segred_stage_1_struct *futhark_mc_segred_stage_1_struct = (struct futhark_mc_segred_stage_1_struct *) args;
     struct futhark_context *ctx = futhark_mc_segred_stage_1_struct->ctx;
@@ -18,8 +17,7 @@ int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
                                                     futhark_mc_segred_stage_1_struct->free_reduce_stage_1_tid_accum_arr,
                                                     .size =0, .references =
                                                     NULL};
-    for (int i = start; i < end; i++)
-    {
+    for (int i = start; i < end; i++) {
       int32_t gtid_23 = i;
 
       int32_t x = ((int32_t *) reduce_stage_1_tid_accum_arr.mem)[tid];
@@ -29,11 +27,6 @@ int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
       ((int32_t *) reduce_stage_1_tid_accum_arr.mem)[tid] = res;
     }
 
-    int64_t futhark_mc_segred_stage_1_end = get_wall_time();
-    int64_t elapsed = futhark_mc_segred_stage_1_end - futhark_mc_segred_stage_1_start;
-
-    __atomic_fetch_add(time, elapsed, __ATOMIC_RELAXED);
-
     return err;
 }
 
@@ -42,8 +35,8 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   int err = 0;
 
   int64_t iterations = 100000000;
-  ctx->tuning_timing = 0;
-  ctx->tuning_iter = iterations;
+  int64_t tuning_time = 0;
+  int64_t tuning_iter = 0;
 
   int64_t start_tuning = get_wall_time();
   // Run sequential ''reduce'' first'
@@ -58,12 +51,12 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     reduce_stage_1_tid_accum_arr;
 
   err = futhark_mc_tuning_segred_stage_1(&futhark_mc_segred_stage_1_struct, 0, iterations,
-                                         0, 0, &ctx->tuning_timing);
+                                         0, 0);
   int64_t tuning_sequentiual_end = get_wall_time();
   int64_t sequential_elapsed = tuning_sequentiual_end - tuning_sequentiual_start;
   fprintf(stderr, "Time Elapsed %lld\n", sequential_elapsed);
 
-  double C = (double)ctx->tuning_timing / (double) ctx->tuning_iter;
+  double C = (double)sequential_elapsed / (double)iterations;
   fprintf(stderr, "Found C is %f\n", C);
 
   int num_threads = ctx->scheduler.num_threads;
@@ -83,11 +76,13 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     int nsubtasks = iterations / min_iter_pr_subtask;
     struct scheduler_info info;
     info.iter_pr_subtask = min_iter_pr_subtask;
+
     info.nsubtasks = iterations / min_iter_pr_subtask;
     info.remainder = iterations % min_iter_pr_subtask;
 
-    info.total_time = &ctx->tuning_timing;
-    info.total_iter = &ctx->tuning_iter;
+    info.total_time = &tuning_time;
+    info.total_iter = &tuning_iter;
+
     info.sched = STATIC;
 
     struct scheduler_subtask futhark_segred_tuning_scheduler_subtask;
@@ -106,7 +101,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     time_elapsed =  tuning_chunked_end - tuning_chunked_start;
 
     ratio = (double)time_elapsed / (double)sequential_elapsed;
-    if (ratio < 1.06) {
+    if (ratio < 1.055) {
       break;
     }
     kappa_tune += 0.1;
