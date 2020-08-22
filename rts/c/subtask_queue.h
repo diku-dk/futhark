@@ -73,7 +73,6 @@ static inline int subtask_queue_init(struct subtask_queue *subtask_queue, int ca
   CHECK_ERRNO(pthread_mutex_init(&subtask_queue->mutex, NULL), "pthread_mutex_init");
   CHECK_ERRNO(pthread_cond_init(&subtask_queue->cond, NULL), "pthread_cond_init");
 
-  subtask_queue->initialized = 1;
 
   return 0;
 }
@@ -164,9 +163,7 @@ static inline int subtask_queue_steal(struct worker *worker,
 {
   struct subtask_queue *subtask_queue = &worker->q;
   assert(subtask_queue != NULL);
-  if (subtask_queue->initialized != 1)  {
-    return 1;
-  }
+
 #ifdef MCPROFILE
   uint64_t start = get_wall_time();
 #endif

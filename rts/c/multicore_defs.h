@@ -122,8 +122,6 @@ struct subtask_queue {
   int dead;
 
 
-  int initialized;
-
   /* Profiling fields */
   uint64_t time_enqueue;
   uint64_t time_dequeue;
