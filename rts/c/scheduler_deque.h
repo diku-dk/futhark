@@ -115,7 +115,7 @@ static inline int compute_max_num_subtasks(int nthreads,
 {
   if (*info.total_iter == 0) return nthreads;
   double C = (double)*info.total_time / (double)*info.total_iter;
-  int64_t min_iter_pr_subtask = (int)(kappa / (C + DBL_EPSILON));
+  int64_t min_iter_pr_subtask = (int64_t)(kappa / (C + DBL_EPSILON));
   if (min_iter_pr_subtask == 0) return nthreads; // => kappa < C
   int nsubtasks = (int)(iterations / min_iter_pr_subtask);
   return nsubtasks > nthreads ? nthreads : nsubtasks;
