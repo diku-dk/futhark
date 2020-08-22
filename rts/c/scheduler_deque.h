@@ -200,9 +200,14 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   int64_t iter_pr_subtask = info.iter_pr_subtask;
   int64_t remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
-  int64_t *total_time = info.total_time;
-  int64_t *total_iter = info.total_iter;
+
   enum scheduling sched = info.sched;
+
+  int64_t task_timer = 0;
+  int64_t task_iter = 0;
+
+  int64_t timer_before = *info.total_time;
+  int64_t iter_before = *info.total_iter;
 
   volatile int shared_counter = nsubtasks;
 
@@ -219,7 +224,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
                                             &shared_counter,
-                                            total_time, total_iter,
+                                            &task_timer, &task_iter,
                                             start, end,
                                             chunkable, iter,
                                             subtask_id);
@@ -252,6 +257,14 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
       }
     }
   }
+
+
+  // TODO the update of both of these should really both be atomic!!
+  int64_t new_total_time = task_timer + timer_before;
+  int64_t new_total_iter = task_iter + iter_before;
+  __atomic_fetch_add(info.total_time, new_total_time, __ATOMIC_RELAXED);
+  __atomic_fetch_add(info.total_iter, new_total_iter, __ATOMIC_RELAXED);
+
 
   if (sched == DYNAMIC)
     __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
