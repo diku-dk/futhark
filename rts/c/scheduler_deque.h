@@ -204,16 +204,14 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   int64_t iter_pr_subtask = info.iter_pr_subtask;
   int64_t remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
-
-  enum scheduling sched = info.sched;
+  volatile int shared_counter = nsubtasks;
 
   // Shared timer used to sum up all
   // sequential work from each subtask
   int64_t task_timer = 0;
   int64_t task_iter = 0;
 
-  volatile int shared_counter = nsubtasks;
-
+  enum scheduling sched = info.sched;
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
   int64_t iter = 1;
@@ -277,42 +275,42 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 #ifdef MCDEBUG
   fprintf(stderr, "[scheduler_execute] starting task %s with %ld iterations \n",
           task->name, task->iterations);
-#endif
   assert(scheduler != NULL);
   assert(task != NULL);
+#endif
 
   struct worker *worker = worker_local;
+
+  int err = 0;
   if (task->iterations == 0) {
-    return 0;
+    return err;
   }
 
+  int64_t task_timer = 0;
+  /* Execute task sequential or parallel based on decision made earlier */
   if (task->info.nsubtasks == 1) {
     int64_t start = get_wall_time();
-    int err = task->fn(task->args, 0, task->iterations, 0, worker->tid);
+    err = task->fn(task->args, 0, task->iterations, 0, worker->tid);
     int64_t end = get_wall_time();
-    int64_t time_elapsed = end - start;
-#ifdef MCPROFILE
-    worker_local->time_spent_working += time_elapsed;
-#endif
-    // report time measurements
-    __atomic_fetch_add(task->info.total_time, time_elapsed, __ATOMIC_RELAXED);
-    __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
-    return err;
-  } else {
-    int64_t task_timer = 0;
+    task_timer = end - start;
+    worker_local->time_spent_working += task_timer;
+  }
+  else
+  {
     // Add "before" time if we already are inside a task
     if (worker->nested > 0)
       task_timer += total_now(worker->total, worker->timer);
-    int err = scheduler_execute_parallel(scheduler, task, &task_timer);
-    // Report time measurements
-    // TODO the update of both of these should really both be atomic!!
-    __atomic_fetch_add(task->info.total_time, task_timer, __ATOMIC_RELAXED);
-    __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
+    err = scheduler_execute_parallel(scheduler, task, &task_timer);
+    // Reset timers to account for new timings
     worker->total = task_timer;
     worker->timer = get_wall_time();
-    return err;
   }
 
+  // Report time measurements
+  // TODO the update of both of these should really both be atomic!!
+  __atomic_fetch_add(task->info.total_time, task_timer, __ATOMIC_RELAXED);
+  __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
+  return err;
 }
 
 /* Decide on how schedule the incoming task i.e. how many subtasks and
