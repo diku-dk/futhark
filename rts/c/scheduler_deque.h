@@ -8,6 +8,7 @@ static volatile sig_atomic_t num_workers;
 static volatile int active_work = 0;
 __thread struct worker* worker_local = NULL;
 
+static volatile int is_nested = 0;
 
 
 static inline int is_finished(struct worker *worker) {
@@ -83,16 +84,17 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 {
   assert(subtask != NULL);
   assert(worker != NULL);
-  int64_t start = get_wall_time();
+  worker->total = 0;
+  worker->timer = get_wall_time();
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,
-                        worker->tid, &start);
+                        worker->tid);
   if (err != 0)
     return err;
-  int64_t end = get_wall_time();
-  int64_t time_elapsed = end - start;
-  worker->time_spent_working += time_elapsed;
   int64_t iter = subtask->end - subtask->start;
+  int64_t time_elapsed = worker->total + (get_wall_time() - worker->timer);
+
+  worker->time_spent_working += time_elapsed;
   // report measurements
   __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->total_iter, iter, __ATOMIC_RELAXED);
@@ -199,8 +201,12 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 
   enum scheduling sched = info.sched;
 
-  int64_t timer_before = *info.total_time;
-  int64_t iter_before = *info.total_iter;
+  // TODO find out if we are in a neste situation
+  int64_t timer_before = 0;
+  if (is_nested > 0) {
+    timer_before = worker->total + (get_wall_time() - worker->timer);
+  }
+  is_nested++;
 
   int64_t task_timer = 0;
   int64_t task_iter = 0;
@@ -256,10 +262,9 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 
   // TODO the update of both of these should really both be atomic!!
   int64_t new_total_time = task_timer + timer_before;
-  int64_t new_total_iter = task_iter + iter_before;
   __atomic_fetch_add(info.total_time, new_total_time, __ATOMIC_RELAXED);
-  __atomic_fetch_add(info.total_iter, new_total_iter, __ATOMIC_RELAXED);
-
+  __atomic_fetch_add(info.total_iter, task_iter, __ATOMIC_RELAXED);
+  is_nested--;
 
   if (sched == DYNAMIC)
     __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
@@ -284,7 +289,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 
   if (task->info.nsubtasks == 1) {
     int64_t start = get_wall_time();
-    int err = task->fn(task->args, 0, task->iterations, 0, worker_local->tid, task->info.total_time);
+    int err = task->fn(task->args, 0, task->iterations, 0, worker_local->tid);
     int64_t end = get_wall_time();
     int64_t time_elapsed = end - start;
 #ifdef MCPROFILE
@@ -294,10 +299,8 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     __atomic_fetch_add(task->info.total_time, time_elapsed, __ATOMIC_RELAXED);
     __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
     return err;
-  } else {
-    int err = scheduler_execute_parallel(scheduler, task);
-    return err;
   }
+  return scheduler_execute_parallel(scheduler, task);
 }
 
 /* Decide on how schedule the incoming task i.e. how many subtasks and

@@ -33,7 +33,7 @@ static volatile int scheduler_error = 0;
 static double kappa = 4.0f;
 
 struct scheduler_info;
-typedef int (*sub_task_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid, int64_t* time);
+typedef int (*sub_task_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
 typedef int (*task_fn)(void* args, int64_t iterations, int tid, struct scheduler_info info);
 
 enum scheduling {
@@ -141,6 +141,8 @@ struct worker {
 
   int tid;                     /* Just a thread id */
   uint64_t time_spent_working; /* Time spent in tasks functions */
+  uint64_t timer;
+  uint64_t total;
 };
 
 /* A wrapper for getting rusage on Linux and MacOS */

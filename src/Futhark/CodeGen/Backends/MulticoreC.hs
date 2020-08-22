@@ -154,6 +154,8 @@ compileProg =
                    cur_worker->time_spent_working = 0;
                    cur_worker->cur_working = 0;
                    cur_worker->output_usage = 1;
+                   cur_worker->timer = 0;
+                   cur_worker->total = 0;
                    cur_worker->scheduler = &ctx->scheduler;
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
@@ -560,7 +562,7 @@ compileOp (MCFunc s' i prebody body free tid) = do
       GC.stm [C.cstm|cleanup: {}|]
       mapM_ GC.stm free_cached
 
-    return [C.cedecl|int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid, typename int64_t* timer) {
+    return [C.cedecl|int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
