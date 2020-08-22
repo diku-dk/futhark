@@ -156,6 +156,7 @@ compileProg =
                    cur_worker->output_usage = 1;
                    cur_worker->timer = 0;
                    cur_worker->total = 0;
+                   cur_worker->nested = 0;
                    cur_worker->scheduler = &ctx->scheduler;
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
