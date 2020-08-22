@@ -101,6 +101,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   int64_t iter = subtask->end - subtask->start;
   // report measurements
   __atomic_fetch_add(subtask->total_iter, iter, __ATOMIC_RELAXED);
+  __atomic_thread_fence(__ATOMIC_RELEASE);
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);
   return 0;
