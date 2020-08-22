@@ -5,11 +5,10 @@
 #include <float.h>
 
 static volatile sig_atomic_t num_workers;
+static volatile int active_work = 0;
 __thread struct worker* worker_local = NULL;
 
 
-static int allow_stealing = 0;
-static int active_work = 0;
 
 static inline int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
@@ -35,9 +34,8 @@ static inline int64_t compute_chunk_size(struct subtask* subtask, struct worker 
   int64_t rem_iter = subtask->end - subtask->start;
   double C = (double)*subtask->total_time / (double)*subtask->total_iter;
   assert(C >= 0.0f);
-  // Should we be careful or nah?
   int64_t min_iter_pr_subtask = (int64_t)(kappa / (C + DBL_EPSILON));
-  min_iter_pr_subtask = min_iter_pr_subtask == 0 ? 1 : min_iter_pr_subtask;
+  min_iter_pr_subtask = min_iter_pr_subtask <= 0 ? 1 : min_iter_pr_subtask;
   return min_iter_pr_subtask;
 }
 
@@ -85,21 +83,18 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 {
   assert(subtask != NULL);
   assert(worker != NULL);
-#ifdef MCPROFILE
   int64_t start = get_wall_time();
-#endif
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,
-                        worker->tid, subtask->total_time);
+                        worker->tid, &start);
   if (err != 0)
     return err;
-#ifdef MCPROFILE
   int64_t end = get_wall_time();
   int64_t time_elapsed = end - start;
   worker->time_spent_working += time_elapsed;
-#endif
   int64_t iter = subtask->end - subtask->start;
   // report measurements
+  __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->total_iter, iter, __ATOMIC_RELAXED);
   __atomic_thread_fence(__ATOMIC_RELEASE);
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
@@ -158,7 +153,7 @@ static inline void *scheduler_worker(void* arg)
         }
       } // else someone stole our work
 
-    } else if (__atomic_load_n(&active_work, __ATOMIC_RELAXED)) {
+    } else if (active_work) {
       /* steal */
       while (!is_finished(worker) && __atomic_load_n(&active_work, __ATOMIC_RELAXED)) {
         if (steal_from_random_worker(worker))
@@ -204,11 +199,11 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 
   enum scheduling sched = info.sched;
 
-  int64_t task_timer = 0;
-  int64_t task_iter = 0;
-
   int64_t timer_before = *info.total_time;
   int64_t iter_before = *info.total_iter;
+
+  int64_t task_timer = 0;
+  int64_t task_iter = 0;
 
   volatile int shared_counter = nsubtasks;
 
@@ -259,7 +254,6 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     }
   }
 
-
   // TODO the update of both of these should really both be atomic!!
   int64_t new_total_time = task_timer + timer_before;
   int64_t new_total_iter = task_iter + iter_before;
@@ -289,20 +283,21 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
   }
 
   if (task->info.nsubtasks == 1) {
-#ifdef MCPROFILE
     int64_t start = get_wall_time();
-#endif
     int err = task->fn(task->args, 0, task->iterations, 0, worker_local->tid, task->info.total_time);
-#ifdef MCPROFILE
     int64_t end = get_wall_time();
     int64_t time_elapsed = end - start;
+#ifdef MCPROFILE
     worker_local->time_spent_working += time_elapsed;
 #endif
+    // report time measurements
+    __atomic_fetch_add(task->info.total_time, time_elapsed, __ATOMIC_RELAXED);
     __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
     return err;
+  } else {
+    int err = scheduler_execute_parallel(scheduler, task);
+    return err;
   }
-
-  return scheduler_execute_parallel(scheduler, task);
 }
 
 /* Decide on how schedule the incoming task i.e. how many subtasks and
@@ -328,28 +323,28 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
-    return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
-  }
+  } else {
 
-  switch (task->sched) {
-  case STATIC:
-    info.iter_pr_subtask = task->iterations / max_num_tasks;
-    info.remainder = task->iterations % max_num_tasks;
-    info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
-    info.sched = STATIC;
-    break;
-  case DYNAMIC:
-    info.iter_pr_subtask = task->iterations / max_num_tasks;
-    info.remainder = task->iterations % max_num_tasks;
-    // As any thread can take any subtasks, we are being safe with returning
-    // an upper bound on the number of tasks
-    info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
-    info.sched = DYNAMIC;
-    break;
-  default:
-    assert(!"Got unknown scheduling");
-  }
+    switch (task->sched) {
+    case STATIC:
+      info.iter_pr_subtask = task->iterations / max_num_tasks;
+      info.remainder = task->iterations % max_num_tasks;
+      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
+      info.sched = STATIC;
+      break;
+    case DYNAMIC:
+      info.iter_pr_subtask = task->iterations / max_num_tasks;
+      info.remainder = task->iterations % max_num_tasks;
+      // As any thread can take any subtasks, we are being safe with returning
+      // an upper bound on the number of tasks
+      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
+      info.sched = DYNAMIC;
+      break;
+    default:
+      assert(!"Got unknown scheduling");
+    }
 
+  }
   return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
 }
 
