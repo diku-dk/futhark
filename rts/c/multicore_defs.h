@@ -143,6 +143,7 @@ struct worker {
   uint64_t time_spent_working; /* Time spent in tasks functions */
   uint64_t timer;
   uint64_t total;
+  int nested;
 };
 
 /* A wrapper for getting rusage on Linux and MacOS */
