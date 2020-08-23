@@ -23,7 +23,6 @@ import Control.Monad.Trans
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
-import Control.Arrow
 import Data.Array
 import qualified Data.Text as T
 import Codec.Binary.UTF8.String (encode)
@@ -38,6 +37,7 @@ import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Prop
 import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
+import Futhark.Util.Pretty
 import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
 
 }
@@ -610,9 +610,7 @@ Exp2 :: { UncheckedExp }
      | Apply_ { $1 }
 
 Apply_ :: { UncheckedExp }
-       : ApplyList { case $1 of
-                       ((Constr n [] _ loc1):_) -> Constr n (tail $1) NoInfo (srcspan loc1 (last $1))
-                       _                -> foldl1 (\f x -> Apply f x NoInfo (NoInfo, NoInfo) (srcspan f x)) $1 }
+       : ApplyList {% applyExp $1 }
 
 ApplyList :: { [UncheckedExp] }
           : ApplyList Atom %prec juxtprec
@@ -1083,6 +1081,20 @@ combArrayElements t ts = foldM comb t ts
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
+
+applyExp :: [UncheckedExp] -> ParserMonad UncheckedExp
+applyExp all@((Constr n [] _ loc1):es) =
+  return $ Constr n es NoInfo (srcspan loc1 (last all))
+applyExp es =
+  foldM ap (head es) (tail es)
+  where
+     ap (Index e is _ floc) (ArrayLit xs _ xloc) =
+       parseErrorAt (srcspan floc xloc) $
+       Just $ pretty $ "Incorrect syntax for multi-dimensional indexing." </>
+       "Use" <+> align (ppr index)
+       where index = Index e (is++map DimFix xs) (NoInfo, NoInfo) xloc
+     ap f x =
+        return $ Apply f x NoInfo (NoInfo, NoInfo) (srcspan f x)
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id v _ loc) = return $ Var (qualName v) NoInfo loc
