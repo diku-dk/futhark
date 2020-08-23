@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Better error message when writing `a[i][j]` (#1095).
 
+  * Better error message when missing "in" (#1091).
+
 ### Removed
 
 ### Changed
