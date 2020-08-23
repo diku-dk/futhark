@@ -210,15 +210,14 @@ callKernelCopy bt
   destloc@(MemLocation destmem _ destIxFun) destslice
   srcloc@(MemLocation srcmem srcshape srcIxFun) srcslice
   | Just (destoffset, srcoffset,
-          num_arrays, size_x, size_y,
-          src_elems, dest_elems) <- isMapTransposeKernel bt destloc destslice srcloc srcslice = do
+          num_arrays, size_x, size_y) <-
+      isMapTransposeKernel bt destloc destslice srcloc srcslice = do
 
       fname <- mapTransposeForType bt
       emit $ Imp.Call [] fname
         [Imp.MemArg destmem, Imp.ExpArg destoffset,
          Imp.MemArg srcmem, Imp.ExpArg srcoffset,
-         Imp.ExpArg num_arrays, Imp.ExpArg size_x, Imp.ExpArg size_y,
-         Imp.ExpArg src_elems, Imp.ExpArg dest_elems]
+         Imp.ExpArg num_arrays, Imp.ExpArg size_x, Imp.ExpArg size_y]
 
   | bt_size <- primByteSize bt,
     Just destoffset <-
@@ -253,15 +252,14 @@ mapTransposeFunction bt =
 
   where params = [memparam destmem, intparam destoffset,
                   memparam srcmem, intparam srcoffset,
-                  intparam num_arrays, intparam x, intparam y,
-                  intparam in_elems, intparam out_elems]
+                  intparam num_arrays, intparam x, intparam y]
 
         space = Space "device"
         memparam v = Imp.MemParam v space
         intparam v = Imp.ScalarParam v $ IntType Int32
 
         [destmem, destoffset, srcmem, srcoffset,
-         num_arrays, x, y, in_elems, out_elems,
+         num_arrays, x, y,
          mulx, muly, block] =
            zipWith (VName . nameFromString)
            ["destmem",
@@ -271,8 +269,6 @@ mapTransposeFunction bt =
              "num_arrays",
              "x_elems",
              "y_elems",
-             "in_elems",
-             "out_elems",
              -- The following is only used for low width/height
              -- transpose kernels
              "mulx",
@@ -289,24 +285,12 @@ mapTransposeFunction bt =
         block_dim = 16
 
         -- When an input array has either width==1 or height==1, performing a
-        -- transpose will be the same as performing a copy.  If 'input_size' or
-        -- 'output_size' is not equal to width*height, then this trick will not
-        -- work when there are more than one array to process, as it is a per
-        -- array limit. We could copy each array individually, but currently we
-        -- do not.
+        -- transpose will be the same as performing a copy.
         can_use_copy =
-          let in_out_eq = CmpOpExp (CmpEq $ IntType Int32) (v32 in_elems) (v32 out_elems)
-              onearr = CmpOpExp (CmpEq $ IntType Int32) (v32 num_arrays) 1
-              noprob_widthheight = CmpOpExp (CmpEq $ IntType Int32)
-                                     (v32 x * v32 y)
-                                     (v32 in_elems)
+          let onearr = CmpOpExp (CmpEq $ IntType Int32) (v32 num_arrays) 1
               height_is_one = CmpOpExp (CmpEq $ IntType Int32) (v32 y) 1
               width_is_one = CmpOpExp (CmpEq $ IntType Int32) (v32 x) 1
-          in BinOpExp LogAnd
-               in_out_eq
-               (BinOpExp LogAnd
-                 (BinOpExp LogOr onearr noprob_widthheight)
-                 (BinOpExp LogOr width_is_one height_is_one))
+          in onearr .&&. (width_is_one .||. height_is_one)
 
         transpose_code =
           Imp.If input_is_empty mempty $ mconcat
@@ -337,7 +321,7 @@ mapTransposeFunction bt =
 
         copy_code =
           let num_bytes =
-                v32 in_elems * Imp.LeafExp (Imp.SizeOf bt) (IntType Int32)
+                v32 x * v32 y * Imp.LeafExp (Imp.SizeOf bt) (IntType Int32)
           in Imp.Copy
                destmem (Imp.Count $ v32 destoffset) space
                srcmem (Imp.Count $ v32 srcoffset) space
@@ -347,7 +331,7 @@ mapTransposeFunction bt =
           Imp.Op . Imp.CallKernel .
           mapTransposeKernel (mapTransposeName bt) block_dim_int
           (destmem, v32 destoffset, srcmem, v32 srcoffset,
-            v32 x, v32 y, v32 in_elems, v32 out_elems,
+            v32 x, v32 y,
             v32 mulx, v32 muly, v32 num_arrays,
             block) bt
 
@@ -355,8 +339,7 @@ isMapTransposeKernel :: PrimType
                      -> MemLocation -> Slice Imp.Exp
                      -> MemLocation -> Slice Imp.Exp
                      -> Maybe (Imp.Exp, Imp.Exp,
-                               Imp.Exp, Imp.Exp, Imp.Exp,
-                               Imp.Exp, Imp.Exp)
+                               Imp.Exp, Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
   (MemLocation _ _ destIxFun) destslice
   (MemLocation _ _ srcIxFun) srcslice
@@ -364,12 +347,12 @@ isMapTransposeKernel bt
     (perm, destshape) <- unzip perm_and_destshape,
     Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (product destshape) destshape swap r1 r2 dest_offset src_offset
+      isOk destshape swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
     Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (product srcshape) srcshape id r1 r2 dest_offset src_offset
+      isOk srcshape id r1 r2 dest_offset src_offset
   | otherwise =
       Nothing
   where bt_size = primByteSize bt
@@ -378,11 +361,10 @@ isMapTransposeKernel bt
         destIxFun' = IxFun.slice destIxFun destslice
         srcIxFun' = IxFun.slice srcIxFun srcslice
 
-        isOk elems shape f r1 r2 dest_offset src_offset = do
+        isOk shape f r1 r2 dest_offset src_offset = do
           let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
           return (dest_offset, src_offset,
-                  num_arrays, size_x, size_y,
-                  elems, elems)
+                  num_arrays, size_x, size_y)
 
         getSizes shape f r1 r2 =
           let (mapped, notmapped) = splitAt r1 shape
