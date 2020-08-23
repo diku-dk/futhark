@@ -737,6 +737,7 @@ LetExp :: { UncheckedExp }
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
+    | error {% throwError "Unexpected end of file - missing \"in\"?" }
 
 MatchExp :: { UncheckedExp }
           : match Exp Cases
