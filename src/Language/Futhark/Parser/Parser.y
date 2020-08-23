@@ -723,7 +723,7 @@ Fields1 :: { [FieldBase NoInfo Name] }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
-                      { LetPat $2 $4 $5 (NoInfo, NoInfo) (srcspan $1 $>) }
+       { LetPat $2 $4 $5 (NoInfo, NoInfo) (srcspan $1 $>) }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2
@@ -731,24 +731,25 @@ LetExp :: { UncheckedExp }
             $8 NoInfo (srcspan $1 $>) }
 
      | let VarSlice '=' Exp LetBody
-                      { let ((v,_),slice,loc) = $2; ident = Ident v NoInfo loc
-                        in LetWith ident ident slice $4 $5 NoInfo (srcspan $1 $>) }
+       { let ((v,_),slice,loc) = $2; ident = Ident v NoInfo loc
+         in LetWith ident ident slice $4 $5 NoInfo (srcspan $1 $>) }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
 
 MatchExp :: { UncheckedExp }
-          : match Exp Cases  { let loc = srcspan $1 (NE.toList $>)
-                               in Match $2 $> (NoInfo, NoInfo) loc  }
+          : match Exp Cases
+            { let loc = srcspan $1 (NE.toList $>)
+              in Match $2 $> (NoInfo, NoInfo) loc  }
 
 Cases :: { NE.NonEmpty (CaseBase NoInfo Name) }
        : Case  %prec caseprec { $1 NE.:| [] }
        | Case Cases           { NE.cons $1 $2 }
 
 Case :: { CaseBase NoInfo Name }
-      : case CPattern '->' Exp       { let loc = srcspan $1 $>
-                                       in CasePat $2 $> loc }
+      : case CPattern '->' Exp
+        { let loc = srcspan $1 $> in CasePat $2 $> loc }
 
 CPattern :: { PatternBase NoInfo Name }
           : CInnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
@@ -813,8 +814,8 @@ LoopForm : for VarId '<' Exp
 
 VarSlice :: { ((Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
           : 'id[' DimIndices ']'
-              { let L vloc (INDEXING v) = $1
-                in ((v, vloc), $2, srcspan $1 $>) }
+            { let L vloc (INDEXING v) = $1
+              in ((v, vloc), $2, srcspan $1 $>) }
 
 QualVarSlice :: { ((QualName Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
               : VarSlice
@@ -871,7 +872,7 @@ FieldPattern :: { (Name, PatternBase NoInfo Name) }
               : FieldId '=' Pattern
                 { (fst $1, $3) }
               | FieldId ':' TypeExpDecl
-              { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
+                { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
