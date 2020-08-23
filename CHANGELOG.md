@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `#[unroll]` attribute.
 
+  * Better error message when writing `a[i][j]` (#1095).
+
 ### Removed
 
 ### Changed
