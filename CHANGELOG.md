@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Scans of empty arrays no longer result in out-of-bounds memory
     reads.
 
+  * Fix yet another defunctionalisation bug due to missing
+    eta-expansion (#1100).
+
 ## [0.16.3]
 
 ### Added
