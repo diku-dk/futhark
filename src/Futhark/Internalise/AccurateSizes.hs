@@ -40,7 +40,9 @@ argShapes shapes all_params valargts = do
   let addShape name =
         case M.lookup name mapping of
           Just se -> se
-          _ -> error $ "argShapes: no mapping for " ++ pretty name
+          _ -> intConst Int32 0 -- FIXME: we only need this because
+                                -- the defunctionaliser throws away
+                                -- sizes.
   return $ map addShape shapes
 
 ensureResultShape :: ErrorMsg SubExp -> SrcLoc -> [Type] -> Body
