@@ -246,7 +246,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
 
     - uses: actions/download-artifact@v2
       with:
@@ -259,7 +259,7 @@ jobs:
         echo "::add-path::$HOME/.local/bin"
 
     - run: |
-        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl tests examples
+        futhark test -c --no-terminal --backend=opencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-cuda:
     runs-on: ubuntu-20.04
