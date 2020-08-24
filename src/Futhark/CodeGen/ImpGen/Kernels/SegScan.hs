@@ -399,7 +399,7 @@ compileSegScan :: Pattern KernelsMem
                -> [SegBinOp KernelsMem]
                -> KernelBody KernelsMem
                -> CallKernelGen ()
-compileSegScan pat lvl space scans kbody = do
+compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   emit $ Imp.DebugPrint "\n# SegScan" Nothing
 
   -- Since stage 2 involves a group size equal to the number of groups
@@ -421,3 +421,4 @@ compileSegScan pat lvl space scans kbody = do
 
   scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
   scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scans
+  where n = product $ map (toExp' int32) $ segSpaceDims space

@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fix issue where loop tiling might generate out-of-bounds reads
     (#1094).
 
+  * Scans of empty arrays no longer result in out-of-bounds memory
+    reads.
+
 ## [0.16.3]
 
 ### Added
