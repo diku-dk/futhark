@@ -51,8 +51,10 @@ mapTranspose block_dim args t kind =
       , dec index_in $ v32 y_index * width + v32 x_index
       , dec index_out $ v32 x_index * height + v32 y_index
 
-      , Write odata (elements $ v32 odata_offset + v32 index_out) t (Space "global") Nonvolatile $
-        index idata (elements $ v32 idata_offset + v32 index_in) t (Space "global") Nonvolatile
+      , If (v32 get_global_id_0 .<. width * height)
+        (Write odata (elements $ v32 odata_offset + v32 index_out) t (Space "global") Nonvolatile $
+         index idata (elements $ v32 idata_offset + v32 index_in) t (Space "global") Nonvolatile)
+        mempty
       ]
 
     TransposeLowWidth ->
