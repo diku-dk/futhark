@@ -51,7 +51,7 @@ mapTranspose block_dim args t kind =
       , dec index_in $ v32 y_index * width + v32 x_index
       , dec index_out $ v32 x_index * height + v32 y_index
 
-      , If (v32 get_global_id_0 .<. width * height)
+      , If (v32 get_global_id_0 .<. width * height * num_arrays)
         (Write odata (elements $ v32 odata_offset + v32 index_out) t (Space "global") Nonvolatile $
          index idata (elements $ v32 idata_offset + v32 index_in) t (Space "global") Nonvolatile)
         mempty
@@ -113,7 +113,7 @@ mapTranspose block_dim args t kind =
 
         (odata, basic_odata_offset, idata, basic_idata_offset,
          width, height,
-         mulx, muly, _num_arrays, block) = args
+         mulx, muly, num_arrays, block) = args
 
         -- Be extremely careful when editing this list to ensure that
         -- the names match up.  Also, be careful that the tags on
