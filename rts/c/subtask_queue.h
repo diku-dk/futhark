@@ -3,7 +3,7 @@
 #ifndef SUBTASK_QUEUE_H
 #define SUBTASK_QUEUE_H
 
-
+#if defined(MCJOBQUEUE)
 
 /* Doubles the size of the queue */
 static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) {
@@ -241,6 +241,7 @@ static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 {
   return subtask_queue->num_used == 0;
 }
+#endif
 #endif
 
 // End of subtask_queue.h

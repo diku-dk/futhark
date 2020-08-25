@@ -5,10 +5,6 @@
 
 #include <float.h>
 
-#define MCJOBQUEUE
-#define MCCHASELEV
-
-
 // Scheduler definitions
 enum scheduling {
   DYNAMIC,
@@ -24,7 +20,6 @@ struct scheduler_info {
   int64_t *total_time;
   int64_t *total_iter;
 };
-
 
 struct scheduler {
   struct worker *workers;
@@ -109,7 +104,11 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
       __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
       subtask->end = subtask->start + subtask->chunk_size;
       new_subtask->start = subtask->end;
+#ifdef MCCHASELEV
+      push_back(&worker->q, new_subtask);
+#elif defined(MCJOBQUEUE)
       subtask_queue_enqueue(worker, new_subtask);
+#endif
     }
   }
   return subtask;

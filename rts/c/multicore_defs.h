@@ -11,6 +11,11 @@
 #define MULTICORE
 /* #define MCPROFILE */
 
+// Which queue implementation to use
+#define MCJOBQUEUE
+/* #define MCCHASELEV */
+
+
 #ifdef _WIN32
 #include <windows.h>
 #elif __APPLE__
@@ -53,6 +58,19 @@ struct subtask_queue {
 };
 
 
+struct deque_buffer {
+  struct subtask** array;
+  int64_t size;
+};
+
+struct deque {
+  struct deque_buffer *buffer;
+  int64_t top, bottom;
+  int dead;
+};
+
+
+
 // Function definitions
 typedef int (*sub_task_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
 typedef int (*task_fn)(void* args, int64_t iterations, int tid, struct scheduler_info info);
@@ -76,9 +94,14 @@ struct subtask {
 };
 
 
+
 struct worker {
   pthread_t thread;
+#if defined(MCCHASELEV)
+  struct deque q;
+#elif defined(MCJOBQUEUE)
   struct subtask_queue q;
+#endif
   struct scheduler *scheduler;
   int cur_working;
   int dead;

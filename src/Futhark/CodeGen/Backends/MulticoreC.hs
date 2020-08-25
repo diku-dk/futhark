@@ -38,6 +38,7 @@ compileProg =
           let multicore_defs_h = $(embedStringFile "rts/c/multicore_defs.h")
               multicore_util_h  = $(embedStringFile "rts/c/multicore_util.h")
               subtask_queue_h  = $(embedStringFile "rts/c/subtask_queue.h")
+              chaselev_h  = $(embedStringFile "rts/c/chaselev.h")
               scheduler_common_h = $(embedStringFile "rts/c/scheduler_common.h")
               scheduler_h = $(embedStringFile "rts/c/scheduler.h")
               scheduler_tune_h = $(embedStringFile "rts/c/scheduler_tune.h")
@@ -45,17 +46,14 @@ compileProg =
           mapM_ GC.earlyDecl [C.cunit|
                               $esc:multicore_defs_h
                               $esc:multicore_util_h
+                              $esc:chaselev_h
                               $esc:subtask_queue_h
                               $esc:scheduler_common_h
                               $esc:scheduler_h
                              |]
 
-          mapM_ GC.earlyDecl [C.cunit|
-                              int futhark_segred_tuning_program(struct futhark_context *ctx);
-                              |]
-          mapM_ GC.libDecl [C.cunit|
-                            $esc:scheduler_tune_h
-                            |]
+          mapM_ GC.earlyDecl [C.cunit|int futhark_segred_tuning_program(struct futhark_context *ctx);|]
+          mapM_ GC.libDecl [C.cunit|$esc:scheduler_tune_h|]
 
           cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
             ([C.cedecl|struct $id:s;|],
@@ -149,7 +147,9 @@ compileProg =
                  worker_local = &ctx->scheduler.workers[0];
                  worker_local->tid = 0;
                  worker_local->scheduler = &ctx->scheduler;
+                 // CHECK_ERR(deque_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
                  CHECK_ERR(subtask_queue_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
+
 
                  for (int i = 1; i < ctx->scheduler.num_threads; i++) {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
@@ -162,7 +162,9 @@ compileProg =
                    cur_worker->total = 0;
                    cur_worker->nested = 0;
                    cur_worker->scheduler = &ctx->scheduler;
+                   // CHECK_ERR(deque_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
+
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
                                             cur_worker),
                              "Failed to create worker %d\n", i);
@@ -184,6 +186,7 @@ compileProg =
                  {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    cur_worker->dead = 1;
+                   //deque_destroy(&cur_worker->q);
                    subtask_queue_destroy(&cur_worker->q);
                    CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
                  }

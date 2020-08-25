@@ -3,21 +3,10 @@
 #ifndef _CHASELEV_H_
 #define _CHASELEV_H_
 
+#if defined(MCCHASELEV)
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
-
-
-struct deque_buffer {
-  struct subtask** array;
-  int64_t size;
-};
-
-struct deque {
-  struct deque_buffer *buffer;
-  int64_t top, bottom;
-  int dead;
-};
 
 
 
@@ -193,5 +182,6 @@ static inline int empty(struct deque *q)
   return nb_subtasks(q) < 1;
 }
 
+#endif
 #endif
 // end of chaselev.h
