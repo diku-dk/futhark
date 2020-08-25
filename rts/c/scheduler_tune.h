@@ -64,7 +64,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   ctx->scheduler.workers = malloc(sizeof(struct worker));
   worker_local = &ctx->scheduler.workers[0];
   worker_local->tid = 0;
-#ifdef MCCHASELV
+#ifdef MCCHASELEV
   CHECK_ERR(deque_init(&ctx->scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
 #elif defined(MCJOBQUEUE)
   CHECK_ERR(subtask_queue_init(&ctx->scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);

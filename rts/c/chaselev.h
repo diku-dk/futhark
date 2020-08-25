@@ -50,7 +50,6 @@ struct deque_buffer* grow(struct subtask **old_array,
                           int64_t b,
                           int64_t t)
 {
-  fprintf(stderr, "growing q from %lld to %lld\n", old_capacity, new_capacity);
   struct deque_buffer* new_deque_buffer = malloc(sizeof(struct deque_buffer));
   new_deque_buffer->size = new_capacity;
   new_deque_buffer->array = calloc(new_capacity,  sizeof(struct subtask*));
