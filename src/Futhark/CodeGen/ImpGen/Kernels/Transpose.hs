@@ -24,7 +24,7 @@ data TransposeType = TransposeNormal
 -- | The types of the arguments accepted by a transposition function.
 type TransposeArgs = (VName, Exp,
                       VName, Exp,
-                      Exp, Exp, Exp, Exp,
+                      Exp, Exp,
                       Exp, Exp, Exp,
                       VName)
 
@@ -51,7 +51,7 @@ mapTranspose block_dim args t kind =
       , dec index_in $ v32 y_index * width + v32 x_index
       , dec index_out $ v32 x_index * height + v32 y_index
 
-      , If (v32 get_global_id_0 .<. input_size)
+      , If (v32 get_global_id_0 .<. width * height * num_arrays)
         (Write odata (elements $ v32 odata_offset + v32 index_out) t (Space "global") Nonvolatile $
          index idata (elements $ v32 idata_offset + v32 index_in) t (Space "global") Nonvolatile)
         mempty
@@ -83,8 +83,7 @@ mapTranspose block_dim args t kind =
         For j Int32 elemsPerThread $
         let i = v32 j * (tile_dim `quot` elemsPerThread)
         in mconcat [ dec index_in $ (v32 y_index + i) * width + v32 x_index
-                   , when (v32 y_index + i .<. height .&&.
-                           v32 index_in .<. input_size) $
+                   , when (v32 y_index + i .<. height) $
                      Write block (elements $ (v32 get_local_id_1 + i) * (tile_dim+1)
                                              + v32 get_local_id_0)
                      t (Space "local") Nonvolatile $
@@ -97,8 +96,7 @@ mapTranspose block_dim args t kind =
         For j Int32 elemsPerThread $
         let i = v32 j * (tile_dim `quot` elemsPerThread)
         in mconcat [ dec index_out $ (v32 y_index + i) * height + v32 x_index
-                   , when (v32 y_index + i .<. width .&&.
-                           v32 index_out .<. output_size) $
+                   , when (v32 y_index + i .<. width) $
                      Write odata (elements $ v32 odata_offset + v32 index_out)
                      t (Space "global") Nonvolatile $
                      index block (elements $ v32 get_local_id_0 * (tile_dim+1)
@@ -114,8 +112,8 @@ mapTranspose block_dim args t kind =
         when a b = If a b mempty
 
         (odata, basic_odata_offset, idata, basic_idata_offset,
-         width, height, input_size, output_size,
-         mulx, muly, _num_arrays, block) = args
+         width, height,
+         mulx, muly, num_arrays, block) = args
 
         -- Be extremely careful when editing this list to ensure that
         -- the names match up.  Also, be careful that the tags on
@@ -168,7 +166,7 @@ mapTranspose block_dim args t kind =
           [ dec x_index x_in_index
           , dec y_index y_in_index
           , dec index_in $ v32 y_index * width + v32 x_index
-          , when (v32 x_index .<. width .&&. v32 y_index .<. height .&&. v32 index_in .<. input_size) $
+          , when (v32 x_index .<. width .&&. v32 y_index .<. height) $
             Write block (elements $ v32 get_local_id_1 * (block_dim+1) + v32 get_local_id_0)
             t (Space "local") Nonvolatile $
             index idata (elements $ v32 idata_offset + v32 index_in)
@@ -177,7 +175,7 @@ mapTranspose block_dim args t kind =
           , SetScalar x_index x_out_index
           , SetScalar y_index y_out_index
           , dec index_out $ v32 y_index * height + v32 x_index
-          , when (v32 x_index .<. height .&&. v32 y_index .<. width .&&. v32 index_out .<. output_size) $
+          , when (v32 x_index .<. height .&&. v32 y_index .<. width) $
             Write odata (elements $ v32 odata_offset + v32 index_out)
             t (Space "global") Nonvolatile $
             index block (elements $ v32 get_local_id_0 * (block_dim+1) + v32 get_local_id_1)
@@ -207,10 +205,6 @@ mapTranspose block_dim args t kind =
 -- of block_dim*2 by block_dim*2+1 elements. Padding each row with
 -- an additional element prevents bank conflicts from occuring when
 -- the tile is accessed column-wise.
---
--- Note that input_size and output_size may not equal width*height if
--- we are dealing with a truncated array - this happens sometimes for
--- coalescing optimisations.
 mapTransposeKernel :: String -> Integer -> TransposeArgs -> PrimType -> TransposeType
                    -> Kernel
 mapTransposeKernel desc block_dim_int args t kind =
@@ -235,7 +229,7 @@ mapTransposeKernel desc block_dim_int args t kind =
         block_dim = fromInteger block_dim_int
 
         (odata, basic_odata_offset, idata, basic_idata_offset,
-         width, height, input_size, output_size,
+         width, height,
          mulx, muly, num_arrays,
          block) = args
 
@@ -258,7 +252,7 @@ mapTransposeKernel desc block_dim_int args t kind =
         uses = map (`ScalarUse` int32)
                (namesToList $ mconcat $ map freeIn
                 [basic_odata_offset, basic_idata_offset, num_arrays,
-                 width, height, input_size, output_size, mulx, muly]) ++
+                 width, height, mulx, muly]) ++
                map MemoryUse [odata, idata]
 
         name =
