@@ -1,289 +1,241 @@
 // start of scheduler.h
-
 #ifndef _SCHEDULER_H_
 #define _SCHEDULER_H_
 
-static int free_workers;
 
-__thread struct worker* worker_local = NULL;
+static volatile int active_work = 0;
 
+
+static inline int is_finished(struct worker *worker) {
+  return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
+}
+
+
+// Try to steal from a random queue
+static inline int steal_from_random_worker(struct worker* worker)
+{
+  int my_id = worker->tid;
+  struct scheduler* scheduler = worker->scheduler;
+  int k = random_other_worker(scheduler, my_id);
+  struct worker *worker_k = &scheduler->workers[k];
+  struct subtask* subtask =  NULL;
+  int retval = subtask_queue_steal(worker_k, &subtask);
+  if (retval == 0) {
+    subtask_queue_enqueue(worker, subtask);
+    return 1;
+  }
+  return 0;
+}
+
+/* Only one error can be returned at the time now
+   Maybe we can provide a stack like structure for pushing errors onto
+   if we wish to backpropagte multiple errors */
 static inline void *scheduler_worker(void* arg)
 {
   struct worker *worker = (struct worker*) arg;
   worker_local = worker;
-  struct subtask *subtask = NULL;
-  while(1) {
-    if (subtask_queue_dequeue(worker, &subtask) == 0) {
-      assert(subtask->fn != NULL);
-      assert(subtask->args != NULL);
-#ifdef MCPROFILE
-      int64_t start = get_wall_time();
-#endif
-      /* fprintf(stderr, "iterations %ld\n", subtask->end - subtask->start); */
-      int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
-#ifdef MCPROFILE
-      int64_t end = get_wall_time();
-      worker->time_spent_working += end - start;
-#endif
-      CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
+  struct subtask * subtask = NULL;
+  while(!is_finished(worker)) {
+    if (!subtask_queue_is_empty(&worker->q)) {
+      int retval = subtask_queue_dequeue(worker, &subtask, 0);
+      if (retval == 0) {
+        assert(subtask != NULL);
+        struct subtask* subtask_new = chunk_subtask(worker, subtask);
+        int err = run_subtask(worker, subtask_new);
+        if (err != 0) {
+          __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
+        }
+      } // else someone stole our work
 
-      /* Only one error can be returned at the time now
-         Maybe we can provide a stack like structure for pushing errors onto
-         if we wish to backpropagte multiple errors */
-      if (err != 0) {
-        scheduler_error = err;
+    } else if (active_work) {
+      /* steal */
+      while (!is_finished(worker) && __atomic_load_n(&active_work, __ATOMIC_RELAXED)) {
+        if (steal_from_random_worker(worker))
+          break;
       }
-      (*subtask->counter)--;
-      if (*subtask->counter == 0)
-        CHECK_ERR(pthread_cond_broadcast(subtask->cond), "pthread_cond_broadcast");
-      CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
-      free(subtask);
-      subtask = NULL;
     } else {
-#ifdef MCPROFILE
-      output_thread_usage(worker);
-#endif
-      break;
+      // go back to sleep
+      int retval = subtask_queue_dequeue(worker, &subtask, 1);
+      if (retval == 0) {
+        assert(subtask != NULL);
+        struct subtask* subtask_new = chunk_subtask(worker, subtask);
+        int err = run_subtask(worker, subtask_new);
+        if (err != 0) {
+          __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
+        }
+      }
     }
   }
+
+  assert(subtask_queue_is_empty(&worker->q));
+  __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
+  if (worker->output_usage)
+    output_thread_usage(worker);
   return NULL;
 }
 
 
-static inline int scheduler_parallel(struct scheduler *scheduler,
-                                     struct scheduler_subtask *task)
+
+static inline int scheduler_execute_parallel(struct scheduler *scheduler,
+                                             struct scheduler_subtask *task,
+                                             int64_t *timer)
 {
-#ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_parallel] Performing scheduling with granularity %d\n", task->granularity);
-#endif
 
-  pthread_mutex_t mutex;
-  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
-  pthread_cond_t cond;
-  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
-
+  struct worker * worker = worker_local;
 
   struct scheduler_info info = task->info;
-  int iter_pr_subtask = info.iter_pr_subtask;
-  int remainder = info.remainder;
+  int64_t iter_pr_subtask = info.iter_pr_subtask;
+  int64_t remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
+  volatile int shared_counter = nsubtasks;
 
-  free_workers -= nsubtasks;
+  // Shared timer used to sum up all
+  // sequential work from each subtask
+  int64_t task_timer = 0;
+  int64_t task_iter = 0;
 
-  int shared_counter = nsubtasks;
+  enum scheduling sched = info.sched;
+  /* Each subtasks can be processed in chunks */
+  int chunkable = sched == STATIC ? 0 : 1;
+  int64_t iter = 1;
 
-  /* Each subtasks is processed in chunks */
-  int chunks = 0;
-  if (task->granularity > 0) {
-    chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
-  }
+  if (sched == DYNAMIC)
+    __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
 
-  int start = 0;
   int subtask_id = 0;
-  int end = iter_pr_subtask + (int)(remainder != 0);
+  int64_t start = 0;
+  int64_t end = iter_pr_subtask + (int)(remainder != 0);
   for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
-                                            &mutex, &cond, &shared_counter,
-                                            start, end, chunks, subtask_id);
+                                            &shared_counter,
+                                            &task_timer, &task_iter,
+                                            start, end,
+                                            chunkable, iter,
+                                            subtask_id);
     assert(subtask != NULL);
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads], subtask),
               "subtask_queue_enqueue");
-#ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_task] pushed %d iterations onto %d's q\n", (end - start), subtask_id%scheduler->num_threads);
-#endif
     // Update range params
     start = end;
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
   // Join (wait for subtasks to finish)
-  CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-  while (shared_counter != 0 && scheduler_error == 0)  {
-    CHECK_ERR(pthread_cond_wait(&cond, &mutex), "pthread_cond_wait");
+  while(shared_counter != 0 && scheduler_error == 0) {
+    if (!subtask_queue_is_empty(&worker->q)) {
+      struct subtask *subtask = NULL;
+      int err = subtask_queue_dequeue(worker, &subtask, 0);
+      if (err == 0 ) {
+        struct subtask* subtask_new = chunk_subtask(worker, subtask);
+        err = run_subtask(worker, subtask_new);
+        if (err != 0) {
+          return err;
+        }
+      }
+    } else {
+      while (shared_counter != 0 && subtask_queue_is_empty(&worker->q) && scheduler_error == 0) {
+        steal_from_random_worker(worker);
+      }
+    }
   }
 
-  free_workers += nsubtasks;
+  if (sched == DYNAMIC)
+    __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
+
+  // Write back timing results
+  (*timer) += task_timer;
   return scheduler_error;
 }
 
 
-
-static inline int scheduler_nested(struct scheduler *scheduler,
-                                   struct scheduler_subtask* task,
-                                   struct worker* calling_worker)
+static inline int scheduler_execute_task(struct scheduler *scheduler,
+                                         struct scheduler_subtask *task)
 {
-#ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_nested] tid %d\n", calling_worker->tid);
-  fprintf(stderr, "[scheduler_nested] granularity %d\n", task->granularity);
-  fprintf(stderr, "[scheduler_nested] iterations %ld\n", task->iterations);
-  fprintf(stderr, "[scheduler_nested] free workers %d\n", free_workers);
-#endif
 
-  pthread_mutex_t mutex;
-  CHECK_ERR(pthread_mutex_init(&mutex, NULL), "pthread_mutex_init");
-  pthread_cond_t cond;
-  CHECK_ERR(pthread_cond_init(&cond, NULL), "pthread_cond_init");
+  struct worker *worker = worker_local;
 
-  struct scheduler_info info = task->info;
-  int iter_pr_subtask = info.iter_pr_subtask;
-  int remainder = info.remainder;
-  int nsubtasks = info.nsubtasks;
-
-
-
-  int shared_counter = info.nsubtasks;
-
-  int chunks = 0;
-  if (task->granularity > 0) {
-    chunks = iter_pr_subtask / task->granularity == 0 ? 1 : iter_pr_subtask / task->granularity;
-  }
-
-  long int start = 0;
-  long int subtask_id = 0;
-  int end = iter_pr_subtask + (long int)(remainder != 0);
-  for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
-                                            &mutex, &cond, &shared_counter,
-                                            start, end, chunks, subtask_id);
-    assert(subtask != NULL);
-    CHECK_ERR(subtask_queue_enqueue(calling_worker, subtask), "subtask_queue_enqueue");
-#ifdef MCDEBUG
-    fprintf(stderr, "[scheduler_nested] pushed %ld iterations onto tid %d q's\n", (end - start), calling_worker->tid);
-#endif
-    // Update range params
-    start = end;
-    end += iter_pr_subtask + ((subtask_id + 1) < remainder);
-  }
-
-
-  struct subtask *subtask = NULL;
-  int done = 0;
-  while(!done) {
-    CHECK_ERR(pthread_mutex_lock(&mutex), "pthread_mutex_lock");
-    if (shared_counter == 0) done = 1;
-    CHECK_ERR(pthread_mutex_unlock(&mutex), "pthread_mutex_unlock");
-
-    if (calling_worker->q.num_used != 0) {
-      int err = subtask_queue_steal(calling_worker, &subtask);
-      if (err == 0) {
-        // Do work
-        assert(subtask->fn != NULL);
-        assert(subtask->args != NULL);
-        int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id);
-        if (err != 0) {
-          return err;
-        }
-        CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock");
-        (*subtask->counter)--;
-        CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock");
-        free(subtask);
-      } else if (err == 1){
-        continue;
-      } else {
-        fprintf(stderr, "[scheduler_nested] Got error %d from \n", err);
-        assert(0);
-      }
-      /* } else { */
-      /*   int retval = query_a_subtask(scheduler, calling_worker->tid, calling_worker, &subtask); */
-
-      /*   if (retval == 0) { */
-      /*     assert(subtask->fn != NULL); */
-      /*     assert(subtask->args != NULL); */
-      /*     int err = subtask->fn(subtask->args, subtask->start, subtask->end, subtask->id); */
-      /*     if (err != 0) { */
-      /*       return err; */
-      /*     } */
-      /*     CHECK_ERR(pthread_mutex_lock(subtask->mutex), "pthread_mutex_lock"); */
-      /*     (*subtask->counter)--; */
-      /*     CHECK_ERR(pthread_mutex_unlock(subtask->mutex), "pthread_mutex_unlock"); */
-      /*     free(subtask); */
-      /*   } else if (retval > 1) { */
-      /*     CHECK_ERR(retval, "query_a_subtask"); */
-      /*   } */
-      /*   // We just stole a subtask, run it before we finish */
-
-    }
-  }
-  return 0;
-}
-
-
-
-static inline int scheduler_execute(struct scheduler *scheduler,
-                                    struct scheduler_subtask *task)
-{
-#ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_execute] starting task %s with %ld iterations \n", task->name, task->iterations);
-#endif
-  assert(scheduler != NULL);
-  assert(task != NULL);
-
+  int err = 0;
   if (task->iterations == 0) {
-    return 0;
+    return err;
   }
 
-  /* Run task directly if all other workers are occupied */
+  int64_t task_timer = 0;
+  /* Execute task sequential or parallel based on decision made earlier */
   if (task->info.nsubtasks == 1) {
-    return task->fn(task->args, 0, task->iterations, 0);
+    int64_t start = get_wall_time();
+    err = task->fn(task->args, 0, task->iterations, 0, worker->tid);
+    int64_t end = get_wall_time();
+    task_timer = end - start;
+    worker_local->time_spent_working += task_timer;
+
+    // Report time measurements
+    // TODO the update of both of these should really both be atomic!!
+    __atomic_fetch_add(task->info.total_time, task_timer, __ATOMIC_RELAXED);
+    __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
   }
+  else
+  {
+    // Add "before" time if we already are inside a task
+    int64_t time_before = 0;
+    if (worker->nested > 0)
+      time_before = total_now(worker->total, worker->timer);
 
-  /* This case indicates that we are inside a nested parallel operation */
-  /* so we handle this differently */
-  if (worker_local != NULL) {
-    CHECK_ERR(scheduler_nested(scheduler, task, worker_local), "scheduler_nested");
-    return 0;
-  }
+    err = scheduler_execute_parallel(scheduler, task, &task_timer);
 
-  return scheduler_parallel(scheduler, task);
-}
+    // Report time measurements
+    // TODO the update of both of these should really both be atomic!!
+    __atomic_fetch_add(task->info.total_time, task_timer, __ATOMIC_RELAXED);
+    __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
 
-#endif
-
-
-/* Decide whether to run sequential  or (potentially nested) parallel code body */
-static inline int scheduler_do_task(struct scheduler* scheduler,
-                                    struct scheduler_task *task)
-{
-  assert(task != NULL);
-#ifdef MCDEBUG
-  fprintf(stderr, "[scheduler_do_task] starting task with %ld iterations\n", task->iterations);
-#endif
-
-  struct scheduler_info info;
-
-  /* Run task directly if all other workers are occupied */
-  if (!free_workers) {
-    info.iter_pr_subtask = task->iterations;
-    info.remainder = 0;
-    info.nsubtasks = 1;
-    return task->seq_fn(task->args, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid, info);
+    // Reset timers to account for new timings
+    worker->total = time_before + task_timer;
+    worker->timer = get_wall_time();
   }
 
 
-  int max_num_tasks = scheduler->num_threads;
-  switch (task->sched) {
-  case STATIC:
-    info.iter_pr_subtask = task->iterations / max_num_tasks;
-    info.remainder = task->iterations % max_num_tasks;
-    info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
-    break;
-  case DYNAMIC:
-    info.iter_pr_subtask = task->iterations / max_num_tasks;
-    info.remainder = task->iterations % max_num_tasks;
-    // As any thread can take any subtasks
-    // we are being safe with returning
-    // an upper bound on the number of tasks
-    info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
-    break;
-  default:
-    assert(!"Got unknown scheduling");
-  }
-
-  stealing = 1;
-  int err = task->seq_fn(task->args, task->iterations, (worker_local == NULL) ? 0 : worker_local->tid, info);
-  stealing = 0;
   return err;
 }
 
+/* Decide on how schedule the incoming task i.e. how many subtasks and
+   to run sequential or (potentially nested) parallel code body */
+static inline int scheduler_prepare_task(struct scheduler* scheduler,
+                                         struct scheduler_task *task)
+{
+  assert(task != NULL);
 
+  struct scheduler_info info;
+  info.total_time = task->total_time;
+  info.total_iter = task->total_iter;
+
+  int max_num_tasks = task->sched == STATIC ?
+    compute_max_num_subtasks(scheduler->num_threads, info, task->iterations):
+    scheduler->num_threads;
+
+  // Decide if task should be scheduled sequentially
+  if (max_num_tasks <= 1 || is_small(task, max_num_tasks)) {
+    info.iter_pr_subtask = task->iterations;
+    info.remainder = 0;
+    info.nsubtasks = 1;
+  } else {
+    info.iter_pr_subtask = task->iterations / max_num_tasks;
+    info.remainder = task->iterations % max_num_tasks;
+    info.sched = task->sched;
+    switch (task->sched) {
+    case STATIC:
+      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
+      break;
+    case DYNAMIC:
+      // As any thread can take any subtasks, we are being safe with returning
+      // an upper bound on the number of tasks such that the task allocate enough memory
+      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
+      break;
+    default:
+      assert(!"Got unknown scheduling");
+    }
+
+  }
+  return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+}
+
+#endif
 // End of scheduler.h

@@ -1,6 +1,23 @@
+// Start of chaselev.h
+
+#ifndef _CHASELEV_H_
+#define _CHASELEV_H_
+
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
+
+
+struct deque_buffer {
+  struct subtask** array;
+  int64_t size;
+};
+
+struct deque {
+  struct deque_buffer *buffer;
+  int64_t top, bottom;
+  int dead;
+};
 
 
 
@@ -176,34 +193,5 @@ static inline int empty(struct deque *q)
   return nb_subtasks(q) < 1;
 }
 
-static inline struct subtask* setup_subtask(sub_task_fn fn,
-                                            void* args,
-                                            const char* name,
-                                            volatile int* counter,
-                                            int64_t *total_time,
-                                            int64_t *total_iter,
-                                            int64_t start, int64_t end,
-                                            int chunkable,
-                                            int64_t chunk_size,
-                                            int id)
-{
-  struct subtask* subtask = malloc(sizeof(struct subtask));
-  if (subtask == NULL) {
-    assert(!"malloc failed in setup_subtask");
-    return  NULL;
-  }
-  subtask->fn         = fn;
-  subtask->args       = args;
-  subtask->name       = name;
-
-  subtask->counter    = counter;
-  subtask->total_time = total_time;
-  subtask->total_iter = total_iter;
-
-  subtask->start      = start;
-  subtask->end        = end;
-  subtask->chunkable  = chunkable;
-  subtask->chunk_size = chunk_size;
-  subtask->id         = id;
-  return subtask;
-}
+#endif
+// end of chaselev.h

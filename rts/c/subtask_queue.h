@@ -3,38 +3,7 @@
 #ifndef SUBTASK_QUEUE_H
 #define SUBTASK_QUEUE_H
 
-static inline struct subtask* setup_subtask(sub_task_fn fn,
-                                            void* args,
-                                            const char* name,
-                                            volatile int* counter,
-                                            int64_t *total_time,
-                                            int64_t *total_iter,
-                                            int64_t start, int64_t end,
-                                            int chunkable,
-                                            int64_t chunk_size,
-                                            int id)
-{
-  struct subtask* subtask = malloc(sizeof(struct subtask));
-  if (subtask == NULL) {
-    assert(!"malloc failed in setup_subtask");
-    return  NULL;
-  }
-  subtask->fn         = fn;
-  subtask->args       = args;
-  subtask->name       = name;
 
-  subtask->counter    = counter;
-  subtask->total_time = total_time;
-  subtask->total_iter = total_iter;
-
-
-  subtask->start      = start;
-  subtask->end        = end;
-  subtask->chunkable  = chunkable;
-  subtask->chunk_size = chunk_size;
-  subtask->id         = id;
-  return subtask;
-}
 
 /* Doubles the size of the queue */
 static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) {
@@ -215,34 +184,6 @@ static inline int subtask_queue_steal(struct worker *worker,
 
   return 0;
 }
-
-
-
-/* Ask for a random subtask from another worker */
-static inline int query_a_subtask(struct scheduler* scheduler,
-                                  int tid,
-                                  struct worker *worker,
-                                  struct subtask **subtask)
-{
-  assert(scheduler != NULL);
-
-  int worker_idx = fast_rand() % scheduler->num_threads;
-  while (worker_idx == tid) {
-    worker_idx = fast_rand() % scheduler->num_threads;
-  }
-  struct worker *rand_worker = &scheduler->workers[worker_idx];
-  assert(rand_worker != NULL);
-  int retval = subtask_queue_steal(rand_worker, subtask);
-  if (retval == 0) { /* we found some work */
-    assert(*subtask != NULL);
-    return 0;
-  } else if (retval == 1) { /* Queue was not ready or no work found */
-    return 1;
-  } else { /* Queue failed else */
-    return retval;
-  }
-}
-
 
 
 // Pop an element from the front of the job queue.  Blocks if the

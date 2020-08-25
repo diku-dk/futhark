@@ -35,14 +35,18 @@ compileProg =
   ImpGen.compileProg
   where generateContext = do
 
-          let subtask_queue_h  = $(embedStringFile "rts/c/subtask_queue.h")
-              scheduler_h = $(embedStringFile "rts/c/scheduler_deque.h")
-              multicore_h = $(embedStringFile "rts/c/multicore_defs.h")
+          let multicore_defs_h = $(embedStringFile "rts/c/multicore_defs.h")
+              multicore_util_h  = $(embedStringFile "rts/c/multicore_util.h")
+              subtask_queue_h  = $(embedStringFile "rts/c/subtask_queue.h")
+              scheduler_common_h = $(embedStringFile "rts/c/scheduler_common.h")
+              scheduler_h = $(embedStringFile "rts/c/scheduler.h")
               scheduler_tune_h = $(embedStringFile "rts/c/scheduler_tune.h")
 
           mapM_ GC.earlyDecl [C.cunit|
-                              $esc:multicore_h
+                              $esc:multicore_defs_h
+                              $esc:multicore_util_h
                               $esc:subtask_queue_h
+                              $esc:scheduler_common_h
                               $esc:scheduler_h
                              |]
 
