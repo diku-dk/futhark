@@ -118,14 +118,16 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 {
   assert(subtask != NULL);
   assert(worker != NULL);
+
   worker->total = 0;
   worker->timer = get_wall_time();
   worker->nested++;
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,
                         worker->tid);
-  if (err != 0)
-    return err;
+  if (err != 0) {
+    __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
+  }
   int64_t time_elapsed = total_now(worker->total, worker->timer);
   worker->time_spent_working += time_elapsed;
   int64_t iter = subtask->end - subtask->start;
@@ -133,7 +135,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   // report measurements
   __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->total_iter, iter, __ATOMIC_RELAXED);
-  __atomic_thread_fence(__ATOMIC_RELEASE);
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);
   return 0;
@@ -176,8 +178,8 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
                                             void* args,
                                             const char* name,
                                             volatile int* counter,
-                                            int64_t *total_time,
-                                            int64_t *total_iter,
+                                            int64_t *timer,
+                                            int64_t *iter,
                                             int64_t start, int64_t end,
                                             int chunkable,
                                             int64_t chunk_size,
@@ -193,8 +195,8 @@ static inline struct subtask* setup_subtask(sub_task_fn fn,
   subtask->name       = name;
 
   subtask->counter    = counter;
-  subtask->total_time = total_time;
-  subtask->total_iter = total_iter;
+  subtask->total_time = timer;
+  subtask->total_iter = iter;
 
 
   subtask->start      = start;

@@ -4,6 +4,7 @@
 
 
 #ifdef MCJOBQUEUE
+
 static volatile int active_work = 0;
 
 static inline int is_finished(struct worker *worker) {
@@ -41,10 +42,7 @@ static inline void *scheduler_worker(void* arg)
       if (retval == 0) {
         assert(subtask != NULL);
         struct subtask* subtask_new = chunk_subtask(worker, subtask);
-        int err = run_subtask(worker, subtask_new);
-        if (err != 0) {
-          __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
-        }
+        CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
       } // else someone stole our work
 
     } else if (active_work) {
@@ -59,10 +57,7 @@ static inline void *scheduler_worker(void* arg)
       if (retval == 0) {
         assert(subtask != NULL);
         struct subtask* subtask_new = chunk_subtask(worker, subtask);
-        int err = run_subtask(worker, subtask_new);
-        if (err != 0) {
-          __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
-        }
+        CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
       }
     }
   }
@@ -127,10 +122,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
       int err = subtask_queue_dequeue(worker, &subtask, 0);
       if (err == 0 ) {
         struct subtask* subtask_new = chunk_subtask(worker, subtask);
-        err = run_subtask(worker, subtask_new);
-        if (err != 0) {
-          return err;
-        }
+        CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
       }
     } else {
       while (shared_counter != 0 && subtask_queue_is_empty(&worker->q) && scheduler_error == 0) {
@@ -185,13 +177,10 @@ static inline void *scheduler_worker(void* arg)
       struct subtask* subtask = pop_back(&worker->q);
       if (subtask == NULL) continue;
       struct subtask* subtask_new = chunk_subtask(worker, subtask);
-      int err = run_subtask(worker, subtask_new);
+      CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
       /* Only one error can be returned at the time now
          Maybe we can provide a stack like structure for pushing errors onto
          if we wish to backpropagte multiple errors */
-      if (err != 0) {
-        __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
-      }
     } else if (__atomic_load_n(&num_workers, __ATOMIC_RELAXED) == 1) {
       break;
     } else { // try to steal
@@ -258,10 +247,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
       struct subtask * subtask = pop_back(&worker->q);
       if (subtask == NULL) continue;
       struct subtask* subtask_new = chunk_subtask(worker, subtask);
-      int err = run_subtask(worker, subtask_new);
-      if (err != 0) {
-        return err;
-      }
+      CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
     } else {
       while (shared_counter != 0 && empty(&worker->q) && scheduler_error == 0) {
         steal_from_random_worker(worker);
