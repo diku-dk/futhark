@@ -131,7 +131,7 @@ casHistogram pat space histops kbody = do
                do_op (map patElemName dest_res) (bucket_is ++ is')
 
   free_params <- freeParams body (segFlat space : [idx])
-  emit $ Imp.Op $ Imp.MCFunc "atomic_seg_hist" idx mempty body free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "atomic_seg_hist" idx mempty body free_params $ segFlat space
 
 segmentedHist :: Pattern MCMem
               -> SegSpace
@@ -147,7 +147,7 @@ segmentedHist pat space histops kbody = do
     par_body <- compileSegHistBody n_segments pat space histops kbody
     free_params <- freeParams par_body [segFlat space, n_segments]
     let (body_allocs, body') = extractAllocations par_body
-    emit $ Imp.Op $ Imp.MCFunc "segmented_hist" n_segments body_allocs body' free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "segmented_hist" n_segments body_allocs body' free_params $ segFlat space
 
 
 
@@ -241,7 +241,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
   free_params <- freeParams (prebody <> body) (segFlat space : [flat_idx])
   let (body_allocs, body') = extractAllocations body
-  emit $ Imp.Op $ Imp.MCFunc "seghist_stage_1" flat_idx (body_allocs <> prebody) body' free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "seghist_stage_1" flat_idx (body_allocs <> prebody) body' free_params $ segFlat space
 
 
   forM_ (zip3 per_red_pes histograms histops) $ \(red_pes, (hists,_,_),  op) -> do

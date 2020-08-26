@@ -137,7 +137,7 @@ reductionStage1 space slugs kbody = do
 
   free_params <- freeParams fbody (segFlat space : [flat_idx])
   let (body_allocs, fbody') = extractAllocations fbody
-  emit $ Imp.Op $ Imp.MCFunc "segred_stage_1" flat_idx body_allocs fbody' free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" flat_idx body_allocs fbody' free_params $ segFlat space
 
 reductionStage2 :: Pattern MCMem
                 -> SegSpace
@@ -186,7 +186,7 @@ segmentedReduction pat space reds kbody =
     body    <- compileSegRedBody n_par_segments pat space reds kbody
     free_params <- freeParams body (segFlat space : [n_par_segments])
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.MCFunc "segmented_segred" n_par_segments body_allocs body' free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" n_par_segments body_allocs body' free_params $ segFlat space
 
 
 compileSegRedBody :: VName

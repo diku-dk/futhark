@@ -31,7 +31,7 @@ data Time = NoTime | Time
 
 -- | A multicore operation.
 data Multicore = Task String [Param] Code (Maybe Code) [Param] SchedulerInfo
-               | MCFunc String VName Code Code [Param] VName
+               | ParLoop String VName Code Code [Param] VName
                | MulticoreCall (Maybe VName) String
                | Atomic AtomicOp
 
@@ -92,7 +92,7 @@ instance Pretty Multicore where
     text "seq_code" <+> nestedBlock "{" "}" (ppr seq_code) <+>
     text "retvals" <+> ppr retval
 
-  ppr (MCFunc s i prebody body params info) =
+  ppr (ParLoop s i prebody body params info) =
     text "parloop" <+> ppr s <+> ppr i <+>
     ppr prebody <+>
     ppr params <+>
@@ -112,7 +112,7 @@ instance FreeIn SchedulerInfo where
 instance FreeIn Multicore where
   freeIn' (Task _ _ par_code seq_code _ info) =
     freeIn' par_code <> freeIn' seq_code  <> freeIn' info
-  freeIn' (MCFunc _  _ prebody body _ _) =
+  freeIn' (ParLoop _  _ prebody body _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' body)
   freeIn' (MulticoreCall dests _ ) = freeIn' dests
   freeIn' (Atomic aop) = freeIn' aop

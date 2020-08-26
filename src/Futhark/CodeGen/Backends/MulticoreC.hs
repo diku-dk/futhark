@@ -539,19 +539,19 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
 
 
 
-compileOp (MCFunc s' i prebody body free tid) = do
+compileOp (ParLoop s' i prebody body free tid) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
   let lexical = lexicalMemoryUsage $
                 Function False [] free body [] []
 
-  fstruct <- multicoreFunDef (s' ++ "_struct") $ \s ->
+  fstruct <- multicoreFunDef (s' ++ "_parloop_struct") $ \s ->
     return [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                      };|]
-  ftask <- multicoreFunDef s' $ \s -> do
+  ftask <- multicoreFunDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=<
              GC.inNewFunction False $ GC.cachingMemory lexical $
              \decl_cached free_cached -> GC.blockScope $ do

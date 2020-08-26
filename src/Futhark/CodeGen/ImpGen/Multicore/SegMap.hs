@@ -61,7 +61,7 @@ compileSegMap pat space kbody =
     body <- compileSegMapBody flat_par_idx pat space kbody
     free_params <- freeParams body [segFlat space, flat_par_idx]
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.MCFunc "segmap" flat_par_idx body_allocs body' free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "segmap" flat_par_idx body_allocs body' free_params $ segFlat space
 
 compileSequentialSegMap :: Pattern MCMem
                         -> SegSpace
