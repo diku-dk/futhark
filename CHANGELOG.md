@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `#[unroll]` attribute.
+
+  * Better error message when writing `a[i][j]` (#1095).
+
+  * Better error message when missing "in" (#1091).
+
 ### Removed
 
 ### Changed
@@ -22,6 +28,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix incorrect movement of array indexing into branches `if`s
     (#1073).
+
+  * Fix defunctorisation bug (#1088).
+
+  * Fix issue where loop tiling might generate out-of-bounds reads
+    (#1094).
+
+  * Scans of empty arrays no longer result in out-of-bounds memory
+    reads.
+
+  * Fix yet another defunctionalisation bug due to missing
+    eta-expansion (#1100).
 
 ## [0.16.3]
 

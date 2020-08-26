@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-linux-nix:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -31,7 +31,7 @@ jobs:
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
   build-linux-cabal:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -40,7 +40,7 @@ jobs:
       run: |
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
-        sudo apt-get install ghc-8.8.2
+        sudo apt-get install ghc-8.8.4
         echo "::add-path::/opt/ghc/bin"
 
     - uses: actions/cache@v2
@@ -59,7 +59,7 @@ jobs:
         cabal install --install-method=copy --overwrite-policy=always
 
   build-linux-stack:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -115,7 +115,7 @@ jobs:
     - name: Install dependencies
       run: |
         choco install -y msys2
-        choco install -y ghc --version=8.8.2 --allow-downgrade
+        choco install -y ghc --version=8.8.4 --allow-downgrade
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -144,7 +144,7 @@ jobs:
         path: futhark-nightly-windows-x86_64.zip
 
   test-unit-and-style:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -171,7 +171,7 @@ jobs:
 
 
   test-interpreter:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -191,7 +191,7 @@ jobs:
         futhark test -i tests examples
 
   test-c:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -212,7 +212,7 @@ jobs:
         make -C libtests/c
 
   test-python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -237,7 +237,7 @@ jobs:
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
 
   test-opencl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -246,7 +246,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
 
     - uses: actions/download-artifact@v2
       with:
@@ -259,10 +259,10 @@ jobs:
         echo "::add-path::$HOME/.local/bin"
 
     - run: |
-        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl tests examples
+        futhark test -c --no-terminal --backend=opencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-cuda:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -287,7 +287,7 @@ jobs:
         futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
 
   test-tools:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -316,7 +316,7 @@ jobs:
         path: prelude-docs.tar.xz
 
   benchmark-opencl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -343,7 +343,7 @@ jobs:
         futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
 
   deploy-nightly:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-windows, build-linux-nix, test-tools]
     if: github.ref == 'refs/heads/master'
 

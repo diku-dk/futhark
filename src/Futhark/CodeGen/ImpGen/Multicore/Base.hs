@@ -207,7 +207,7 @@ decideScheduling code  =
 
 -- | Try to extract invariant allocations.  If we assume that the
 -- given 'Code' is the body of a 'SegOp', then it is always safe to
--- move the allocations to the prebody.
+-- move the immediate allocations to the prebody.
 extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
 extractAllocations segop_code = f segop_code
   where declared = Imp.declaredIn segop_code
@@ -219,9 +219,9 @@ extractAllocations segop_code = f segop_code
               (Imp.Allocate name size space, mempty)
         f (x Imp.:>>: y) = f x <> f y
         f (Imp.While cond body) =
-          second (Imp.While cond) (f body)
+          (mempty, Imp.While cond body)
         f (Imp.For i it bound body) =
-          second (Imp.For i it bound) (f body)
+          (mempty, Imp.For i it bound body)
         f (Imp.Comment s code) =
           second (Imp.Comment s) (f code)
         f Imp.Free{} =

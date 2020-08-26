@@ -260,9 +260,10 @@ instance Monoid (Code a) where
 
 -- | Find those memory blocks that are used only lexically.  That is,
 -- are not used as the source or target of a 'SetMem', or are the
--- result of the function.  This is interesting because such memory
--- blocks do not need reference counting, but can be managed in a
--- purely stack-like fashion.
+-- result of the function, nor passed as arguments to other functions.
+-- This is interesting because such memory blocks do not need
+-- reference counting, but can be managed in a purely stack-like
+-- fashion.
 --
 -- We do not look inside any 'Op's.  We assume that no 'Op' is going
 -- to 'SetMem' a memory block declared outside it.
@@ -287,6 +288,9 @@ lexicalMemoryUsage func =
         declared x = go declared x
 
         set (SetMem x y _) = namesFromList [x,y]
+        set (Call _ _ args) = foldMap onArg args
+          where onArg ExpArg{} = mempty
+                onArg (MemArg x) = oneName x
         set x = go set x
 
 -- | The set of functions that are called by this code.  Assumes there
