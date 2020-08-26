@@ -680,7 +680,9 @@ simplifyIndexing vtable seType idd inds consuming =
             fmap (SubExpResult cs) $ letSubExp "slice_iota" $
               BasicOp $ Iota i_n i_offset'' i_stride'' to_it
 
-    Just (Rotate offsets a, cs) -> Just $ do
+    -- A rotate cannot be simplified away if we are slicing a rotated dimension.
+    Just (Rotate offsets a, cs)
+      | not $ or $ zipWith rotateAndSlice offsets inds -> Just $ do
       dims <- arrayDims <$> lookupType a
       let adjustI i o d = do
             i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int32 OverflowWrap) i o
@@ -690,6 +692,8 @@ simplifyIndexing vtable seType idd inds consuming =
           adjust (DimSlice i n s, o, d) =
             DimSlice <$> adjustI i o d <*> pure n <*> pure s
       IndexResult cs a <$> mapM adjust (zip3 inds offsets dims)
+        where rotateAndSlice r DimSlice{} = not $ isCt0 r
+              rotateAndSlice _ _ = False
 
     Just (Index aa ais, cs) ->
       Just $ IndexResult cs aa <$>
