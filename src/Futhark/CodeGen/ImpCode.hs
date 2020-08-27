@@ -171,11 +171,11 @@ data Code a = Skip
               -- ^ No-op.  Crucial for the 'Monoid' instance.
             | Code a :>>: Code a
               -- ^ Statement composition.  Crucial for the 'Semigroup' instance.
-            | For VName IntType Exp (Code a)
-              -- ^ A for-loop iterating the given number of times.  The
-              -- loop parameter starts counting from zero and will have
-              -- the given type.  The bound is evaluated just once,
-              -- before the loop is entered.
+            | For VName Exp (Code a)
+              -- ^ A for-loop iterating the given number of times.
+              -- The loop parameter starts counting from zero and will
+              -- have the same (integer) type as the bound.  The bound
+              -- is evaluated just once, before the loop is entered.
             | While Exp (Code a)
               -- ^ While loop.  The conditional is (of course)
               -- re-evaluated before every iteration of the loop.
@@ -275,7 +275,7 @@ lexicalMemoryUsage func =
 
         go f (x :>>: y) = f x <> f y
         go f (If _ x y) = f x <> f y
-        go f (For _ _ _ x) = f x
+        go f (For _ _ x) = f x
         go f (While _ x) = f x
         go f (Comment _ x) = f x
         go _ _ = mempty
@@ -294,7 +294,7 @@ lexicalMemoryUsage func =
 calledFuncs :: Code a -> S.Set Name
 calledFuncs (x :>>: y) = calledFuncs x <> calledFuncs y
 calledFuncs (If _ x y) = calledFuncs x <> calledFuncs y
-calledFuncs (For _ _ _ x) = calledFuncs x
+calledFuncs (For _ _ x) = calledFuncs x
 calledFuncs (While _ x) = calledFuncs x
 calledFuncs (Comment _ x) = calledFuncs x
 calledFuncs (Call _ f _) = S.singleton f
@@ -410,8 +410,8 @@ instance Pretty op => Pretty (Code op) where
   ppr (Op op) = ppr op
   ppr Skip   = text "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
-  ppr (For i it limit body) =
-    text "for" <+> ppr i <> text ":" <> ppr it <+> langle <+> ppr limit <+> text "{" </>
+  ppr (For i limit body) =
+    text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
   ppr (While cond body) =
@@ -510,8 +510,8 @@ instance Foldable Code where
 instance Traversable Code where
   traverse f (x :>>: y) =
     (:>>:) <$> traverse f x <*> traverse f y
-  traverse f (For i it bound code) =
-    For i it bound <$> traverse f code
+  traverse f (For i bound code) =
+    For i bound <$> traverse f code
   traverse f (While cond code) =
     While cond <$> traverse f code
   traverse f (If cond x y) =
@@ -553,7 +553,7 @@ declaredIn (DeclareScalar name _ _) = oneName name
 declaredIn (DeclareArray name _ _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
-declaredIn (For i _ _ body) = oneName i <> declaredIn body
+declaredIn (For i _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
@@ -567,7 +567,7 @@ instance FreeIn a => FreeIn (Code a) where
     fvBind (declaredIn x) $ freeIn' x <> freeIn' y
   freeIn' Skip =
     mempty
-  freeIn' (For i _ bound body) =
+  freeIn' (For i bound body) =
     fvBind (oneName i) $ freeIn' bound <> freeIn' body
   freeIn' (While cond body) =
     freeIn' cond <> freeIn' body

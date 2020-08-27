@@ -2026,12 +2026,12 @@ compileCode (Free name space) = do
   cached <- isJust <$> cacheMem name
   unless cached $ unRefMem name space
 
-compileCode (For i it bound body) = do
+compileCode (For i bound body) = do
   let i' = C.toIdent i
-      it' = primTypeToCType $ IntType it
+      t = primTypeToCType $ primExpType bound
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
-  stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+  stm [C.cstm|for ($ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 

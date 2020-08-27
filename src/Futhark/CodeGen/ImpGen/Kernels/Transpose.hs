@@ -80,7 +80,7 @@ mapTranspose block_dim args t kind =
       [ dec x_index $ v32 get_global_id_0
       , dec y_index $ v32 get_group_id_1 * tile_dim + v32 get_local_id_1
       , when (v32 x_index .<. width) $
-        For j Int32 elemsPerThread $
+        For j elemsPerThread $
         let i = v32 j * (tile_dim `quot` elemsPerThread)
         in mconcat [ dec index_in $ (v32 y_index + i) * width + v32 x_index
                    , when (v32 y_index + i .<. height) $
@@ -93,7 +93,7 @@ mapTranspose block_dim args t kind =
       , SetScalar x_index $ v32 get_group_id_1 * tile_dim + v32 get_local_id_0
       , SetScalar y_index $ v32 get_group_id_0 * tile_dim + v32 get_local_id_1
       , when (v32 x_index .<. height) $
-        For j Int32 elemsPerThread $
+        For j elemsPerThread $
         let i = v32 j * (tile_dim `quot` elemsPerThread)
         in mconcat [ dec index_out $ (v32 y_index + i) * height + v32 x_index
                    , when (v32 y_index + i .<. width) $
