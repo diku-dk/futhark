@@ -583,7 +583,7 @@ compileOp (ParLoop s' i prebody body free tid) = do
   GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
 
   let ftask_name = ftask <> "_task"
-  GC.decl [C.cdecl|struct scheduler_subtask $id:ftask_name;|]
+  GC.decl [C.cdecl|struct scheduler_parloop $id:ftask_name;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
   GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
   GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]

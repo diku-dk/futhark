@@ -72,7 +72,7 @@ static inline void *scheduler_worker(void* arg)
 
 
 static inline int scheduler_execute_parallel(struct scheduler *scheduler,
-                                             struct scheduler_subtask *task,
+                                             struct scheduler_parloop *task,
                                              int64_t *timer)
 {
 
@@ -200,7 +200,7 @@ static inline void *scheduler_worker(void* arg)
 
 
 static inline int scheduler_execute_parallel(struct scheduler *scheduler,
-                                             struct scheduler_subtask *task,
+                                             struct scheduler_parloop *task,
                                              int64_t *timer)
 {
   struct worker * worker = worker_local;
@@ -264,7 +264,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 
 
 static inline int scheduler_execute_task(struct scheduler *scheduler,
-                                         struct scheduler_subtask *task)
+                                         struct scheduler_parloop *task)
 {
 
   struct worker *worker = worker_local;

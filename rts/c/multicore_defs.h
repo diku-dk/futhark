@@ -72,13 +72,13 @@ struct deque {
 
 
 // Function definitions
-typedef int (*sub_task_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
+typedef int (*parloop_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
 typedef int (*task_fn)(void* args, int64_t iterations, int tid, struct scheduler_info info);
 
 
 /* A subtask that can be executed by a thread */
 struct subtask {
-  sub_task_fn fn;
+  parloop_fn fn;
   void* args;
   int64_t start, end;
   const char *name;

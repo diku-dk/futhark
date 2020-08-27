@@ -26,10 +26,10 @@ struct scheduler {
   int num_threads;
 };
 
-/* A Parallel task  */
-struct scheduler_subtask {
+/* A parallel parloop task  */
+struct scheduler_parloop {
   const char* name;
-  sub_task_fn fn;
+  parloop_fn fn;
   void* args;
   int64_t iterations;
   struct scheduler_info info;
@@ -174,7 +174,7 @@ static inline int is_small(struct scheduler_task *task, int ntasks)
 }
 
 // TODO make this prettier
-static inline struct subtask* setup_subtask(sub_task_fn fn,
+static inline struct subtask* setup_subtask(parloop_fn fn,
                                             void* args,
                                             const char* name,
                                             volatile int* counter,

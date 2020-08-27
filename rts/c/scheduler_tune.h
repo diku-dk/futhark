@@ -89,17 +89,17 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 
     info.sched = STATIC;
 
-    struct scheduler_subtask futhark_segred_tuning_scheduler_subtask;
-    futhark_segred_tuning_scheduler_subtask.name = "futhark_mc_tuning_segred_stage_1";
-    futhark_segred_tuning_scheduler_subtask.fn = futhark_mc_tuning_segred_stage_1;
-    futhark_segred_tuning_scheduler_subtask.args = &futhark_mc_segred_stage_1_struct;
-    futhark_segred_tuning_scheduler_subtask.iterations = iterations;
-    futhark_segred_tuning_scheduler_subtask.info = info;
+    struct scheduler_parloop futhark_segred_tuning_scheduler_parloop;
+    futhark_segred_tuning_scheduler_parloop.name = "futhark_mc_tuning_segred_stage_1";
+    futhark_segred_tuning_scheduler_parloop.fn = futhark_mc_tuning_segred_stage_1;
+    futhark_segred_tuning_scheduler_parloop.args = &futhark_mc_segred_stage_1_struct;
+    futhark_segred_tuning_scheduler_parloop.iterations = iterations;
+    futhark_segred_tuning_scheduler_parloop.info = info;
 
     int64_t tuning_chunked_start = get_wall_time();
     int futhark_segred_tuning_program_err =
       scheduler_execute_task(&ctx->scheduler,
-                             &futhark_segred_tuning_scheduler_subtask);
+                             &futhark_segred_tuning_scheduler_parloop);
     assert(futhark_segred_tuning_program_err == 0);
     int64_t tuning_chunked_end = get_wall_time();
     time_elapsed =  tuning_chunked_end - tuning_chunked_start;
@@ -114,8 +114,8 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   int64_t end_tuning = get_wall_time();
   fprintf(stderr, "tuning took %lld us and found kappa %f - time %lld - ratio %f\n",
           end_tuning- start_tuning, kappa_tune, time_elapsed,  ratio);
-
   kappa = kappa_tune;
+
 #ifdef MCCHASELV
   CHECK_ERR(deque_destroy(&ctx->scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
 #elif defined(MCJOBQUEUE)
