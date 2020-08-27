@@ -166,7 +166,7 @@ instance ArrayShape Rank where
 -- between host memory ('DefaultSpace') and GPU space.
 data Space = DefaultSpace
            | Space SpaceId
-           | ScalarSpace [SubExp] PrimType
+           | ScalarSpace [SubExp] (UT PrimType)
              -- ^ A special kind of memory that is a statically sized
              -- array of some primitive type.  Used for private memory
              -- on GPUs.
@@ -181,8 +181,8 @@ data NoUniqueness = NoUniqueness
 
 -- | A Futhark type is either an array or an element type.  When
 -- comparing types for equality with '==', shapes must match.
-data TypeBase shape u = Prim PrimType
-                      | Array PrimType shape u
+data TypeBase shape u = Prim (UT PrimType)
+                      | Array (UT PrimType) shape u
                       | Mem Space
                     deriving (Show, Eq, Ord)
 
@@ -241,7 +241,7 @@ instance Monoid Certificates where
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
 -- guaranteed to complete in constant time.
-data SubExp = Constant PrimValue
+data SubExp = Constant (UT PrimValue)
             | Var      VName
             deriving (Show, Eq, Ord)
 
@@ -385,7 +385,7 @@ instance Traversable ErrorMsgPart where
 
 -- | How many non-constant parts does the error message have, and what
 -- is their type?
-errorMsgArgTypes :: ErrorMsg a -> [PrimType]
+errorMsgArgTypes :: ErrorMsg a -> [UT PrimType]
 errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
   where onPart ErrorString{} = Nothing
-        onPart ErrorInt32{} = Just $ IntType Int32
+        onPart ErrorInt32{} = Just $ UT $ IntType Int32

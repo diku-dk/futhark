@@ -86,6 +86,24 @@ instance Pretty Value where
     | Array{} <- t  = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
+instance Pretty IntValue where
+  ppr (Int8Value v)  = text $ show v ++ "i8"
+  ppr (Int16Value v) = text $ show v ++ "i16"
+  ppr (Int32Value v) = text $ show v ++ "i32"
+  ppr (Int64Value v) = text $ show v ++ "i64"
+
+instance Pretty FloatValue where
+  ppr (Float32Value v)
+    | isInfinite v, v >= 0 = text "f32.inf"
+    | isInfinite v, v <  0 = text "-f32.inf"
+    | isNaN v = text "f32.nan"
+    | otherwise = text $ show v ++ "f32"
+  ppr (Float64Value v)
+    | isInfinite v, v >= 0 = text "f64.inf"
+    | isInfinite v, v <  0 = text "-f64.inf"
+    | isNaN v = text "f64.nan"
+    | otherwise = text $ show v ++ "f64"
+
 instance Pretty PrimValue where
   ppr (UnsignedValue (Int8Value v)) =
     text (show (fromIntegral v::Word8)) <> text "u8"

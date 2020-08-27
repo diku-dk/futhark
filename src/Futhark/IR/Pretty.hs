@@ -187,7 +187,7 @@ instance Pretty BasicOp where
       _        -> brackets $ commasep   $ map ppr es
   ppr (BinOp bop x y) = ppr bop <> parens (ppr x <> comma <+> ppr y)
   ppr (CmpOp op x y) = ppr op <> parens (ppr x <> comma <+> ppr y)
-  ppr (ConvOp conv x) =
+  ppr (ConvOp (UT2 conv) x) =
     text (convOpFun conv) <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
     where (fromtype, totype) = convOpType conv
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
@@ -196,11 +196,11 @@ instance Pretty BasicOp where
   ppr (Update src idxs se) =
     ppr src <+> text "with" <+> brackets (commasep (map ppr idxs)) <+>
     text "<-" <+> ppr se
-  ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
+  ppr (Iota e x s (UT et)) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where et' = text $ show $ primBitSize $ IntType et
   ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
-  ppr (Scratch t shape) =
+  ppr (Scratch (UT t) shape) =
     text "scratch" <> apply (ppr t : map ppr shape)
   ppr (Reshape shape e) =
     text "reshape" <> apply [apply (map ppr shape), ppr e]
@@ -243,10 +243,10 @@ instance PrettyLore lore => Pretty (Exp lore) where
     text "loop" <+> ppPattern ctxparams valparams <+>
     equals <+> ppTuple' (ctxinit++valinit) </>
     (case form of
-      ForLoop i it bound [] ->
+      ForLoop i (UT it) bound [] ->
         text "for" <+> align (ppr i <> text ":" <> ppr it <+>
                               text "<" <+> align (ppr bound))
-      ForLoop i it bound loop_vars ->
+      ForLoop i (UT it) bound loop_vars ->
         annot (mapMaybe (ppAnnot . fst) loop_vars) $
         text "for" <+> align (ppr i <> text ":" <> ppr it <+>
                               text "<" <+> align (ppr bound) </>

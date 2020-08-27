@@ -104,9 +104,6 @@ import           Data.Traversable
 import qualified Data.List.NonEmpty               as NE
 import           Prelude
 
-import           Futhark.IR.Primitive (FloatType (..),
-                                                   FloatValue (..),
-                                                   IntType (..), IntValue (..))
 import           Futhark.Util.Pretty
 import           Futhark.Util.Loc
 import           Language.Futhark.Core
@@ -154,12 +151,55 @@ instance Foldable Info where
 instance Traversable Info where
   traverse f (Info x) = Info <$> f x
 
+-- | An integer type, ordered by size.  Note that signedness is not a
+-- property of the type, but a property of the operations performed on
+-- values of these types.
+data IntType = Int8 | Int16 | Int32 | Int64
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- | A floating point type.
+data FloatType = Float32 | Float64
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
 -- | Low-level primitive types.
 data PrimType = Signed IntType
               | Unsigned IntType
               | FloatType FloatType
               | Bool
               deriving (Eq, Ord, Show)
+
+-- | An integer value.
+data IntValue = Int8Value !Int8
+              | Int16Value !Int16
+              | Int32Value !Int32
+              | Int64Value !Int64
+               deriving (Eq, Ord, Show)
+
+-- | A floating-point value.
+data FloatValue = Float32Value !Float
+                | Float64Value !Double
+               deriving (Show)
+
+instance Eq FloatValue where
+  Float32Value x == Float32Value y = isNaN x && isNaN y || x == y
+  Float64Value x == Float64Value y = isNaN x && isNaN y || x == y
+  Float32Value _ == Float64Value _ = False
+  Float64Value _ == Float32Value _ = False
+
+-- The derived Ord instance does not handle NaNs correctly.
+instance Ord FloatValue where
+  Float32Value x <= Float32Value y = x <= y
+  Float64Value x <= Float64Value y = x <= y
+  Float32Value _ <= Float64Value _ = True
+  Float64Value _ <= Float32Value _ = False
+
+  Float32Value x < Float32Value y = x < y
+  Float64Value x < Float64Value y = x < y
+  Float32Value _ < Float64Value _ = True
+  Float64Value _ < Float32Value _ = False
+
+  (>) = flip (<)
+  (>=) = flip (<=)
 
 -- | Non-array values.
 data PrimValue = SignedValue !IntValue
@@ -1067,7 +1107,17 @@ data ProgBase f vn = Prog { progDoc :: Maybe DocComment
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 --- Some prettyprinting definitions are here because we need them in
---- the Attributes module.
+--- the Prop module.
+
+instance Pretty IntType where
+  ppr Int8  = text "i8"
+  ppr Int16 = text "i16"
+  ppr Int32 = text "i32"
+  ppr Int64 = text "i64"
+
+instance Pretty FloatType where
+  ppr Float32 = text "f32"
+  ppr Float64 = text "f64"
 
 instance Pretty PrimType where
   ppr (Unsigned Int8)  = text "u8"

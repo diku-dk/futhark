@@ -41,7 +41,6 @@ import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import qualified Language.Futhark.TypeChecker.Types as Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
-import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util.Pretty hiding (space, bool, group)
 
 --- Uniqueness
@@ -2475,6 +2474,12 @@ literalOverflowCheck = void . check
         warnBounds inBounds x ty loc = unless inBounds
           $ typeError loc mempty $ "Literal " <> ppr x <>
           " out of bounds for inferred type " <> ppr ty <> "."
+
+        intByteSize :: IntType -> Int
+        intByteSize Int8 = 1
+        intByteSize Int16 = 2
+        intByteSize Int32 = 4
+        intByteSize Int64 = 8
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant

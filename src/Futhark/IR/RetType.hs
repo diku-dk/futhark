@@ -19,7 +19,7 @@ import Futhark.IR.Prop.Types
 -- have more, notably an existential context.
 class (Show rt, Eq rt, Ord rt, ExtTyped rt) => IsBodyType rt where
   -- | Construct a body type from a primitive type.
-  primBodyType :: PrimType -> rt
+  primBodyType :: UT PrimType -> rt
 
 instance IsBodyType ExtType where
   primBodyType = Prim
@@ -30,7 +30,7 @@ instance IsBodyType ExtType where
 -- an existential context.
 class (Show rt, Eq rt, Ord rt, DeclExtTyped rt) => IsRetType rt where
   -- | Contruct a return type from a primitive type.
-  primRetType :: PrimType -> rt
+  primRetType :: UT PrimType -> rt
 
   -- | Given a function return type, the parameters of the function,
   -- and the arguments for a concrete call, return the instantiated

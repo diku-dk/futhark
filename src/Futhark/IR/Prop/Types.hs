@@ -267,10 +267,10 @@ primType _ = True
 
 -- | Returns the bottommost type of an array.  For @[[int]]@, this
 -- would be @int@.  If the given type is not an array, it is returned.
-elemType :: TypeBase shape u -> PrimType
+elemType :: TypeBase shape u -> UT PrimType
 elemType (Array t _ _) = t
-elemType (Prim t)     = t
-elemType Mem{}      = error "elemType Mem"
+elemType (Prim t)      = t
+elemType Mem{}         = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.
 transposeType :: Type -> Type
@@ -449,28 +449,28 @@ dimMapping getDims1 getDims2 f comb ts1 ts2 =
   foldl' comb mempty $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
 
 -- | @IntType Int8@
-int8 :: PrimType
-int8 = IntType Int8
+int8 :: UT PrimType
+int8 = UT $ IntType Int8
 
 -- | @IntType Int16@
-int16 :: PrimType
-int16 = IntType Int16
+int16 :: UT PrimType
+int16 = UT $ IntType Int16
 
 -- | @IntType Int32@
-int32 :: PrimType
-int32 = IntType Int32
+int32 :: UT PrimType
+int32 = UT $ IntType Int32
 
 -- | @IntType Int64@
-int64 :: PrimType
-int64 = IntType Int64
+int64 :: UT PrimType
+int64 = UT $ IntType Int64
 
 -- | @FloatType Float32@
-float32 :: PrimType
-float32 = FloatType Float32
+float32 :: UT PrimType
+float32 = UT $ FloatType Float32
 
 -- | @FloatType Float64@
-float64 :: PrimType
-float64 = FloatType Float64
+float64 :: UT PrimType
+float64 = UT $ FloatType Float64
 
 -- | Typeclass for things that contain 'Type's.
 class Typed t where

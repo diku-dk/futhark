@@ -341,16 +341,16 @@ data BasicOp
     -- Second arg is the element type of the rows of the array.
     -- Scalar operations
 
-  | UnOp UnOp SubExp
+  | UnOp (UT UnOp) SubExp
     -- ^ Unary operation.
 
-  | BinOp BinOp SubExp SubExp
+  | BinOp (UT BinOp) SubExp SubExp
     -- ^ Binary operation.
 
-  | CmpOp CmpOp SubExp SubExp
+  | CmpOp (UT CmpOp) SubExp SubExp
     -- ^ Comparison - result type is always boolean.
 
-  | ConvOp ConvOp SubExp
+  | ConvOp (UT2 ConvOp) SubExp
     -- ^ Conversion "casting".
 
   | Assert SubExp (ErrorMsg SubExp) (SrcLoc, [SrcLoc])
@@ -377,7 +377,7 @@ data BasicOp
   -- order.  The result will not alias anything.
 
   -- Array construction.
-  | Iota SubExp SubExp SubExp IntType
+  | Iota SubExp SubExp SubExp (UT IntType)
   -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@.
   --
   -- The t'IntType' indicates the type of the array returned and the
@@ -386,7 +386,7 @@ data BasicOp
   | Replicate Shape SubExp
   -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
 
-  | Scratch PrimType [SubExp]
+  | Scratch (UT PrimType) [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
@@ -427,7 +427,7 @@ deriving instance Decorations lore => Show (ExpT lore)
 deriving instance Decorations lore => Ord (ExpT lore)
 
 -- | For-loop or while-loop?
-data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
+data LoopForm lore = ForLoop VName (UT IntType) SubExp [(LParam lore,VName)]
                    | WhileLoop VName
 
 deriving instance Decorations lore => Eq (LoopForm lore)

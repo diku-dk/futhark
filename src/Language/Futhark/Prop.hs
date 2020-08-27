@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GADTs #-}
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
 -- keep "Futhark.Language.Syntax" simple, and put whatever embellishments
@@ -50,7 +51,6 @@ module Language.Futhark.Prop
   , foldFunType
   , typeVars
   , typeDimNames
-  , primByteSize
 
   -- * Operations on types
   , rank
@@ -490,13 +490,6 @@ valueType :: Value -> ValueType
 valueType (PrimValue bv) = Scalar $ Prim $ primValueType bv
 valueType (ArrayValue _ t) = t
 
--- | The size of values of this type, in bytes.
-primByteSize :: Num a => PrimType -> a
-primByteSize (Signed it) = Primitive.intByteSize it
-primByteSize (Unsigned it) = Primitive.intByteSize it
-primByteSize (FloatType ft) = Primitive.floatByteSize ft
-primByteSize Bool = 1
-
 -- | Construct a 'ShapeDecl' with the given number of 'AnyDim'
 -- dimensions.
 rank :: Int -> ShapeDecl (DimDecl VName)
@@ -870,36 +863,52 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
         namify i (k,v) = (VName (nameFromString k) i, v)
 
-        primFun (name, (ts,t, _)) =
-          (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
+        primFun (name, (ts,Primitive.UT t, _)) =
+          (name, IntrinsicMonoFun (map unPrim' ts) $ unPrim t)
+          where unPrim' (Primitive.UT t') = unPrim t'
 
-        unOpFun bop = (pretty bop, IntrinsicMonoFun [t] t)
+        unOpFun (Primitive.UT bop) = (pretty bop, IntrinsicMonoFun [t] t)
           where t = unPrim $ Primitive.unOpType bop
 
-        binOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] t)
+        binOpFun (Primitive.UT bop) = (pretty bop, IntrinsicMonoFun [t, t] t)
           where t = unPrim $ Primitive.binOpType bop
 
-        cmpOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] Bool)
+        cmpOpFun (Primitive.UT bop) = (pretty bop, IntrinsicMonoFun [t, t] Bool)
           where t = unPrim $ Primitive.cmpOpType bop
 
-        convOpFun cop = (pretty cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
+        convOpFun (Primitive.UT2 cop) =
+          (pretty cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
           where (ft, tt) = Primitive.convOpType cop
 
-        signFun t = ("sign_" ++ pretty t, IntrinsicMonoFun [Unsigned t] $ Signed t)
+        signFun (Primitive.UT t) =
+          ("sign_" ++ pretty t', IntrinsicMonoFun [Unsigned t'] $ Signed t')
+          where t' = unPrimInt t
 
-        unsignFun t = ("unsign_" ++ pretty t, IntrinsicMonoFun [Signed t] $ Unsigned t)
+        unsignFun (Primitive.UT t) =
+          ("unsign_" ++ pretty t', IntrinsicMonoFun [Signed t'] $ Unsigned t')
+          where t' = unPrimInt t
 
-        unPrim (Primitive.IntType t) = Signed t
-        unPrim (Primitive.FloatType t) = FloatType t
+        unPrimInt :: Primitive.IntType t -> IntType
+        unPrimInt Primitive.Int8 = Int8
+        unPrimInt Primitive.Int16 = Int16
+        unPrimInt Primitive.Int32 = Int32
+        unPrimInt Primitive.Int64 = Int64
+
+        unPrimFloat :: Primitive.FloatType t -> FloatType
+        unPrimFloat Primitive.Float32 = Float32
+        unPrimFloat Primitive.Float64 = Float64
+
+        unPrim :: Primitive.PrimType t -> PrimType
+        unPrim (Primitive.IntType it) = Signed $ unPrimInt it
+        unPrim (Primitive.FloatType ft) = FloatType $ unPrimFloat ft
         unPrim Primitive.Bool = Bool
-        unPrim Primitive.Cert = Bool
 
         intrinsicType t = (pretty t, IntrinsicType t)
 
         anyIntType = map Signed [minBound..maxBound] ++
                      map Unsigned [minBound..maxBound]
-        anyNumberType = anyIntType ++
-                        map FloatType [minBound..maxBound]
+        anyFloatType = map FloatType [minBound..maxBound]
+        anyNumberType = anyIntType ++ anyFloatType
         anyPrimType = Bool : anyNumberType
 
         mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
