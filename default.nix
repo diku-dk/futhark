@@ -13,12 +13,7 @@ let
   futhark =
     pkgs.haskell.lib.overrideCabal
       (pkgs.haskell.lib.addBuildTools
-        (pkgs.haskell.packages.${compiler}.callCabal2nix "futhark"
-          ( pkgs.lib.cleanSourceWith { filter = name: type:
-                                         baseNameOf (toString name) != "default.nix";
-                                       src = pkgs.lib.cleanSource ./.;
-                                     })
-          { })
+        (pkgs.haskell.packages.${compiler}.callPackage ./futhark.nix { })
         [ pkgs.python37Packages.sphinx ])
     ( _drv: {
       isLibrary = false;
