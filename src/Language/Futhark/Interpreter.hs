@@ -1354,7 +1354,7 @@ initialCtx =
         _ ->
           error $ "Invalid arguments to map intrinsic:\n" ++
           unlines [pretty t, pretty v]
-      where typeRowShape = traverse id . structTypeShape mempty . stripArray 1
+      where typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
 
     def s | "reduce" `isPrefixOf` s = Just $ fun3t $ \f ne xs ->
       foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
