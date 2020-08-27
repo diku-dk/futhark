@@ -17,5 +17,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.pkgconfig
     pkgs.zlib
     pkgs.zlib.out
+    pkgs.cabal2nix
   ];
 }
