@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -102,6 +103,11 @@ module Futhark.IR.Mem
        )
 where
 
+import Prelude hiding ((.), id)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Data.Maybe
 import Control.Monad.State
 import Control.Monad.Reader
@@ -163,7 +169,14 @@ data MemOp inner = Alloc SubExp Space
                    -- ^ Allocate a memory block.  This really should not be an
                    -- expression, but what are you gonna do...
                  | Inner inner
-            deriving (Eq, Ord, Show)
+            deriving (Eq, Ord, Show, Generic)
+
+
+instance SexpIso inner => SexpIso (MemOp inner) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "alloc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "inner") >>> Sexp.el sexpIso))
+    End
 
 instance AllocOp (MemOp inner) where
   allocOp = Alloc
@@ -243,7 +256,14 @@ data MemInfo d u ret = MemPrim PrimType
                      -- offset, /not/ byte offsets!  To translate to byte
                      -- offsets, multiply the offset with the size of the
                      -- array element type.
-                     deriving (Eq, Show, Ord) --- XXX Ord?
+                     deriving (Eq, Show, Ord, Generic) --- XXX Ord?
+
+instance (SexpIso d, SexpIso u, SexpIso ret) => SexpIso (MemInfo d u ret) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "prim") >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "mem") >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "array") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 type MemBound u = MemInfo SubExp u MemBind
 
@@ -337,7 +357,12 @@ instance PP.Pretty (PatElemT (MemInfo SubExp NoUniqueness ret)) where
 data MemBind = ArrayIn VName IxFun
              -- ^ Located in this memory block with this index
              -- function.
-             deriving (Show)
+             deriving (Show, Generic)
+
+instance SexpIso MemBind where
+  sexpIso = with $ \membind ->
+    Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso) >>>
+    membind
 
 instance Eq MemBind where
   _ == _ = True
@@ -367,7 +392,18 @@ data MemReturn = ReturnsInBlock VName ExtIxFun
                | ReturnsNewBlock Space Int ExtIxFun
                  -- ^ The operation returns a new (existential) memory
                  -- block.
-               deriving (Show)
+               deriving (Show, Generic)
+
+instance SexpIso MemReturn where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "returns-in-block") >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "returns-new-block") >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso))
+    End
 
 instance Eq MemReturn where
   _ == _ = True

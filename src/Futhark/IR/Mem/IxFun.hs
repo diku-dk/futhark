@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 -- | This module contains a representation for the index function based on
 -- linear-memory accessor descriptors; see Zhu, Hoeflinger and David work.
@@ -23,7 +25,11 @@ module Futhark.IR.Mem.IxFun
        )
        where
 
-import Prelude hiding (mod)
+import Prelude hiding ((.), id, mod)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty(..))
@@ -52,7 +58,15 @@ type Permutation = [Int]
 
 data Monotonicity = Inc | Dec | Unknown
                -- ^ monotonously increasing, decreasing or unknown
-             deriving (Show, Eq)
+             deriving (Show, Eq, Generic)
+
+instance SexpIso Monotonicity where
+  sexpIso = match
+    $ With (. Sexp.sym "inc")
+    $ With (. Sexp.sym "dec")
+    $ With (. Sexp.sym "unknown")
+    End
+
 
 data LMADDim num = LMADDim { ldStride :: num
                            , ldRotate :: num
@@ -60,7 +74,20 @@ data LMADDim num = LMADDim { ldStride :: num
                            , ldPerm :: Int
                            , ldMon :: Monotonicity
                            }
-                 deriving (Show, Eq)
+                 deriving (Show, Eq, Generic)
+
+
+instance SexpIso num => SexpIso (LMADDim num) where
+  sexpIso = with $ \lmaddim ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "dim") >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    lmaddim
+
 
 -- | LMAD's representation consists of a general offset and for each dimension a
 -- stride, rotate factor, number of elements (or shape), permutation, and
@@ -91,7 +118,16 @@ data LMADDim num = LMADDim { ldStride :: num
 data LMAD num = LMAD { lmadOffset :: num
                      , lmadDims :: [LMADDim num]
                      }
-                deriving (Show, Eq)
+                deriving (Show, Eq, Generic)
+
+instance SexpIso num => SexpIso (LMAD num) where
+  sexpIso = with $ \lmad ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "lmad") >>>
+      Sexp.el sexpIso >>>
+      Sexp.rest sexpIso) >>>
+    lmad
+
 
 -- | An index function is a mapping from a multidimensional array
 -- index space (the domain) to a one-dimensional memory index space.
@@ -106,7 +142,17 @@ data IxFun num = IxFun { ixfunLMADs :: NonEmpty (LMAD num)
                        , ixfunContig :: Bool
                        -- ^ ignoring permutations, is the index function contiguous?
                        }
-                 deriving (Show, Eq)
+                 deriving (Show, Eq, Generic)
+
+
+instance SexpIso num => SexpIso (IxFun num) where
+  sexpIso = with $ \ixfun ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "ixfun") >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    ixfun
 
 
 instance Pretty Monotonicity where

@@ -1,3 +1,6 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | A primitive expression is an expression where the non-leaves are
 -- primitive operators.  Our representation does not guarantee that
 -- the expression is type-correct.
@@ -17,10 +20,16 @@ module Futhark.Analysis.PrimExp
   , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
   ) where
 
+import Prelude hiding ((.), id)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import           Control.Monad
 import           Data.Traversable
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Text as T
 
 import           Futhark.IR.Prop.Names
 import           Futhark.IR.Primitive
@@ -40,7 +49,18 @@ data PrimExp v = LeafExp v PrimType
                | UnOpExp UnOp (PrimExp v)
                | ConvOpExp ConvOp (PrimExp v)
                | FunExp String [PrimExp v] PrimType
-               deriving (Ord, Show)
+               deriving (Ord, Show, Generic)
+
+instance SexpIso v => SexpIso (PrimExp v) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "leaf") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "value") >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "bin-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "cmp-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "un-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "conv-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "fun") >>> Sexp.el (iso T.unpack T.pack . sexpIso) >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 -- The Eq instance upcoerces all integer constants to their largest
 -- type before comparing for equality.  This is technically not a good
