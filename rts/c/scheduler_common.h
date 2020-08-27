@@ -70,9 +70,11 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
   if (i >= my_id) {
     i++;
   }
+#ifdef MCDEBUG
   assert(i >= 0);
   assert(i < my_num_workers);
   assert(i != my_id);
+#endif
 
   return i;
 }
@@ -92,6 +94,7 @@ static inline int64_t compute_chunk_size(struct subtask* subtask, struct worker 
 static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
 {
   if (subtask->chunkable) {
+    // Do we have information from previous runs avaliable
     if (*subtask->total_iter > 0) {
       subtask->chunk_size = compute_chunk_size(subtask, worker);
       assert(subtask->chunk_size > 0);
@@ -135,6 +138,8 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   // report measurements
   __atomic_fetch_add(subtask->total_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->total_iter, iter, __ATOMIC_RELAXED);
+  // We need a fence here, since if the counter is decremented before either
+  // of the two above are updated bad things can happen, if they are stack-allocated
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);

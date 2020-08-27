@@ -3,12 +3,6 @@
 #ifndef MULTICORE_DEFS
 #define MULTICORE_DEFS
 
-
-#include <pthread.h>
-#include <stdlib.h>
-#include <assert.h>
-
-#define MULTICORE
 /* #define MCPROFILE */
 
 // Which queue implementation to use
@@ -16,14 +10,14 @@
 /* #define MCCHASELEV */
 
 
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <windows.h>
-#elif __APPLE__
+#elif defined(__APPLE__)
 #include <sys/sysctl.h>
 // For getting cpu usage of threads
 #include <mach/mach.h>
 #include <sys/resource.h>
-#else // Linux
+#elif defined(__linux__)
 #include <sys/sysinfo.h>
 #include <sys/resource.h>
 #include <signal.h>
@@ -40,13 +34,13 @@ struct scheduler_task;
 
 
 struct subtask_queue {
-  int capacity; // Size of the buffer.
-  int first; // Index of the start of the ring buffer.
-  int num_used; // Number of used elements in the buffer.
+  int capacity;             // Size of the buffer.
+  int first;                // Index of the start of the ring buffer.
+  int num_used;             // Number of used elements in the buffer.
   struct subtask **buffer;
 
-  pthread_mutex_t mutex; // Mutex used for synchronisation.
-  pthread_cond_t cond;   // Condition variable used for synchronisation.
+  pthread_mutex_t mutex;    // Mutex used for synchronisation.
+  pthread_cond_t cond;      // Condition variable used for synchronisation.
   int dead;
 
 
@@ -70,10 +64,9 @@ struct deque {
 };
 
 
-
 // Function definitions
-typedef int (*parloop_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
 typedef int (*task_fn)(void* args, int64_t iterations, int tid, struct scheduler_info info);
+typedef int (*parloop_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
 
 
 /* A subtask that can be executed by a thread */

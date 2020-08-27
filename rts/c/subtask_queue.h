@@ -42,7 +42,6 @@ static inline int subtask_queue_init(struct subtask_queue *subtask_queue, int ca
   CHECK_ERRNO(pthread_mutex_init(&subtask_queue->mutex, NULL), "pthread_mutex_init");
   CHECK_ERRNO(pthread_cond_init(&subtask_queue->cond, NULL), "pthread_cond_init");
 
-
   return 0;
 }
 
@@ -241,7 +240,9 @@ static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 {
   return subtask_queue->num_used == 0;
 }
-#endif
+
+#endif // end defined(MCJOBQUEUE)
+
 #endif
 
 // End of subtask_queue.h

@@ -1,5 +1,7 @@
 // start of multicore_util.h
+
 /* Multicore Utility functions */
+
 #ifndef _MULTICORE_UTIL_H_
 #define _MULTICORE_UTIL_H_
 
@@ -8,7 +10,7 @@
 static inline int getrusage_thread(struct rusage *rusage)
 {
   int err = -1;
-#ifdef __APPLE__
+#if  defined(__APPLE__)
     thread_basic_info_data_t info = { 0 };
     mach_msg_type_number_t info_count = THREAD_BASIC_INFO_COUNT;
     kern_return_t kern_err;
@@ -27,7 +29,7 @@ static inline int getrusage_thread(struct rusage *rusage)
     } else {
         errno = EINVAL;
     }
-#else // Linux
+#elif defined(__linux__)
     err = getrusage(RUSAGE_THREAD, rusage);
 #endif
     return err;
@@ -36,21 +38,24 @@ static inline int getrusage_thread(struct rusage *rusage)
 /* returns the number of logical cores */
 static const int num_processors()
 {
-#ifdef _WIN32
+#if  defined(_WIN32)
 /* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
     SYSTEM_INFO sysinfo;
     GetSystemInfo(&sysinfo);
     int ncores = sysinfo.dwNumberOfProcessors;
     fprintf(stderr, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
     return ncores;
-#elif __APPLE__
+#elif defined(__APPLE__)
     int ncores;
     size_t ncores_size = sizeof(ncores);
     CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0),
                 "sysctlbyname (hw.logicalcpu)");
     return ncores;
-#else // If Linux
+#elif defined(__linux__)
   return get_nprocs();
+#else
+  fprintf(stderr, "operating system not recognised\n");
+  return -1;
 #endif
 }
 
@@ -65,7 +70,6 @@ static inline void output_thread_usage(struct worker *worker)
           worker->time_spent_working,
           (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
           (uint64_t)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec));
-
 }
 
 
