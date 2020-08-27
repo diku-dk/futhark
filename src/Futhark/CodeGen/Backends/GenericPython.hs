@@ -907,14 +907,14 @@ compileCode (Imp.While cond body) = do
   body' <- collect $ compileCode body
   stm $ While cond' body'
 
-compileCode (Imp.For i it bound body) = do
+compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = compileName i
   body' <- collect $ compileCode body
   counter <- pretty <$> newVName "counter"
   one <- pretty <$> newVName "one"
-  stm $ Assign (Var i') $ simpleCall (compilePrimToNp (IntType it)) [Integer 0]
-  stm $ Assign (Var one) $ simpleCall (compilePrimToNp (IntType it)) [Integer 1]
+  stm $ Assign (Var i') $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 0]
+  stm $ Assign (Var one) $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 1]
   stm $ For counter (simpleCall "range" [bound']) $
     body' ++ [AssignOp "+" (Var i') (Var one)]
 

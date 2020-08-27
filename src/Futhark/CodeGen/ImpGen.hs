@@ -657,15 +657,17 @@ defCompileExp pat (DoLoop ctx val form body) = do
   let doBody = compileLoopBody mergepat body
 
   case form of
-    ForLoop i it bound loopvars -> do
+    ForLoop i _ bound loopvars -> do
       let setLoopParam (p,a)
             | Prim _ <- paramType p =
                 copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.vi32 i]
             | otherwise =
                 return ()
 
+      bound' <- toExp bound
+
       dLParams $ map fst loopvars
-      sFor' i it (toExp' (IntType it) bound) $
+      sFor' i bound' $
         mapM_ setLoopParam loopvars >> doBody
     WhileLoop cond ->
       sWhile (Imp.var cond Bool) doBody
@@ -731,7 +733,7 @@ defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
   copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi32) is) se []
-  emit $ foldl (.) id (zipWith (`Imp.For` Int32) is ds') copy_elem
+  emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 
 defCompileBasicOp _ Scratch{} =
   return ()
@@ -1102,7 +1104,7 @@ copyElementWise bt dest destslice src srcslice = do
     (srcmem, srcspace, srcidx) <-
       fullyIndexArray' src $ fixSlice srcslice ivars
     vol <- asks envVolatility
-    emit $ foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
+    emit $ foldl (.) id (zipWith Imp.For is bounds) $
       Imp.Write destmem destidx bt destspace vol $
       Imp.index srcmem srcidx bt srcspace vol
 
@@ -1281,21 +1283,19 @@ typeSize t =
 
 --- Building blocks for constructing code.
 
-sFor' :: VName -> IntType -> Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
-sFor' i it bound body = do
+sFor' :: VName -> Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
+sFor' i bound body = do
+  let it = case primExpType bound of
+             IntType bound_t -> bound_t
+             t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
   addLoopVar i it
   body' <- collect body
-  emit $ Imp.For i it bound body'
+  emit $ Imp.For i bound body'
 
 sFor :: String -> Imp.Exp -> (Imp.Exp -> ImpM lore r op ()) -> ImpM lore r op ()
 sFor i bound body = do
   i' <- newVName i
-  it <- case primExpType bound of
-          IntType it -> return it
-          t -> error $ "sFor: bound " ++ pretty bound ++ " is of type " ++ pretty t
-  addLoopVar i' it
-  body' <- collect $ body $ Imp.var i' $ IntType it
-  emit $ Imp.For i' it bound body'
+  sFor' i' bound $ body $ Imp.var i' $ primExpType bound
 
 sWhile :: Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
 sWhile cond body = do
