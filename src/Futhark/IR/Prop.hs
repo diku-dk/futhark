@@ -43,6 +43,7 @@ module Futhark.IR.Prop
   )
   where
 
+import Language.SexpGrammar as Sexp
 import Data.List (find)
 import Data.Maybe (mapMaybe, isJust)
 import qualified Data.Map.Strict as M
@@ -200,7 +201,7 @@ certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
 -- | A handy shorthand for properties that we usually want to things
 -- we stuff into ASTs.
 type ASTConstraints a =
-  (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a)
+  (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a, SexpIso a)
 
 -- | A type class for operations.
 class (ASTConstraints op, TypedOp op) => IsOp op where
