@@ -153,7 +153,7 @@ static inline int subtask_queue_steal(struct worker *worker,
   struct subtask *new_subtask = NULL;
   int remaining_iter = cur_back->end - cur_back->start;
   if (cur_back->chunkable && remaining_iter > 1) {
-      int half = remaining_iter / 2;
+      int64_t half = remaining_iter / 2;
       new_subtask = malloc(sizeof(struct subtask));
       *new_subtask = *cur_back;
       new_subtask->start = cur_back->end - half;
