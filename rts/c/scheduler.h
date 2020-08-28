@@ -167,22 +167,42 @@ static inline void split(struct worker* worker, struct subtask *subtask)
 static inline int steal_from_random_worker(struct worker* worker)
 {
   int my_id = worker->tid;
-  struct scheduler* scheduler = worker->scheduler;
-  int k = random_other_worker(scheduler, my_id);
-  struct deque *deque_k = &scheduler->workers[k].q;
-  if (empty(deque_k)) return 0;
-  struct subtask* subtask = steal(deque_k);
-  // otherwise try to steal from
-  if (subtask == STEAL_RES_EMPTY) {
-    // TODO: log
-  } else if (subtask == STEAL_RES_ABORT) {
-    // TODO: log
+  if (active_work == 1) {
+    struct scheduler* scheduler = worker->scheduler;
+    struct deque *deque_0 = &scheduler->workers[0].q;
+    if (empty(deque_0)) return 0;
+    struct subtask* subtask = steal(deque_0);
+    // otherwise try to steal from
+    if (subtask == STEAL_RES_EMPTY) {
+      // TODO: log
+    } else if (subtask == STEAL_RES_ABORT) {
+      // TODO: log
+    } else {
+      assert(subtask != NULL);
+      split(worker, subtask);
+      push_back(&worker->q, subtask);
+      return 1;
+    }
   } else {
-    assert(subtask != NULL);
-    split(worker, subtask);
-    push_back(&worker->q, subtask);
-    return 1;
+    struct scheduler* scheduler = worker->scheduler;
+    int k = random_other_worker(scheduler, my_id);
+    struct deque *deque_k = &scheduler->workers[k].q;
+    if (empty(deque_k)) return 0;
+    struct subtask* subtask = steal(deque_k);
+    // otherwise try to steal from
+    if (subtask == STEAL_RES_EMPTY) {
+      // TODO: log
+    } else if (subtask == STEAL_RES_ABORT) {
+      // TODO: log
+    } else {
+      assert(subtask != NULL);
+      split(worker, subtask);
+      push_back(&worker->q, subtask);
+      return 1;
+    }
+
   }
+
   return 0;
 }
 
@@ -193,7 +213,7 @@ static inline void *scheduler_worker(void* arg)
   while (!is_finished(worker))
   {
 
-    if (!active_work) {
+    if (active_work == 0) {
       int n_sig;
       CHECK_ERR(sigwait(&scheduler_sig_set, &n_sig), "sigwait");
 
@@ -235,6 +255,12 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 {
   struct worker * worker = worker_local;
 
+  int old_active_work = active_work;
+  __atomic_add_fetch(&active_work, 1, __ATOMIC_SEQ_CST);
+  if(old_active_work == 0) {
+    wake_up_all_threads(scheduler);
+  }
+
   struct scheduler_info info = task->info;
   int64_t iter_pr_subtask = info.iter_pr_subtask;
   int64_t remainder = info.remainder;
@@ -252,13 +278,6 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
   int64_t iter = 1;
-
-  int old_active_work = active_work;
-  __atomic_add_fetch(&active_work, 1, __ATOMIC_SEQ_CST);
-
-  if(old_active_work == 0) {
-    wake_up_all_threads(scheduler);
-  }
 
   int subtask_id = 0;
   int64_t start = 0;
@@ -334,6 +353,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     }
 
     err = scheduler_execute_parallel(scheduler, task, &task_timer);
+
 
     // Report time measurements
     // TODO the update of both of these should really both be atomic!!
