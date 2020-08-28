@@ -766,9 +766,8 @@ segmentedUpdateKernel nest perm cs arr slice v = do
     -- Compute indexes into full array.
     v' <- certifying cs $
           letSubExp "v" $ BasicOp $ Index v $ map (DimFix . Var) slice_gtids
-    let pexp = primExpFromSubExp int32
     slice_is <- traverse (toSubExp "index") $
-                fixSlice (map (fmap pexp) slice) $ map (pexp . Var) slice_gtids
+                fixSlice (map (fmap pe32) slice) $ map (pe32 . Var) slice_gtids
 
     let write_is = map (Var . fst) base_ispace ++ slice_is
         arr' = maybe (error "incorrectly typed Update") kernelInputArray $

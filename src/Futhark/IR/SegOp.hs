@@ -841,8 +841,8 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
     Returns ResultMaySimplify se <- maybeNth k $ kernelBodyResult kbody
     guard $ length gtids <= length is
-    let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty) is
-        idx_table' = foldl expandIndexedTable idx_table $ kernelBodyStms kbody
+    let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty . untyped) is
+        idx_table' = foldl' expandIndexedTable idx_table $ kernelBodyStms kbody
     case se of
       Var v -> M.lookup v idx_table'
       _ -> Nothing
@@ -864,7 +864,7 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
               arr `ST.elem` vtable,
               Just (slice', cs) <- asPrimExpSlice table slice =
                 let idx = ST.IndexedArray (stmCerts stm <> cs)
-                          arr (fixSlice slice' excess_is)
+                          arr (fixSlice (map (fmap isInt32) slice') excess_is)
                 in M.insert v idx table
 
             | otherwise =

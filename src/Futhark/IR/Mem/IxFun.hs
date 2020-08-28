@@ -40,7 +40,8 @@ import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 
-import Futhark.Analysis.PrimExp (PrimExp(..), primExpType)
+import Futhark.Analysis.PrimExp
+  (PrimExp(..), TPrimExp(..), IntExp, primExpType)
 import Futhark.IR.Syntax.Core (Ext(..))
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -258,12 +259,14 @@ substituteInLMAD tab (LMAD offset dims) =
   in LMAD offset' dims'
 
 -- | Substitute a name with a PrimExp in an index function.
-substituteInIxFun :: (Ord a) => M.Map a (PrimExp a) -> IxFun (PrimExp a)
-                  -> IxFun (PrimExp a)
+substituteInIxFun :: Ord a =>
+                     M.Map a (TPrimExp t a) -> IxFun (TPrimExp t a)
+                  -> IxFun (TPrimExp t a)
 substituteInIxFun tab (IxFun lmads oshp cg) =
-  IxFun (NE.map (substituteInLMAD tab) lmads)
-        (map (substituteInPrimExp tab) oshp)
+  IxFun (NE.map (fmap TPrimExp . substituteInLMAD tab' . fmap untyped) lmads)
+        (map (TPrimExp . substituteInPrimExp tab' . untyped) oshp)
         cg
+  where tab' = fmap untyped tab
 
 -- | Is this is a row-major array?
 isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
@@ -812,16 +815,16 @@ isSequential :: [Int] -> Bool
 isSequential xs =
   all (uncurry (==)) $ zip xs [0..]
 
-existentializeExp :: PrimExp v -> State [PrimExp v] (PrimExp (Ext v))
+existentializeExp :: TPrimExp t v -> State [TPrimExp t v] (TPrimExp t (Ext v))
 existentializeExp e = do
   i <- gets length
   modify (++ [e])
-  let t = primExpType e
-  return $ LeafExp (Ext i) t
+  let t = primExpType $ untyped e
+  return $ TPrimExp $ LeafExp (Ext i) t
 
 -- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
-existentialize :: (Eq v, Pretty v) =>
-                  IxFun (PrimExp v) -> State [PrimExp v] (Maybe (IxFun (PrimExp (Ext v))))
+existentialize :: (IntExp t, Eq v, Pretty v) =>
+                  IxFun (TPrimExp t v) -> State [TPrimExp t v] (Maybe (IxFun (TPrimExp t (Ext v))))
 existentialize (IxFun (lmad :| []) oshp True)
   | all ((== 0) . ldRotate) (lmadDims lmad),
     length (lmadShape lmad) == length oshp,
@@ -832,7 +835,8 @@ existentialize (IxFun (lmad :| []) oshp True)
       let lmad' = LMAD lmadOffset' lmadDims'
       return $ Just $ IxFun (lmad' :| []) oshp' True
         where
-          existentializeLMADDim :: LMADDim (PrimExp v) -> State [PrimExp v] (LMADDim (PrimExp (Ext v)))
+          existentializeLMADDim :: LMADDim (TPrimExp t v)
+                                -> State [TPrimExp t v] (LMADDim (TPrimExp t (Ext v)))
           existentializeLMADDim (LMADDim str rot shp perm mon) = do
             stride' <- existentializeExp str
             shape' <- existentializeExp shp

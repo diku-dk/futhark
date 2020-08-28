@@ -15,6 +15,7 @@ module Futhark.IR.Primitive
          IntType (..), allIntTypes
        , FloatType (..), allFloatTypes
        , PrimType (..), allPrimTypes
+       , module Data.Int
 
          -- * Values
        , IntValue(..)

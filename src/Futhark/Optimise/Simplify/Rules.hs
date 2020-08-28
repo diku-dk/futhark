@@ -57,13 +57,6 @@ bottomUpRules = [ RuleDoLoop removeRedundantMergeVariables
                 , RuleBasicOp simplifyConcat
                 ]
 
-asInt32PrimExp :: PrimExp v -> PrimExp v
-asInt32PrimExp pe
-  | IntType it <- primExpType pe, it /= Int32 =
-      sExt Int32 pe
-  | otherwise =
-      pe
-
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
@@ -650,7 +643,7 @@ simplifyIndexing vtable seType idd inds consuming =
 
       | Just inds' <- sliceIndices inds,
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
-        all worthInlining inds'',
+        all (worthInlining . untyped) inds'',
         all (`ST.elem` vtable) (unCertificates cs) ->
           Just $ IndexResult cs arr . map DimFix <$>
           mapM (toSubExp "index_primexp") inds''
@@ -663,18 +656,22 @@ simplifyIndexing vtable seType idd inds consuming =
       | [DimFix ii] <- inds,
         Just (Prim (IntType from_it)) <- seType ii ->
           Just $
-          fmap (SubExpResult cs) $ toSubExp "index_iota" $
-          sExt to_it (primExpFromSubExp (IntType from_it) ii)
-          * primExpFromSubExp (IntType to_it) s
-          + primExpFromSubExp (IntType to_it) x
+          let mul = BinOpExp $ Mul to_it OverflowWrap
+              add = BinOpExp $ Add to_it OverflowWrap
+          in fmap (SubExpResult cs) $ toSubExp "index_iota" $
+             (sExt to_it (primExpFromSubExp (IntType from_it) ii)
+              `mul` primExpFromSubExp (IntType to_it) s)
+             `add` primExpFromSubExp (IntType to_it) x
       | [DimSlice i_offset i_n i_stride] <- inds ->
           Just $ do
             i_offset' <- asIntS to_it i_offset
             i_stride' <- asIntS to_it i_stride
+            let mul = BinOpExp $ Mul to_it OverflowWrap
+                add = BinOpExp $ Add to_it OverflowWrap
             i_offset'' <- toSubExp "iota_offset" $
-                          primExpFromSubExp (IntType to_it) x +
-                          primExpFromSubExp (IntType to_it) s *
-                          primExpFromSubExp (IntType to_it) i_offset'
+                          (primExpFromSubExp (IntType to_it) x
+                           `mul` primExpFromSubExp (IntType to_it) s)
+                          `add` primExpFromSubExp (IntType to_it) i_offset'
             i_stride'' <- letSubExp "iota_offset" $
                           BasicOp $ BinOp (Mul Int32 OverflowWrap) s i_stride'
             fmap (SubExpResult cs) $ letSubExp "slice_iota" $
@@ -1186,11 +1183,11 @@ ruleBasicOp vtable pat aux (Index idd slice)
           -- Linearise indices and map to old index space.
           oldshape <- arrayDims <$> lookupType idd2
           let new_inds =
-                reshapeIndex (map (primExpFromSubExp int32) oldshape)
-                             (map (primExpFromSubExp int32) $ newDims newshape)
-                             (map (primExpFromSubExp int32) inds)
+                reshapeIndex (map pe32 oldshape)
+                             (map pe32 $ newDims newshape)
+                             (map pe32 inds)
           new_inds' <-
-            mapM (toSubExp "new_index" . asInt32PrimExp) new_inds
+            mapM (toSubExp "new_index") new_inds
           certifying idd_cs $ auxing aux $
             letBind pat $ BasicOp $ Index idd2 $ map DimFix new_inds'
 

@@ -38,11 +38,6 @@ class Num e => IntegralExp e where
   divUp x y =
     (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
-  fromInt8  :: Int8 -> e
-  fromInt16 :: Int16 -> e
-  fromInt32 :: Int32 -> e
-  fromInt64 :: Int64 -> e
-
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
 newtype Wrapped a = Wrapped { wrappedValue :: a }
@@ -71,8 +66,3 @@ instance Integral a => IntegralExp (Wrapped a) where
   div = liftOp2 Prelude.div
   mod = liftOp2 Prelude.mod
   sgn = Just . fromIntegral . signum . toInteger . wrappedValue
-
-  fromInt8  = fromInteger . toInteger
-  fromInt16 = fromInteger . toInteger
-  fromInt32 = fromInteger . toInteger
-  fromInt64 = fromInteger . toInteger

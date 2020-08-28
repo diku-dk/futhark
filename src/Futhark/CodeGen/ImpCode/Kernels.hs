@@ -146,7 +146,7 @@ data KernelOp = GetGroupId VName Int
               | Atomic Space AtomicOp
               | Barrier Fence
               | MemFence Fence
-              | LocalAlloc VName (Count Bytes Imp.Exp)
+              | LocalAlloc VName (Count Bytes (Imp.TExp Int64))
               | ErrorSync Fence
                 -- ^ Perform a barrier and also check whether any
                 -- threads have failed an assertion.  Make sure all
@@ -159,18 +159,19 @@ data KernelOp = GetGroupId VName Int
 -- | Atomic operations return the value stored before the update.
 -- This old value is stored in the first 'VName'.  The second 'VName'
 -- is the memory block to update.  The 'Exp' is the new value.
-data AtomicOp = AtomicAdd IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicFAdd FloatType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicSMax IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicSMin IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicUMax IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicUMin IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicAnd IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicOr IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicXor IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicCmpXchg PrimType VName VName (Count Elements Imp.Exp) Exp Exp
-              | AtomicXchg PrimType VName VName (Count Elements Imp.Exp) Exp
-              deriving (Show)
+data AtomicOp
+  = AtomicAdd IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicFAdd FloatType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicSMax IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicSMin IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicUMax IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicUMin IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicAnd IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicOr IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicXor IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicCmpXchg PrimType VName VName (Count Elements (Imp.TExp Int32)) Exp Exp
+  | AtomicXchg PrimType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  deriving (Show)
 
 instance FreeIn AtomicOp where
   freeIn' (AtomicAdd _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x

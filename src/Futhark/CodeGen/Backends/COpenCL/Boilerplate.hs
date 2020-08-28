@@ -560,7 +560,7 @@ costCentreReport names = report_kernels ++ [report_total]
                         |]
 
 sizeHeuristicsCode :: SizeHeuristic -> C.Stm
-sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
+sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what)) =
   [C.cstm|
    if ($exp:which' == 0 &&
        strstr(option->platform_name, $string:platform_name) != NULL &&
