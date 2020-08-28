@@ -63,7 +63,6 @@ nonsegmentedHist :: Pattern MCMem
                 -> VName
                 -> MulticoreGen Imp.Code
 nonsegmentedHist pat space histops kbody num_histos = do
-  emit $ Imp.DebugPrint "nonsegmented segHist" Nothing
   let ns = map snd $ unSegSpace space
       ns_64 = map (sExt Int64 . toExp' int32) ns
 
@@ -91,7 +90,6 @@ casHistogram :: Pattern MCMem
              -> KernelBody MCMem
              -> MulticoreGen ()
 casHistogram pat space histops kbody = do
-  emit $ Imp.DebugPrint "Atomic segHist" Nothing
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map (sExt Int64 . toExp' int32) ns
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
