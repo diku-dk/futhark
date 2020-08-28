@@ -9,6 +9,7 @@ module Futhark.IR.Decorations
 
 import qualified Data.Kind
 
+import Language.SexpGrammar (SexpIso)
 import Futhark.IR.Syntax.Core
 import Futhark.IR.RetType
 import Futhark.IR.Prop.Types
@@ -21,7 +22,8 @@ class (Show (LetDec l), Show (ExpDec l), Show (BodyDec l), Show (FParamInfo l), 
        Ord (LetDec l), Ord (ExpDec l), Ord (BodyDec l), Ord (FParamInfo l), Ord (LParamInfo l), Ord (RetType l), Ord (BranchType l), Ord (Op l),
        IsRetType (RetType l), IsBodyType (BranchType l),
        Typed (FParamInfo l), Typed (LParamInfo l), Typed (LetDec l),
-       DeclTyped (FParamInfo l))
+       DeclTyped (FParamInfo l),
+       SexpIso (LetDec l), SexpIso (ExpDec l), SexpIso (BodyDec l), SexpIso (FParamInfo l), SexpIso (LParamInfo l), SexpIso (RetType l), SexpIso (BranchType l), SexpIso (Op l))
       => Decorations l where
   -- | Decoration for every let-pattern element.
   type LetDec l :: Data.Kind.Type
