@@ -65,7 +65,7 @@ static inline void output_thread_usage(struct worker *worker)
   CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
   struct timeval user_cpu_time = usage.ru_utime;
   struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %2d - work time %10llu - user time: %10llu us - sys: %10llu us\n",
+  fprintf(stderr, "tid: %2d - work time %10llu ns - user time: %10llu us - sys: %10llu us\n",
           worker->tid,
           worker->time_spent_working,
           (uint64_t)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),

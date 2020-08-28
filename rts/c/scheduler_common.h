@@ -50,16 +50,16 @@ struct scheduler_task {
 };
 
 
-
 static volatile sig_atomic_t num_workers;
 __thread struct worker* worker_local = NULL;
 
-
 static volatile int scheduler_error = 0;
-static double kappa = 5.0f;
+
+// kappa time unit in nanoseconds
+static double kappa = 5.0f * 1000;
 
 int64_t total_now(int64_t total, int64_t time) {
-  return total + (get_wall_time() - time);
+  return total + (get_wall_time_ns() - time);
 }
 
 int random_other_worker(struct scheduler *scheduler, int my_id)
@@ -123,7 +123,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   assert(worker != NULL);
 
   worker->total = 0;
-  worker->timer = get_wall_time();
+  worker->timer = get_wall_time_ns();
   worker->nested++;
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,

@@ -38,9 +38,9 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   int64_t tuning_time = 0;
   int64_t tuning_iter = 0;
 
-  int64_t start_tuning = get_wall_time();
+  int64_t start_tuning = get_wall_time_ns();
   // Run sequential ''reduce'' first'
-  int64_t tuning_sequentiual_start = get_wall_time();
+  int64_t tuning_sequentiual_start = get_wall_time_ns();
   char reduce_stage_1_tid_accum_arr[sizeof(int32_t) * ctx->scheduler.num_threads];
   memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * ctx->scheduler.num_threads);
 
@@ -52,7 +52,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 
   err = futhark_mc_tuning_segred_stage_1(&futhark_mc_segred_stage_1_struct, 0, iterations,
                                          0, 0);
-  int64_t tuning_sequentiual_end = get_wall_time();
+  int64_t tuning_sequentiual_end = get_wall_time_ns();
   int64_t sequential_elapsed = tuning_sequentiual_end - tuning_sequentiual_start;
   fprintf(stderr, "Time Elapsed %lld\n", sequential_elapsed);
 
@@ -96,12 +96,12 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     futhark_segred_tuning_scheduler_parloop.iterations = iterations;
     futhark_segred_tuning_scheduler_parloop.info = info;
 
-    int64_t tuning_chunked_start = get_wall_time();
+    int64_t tuning_chunked_start = get_wall_time_ns();
     int futhark_segred_tuning_program_err =
       scheduler_execute_task(&ctx->scheduler,
                              &futhark_segred_tuning_scheduler_parloop);
     assert(futhark_segred_tuning_program_err == 0);
-    int64_t tuning_chunked_end = get_wall_time();
+    int64_t tuning_chunked_end = get_wall_time_ns();
     time_elapsed =  tuning_chunked_end - tuning_chunked_start;
 
     ratio = (double)time_elapsed / (double)sequential_elapsed;
@@ -111,7 +111,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     kappa_tune += 0.1;
   }
 
-  int64_t end_tuning = get_wall_time();
+  int64_t end_tuning = get_wall_time_ns();
   fprintf(stderr, "tuning took %lld us and found kappa %f - time %lld - ratio %f\n",
           end_tuning- start_tuning, kappa_tune, time_elapsed,  ratio);
   kappa = kappa_tune;
