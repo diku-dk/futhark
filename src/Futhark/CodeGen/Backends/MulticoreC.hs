@@ -190,6 +190,7 @@ compileProg =
                  free_constants(ctx);
 
                  active_work = 1;
+                 __atomic_thread_fence(__ATOMIC_SEQ_CST);
                  // Wake up threads so we can kill them
                  wake_up_all_threads(&ctx->scheduler);
                  output_thread_usage(worker_local);
