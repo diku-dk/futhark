@@ -277,9 +277,9 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
   int64_t task_timer = 0;
   /* Execute task sequential or parallel based on decision made earlier */
   if (task->info.nsubtasks == 1) {
-    int64_t start = get_wall_time();
+    int64_t start = get_wall_time_ns();
     err = task->fn(task->args, 0, task->iterations, 0, worker->tid);
-    int64_t end = get_wall_time();
+    int64_t end = get_wall_time_ns();
     task_timer = end - start;
     worker_local->time_spent_working += task_timer;
 
@@ -304,7 +304,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 
     // Reset timers to account for new timings
     worker->total = time_before + task_timer;
-    worker->timer = get_wall_time();
+    worker->timer = get_wall_time_ns();
   }
 
 

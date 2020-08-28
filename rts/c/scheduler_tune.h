@@ -71,12 +71,12 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 #endif
 
   // Start tuning for kappa
-  double kappa_tune = 0.1;
+  double kappa_tune = 1000;
   double ratio;
   int64_t time_elapsed;
   while(1) {
     memset(reduce_stage_1_tid_accum_arr, 0, sizeof(int32_t) * num_threads);
-    int64_t min_iter_pr_subtask = kappa_tune / C;
+    int64_t min_iter_pr_subtask = (int64_t) (kappa_tune / C) == 0 ? 1 : (kappa_tune / C);
     int nsubtasks = iterations / min_iter_pr_subtask;
     struct scheduler_info info;
     info.iter_pr_subtask = min_iter_pr_subtask;
@@ -108,11 +108,11 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     if (ratio < 1.055) {
       break;
     }
-    kappa_tune += 0.1;
+    kappa_tune += 100;
   }
 
   int64_t end_tuning = get_wall_time_ns();
-  fprintf(stderr, "tuning took %lld us and found kappa %f - time %lld - ratio %f\n",
+  fprintf(stderr, "tuning took %lld ns and found kappa %f - time %lld - ratio %f\n",
           end_tuning- start_tuning, kappa_tune, time_elapsed,  ratio);
   kappa = kappa_tune;
 
