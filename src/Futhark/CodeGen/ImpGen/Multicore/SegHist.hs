@@ -75,9 +75,9 @@ nonsegmentedHist pat space histops kbody num_histos = do
 
   collect $ do
     flat_idx <- dPrim "iter" int64
-    -- sIf use_small_dest_histogram
-    smallDestHistogram pat flat_idx space histops num_histos kbody
-    -- casHistogram pat space histops' kbody
+    sIf use_small_dest_histogram
+      (smallDestHistogram pat flat_idx space histops num_histos kbody)
+      (casHistogram pat space histops' kbody)
 
 
 
