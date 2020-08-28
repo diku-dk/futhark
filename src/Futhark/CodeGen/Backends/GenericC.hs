@@ -1860,16 +1860,16 @@ compileExp = compilePrimExp compileLeaf
         compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
           src' <- rawMem src
           derefPointer src'
-            <$> compileExp iexp
+            <$> compileExp (untyped iexp)
             <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType restype)*|]
 
         compileLeaf (Index src (Count iexp) restype (Space space) vol) =
           join $ asks envReadScalar
-          <*> rawMem src <*> compileExp iexp
+          <*> rawMem src <*> compileExp (untyped iexp)
           <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (Index src (Count iexp) _ ScalarSpace{} _) = do
-          iexp' <- compileExp iexp
+          iexp' <- compileExp $ untyped iexp
           return [C.cexp|$id:src[$exp:iexp']|]
 
         compileLeaf (SizeOf t) =
@@ -2010,7 +2010,7 @@ compileCode (Allocate _ _ ScalarSpace{}) =
   -- translated to an actual array.
   return ()
 
-compileCode (Allocate name (Count e) space) = do
+compileCode (Allocate name (Count (TPrimExp e)) space) = do
   size <- compileExp e
   cached <- cacheMem name
   case cached of
@@ -2036,14 +2036,14 @@ compileCode (For i bound body) = do
           }|]
 
 compileCode (While cond body) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ untyped cond
   body' <- blockScope $ compileCode body
   stm [C.cstm|while ($exp:cond') {
             $items:body'
           }|]
 
 compileCode (If cond tbranch fbranch) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ untyped cond
   tbranch' <- blockScope $ compileCode tbranch
   fbranch' <- blockScope $ compileCode fbranch
   stm $ case (tbranch', fbranch') of
@@ -2056,34 +2056,34 @@ compileCode (If cond tbranch fbranch) = do
 
 compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
   join $ copyMemoryDefaultSpace
-  <$> rawMem dest <*> compileExp destoffset
-  <*> rawMem src <*> compileExp srcoffset
-  <*> compileExp size
+  <$> rawMem dest <*> compileExp (untyped destoffset)
+  <*> rawMem src <*> compileExp (untyped srcoffset)
+  <*> compileExp (untyped size)
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
   join $ copy
-    <$> rawMem dest <*> compileExp destoffset <*> pure destspace
-    <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
-    <*> compileExp size
+    <$> rawMem dest <*> compileExp (untyped destoffset) <*> pure destspace
+    <*> rawMem src <*> compileExp (untyped srcoffset) <*> pure srcspace
+    <*> compileExp (untyped size)
 
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
-           <$> compileExp idx
+           <$> compileExp (untyped idx)
            <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) _ ScalarSpace{} _ elemexp) = do
-  idx' <- compileExp idx
+  idx' <- compileExp (untyped idx)
   elemexp' <- compileExp elemexp
   stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
-    <*> compileExp idx
+    <*> compileExp (untyped idx)
     <*> pure (primTypeToCType elemtype)
     <*> pure space
     <*> pure vol

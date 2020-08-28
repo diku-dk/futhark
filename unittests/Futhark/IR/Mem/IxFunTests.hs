@@ -29,11 +29,6 @@ instance IE.IntegralExp Int where
   mod  = P.mod
   sgn  = Just . P.signum
 
-  fromInt8  = fromInteger . toInteger
-  fromInt16 = fromInteger . toInteger
-  fromInt32 = fromInteger . toInteger
-  fromInt64 = fromInteger . toInteger
-
 allPoints :: [Int] -> [[Int]]
 allPoints dims =
     let total = product dims
