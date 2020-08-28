@@ -1,4 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE TypeApplications #-}
 module Futhark.IR.PrimitiveTests
        ( tests
        , arbitraryPrimValOfType
@@ -10,19 +12,32 @@ import Control.Applicative
 import Test.QuickCheck
 import Test.Tasty
 import Test.Tasty.HUnit
+import Language.SexpGrammar
 
 import Prelude
 
 import Futhark.IR.Primitive
 
 tests :: TestTree
-tests = testGroup "PrimitiveTests" propPrimValuesHaveRightType
+tests = testGroup "PrimitiveTests" [propPrimValuesHaveRightType, doUnOpTests]
 
-propPrimValuesHaveRightType :: [TestTree]
-propPrimValuesHaveRightType = [ testCase (show t ++ " has blank of right type") $
-                                primValueType (blankPrimValue t) @?= t
-                              | t <- [minBound..maxBound]
-                              ]
+propPrimValuesHaveRightType :: TestTree
+propPrimValuesHaveRightType =
+  testGroup "propPrimValuesHaveRightTypes"
+  [ testCase (show t ++ " has blank of right type") $
+    primValueType (blankPrimValue t) @?= t
+  | t <- [minBound..maxBound]
+  ]
+
+doUnOpTests :: TestTree
+doUnOpTests =
+  testGroup "doUnOp"
+  [ testCase "not" $
+      let unop = decode @UnOp "(complement i32)"
+          val = decode @PrimValue "42i32"
+          res = doUnOp <$> unop <*> val
+      in res @?= Right (Just (IntValue (Int32Value (-43))))
+  ]
 
 instance Arbitrary IntType where
   arbitrary = elements [minBound..maxBound]

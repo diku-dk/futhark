@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -50,6 +51,11 @@ module Futhark.IR.SOACS.SOAC
        )
        where
 
+import Prelude hiding ((.), id)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Control.Monad.Identity
@@ -101,7 +107,15 @@ data SOAC lore =
   | Screma SubExp (ScremaForm lore) [VName]
     -- ^ A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (SOAC lore) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "scatter") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "hist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 -- | Information about computing a single histogram.
 data HistOp lore = HistOp { histWidth :: SubExp
@@ -112,20 +126,48 @@ data HistOp lore = HistOp { histWidth :: SubExp
                           , histNeutral :: [SubExp]
                           , histOp :: Lambda lore
                           }
-                      deriving (Eq, Ord, Show)
+                      deriving (Eq, Ord, Show, Generic)
+
+
+instance Decorations lore => SexpIso (HistOp lore) where
+  sexpIso = with $ \histop ->
+    Sexp.list (
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    histop
 
 -- | Is the stream chunk required to correspond to a contiguous
 -- subsequence of the original input ('InOrder') or not?  'Disorder'
 -- streams can be more efficient, but not all algorithms work with
 -- this.
 data StreamOrd  = InOrder | Disorder
-                deriving (Eq, Ord, Show)
+                deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso StreamOrd where
+  sexpIso = match
+    $ With (. Sexp.sym "in-order")
+    $ With (. Sexp.sym "disorder")
+    End
 
 -- | What kind of stream is this?
 data StreamForm lore  =
     Parallel StreamOrd Commutativity (Lambda lore) [SubExp]
   | Sequential [SubExp]
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (StreamForm lore) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "parallel") >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.rest sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "sequential") >>>
+                         Sexp.rest sexpIso))
+    End
 
 -- | The essential parts of a 'Screma' factored out (everything
 -- except the input arrays).
@@ -133,7 +175,15 @@ data ScremaForm lore = ScremaForm
                          [Scan lore]
                          [Reduce lore]
                          (Lambda lore)
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (ScremaForm lore) where
+  sexpIso = with $ \scremaform ->
+    Sexp.list (
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    scremaform
 
 singleBinOp :: Bindable lore => [Lambda lore] -> Lambda lore
 singleBinOp lams =
@@ -149,7 +199,15 @@ singleBinOp lams =
 data Scan lore = Scan { scanLambda :: Lambda lore
                       , scanNeutral :: [SubExp]
                       }
-               deriving (Eq, Ord, Show)
+               deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (Scan lore) where
+  sexpIso = with $ \scan ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "scan") >>>
+      Sexp.el sexpIso >>> Sexp.el sexpIso) >>>
+    scan
+
 
 -- | How many reduction results are produced by these 'Scan's?
 scanResults :: [Scan lore] -> Int
@@ -167,7 +225,15 @@ data Reduce lore = Reduce { redComm :: Commutativity
                           , redLambda :: Lambda lore
                           , redNeutral :: [SubExp]
                           }
-                   deriving (Eq, Ord, Show)
+                   deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (Reduce lore) where
+  sexpIso = with $ \red ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "reduce") >>>
+      Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso) >>>
+    red
+
 
 -- | How many reduction results are produced by these 'Reduce's?
 redResults :: [Reduce lore] -> Int

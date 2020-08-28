@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -25,6 +27,11 @@ module Futhark.Optimise.Simplify.Lore
        )
        where
 
+import Prelude hiding ((.), id)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp hiding (cons)
+import Language.SexpGrammar.Generic
+import Control.Category
 import Control.Monad.Identity
 import Control.Monad.Reader
 import qualified Data.Kind
@@ -44,7 +51,10 @@ data Wise lore
 
 -- | The wisdom of the let-bound variable.
 newtype VarWisdom = VarWisdom { varWisdomAliases :: VarAliases }
-                  deriving (Eq, Ord, Show)
+                  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso VarWisdom where
+  sexpIso = with $ \varwisdom -> sexpIso >>> varwisdom
 
 instance Rename VarWisdom where
   rename = substituteRename
@@ -60,7 +70,14 @@ instance FreeIn VarWisdom where
 data ExpWisdom = ExpWisdom { _expWisdomConsumed :: ConsumedInExp
                            , expWisdomFree :: AliasDec
                            }
-                 deriving (Eq, Ord, Show)
+                 deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso ExpWisdom where
+  sexpIso = with $ \expwisdom ->
+    Sexp.list (
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    expwisdom
 
 instance FreeIn ExpWisdom where
   freeIn' = mempty
@@ -82,7 +99,14 @@ data BodyWisdom = BodyWisdom { bodyWisdomAliases :: [VarAliases]
                              , bodyWisdomConsumed :: ConsumedInExp
                              , bodyWisdomFree :: AliasDec
                              }
-                  deriving (Eq, Ord, Show)
+                  deriving (Eq, Ord, Show, Generic)
+
+
+instance SexpIso BodyWisdom where
+  sexpIso = with $ \bodywisdom ->
+    Sexp.list (
+      Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso) >>>
+    bodywisdom
 
 instance Rename BodyWisdom where
   rename = substituteRename

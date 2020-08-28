@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, FlexibleContexts, UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, UndecidableInstances, DeriveGeneric, Safe #-}
 -- | Facilities for determining which names are used in some syntactic
 -- construct.  The most important interface is the 'FreeIn' class and
 -- its instances, but for reasons related to the Haskell type system,
@@ -34,6 +34,11 @@ module Futhark.IR.Prop.Names
        )
        where
 
+import Prelude hiding ((.), id)
+import Control.Category
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
 import Control.Monad.State.Strict
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
@@ -48,7 +53,12 @@ import Futhark.Util.Pretty
 -- | A set of names.  Note that the 'Ord' instance is a dummy that
 -- treats everything as 'EQ' if '==', and otherwise 'LT'.
 newtype Names = Names (IM.IntMap VName)
-              deriving (Eq, Show)
+              deriving (Eq, Show, Generic)
+
+instance SexpIso Names where
+  sexpIso = with $ \names ->
+    (iso IM.fromList IM.toList . sexpIso) >>> names
+
 
 -- | Retrieve the data structure underlying the names representation.
 namesIntMap :: Names -> IM.IntMap VName

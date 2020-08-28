@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE Safe #-}
@@ -53,11 +55,17 @@ module Futhark.IR.Syntax.Core
          , PatElemT (..)
          ) where
 
+import Prelude hiding ((.), id)
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Control.Monad.State
 import Data.Maybe
 import Data.String
 import qualified Data.Map.Strict as M
 import Data.Traversable (fmapDefault, foldMapDefault)
+import qualified Data.Text as T
 
 import Language.Futhark.Core
 import Futhark.IR.Primitive
@@ -65,7 +73,10 @@ import Futhark.IR.Primitive
 -- | The size of an array type as a list of its dimension sizes, with
 -- the type of sizes being parametric.
 newtype ShapeBase d = Shape { shapeDims :: [d] }
-                    deriving (Eq, Ord, Show)
+                    deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso d => SexpIso (ShapeBase d) where
+  sexpIso = with $ \vname -> sexpIso >>> vname
 
 instance Functor ShapeBase where
   fmap = fmapDefault
@@ -89,7 +100,13 @@ type Shape = ShapeBase SubExp
 -- | Something that may be existential.
 data Ext a = Ext Int
            | Free a
-           deriving (Eq, Ord, Show)
+           deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso a => SexpIso (Ext a) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "ext") >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "free") >>> Sexp.el sexpIso))
+    End
 
 instance Functor Ext where
   fmap = fmapDefault
@@ -111,7 +128,14 @@ type ExtShape = ShapeBase ExtSize
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
 newtype Rank = Rank Int
-             deriving (Show, Eq, Ord)
+             deriving (Show, Eq, Ord, Generic)
+
+instance SexpIso Rank where
+  sexpIso = with $ \rank ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "rank") >>>
+      Sexp.el sexpIso) >>>
+    rank
 
 -- | A class encompassing types containing array shape information.
 class (Monoid a, Eq a, Ord a) => ArrayShape a where
@@ -170,21 +194,38 @@ data Space = DefaultSpace
              -- ^ A special kind of memory that is a statically sized
              -- array of some primitive type.  Used for private memory
              -- on GPUs.
-             deriving (Show, Eq, Ord)
+             deriving (Show, Eq, Ord, Generic)
+
+instance SexpIso Space where
+  sexpIso = match
+    $ With (Sexp.sym "default" >>>)
+    $ With (. Sexp.list (Sexp.el (sym "space") >>> Sexp.el (iso T.unpack T.pack . sexpIso)))
+    $ With (. Sexp.list (Sexp.el (sym "scalar-space") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
 -- | A fancier name for @()@ - encodes no uniqueness information.
 data NoUniqueness = NoUniqueness
-                  deriving (Eq, Ord, Show)
+                  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso NoUniqueness where
+  sexpIso = with (. sym "no-uniqueness")
 
 -- | A Futhark type is either an array or an element type.  When
 -- comparing types for equality with '==', shapes must match.
 data TypeBase shape u = Prim PrimType
                       | Array PrimType shape u
                       | Mem Space
-                    deriving (Show, Eq, Ord)
+                    deriving (Show, Eq, Ord, Generic)
+
+instance (SexpIso shape, SexpIso u) => SexpIso (TypeBase shape u) where
+  sexpIso = match
+    $ With (. sexpIso)
+    $ With (. Sexp.list (Sexp.el (sym "array") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (sym "mem") >>> Sexp.el sexpIso))
+    End
 
 -- | A type with shape information, used for describing the type of
 -- variables.
@@ -213,14 +254,29 @@ data Diet = Consume -- ^ Consumes this value.
           | ObservePrim -- ^ As 'Observe', but the result will not
                         -- alias, because the parameter does not carry
                         -- aliases.
-            deriving (Eq, Ord, Show)
+            deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso Diet where
+  sexpIso = match
+    $ With (Sexp.sym "consume" >>>)
+    $ With (Sexp.sym "observe" >>>)
+    $ With (Sexp.sym "observe-prim" >>>)
+    End
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
 data Ident = Ident { identName :: VName
                    , identType :: Type
                    }
-               deriving (Show)
+               deriving (Show, Generic)
+
+instance SexpIso Ident where
+  sexpIso = with $ \vname ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "ident") >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    vname
 
 instance Eq Ident where
   x == y = identName x == identName y
@@ -230,7 +286,10 @@ instance Ord Ident where
 
 -- | A list of names used for certificates in some expressions.
 newtype Certificates = Certificates { unCertificates :: [VName] }
-                     deriving (Eq, Ord, Show)
+                     deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso Certificates where
+  sexpIso = with $ \certificates -> sexpIso >>> certificates
 
 instance Semigroup Certificates where
   Certificates x <> Certificates y = Certificates (x <> y)
@@ -243,7 +302,14 @@ instance Monoid Certificates where
 -- guaranteed to complete in constant time.
 data SubExp = Constant PrimValue
             | Var      VName
-            deriving (Show, Eq, Ord)
+            deriving (Show, Eq, Ord, Generic)
+
+
+instance SexpIso SubExp where
+  sexpIso = match
+    $ With (. sexpIso)
+    $ With (. sexpIso)
+    End
 
 -- | A function or lambda parameter.
 data Param dec = Param
@@ -251,7 +317,16 @@ data Param dec = Param
                    -- ^ Name of the parameter.
                  , paramDec :: dec
                    -- ^ Function parameter decoration.
-                 } deriving (Ord, Show, Eq)
+                 } deriving (Ord, Show, Eq, Generic)
+
+instance SexpIso dec => SexpIso (Param dec) where
+  sexpIso = with $ \vname ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "param") >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    vname
+
 
 instance Foldable Param where
   foldMap = foldMapDefault
@@ -267,7 +342,13 @@ data DimIndex d = DimFix
                   d -- ^ Fix index in this dimension.
                 | DimSlice d d d
                   -- ^ @DimSlice start_offset num_elems stride@.
-                  deriving (Eq, Ord, Show)
+                  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso d => SexpIso (DimIndex d) where
+  sexpIso = match
+    $ With (. sexpIso)
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "slice") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 instance Functor DimIndex where
   fmap f (DimFix i) = DimFix $ f i
@@ -334,7 +415,13 @@ data PatElemT dec = PatElem { patElemName :: VName
                              , patElemDec :: dec
                                -- ^ Pattern element decoration.
                              }
-                   deriving (Ord, Show, Eq)
+                   deriving (Ord, Show, Eq, Generic)
+
+instance SexpIso dec => SexpIso (PatElemT dec) where
+  sexpIso = with $ \pe ->
+    Sexp.list (Sexp.el sexpIso >>>
+               Sexp.el sexpIso) >>>
+    pe
 
 instance Functor PatElemT where
   fmap = fmapDefault
@@ -349,7 +436,10 @@ instance Traversable PatElemT where
 -- | An error message is a list of error parts, which are concatenated
 -- to form the final message.
 newtype ErrorMsg a = ErrorMsg [ErrorMsgPart a]
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso a => SexpIso (ErrorMsg a) where
+  sexpIso = with $ \errormsg -> sexpIso >>> errormsg
 
 instance IsString (ErrorMsg a) where
   fromString = ErrorMsg . pure . fromString
@@ -357,7 +447,14 @@ instance IsString (ErrorMsg a) where
 -- | A part of an error message.
 data ErrorMsgPart a = ErrorString String -- ^ A literal string.
                     | ErrorInt32 a -- ^ A run-time integer value.
-                    deriving (Eq, Ord, Show)
+                    deriving (Eq, Ord, Show, Generic)
+
+
+instance SexpIso a => SexpIso (ErrorMsgPart a) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "error-string") . Sexp.el (iso T.unpack T.pack . sexpIso)))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "error-int32") . Sexp.el sexpIso))
+    End
 
 instance IsString (ErrorMsgPart a) where
   fromString = ErrorString
