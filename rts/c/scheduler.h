@@ -167,40 +167,21 @@ static inline void split(struct worker* worker, struct subtask *subtask)
 static inline int steal_from_random_worker(struct worker* worker)
 {
   int my_id = worker->tid;
-  if (active_work == 1) {
-    struct scheduler* scheduler = worker->scheduler;
-    struct deque *deque_0 = &scheduler->workers[0].q;
-    if (empty(deque_0)) return 0;
-    struct subtask* subtask = steal(deque_0);
-    // otherwise try to steal from
-    if (subtask == STEAL_RES_EMPTY) {
-      // TODO: log
-    } else if (subtask == STEAL_RES_ABORT) {
-      // TODO: log
-    } else {
-      assert(subtask != NULL);
-      split(worker, subtask);
-      push_back(&worker->q, subtask);
-      return 1;
-    }
+  struct scheduler* scheduler = worker->scheduler;
+  int k = random_other_worker(scheduler, my_id);
+  struct deque *deque_k = &scheduler->workers[k].q;
+  if (empty(deque_k)) return 0;
+  struct subtask* subtask = steal(deque_k);
+  // otherwise try to steal from
+  if (subtask == STEAL_RES_EMPTY) {
+    // TODO: log
+  } else if (subtask == STEAL_RES_ABORT) {
+    // TODO: log
   } else {
-    struct scheduler* scheduler = worker->scheduler;
-    int k = random_other_worker(scheduler, my_id);
-    struct deque *deque_k = &scheduler->workers[k].q;
-    if (empty(deque_k)) return 0;
-    struct subtask* subtask = steal(deque_k);
-    // otherwise try to steal from
-    if (subtask == STEAL_RES_EMPTY) {
-      // TODO: log
-    } else if (subtask == STEAL_RES_ABORT) {
-      // TODO: log
-    } else {
-      assert(subtask != NULL);
-      split(worker, subtask);
-      push_back(&worker->q, subtask);
-      return 1;
-    }
-
+    assert(subtask != NULL);
+    split(worker, subtask);
+    push_back(&worker->q, subtask);
+    return 1;
   }
 
   return 0;
@@ -212,7 +193,6 @@ static inline void *scheduler_worker(void* arg)
   worker_local = worker;
   while (!is_finished(worker))
   {
-
     if (active_work == 0) {
       int n_sig;
       CHECK_ERR(sigwait(&scheduler_sig_set, &n_sig), "sigwait");
@@ -273,7 +253,6 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   // sequential work from each subtask
   int64_t task_timer = 0;
   int64_t task_iter = 0;
-
 
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
