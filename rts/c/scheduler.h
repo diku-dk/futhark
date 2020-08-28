@@ -2,7 +2,6 @@
 #ifndef _SCHEDULER_H_
 #define _SCHEDULER_H_
 
-
 #ifdef MCJOBQUEUE
 
 static volatile int active_work = 0;
@@ -10,7 +9,6 @@ static volatile int active_work = 0;
 static inline int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
 }
-
 
 // Try to steal from a random queue
 static inline int steal_from_random_worker(struct worker* worker)
@@ -126,7 +124,14 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
       }
     } else {
       while (shared_counter != 0 && subtask_queue_is_empty(&worker->q) && scheduler_error == 0) {
-        steal_from_random_worker(worker);
+        if (steal_from_random_worker(worker)) {
+          struct subtask *subtask = NULL;
+          int err = subtask_queue_dequeue(worker, &subtask, 0);
+          if (err == 0 ) {
+            struct subtask* subtask_new = chunk_subtask(worker, subtask);
+            CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
+          }
+        }
       }
     }
   }
