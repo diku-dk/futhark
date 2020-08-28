@@ -3,11 +3,13 @@
 #ifndef MULTICORE_DEFS
 #define MULTICORE_DEFS
 
+#include <signal.h>
+
 /* #define MCPROFILE */
 
 // Which queue implementation to use
-#define MCJOBQUEUE
-/* #define MCCHASELEV */
+/* #define MCJOBQUEUE */
+#define MCCHASELEV
 
 
 #if defined(_WIN32)

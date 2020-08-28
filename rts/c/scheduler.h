@@ -4,8 +4,6 @@
 
 #ifdef MCJOBQUEUE
 
-static volatile int active_work = 0;
-
 static inline int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
 }
@@ -194,7 +192,12 @@ static inline void *scheduler_worker(void* arg)
   worker_local = worker;
   while (!is_finished(worker))
   {
-    if (!empty(&worker->q)) {
+
+    if (!active_work) {
+      int n_sig;
+      CHECK_ERR(sigwait(&scheduler_sig_set, &n_sig), "sigwait");
+
+    } else if (!empty(&worker->q)) {
       struct subtask* subtask = pop_back(&worker->q);
       if (subtask == NULL) continue;
       struct subtask* subtask_new = chunk_subtask(worker, subtask);
@@ -217,6 +220,12 @@ static inline void *scheduler_worker(void* arg)
   if (worker->output_usage)
     output_thread_usage(worker);
   return NULL;
+}
+
+static inline void wake_up_all_threads(struct scheduler *scheduler) {
+  for (int i = 1; i < scheduler->num_threads; i++) {
+    CHECK_ERRNO(pthread_kill(scheduler->workers[i].thread, SIGUSR1), "pthread_kill");
+  }
 }
 
 
@@ -244,6 +253,12 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   int chunkable = sched == STATIC ? 0 : 1;
   int64_t iter = 1;
 
+  int old_active_work = active_work;
+  __atomic_add_fetch(&active_work, 1, __ATOMIC_SEQ_CST);
+
+  if(old_active_work == 0) {
+    wake_up_all_threads(scheduler);
+  }
 
   int subtask_id = 0;
   int64_t start = 0;
@@ -275,6 +290,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
       }
     }
   }
+
+  __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
   // Write back timing results
   (*timer) += task_timer;
 

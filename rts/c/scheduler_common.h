@@ -49,6 +49,8 @@ struct scheduler_task {
   int64_t *total_iter;
 };
 
+sigset_t scheduler_sig_set;
+static volatile int active_work = 0;
 
 static volatile sig_atomic_t num_workers;
 __thread struct worker* worker_local = NULL;

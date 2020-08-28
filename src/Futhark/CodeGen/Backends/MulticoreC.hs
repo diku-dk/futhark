@@ -140,6 +140,14 @@ compileProg =
 
                  // futhark_segred_tuning_program(ctx);
 
+
+                 // Initialize signal set for threads
+                 sigemptyset(&scheduler_sig_set);
+                 sigaddset(&scheduler_sig_set, SIGUSR1);
+                 sigaddset(&scheduler_sig_set, SIGSEGV);
+                 pthread_sigmask(SIG_BLOCK, &scheduler_sig_set, NULL);
+
+
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
                  num_workers = ctx->scheduler.num_threads;
@@ -147,8 +155,8 @@ compileProg =
                  worker_local = &ctx->scheduler.workers[0];
                  worker_local->tid = 0;
                  worker_local->scheduler = &ctx->scheduler;
-                 // CHECK_ERR(deque_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
-                 CHECK_ERR(subtask_queue_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
+                 CHECK_ERR(deque_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
+                 // CHECK_ERR(subtask_queue_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
 
 
                  for (int i = 1; i < ctx->scheduler.num_threads; i++) {
@@ -162,8 +170,8 @@ compileProg =
                    cur_worker->total = 0;
                    cur_worker->nested = 0;
                    cur_worker->scheduler = &ctx->scheduler;
-                   // CHECK_ERR(deque_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
-                   CHECK_ERR(subtask_queue_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
+                   CHECK_ERR(deque_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
+                   // CHECK_ERR(subtask_queue_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
 
                    CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
                                             cur_worker),
@@ -181,13 +189,16 @@ compileProg =
              [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
 
+                 active_work = 1;
+                 // Wake up threads so we can kill them
+                 wake_up_all_threads(&ctx->scheduler);
                  output_thread_usage(worker_local);
                  for (int i = 1; i < ctx->scheduler.num_threads; i++)
                  {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    cur_worker->dead = 1;
-                   //deque_destroy(&cur_worker->q);
-                   subtask_queue_destroy(&cur_worker->q);
+                   deque_destroy(&cur_worker->q);
+                   // subtask_queue_destroy(&cur_worker->q);
                    CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
                  }
 
