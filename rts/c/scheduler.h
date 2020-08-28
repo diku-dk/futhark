@@ -150,6 +150,21 @@ static inline int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && empty(&worker->q);
 }
 
+static inline void split(struct worker* worker, struct subtask *subtask)
+{
+  int64_t remaining_iter = subtask->end - subtask->start;
+  if (subtask->chunkable && remaining_iter > 1) {
+    int64_t half = remaining_iter / 2;
+    struct subtask* new_subtask = malloc(sizeof(struct subtask));
+    *new_subtask = *subtask;
+    new_subtask->start = subtask->end - half;
+    subtask->end = new_subtask->start;
+    __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
+    push_back(&worker->q, new_subtask);
+  }
+  return;
+}
+
 // Try to steal from a random queue
 static inline int steal_from_random_worker(struct worker* worker)
 {
@@ -166,6 +181,7 @@ static inline int steal_from_random_worker(struct worker* worker)
     // TODO: log
   } else {
     assert(subtask != NULL);
+    split(worker, subtask);
     push_back(&worker->q, subtask);
     return 1;
   }
