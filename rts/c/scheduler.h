@@ -2,7 +2,7 @@
 #ifndef _SCHEDULER_H_
 #define _SCHEDULER_H_
 
-#ifdef MCJOBQUEUE
+#if defined(MCJOBQUEUE)
 
 static inline int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
@@ -166,8 +166,8 @@ static inline void split(struct worker* worker, struct subtask *subtask)
 // Try to steal from a random queue
 static inline int steal_from_random_worker(struct worker* worker)
 {
-  int my_id = worker->tid;
   struct scheduler* scheduler = worker->scheduler;
+  int my_id = worker->tid;
   int k = random_other_worker(scheduler, my_id);
   struct deque *deque_k = &scheduler->workers[k].q;
   if (empty(deque_k)) return 0;
@@ -209,7 +209,7 @@ static inline void *scheduler_worker(void* arg)
       break;
     } else { // try to steal
       assert(num_workers >= 2);
-      while(!is_finished(worker)) {
+      while(!is_finished(worker) && active_work) {
         if (steal_from_random_worker(worker))
           break;
       }
