@@ -523,8 +523,8 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
   GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
   GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  GC.stm  [C.cstm|$id:ftask_name.total_iter = &ctx->$id:(functionTiming fpar_task);|]
-  GC.stm  [C.cstm|$id:ftask_name.total_time = &ctx->$id:(functionIterations fpar_task);|]
+  GC.stm  [C.cstm|$id:ftask_name.total_iter = &ctx->$id:(functionIterations fpar_task);|]
+  GC.stm  [C.cstm|$id:ftask_name.total_time = &ctx->$id:(functionTiming fpar_task);|]
 
   case sched of
     Dynamic -> GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
