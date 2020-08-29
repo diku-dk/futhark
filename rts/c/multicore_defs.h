@@ -8,8 +8,8 @@
 /* #define MCPROFILE */
 
 // Which queue implementation to use
-/* #define MCJOBQUEUE */
-#define MCCHASELEV
+#define MCJOBQUEUE
+/* #define MCCHASELEV */
 
 
 #if defined(_WIN32)
