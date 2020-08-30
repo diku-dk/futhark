@@ -274,19 +274,11 @@ sequentialRed :: Pattern MCMem
               -> DoSegBody
               -> MulticoreGen ()
 sequentialRed pat space reds kbody = do
-  let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
-  flat_seq_idx <- dPrimV "seq_iter" 0
-  code <- collect $ do
-      seq_code_body <- sequentialRedBody pat flat_seq_idx space reds kbody
-      let (body_allocs, seq_code_body') = extractAllocations seq_code_body
-      emit body_allocs
-      sFor "i" (product ns') $ \i -> do
-        flat_seq_idx <-- i
-        emit seq_code_body'
-  free_params <- freeParams code (segFlat space : [flat_seq_idx])
+  flat_idx <- dPrim "iter" int64
+  code <- sequentialRedBody pat flat_idx space reds kbody
+  free_params <- freeParams code (segFlat space : [flat_idx])
   let (body_allocs, fbody') = extractAllocations code
-  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" flat_seq_idx body_allocs fbody' free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" flat_idx body_allocs fbody' free_params $ segFlat space
 
 
 
