@@ -1,5 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | Futhark Compiler Driver
 module Futhark.CLI.Dev (main) where
 
@@ -23,12 +24,14 @@ import Futhark.Pass
 import Futhark.Actions
 import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
+import Futhark.Analysis.Metrics (OpMetrics)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.Seq as Seq
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.SeqMem as SeqMem
-import Futhark.IR (Prog, pretty)
+import Futhark.IR (Prog, pretty, ASTLore, Op)
+import Futhark.IR.Prop.Aliases (CanBeAliased)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 
@@ -118,26 +121,22 @@ newtype UntypedPass = UntypedPass (UntypedPassState
                                   -> PipelineConfig
                                   -> FutharkM UntypedPassState)
 
-data AllActions = AllActions
-  { actionSOACS :: Action SOACS.SOACS
-  , actionKernels :: Action Kernels.Kernels
-  , actionSeq :: Action Seq.Seq
-  , actionKernelsMem :: Action KernelsMem.KernelsMem
-  , actionSeqMem :: Action SeqMem.SeqMem
-  }
-
-data UntypedAction = SOACSAction (Action SOACS.SOACS)
-                   | KernelsAction (Action Kernels.Kernels)
-                   | KernelsMemAction (FilePath -> Action KernelsMem.KernelsMem)
-                   | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
-                   | PolyAction AllActions
+data UntypedAction
+  = SOACSAction (Action SOACS.SOACS)
+  | KernelsAction (Action Kernels.Kernels)
+  | KernelsMemAction (FilePath -> Action KernelsMem.KernelsMem)
+  | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
+  | PolyAction (forall lore.
+                (ASTLore lore,
+                 (CanBeAliased (Op lore)),
+                 (OpMetrics (Op lore))) => Action lore)
 
 untypedActionName :: UntypedAction -> String
 untypedActionName (SOACSAction a) = actionName a
 untypedActionName (KernelsAction a) = actionName a
 untypedActionName (SeqMemAction a) = actionName $ a ""
 untypedActionName (KernelsMemAction a) = actionName $ a ""
-untypedActionName (PolyAction a) = actionName (actionSOACS a)
+untypedActionName (PolyAction a) = actionName (a::Action SOACS.SOACS)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
@@ -148,7 +147,7 @@ instance Representation UntypedAction where
 
 newConfig :: Config
 newConfig = Config newFutharkConfig (Pipeline []) action False
-  where action = PolyAction $ AllActions printAction printAction printAction printAction printAction
+  where action = PolyAction printAction
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
@@ -337,17 +336,13 @@ commandLineOptions =
        opts { futharkAction = SeqMemAction $ compileCAction newFutharkConfig ToExecutable })
     "Compile the program using the C backend."
   , Option "p" ["print"]
-    (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions printAction printAction printAction printAction printAction })
+    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
   , Option "m" ["metrics"]
-    (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions metricsAction metricsAction metricsAction metricsAction metricsAction })
+    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction metricsAction })
     "Print AST metrics of the resulting internal representation on standard output."
   , Option [] ["sexp"]
-    (NoArg $ Right $ \opts ->
-        opts { futharkAction = PolyAction $ AllActions sexpAction sexpAction sexpAction sexpAction sexpAction
-             })
+    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction sexpAction })
     "Print the resulting IR as S-expressions to standard output."
   , Option [] ["defunctorise"]
     (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctorise })
@@ -495,15 +490,15 @@ runPolyPasses config base initial_prog = do
         actionProcedure (action base) prog
 
       (SOACS soacs_prog, PolyAction acs) ->
-        actionProcedure (actionSOACS acs) soacs_prog
+        actionProcedure acs soacs_prog
       (Kernels kernels_prog, PolyAction acs) ->
-        actionProcedure (actionKernels acs) kernels_prog
+        actionProcedure acs kernels_prog
       (Seq seq_prog, PolyAction acs) ->
-        actionProcedure (actionSeq acs) seq_prog
+        actionProcedure acs seq_prog
       (KernelsMem mem_prog, PolyAction acs) ->
-        actionProcedure (actionKernelsMem acs) mem_prog
+        actionProcedure acs mem_prog
       (SeqMem mem_prog, PolyAction acs) ->
-        actionProcedure (actionSeqMem acs) mem_prog
+        actionProcedure acs mem_prog
 
       (_, action) ->
         externalErrorS $ "Action " <>
