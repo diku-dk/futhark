@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -38,6 +40,9 @@ module Futhark.IR.Aliases
        )
 where
 
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Maybe
@@ -60,7 +65,10 @@ data Aliases lore
 -- | A wrapper around 'AliasDec to get around the fact that we need an
 -- 'Ord' instance, which 'AliasDec does not have.
 newtype AliasDec = AliasDec { unAliases :: Names }
-               deriving (Show)
+               deriving (Show, Generic)
+
+instance SexpIso AliasDec where
+  sexpIso = with $ \vname -> sexpIso >>> vname
 
 instance Semigroup AliasDec where
   x <> y = AliasDec $ unAliases x <> unAliases y

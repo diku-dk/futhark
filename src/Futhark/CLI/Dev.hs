@@ -1,13 +1,16 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeApplications #-}
 -- | Futhark Compiler Driver
 module Futhark.CLI.Dev (main) where
 
+import qualified Data.ByteString.Lazy as ByteString
 import Data.Maybe
 import Data.List (intersperse)
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
 import qualified Data.Text.IO as T
+import qualified Language.SexpGrammar as Sexp
 import System.IO
 import System.Exit
 import System.Console.GetOpt
@@ -359,6 +362,11 @@ commandLineOptions =
         opts { futharkAction = PolyAction $
                AllActions metricsAction metricsAction metricsAction metricsAction metricsAction metricsAction })
     "Print AST metrics of the resulting internal representation on standard output."
+  , Option [] ["sexp"]
+    (NoArg $ Right $ \opts ->
+        opts { futharkAction = PolyAction $ AllActions sexpAction sexpAction sexpAction sexpAction sexpAction sexpAction
+             })
+    "Print the resulting IR as S-expressions to standard output."
   , Option [] ["defunctorise"]
     (NoArg $ Right $ \opts -> opts { futharkPipeline = Defunctorise })
     "Partially evaluate all module constructs and print the residual program."
@@ -466,9 +474,31 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                 >>= Monomorphise.transformProg
                 >>= Defunctionalise.transformProg
-            Pipeline{} -> do
-              prog <- runPipelineOnProgram (futharkConfig config) id file
-              runPolyPasses config (file `replaceExtension` "") (SOACS prog)
+            Pipeline{} ->
+              case splitExtensions file of
+                (base, ".fut") -> do
+                  prog <- runPipelineOnProgram (futharkConfig config) id file
+                  runPolyPasses config base (SOACS prog)
+                (base, ".sexp") -> do
+                  input <- liftIO $ ByteString.readFile file
+                  prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
+                        Right prog' -> return $ SOACS prog'
+                        Left _ ->
+                          case Sexp.decode @(Prog Kernels.Kernels) input of
+                            Right prog' -> return $ Kernels prog'
+                            Left _ ->
+                              case Sexp.decode @(Prog Seq.Seq) input of
+                                Right prog' -> return $ Seq prog'
+                                Left _ ->
+                                  case Sexp.decode @(Prog KernelsMem.KernelsMem) input of
+                                    Right prog' -> return $ KernelsMem prog'
+                                    Left _ ->
+                                      case Sexp.decode @(Prog SeqMem.SeqMem) input of
+                                        Right prog' -> return $ SeqMem prog'
+                                        Left e -> externalErrorS $ "Couldn't parse sexp input: " ++ show e
+                  runPolyPasses config base prog
+                (_, ext) ->
+                  externalErrorS $ unwords ["Unsupported extension", show ext, ". Supported extensions: sexp, fut"]
 
 runPolyPasses :: Config -> FilePath -> UntypedPassState -> FutharkM ()
 runPolyPasses config base initial_prog = do

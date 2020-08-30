@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -17,6 +18,9 @@ module Futhark.IR.MC.Op
 where
 
 import Data.Bifunctor (first)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
 
 import Futhark.IR
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -45,7 +49,13 @@ data MCOp lore op
     -- semantically fully equivalent.
   | OtherOp op
     -- ^ Something else (in practice often a SOAC).
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance (Decorations lore, SexpIso op) => SexpIso (MCOp lore op) where
+  sexpIso = match
+    $ With (error "SexpIso MCOp")
+    $ With (error "SexpIso MCOp")
+    End
 
 instance (ASTLore lore, Substitute op) => Substitute (MCOp lore op) where
   substituteNames substs (ParOp par_op op) =

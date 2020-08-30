@@ -29,10 +29,11 @@ module Futhark.CodeGen.ImpCode
   , PrimValue (..)
   , ExpLeaf (..)
   , Exp
+  , TExp
   , Volatility (..)
   , Arg (..)
   , var
-  , vi32
+  , vi32, vi64
   , index
   , ErrorMsg(..)
   , ErrorMsgPart(..)
@@ -172,12 +173,12 @@ data Code a = Skip
               -- ^ No-op.  Crucial for the 'Monoid' instance.
             | Code a :>>: Code a
               -- ^ Statement composition.  Crucial for the 'Semigroup' instance.
-            | For VName IntType Exp (Code a)
-              -- ^ A for-loop iterating the given number of times.  The
-              -- loop parameter starts counting from zero and will have
-              -- the given type.  The bound is evaluated just once,
-              -- before the loop is entered.
-            | While Exp (Code a)
+            | For VName Exp (Code a)
+              -- ^ A for-loop iterating the given number of times.
+              -- The loop parameter starts counting from zero and will
+              -- have the same (integer) type as the bound.  The bound
+              -- is evaluated just once, before the loop is entered.
+            | While (TExp Bool) (Code a)
               -- ^ While loop.  The conditional is (of course)
               -- re-evaluated before every iteration of the loop.
             | DeclareMem VName Space
@@ -186,7 +187,7 @@ data Code a = Skip
               -- distinct from allocation.  The memory block must be the
               -- target of either an 'Allocate' or a 'SetMem' before it
               -- can be used for reading or writing.
-            | DeclareStackMem VName Space (Count Bytes Exp)
+            | DeclareStackMem VName Space (Count Bytes (TExp Int64))
             | DeclareScalar VName Volatility PrimType
               -- ^ Declare a scalar variable with an initially undefined value.
             | DeclareArray VName Space PrimType ArrayContents
@@ -195,7 +196,7 @@ data Code a = Skip
               -- This is mostly used for constant arrays, but also for
               -- some bookkeeping data, like the synchronisation
               -- counts used to implement reduction.
-            | Allocate VName (Count Bytes Exp) Space
+            | Allocate VName (Count Bytes (TExp Int64)) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
             | Free VName Space
@@ -206,11 +207,14 @@ data Code a = Skip
               -- is the last reference.  There is no guarantee that
               -- all memory blocks will be freed with this statement.
               -- Backends are free to ignore it entirely.
-            | Copy VName (Count Bytes Exp) Space VName (Count Bytes Exp) Space (Count Bytes Exp)
+            | Copy
+              VName (Count Bytes (TExp Int32)) Space
+              VName (Count Bytes (TExp Int32)) Space
+              (Count Bytes (TExp Int64))
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName (Count Elements Exp) PrimType Space Volatility Exp
+            | Write VName (Count Elements (TExp Int32)) PrimType Space Volatility Exp
               -- ^ @Write mem i t space vol v@ writes the value @v@ to
               -- @mem@ offset by @i@ elements of type @t@.  The
               -- 'Space' argument is the memory space of @mem@
@@ -223,7 +227,7 @@ data Code a = Skip
             | Call [VName] Name [Arg]
               -- ^ Function call.  The results are written to the
               -- provided 'VName' variables.
-            | If Exp (Code a) (Code a)
+            | If (TExp Bool) (Code a) (Code a)
               -- ^ Conditional execution.
             | Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
               -- ^ Assert that something must be true.  Should it turn
@@ -268,7 +272,7 @@ instance Monoid (Code a) where
 -- We do not look inside any 'Op's.  We assume that no 'Op' is going
 -- to 'SetMem' a memory block declared outside it.
 -- TODO find a way to distinguish between stack vs heap memory (instead of Count 0)
-lexicalMemoryUsage :: Function a -> M.Map VName (Count Bytes Exp, Space)
+lexicalMemoryUsage :: Function a -> M.Map VName (Count Bytes (TExp Int64), Space)
 lexicalMemoryUsage func =
   M.filterWithKey (const . not . (`nameIn` nonlexical)) $
   declared $ functionBody func
@@ -278,13 +282,15 @@ lexicalMemoryUsage func =
 
         go f (x :>>: y) = f x <> f y
         go f (If _ x y) = f x <> f y
-        go f (For _ _ _ x) = f x
+        go f (For _ _ x) = f x
         go f (While _ x) = f x
         go f (Comment _ x) = f x
         go _ _ = mempty
 
-        declared (DeclareMem mem space ) = M.singleton mem (Count 0, space)
-        declared (DeclareStackMem mem space size) = M.singleton mem (size, space)
+        declared (DeclareMem mem space ) =
+          M.singleton mem (Count 0, space)
+        declared (DeclareStackMem mem space size) =
+          M.singleton mem (size, space)
         declared x = go declared x
 
         set (SetMem x y _) = namesFromList [x,y]
@@ -298,7 +304,7 @@ lexicalMemoryUsage func =
 calledFuncs :: Code a -> S.Set Name
 calledFuncs (x :>>: y) = calledFuncs x <> calledFuncs y
 calledFuncs (If _ x y) = calledFuncs x <> calledFuncs y
-calledFuncs (For _ _ _ x) = calledFuncs x
+calledFuncs (For _ _ x) = calledFuncs x
 calledFuncs (While _ x) = calledFuncs x
 calledFuncs (Comment _ x) = calledFuncs x
 calledFuncs (Call _ f _) = S.singleton f
@@ -310,7 +316,7 @@ data ExpLeaf = ScalarVar VName
                -- 'LeafExp' constructor itself.
              | SizeOf PrimType
                -- ^ The size of a primitive type.
-             | Index VName (Count Elements Exp) PrimType Space Volatility
+             | Index VName (Count Elements (TExp Int32)) PrimType Space Volatility
                -- ^ Reading a value from memory.  The arguments have
                -- the same meaning as with 'Write'.
            deriving (Eq, Show)
@@ -318,6 +324,9 @@ data ExpLeaf = ScalarVar VName
 -- | A side-effect free expression whose execution will produce a
 -- single primitive value.
 type Exp = PrimExp ExpLeaf
+
+-- | Like 'Exp', but with a required/known type.
+type TExp t = TPrimExp t ExpLeaf
 
 -- | A function call argument.
 data Arg = ExpArg Exp
@@ -331,29 +340,33 @@ data Elements
 data Bytes
 
 -- | This expression counts elements.
-elements :: Exp -> Count Elements Exp
+elements :: a -> Count Elements a
 elements = Count
 
 -- | This expression counts bytes.
-bytes :: Exp -> Count Bytes Exp
+bytes :: a -> Count Bytes a
 bytes = Count
 
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
-withElemType :: Count Elements Exp -> PrimType -> Count Bytes Exp
+withElemType :: Count Elements (TExp Int32) -> PrimType -> Count Bytes (TExp Int64)
 withElemType (Count e) t =
-  bytes $ sExt Int64 e * LeafExp (SizeOf t) (IntType Int64)
+  bytes $ isInt64 (sExt Int64 (untyped e)) * isInt64 (LeafExp (SizeOf t) (IntType Int64))
 
 -- | Turn a 'VName' into a 'Imp.ScalarVar'.
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
 -- | Turn a 'VName' into a v'Int32' 'Imp.ScalarVar'.
-vi32 :: VName -> Exp
-vi32 = flip var $ IntType Int32
+vi32 :: VName -> TExp Int32
+vi32 = TPrimExp . flip var (IntType Int32)
+
+-- | Turn a 'VName' into a v'Int64' 'Imp.ScalarVar'.
+vi64 :: VName -> TExp Int64
+vi64 = TPrimExp . flip var (IntType Int64)
 
 -- | Concise wrapper for using 'Index'.
-index :: VName -> Count Elements Exp -> PrimType -> Space -> Volatility -> Exp
+index :: VName -> Count Elements (TExp Int32) -> PrimType -> Space -> Volatility -> Exp
 index arr i t s vol = LeafExp (Index arr i t s vol) t
 
 -- Prettyprinting definitions.
@@ -414,8 +427,8 @@ instance Pretty op => Pretty (Code op) where
   ppr (Op op) = ppr op
   ppr Skip   = text "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
-  ppr (For i it limit body) =
-    text "for" <+> ppr i <> text ":" <> ppr it <+> langle <+> ppr limit <+> text "{" </>
+  ppr (For i limit body) =
+    text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
   ppr (While cond body) =
@@ -516,8 +529,8 @@ instance Foldable Code where
 instance Traversable Code where
   traverse f (x :>>: y) =
     (:>>:) <$> traverse f x <*> traverse f y
-  traverse f (For i it bound code) =
-    For i it bound <$> traverse f code
+  traverse f (For i bound code) =
+    For i bound <$> traverse f code
   traverse f (While cond code) =
     While cond <$> traverse f code
   traverse f (If cond x y) =
@@ -562,7 +575,7 @@ declaredIn (DeclareScalar name _ _) = oneName name
 declaredIn (DeclareArray name _ _ _) = oneName name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
-declaredIn (For i _ _ body) = oneName i <> declaredIn body
+declaredIn (For i _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
@@ -576,7 +589,7 @@ instance FreeIn a => FreeIn (Code a) where
     fvBind (declaredIn x) $ freeIn' x <> freeIn' y
   freeIn' Skip =
     mempty
-  freeIn' (For i _ bound body) =
+  freeIn' (For i bound body) =
     fvBind (oneName i) $ freeIn' bound <> freeIn' body
   freeIn' (While cond body) =
     freeIn' cond <> freeIn' body

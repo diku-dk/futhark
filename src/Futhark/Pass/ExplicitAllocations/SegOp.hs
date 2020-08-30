@@ -32,7 +32,7 @@ allocInLambda params body rettype = do
 
 allocInBinOpParams :: Allocable fromlore tolore =>
                       SubExp
-                   -> PrimExp VName -> PrimExp VName
+                   -> TPrimExp Int32 VName -> TPrimExp Int32 VName
                    -> [LParam fromlore]
                    -> [LParam fromlore]
                    -> AllocM fromlore tolore ([LParam tolore], [LParam tolore])
@@ -47,7 +47,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
               mem <- allocForArray t DefaultSpace
               -- XXX: this iota ixfun is a bit inefficient; leading to
               -- uncoalesced access.
-              let base_dims = map (primExpFromSubExp int32) (arrayDims t)
+              let base_dims = map pe32 $ arrayDims t
                   ixfun_base = IxFun.iota base_dims
                   ixfun_x = IxFun.slice ixfun_base $
                             fullSliceNum base_dims [DimFix my_id]
@@ -68,8 +68,8 @@ allocInBinOpLambda :: Allocable fromlore tolore =>
 allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   let (acc_params, arr_params) =
         splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
-      index_x = LeafExp flat int32
-      index_y = index_x + primExpFromSubExp int32 num_threads
+      index_x = TPrimExp $ LeafExp flat int32
+      index_y = index_x + pe32 num_threads
   (acc_params', arr_params') <-
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 

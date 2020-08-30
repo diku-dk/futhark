@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE DeriveGeneric #-}
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -41,10 +42,18 @@ module Language.Futhark.Core
 
 where
 
+
+
+import Prelude hiding ((.), id)
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.String
 import Data.Word (Word8, Word16, Word32, Word64)
 import qualified Data.Text as T
+import Text.Read
 
 import Futhark.Util.Pretty
 import Futhark.Util.Loc
@@ -54,7 +63,13 @@ import Futhark.Util.Loc
 -- to ordering, 'Unique' is greater than 'Nonunique'.
 data Uniqueness = Nonunique -- ^ May have references outside current function.
                 | Unique    -- ^ No references outside current function.
-                  deriving (Eq, Ord, Show)
+                  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso Uniqueness where
+  sexpIso = match
+    $ With (. Sexp.sym "nonunique")
+    $ With (. Sexp.sym "unique")
+    End
 
 instance Semigroup Uniqueness where
   (<>) = min
@@ -70,7 +85,13 @@ instance Pretty Uniqueness where
 -- instance returns the least commutative of its arguments.
 data Commutativity = Noncommutative
                    | Commutative
-                     deriving (Eq, Ord, Show)
+                     deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso Commutativity where
+  sexpIso = match
+    $ With (. Sexp.sym "noncommutative")
+    $ With (. Sexp.sym "commutative")
+    End
 
 instance Semigroup Commutativity where
   (<>) = min
@@ -86,7 +107,10 @@ defaultEntryPoint = nameFromString "main"
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
 newtype Name = Name T.Text
-  deriving (Show, Eq, Ord, IsString, Semigroup)
+  deriving (Show, Eq, Ord, IsString, Semigroup, Generic)
+
+instance SexpIso Name where
+  sexpIso = with (. symbol)
 
 instance Pretty Name where
   ppr = text . nameToString
@@ -161,7 +185,20 @@ prettyStacktrace cur = unlines . zipWith f [(0::Int)..]
 -- | A name tagged with some integer.  Only the integer is used in
 -- comparisons, no matter the type of @vn@.
 data VName = VName !Name !Int
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance SexpIso VName where
+  sexpIso = with $ \vname ->
+    Sexp.symbol >>>
+    flipped (pair >>> partialIso
+              (\(nm, i) -> T.pack $ nameToString nm ++ "_" ++ show i)
+              (\s ->
+                  let (nm, i) = T.breakOnEnd "_" s
+                  in case readMaybe $ T.unpack i of
+                       Just i' -> Right (nameFromString $ T.unpack $ T.init nm, i')
+                       Nothing -> Left $ expected "Couldn't parse int of vname"
+              )) >>>
+    vname
 
 -- | Return the tag contained in the 'VName'.
 baseTag :: VName -> Int

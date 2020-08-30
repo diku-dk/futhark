@@ -453,7 +453,7 @@ multicoreFunDef s f = do
   GC.libDecl =<< f s'
   return s'
 
-generateFunction :: C.ToIdent a => M.Map VName (Count Bytes Exp, Space)
+generateFunction :: C.ToIdent a => M.Map VName (Count Bytes (TExp Int64), Space)
                   -> String
                   -> Code
                   -> a
@@ -624,20 +624,20 @@ compileOp (Atomic aop) =
 
 doAtomic :: (C.ToIdent a1, C.ToIdent a2) => a1
          -> a2
-         -> Count u Exp
+         -> Count u (TExp Int32)
          -> Exp
          -> String
          -> C.Type
          -> GC.CompilerM op s ()
 doAtomic old arr ind val op ty = do
-  ind' <- GC.compileExp $ unCount ind
+  ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
 
 atomicOps :: AtomicOp -> GC.CompilerM op s ()
 atomicOps (AtomicCmpXchg t old arr ind res val) = do
-  ind' <- GC.compileExp $ unCount ind
+  ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
   GC.stm [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
@@ -649,7 +649,7 @@ atomicOps (AtomicCmpXchg t old arr ind res val) = do
     op = "__atomic_compare_exchange_n"
 
 atomicOps (AtomicXchg t old arr ind val) = do
-  ind' <- GC.compileExp $ unCount ind
+  ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]

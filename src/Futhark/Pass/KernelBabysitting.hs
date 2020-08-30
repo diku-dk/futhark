@@ -256,9 +256,9 @@ ensureCoalescedAccess expmap thread_space num_threads free_ker_vars isThreadLoca
         Just {} <- sizeSubst len,
         oneIsh stride -> do
           let num_chunks = if null is
-                           then primExpFromSubExp int32 num_threads
-                           else coerceIntPrimExp Int32 $
-                                product $ map (primExpFromSubExp int32) $
+                           then untyped $ pe32 num_threads
+                           else coerceIntPrimExp Int32 $ untyped $
+                                product $ map pe32 $
                                 drop (length is) thread_gdims
           replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
 

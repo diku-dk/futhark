@@ -542,13 +542,14 @@ segMap1D desc lvl manifest f = do
   letTupExp desc $ Op $ SegOp $
     SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
 
+v32 :: VName -> TPrimExp Int32 VName
+v32 v = TPrimExp $ LeafExp v int32
+
 reconstructGtids1D :: Count GroupSize SubExp -> VName -> VName -> VName
                    -> Binder Kernels ()
 reconstructGtids1D group_size gtid gid ltid  =
   letBindNames [gtid] =<<
-    toExp (LeafExp gid int32 *
-           primExpFromSubExp int32 (unCount group_size) +
-           LeafExp ltid int32)
+    toExp (v32 gid * pe32 (unCount group_size) + v32 ltid)
 
 readTile1D :: SubExp -> VName -> VName
            -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -562,9 +563,7 @@ readTile1D
 
   segMap1D "full_tile" (SegThread num_groups group_size SegNoVirt) ResultNoSimplify $ \ltid -> do
     j <- letSubExp "j" =<<
-         toExp (primExpFromSubExp int32 tile_id *
-                primExpFromSubExp int32 tile_size +
-                LeafExp ltid int32)
+         toExp (pe32 tile_id * pe32 tile_size + v32 ltid)
 
     reconstructGtids1D group_size gtid gid ltid
     addPrivStms [DimFix $ Var ltid] privstms
@@ -580,8 +579,7 @@ readTile1D
     fmap (map Var) $
       case kind of
         TilePartial ->
-          letTupExp "pre" =<< eIf (toExp $ primExpFromSubExp int32 j .<.
-                                   primExpFromSubExp int32 w)
+          letTupExp "pre" =<< eIf (toExp $ pe32 j .<. pe32 w)
           (resultBody <$> mapM (fmap Var . readTileElem) arrs)
           (eBody $ map eBlank tile_ts)
         TileFull ->
@@ -613,7 +611,7 @@ processTile1D
     let form' = redomapSOAC [Reduce red_comm red_lam thread_accs] map_lam
 
     fmap (map Var) $
-      letTupExp "acc" =<< eIf (toExp $ LeafExp gtid int32 .<. primExpFromSubExp int32 kdim)
+      letTupExp "acc" =<< eIf (toExp $ v32 gtid .<. pe32 kdim)
       (eBody [pure $ Op $ OtherOp $ Screma tile_size form' tile])
       (resultBodyM thread_accs)
 
@@ -631,7 +629,7 @@ processResidualTile1D
     BasicOp $ BinOp (SRem Int32 Unsafe) w tile_size
 
   letTupExp "acc_after_residual" =<<
-    eIf (toExp $ primExpFromSubExp int32 residual_input .==. 0)
+    eIf (toExp $ pe32 residual_input .==. 0)
     (resultBodyM $ map Var accs)
     (nonemptyTile residual_input)
 
@@ -679,10 +677,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
   return Tiling
     { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
         letBindNames [gtid] =<<
-          toExp (LeafExp gid int32 * primExpFromSubExp int32 tile_size +
-                 LeafExp ltid int32)
-        f (LeafExp gtid int32 .<. primExpFromSubExp int32 kdim)
-          [DimFix $ Var ltid]
+          toExp (v32 gid * pe32 tile_size + v32 ltid)
+        f (untyped $ v32 gtid .<. pe32 kdim) [DimFix $ Var ltid]
 
     , tilingReadTile =
         readTile1D tile_size gid gtid (segNumGroups lvl) (segGroupSize lvl)
@@ -740,11 +736,9 @@ reconstructGtids2D :: SubExp -> (VName, VName) -> (VName, VName) -> (VName, VNam
 reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = do
   -- Reconstruct the original gtids from gid_x/gid_y and ltid_x/ltid_y.
   letBindNames [gtid_x] =<<
-    toExp (LeafExp gid_x int32 * primExpFromSubExp int32 tile_size +
-           LeafExp ltid_x int32)
+    toExp (v32 gid_x * pe32 tile_size + v32 ltid_x)
   letBindNames [gtid_y] =<<
-    toExp (LeafExp gid_y int32 * primExpFromSubExp int32 tile_size +
-            LeafExp ltid_y int32)
+    toExp (v32 gid_y * pe32 tile_size + v32 ltid_y)
 
 readTile2D :: (SubExp, SubExp) -> (VName, VName) -> (VName, VName) -> SubExp
            -> Count NumGroups SubExp -> Count GroupSize SubExp
@@ -755,13 +749,9 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
   segMap2D "full_tile" (SegThread num_groups group_size SegNoVirtFull)
   ResultNoSimplify (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
     i <- letSubExp "i" =<<
-         toExp (primExpFromSubExp int32 tile_id *
-                primExpFromSubExp int32 tile_size +
-                LeafExp ltid_x int32)
+         toExp (pe32 tile_id * pe32 tile_size + v32 ltid_x)
     j <- letSubExp "j" =<<
-         toExp (primExpFromSubExp int32 tile_id *
-                primExpFromSubExp int32 tile_size +
-                LeafExp ltid_y int32)
+         toExp (pe32 tile_id * pe32 tile_size + v32 ltid_y)
 
     reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
     addPrivStms [DimFix $ Var ltid_x, DimFix $ Var ltid_y] privstms
@@ -778,11 +768,10 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
         readTileElemIfInBounds (tile_t, arr, perm) = do
           let idx = last $ rearrangeShape perm [i,j]
               othercheck = last $ rearrangeShape perm
-                           [ LeafExp gtid_y int32 .<. primExpFromSubExp int32 kdim_y
-                           , LeafExp gtid_x int32 .<. primExpFromSubExp int32 kdim_x
+                           [ isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y
+                           , isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x
                            ]
-          eIf (toExp $
-               primExpFromSubExp int32 idx .<. primExpFromSubExp int32 w .&&. othercheck)
+          eIf (toExp $ pe32 idx .<. pe32 w .&&. othercheck)
             (eBody [return $ BasicOp $ Index arr [DimFix idx]])
             (eBody [eBlank tile_t])
 
@@ -826,8 +815,8 @@ processTile2D
 
     fmap (map Var) $
       letTupExp "acc" =<< eIf (toExp $
-                               LeafExp gtid_x int32 .<. primExpFromSubExp int32 kdim_x .&&.
-                               LeafExp gtid_y int32 .<. primExpFromSubExp int32 kdim_y)
+                               isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x .&&.
+                               isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y)
       (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size form' tiles'])
       (resultBodyM thread_accs)
 
@@ -845,7 +834,7 @@ processResidualTile2D
     BasicOp $ BinOp (SRem Int32 Unsafe) w tile_size
 
   letTupExp "acc_after_residual" =<<
-    eIf (toExp $ primExpFromSubExp int32 residual_input .==. 0)
+    eIf (toExp $ pe32 residual_input .==. 0)
     (resultBodyM $ map Var accs)
     (nonemptyTile residual_input)
 
@@ -895,8 +884,9 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
     { tilingSegMap = \desc lvl' manifest f ->
         segMap2D desc lvl' manifest (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
         reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
-        f (LeafExp gtid_x int32 .<. primExpFromSubExp int32 kdim_x .&&.
-           LeafExp gtid_y int32 .<. primExpFromSubExp int32 kdim_y)
+        f (untyped $
+           isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x .&&.
+           isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y)
           [DimFix $ Var ltid_x, DimFix $ Var ltid_y]
 
     , tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size (segNumGroups lvl) (segGroupSize lvl)

@@ -103,7 +103,7 @@ deepen vtable = vtable { loopDepth = loopDepth vtable + 1,
 data Indexed = Indexed Certificates (PrimExp VName)
                -- ^ A PrimExp based on the indexes (that is, without
                -- accessing any actual array).
-             | IndexedArray Certificates VName [PrimExp VName]
+             | IndexedArray Certificates VName [TPrimExp Int32 VName]
                -- ^ The indexing corresponds to another (perhaps more
                -- advantageous) array.
 
@@ -116,7 +116,7 @@ instance FreeIn Indexed where
   freeIn' (IndexedArray cs arr v) = freeIn' cs <> freeIn' arr <> freeIn' v
 
 -- | Indexing a delayed array if possible.
-type IndexArray = [PrimExp VName] -> Maybe Indexed
+type IndexArray = [TPrimExp Int32 VName] -> Maybe Indexed
 
 data Entry lore =
   Entry { entryConsumed :: Bool
@@ -241,9 +241,9 @@ index name is table = do
   index' name is' table
   where asPrimExp i = do
           Prim t <- lookupSubExpType i table
-          return $ primExpFromSubExp t i
+          return $ TPrimExp $ primExpFromSubExp t i
 
-index' :: VName -> [PrimExp VName] -> SymbolTable lore
+index' :: VName -> [TPrimExp Int32 VName] -> SymbolTable lore
        -> Maybe Indexed
 index' name is vtable = do
   entry <- lookup name vtable
@@ -260,7 +260,7 @@ index' name is vtable = do
 class IndexOp op where
   indexOp :: (ASTLore lore, IndexOp (Op lore)) =>
              SymbolTable lore -> Int -> op
-          -> [PrimExp VName] -> Maybe Indexed
+          -> [TPrimExp Int32 VName] -> Maybe Indexed
   indexOp _ _ _ _ = Nothing
 
 instance IndexOp () where
@@ -273,9 +273,11 @@ indexExp vtable (Op op) k is =
 
 indexExp _ (BasicOp (Iota _ x s to_it)) _ [i] =
   Just $ Indexed mempty $
-  sExt to_it i
-  * primExpFromSubExp (IntType to_it) s
-  + primExpFromSubExp (IntType to_it) x
+  (sExt to_it (untyped i)
+   `mul` primExpFromSubExp (IntType to_it) s)
+  `add` primExpFromSubExp (IntType to_it) x
+  where mul = BinOpExp (Mul to_it OverflowWrap)
+        add = BinOpExp (Add to_it OverflowWrap)
 
 indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
@@ -287,23 +289,20 @@ indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_:is) =
 
 indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
-      let is' =
-            reshapeIndex (map (primExpFromSubExp int32) oldshape)
-                         (map (primExpFromSubExp int32) $ newDims newshape)
-                         is
+      let is' = reshapeIndex (map pe32 oldshape)
+                             (map pe32 $ newDims newshape)
+                             is
       in index' v is' table
 
 indexExp table (BasicOp (Index v slice)) _ is =
   index' v (adjust slice is) table
   where adjust (DimFix j:js') is' =
-          pe j : adjust js' is'
+          pe32 j : adjust js' is'
         adjust (DimSlice j _ s:js') (i:is') =
-          let i_t_s = i * pe s
-              j_p_i_t_s = pe j + i_t_s
+          let i_t_s = i * pe32 s
+              j_p_i_t_s = pe32 j + i_t_s
           in j_p_i_t_s : adjust js' is'
         adjust _ _ = []
-
-        pe = primExpFromSubExp (IntType Int32)
 
 indexExp _ _ _ _ = Nothing
 
