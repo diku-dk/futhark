@@ -69,7 +69,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
 
   num_histos' <- toExp $ Var num_histos
   hist_width <- toExp $ histWidth $ head histops
-  let use_small_dest_histogram =  (num_histos' * hist_width) .<=. product ns_64
+  let use_small_dest_histogram =  (sExt Int64 num_histos' * sExt Int64 hist_width) .<=. product ns_64
   histops' <- renameHistOpLambda histops
 
   collect $ do
