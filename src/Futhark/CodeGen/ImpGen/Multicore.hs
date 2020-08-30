@@ -48,13 +48,13 @@ compileMCOp :: Pattern MCMem -> MCOp MCMem ()
 compileMCOp _ (OtherOp ()) = pure ()
 compileMCOp pat (ParOp _par_op op) = do
   let space = getSpace op
-  dPrimV_ (segFlat space) 0
+  dPrimV_ (segFlat space) (0::Imp.TExp Int32)
   iterations <- getIterationDomain op space
   nsubtasks  <- dPrim "num_tasks" $ IntType Int32
   seq_code   <- compileSegOp pat op nsubtasks
   retvals    <- getReturnParams pat op
 
-  let scheduling_info = Imp.SchedulerInfo nsubtasks (segFlat space) iterations
+  let scheduling_info = Imp.SchedulerInfo nsubtasks (segFlat space) (untyped iterations)
 
   -- par_code <- case par_op of
   --   Just nested_op -> do

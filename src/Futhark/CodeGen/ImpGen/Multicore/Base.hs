@@ -42,7 +42,7 @@ import Futhark.MonadFreshNames
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
 type AtomicBinOp =
   BinOp ->
-  Maybe (VName -> VName -> Imp.Count Imp.Elements Imp.Exp -> Imp.Exp -> Imp.AtomicOp)
+  Maybe (VName -> VName -> Imp.Count Imp.Elements (Imp.TExp Int32) -> Imp.Exp -> Imp.AtomicOp)
 
 newtype HostEnv = HostEnv
   { hostAtomics :: AtomicBinOp }
@@ -75,14 +75,14 @@ getSpace (SegRed _ space _ _ _ ) = space
 getSpace (SegScan _ space _ _ _ ) = space
 getSpace (SegMap _ space _ _) = space
 
-getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen Imp.Exp
+getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64)
 getIterationDomain SegMap{} space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+      ns_64 = map (sExt64 . toInt32Exp) ns
   return $ product ns_64
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+      ns_64 = map (sExt64 . toInt32Exp) ns
   case unSegSpace space of
      [_] -> return $ product ns_64
      _   -> return $ product $ init ns_64 -- Segmented reduction is over the inner most dimension
@@ -167,16 +167,16 @@ getNumThreads' :: VName -> MulticoreGen ()
 getNumThreads' dest =
   emit $ Imp.Op $ Imp.MulticoreCall (Just dest) "futhark_context_get_num_threads"
 
-getNumThreads :: MulticoreGen VName
+getNumThreads :: MulticoreGen (Imp.TExp Int32)
 getNumThreads = do
   v <- dPrim "num_threads" (IntType Int32)
   getNumThreads' v
-  return v
+  return $ Imp.vi32 v
 
 
 isLoadBalanced :: Imp.Code -> Bool
 isLoadBalanced (a Imp.:>>: b)    = isLoadBalanced a && isLoadBalanced b
-isLoadBalanced (Imp.For _ _ _ a) = isLoadBalanced a
+isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b)    = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While{}       = False
@@ -220,8 +220,8 @@ extractAllocations segop_code = f segop_code
         f (x Imp.:>>: y) = f x <> f y
         f (Imp.While cond body) =
           (mempty, Imp.While cond body)
-        f (Imp.For i it bound body) =
-          (mempty, Imp.For i it bound body)
+        f (Imp.For i bound body) =
+          (mempty, Imp.For i bound body)
         f (Imp.Comment s code) =
           second (Imp.Comment s) (f code)
         f Imp.Free{} =
@@ -258,13 +258,13 @@ renameHistOpLambda hist_ops =
 data Locking =
   Locking { lockingArray :: VName
             -- ^ Array containing the lock.
-          , lockingIsUnlocked :: Imp.Exp
+          , lockingIsUnlocked :: Imp.TExp Int32
             -- ^ Value for us to consider the lock free.
-          , lockingToLock :: Imp.Exp
+          , lockingToLock :: Imp.TExp Int32
             -- ^ What to write when we lock it.
-          , lockingToUnlock :: Imp.Exp
+          , lockingToUnlock :: Imp.TExp Int32
             -- ^ What to write when we unlock it.
-          , lockingMapping :: [Imp.Exp] -> [Imp.Exp]
+          , lockingMapping :: [Imp.TExp Int32] -> [Imp.TExp Int32]
             -- ^ A transformation from the logical lock index to the
             -- physical position in the array.  This can also be used
             -- to make the lock array smaller.
@@ -273,7 +273,7 @@ data Locking =
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
 type DoAtomicUpdate lore r =
-  [VName] -> [Imp.Exp] -> MulticoreGen ()
+  [VName] -> [Imp.TExp Int32] -> MulticoreGen ()
 
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
@@ -308,7 +308,7 @@ atomicUpdateLocking atomicBinOp lam
   case opHasAtomicSupport old arr' bucket_offset op of
     Just f -> sOp $ f $ Imp.var y t
     Nothing -> atomicUpdateCAS t a old bucket x $
-      x <-- Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
+      x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
 
   where opHasAtomicSupport old arr' bucket' bop = do
           let atomic f = Imp.Atomic . f old arr' bucket'
@@ -332,7 +332,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
   continue <- newVName "continue"
   dPrimVol_ continue int32
-  continue <-- 0
+  continue <-- (0::Imp.TExp Int32)
 
   -- Correctly index into locks.
   (locks', _locks_space, locks_offset) <-
@@ -340,18 +340,18 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
 
   -- Critical section
   let try_acquire_lock = do
-        old <-- 0
+        old <-- (0::Imp.TExp Int32)
         sOp $ Imp.Atomic $
           Imp.AtomicCmpXchg int32 old locks' locks_offset
-          continue (lockingToLock locking)
-      lock_acquired = Imp.var continue int32 -- .==. lockingIsUnlocked locking
+          continue (untyped (lockingToLock locking))
+      lock_acquired = Imp.vi32 continue -- .==. lockingIsUnlocked locking
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock = do
         old <-- lockingToLock locking
         sOp $ Imp.Atomic $
           Imp.AtomicCmpXchg int32 old locks' locks_offset
-          continue (lockingToUnlock locking)
+          continue (untyped (lockingToUnlock locking))
 
   -- Preparing parameters. It is assumed that the caller has already
   -- filled the arr_params. We copy the current value to the
@@ -373,9 +373,9 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
 
 
   -- While-loop: Try to insert your value
-  sWhile (Imp.var continue int32 .==. 0) $ do
+  sWhile (Imp.vi32 continue .==. 0) $ do
     try_acquire_lock
-    sWhen lock_acquired $ do
+    sUnless (lock_acquired .==. 0) $ do
       dLParams acc_params
       bind_acc_params
       op_body
@@ -386,7 +386,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
 
 atomicUpdateCAS :: PrimType
                 -> VName -> VName
-                -> [Imp.Exp] -> VName
+                -> [Imp.TExp Int32] -> VName
                 -> MulticoreGen ()
                 -> MulticoreGen ()
 atomicUpdateCAS t arr old bucket x do_op = do
@@ -398,7 +398,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
   --   x = do_op(assumed, y);
   --   old = atomicCAS(&d_his[idx], assumed, tmp);
   -- } while(assumed != old);
-  run_loop <- dPrimV "run_loop" 0
+  run_loop <- dPrimV "run_loop" (0::Imp.TExp Int32)
   everythingVolatile $ copyDWIMFix old [] (Var arr) bucket
   (arr', _a_space, bucket_offset) <- fullyIndexArray arr bucket
 
@@ -411,8 +411,8 @@ atomicUpdateCAS t arr old bucket x do_op = do
                      \v -> Imp.FunExp from [v] t)
                   _           -> (id, id)
 
-  sWhile (Imp.var run_loop int32 .==. 0) $ do
-    x <-- Imp.var old t
+  sWhile (Imp.vi32 run_loop .==. 0) $ do
+    x <~~ Imp.var old t
     do_op -- Writes result into x
     sOp $ Imp.Atomic $
       Imp.AtomicCmpXchg bytes old arr' bucket_offset

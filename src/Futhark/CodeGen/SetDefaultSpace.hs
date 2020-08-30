@@ -47,7 +47,7 @@ setValueSpace _ (ScalarValue bt ept v) =
 
 setBodySpace :: Space -> Code op -> Code op
 setBodySpace space (Allocate v e old_space) =
-  Allocate v (fmap (setExpSpace space) e) $ setSpace space old_space
+  Allocate v (fmap (setTExpSpace space) e) $ setSpace space old_space
 setBodySpace space (Free v old_space) =
   Free v $ setSpace space old_space
 setBodySpace space (DeclareMem name old_space) =
@@ -58,22 +58,22 @@ setBodySpace space (DeclareArray name _ t vs) =
   DeclareArray name space t vs
 setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
   Copy
-  dest (fmap (setExpSpace space) dest_offset) dest_space'
-  src (fmap (setExpSpace space) src_offset) src_space' $
-  fmap (setExpSpace space) n
+  dest (fmap (setTExpSpace space) dest_offset) dest_space'
+  src (fmap (setTExpSpace space) src_offset) src_space' $
+  fmap (setTExpSpace space) n
   where dest_space' = setSpace space dest_space
         src_space' = setSpace space src_space
 setBodySpace space (Write dest dest_offset bt dest_space vol e) =
-  Write dest (fmap (setExpSpace space) dest_offset) bt (setSpace space dest_space)
+  Write dest (fmap (setTExpSpace space) dest_offset) bt (setSpace space dest_space)
   vol (setExpSpace space e)
 setBodySpace space (c1 :>>: c2) =
   setBodySpace space c1 :>>: setBodySpace space c2
-setBodySpace space (For i it e body) =
-  For i it (setExpSpace space e) $ setBodySpace space body
+setBodySpace space (For i e body) =
+  For i (setExpSpace space e) $ setBodySpace space body
 setBodySpace space (While e body) =
-  While (setExpSpace space e) $ setBodySpace space body
+  While (setTExpSpace space e) $ setBodySpace space body
 setBodySpace space (If e c1 c2) =
-  If (setExpSpace space e) (setBodySpace space c1) (setBodySpace space c2)
+  If (setTExpSpace space e) (setBodySpace space c1) (setBodySpace space c2)
 setBodySpace space (Comment s c) =
   Comment s $ setBodySpace space c
 setBodySpace _ Skip =
@@ -100,6 +100,9 @@ setExpSpace space = fmap setLeafSpace
   where setLeafSpace (Index mem i bt DefaultSpace vol) =
           Index mem i bt space vol
         setLeafSpace e = e
+
+setTExpSpace :: Space -> TExp t -> TExp t
+setTExpSpace space = TPrimExp . setExpSpace space . untyped
 
 setSpace :: Space -> Space -> Space
 setSpace space DefaultSpace = space

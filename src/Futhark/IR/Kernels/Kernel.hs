@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -23,6 +24,12 @@ module Futhark.IR.Kernels.Kernel
   )
 where
 
+import Prelude hiding ((.), id)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
+
 import Futhark.IR
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Util.Pretty as PP
@@ -46,7 +53,13 @@ data SegLevel = SegThread { segNumGroups :: Count NumGroups SubExp
               | SegGroup { segNumGroups :: Count NumGroups SubExp
                          , segGroupSize :: Count GroupSize SubExp
                          , segVirt :: SegVirt }
-              deriving (Eq, Ord, Show)
+              deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SegLevel where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "thread") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "group") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 instance PP.Pretty SegLevel where
   ppr lvl =
@@ -121,7 +134,16 @@ data SizeOp
     -- number of GPU workgroups to use for an input of the given size.
     -- The @Name@ is a size name.  Note that @w@ is an i64 to avoid
     -- overflow issues.
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SizeOp where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "split-space") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "get-size") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "get-size-max") >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "cmp-size-le") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "calc-num-groups") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 instance Substitute SizeOp where
   substituteNames subst (SplitSpace o w i elems_per_thread) =
@@ -219,7 +241,14 @@ data HostOp lore op
     -- ^ A segmented operation.
   | SizeOp SizeOp
   | OtherOp op
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance (SexpIso op, Decorations lore) => SexpIso (HostOp lore op) where
+  sexpIso = match
+    $ With (. sexpIso)
+    $ With (. sexpIso)
+    $ With (. sexpIso)
+    End
 
 instance (ASTLore lore, Substitute op) => Substitute (HostOp lore op) where
   substituteNames substs (SegOp op) =

@@ -37,7 +37,7 @@ segHistOpChunks = chunks . map (length . histNeutral)
 
 
 
-onOpCas :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.Exp] -> MulticoreGen())
+onOpCas :: HistOp MCMem -> MulticoreGen ([VName] -> [Imp.TExp Int32] -> MulticoreGen())
 onOpCas op = do
   atomics <- hostAtomics <$> askEnv
   let lambda = histOp op
@@ -47,7 +47,7 @@ onOpCas op = do
     AtomicCAS f  -> return f
     AtomicLocking f -> do
       let num_locks = 100151
-          dims = map (toExp' int32) $
+          dims = map toInt32Exp $
                  shapeDims (histShape op) ++ [histWidth op]
       locks <-
         sStaticArray "hist_locks" DefaultSpace int32 $
@@ -64,12 +64,11 @@ nonsegmentedHist :: Pattern MCMem
                 -> MulticoreGen Imp.Code
 nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+      ns_64 = map (sExt64 . toInt32Exp) ns
 
   num_threads <- getNumThreads
-  num_threads' <- toExp $ Var num_threads
-  hist_width <- toExp $ histWidth $ head histops
-  let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns_64
+  let hist_width = toInt32Exp $ histWidth $ head histops
+  let use_small_dest_histogram =  sExt64 num_threads * sExt64 hist_width .<=. product ns_64
   histops' <- renameHistOpLambda histops
 
   collect $ do
@@ -91,16 +90,16 @@ casHistogram :: Pattern MCMem
              -> MulticoreGen ()
 casHistogram pat space histops kbody = do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+      ns_64 = map (sExt64 . toInt32Exp) ns
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
 
   atomicOps <- mapM onOpCas histops
 
   idx <- dPrim "iter" int64
-  idx' <- toExp $ Var idx
+  let idx' = Imp.vi64 idx
   body <- collect $ do
-    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 idx'
+    zipWithM_ dPrimV_ is $ map sExt32 $ unflattenIndex ns_64 idx'
     compileStms mempty (kernelBodyStms kbody) $ do
       let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
           (buckets, vs) = splitAt (length histops) red_res
@@ -111,8 +110,8 @@ casHistogram pat space histops kbody = do
          \(HistOp dest_w _ _ _ shape lam, vs', bucket, do_op, dest_res) -> do
 
            let (_is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-               bucket'   = toExp' int32 $ kernelResultSubExp bucket
-               dest_w'   = toExp' int32 dest_w
+               bucket'   = toInt32Exp $ kernelResultSubExp bucket
+               dest_w'   = toInt32Exp dest_w
                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
 
            sComment "save map-out results" $
@@ -166,7 +165,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
   emit $ Imp.DebugPrint "smallDestHistogram segHist" Nothing
 
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+      ns_64 = map (sExt64 . toInt32Exp) ns
 
   let pes = patternElements pat
       num_red_res = length histops + sum (map (length . histNeutral) histops)
@@ -176,12 +175,11 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
   init_histograms <- mapM (onOp num_histos) histops
 
-  hist_widths <- forM (map histWidth histops) $ \w -> do
-    w' <- toExp w
-    dPrimV "hist_width" w'
+  hist_widths <- forM (map histWidth histops) $ \w ->
+    dPrimV "hist_width" $ toInt32Exp w
 
-  tid' <- toExp $ Var $ segFlat space
-  flat_idx' <- toExp $ Var  flat_idx
+  let tid' = Imp.vi32 $ segFlat space
+      flat_idx' = Imp.vi32 flat_idx
 
   -- Actually allocate subhistograms
   histograms <- forM (zip init_histograms hist_widths) $
@@ -190,10 +188,10 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
     return (local_subhistos, hist_width, do_op)
 
   prebody <- collect $ do
-    zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
+    zipWithM_ dPrimV_ is $ map sExt32 $ unflattenIndex ns_64 $ sExt64 flat_idx'
     forM_ (zip4 per_red_pes histograms hist_widths histops) $ \(pes', (hists, _, _), hist_width, histop) ->
       forM_ (zip3 pes' hists (histNeutral histop)) $ \(pe, hist, ne) -> do
-        hist_H_chk' <- toExp $ Var hist_width
+        let hist_H_chk' = Imp.vi32 hist_width
 
         -- First thread initializes histrogram wtih dest vals
         -- Others initialize with neutral element
@@ -208,7 +206,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
   -- Generate loop body of parallel function
   body <- collect $ do
-     zipWithM_ dPrimV_ is $ map (sExt Int32) $ unflattenIndex ns_64 flat_idx'
+     zipWithM_ dPrimV_ is $ map sExt32 $ unflattenIndex ns_64 $ sExt64 flat_idx'
      compileStms mempty (kernelBodyStms kbody) $ do
        let (red_res, map_res) = splitFromEnd (length map_pes) $ kernelBodyResult kbody
            (buckets, vs) = splitAt (length histops) red_res
@@ -223,8 +221,8 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
          \(HistOp dest_w _ _ _ shape lam,
            (_, _hist_H_chk, do_op), bucket, vs') -> do
 
-           let bucket' = toExp' int32 $ kernelResultSubExp bucket
-               dest_w' = toExp' int32 dest_w
+           let bucket' = toInt32Exp $ kernelResultSubExp bucket
+               dest_w' = toInt32Exp dest_w
                bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
                vs_params = takeLast (length vs') $ lambdaParams lam
                bucket_is = [tid', bucket']
@@ -256,7 +254,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
     let segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
         ns_red = map snd $ unSegSpace segred_space
-    ns_red' <- mapM toExp ns_red
+        ns_red' = map toInt32Exp ns_red
 
     let iterations = case unSegSpace segred_space of
                        [_] -> product ns_red'
@@ -272,7 +270,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
             (Var subhisto, map Imp.vi32 $
               map fst segment_dims ++ [subhistogram_id, bucket_id])
 
-    let scheduler_info = Imp.SchedulerInfo nsubtasks_red (segFlat space) iterations Imp.Static
+    let scheduler_info = Imp.SchedulerInfo nsubtasks_red (segFlat space) (untyped iterations) Imp.Static
     free_params_red <- freeParams red_code ([segFlat space, nsubtasks_red] ++ retval_names )
     emit $ Imp.Op $ Imp.Task "seghist_red" free_params_red red_code Nothing  retval_params scheduler_info
 
@@ -288,20 +286,20 @@ compileSegHistBody :: VName
                    -> MulticoreGen Imp.Code
 compileSegHistBody idx pat space histops kbody = do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map (sExt Int64 . toExp' int32) ns
+      ns_64 = map (sExt64 . toInt32Exp) ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
       (_all_red_pes, map_pes) = splitAt num_red_res $ patternValueElements pat
       per_red_pes = segHistOpChunks histops $ patternValueElements pat
 
-  idx' <- toExp $ Var idx
+  let idx' = Imp.vi64 idx
   collect $ do
     emit $ Imp.DebugPrint "Segmented segHist" Nothing
     let inner_bound = last ns_64
 
     sFor "i" inner_bound $ \i -> do
-      zipWithM_ dPrimV_ (init is) $ map (sExt Int32) $ unflattenIndex (init ns_64) idx'
-      dPrimV_ (last is) $ sExt Int32 i
+      zipWithM_ dPrimV_ (init is) $ map sExt32 $ unflattenIndex (init ns_64) idx'
+      dPrimV_ (last is) $ sExt32 i
 
       compileStms mempty (kernelBodyStms kbody) $ do
         let (_red_res, map_res) = splitFromEnd (length map_pes) $
@@ -313,8 +311,8 @@ compileSegHistBody idx pat space histops kbody = do
            \(red_res, HistOp dest_w _ _ _ shape lam, vs', bucket) -> do
 
              let (is_params, vs_params) = splitAt (length vs') $ lambdaParams lam
-                 bucket'   = toExp' int32 bucket
-                 dest_w'   = toExp' int32 dest_w
+                 bucket'   = toInt32Exp bucket
+                 dest_w'   = toInt32Exp dest_w
                  bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
 
              sComment "save map-out results" $
@@ -326,7 +324,7 @@ compileSegHistBody idx pat space histops kbody = do
                dLParams $ lambdaParams lam
                sLoopNest shape $ \is' -> do
                  -- Index
-                 buck <- toExp bucket
+                 let buck = toInt32Exp bucket
                  forM_ (zip red_res is_params) $ \(pe, p) ->
                    copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 (init is)  ++ [buck] ++ is')
                  -- Value at index
@@ -336,7 +334,7 @@ compileSegHistBody idx pat space histops kbody = do
                    forM_ (zip red_res  $ bodyResult $ lambdaBody lam) $
                    \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ [buck] ++ is') se []
 
-type InitLocalHistograms = SubExp -> MulticoreGen ([VName], [Imp.Exp] -> MulticoreGen ())
+type InitLocalHistograms = SubExp -> MulticoreGen ([VName], [Imp.TExp Int32] -> MulticoreGen ())
 
 onOp :: VName -> HistOp MCMem -> MulticoreGen InitLocalHistograms
 onOp num_subhistos_per_group op = do

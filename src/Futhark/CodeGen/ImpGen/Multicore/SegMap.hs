@@ -21,10 +21,10 @@ writeResult is pe (Returns _ se) =
   copyDWIMFix (patElemName pe) (map Imp.vi32 is) se []
 writeResult _ pe (WriteReturns rws _ idx_vals) = do
   let (iss, vs) = unzip idx_vals
-  rws' <- mapM toExp rws
+      rws' = map toInt32Exp rws
   forM_ (zip iss vs) $ \(slice, v) -> do
-    slice' <- mapM (traverse toExp) slice
-    let condInBounds (DimFix i) rw =
+    let slice' = map (fmap toInt32Exp) slice
+        condInBounds (DimFix i) rw =
           0 .<=. i .&&. i .<. rw
         condInBounds (DimSlice i n s) rw =
           0 .<=. i .&&. i+n*s .<. rw
@@ -43,7 +43,7 @@ compileSegMapBody :: VName
                   -> MulticoreGen Imp.Code
 compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   let (is, ns) = unzip $ unSegSpace space
-  ns' <- mapM toExp ns
+      ns' = map toInt32Exp ns
   kstms' <- mapM renameStm kstms
   collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
@@ -69,7 +69,7 @@ compileSequentialSegMap :: Pattern MCMem
                         -> MulticoreGen Imp.Code
 compileSequentialSegMap pat space kbody = do
   let ns = map snd $ unSegSpace space
-  ns' <- mapM toExp ns
+      ns' = map toInt32Exp ns
   collect $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
     flat_seq_idx <- dPrim "seq_iter" int32

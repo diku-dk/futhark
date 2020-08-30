@@ -11,14 +11,17 @@ module Futhark.Actions
   , compileOpenCLAction
   , compileCUDAAction
   , compileMulticoreAction
+  , sexpAction
   )
 where
 
+import Language.SexpGrammar as Sexp
 import Control.Monad
 import Control.Monad.IO.Class
 import System.Exit
 import System.FilePath
 import qualified System.Info
+import qualified Data.ByteString.Lazy.Char8 as ByteString
 
 import Futhark.Compiler.CLI
 import Futhark.Analysis.Alias
@@ -69,13 +72,32 @@ kernelImpCodeGenAction =
          , actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
          }
 
-
 multicoreImpCodeGenAction :: Action MCMem
 multicoreImpCodeGenAction =
   Action { actionName = "Compile to imperative multicore"
          , actionDescription = "Translate program into imperative multicore IL and write it on standard output."
          , actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
          }
+
+-- | Print metrics about AST node counts to stdout.
+sexpAction :: ASTLore lore => Action lore
+sexpAction =
+  Action { actionName = "Print sexps"
+         , actionDescription = "Print sexps on the final IR."
+         , actionProcedure = liftIO . helper
+         }
+  where
+    helper :: ASTLore lore => Prog lore -> IO ()
+    helper prog =
+      case encodePretty prog of
+        Right prog' -> do
+          ByteString.putStrLn prog'
+          let prog'' = decode prog'
+          unless (prog'' == Right prog) $
+            error $ "S-exp not isomorph!\n" ++
+            either show pretty prog''
+        Left s ->
+          error $ "Couldn't encode program: " ++ s
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem

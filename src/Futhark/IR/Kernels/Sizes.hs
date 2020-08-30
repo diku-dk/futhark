@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Trustworthy #-}
 -- | In the context of this module, a "size" is any kind of tunable
@@ -11,6 +13,11 @@ module Futhark.IR.Kernels.Sizes
   )
   where
 
+import Prelude hiding ((.), id)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Data.Int (Int32)
 import Data.Traversable
 
@@ -36,7 +43,17 @@ data SizeClass = SizeThreshold KernelPath (Maybe Int32)
                -- maximum can be handy.
                | SizeBespoke Name Int32
                -- ^ A bespoke size with a default.
-               deriving (Eq, Ord, Show)
+               deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SizeClass where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "threshold") >>> Sexp.el sexpIso >>> props (Sexp.optKey "default" (iso fromIntegral fromIntegral . Sexp.int))))
+    $ With (. Sexp.sym "group")
+    $ With (. Sexp.sym "num-groups")
+    $ With (. Sexp.sym "tile")
+    $ With (. Sexp.sym "local-memory")
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "bespoke") >>> Sexp.el sexpIso >>> Sexp.el (iso fromIntegral fromIntegral . Sexp.int)))
+    End
 
 instance Pretty SizeClass where
   ppr (SizeThreshold path _) = text $ "threshold (" ++ unwords (map pStep path) ++ ")"
@@ -56,7 +73,10 @@ sizeDefault _ = Nothing
 
 -- | A wrapper supporting a phantom type for indicating what we are counting.
 newtype Count u e = Count { unCount :: e }
-  deriving (Eq, Ord, Show, Num, IntegralExp, FreeIn, Pretty, Substitute)
+  deriving (Eq, Ord, Show, Num, IntegralExp, FreeIn, Pretty, Substitute, Generic)
+
+instance SexpIso e => SexpIso (Count u e) where
+  sexpIso = with $ \count -> sexpIso >>> count
 
 instance Functor (Count u) where
   fmap = fmapDefault

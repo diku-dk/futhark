@@ -65,7 +65,6 @@ module Futhark.Construct
   , eBinOp
   , eCmpOp
   , eConvOp
-  , eNot
   , eSignum
   , eCopy
   , eAssert
@@ -226,10 +225,6 @@ eConvOp :: MonadBinder m =>
 eConvOp op x = do
   x' <- letSubExp "x" =<< x
   return $ BasicOp $ ConvOp op x'
-
-eNot :: MonadBinder m =>
-        m (Exp (Lore m)) -> m (Exp (Lore m))
-eNot e = BasicOp . UnOp Not <$> (letSubExp "not_arg" =<< e)
 
 eSignum :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))

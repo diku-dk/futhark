@@ -39,14 +39,15 @@ data Multicore = Task String [Param] Code (Maybe Code) [Param] SchedulerInfo
 -- | Atomic operations return the value stored before the update.
 -- This old value is stored in the first 'VName'.  The second 'VName'
 -- is the memory block to update.  The 'Exp' is the new value.
-data AtomicOp = AtomicAdd IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicSub IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicAnd IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicOr IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicXor IntType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicXchg PrimType VName VName (Count Elements Imp.Exp) Exp
-              | AtomicCmpXchg PrimType VName VName (Count Elements Imp.Exp) VName Exp
-              deriving (Show)
+data AtomicOp
+  = AtomicAdd IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicSub IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicAnd IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicOr IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicXor IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicXchg PrimType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  | AtomicCmpXchg PrimType VName VName (Count Elements (Imp.TExp Int32)) VName Exp
+  deriving (Show)
 
 instance FreeIn AtomicOp where
   freeIn' (AtomicAdd _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
