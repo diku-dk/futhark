@@ -1506,14 +1506,14 @@ isOverloadedFunction qname args loc = do
         I.Screma w (I.mapSOAC lam') arr'
 
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
-      k' <- fromIntegral <$> isInt32 k
+      k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
         arrs <- internaliseExpToVars "partition_input" arr
         lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
         uncurry (++) <$> partitionWithSOACS k' lam' arrs
-        where isInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-              isInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
-              isInt32 _ = Nothing
+        where fromInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
+              fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
+              fromInt32 _ = Nothing
 
     handleSOACs [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)

@@ -1,9 +1,6 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-in
-pkgs.stdenv.mkDerivation {
-  name = "futhark";
   buildInputs = [
     pkgs.cabal-install
     pkgs.cacert
@@ -17,5 +14,13 @@ pkgs.stdenv.mkDerivation {
     pkgs.pkgconfig
     pkgs.zlib
     pkgs.zlib.out
+    pkgs.zlib.dev
+    pkgs.cabal2nix
   ];
+in
+pkgs.stdenv.mkDerivation {
+  name = "futhark";
+  buildInputs = buildInputs;
+
+  shellHook = ''export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH'';
 }

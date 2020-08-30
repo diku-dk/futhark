@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 -- | This module contains a representation for the index function based on
 -- linear-memory accessor descriptors; see Zhu, Hoeflinger and David work.
@@ -23,7 +25,11 @@ module Futhark.IR.Mem.IxFun
        )
        where
 
-import Prelude hiding (mod)
+import Prelude hiding ((.), id, mod)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Data.List (sort, sortBy, zip4, zip5, zipWith5)
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty(..))
@@ -34,7 +40,8 @@ import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 
-import Futhark.Analysis.PrimExp (PrimExp(..), primExpType)
+import Futhark.Analysis.PrimExp
+  (PrimExp(..), TPrimExp(..), IntExp, primExpType)
 import Futhark.IR.Syntax.Core (Ext(..))
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -52,7 +59,15 @@ type Permutation = [Int]
 
 data Monotonicity = Inc | Dec | Unknown
                -- ^ monotonously increasing, decreasing or unknown
-             deriving (Show, Eq)
+             deriving (Show, Eq, Generic)
+
+instance SexpIso Monotonicity where
+  sexpIso = match
+    $ With (. Sexp.sym "inc")
+    $ With (. Sexp.sym "dec")
+    $ With (. Sexp.sym "unknown")
+    End
+
 
 data LMADDim num = LMADDim { ldStride :: num
                            , ldRotate :: num
@@ -60,7 +75,20 @@ data LMADDim num = LMADDim { ldStride :: num
                            , ldPerm :: Int
                            , ldMon :: Monotonicity
                            }
-                 deriving (Show, Eq)
+                 deriving (Show, Eq, Generic)
+
+
+instance SexpIso num => SexpIso (LMADDim num) where
+  sexpIso = with $ \lmaddim ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "dim") >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    lmaddim
+
 
 -- | LMAD's representation consists of a general offset and for each dimension a
 -- stride, rotate factor, number of elements (or shape), permutation, and
@@ -91,7 +119,16 @@ data LMADDim num = LMADDim { ldStride :: num
 data LMAD num = LMAD { lmadOffset :: num
                      , lmadDims :: [LMADDim num]
                      }
-                deriving (Show, Eq)
+                deriving (Show, Eq, Generic)
+
+instance SexpIso num => SexpIso (LMAD num) where
+  sexpIso = with $ \lmad ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "lmad") >>>
+      Sexp.el sexpIso >>>
+      Sexp.rest sexpIso) >>>
+    lmad
+
 
 -- | An index function is a mapping from a multidimensional array
 -- index space (the domain) to a one-dimensional memory index space.
@@ -106,7 +143,17 @@ data IxFun num = IxFun { ixfunLMADs :: NonEmpty (LMAD num)
                        , ixfunContig :: Bool
                        -- ^ ignoring permutations, is the index function contiguous?
                        }
-                 deriving (Show, Eq)
+                 deriving (Show, Eq, Generic)
+
+
+instance SexpIso num => SexpIso (IxFun num) where
+  sexpIso = with $ \ixfun ->
+    Sexp.list (
+      Sexp.el (Sexp.sym "ixfun") >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso >>>
+      Sexp.el sexpIso) >>>
+    ixfun
 
 
 instance Pretty Monotonicity where
@@ -212,12 +259,14 @@ substituteInLMAD tab (LMAD offset dims) =
   in LMAD offset' dims'
 
 -- | Substitute a name with a PrimExp in an index function.
-substituteInIxFun :: (Ord a) => M.Map a (PrimExp a) -> IxFun (PrimExp a)
-                  -> IxFun (PrimExp a)
+substituteInIxFun :: Ord a =>
+                     M.Map a (TPrimExp t a) -> IxFun (TPrimExp t a)
+                  -> IxFun (TPrimExp t a)
 substituteInIxFun tab (IxFun lmads oshp cg) =
-  IxFun (NE.map (substituteInLMAD tab) lmads)
-        (map (substituteInPrimExp tab) oshp)
+  IxFun (NE.map (fmap TPrimExp . substituteInLMAD tab' . fmap untyped) lmads)
+        (map (TPrimExp . substituteInPrimExp tab' . untyped) oshp)
         cg
+  where tab' = fmap untyped tab
 
 -- | Is this is a row-major array?
 isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
@@ -766,16 +815,16 @@ isSequential :: [Int] -> Bool
 isSequential xs =
   all (uncurry (==)) $ zip xs [0..]
 
-existentializeExp :: PrimExp v -> State [PrimExp v] (PrimExp (Ext v))
+existentializeExp :: TPrimExp t v -> State [TPrimExp t v] (TPrimExp t (Ext v))
 existentializeExp e = do
   i <- gets length
   modify (++ [e])
-  let t = primExpType e
-  return $ LeafExp (Ext i) t
+  let t = primExpType $ untyped e
+  return $ TPrimExp $ LeafExp (Ext i) t
 
 -- We require that there's only one lmad, and that the index function is contiguous, and the base shape has only one dimension
-existentialize :: (Eq v, Pretty v) =>
-                  IxFun (PrimExp v) -> State [PrimExp v] (Maybe (IxFun (PrimExp (Ext v))))
+existentialize :: (IntExp t, Eq v, Pretty v) =>
+                  IxFun (TPrimExp t v) -> State [TPrimExp t v] (Maybe (IxFun (TPrimExp t (Ext v))))
 existentialize (IxFun (lmad :| []) oshp True)
   | all ((== 0) . ldRotate) (lmadDims lmad),
     length (lmadShape lmad) == length oshp,
@@ -786,7 +835,8 @@ existentialize (IxFun (lmad :| []) oshp True)
       let lmad' = LMAD lmadOffset' lmadDims'
       return $ Just $ IxFun (lmad' :| []) oshp' True
         where
-          existentializeLMADDim :: LMADDim (PrimExp v) -> State [PrimExp v] (LMADDim (PrimExp (Ext v)))
+          existentializeLMADDim :: LMADDim (TPrimExp t v)
+                                -> State [TPrimExp t v] (LMADDim (TPrimExp t (Ext v)))
           existentializeLMADDim (LMADDim str rot shp perm mon) = do
             stride' <- existentializeExp str
             shape' <- existentializeExp shp

@@ -27,10 +27,9 @@ compileSegMap :: Pattern KernelsMem
 
 compileSegMap pat lvl space kbody = do
   let (is, dims) = unzip $ unSegSpace space
-  dims' <- mapM toExp dims
-
-  num_groups' <- traverse toExp $ segNumGroups lvl
-  group_size' <- traverse toExp $ segGroupSize lvl
+      dims' = map toInt32Exp dims
+      num_groups' = toInt32Exp <$> segNumGroups lvl
+      group_size' = toInt32Exp <$> segGroupSize lvl
 
   case lvl of
     SegThread{} -> do

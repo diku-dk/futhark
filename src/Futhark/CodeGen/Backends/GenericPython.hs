@@ -874,11 +874,11 @@ compileExp = compilePrimExp compileLeaf
 
         compileLeaf (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) =
           join $ asks envReadScalar
-          <*> compileVar src <*> compileExp iexp
+          <*> compileVar src <*> compileExp (Imp.untyped iexp)
           <*> pure restype <*> pure space
 
         compileLeaf (Imp.Index src (Imp.Count iexp) bt _ _) = do
-          iexp' <- compileExp iexp
+          iexp' <- compileExp $ Imp.untyped iexp
           let bt' = compilePrimType bt
               nptype = compilePrimToNp bt
           src' <- compileVar src
@@ -893,7 +893,7 @@ compileCode (Imp.Op op) =
   join $ asks envOpCompiler <*> pure op
 
 compileCode (Imp.If cond tb fb) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ Imp.untyped cond
   tb' <- collect $ compileCode tb
   fb' <- collect $ compileCode fb
   stm $ If cond' tb' fb'
@@ -903,18 +903,18 @@ compileCode (c1 Imp.:>>: c2) = do
   compileCode c2
 
 compileCode (Imp.While cond body) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ Imp.untyped cond
   body' <- collect $ compileCode body
   stm $ While cond' body'
 
-compileCode (Imp.For i it bound body) = do
+compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = compileName i
   body' <- collect $ compileCode body
   counter <- pretty <$> newVName "counter"
   one <- pretty <$> newVName "one"
-  stm $ Assign (Var i') $ simpleCall (compilePrimToNp (IntType it)) [Integer 0]
-  stm $ Assign (Var one) $ simpleCall (compilePrimToNp (IntType it)) [Integer 1]
+  stm $ Assign (Var i') $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 0]
+  stm $ Assign (Var one) $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 1]
   stm $ For counter (simpleCall "range" [bound']) $
     body' ++ [AssignOp "+" (Var i') (Var one)]
 
@@ -985,13 +985,13 @@ compileCode (Imp.Call dests fname args) = do
 compileCode (Imp.SetMem dest src _) =
   stm =<< Assign <$> compileVar dest <*> compileVar src
 
-compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
+compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) (Imp.Space space)) =
   join $ asks envAllocate
     <*> compileVar name
     <*> compileExp e
     <*> pure space
 
-compileCode (Imp.Allocate name (Imp.Count e) _) = do
+compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) _) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
   stm =<< Assign <$> compileVar name <*> pure allocate'
@@ -1000,11 +1000,11 @@ compileCode (Imp.Free name _) =
   stm =<< Assign <$> compileVar name <*> pure None
 
 compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
-  destoffset' <- compileExp destoffset
-  srcoffset' <- compileExp srcoffset
+  destoffset' <- compileExp $ Imp.untyped destoffset
+  srcoffset' <- compileExp $ Imp.untyped srcoffset
   dest' <- compileVar dest
   src' <- compileVar src
-  size' <- compileExp size
+  size' <- compileExp $ Imp.untyped size
   let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
   let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, size']
@@ -1012,20 +1012,20 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count sr
 compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
   copy <- asks envCopy
   join $ copy
-    <$> compileVar dest <*> compileExp destoffset <*> pure destspace
-    <*> compileVar src <*> compileExp srcoffset <*> pure srcspace
-    <*> compileExp size <*> pure (IntType Int32) -- FIXME
+    <$> compileVar dest <*> compileExp (Imp.untyped destoffset) <*> pure destspace
+    <*> compileVar src <*> compileExp (Imp.untyped srcoffset) <*> pure srcspace
+    <*> compileExp (Imp.untyped size) <*> pure (IntType Int32) -- FIXME
 
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $ asks envWriteScalar
     <*> compileVar dest
-    <*> compileExp idx
+    <*> compileExp (Imp.untyped idx)
     <*> pure elemtype
     <*> pure space
     <*> compileExp elemexp
 
 compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
-  idx' <- compileExp idx
+  idx' <- compileExp $ Imp.untyped idx
   elemexp' <- compileExp elemexp
   dest' <- compileVar dest
   let elemtype' = compilePrimType elemtype

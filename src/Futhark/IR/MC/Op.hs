@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -18,6 +19,12 @@ where
 
 import Data.Bifunctor (first)
 
+import Prelude hiding ((.), id)
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
+
 import Futhark.IR
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Util.Pretty
@@ -32,6 +39,8 @@ import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.SegOp
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
+import Futhark.IR.Seq
+import Futhark.IR.SOACS
 
 -- | An operation for the multicore representation.  Feel free to
 -- extend this on an ad hoc basis as needed.  Parameterised with some
@@ -45,7 +54,13 @@ data MCOp lore op
     -- semantically fully equivalent.
   | OtherOp op
     -- ^ Something else (in practice often a SOAC).
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance (Decorations lore, SexpIso op) => SexpIso (MCOp lore op) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "par") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. sexpIso)
+    End
 
 instance (ASTLore lore, Substitute op) => Substitute (MCOp lore op) where
   substituteNames substs (ParOp par_op op) =

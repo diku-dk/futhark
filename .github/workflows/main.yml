@@ -115,7 +115,7 @@ jobs:
     - name: Install dependencies
       run: |
         choco install -y msys2
-        choco install -y ghc --version=8.8.4 --allow-downgrade
+        choco install -y ghc --version=8.8.2 --allow-downgrade
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle

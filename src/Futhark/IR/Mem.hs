@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -102,6 +103,11 @@ module Futhark.IR.Mem
        )
 where
 
+import Prelude hiding ((.), id)
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Control.Category
 import Data.Maybe
 import Control.Monad.State
 import Control.Monad.Reader
@@ -163,7 +169,14 @@ data MemOp inner = Alloc SubExp Space
                    -- ^ Allocate a memory block.  This really should not be an
                    -- expression, but what are you gonna do...
                  | Inner inner
-            deriving (Eq, Ord, Show)
+            deriving (Eq, Ord, Show, Generic)
+
+
+instance SexpIso inner => SexpIso (MemOp inner) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "alloc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "inner") >>> Sexp.el sexpIso))
+    End
 
 instance AllocOp (MemOp inner) where
   allocOp = Alloc
@@ -224,10 +237,10 @@ instance ST.IndexOp inner => ST.IndexOp (MemOp inner) where
   indexOp _ _ _ _ = Nothing
 
 -- | The index function representation used for memory annotations.
-type IxFun = IxFun.IxFun (PrimExp VName)
+type IxFun = IxFun.IxFun (TPrimExp Int32 VName)
 
 -- | An index function that may contain existential variables.
-type ExtIxFun = IxFun.IxFun (PrimExp (Ext VName))
+type ExtIxFun = IxFun.IxFun (TPrimExp Int32 (Ext VName))
 
 -- | A summary of the memory information for every let-bound
 -- identifier, function parameter, and return value.  Parameterisered
@@ -243,7 +256,14 @@ data MemInfo d u ret = MemPrim PrimType
                      -- offset, /not/ byte offsets!  To translate to byte
                      -- offsets, multiply the offset with the size of the
                      -- array element type.
-                     deriving (Eq, Show, Ord) --- XXX Ord?
+                     deriving (Eq, Show, Ord, Generic) --- XXX Ord?
+
+instance (SexpIso d, SexpIso u, SexpIso ret) => SexpIso (MemInfo d u ret) where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "prim") >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "mem") >>> Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "array") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+    End
 
 type MemBound u = MemInfo SubExp u MemBind
 
@@ -296,11 +316,11 @@ instance (Substitute d, Substitute ret) => Rename (MemInfo d u ret) where
 
 simplifyIxFun :: Engine.SimplifiableLore lore =>
                  IxFun -> Engine.SimpleM lore IxFun
-simplifyIxFun = traverse simplifyPrimExp
+simplifyIxFun = traverse $ fmap isInt32 . simplifyPrimExp . untyped
 
 simplifyExtIxFun :: Engine.SimplifiableLore lore =>
                     ExtIxFun -> Engine.SimpleM lore ExtIxFun
-simplifyExtIxFun = traverse simplifyExtPrimExp
+simplifyExtIxFun = traverse $ fmap isInt32 . simplifyExtPrimExp . untyped
 
 isStaticIxFun :: ExtIxFun -> Maybe IxFun
 isStaticIxFun = traverse $ traverse inst
@@ -337,7 +357,12 @@ instance PP.Pretty (PatElemT (MemInfo SubExp NoUniqueness ret)) where
 data MemBind = ArrayIn VName IxFun
              -- ^ Located in this memory block with this index
              -- function.
-             deriving (Show)
+             deriving (Show, Generic)
+
+instance SexpIso MemBind where
+  sexpIso = with $ \membind ->
+    Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso) >>>
+    membind
 
 instance Eq MemBind where
   _ == _ = True
@@ -367,7 +392,18 @@ data MemReturn = ReturnsInBlock VName ExtIxFun
                | ReturnsNewBlock Space Int ExtIxFun
                  -- ^ The operation returns a new (existential) memory
                  -- block.
-               deriving (Show)
+               deriving (Show, Generic)
+
+instance SexpIso MemReturn where
+  sexpIso = match
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "returns-in-block") >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso))
+    $ With (. Sexp.list (Sexp.el (Sexp.sym "returns-new-block") >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso >>>
+                         Sexp.el sexpIso))
+    End
 
 instance Eq MemReturn where
   _ == _ = True
@@ -397,14 +433,14 @@ instance FixExt MemReturn where
     ReturnsInBlock mem (fixExtIxFun i (primExpFromSubExp int32 se) ixfun)
 
 fixExtIxFun :: Int -> PrimExp VName -> ExtIxFun -> ExtIxFun
-fixExtIxFun i e = fmap $ replaceInPrimExp update
+fixExtIxFun i e = fmap $ isInt32 . replaceInPrimExp update . untyped
   where update (Ext j) t | j > i     = LeafExp (Ext $ j - 1) t
                          | j == i    = fmap Free e
                          | otherwise = LeafExp (Ext j) t
         update (Free x) t = LeafExp (Free x) t
 
-leafExp :: Int -> PrimExp (Ext a)
-leafExp i = LeafExp (Ext i) int32
+leafExp :: Int -> TPrimExp Int32 (Ext a)
+leafExp i = isInt32 $ LeafExp (Ext i) int32
 
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
 existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
@@ -554,12 +590,12 @@ matchBranchReturnType rettype (Body _ stms res) = do
 -- The second return value maps each Int (wrapped in an 'Ext') to a
 -- 'LeafExp' 'Ext' with the Int at which its associated VName first
 -- occurs.
-getExtMaps :: [(VName,Int)] -> (M.Map (Ext VName) (PrimExp (Ext VName)),
-                                M.Map (Ext VName) (PrimExp (Ext VName)))
+getExtMaps :: [(VName,Int)] -> (M.Map (Ext VName) (TPrimExp Int32 (Ext VName)),
+                                M.Map (Ext VName) (TPrimExp Int32 (Ext VName)))
 getExtMaps ctx_lst_ids =
   (M.map leafExp $ M.mapKeys Free $ M.fromListWith (flip const) ctx_lst_ids,
    M.fromList $
-   mapMaybe (traverse (fmap (\i -> LeafExp (Ext i) int32) .
+   mapMaybe (traverse (fmap (\i -> isInt32 $ LeafExp (Ext i) int32) .
                        (`lookup` ctx_lst_ids)) .
              uncurry (flip (,)) . fmap Ext) ctx_lst_ids)
 
@@ -743,7 +779,7 @@ subExpMemInfo (Var v) = lookupMemInfo v
 subExpMemInfo (Constant v) = return $ MemPrim $ primValueType v
 
 lookupArraySummary :: (Mem lore, HasScope lore m, Monad m) =>
-                      VName -> m (VName, IxFun.IxFun (PrimExp VName))
+                      VName -> m (VName, IxFun.IxFun (TPrimExp Int32 VName))
 lookupArraySummary name = do
   summary <- lookupMemInfo name
   case summary of
@@ -770,7 +806,7 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
       pretty t ++ "."
 
   TC.context ("in index function " ++ pretty ixfun) $ do
-    traverse_ (TC.requirePrimExp int32) ixfun
+    traverse_ (TC.requirePrimExp int32 . untyped) ixfun
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
     unless (ixfun_rank == ident_rank) $
@@ -840,12 +876,12 @@ extReturns ts =
                 IxFun.iota $ map convert $ shapeDims shape
             | otherwise =
               return $ MemArray bt shape u Nothing
-          convert (Ext i) = LeafExp (Ext i) int32
-          convert (Free v) = Free <$> primExpFromSubExp int32 v
+          convert (Ext i) = isInt32 $ LeafExp (Ext i) int32
+          convert (Free v) = isInt32 $ Free <$> primExpFromSubExp int32 v
 
 arrayVarReturns :: (HasScope lore m, Monad m, Mem lore) =>
                    VName
-                -> m (PrimType, Shape, VName, IxFun.IxFun (PrimExp VName))
+                -> m (PrimType, Shape, VName, IxFun)
 arrayVarReturns v = do
   summary <- lookupMemInfo v
   case summary of
@@ -883,7 +919,7 @@ expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   return [MemArray et (Shape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $ existentialiseIxFun [] $
-          IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape]
+          IxFun.reshape ixfun $ map (fmap $ isInt32 . primExpFromSubExp int32) newshape]
 
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
@@ -894,7 +930,7 @@ expReturns (BasicOp (Rearrange perm v)) = do
 
 expReturns (BasicOp (Rotate offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let offsets' = map (primExpFromSubExp int32) offsets
+  let offsets' = map (isInt32 . primExpFromSubExp int32) offsets
       ixfun' = IxFun.rotate ixfun offsets'
   return [MemArray et (Shape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun']
@@ -955,7 +991,7 @@ sliceInfo v slice = do
     dims ->
       return $ MemArray et (Shape dims) NoUniqueness $
       ArrayIn mem $ IxFun.slice ixfun
-      (map (fmap (primExpFromSubExp int32)) slice)
+      (map (fmap (isInt32 . primExpFromSubExp int32)) slice)
 
 class TypedOp (Op lore) => OpReturns lore where
   opReturns :: (Monad m, HasScope lore m) =>
