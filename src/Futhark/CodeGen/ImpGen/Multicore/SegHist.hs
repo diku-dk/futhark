@@ -66,10 +66,10 @@ nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
       ns_64 = map (sExt Int64 . toExp' int32) ns
 
-  num_threads <- getNumThreads
-  num_threads' <- toExp $ Var num_threads
+
+  num_histos' <- toExp $ Var num_histos
   hist_width <- toExp $ histWidth $ head histops
-  let use_small_dest_histogram =  (num_threads' * hist_width) .<=. product ns_64
+  let use_small_dest_histogram =  (num_histos' * hist_width) .<=. product ns_64
   histops' <- renameHistOpLambda histops
 
   collect $ do
