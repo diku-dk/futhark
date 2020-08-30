@@ -100,22 +100,23 @@ data Tree a = Branch !a !(Tree a) !(Tree a)
             | Leaf
 ```
 
-For long type names the following formatting is also acceptable:
+For long type names or constructors, the following formatting is also
+acceptable:
 
 ```haskell
 data HttpException
-    = InvalidStatusCode Int
-    | MissingContentHeader
+  = InvalidStatusCode Int
+  | MissingContentHeader
 ```
 
 Format records as follows:
 
 ```haskell
 data Person = Person
-    { firstName :: !String  -- ^ First name
-    , lastName  :: !String  -- ^ Last name
-    , age       :: !Int     -- ^ Age
-    } deriving (Eq, Show)
+  { firstName :: !String  -- ^ First name
+  , lastName  :: !String  -- ^ Last name
+  , age       :: !Int     -- ^ Age
+  } deriving (Eq, Show)
 ```
 
 ### List Declarations
@@ -124,10 +125,10 @@ Align the elements in the list.  Example:
 
 ```haskell
 exceptions =
-    [ InvalidStatusCode
-    , MissingContentHeader
-    , InternalServerError
-    ]
+  [ InvalidStatusCode
+  , MissingContentHeader
+  , InternalServerError
+  ]
 ```
 
 Optionally, you can skip the first newline.  Use your judgement.
@@ -356,23 +357,23 @@ Record example:
 ```haskell
 -- | Bla bla bla.
 data Person = Person
-    { age  :: !Int     -- ^ Age
-    , name :: !String  -- ^ First name
-    }
+  { age  :: !Int     -- ^ Age
+  , name :: !String  -- ^ First name
+  }
 ```
 
 For fields that require longer comments format them like so:
 
 ```haskell
 data Record = Record
-    { -- | This is a very very very long comment that is split over
-      -- multiple lines.
-      field1 :: !Text
+  { -- | This is a very very very long comment that is split over
+    -- multiple lines.
+    field1 :: !Text
 
-      -- | This is a second very very very long comment that is split
-      -- over multiple lines.
-    , field2 :: !Int
-    }
+    -- | This is a second very very very long comment that is split
+    -- over multiple lines.
+  , field2 :: !Int
+  }
 ```
 
 Naming
