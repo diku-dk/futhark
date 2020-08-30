@@ -66,9 +66,10 @@ nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
       ns_64 = map (sExt64 . toInt32Exp) ns
 
-  let num_histos' = Imp.vi32 num_histos
-      hist_width = toInt32Exp $ histWidth $ head histops
-      use_small_dest_histogram =  sExt64 num_histos' * sExt64 hist_width .<=. product ns_64
+  num_histos' <- toExp $ Var num_histos
+  hist_width <- toExp $ histWidth $ head histops
+  let use_small_dest_histogram =  (sExt Int64 num_histos' * sExt Int64 hist_width) .<=. product ns_64
+
   histops' <- renameHistOpLambda histops
 
   collect $ do
@@ -341,14 +342,10 @@ onOp num_subhistos_per_group op = do
   let mk_op arrs bucket = do
         let acc_params = take (length arrs) $ lambdaParams $ histOp op
             bind_acc_params =
-              sComment "bind lhs" $
-                forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
-                  copyDWIMFix (paramName acc_p) [] (Var arr) bucket
-            op_body = sComment "execute operation" $
-                      compileBody' acc_params $ lambdaBody $ histOp op
-            do_hist =
-              sComment "update sub hist result" $
-              zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
+              forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
+                copyDWIMFix (paramName acc_p) [] (Var arr) bucket
+            op_body = compileBody' [] $ lambdaBody $ histOp op
+            do_hist = zipWithM_ (writeArray bucket) arrs $ bodyResult $ lambdaBody $ histOp op
 
         sComment "Start of body" $ do
           dLParams acc_params
