@@ -1069,15 +1069,9 @@ fullyIndexArray' (MemLocation mem _ ixfun) indices = do
                      let (zero_is, is) = splitFromEnd (length ds) indices
                      in map (const 0) zero_is ++ is
                    _ -> indices
-      -- We zero-extend the indexes because they cannot be negative
-      -- anyway, and it apparently helps the downstream kernel code
-      -- generator produce better code (presumably because it will
-      -- know that the values are non-negative).
-      --
-      -- We sign-extend the index functions, because negative strides
-      -- are allowed.
+
       ixfun64 = fmap sExt64 ixfun
-      indices64 = fmap zExt64 indices'
+      indices64 = fmap sExt64 indices'
   return (mem, space,
           elements $ IxFun.index ixfun64 indices64)
 
