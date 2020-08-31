@@ -13,6 +13,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.IR.MCMem
 import Futhark.Util (chunks)
 import Futhark.CodeGen.ImpGen.Multicore.Base
+import Futhark.MonadFreshNames
 
 type DoSegBody = (([(SubExp, [Imp.TExp Int32])] -> MulticoreGen ()) -> MulticoreGen ())
 
@@ -117,27 +118,79 @@ reductionStage1 space slugs kbody = do
       ns' = map (sExt64 . toInt32Exp) ns
   flat_idx <- dPrim "iter" int64
 
+  -- Create new redout names
+  redouts <- forM (map slugOp slugs) $ \(SegBinOp _ lam _ _) ->
+      forM (lambdaReturnType lam) $ \_ -> newVName "redout"
+
+  prebody <- collect $
+    -- Declare accumulator variables
+    forM_ (zip slugs redouts) $ \(slug, redout) -> do
+      let lam = segBinOpLambda $ slugOp slug
+          shape = segBinOpShape $ slugOp slug
+          vec_is = shapeDims $ slugShape slug
+      forM (zip3 (slugAccs slug) redout $ lambdaReturnType lam) $ \((acc, acc_is), redout', t) -> do
+          let array_shape = shapeDims $ shape <> arrayShape t
+          case (vec_is , array_shape) of
+            ([], []) -> do
+              let pt = elemType t
+              dPrim_ redout' pt
+              -- Initialize redouts
+              copyDWIMFix redout' [] (Var acc) acc_is
+            _ -> return mempty
+
+
+
   fbody <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi64 flat_idx
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
     kbody $ \all_red_res -> do
       let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
-      forM_ (zip all_red_res' slugs) $ \(red_res, slug) ->
+      forM_ (zip3 all_red_res' slugs redouts) $ \(red_res, slug, redout) ->
+        forM_ (lambdaReturnType $ segBinOpLambda $ slugOp slug) $ \t ->
         sLoopNest (slugShape slug) $ \vec_is -> do
-          sComment "load acc params" $
-            forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-              copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
-          sComment "load next params" $
+          let shape = segBinOpShape $ slugOp slug
+          let array_shape = shapeDims $ shape <> arrayShape t
+          -- Load accum params
+          sComment  "Load accum params" $
+            case (vec_is, array_shape) of
+              ([], []) ->  forM_ (zip (accParams slug) redout) $ \(p, redout') ->
+                                                                   copyDWIMFix (paramName p) [] (Var redout') []
+
+              _ -> forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+                                                                    copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
+
+          sComment "Load next params" $
             forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
               copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-          sComment "red body" $
-            compileStms mempty (bodyStms $ slugBody slug) $
-                forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
-                  \((acc, acc_is), se) -> copyDWIMFix acc (acc_is++vec_is) se []
 
-  free_params <- freeParams fbody (segFlat space : [flat_idx])
+
+          sComment "Red body" $
+            compileStms mempty (bodyStms $ slugBody slug) $
+              case (vec_is, array_shape) of
+                ([], []) ->  forM_ (zip redout (bodyResult $ slugBody slug)) $
+                  \(redout', se) ->
+                    copyDWIMFix redout' [] se []
+                _ ->   forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
+                  \((acc, acc_is), se) ->
+                    copyDWIMFix acc (acc_is++vec_is) se []
+
+
+  post_body <- collect $
+    forM_ (zip slugs redouts) $ \(slug, redout) -> do
+      let lam = segBinOpLambda $ slugOp slug
+      forM (zip3 (slugAccs slug) redout $ lambdaReturnType lam) $ \((acc, acc_is), redout', t) -> do
+        let vec_is = shapeDims $ slugShape slug
+            shape = segBinOpShape $ slugOp slug
+            array_shape = shapeDims $ shape <> arrayShape t
+        case (vec_is, array_shape) of
+          ([], []) ->
+            -- write back result to accum array redouts
+            copyDWIMFix acc acc_is (Var redout') []
+          _ -> return mempty
+
+  free_params <- freeParams (prebody <> fbody) (segFlat space : [flat_idx])
   let (body_allocs, fbody') = extractAllocations fbody
-  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" flat_idx body_allocs fbody' free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" flat_idx (body_allocs <> prebody) fbody' post_body free_params $ segFlat space
 
 reductionStage2 :: Pattern MCMem
                 -> SegSpace
@@ -186,7 +239,7 @@ segmentedReduction pat space reds kbody =
     body    <- compileSegRedBody n_par_segments pat space reds kbody
     free_params <- freeParams body (segFlat space : [n_par_segments])
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" n_par_segments body_allocs body' free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" n_par_segments body_allocs body' mempty free_params $ segFlat space
 
 
 compileSegRedBody :: VName

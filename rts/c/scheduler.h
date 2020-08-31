@@ -364,7 +364,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
     scheduler->num_threads;
 
   // Decide if task should be scheduled sequentially
-  if (max_num_tasks <= 1 || is_small(task, max_num_tasks)) {
+  if (1 || max_num_tasks <= 1 || is_small(task, max_num_tasks)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
