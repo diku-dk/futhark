@@ -146,13 +146,11 @@ reductionStage1 space slugs kbody = do
     kbody $ \all_red_res -> do
       let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
       forM_ (zip3 all_red_res' slugs redouts) $ \(red_res, slug, redout) ->
-        forM_ (lambdaReturnType $ segBinOpLambda $ slugOp slug) $ \t ->
         sLoopNest (slugShape slug) $ \vec_is -> do
-          let shape = segBinOpShape $ slugOp slug
-          let array_shape = shapeDims $ shape <> arrayShape t
+          let shape = shapeDims $ segBinOpShape $ slugOp slug
           -- Load accum params
           sComment  "Load accum params" $
-            case (vec_is, array_shape) of
+            case (vec_is, shape) of
               ([], []) ->  forM_ (zip (accParams slug) redout) $ \(p, redout') ->
                                                                    copyDWIMFix (paramName p) [] (Var redout') []
 
@@ -166,7 +164,7 @@ reductionStage1 space slugs kbody = do
 
           sComment "Red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
-              case (vec_is, array_shape) of
+              case (vec_is, shape) of
                 ([], []) ->  forM_ (zip redout (bodyResult $ slugBody slug)) $
                   \(redout', se) ->
                     copyDWIMFix redout' [] se []
