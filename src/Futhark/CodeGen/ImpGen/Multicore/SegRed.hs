@@ -122,6 +122,11 @@ reductionStage1 space slugs kbody = do
   redouts <- forM (map slugOp slugs) $ \(SegBinOp _ lam _ _) ->
       forM (lambdaReturnType lam) $ \_ -> newVName "redout"
 
+  -- Whenever the return value of the lambda is scalar value (collection of)
+  -- we use a local variable as a readout variable.
+  -- This can in some cases let GCC use registers to hold these variable,
+  -- requiring less memory instructions.
+  -- TODO this is a VERY hacky way; should refactor at some point
   prebody <- collect $
     -- Declare accumulator variables
     forM_ (zip slugs redouts) $ \(slug, redout) -> do
@@ -147,12 +152,15 @@ reductionStage1 space slugs kbody = do
       let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
       forM_ (zip3 all_red_res' slugs redouts) $ \(red_res, slug, redout) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
-          let shape = shapeDims $ segBinOpShape $ slugOp slug
+          let shape = segBinOpShape $ slugOp slug
+          let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
           -- Load accum params
           sComment  "Load accum params" $
-            case (vec_is, shape) of
-              ([], []) ->  forM_ (zip (accParams slug) redout) $ \(p, redout') ->
-                                                                   copyDWIMFix (paramName p) [] (Var redout') []
+            case vec_is of
+              [] ->  forM_ (zip4 (accParams slug) redout lamtypes $ slugAccs slug) $ \(p, redout', t, (acc, acc_is)) ->
+                case shapeDims $ shape <> arrayShape t of
+                  [] -> copyDWIMFix (paramName p) [] (Var redout') []
+                  _ -> copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
 
               _ -> forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
                                                                     copyDWIMFix (paramName p) [] (Var acc) (acc_is++vec_is)
@@ -164,10 +172,12 @@ reductionStage1 space slugs kbody = do
 
           sComment "Red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
-              case (vec_is, shape) of
-                ([], []) ->  forM_ (zip redout (bodyResult $ slugBody slug)) $
-                  \(redout', se) ->
-                    copyDWIMFix redout' [] se []
+              case vec_is of
+                [] ->  forM_ (zip4 redout (bodyResult $ slugBody slug) lamtypes $ slugAccs slug) $ \(redout', se, t, (acc, acc_is)) ->
+                  case shapeDims $ shape <> arrayShape t of
+                    [] ->  copyDWIMFix redout' [] se []
+                    _ ->  copyDWIMFix acc (acc_is++vec_is) se []
+
                 _ ->   forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
                   \((acc, acc_is), se) ->
                     copyDWIMFix acc (acc_is++vec_is) se []
