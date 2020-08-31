@@ -1,29 +1,26 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+
 -- | An unstructured grab-bag of various tools and inspection
 -- functions that didn't really fit anywhere else.
 module Futhark.Tools
-  (
-    module Futhark.Construct
+  ( module Futhark.Construct,
+    redomapToMapAndReduce,
+    dissectScrema,
+    sequentialStreamWholeArray,
+    partitionChunkedFoldParameters,
 
-  , redomapToMapAndReduce
-  , dissectScrema
-  , sequentialStreamWholeArray
-
-  , partitionChunkedFoldParameters
-
-  -- * Primitive expressions
-  , module Futhark.Analysis.PrimExp.Convert
+    -- * Primitive expressions
+    module Futhark.Analysis.PrimExp.Convert,
   )
 where
 
 import Control.Monad.Identity
-
+import Futhark.Analysis.PrimExp.Convert
+import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.SOACS.SOAC
 import Futhark.MonadFreshNames
-import Futhark.Construct
-import Futhark.Analysis.PrimExp.Convert
 import Futhark.Util
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
@@ -33,30 +30,42 @@ import Futhark.Util
 -- pattern with new 'Ident's for the result of the @map@.
 --
 -- Only handles a pattern with an empty 'patternContextElements'.
-redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
-                          ExpDec lore ~ (), Op lore ~ SOAC lore) =>
-                         Pattern lore
-                      -> ( SubExp
-                         , Commutativity
-                         , LambdaT lore, LambdaT lore, [SubExp]
-                         , [VName])
-                      -> m (Stm lore, Stm lore)
-redomapToMapAndReduce (Pattern [] patelems)
-                      (w, comm, redlam, map_lam, accs, arrs) = do
-  (map_pat, red_pat, red_args) <-
-    splitScanOrRedomap patelems w map_lam accs
-  let map_bnd = mkLet [] map_pat $ Op $ Screma w (mapSOAC map_lam) arrs
-      (nes, red_arrs) = unzip red_args
-  red_bnd <- Let red_pat (defAux ()) . Op <$>
-             (Screma w <$> reduceSOAC [Reduce comm redlam nes] <*> pure red_arrs)
-  return (map_bnd, red_bnd)
+redomapToMapAndReduce ::
+  ( MonadFreshNames m,
+    Bindable lore,
+    ExpDec lore ~ (),
+    Op lore ~ SOAC lore
+  ) =>
+  Pattern lore ->
+  ( SubExp,
+    Commutativity,
+    LambdaT lore,
+    LambdaT lore,
+    [SubExp],
+    [VName]
+  ) ->
+  m (Stm lore, Stm lore)
+redomapToMapAndReduce
+  (Pattern [] patelems)
+  (w, comm, redlam, map_lam, accs, arrs) = do
+    (map_pat, red_pat, red_args) <-
+      splitScanOrRedomap patelems w map_lam accs
+    let map_bnd = mkLet [] map_pat $ Op $ Screma w (mapSOAC map_lam) arrs
+        (nes, red_arrs) = unzip red_args
+    red_bnd <-
+      Let red_pat (defAux ()) . Op
+        <$> (Screma w <$> reduceSOAC [Reduce comm redlam nes] <*> pure red_arrs)
+    return (map_bnd, red_bnd)
 redomapToMapAndReduce _ _ =
   error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
 
-splitScanOrRedomap :: (Typed dec, MonadFreshNames m) =>
-                      [PatElemT dec]
-                   -> SubExp -> LambdaT lore -> [SubExp]
-                   -> m ([Ident], PatternT dec, [(SubExp, VName)])
+splitScanOrRedomap ::
+  (Typed dec, MonadFreshNames m) =>
+  [PatElemT dec] ->
+  SubExp ->
+  LambdaT lore ->
+  [SubExp] ->
+  m ([Ident], PatternT dec, [(SubExp, VName)])
 splitScanOrRedomap patelems w map_lam accs = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
       (acc_ts, _arr_ts) = splitAt (length accs) $ lambdaReturnType map_lam
@@ -74,10 +83,16 @@ splitScanOrRedomap patelems w map_lam accs = do
 -- Redomap.  This is used to handle Scremas that are so complicated
 -- that we cannot directly generate efficient parallel code for them.
 -- In essense, what happens is the opposite of horisontal fusion.
-dissectScrema :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
-                  Bindable (Lore m)) =>
-                 Pattern (Lore m) -> SubExp -> ScremaForm (Lore m) -> [VName]
-              -> m ()
+dissectScrema ::
+  ( MonadBinder m,
+    Op (Lore m) ~ SOAC (Lore m),
+    Bindable (Lore m)
+  ) =>
+  Pattern (Lore m) ->
+  SubExp ->
+  ScremaForm (Lore m) ->
+  [VName] ->
+  m ()
 dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
   let num_reds = redResults reds
       num_scans = scanResults scans
@@ -95,11 +110,14 @@ dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
 
 -- | Turn a stream SOAC into statements that apply the stream lambda
 -- to the entire input.
-sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
-                              Pattern (Lore m)
-                           -> SubExp -> [SubExp]
-                           -> LambdaT (Lore m) -> [VName]
-                           -> m ()
+sequentialStreamWholeArray ::
+  (MonadBinder m, Bindable (Lore m)) =>
+  Pattern (Lore m) ->
+  SubExp ->
+  [SubExp] ->
+  LambdaT (Lore m) ->
+  [VName] ->
+  m ()
 sequentialStreamWholeArray pat w nes lam arrs = do
   -- We just set the chunksize to w and inline the lambda body.  There
   -- is no difference between parallel and sequential streams here.
@@ -116,8 +134,9 @@ sequentialStreamWholeArray pat w nes lam arrs = do
   -- Finally, the array parameters are set to the arrays (but reshaped
   -- to make the types work out; this will be simplified rapidly).
   forM_ (zip arr_params arrs) $ \(p, arr) ->
-    letBindNames [paramName p] $ BasicOp $
-      Reshape (map DimCoercion $ arrayDims $ paramType p) arr
+    letBindNames [paramName p] $
+      BasicOp $
+        Reshape (map DimCoercion $ arrayDims $ paramType p) arr
 
   -- Then we just inline the lambda body.
   mapM_ addStm $ bodyStms $ lambdaBody lam
@@ -129,17 +148,19 @@ sequentialStreamWholeArray pat w nes lam arrs = do
     case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
-            letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
+          letBindNames [patElemName pe] $ BasicOp $ Reshape (map DimCoercion dims) v
       _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
 -- | Split the parameters of a stream reduction lambda into the chunk
 -- size parameter, the accumulator parameters, and the input chunk
 -- parameters.  The integer argument is how many accumulators are
 -- used.
-partitionChunkedFoldParameters :: Int -> [Param dec]
-                               -> (Param dec, [Param dec], [Param dec])
+partitionChunkedFoldParameters ::
+  Int ->
+  [Param dec] ->
+  (Param dec, [Param dec], [Param dec])
 partitionChunkedFoldParameters _ [] =
   error "partitionChunkedFoldParameters: lambda takes no parameters"
 partitionChunkedFoldParameters num_accs (chunk_param : params) =
   let (acc_params, arr_params) = splitAt num_accs params
-  in (chunk_param, acc_params, arr_params)
+   in (chunk_param, acc_params, arr_params)

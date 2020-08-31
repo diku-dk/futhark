@@ -1,11 +1,11 @@
 -- | Some utility functions for working with pretty console output.
 module Futhark.Util.Console
-       ( color
-       , inRed
-       , inGreen
-       , inBold
-       )
-       where
+  ( color,
+    inRed,
+    inGreen,
+    inBold,
+  )
+where
 
 import System.Console.ANSI
 
