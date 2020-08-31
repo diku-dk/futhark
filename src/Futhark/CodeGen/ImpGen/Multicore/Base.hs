@@ -180,7 +180,7 @@ isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b)    = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While{}       = False
-isLoadBalanced (Imp.Op (Imp.ParLoop _ _ _ code _ _)) = isLoadBalanced code
+isLoadBalanced (Imp.Op (Imp.ParLoop _ _ _ code _ _ _)) = isLoadBalanced code
 isLoadBalanced _                 = True
 
 
@@ -230,14 +230,14 @@ extractAllocations segop_code = f segop_code
           let (ta, tcode') = f tcode
               (fa, fcode') = f fcode
           in (ta <> fa, Imp.If cond tcode' fcode')
-        f (Imp.Op (Imp.ParLoop s i prebody body free info)) =
+        f (Imp.Op (Imp.ParLoop s i prebody body postbody free info)) =
           let (body_allocs, body') = extractAllocations body
               (free_allocs, here_allocs) = f body_allocs
               free' = filter (not .
                               (`nameIn` Imp.declaredIn body_allocs) .
                               Imp.paramName) free
           in (free_allocs, here_allocs <>
-              Imp.Op (Imp.ParLoop s i prebody body' free' info))
+              Imp.Op (Imp.ParLoop s i prebody body' postbody free' info))
         f code =
           (mempty, code)
 

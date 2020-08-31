@@ -551,7 +551,7 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
 
 
 
-compileOp (ParLoop s' i prebody body free tid) = do
+compileOp (ParLoop s' i prebody body postbody free tid) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
@@ -579,6 +579,7 @@ compileOp (ParLoop s' i prebody body free tid) = do
       GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
                        $items:body'
                      }|]
+      GC.compileCode postbody
       GC.stm [C.cstm|cleanup: {}|]
       mapM_ GC.stm free_cached
 
