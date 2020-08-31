@@ -339,13 +339,14 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
       }
     }|]
   where kernel_rank = length kernel_dims
-        kernel_dims = zipWith multExp num_workgroups workgroup_dims
+        kernel_dims = zipWith multExp (map toSize num_workgroups) (map toSize workgroup_dims)
         kernel_dims' = map toInit kernel_dims
         workgroup_dims' = map toInit workgroup_dims
         total_elements = foldl multExp [C.cexp|1|] kernel_dims
 
         toInit e = [C.cinit|$exp:e|]
         multExp x y = [C.cexp|$exp:x * $exp:y|]
+        toSize e = [C.cexp|(size_t)$exp:e|]
 
         printKernelSize :: VName -> [C.Stm]
         printKernelSize work_size =

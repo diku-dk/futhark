@@ -228,8 +228,8 @@ callKernelCopy bt
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
         emit $ Imp.Copy
-          destmem (bytes destoffset) destspace
-          srcmem (bytes srcoffset) srcspace $
+          destmem (bytes $ sExt64 destoffset) destspace
+          srcmem (bytes $ sExt64 srcoffset) srcspace $
           num_elems `Imp.withElemType` bt
 
   | otherwise = sCopy bt destloc destslice srcloc srcslice
@@ -322,8 +322,8 @@ mapTransposeFunction bt =
                 sExt64 $
                 Imp.vi32 x * Imp.vi32 y * isInt32 (Imp.LeafExp (Imp.SizeOf bt) (IntType Int32))
           in Imp.Copy
-               destmem (Imp.Count $ Imp.vi32 destoffset) space
-               srcmem (Imp.Count $ Imp.vi32 srcoffset) space
+               destmem (Imp.Count $ sExt64 $ Imp.vi32 destoffset) space
+               srcmem (Imp.Count $ sExt64 $ Imp.vi32 srcoffset) space
                (Imp.Count num_bytes)
 
         callTransposeKernel =

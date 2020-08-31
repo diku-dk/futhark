@@ -1055,13 +1055,13 @@ destinationFromPattern pat =
               return $ ScalarDestination name
 
 fullyIndexArray :: VName -> [Imp.TExp Int32]
-                -> ImpM lore r op (VName, Imp.Space, Count Elements (Imp.TExp Int32))
+                -> ImpM lore r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
 fullyIndexArray name indices = do
   arr <- lookupArray name
   fullyIndexArray' (entryArrayLocation arr) indices
 
 fullyIndexArray' :: MemLocation -> [Imp.TExp Int32]
-                 -> ImpM lore r op (VName, Imp.Space, Count Elements (Imp.TExp Int32))
+                 -> ImpM lore r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
 fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
   let indices' = case space of
@@ -1069,8 +1069,17 @@ fullyIndexArray' (MemLocation mem _ ixfun) indices = do
                      let (zero_is, is) = splitFromEnd (length ds) indices
                      in map (const 0) zero_is ++ is
                    _ -> indices
+      -- We zero-extend the indexes because they cannot be negative
+      -- anyway, and it apparently helps the downstream kernel code
+      -- generator produce better code (presumably because it will
+      -- know that the values are non-negative).
+      --
+      -- We sign-extend the index functions, because negative strides
+      -- are allowed.
+      ixfun64 = fmap sExt64 ixfun
+      indices64 = fmap zExt64 indices'
   return (mem, space,
-          elements $ IxFun.index ixfun indices')
+          elements $ IxFun.index ixfun64 indices64)
 
 -- More complicated read/write operations that use index functions.
 
@@ -1083,9 +1092,9 @@ copy bt dest destslice src srcslice = do
 defaultCopy :: CopyCompiler lore r op
 defaultCopy bt dest destslice src srcslice
   | Just destoffset <-
-      IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
+      IxFun.linearWithOffset (IxFun.slice dest_ixfun64 destslice64) bt_size,
     Just srcoffset  <-
-      IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
+      IxFun.linearWithOffset (IxFun.slice src_ixfun64 srcslice64) bt_size = do
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
         if isScalarSpace srcspace || isScalarSpace destspace
@@ -1098,8 +1107,15 @@ defaultCopy bt dest destslice src srcslice
       copyElementWise bt dest destslice src srcslice
   where bt_size = primByteSize bt
         num_elems = Imp.elements $ product $ sliceDims srcslice
-        MemLocation destmem _ destIxFun = dest
-        MemLocation srcmem _ srcIxFun = src
+
+        MemLocation destmem _ dest_ixfun = dest
+        MemLocation srcmem _ src_ixfun = src
+
+        dest_ixfun64 = fmap sExt64 dest_ixfun
+        destslice64 = map (fmap sExt64) destslice
+        src_ixfun64 = fmap sExt64 src_ixfun
+        srcslice64 = map (fmap sExt64) srcslice
+
         isScalarSpace ScalarSpace{} = True
         isScalarSpace _ = False
 
@@ -1292,8 +1308,8 @@ compileAlloc pat _ _ =
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
   Imp.bytes $
-  isInt64 (sExt Int64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int32)) *
-  product (map (isInt64 . sExt Int64 . toExp' int32) (arrayDims t))
+  isInt64 (Imp.LeafExp (Imp.SizeOf $ elemType t) int64) *
+  product (map (sExt64 . toInt32Exp) (arrayDims t))
 
 --- Building blocks for constructing code.
 

@@ -52,8 +52,8 @@ mapTranspose block_dim args t kind =
       , dec index_out $ vi32 x_index * height + vi32 y_index
 
       , when (vi32 get_global_id_0 .<. width * height * num_arrays)
-        (Write odata (elements $ vi32 odata_offset + vi32 index_out) t (Space "global") Nonvolatile $
-         index idata (elements $ vi32 idata_offset + vi32 index_in) t (Space "global") Nonvolatile)
+        (Write odata (elements $ sExt64 $ vi32 odata_offset + vi32 index_out) t (Space "global") Nonvolatile $
+         index idata (elements $ sExt64 $ vi32 idata_offset + vi32 index_in) t (Space "global") Nonvolatile)
       ]
 
     TransposeLowWidth ->
@@ -83,10 +83,11 @@ mapTranspose block_dim args t kind =
         let i = vi32 j * (tile_dim `quot` elemsPerThread)
         in mconcat [ dec index_in $ (vi32 y_index + i) * width + vi32 x_index
                    , when (vi32 y_index + i .<. height) $
-                     Write block (elements $ (vi32 get_local_id_1 + i) * (tile_dim+1)
-                                             + vi32 get_local_id_0)
+                     Write block (elements $ sExt64 $
+                                  (vi32 get_local_id_1 + i) * (tile_dim+1)
+                                  + vi32 get_local_id_0)
                      t (Space "local") Nonvolatile $
-                     index idata (elements $ vi32 idata_offset + vi32 index_in)
+                     index idata (elements $ sExt64 $ vi32 idata_offset + vi32 index_in)
                      t (Space "global") Nonvolatile]
       , Op $ Barrier FenceLocal
       , SetScalar x_index $ untyped $ vi32 get_group_id_1 * tile_dim + vi32 get_local_id_0
@@ -96,10 +97,10 @@ mapTranspose block_dim args t kind =
         let i = vi32 j * (tile_dim `quot` elemsPerThread)
         in mconcat [ dec index_out $ (vi32 y_index + i) * height + vi32 x_index
                    , when (vi32 y_index + i .<. width) $
-                     Write odata (elements $ vi32 odata_offset + vi32 index_out)
+                     Write odata (elements $ sExt64 $ vi32 odata_offset + vi32 index_out)
                      t (Space "global") Nonvolatile $
-                     index block (elements $ vi32 get_local_id_0 * (tile_dim+1)
-                                             + vi32 get_local_id_1+i)
+                     index block (elements $ sExt64 $
+                                  vi32 get_local_id_0 * (tile_dim+1) + vi32 get_local_id_1+i)
                      t (Space "local") Nonvolatile
                    ]
       ]
@@ -166,18 +167,18 @@ mapTranspose block_dim args t kind =
           , dec y_index y_in_index
           , dec index_in $ vi32 y_index * width + vi32 x_index
           , when (vi32 x_index .<. width .&&. vi32 y_index .<. height) $
-            Write block (elements $ vi32 get_local_id_1 * (block_dim+1) + vi32 get_local_id_0)
+            Write block (elements $ sExt64 $ vi32 get_local_id_1 * (block_dim+1) + vi32 get_local_id_0)
             t (Space "local") Nonvolatile $
-            index idata (elements $ vi32 idata_offset + vi32 index_in)
+            index idata (elements $ sExt64 $ vi32 idata_offset + vi32 index_in)
             t (Space "global") Nonvolatile
           , Op $ Barrier FenceLocal
           , SetScalar x_index $ untyped x_out_index
           , SetScalar y_index $ untyped y_out_index
           , dec index_out $ vi32 y_index * height + vi32 x_index
           , when (vi32 x_index .<. height .&&. vi32 y_index .<. width) $
-            Write odata (elements $ vi32 odata_offset + vi32 index_out)
+            Write odata (elements $ sExt64 (vi32 odata_offset + vi32 index_out))
             t (Space "global") Nonvolatile $
-            index block (elements $ vi32 get_local_id_0 * (block_dim+1) + vi32 get_local_id_1)
+            index block (elements $ sExt64 $ vi32 get_local_id_0 * (block_dim+1) + vi32 get_local_id_1)
             t (Space "local") Nonvolatile
           ]
 
