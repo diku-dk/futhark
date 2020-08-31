@@ -161,6 +161,9 @@ jobs:
           dist-newstyle
         key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-style
 
+    - name: Formatting check
+      run: nix-shell --pure --run "LC_ALL=C.UTF-8 find src unittests -name '*.hs' -print -execdir ormolu --mode check {} +"
+
     - name: Style check
       run: nix-shell --pure --run "tools/style-check.sh src"
 
