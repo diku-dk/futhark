@@ -104,8 +104,13 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
                                             chunkable, iter,
                                             subtask_id);
     assert(subtask != NULL);
-    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads], subtask),
-              "subtask_queue_enqueue");
+    if (worker->nested){
+      CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[worker->tid], subtask),
+                "subtask_queue_enqueue");
+    } else {
+      CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads], subtask),
+                "subtask_queue_enqueue");
+    }
     // Update range params
     start = end;
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
