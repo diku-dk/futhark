@@ -1,5 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.ReuseAllocations (optimise) where
@@ -53,7 +54,7 @@ setAllocsStm :: Map VName SubExp -> Stm KernelsMem -> Stm KernelsMem
 setAllocsStm m stm@(Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- Map.lookup name m =
     stm {stmExp = BasicOp $ SubExp s}
-setAllocsStm _ (Let _ _ (Op (Alloc _ _))) = error "impossible"
+setAllocsStm _ stm@(Let _ _ (Op (Alloc _ _))) = stm
 setAllocsStm m stm@(Let _ _ (Op (Inner (SegOp segop)))) =
   stm {stmExp = Op $ Inner $ SegOp $ setAllocsSegOp m segop}
 setAllocsStm m stm@(Let _ _ (If cse then_body else_body dec)) =
@@ -109,12 +110,45 @@ maxSubExp = helper . Set.toList
       return s
     helper [] = error "impossible"
 
+definedInExp :: Exp KernelsMem -> Set VName
+definedInExp (Op (Inner (SegOp segop))) =
+  definedInSegOp segop
+definedInExp (If _ then_body else_body _) =
+  foldMap definedInStm (bodyStms then_body)
+    <> foldMap definedInStm (bodyStms else_body)
+definedInExp (DoLoop _ _ _ body) =
+  foldMap definedInStm $ bodyStms body
+definedInExp _ = mempty
+
+definedInStm :: Stm KernelsMem -> Set VName
+definedInStm Let {stmPattern = Pattern ctx vals, stmExp} =
+  let definedInside =
+        ctx <> vals
+          & fmap patElemName
+          & Set.fromList
+   in definedInExp stmExp <> definedInside
+
+definedInSegOp :: SegOp lvl KernelsMem -> Set VName
+definedInSegOp (SegMap _ _ _ body) =
+  foldMap definedInStm $ kernelBodyStms body
+definedInSegOp (SegRed _ _ _ _ body) =
+  foldMap definedInStm $ kernelBodyStms body
+definedInSegOp (SegScan _ _ _ _ body) =
+  foldMap definedInStm $ kernelBodyStms body
+definedInSegOp (SegHist _ _ _ _ body) =
+  foldMap definedInStm $ kernelBodyStms body
+
+isKernelInvariant :: SegOp lvl KernelsMem -> (SubExp, space) -> Bool
+isKernelInvariant segop (Var vname, _) =
+  not $ vname `Set.member` definedInSegOp segop
+isKernelInvariant _ _ = True
+
 optimiseKernel ::
   Interference.Graph VName ->
   SegOp lvl KernelsMem ->
   ReuseAllocsM (SegOp lvl KernelsMem)
 optimiseKernel graph segop = do
-  let allocs = getAllocsSegOp segop
+  let allocs = Map.filter (isKernelInvariant segop) $ getAllocsSegOp segop
       (colorspaces, coloring) =
         GreedyColoring.colorGraph
           (fmap snd allocs)
