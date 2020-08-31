@@ -112,7 +112,6 @@ import Data.List (sortOn)
 import qualified Data.Map.Strict as M
 import Futhark.Binder
 import Futhark.IR
-import Futhark.MonadFreshNames
 
 letSubExp ::
   MonadBinder m =>

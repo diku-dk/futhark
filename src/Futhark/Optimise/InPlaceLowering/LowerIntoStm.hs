@@ -19,7 +19,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR.Aliases
 import Futhark.IR.Kernels
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 data DesiredUpdate dec = DesiredUpdate

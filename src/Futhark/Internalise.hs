@@ -12,7 +12,6 @@
 module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.Reader
-import Control.Monad.State
 import Data.Bitraversable
 import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
@@ -27,8 +26,6 @@ import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.TypesValues
-import Futhark.MonadFreshNames
-import Futhark.Tools
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
 import Language.Futhark as E hiding (TypeArg)

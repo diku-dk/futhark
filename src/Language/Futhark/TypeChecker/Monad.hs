@@ -50,9 +50,6 @@ where
 
 import Control.Monad.Except
 import Control.Monad.RWS.Strict hiding (Sum)
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer hiding (Sum)
 import Data.Either
 import Data.List (find, isPrefixOf)
 import qualified Data.Map.Strict as M

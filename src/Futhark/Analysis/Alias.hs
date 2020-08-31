@@ -24,7 +24,6 @@ where
 import Data.List (foldl')
 import qualified Data.Map as M
 import Futhark.IR.Aliases
-import Futhark.IR.Syntax
 
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis ::

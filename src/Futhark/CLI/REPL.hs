@@ -11,7 +11,6 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
-import Control.Monad.IO.Class
 import Control.Monad.State
 import Data.Char
 import Data.List (intercalate, intersperse)

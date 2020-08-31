@@ -19,20 +19,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.IR.Syntax hiding
-  ( BasicOp,
-    Body,
-    Exp,
-    FParam,
-    FunDef,
-    LParam,
-    Lambda,
-    PatElem,
-    Pattern,
-    Prog,
-    RetType,
-    Stm,
-  )
 import qualified Futhark.IR.Syntax as AST
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine

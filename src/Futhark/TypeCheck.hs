@@ -53,9 +53,6 @@ module Futhark.TypeCheck
 where
 
 import Control.Monad.RWS.Strict
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer
 import Control.Parallel.Strategies
 import Data.List (find, intercalate, sort)
 import qualified Data.Map.Strict as M

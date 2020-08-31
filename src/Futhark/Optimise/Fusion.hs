@@ -24,7 +24,6 @@ import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
 import Futhark.IR.SOACS.Simplify
-import Futhark.MonadFreshNames
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Pass
 import Futhark.Transform.Rename

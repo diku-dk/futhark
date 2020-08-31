@@ -24,10 +24,6 @@ import Futhark.IR.Kernels.Kernel
 import Futhark.IR.Kernels.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
-import Futhark.IR.Pretty
-import Futhark.IR.Prop
-import Futhark.IR.Syntax
-import Futhark.IR.Traversals
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass

@@ -73,9 +73,6 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.RWS
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Bits (shiftR, xor)
 import Data.Char (isAlphaNum, isDigit, ord)

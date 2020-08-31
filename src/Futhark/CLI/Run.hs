@@ -9,7 +9,6 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
-import Control.Monad.IO.Class
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text.IO as T

@@ -65,7 +65,6 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
-import Control.Monad.Writer
 import Data.Either
 import Data.List (find, foldl', mapAccumL, nub)
 import Data.Maybe
