@@ -18,5 +18,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.zlib
     pkgs.zlib.out
     pkgs.cabal2nix
+    pkgs.ghcid
   ];
 }
