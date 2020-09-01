@@ -1,5 +1,6 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+
 -- | Transform any SOACs to @for@-loops.
 --
 -- Example:
@@ -19,19 +20,18 @@
 --     let ys'[i] = y
 --     in ys'
 -- @
-module Futhark.Pass.FirstOrderTransform
-  ( firstOrderTransform )
-  where
+module Futhark.Pass.FirstOrderTransform (firstOrderTransform) where
 
-import Futhark.Transform.FirstOrderTransform (FirstOrderLore, transformFunDef, transformConsts)
 import Futhark.IR.SOACS (SOACS, scopeOf)
 import Futhark.Pass
+import Futhark.Transform.FirstOrderTransform (FirstOrderLore, transformConsts, transformFunDef)
 
 -- | The first-order transformation pass.
 firstOrderTransform :: FirstOrderLore lore => Pass SOACS lore
 firstOrderTransform =
   Pass
-  "first order transform"
-  "Transform all SOACs to for-loops." $
-  intraproceduralTransformationWithConsts
-  transformConsts (transformFunDef . scopeOf)
+    "first order transform"
+    "Transform all SOACs to for-loops."
+    $ intraproceduralTransformationWithConsts
+      transformConsts
+      (transformFunDef . scopeOf)
