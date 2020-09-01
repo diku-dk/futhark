@@ -1,34 +1,36 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+
 -- | Inspecing and modifying t'Pattern's, function parameters and
 -- pattern elements.
 module Futhark.IR.Prop.Patterns
-       (
-         -- * Function parameters
-         paramIdent
-       , paramType
-       , paramDeclType
-         -- * Pattern elements
-       , patElemIdent
-       , patElemType
-       , setPatElemLore
-       , patternElements
-       , patternIdents
-       , patternContextIdents
-       , patternValueIdents
-       , patternNames
-       , patternValueNames
-       , patternContextNames
-       , patternTypes
-       , patternValueTypes
-       , patternSize
-       -- * Pattern construction
-       , basicPattern
-       )
-       where
+  ( -- * Function parameters
+    paramIdent,
+    paramType,
+    paramDeclType,
 
+    -- * Pattern elements
+    patElemIdent,
+    patElemType,
+    setPatElemLore,
+    patternElements,
+    patternIdents,
+    patternContextIdents,
+    patternValueIdents,
+    patternNames,
+    patternValueNames,
+    patternContextNames,
+    patternTypes,
+    patternValueTypes,
+    patternSize,
+
+    -- * Pattern construction
+    basicPattern,
+  )
+where
+
+import Futhark.IR.Prop.Types (DeclTyped (..), Typed (..))
 import Futhark.IR.Syntax
-import Futhark.IR.Prop.Types (Typed(..), DeclTyped(..))
 
 -- | The 'Type' of a parameter.
 paramType :: Typed dec => Param dec -> Type
@@ -98,4 +100,5 @@ patternSize (Pattern context values) = length context + length values
 basicPattern :: [Ident] -> [Ident] -> PatternT Type
 basicPattern context values =
   Pattern (map patElem context) (map patElem values)
-  where patElem (Ident name t) = PatElem name t
+  where
+    patElem (Ident name t) = PatElem name t

@@ -1,75 +1,83 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
+
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
 module Language.Futhark.Core
-  ( Uniqueness(..)
-  , Commutativity(..)
+  ( Uniqueness (..),
+    Commutativity (..),
 
-  -- * Location utilities
-  , SrcLoc
-  , Loc
-  , Located(..)
-  , srclocOf
-  , locStr
-  , locStrRel
-  , prettyStacktrace
+    -- * Location utilities
+    SrcLoc,
+    Loc,
+    Located (..),
+    srclocOf,
+    locStr,
+    locStrRel,
+    prettyStacktrace,
 
-  -- * Name handling
-  , Name
-  , nameToString
-  , nameFromString
-  , nameToText
-  , nameFromText
-  , VName(..)
-  , baseTag
-  , baseName
-  , baseString
-  , pretty
-  , quote
-  , pquote
+    -- * Name handling
+    Name,
+    nameToString,
+    nameFromString,
+    nameToText,
+    nameFromText,
+    VName (..),
+    baseTag,
+    baseName,
+    baseString,
+    pretty,
+    quote,
+    pquote,
 
-  -- * Special identifiers
-  , defaultEntryPoint
+    -- * Special identifiers
+    defaultEntryPoint,
 
     -- * Integer re-export
-  , Int8, Int16, Int32, Int64
-  , Word8, Word16, Word32, Word64
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Word8,
+    Word16,
+    Word32,
+    Word64,
   )
-
 where
 
-
-
-import Prelude hiding ((.), id)
+import Control.Category
+import Data.Int (Int16, Int32, Int64, Int8)
+import Data.String
+import qualified Data.Text as T
+import Data.Word (Word16, Word32, Word64, Word8)
+import Futhark.Util.Loc
+import Futhark.Util.Pretty
 import GHC.Generics
 import Language.SexpGrammar as Sexp
 import Language.SexpGrammar.Generic
-import Control.Category
-import Data.Int (Int8, Int16, Int32, Int64)
-import Data.String
-import Data.Word (Word8, Word16, Word32, Word64)
-import qualified Data.Text as T
 import Text.Read
-
-import Futhark.Util.Pretty
-import Futhark.Util.Loc
+import Prelude hiding (id, (.))
 
 -- | The uniqueness attribute of a type.  This essentially indicates
 -- whether or not in-place modifications are acceptable.  With respect
 -- to ordering, 'Unique' is greater than 'Nonunique'.
-data Uniqueness = Nonunique -- ^ May have references outside current function.
-                | Unique    -- ^ No references outside current function.
-                  deriving (Eq, Ord, Show, Generic)
+data Uniqueness
+  = -- | May have references outside current function.
+    Nonunique
+  | -- | No references outside current function.
+    Unique
+  deriving (Eq, Ord, Show, Generic)
 
 instance SexpIso Uniqueness where
-  sexpIso = match
-    $ With (. Sexp.sym "nonunique")
-    $ With (. Sexp.sym "unique")
-    End
+  sexpIso =
+    match $
+      With (. Sexp.sym "nonunique") $
+        With
+          (. Sexp.sym "unique")
+          End
 
 instance Semigroup Uniqueness where
   (<>) = min
@@ -83,15 +91,18 @@ instance Pretty Uniqueness where
 
 -- | Whether some operator is commutative or not.  The 'Monoid'
 -- instance returns the least commutative of its arguments.
-data Commutativity = Noncommutative
-                   | Commutative
-                     deriving (Eq, Ord, Show, Generic)
+data Commutativity
+  = Noncommutative
+  | Commutative
+  deriving (Eq, Ord, Show, Generic)
 
 instance SexpIso Commutativity where
-  sexpIso = match
-    $ With (. Sexp.sym "noncommutative")
-    $ With (. Sexp.sym "commutative")
-    End
+  sexpIso =
+    match $
+      With (. Sexp.sym "noncommutative") $
+        With
+          (. Sexp.sym "commutative")
+          End
 
 instance Semigroup Commutativity where
   (<>) = min
@@ -143,13 +154,13 @@ locStr a =
   case locOf a of
     NoLoc -> "unknown location"
     Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)
-    -- Do not show line2 if it is identical to line1.
+      -- Do not show line2 if it is identical to line1.
       | line1 == line2 ->
-          first_part ++ "-" ++ show col2
+        first_part ++ "-" ++ show col2
       | otherwise ->
-          first_part ++ "-" ++ show line2 ++ ":" ++ show col2
-      where first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
-
+        first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+      where
+        first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
 
 -- | Like 'locStr', but @locStrRel prev now@ prints the location @now@
 -- with the file name left out if the same as @prev@.  This is useful
@@ -162,10 +173,11 @@ locStrRel a b =
     (Loc (Pos a_file _ _ _) _, Loc (Pos b_file line1 col1 _) (Pos _ line2 col2 _))
       | a_file == b_file,
         line1 == line2 ->
-          first_part ++ "-" ++ show col2
+        first_part ++ "-" ++ show col2
       | a_file == b_file ->
-          first_part ++ "-" ++ show line2 ++ ":" ++ show col2
-      where first_part = show line1 ++ ":" ++ show col1
+        first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+      where
+        first_part = show line1 ++ ":" ++ show col1
     _ -> locStr b
 
 -- | Given a list of strings representing entries in the stack trace
@@ -174,13 +186,18 @@ locStrRel a b =
 -- should also be preceded by a newline.  The most recent stack frame
 -- must come first in the list.
 prettyStacktrace :: Int -> [String] -> String
-prettyStacktrace cur = unlines . zipWith f [(0::Int)..]
-  where -- Formatting hack: assume no stack is deeper than 100
-        -- elements.  Since Futhark does not support recursion, going
-        -- beyond that would require a truly perverse program.
-        f i x = (if cur == i then "-> " else "   ") ++
-                '#' : show i ++
-                (if i > 9 then "" else " ") ++ " " ++ x
+prettyStacktrace cur = unlines . zipWith f [(0 :: Int) ..]
+  where
+    -- Formatting hack: assume no stack is deeper than 100
+    -- elements.  Since Futhark does not support recursion, going
+    -- beyond that would require a truly perverse program.
+    f i x =
+      (if cur == i then "-> " else "   ")
+        ++ '#' :
+      show i
+        ++ (if i > 9 then "" else " ")
+        ++ " "
+        ++ x
 
 -- | A name tagged with some integer.  Only the integer is used in
 -- comparisons, no matter the type of @vn@.
@@ -189,16 +206,19 @@ data VName = VName !Name !Int
 
 instance SexpIso VName where
   sexpIso = with $ \vname ->
-    Sexp.symbol >>>
-    flipped (pair >>> partialIso
+    Sexp.symbol
+      >>> flipped
+        ( pair
+            >>> partialIso
               (\(nm, i) -> T.pack $ nameToString nm ++ "_" ++ show i)
-              (\s ->
+              ( \s ->
                   let (nm, i) = T.breakOnEnd "_" s
-                  in case readMaybe $ T.unpack i of
-                       Just i' -> Right (nameFromString $ T.unpack $ T.init nm, i')
-                       Nothing -> Left $ expected "Couldn't parse int of vname"
-              )) >>>
-    vname
+                   in case readMaybe $ T.unpack i of
+                        Just i' -> Right (nameFromString $ T.unpack $ T.init nm, i')
+                        Nothing -> Left $ expected "Couldn't parse int of vname"
+              )
+        )
+      >>> vname
 
 -- | Return the tag contained in the 'VName'.
 baseTag :: VName -> Int
