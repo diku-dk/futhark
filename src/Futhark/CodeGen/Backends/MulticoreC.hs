@@ -531,7 +531,8 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
 
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask tid e sched)) = do
+compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
+  let (ParallelTask seq_code tid) = seq_task
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
   let free_args = map paramName params
@@ -572,10 +573,10 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
     Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
     Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
-  fnpar_task <- case par_code of
-    Just code -> do
-      let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
-      fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") code fstruct free retval tid nsubtask
+  fnpar_task <- case par_task of
+    Just (ParallelTask nested_code nested_tid)-> do
+      let lexical_npar = lexicalMemoryUsage $ Function False [] params nested_code [] []
+      fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") nested_code fstruct free retval nested_tid nsubtask
       GC.stm [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
     Nothing -> do

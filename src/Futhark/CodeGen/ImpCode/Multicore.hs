@@ -9,6 +9,7 @@ module Futhark.CodeGen.ImpCode.Multicore
     SchedulerInfo (..),
     AtomicOp (..),
     Time (..),
+    ParallelTask (..),
     module Futhark.CodeGen.ImpCode,
   )
 where
@@ -30,7 +31,7 @@ data Time = NoTime | Time
 
 -- | A multicore operation.
 data Multicore
-  = Task String [Param] Code (Maybe Code) [Param] SchedulerInfo
+  = Task String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String VName Code Code Code [Param] VName
   | MulticoreCall (Maybe VName) String
   | Atomic AtomicOp
@@ -59,9 +60,14 @@ instance FreeIn AtomicOp where
 
 data SchedulerInfo = SchedulerInfo
   { nsubtasks :: VName, -- The variable that describes how many subtasks the scheduler created
-    flatTid :: VName, -- The variable for the tid execution the code
     iterations :: Imp.Exp, -- The number of total iterations for a task
     scheduling :: Scheduling -- The type scheduling that the task can be performed as
+  }
+
+data ParallelTask = ParallelTask
+  {
+    task_code :: Code,
+    flatTid   :: VName -- the variable for the thread execution the code
   }
 
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic
@@ -77,7 +83,7 @@ instance Pretty Scheduling where
 
 -- TODO fix all of this!
 instance Pretty SchedulerInfo where
-  ppr (SchedulerInfo nsubtask _ i sched) =
+  ppr (SchedulerInfo nsubtask i sched) =
     text "SchedulingInfo"
       <+> text "number of subtasks"
       <+> ppr nsubtask
@@ -85,6 +91,10 @@ instance Pretty SchedulerInfo where
       <+> ppr sched
       <+> text "iter"
       <+> ppr i
+
+instance Pretty ParallelTask where
+  ppr (ParallelTask code _) =
+    ppr code
 
 instance Pretty Multicore where
   ppr (Task s free _par_code seq_code retval scheduler) =
@@ -109,8 +119,12 @@ instance Pretty Multicore where
   ppr (Atomic _) = text "AtomicOp"
 
 instance FreeIn SchedulerInfo where
-  freeIn' (SchedulerInfo nsubtask _ iter _) =
+  freeIn' (SchedulerInfo nsubtask iter _) =
     freeIn' iter <> freeIn' nsubtask
+
+instance FreeIn ParallelTask where
+  freeIn' (ParallelTask code _) =
+    freeIn' code
 
 instance FreeIn Multicore where
   freeIn' (Task _ _ par_code seq_code _ info) =
