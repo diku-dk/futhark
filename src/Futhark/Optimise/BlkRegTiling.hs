@@ -125,22 +125,22 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
         tk_div_tx  <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
         tk_div_ty  <- letSubExp "tk_div_ty" =<< ceilDiv tk ty
 
-        tx_rx      <- letSubExp "TxRx" =<< toExp (primFromSe tx * primFromSe rx)
-        ty_ry      <- letSubExp "TyRy" =<< toExp (primFromSe ty * primFromSe ry)
+        tx_rx      <- letSubExp "TxRx" =<< toExp (pe32 tx * pe32 rx)
+        ty_ry      <- letSubExp "TyRy" =<< toExp (pe32 ty * pe32 ry)
 
         a_loc_sz   <- letSubExp "a_loc_sz" =<<
-                         toExp (primFromSe ty * primFromSe ry * primFromSe tk)
+                         toExp (pe32 ty * pe32 ry * pe32 tk)
 
         b_loc_sz   <- letSubExp "b_loc_sz" =<<
-                        toExp (primFromSe tk * primFromSe tx * primFromSe rx)
+                        toExp (pe32 tk * pe32 tx * pe32 rx)
 
         gridDim_x  <- letSubExp "gridDim_x"  =<< ceilDiv width_B  tx_rx
         gridDim_y  <- letSubExp "gridDim_y"  =<< ceilDiv height_A ty_ry
-        let gridxy_pexp = primFromSe gridDim_y * primFromSe gridDim_x
-        let grid_pexp = foldl (\ x d -> primFromSe d * x) gridxy_pexp $
+        let gridxy_pexp = pe32 gridDim_y * pe32 gridDim_x
+        let grid_pexp = foldl (\ x d -> pe32 d * x) gridxy_pexp $
                               map snd rem_outer_dims_rev
         grid_size  <- letSubExp "grid_size"  =<< toExp grid_pexp
-        group_size <- letSubExp "group_size" =<< toExp (primFromSe ty * primFromSe tx)
+        group_size <- letSubExp "group_size" =<< toExp (pe32 ty * pe32 tx)
         let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
 
         gid_x      <- newVName "gid_x"
@@ -150,8 +150,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBinder $ do
 
-          iii <- letExp "iii" =<< toExp (LeafExp gid_y int32 * primFromSe ty_ry)
-          jjj <- letExp "jjj" =<< toExp (LeafExp gid_x int32 * primFromSe tx_rx)
+          iii <- letExp "iii" =<< toExp (le32 gid_y * pe32 ty_ry)
+          jjj <- letExp "jjj" =<< toExp (le32 gid_x * pe32 tx_rx)
 
           -- initialize register mem with neutral elements.
           cssss_list <- segMap2D "cssss" segthd_lvl ResultPrivate (ty, tx) $ \_ -> do
@@ -168,33 +168,31 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
           b_loc_init <- scratch "B_loc" map_t2 [b_loc_sz]
 
           let kkLoopBody kk0 (thd_res_merge, a_loc_init', b_loc_init') epilogue = do
-               kk <- letExp "kk" =<< toExp (LeafExp kk0 int32 * primFromSe tk)
+               kk <- letExp "kk" =<< toExp (le32 kk0 * pe32 tk)
                a_loc <- forLoop ry [a_loc_init'] $ \i0 [a_loc_merge] -> do
                  loop_a_loc <- forLoop tk_div_tx [a_loc_merge] $ \k0 [a_loc_merge'] -> do
 
                    scatter_a_loc <- segScatter2D "A_glb2loc" a_loc_sz a_loc_merge'
                                       segthd_lvl (ty, tx) $ \(thd_y, thd_x) -> do
 
-                       k <- letExp "k" =<< toExp (LeafExp thd_x int32 +
-                              LeafExp k0 int32 * primFromSe tx)
-                       i <- letExp "i" =<< toExp (LeafExp thd_y int32 +
-                              LeafExp i0 int32 * primFromSe ty)
+                       k <- letExp "k" =<< toExp (le32 thd_x + le32 k0 * pe32 tx)
+                       i <- letExp "i" =<< toExp (le32 thd_y + le32 i0 * pe32 ty)
 
-                       letBindNames [gtid_y] =<< toExp (LeafExp iii int32 + LeafExp i int32)
-                       a_col_idx <- letExp "A_col_idx" =<< toExp (LeafExp kk int32 + LeafExp k int32)
+                       letBindNames [gtid_y] =<< toExp (le32 iii + le32 i)
+                       a_col_idx <- letExp "A_col_idx" =<< toExp (le32 kk + le32 k)
 
                        a_elem <- letSubExp "A_elem" =<<
-                                eIf (toExp $ LeafExp gtid_y int32 .<. primFromSe height_A .&&.
+                                eIf (toExp $ le32 gtid_y .<. pe32 height_A .&&.
                                              if epilogue then
-                                               LeafExp a_col_idx int32 .<. primFromSe common_dim
+                                               le32 a_col_idx .<. pe32 common_dim
                                              else true)
                                     (do addStm load_A
                                         res <- index "A_elem" inp_A [a_col_idx]
                                         resultBodyM [Var res])
                                     (eBody [eBlank $ Prim map_t1])
                        a_loc_ind <- letSubExp "a_loc_ind" =<<
-                                eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
-                                    (toExp (LeafExp k int32 + LeafExp i int32 * primFromSe tk)
+                                eIf (toExp $ le32 k .<. pe32 tk)
+                                    (toExp (le32 k + le32 i * pe32 tk)
                                       >>= letTupExp' "loc_fi" >>= resultBodyM)
                                     (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
                        return (a_elem, a_loc_ind)
@@ -207,18 +205,16 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
                    scatter_b_loc <- segScatter2D "B_glb2loc" b_loc_sz b_loc_merge'
                          segthd_lvl (ty, tx) $ \(thd_y, thd_x) -> do
 
-                     k <- letExp "k" =<< toExp (LeafExp thd_y int32 +
-                            LeafExp k0 int32 * primFromSe ty)
-                     j <- letExp "j" =<< toExp (LeafExp thd_x int32 +
-                            LeafExp j0 int32 * primFromSe tx)
+                     k <- letExp "k" =<< toExp (le32 thd_y + le32 k0 * pe32 ty)
+                     j <- letExp "j" =<< toExp (le32 thd_x + le32 j0 * pe32 tx)
 
-                     letBindNames [gtid_x]  =<< toExp (LeafExp jjj int32 + LeafExp j int32)
-                     b_row_idx <- letExp "B_row_idx" =<< toExp (LeafExp kk int32 + LeafExp k int32)
+                     letBindNames [gtid_x]  =<< toExp (le32 jjj + le32 j)
+                     b_row_idx <- letExp "B_row_idx" =<< toExp (le32 kk + le32 k)
 
                      b_elem <- letSubExp "B_elem" =<<
-                                eIf (toExp $ LeafExp gtid_x int32 .<. primFromSe width_B .&&.
+                                eIf (toExp $ le32 gtid_x .<. pe32 width_B .&&.
                                              if epilogue then
-                                               LeafExp b_row_idx int32 .<. primFromSe common_dim
+                                               le32 b_row_idx .<. pe32 common_dim
                                              else true)
                                     (do addStm load_B
                                         res <- index "B_elem" inp_B [b_row_idx]
@@ -226,8 +222,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
                                     (eBody [eBlank $ Prim map_t2])
 
                      b_loc_ind <- letSubExp "b_loc_ind" =<<
-                              eIf (toExp $ LeafExp k int32 .<. primFromSe tk)
-                                  (toExp (LeafExp j int32 + LeafExp k int32 * primFromSe tx_rx)
+                              eIf (toExp $ le32 k .<. pe32 tk)
+                                  (toExp (le32 j + le32 k * pe32 tx_rx)
                                      >>= letTupExp' "loc_fi" >>= resultBodyM)
                                   (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
                      return (b_elem, b_loc_ind)
@@ -237,8 +233,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
                -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
                thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] ->
                  resultBodyM =<< letTupExp' "foo" =<<
-                   eIf (toExp $ if epilogue then LeafExp kk int32 + LeafExp k int32
-                                                 .<. primFromSe common_dim
+                   eIf (toExp $ if epilogue then le32 kk + le32 k
+                                                 .<. pe32 common_dim
                                 else true) -- if in prologue, always compute redomap.
                        (do reg_mem <- segMap2D "reg_mem" segthd_lvl
                                         ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
@@ -247,9 +243,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
 
                              asss <- forLoop ry [asss_init] $ \i [asss_merge] -> do
 
-                               a_loc_ind <- letExp "a_loc_ind" =<< toExp (LeafExp k int32 +
-                                              (LeafExp ltid_y int32 * primFromSe ry +
-                                               LeafExp i int32) * primFromSe tk)
+                               a_loc_ind <- letExp "a_loc_ind" =<< toExp (le32 k +
+                                              (le32 ltid_y * pe32 ry + le32 i) * pe32 tk)
 
                                asss <- index "A_loc_elem" a_loc [a_loc_ind]
                                          >>= update "asss" asss_merge [i]
@@ -257,9 +252,9 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
 
                              bsss <- forLoop rx [bsss_init] $ \j [bsss_merge] -> do
 
-                               b_loc_ind <- letExp "b_loc_ind" =<< toExp (LeafExp j int32 +
-                                              LeafExp k int32 * primFromSe tx_rx +
-                                              LeafExp ltid_x int32 * primFromSe rx)
+                               b_loc_ind <- letExp "b_loc_ind" =<< toExp (le32 j +
+                                              le32 k * pe32 tx_rx +
+                                              le32 ltid_x * pe32 rx)
 
                                bsss <- index "B_loc_elem" b_loc [b_loc_ind]
                                          >>= update "bsss" bsss_merge [j]
@@ -280,12 +275,10 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
 
                                css <- forLoop rx [css_merge] $ \j [css_merge'] ->
                                  resultBodyM =<< letTupExp' "foo" =<<
-                                   eIf ( toExp $ LeafExp iii int32 + LeafExp i int32 +
-                                                   primFromSe ry * LeafExp ltid_y int32
-                                                   .<. primFromSe height_A .&&.
-                                                 LeafExp jjj int32 + LeafExp j int32 +
-                                                   primFromSe rx * LeafExp ltid_x int32
-                                                   .<. primFromSe width_B
+                                   eIf ( toExp $ le32 iii + le32 i + pe32 ry * le32 ltid_y
+                                                   .<. pe32 height_A .&&.
+                                                 le32 jjj + le32 j + pe32 rx * le32 ltid_x
+                                                   .<. pe32 width_B
                                        )
 
                                        ( do a <- index "a" as [i]
@@ -344,19 +337,19 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
               rssss_list <- segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
                 rss_init <- scratch "rss_init" (elemType res_tp) [ry, rx]
                 css <- index "redomap_thd" redomap_res [ltid_y, ltid_x]
-                ii <- letExp "ii" =<< toExp (LeafExp iii int32 + LeafExp ltid_y int32 * primFromSe ry)
-                jj <- letExp "jj" =<< toExp (LeafExp jjj int32 + LeafExp ltid_x int32 * primFromSe rx)
+                ii <- letExp "ii" =<< toExp (le32 iii + le32 ltid_y * pe32 ry)
+                jj <- letExp "jj" =<< toExp (le32 jjj + le32 ltid_x * pe32 rx)
                 rss <- forLoop ry [rss_init] $ \i [rss_merge] -> do
                   rss' <- forLoop rx [rss_merge] $ \j [rss_merge'] -> do
                     c <- index "redomap_elm" css [i, j]
                     cpy_stm <- mkLetNamesM [patElemName redomap_orig_res] $ BasicOp $ SubExp $ Var c
                     addStm cpy_stm
-                    letBindNames [gtid_y] =<< toExp (LeafExp ii int32 + LeafExp i int32)
-                    letBindNames [gtid_x] =<< toExp (LeafExp jj int32 + LeafExp j int32)
+                    letBindNames [gtid_y] =<< toExp (le32 ii + le32 i)
+                    letBindNames [gtid_x] =<< toExp (le32 jj + le32 j)
 
                     res_el <- letSubExp "res_elem" =<<
-                                eIf (toExp $ LeafExp gtid_y int32 .<. primFromSe height_A .&&.
-                                             LeafExp gtid_x int32 .<. primFromSe width_B
+                                eIf (toExp $ le32 gtid_y .<. pe32 height_A .&&.
+                                             le32 gtid_x .<. pe32 width_B
                                     )
                                     (do addStms code2'
                                         resultBodyM [Var res_nm])
@@ -394,9 +387,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
       return $ Just (host_stms, new_kernel)
 
 mmBlkRegTiling _ = return Nothing
-
-primFromSe :: SubExp -> PrimExp VName
-primFromSe = primExpFromSubExp int32
 
 ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int32 Unsafe) x y
