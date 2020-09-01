@@ -822,7 +822,7 @@ defCompileBasicOp _ (Assert e msg loc) = do
     uncurry warn loc "Safety check required at run-time."
 defCompileBasicOp (Pattern _ [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-    copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . isInt32 . toExp' int32) idxs
+    copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt32Exp) idxs
 defCompileBasicOp _ Index {} =
   return ()
 defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
@@ -1293,9 +1293,9 @@ copyArrayDWIM
           Imp.index srcmem srcoffset bt srcspace vol
     | otherwise = do
       let destslice' =
-            fullSliceNum (map (isInt32 . toExp' int32) destshape) destslice
+            fullSliceNum (map toInt32Exp destshape) destslice
           srcslice' =
-            fullSliceNum (map (isInt32 . toExp' int32) srcshape) srcslice
+            fullSliceNum (map toInt32Exp srcshape) srcslice
           destrank = length $ sliceDims destslice'
           srcrank = length $ sliceDims srcslice'
       if destrank /= srcrank
