@@ -1,26 +1,22 @@
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
+
 -- | This module defines a translation from imperative code with
 -- kernels to imperative code with OpenCL calls.
 module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
-  ( kernelsToOpenCL
-  , kernelsToCUDA
+  ( kernelsToOpenCL,
+    kernelsToCUDA,
   )
-  where
+where
 
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Identity
 import Data.FileEmbed
+import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
-import qualified Data.Map.Strict as M
-
-import qualified Language.C.Syntax as C
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Quote.CUDA as CUDAC
-
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
@@ -32,91 +28,105 @@ import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (prettyOneLine)
+import qualified Language.C.Quote.CUDA as CUDAC
+import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Syntax as C
 
 kernelsToCUDA, kernelsToOpenCL :: ImpKernels.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateKernels TargetCUDA
 kernelsToOpenCL = translateKernels TargetOpenCL
 
 -- | Translate a kernels-program to an OpenCL-program.
-translateKernels :: KernelTarget
-                 -> ImpKernels.Program
-                 -> ImpOpenCL.Program
+translateKernels ::
+  KernelTarget ->
+  ImpKernels.Program ->
+  ImpOpenCL.Program
 translateKernels target prog =
-  let (prog',
-       ToOpenCL kernels device_funs used_types sizes failures) =
+  let ( prog',
+        ToOpenCL kernels device_funs used_types sizes failures
+        ) =
+          (`runState` initialOpenCL) . (`runReaderT` defFuns prog) $ do
+            let ImpKernels.Definitions
+                  (ImpKernels.Constants ps consts)
+                  (ImpKernels.Functions funs) = prog
+            consts' <- traverse (onHostOp target) consts
+            funs' <- forM funs $ \(fname, fun) ->
+              (fname,) <$> traverse (onHostOp target) fun
 
-        (`runState` initialOpenCL) . (`runReaderT` defFuns prog) $ do
-          let ImpKernels.Definitions
-                (ImpKernels.Constants ps consts)
-                (ImpKernels.Functions funs) = prog
-          consts' <- traverse (onHostOp target) consts
-          funs' <- forM funs $ \(fname, fun) ->
-            (fname,) <$> traverse (onHostOp target) fun
-
-          return $ ImpOpenCL.Definitions
-            (ImpOpenCL.Constants ps consts')
-            (ImpOpenCL.Functions funs')
+            return $
+              ImpOpenCL.Definitions
+                (ImpOpenCL.Constants ps consts')
+                (ImpOpenCL.Functions funs')
 
       (device_prototypes, device_defs) = unzip $ M.elems device_funs
       kernels' = M.map fst kernels
       opencl_code = openClCode $ map snd $ M.elems kernels
 
       opencl_prelude =
-        unlines [pretty $ genPrelude target used_types,
-                 unlines $ map pretty device_prototypes,
-                 unlines $ map pretty device_defs]
-
-  in ImpOpenCL.Program opencl_code opencl_prelude kernels'
-     (S.toList used_types) (cleanSizes sizes) failures prog'
-
-  where genPrelude TargetOpenCL = genOpenClPrelude
-        genPrelude TargetCUDA = const genCUDAPrelude
+        unlines
+          [ pretty $ genPrelude target used_types,
+            unlines $ map pretty device_prototypes,
+            unlines $ map pretty device_defs
+          ]
+   in ImpOpenCL.Program
+        opencl_code
+        opencl_prelude
+        kernels'
+        (S.toList used_types)
+        (cleanSizes sizes)
+        failures
+        prog'
+  where
+    genPrelude TargetOpenCL = genOpenClPrelude
+    genPrelude TargetCUDA = const genCUDAPrelude
 
 -- | Due to simplifications after kernel extraction, some threshold
 -- parameters may contain KernelPaths that reference threshold
 -- parameters that no longer exist.  We remove these here.
 cleanSizes :: M.Map Name SizeClass -> M.Map Name SizeClass
 cleanSizes m = M.map clean m
-  where known = M.keys m
-        clean (SizeThreshold path def) =
-          SizeThreshold (filter ((`elem` known) . fst) path) def
-        clean s = s
+  where
+    known = M.keys m
+    clean (SizeThreshold path def) =
+      SizeThreshold (filter ((`elem` known) . fst) path) def
+    clean s = s
 
-pointerQuals ::  Monad m => String -> m [C.TypeQual]
-pointerQuals "global"     = return [C.ctyquals|__global|]
-pointerQuals "local"      = return [C.ctyquals|__local|]
-pointerQuals "private"    = return [C.ctyquals|__private|]
-pointerQuals "constant"   = return [C.ctyquals|__constant|]
+pointerQuals :: Monad m => String -> m [C.TypeQual]
+pointerQuals "global" = return [C.ctyquals|__global|]
+pointerQuals "local" = return [C.ctyquals|__local|]
+pointerQuals "private" = return [C.ctyquals|__private|]
+pointerQuals "constant" = return [C.ctyquals|__constant|]
 pointerQuals "write_only" = return [C.ctyquals|__write_only|]
-pointerQuals "read_only"  = return [C.ctyquals|__read_only|]
-pointerQuals "kernel"     = return [C.ctyquals|__kernel|]
-pointerQuals s            = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
+pointerQuals "read_only" = return [C.ctyquals|__read_only|]
+pointerQuals "kernel" = return [C.ctyquals|__kernel|]
+pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-workgroup size in bytes.
 type LocalMemoryUse = (VName, Count Bytes Exp)
 
-data KernelState =
-  KernelState { kernelLocalMemory :: [LocalMemoryUse]
-              , kernelFailures :: [FailureMsg]
-              , kernelNextSync :: Int
-              , kernelSyncPending :: Bool
-                -- ^ Has a potential failure occurred sine the last
-                -- ErrorSync?
-              , kernelHasBarriers :: Bool
-              }
+data KernelState = KernelState
+  { kernelLocalMemory :: [LocalMemoryUse],
+    kernelFailures :: [FailureMsg],
+    kernelNextSync :: Int,
+    -- | Has a potential failure occurred sine the last
+    -- ErrorSync?
+    kernelSyncPending :: Bool,
+    kernelHasBarriers :: Bool
+  }
 
 newKernelState :: [FailureMsg] -> KernelState
 newKernelState failures = KernelState mempty failures 0 False False
 
 errorLabel :: KernelState -> String
-errorLabel = ("error_"++) . show . kernelNextSync
+errorLabel = ("error_" ++) . show . kernelNextSync
 
-data ToOpenCL = ToOpenCL { clKernels :: M.Map KernelName (KernelSafety, C.Func)
-                         , clDevFuns :: M.Map Name (C.Definition, C.Func)
-                         , clUsedTypes :: S.Set PrimType
-                         , clSizes :: M.Map Name SizeClass
-                         , clFailures :: [FailureMsg]
-                         }
+data ToOpenCL = ToOpenCL
+  { clKernels :: M.Map KernelName (KernelSafety, C.Func),
+    clDevFuns :: M.Map Name (C.Definition, C.Func),
+    clUsedTypes :: S.Set PrimType,
+    clSizes :: M.Map Name SizeClass,
+    clFailures :: [FailureMsg]
+  }
 
 initialOpenCL :: ToOpenCL
 initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
@@ -130,7 +140,7 @@ type OnKernelM = ReaderT AllFunctions (State ToOpenCL)
 
 addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =
-  modify $ \s -> s { clSizes = M.insert key sclass $ clSizes s }
+  modify $ \s -> s {clSizes = M.insert key sclass $ clSizes s}
 
 onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
 onHostOp target (CallKernel k) = onKernel target k
@@ -143,12 +153,17 @@ onHostOp _ (ImpKernels.CmpSizeLe v key size_class x) = do
 onHostOp _ (ImpKernels.GetSizeMax v size_class) =
   return $ ImpOpenCL.GetSizeMax v size_class
 
-genGPUCode :: OpsMode -> KernelCode -> [FailureMsg]
-           -> GC.CompilerM KernelOp KernelState a
-           -> (a, GC.CompilerState KernelState)
+genGPUCode ::
+  OpsMode ->
+  KernelCode ->
+  [FailureMsg] ->
+  GC.CompilerM KernelOp KernelState a ->
+  (a, GC.CompilerState KernelState)
 genGPUCode mode body failures =
-  GC.runCompilerM (inKernelOperations mode body)
-  blankNameSource (newKernelState failures)
+  GC.runCompilerM
+    (inKernelOperations mode body)
+    blankNameSource
+    (newKernelState failures)
 
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
@@ -164,30 +179,32 @@ generateDeviceFun fname host_func = do
   failures <- gets clFailures
 
   let params =
-        [[C.cparam|__global int *global_failure|],
-         [C.cparam|__global int *global_failure_args|]]
+        [ [C.cparam|__global int *global_failure|],
+          [C.cparam|__global int *global_failure_args|]
+        ]
       (func, cstate) =
         genGPUCode FunMode (functionBody device_func) failures $
-        GC.compileFun mempty params (fname, device_func)
+          GC.compileFun mempty params (fname, device_func)
       kstate = GC.compUserState cstate
 
-  modify $ \s -> s
-           { clUsedTypes = typesInCode (functionBody device_func) <> clUsedTypes s
-           , clDevFuns = M.insert fname func $ clDevFuns s
-           , clFailures = kernelFailures kstate
-           }
+  modify $ \s ->
+    s
+      { clUsedTypes = typesInCode (functionBody device_func) <> clUsedTypes s,
+        clDevFuns = M.insert fname func $ clDevFuns s,
+        clFailures = kernelFailures kstate
+      }
 
   -- Important to do this after the 'modify' call, so we propagate the
   -- right clFailures.
   void $ ensureDeviceFuns $ functionBody device_func
+  where
+    toDevice :: HostOp -> KernelOp
+    toDevice _ = bad
 
-  where toDevice :: HostOp -> KernelOp
-        toDevice _ = bad
+    memParam MemParam {} = True
+    memParam ScalarParam {} = False
 
-        memParam MemParam{} = True
-        memParam ScalarParam{} = False
-
-        bad = compilerLimitationS "Cannot generate GPU functions that use arrays."
+    bad = compilerLimitationS "Cannot generate GPU functions that use arrays."
 
 -- Ensure that this device function is available, but don't regenerate
 -- it if it already exists.
@@ -199,15 +216,16 @@ ensureDeviceFun fname host_func = do
 ensureDeviceFuns :: ImpKernels.KernelCode -> OnKernelM [Name]
 ensureDeviceFuns code = do
   let called = calledFuncs code
-  fmap catMaybes $ forM (S.toList called) $ \fname -> do
-    def <- asks $ lookupFunction fname
-    case def of
-      Just func -> do ensureDeviceFun fname func
-                      return $ Just fname
-      Nothing -> return Nothing
+  fmap catMaybes $
+    forM (S.toList called) $ \fname -> do
+      def <- asks $ lookupFunction fname
+      case def of
+        Just func -> do
+          ensureDeviceFun fname func
+          return $ Just fname
+        Nothing -> return Nothing
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
-
 onKernel target kernel = do
   called <- ensureDeviceFuns $ kernelBody kernel
 
@@ -217,15 +235,15 @@ onKernel target kernel = do
 
   let (kernel_body, cstate) =
         genGPUCode KernelMode (kernelBody kernel) failures $
-        GC.blockScope $ GC.compileCode $ kernelBody kernel
+          GC.blockScope $ GC.compileCode $ kernelBody kernel
       kstate = GC.compUserState cstate
 
       use_params = mapMaybe useAsParam $ kernelUses kernel
 
       (local_memory_args, local_memory_params, local_memory_init) =
         unzip3 $
-        flip evalState (blankNameSource :: VNameSource) $
-        mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
+          flip evalState (blankNameSource :: VNameSource) $
+            mapM (prepareLocalMemory target) $ kernelLocalMemory kstate
 
       -- CUDA has very strict restrictions on the number of blocks
       -- permitted along the 'y' and 'z' dimensions of the grid
@@ -239,36 +257,45 @@ onKernel target kernel = do
       -- added automatically in CCUDA.hs.
       (perm_params, block_dim_init) =
         case (target, num_groups) of
-          (TargetCUDA, [_, _, _]) -> ([[C.cparam|const int block_dim0|],
-                                       [C.cparam|const int block_dim1|],
-                                       [C.cparam|const int block_dim2|]],
-                                      mempty)
-          _ -> (mempty,
-                [[C.citem|const int block_dim0 = 0;|],
-                 [C.citem|const int block_dim1 = 1;|],
-                 [C.citem|const int block_dim2 = 2;|]])
+          (TargetCUDA, [_, _, _]) ->
+            ( [ [C.cparam|const int block_dim0|],
+                [C.cparam|const int block_dim1|],
+                [C.cparam|const int block_dim2|]
+              ],
+              mempty
+            )
+          _ ->
+            ( mempty,
+              [ [C.citem|const int block_dim0 = 0;|],
+                [C.citem|const int block_dim1 = 1;|],
+                [C.citem|const int block_dim2 = 2;|]
+              ]
+            )
 
       (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
 
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
         | not $ null called =
-            (SafetyFull, [])
-
+          (SafetyFull, [])
         | length (kernelFailures kstate) == length failures =
-            if kernelFailureTolerant kernel
+          if kernelFailureTolerant kernel
             then (SafetyNone, [])
             else -- No possible failures in this kernel, so if we make
-                 -- it past an initial check, then we are good to go.
-                 (SafetyCheap,
-                  [C.citems|if (*global_failure >= 0) { return; }|])
+            -- it past an initial check, then we are good to go.
 
+              ( SafetyCheap,
+                [C.citems|if (*global_failure >= 0) { return; }|]
+              )
         | otherwise =
-            if not (kernelHasBarriers kstate)
-            then (SafetyFull,
-                  [C.citems|if (*global_failure >= 0) { return; }|])
-            else (SafetyFull,
-                  [C.citems|
+          if not (kernelHasBarriers kstate)
+            then
+              ( SafetyFull,
+                [C.citems|if (*global_failure >= 0) { return; }|]
+              )
+            else
+              ( SafetyFull,
+                [C.citems|
                      volatile __local bool local_failure;
                      if (failure_is_an_option) {
                        int failed = *global_failure >= 0;
@@ -279,17 +306,20 @@ onKernel target kernel = do
                      // All threads write this value - it looks like CUDA has a compiler bug otherwise.
                      local_failure = false;
                      barrier(CLK_LOCAL_MEM_FENCE);
-                  |])
+                  |]
+              )
 
       failure_params =
-        [[C.cparam|__global int *global_failure|],
-         [C.cparam|int failure_is_an_option|],
-         [C.cparam|__global int *global_failure_args|]]
+        [ [C.cparam|__global int *global_failure|],
+          [C.cparam|int failure_is_an_option|],
+          [C.cparam|__global int *global_failure_args|]
+        ]
 
-      params = perm_params ++
-               take (numFailureParams safety) failure_params ++
-               catMaybes local_memory_params ++
-               use_params
+      params =
+        perm_params
+          ++ take (numFailureParams safety) failure_params
+          ++ catMaybes local_memory_params
+          ++ use_params
 
       kernel_fun =
         [C.cfun|__kernel void $id:name ($params:params) {
@@ -303,62 +333,75 @@ onKernel target kernel = do
 
                   $items:const_undefs
                 }|]
-  modify $ \s -> s
-    { clKernels = M.insert name (safety, kernel_fun) $ clKernels s
-    , clUsedTypes = typesInKernel kernel <> clUsedTypes s
-    , clFailures = kernelFailures kstate
-    }
+  modify $ \s ->
+    s
+      { clKernels = M.insert name (safety, kernel_fun) $ clKernels s,
+        clUsedTypes = typesInKernel kernel <> clUsedTypes s,
+        clFailures = kernelFailures kstate
+      }
 
   -- The argument corresponding to the global_failure parameters is
   -- added automatically later.
-  let args = catMaybes local_memory_args ++
-             kernelArgs kernel
+  let args =
+        catMaybes local_memory_args
+          ++ kernelArgs kernel
 
   return $ LaunchKernel safety name args num_groups group_size
-  where name = kernelName kernel
-        num_groups = kernelNumGroups kernel
-        group_size = kernelGroupSize kernel
+  where
+    name = kernelName kernel
+    num_groups = kernelNumGroups kernel
+    group_size = kernelGroupSize kernel
 
-        prepareLocalMemory TargetOpenCL (mem, size) = do
-          mem_aligned <- newVName $ baseString mem ++ "_aligned"
-          return (Just $ SharedMemoryKArg size,
-                  Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-                  [C.citem|__local volatile char* restrict $id:mem = (__local volatile char*)$id:mem_aligned;|])
-        prepareLocalMemory TargetCUDA (mem, size) = do
-          param <- newVName $ baseString mem ++ "_offset"
-          return (Just $ SharedMemoryKArg size,
-                  Just [C.cparam|uint $id:param|],
-                  [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|])
+    prepareLocalMemory TargetOpenCL (mem, size) = do
+      mem_aligned <- newVName $ baseString mem ++ "_aligned"
+      return
+        ( Just $ SharedMemoryKArg size,
+          Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
+          [C.citem|__local volatile char* restrict $id:mem = (__local volatile char*)$id:mem_aligned;|]
+        )
+    prepareLocalMemory TargetCUDA (mem, size) = do
+      param <- newVName $ baseString mem ++ "_offset"
+      return
+        ( Just $ SharedMemoryKArg size,
+          Just [C.cparam|uint $id:param|],
+          [C.citem|volatile char *$id:mem = &shared_mem[$id:param];|]
+        )
 
 useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
   let ctp = case bt of
         -- OpenCL does not permit bool as a kernel parameter type.
         Bool -> [C.cty|unsigned char|]
-        _    -> GC.primTypeToCType bt
-  in Just [C.cparam|$ty:ctp $id:name|]
+        _ -> GC.primTypeToCType bt
+   in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name) =
   Just [C.cparam|__global unsigned char *$id:name|]
-useAsParam ConstUse{} =
+useAsParam ConstUse {} =
   Nothing
 
 -- Constants are #defined as macros.  Since a constant name in one
 -- kernel might potentially (although unlikely) also be used for
 -- something else in another kernel, we #undef them after the kernel.
 constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
-constDef (ConstUse v e) = Just ([C.citem|$escstm:def|],
-                                [C.citem|$escstm:undef|])
-  where e' = compilePrimExp e
-        def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
-        undef = "#undef " ++ pretty (C.toIdent v mempty)
+constDef (ConstUse v e) =
+  Just
+    ( [C.citem|$escstm:def|],
+      [C.citem|$escstm:undef|]
+    )
+  where
+    e' = compilePrimExp e
+    def = "#define " ++ pretty (C.toIdent v mempty) ++ " (" ++ prettyOneLine e' ++ ")"
+    undef = "#undef " ++ pretty (C.toIdent v mempty)
 constDef _ = Nothing
 
 openClCode :: [C.Func] -> String
 openClCode kernels =
   pretty [C.cunit|$edecls:funcs|]
-  where funcs =
-          [[C.cedecl|$func:kernel_func|] |
-           kernel_func <- kernels ]
+  where
+    funcs =
+      [ [C.cedecl|$func:kernel_func|]
+        | kernel_func <- kernels
+      ]
 
 atomicsDefs :: String
 atomicsDefs = $(embedStringFile "rts/c/atomics.h")
@@ -366,13 +409,13 @@ atomicsDefs = $(embedStringFile "rts/c/atomics.h")
 genOpenClPrelude :: S.Set PrimType -> [C.Definition]
 genOpenClPrelude ts =
   -- Clang-based OpenCL implementations need this for 'static' to work.
-  [ [C.cedecl|$esc:("#ifdef cl_clang_storage_class_specifiers")|]
-  , [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable")|]
-  , [C.cedecl|$esc:("#endif")|]
-  , [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]]
-  ++
-  [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
-  [C.cunit|
+  [ [C.cedecl|$esc:("#ifdef cl_clang_storage_class_specifiers")|],
+    [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable")|],
+    [C.cedecl|$esc:("#endif")|],
+    [C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable")|]
+  ]
+    ++ [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64]
+    ++ [C.cunit|
 /* Some OpenCL programs dislike empty progams, or programs with no kernels.
  * Declare a dummy kernel to ensure they remain our friends. */
 __kernel void dummy_kernel(__global unsigned char *dummy, int n)
@@ -405,19 +448,26 @@ $esc:("#endif")
 static inline void mem_fence_local() {
   mem_fence(CLK_LOCAL_MEM_FENCE);
 }
-|] ++
-  cIntOps ++ cFloat32Ops ++ cFloat32Funs ++
-  (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
-  ++ [[C.cedecl|$esc:atomicsDefs|]]
-  where uses_float64 = FloatType Float64 `S.member` ts
+|]
+    ++ cIntOps
+    ++ cFloat32Ops
+    ++ cFloat32Funs
+    ++ (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else [])
+    ++ [[C.cedecl|$esc:atomicsDefs|]]
+  where
+    uses_float64 = FloatType Float64 `S.member` ts
 
 genCUDAPrelude :: [C.Definition]
 genCUDAPrelude =
   cudafy ++ ops
-  where ops = cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
-              ++ cFloat64Funs ++ cFloatConvOps
-              ++ [[C.cedecl|$esc:atomicsDefs|]]
-        cudafy = [CUDAC.cunit|
+  where
+    ops =
+      cIntOps ++ cFloat32Ops ++ cFloat32Funs ++ cFloat64Ops
+        ++ cFloat64Funs
+        ++ cFloatConvOps
+        ++ [[C.cedecl|$esc:atomicsDefs|]]
+    cudafy =
+      [CUDAC.cunit|
 $esc:("#define FUTHARK_CUDA")
 
 typedef char int8_t;
@@ -523,14 +573,16 @@ extern volatile __shared__ char shared_mem[];
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
-  where compileKernelConst (SizeConst key) =
-          return [C.cexp|$id:(zEncodeString (pretty key))|]
+  where
+    compileKernelConst (SizeConst key) =
+      return [C.cexp|$id:(zEncodeString (pretty key))|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
-  where useToArg (MemoryUse mem)  = Just $ MemKArg mem
-        useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
-        useToArg ConstUse{}       = Nothing
+  where
+    useToArg (MemoryUse mem) = Just $ MemKArg mem
+    useToArg (ScalarUse v bt) = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+    useToArg ConstUse {} = Nothing
 
 nextErrorLabel :: GC.CompilerM KernelOp KernelState String
 nextErrorLabel =
@@ -538,202 +590,204 @@ nextErrorLabel =
 
 incErrorLabel :: GC.CompilerM KernelOp KernelState ()
 incErrorLabel =
-  GC.modifyUserState $ \s -> s { kernelNextSync = kernelNextSync s + 1 }
+  GC.modifyUserState $ \s -> s {kernelNextSync = kernelNextSync s + 1}
 
 pendingError :: Bool -> GC.CompilerM KernelOp KernelState ()
 pendingError b =
-  GC.modifyUserState $ \s -> s { kernelSyncPending = b }
+  GC.modifyUserState $ \s -> s {kernelSyncPending = b}
 
 hasCommunication :: ImpKernels.KernelCode -> Bool
 hasCommunication = any communicates
-  where communicates ErrorSync{} = True
-        communicates Barrier{} = True
-        communicates _ = False
+  where
+    communicates ErrorSync {} = True
+    communicates Barrier {} = True
+    communicates _ = False
 
 -- Whether we are generating code for a kernel or a device function.
 -- This has minor effects, such as exactly how failures are
 -- propagated.
 data OpsMode = KernelMode | FunMode deriving (Eq)
 
-inKernelOperations :: OpsMode -> ImpKernels.KernelCode
-                   -> GC.Operations KernelOp KernelState
+inKernelOperations ::
+  OpsMode ->
+  ImpKernels.KernelCode ->
+  GC.Operations KernelOp KernelState
 inKernelOperations mode body =
   GC.Operations
-  { GC.opsCompiler = kernelOps
-  , GC.opsMemoryType = kernelMemoryType
-  , GC.opsWriteScalar = kernelWriteScalar
-  , GC.opsReadScalar = kernelReadScalar
-  , GC.opsAllocate = cannotAllocate
-  , GC.opsDeallocate = cannotDeallocate
-  , GC.opsCopy = copyInKernel
-  , GC.opsStaticArray = noStaticArrays
-  , GC.opsFatMemory = False
-  , GC.opsError = errorInKernel
-  , GC.opsCall = callInKernel
-  }
-  where has_communication = hasCommunication body
+    { GC.opsCompiler = kernelOps,
+      GC.opsMemoryType = kernelMemoryType,
+      GC.opsWriteScalar = kernelWriteScalar,
+      GC.opsReadScalar = kernelReadScalar,
+      GC.opsAllocate = cannotAllocate,
+      GC.opsDeallocate = cannotDeallocate,
+      GC.opsCopy = copyInKernel,
+      GC.opsStaticArray = noStaticArrays,
+      GC.opsFatMemory = False,
+      GC.opsError = errorInKernel,
+      GC.opsCall = callInKernel
+    }
+  where
+    has_communication = hasCommunication body
 
-        fence FenceLocal = [C.cexp|CLK_LOCAL_MEM_FENCE|]
-        fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE|]
+    fence FenceLocal = [C.cexp|CLK_LOCAL_MEM_FENCE|]
+    fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE|]
 
-        kernelOps :: GC.OpCompiler KernelOp KernelState
-        kernelOps (GetGroupId v i) =
-          GC.stm [C.cstm|$id:v = get_group_id($int:i);|]
-        kernelOps (GetLocalId v i) =
-          GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
-        kernelOps (GetLocalSize v i) =
-          GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-        kernelOps (GetGlobalId v i) =
-          GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-        kernelOps (GetGlobalSize v i) =
-          GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
-        kernelOps (GetLockstepWidth v) =
-          GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-        kernelOps (Barrier f) = do
-          GC.stm [C.cstm|barrier($exp:(fence f));|]
-          GC.modifyUserState $ \s -> s { kernelHasBarriers = True }
-        kernelOps (MemFence FenceLocal) =
-          GC.stm [C.cstm|mem_fence_local();|]
-        kernelOps (MemFence FenceGlobal) =
-          GC.stm [C.cstm|mem_fence_global();|]
-        kernelOps (LocalAlloc name size) = do
-          name' <- newVName $ pretty name ++ "_backing"
-          GC.modifyUserState $ \s ->
-            s { kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s }
-          GC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
-        kernelOps (ErrorSync f) = do
-          label <- nextErrorLabel
-          pending <- kernelSyncPending <$> GC.getUserState
-          when pending $ do
-            pendingError False
-            GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
-            GC.stm [C.cstm|if (local_failure) { return; }|]
-          GC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
-          GC.modifyUserState $ \s -> s { kernelHasBarriers = True }
-          incErrorLabel
-        kernelOps (Atomic space aop) = atomicOps space aop
+    kernelOps :: GC.OpCompiler KernelOp KernelState
+    kernelOps (GetGroupId v i) =
+      GC.stm [C.cstm|$id:v = get_group_id($int:i);|]
+    kernelOps (GetLocalId v i) =
+      GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
+    kernelOps (GetLocalSize v i) =
+      GC.stm [C.cstm|$id:v = get_local_size($int:i);|]
+    kernelOps (GetGlobalId v i) =
+      GC.stm [C.cstm|$id:v = get_global_id($int:i);|]
+    kernelOps (GetGlobalSize v i) =
+      GC.stm [C.cstm|$id:v = get_global_size($int:i);|]
+    kernelOps (GetLockstepWidth v) =
+      GC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
+    kernelOps (Barrier f) = do
+      GC.stm [C.cstm|barrier($exp:(fence f));|]
+      GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
+    kernelOps (MemFence FenceLocal) =
+      GC.stm [C.cstm|mem_fence_local();|]
+    kernelOps (MemFence FenceGlobal) =
+      GC.stm [C.cstm|mem_fence_global();|]
+    kernelOps (LocalAlloc name size) = do
+      name' <- newVName $ pretty name ++ "_backing"
+      GC.modifyUserState $ \s ->
+        s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
+      GC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
+    kernelOps (ErrorSync f) = do
+      label <- nextErrorLabel
+      pending <- kernelSyncPending <$> GC.getUserState
+      when pending $ do
+        pendingError False
+        GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
+        GC.stm [C.cstm|if (local_failure) { return; }|]
+      GC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|] -- intentional
+      GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
+      incErrorLabel
+    kernelOps (Atomic space aop) = atomicOps space aop
 
-        atomicCast s t = do
-          let volatile = [C.ctyquals|volatile|]
-          quals <- case s of Space sid    -> pointerQuals sid
-                             _            -> pointerQuals "global"
-          return [C.cty|$tyquals:(volatile++quals) $ty:t|]
+    atomicCast s t = do
+      let volatile = [C.ctyquals|volatile|]
+      quals <- case s of
+        Space sid -> pointerQuals sid
+        _ -> pointerQuals "global"
+      return [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
-        atomicSpace (Space sid) = sid
-        atomicSpace _           = "global"
+    atomicSpace (Space sid) = sid
+    atomicSpace _ = "global"
 
-        doAtomic s t old arr ind val op ty = do
-          ind' <- GC.compileExp $ untyped $ unCount ind
-          val' <- GC.compileExp val
-          cast <- atomicCast s ty
-          GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
-          where op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
+    doAtomic s t old arr ind val op ty = do
+      ind' <- GC.compileExp $ untyped $ unCount ind
+      val' <- GC.compileExp val
+      cast <- atomicCast s ty
+      GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+      where
+        op' = op ++ "_" ++ pretty t ++ "_" ++ atomicSpace s
 
-        atomicOps s (AtomicAdd t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
+    atomicOps s (AtomicAdd t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
+    atomicOps s (AtomicFAdd t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicSMax t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
+    atomicOps s (AtomicSMin t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_smin" [C.cty|int|]
+    atomicOps s (AtomicUMax t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_umax" [C.cty|unsigned int|]
+    atomicOps s (AtomicUMin t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_umin" [C.cty|unsigned int|]
+    atomicOps s (AtomicAnd t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_and" [C.cty|int|]
+    atomicOps s (AtomicOr t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_or" [C.cty|int|]
+    atomicOps s (AtomicXor t old arr ind val) =
+      doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
+    atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
+      ind' <- GC.compileExp $ untyped $ unCount ind
+      cmp' <- GC.compileExp cmp
+      val' <- GC.compileExp val
+      cast <- atomicCast s [C.cty|int|]
+      GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
+      where
+        op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
+    atomicOps s (AtomicXchg t old arr ind val) = do
+      ind' <- GC.compileExp $ untyped $ unCount ind
+      val' <- GC.compileExp val
+      cast <- atomicCast s [C.cty|int|]
+      GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
+      where
+        op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
 
-        atomicOps s (AtomicFAdd t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
+    cannotAllocate :: GC.Allocate KernelOp KernelState
+    cannotAllocate _ =
+      error "Cannot allocate memory in kernel"
 
-        atomicOps s (AtomicSMax t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
+    cannotDeallocate :: GC.Deallocate KernelOp KernelState
+    cannotDeallocate _ _ =
+      error "Cannot deallocate memory in kernel"
 
-        atomicOps s (AtomicSMin t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_smin" [C.cty|int|]
+    copyInKernel :: GC.Copy KernelOp KernelState
+    copyInKernel _ _ _ _ _ _ _ =
+      error "Cannot bulk copy in kernel."
 
-        atomicOps s (AtomicUMax t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_umax" [C.cty|unsigned int|]
+    noStaticArrays :: GC.StaticArray KernelOp KernelState
+    noStaticArrays _ _ _ _ =
+      error "Cannot create static array in kernel."
 
-        atomicOps s (AtomicUMin t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_umin" [C.cty|unsigned int|]
+    kernelMemoryType space = do
+      quals <- pointerQuals space
+      return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
-        atomicOps s (AtomicAnd t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_and" [C.cty|int|]
+    kernelWriteScalar =
+      GC.writeScalarPointerWithQuals pointerQuals
 
-        atomicOps s (AtomicOr t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_or" [C.cty|int|]
+    kernelReadScalar =
+      GC.readScalarPointerWithQuals pointerQuals
 
-        atomicOps s (AtomicXor t old arr ind val) =
-          doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
+    whatNext = do
+      label <- nextErrorLabel
+      pendingError True
+      return $
+        if has_communication
+          then [C.citems|local_failure = true; goto $id:label;|]
+          else
+            if mode == FunMode
+              then [C.citems|return 1;|]
+              else [C.citems|return;|]
 
-        atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
-          ind' <- GC.compileExp $ untyped $ unCount ind
-          cmp' <- GC.compileExp cmp
-          val' <- GC.compileExp val
-          cast <- atomicCast s [C.cty|int|]
-          GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:cmp', $exp:val');|]
-          where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
+    callInKernel dests fname args
+      | isBuiltInFunction fname =
+        GC.opsCall GC.defaultOperations dests fname args
+      | otherwise = do
+        let out_args = [[C.cexp|&$id:d|] | d <- dests]
+            args' =
+              [C.cexp|global_failure|] :
+              [C.cexp|global_failure_args|] :
+              out_args ++ args
 
-        atomicOps s (AtomicXchg t old arr ind val) = do
-          ind' <- GC.compileExp $ untyped $ unCount ind
-          val' <- GC.compileExp val
-          cast <- atomicCast s [C.cty|int|]
-          GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
-          where op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
+        what_next <- whatNext
 
-        cannotAllocate :: GC.Allocate KernelOp KernelState
-        cannotAllocate _ =
-          error "Cannot allocate memory in kernel"
+        GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
 
-        cannotDeallocate :: GC.Deallocate KernelOp KernelState
-        cannotDeallocate _ _ =
-          error "Cannot deallocate memory in kernel"
+    errorInKernel msg@(ErrorMsg parts) backtrace = do
+      n <- length . kernelFailures <$> GC.getUserState
+      GC.modifyUserState $ \s ->
+        s {kernelFailures = kernelFailures s ++ [FailureMsg msg backtrace]}
+      let setArgs _ [] = return []
+          setArgs i (ErrorString {} : parts') = setArgs i parts'
+          setArgs i (ErrorInt32 x : parts') = do
+            x' <- GC.compileExp x
+            stms <- setArgs (i + 1) parts'
+            return $ [C.cstm|global_failure_args[$int:i] = $exp:x';|] : stms
+      argstms <- setArgs (0 :: Int) parts
 
-        copyInKernel :: GC.Copy KernelOp KernelState
-        copyInKernel _ _ _ _ _ _ _ =
-          error "Cannot bulk copy in kernel."
+      what_next <- whatNext
 
-        noStaticArrays :: GC.StaticArray KernelOp KernelState
-        noStaticArrays _ _ _ _ =
-          error "Cannot create static array in kernel."
-
-        kernelMemoryType space = do
-          quals <- pointerQuals space
-          return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
-
-        kernelWriteScalar =
-          GC.writeScalarPointerWithQuals pointerQuals
-
-        kernelReadScalar =
-          GC.readScalarPointerWithQuals pointerQuals
-
-        whatNext = do
-           label <- nextErrorLabel
-           pendingError True
-           return $ if has_communication
-                    then [C.citems|local_failure = true; goto $id:label;|]
-                    else if mode == FunMode
-                         then [C.citems|return 1;|]
-                         else [C.citems|return;|]
-
-        callInKernel dests fname args
-          | isBuiltInFunction fname =
-              GC.opsCall GC.defaultOperations dests fname args
-
-          | otherwise = do
-              let out_args = [ [C.cexp|&$id:d|] | d <- dests ]
-                  args' = [C.cexp|global_failure|] : [C.cexp|global_failure_args|] :
-                          out_args ++ args
-
-              what_next <- whatNext
-
-              GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
-
-        errorInKernel msg@(ErrorMsg parts) backtrace = do
-          n <- length . kernelFailures <$> GC.getUserState
-          GC.modifyUserState $ \s ->
-            s { kernelFailures = kernelFailures s ++ [FailureMsg msg backtrace] }
-          let setArgs _ [] = return []
-              setArgs i (ErrorString{} : parts') = setArgs i parts'
-              setArgs i (ErrorInt32 x : parts') = do
-                x' <- GC.compileExp x
-                stms <- setArgs (i+1) parts'
-                return $ [C.cstm|global_failure_args[$int:i] = $exp:x';|] : stms
-          argstms <- setArgs (0::Int) parts
-
-          what_next <- whatNext
-
-          GC.stm [C.cstm|{ if (atomic_cmpxchg_i32_global(global_failure, -1, $int:n) == -1)
+      GC.stm
+        [C.cstm|{ if (atomic_cmpxchg_i32_global(global_failure, -1, $int:n) == -1)
                                  { $stms:argstms; }
                                  $items:what_next
                                }|]
@@ -748,36 +802,46 @@ typesInCode Skip = mempty
 typesInCode (c1 :>>: c2) = typesInCode c1 <> typesInCode c2
 typesInCode (For _ e c) = typesInExp e <> typesInCode c
 typesInCode (While (TPrimExp e) c) = typesInExp e <> typesInCode c
-typesInCode DeclareMem{} = mempty
+typesInCode DeclareMem {} = mempty
 typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
-typesInCode Free{} = mempty
-typesInCode (Copy _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _
-             (Count (TPrimExp e3))) =
-  typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode Free {} = mempty
+typesInCode
+  ( Copy
+      _
+      (Count (TPrimExp e1))
+      _
+      _
+      (Count (TPrimExp e2))
+      _
+      (Count (TPrimExp e3))
+    ) =
+    typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e
-typesInCode SetMem{} = mempty
+typesInCode SetMem {} = mempty
 typesInCode (Call _ _ es) = mconcat $ map typesInArg es
-  where typesInArg MemArg{} = mempty
-        typesInArg (ExpArg e) = typesInExp e
+  where
+    typesInArg MemArg {} = mempty
+    typesInArg (ExpArg e) = typesInExp e
 typesInCode (If (TPrimExp e) c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
-typesInCode Op{} = mempty
+typesInCode Op {} = mempty
 
 typesInExp :: Exp -> S.Set PrimType
 typesInExp (ValueExp v) = S.singleton $ primValueType v
 typesInExp (BinOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
 typesInExp (CmpOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
 typesInExp (ConvOpExp op e) = S.fromList [from, to] <> typesInExp e
-  where (from, to) = convOpType op
+  where
+    (from, to) = convOpType op
 typesInExp (UnOpExp _ e) = typesInExp e
 typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
 typesInExp (LeafExp (Index _ (Count (TPrimExp e)) t _ _) _) = S.singleton t <> typesInExp e
-typesInExp (LeafExp ScalarVar{} _) = mempty
+typesInExp (LeafExp ScalarVar {} _) = mempty
 typesInExp (LeafExp (SizeOf t) _) = S.singleton t

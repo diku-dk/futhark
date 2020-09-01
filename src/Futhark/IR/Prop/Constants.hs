@@ -1,12 +1,11 @@
 -- | Possibly convenient facilities for constructing constants.
 module Futhark.IR.Prop.Constants
-       (
-         IsValue (..)
-       , constant
-       , intConst
-       , floatConst
-       )
-       where
+  ( IsValue (..),
+    constant,
+    intConst,
+    floatConst,
+  )
+where
 
 import Futhark.IR.Syntax.Core
 

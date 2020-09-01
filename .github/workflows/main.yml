@@ -162,7 +162,7 @@ jobs:
         key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-style
 
     - name: Style check
-      run: nix-shell --pure --run "tools/style-check.sh src"
+      run: nix-shell --pure --run "tools/style-check.sh src unittests"
 
     - name: Unit tests
       run: |

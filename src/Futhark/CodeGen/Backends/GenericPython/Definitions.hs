@@ -1,11 +1,13 @@
 {-# LANGUAGE TemplateHaskell #-}
+
 module Futhark.CodeGen.Backends.GenericPython.Definitions
-  ( pyFunctions
-  , pyUtility
-  , pyValues
-  , pyPanic
-  , pyTuning
-  ) where
+  ( pyFunctions,
+    pyUtility,
+    pyValues,
+    pyPanic,
+    pyTuning,
+  )
+where
 
 import Data.FileEmbed
 

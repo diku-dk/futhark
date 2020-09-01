@@ -1,15 +1,16 @@
 {-# LANGUAGE DeriveLift #-}
+
 -- | This module provides facilities for generating unique names.
 module Futhark.FreshNames
-  ( VNameSource
-  , blankNameSource
-  , newNameSource
-  , newName
-  ) where
-
-import Language.Haskell.TH.Syntax (Lift)
+  ( VNameSource,
+    blankNameSource,
+    newNameSource,
+    newName,
+  )
+where
 
 import Language.Futhark.Core
+import Language.Haskell.TH.Syntax (Lift)
 
 -- | A name source is conceptually an infinite sequence of names with
 -- no repeating entries.  In practice, when asked for a name, the name
@@ -30,7 +31,8 @@ instance Monoid VNameSource where
 -- | Produce a fresh name, using the given name as a template.
 newName :: VNameSource -> VName -> (VName, VNameSource)
 newName (VNameSource i) k = i' `seq` (VName (baseName k) i, VNameSource i')
-  where i' = i+1
+  where
+    i' = i + 1
 
 -- | A blank name source.
 blankNameSource :: VNameSource

@@ -1,33 +1,34 @@
 {-# LANGUAGE FlexibleContexts #-}
+
 -- | Facilities for answering queries about a program, such as "what
 -- appears at this source location", or "where is this name bound".
 -- The intent is that this is used as a building block for IDE-like
 -- functionality.
 module Language.Futhark.Query
-  ( BoundTo(..)
-  , boundLoc
-  , AtPos(..)
-  , atPos
-  , Pos(..)
+  ( BoundTo (..),
+    boundLoc,
+    AtPos (..),
+    atPos,
+    Pos (..),
   )
-  where
+where
 
 import Control.Monad
 import Control.Monad.State
 import Data.List (find)
 import qualified Data.Map as M
-import qualified System.FilePath.Posix as Posix
-
-import Futhark.Util.Loc (Pos(..), Loc(..))
+import Futhark.Util.Loc (Loc (..), Pos (..))
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.Traversals
+import qualified System.FilePath.Posix as Posix
 
 -- | What a name is bound to.
-data BoundTo = BoundTerm StructType Loc
-             | BoundModule Loc
-             | BoundModuleType Loc
-             | BoundType Loc
+data BoundTo
+  = BoundTerm StructType Loc
+  | BoundModule Loc
+  | BoundModuleType Loc
+  | BoundType Loc
   deriving (Eq, Show)
 
 data Def = DefBound BoundTo | DefIndirect VName
@@ -52,8 +53,8 @@ patternDefs (RecordPattern fields _) =
   mconcat $ map (patternDefs . snd) fields
 patternDefs (PatternParens pat _) =
   patternDefs pat
-patternDefs Wildcard{} = mempty
-patternDefs PatternLit{} = mempty
+patternDefs Wildcard {} = mempty
+patternDefs PatternLit {} = mempty
 patternDefs (PatternAscription pat _ _) =
   patternDefs pat
 patternDefs (PatternConstr _ _ pats _) =
@@ -68,50 +69,54 @@ typeParamDefs (TypeParamType _ vn loc) =
 expDefs :: Exp -> Defs
 expDefs e =
   execState (astMap mapper e) extra
-  where mapper = ASTMapper { mapOnExp = onExp
-                           , mapOnName = pure
-                           , mapOnQualName = pure
-                           , mapOnStructType = pure
-                           , mapOnPatternType = pure
-                           }
-        onExp e' = do
-          modify (<>expDefs e')
-          return e'
+  where
+    mapper =
+      ASTMapper
+        { mapOnExp = onExp,
+          mapOnName = pure,
+          mapOnQualName = pure,
+          mapOnStructType = pure,
+          mapOnPatternType = pure
+        }
+    onExp e' = do
+      modify (<> expDefs e')
+      return e'
 
-        identDefs (Ident v (Info vt) vloc) =
-          M.singleton v $ DefBound $ BoundTerm (toStruct vt) $ locOf vloc
+    identDefs (Ident v (Info vt) vloc) =
+      M.singleton v $ DefBound $ BoundTerm (toStruct vt) $ locOf vloc
 
-        extra =
-          case e of
-            LetPat pat _ _ _ _ ->
-              patternDefs pat
-            Lambda params _ _ _ _ ->
-              mconcat (map patternDefs params)
-            LetFun name (tparams, params, _, Info ret, _) _ _ loc ->
-              let name_t = foldFunType (map patternStructType params) ret
-              in M.singleton name (DefBound $ BoundTerm name_t (locOf loc)) <>
-                 mconcat (map typeParamDefs tparams) <>
-                 mconcat (map patternDefs params)
-            LetWith v _ _ _ _ _ _ ->
-              identDefs v
-            DoLoop _ merge _ form _ _ _ ->
-              patternDefs merge <>
-              case form of
-                For i _ -> identDefs i
-                ForIn pat _ -> patternDefs pat
-                While{} -> mempty
-            _ ->
-              mempty
+    extra =
+      case e of
+        LetPat pat _ _ _ _ ->
+          patternDefs pat
+        Lambda params _ _ _ _ ->
+          mconcat (map patternDefs params)
+        LetFun name (tparams, params, _, Info ret, _) _ _ loc ->
+          let name_t = foldFunType (map patternStructType params) ret
+           in M.singleton name (DefBound $ BoundTerm name_t (locOf loc))
+                <> mconcat (map typeParamDefs tparams)
+                <> mconcat (map patternDefs params)
+        LetWith v _ _ _ _ _ _ ->
+          identDefs v
+        DoLoop _ merge _ form _ _ _ ->
+          patternDefs merge
+            <> case form of
+              For i _ -> identDefs i
+              ForIn pat _ -> patternDefs pat
+              While {} -> mempty
+        _ ->
+          mempty
 
 valBindDefs :: ValBind -> Defs
 valBindDefs vbind =
   M.insert (valBindName vbind) (DefBound $ BoundTerm vbind_t (locOf vbind)) $
-  mconcat (map typeParamDefs (valBindTypeParams vbind)) <>
-  mconcat (map patternDefs (valBindParams vbind)) <>
-  expDefs (valBindBody vbind)
-  where vbind_t =
-          foldFunType (map patternStructType (valBindParams vbind)) $
-          fst $ unInfo $ valBindRetType vbind
+    mconcat (map typeParamDefs (valBindTypeParams vbind))
+      <> mconcat (map patternDefs (valBindParams vbind))
+      <> expDefs (valBindBody vbind)
+  where
+    vbind_t =
+      foldFunType (map patternStructType (valBindParams vbind)) $
+        fst $ unInfo $ valBindRetType vbind
 
 typeBindDefs :: TypeBind -> Defs
 typeBindDefs tbind =
@@ -119,15 +124,15 @@ typeBindDefs tbind =
 
 modParamDefs :: ModParam -> Defs
 modParamDefs (ModParam p se _ loc) =
-  M.singleton p (DefBound $ BoundModule $ locOf loc) <>
-  sigExpDefs se
+  M.singleton p (DefBound $ BoundModule $ locOf loc)
+    <> sigExpDefs se
 
 modExpDefs :: ModExp -> Defs
-modExpDefs ModVar{} =
+modExpDefs ModVar {} =
   mempty
 modExpDefs (ModParens me _) =
   modExpDefs me
-modExpDefs ModImport{} =
+modExpDefs ModImport {} =
   mempty
 modExpDefs (ModDecs decs _) =
   mconcat $ map decDefs decs
@@ -140,26 +145,26 @@ modExpDefs (ModLambda p _ e _) =
 
 modBindDefs :: ModBind -> Defs
 modBindDefs mbind =
-  M.singleton (modName mbind) (DefBound $ BoundModule $ locOf mbind) <>
-  mconcat (map modParamDefs (modParams mbind)) <>
-  modExpDefs (modExp mbind) <>
-  case modSignature mbind of
-    Nothing -> mempty
-    Just (_, Info substs) ->
-      M.map DefIndirect substs
+  M.singleton (modName mbind) (DefBound $ BoundModule $ locOf mbind)
+    <> mconcat (map modParamDefs (modParams mbind))
+    <> modExpDefs (modExp mbind)
+    <> case modSignature mbind of
+      Nothing -> mempty
+      Just (_, Info substs) ->
+        M.map DefIndirect substs
 
 specDefs :: Spec -> Defs
 specDefs spec =
   case spec of
     ValSpec v tparams tdecl _ loc ->
       let vdef = DefBound $ BoundTerm (unInfo $ expandedType tdecl) (locOf loc)
-      in M.insert v vdef $ mconcat (map typeParamDefs tparams)
+       in M.insert v vdef $ mconcat (map typeParamDefs tparams)
     TypeAbbrSpec tbind -> typeBindDefs tbind
     TypeSpec _ v _ _ loc ->
       M.singleton v $ DefBound $ BoundType $ locOf loc
     ModSpec v se _ loc ->
-      M.singleton v (DefBound $ BoundModuleType $ locOf loc) <>
-      sigExpDefs se
+      M.singleton v (DefBound $ BoundModuleType $ locOf loc)
+        <> sigExpDefs se
     IncludeSpec se _ -> sigExpDefs se
 
 sigExpDefs :: SigExp -> Defs
@@ -173,8 +178,8 @@ sigExpDefs se =
 
 sigBindDefs :: SigBind -> Defs
 sigBindDefs sbind =
-  M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind) <>
-  sigExpDefs (sigExp sbind)
+  M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind)
+    <> sigExpDefs (sigExp sbind)
 
 decDefs :: Dec -> Defs
 decDefs (ValDec vbind) = valBindDefs vbind
@@ -183,7 +188,7 @@ decDefs (ModDec mbind) = modBindDefs mbind
 decDefs (SigDec mbind) = sigBindDefs mbind
 decDefs (OpenDec me _) = modExpDefs me
 decDefs (LocalDec dec _) = decDefs dec
-decDefs ImportDec{} = mempty
+decDefs ImportDec {} = mempty
 
 -- | All bindings of everything in the program.
 progDefs :: Prog -> Defs
@@ -191,9 +196,10 @@ progDefs = mconcat . map decDefs . progDecs
 
 allBindings :: Imports -> M.Map VName BoundTo
 allBindings imports = M.mapMaybe forward defs
-  where defs = mconcat $ map (progDefs . fileProg . snd) imports
-        forward (DefBound x) = Just x
-        forward (DefIndirect v) = forward =<< M.lookup v defs
+  where
+    defs = mconcat $ map (progDefs . fileProg . snd) imports
+    forward (DefBound x) = Just x
+    forward (DefIndirect v) = forward =<< M.lookup v defs
 
 data RawAtPos = RawAtName (QualName VName) Loc
 
@@ -223,12 +229,13 @@ atPosInTypeExp te pos =
       atPosInTypeExp e1 pos `mplus` atPosInTypeExp e2 pos
     TESum cs _ ->
       msum $ map (`atPosInTypeExp` pos) $ concatMap snd cs
-  where inArg (TypeArgExpDim dim _) = inDim dim
-        inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos
-        inDim (DimExpNamed qn loc) = do
-          guard $ loc `contains` pos
-          Just $ RawAtName qn $ locOf loc
-        inDim _ = Nothing
+  where
+    inArg (TypeArgExpDim dim _) = inDim dim
+    inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos
+    inDim (DimExpNamed qn loc) = do
+      guard $ loc `contains` pos
+      Just $ RawAtName qn $ locOf loc
+    inDim _ = Nothing
 
 atPosInPattern :: Pattern -> Pos -> Maybe RawAtPos
 atPosInPattern (Id vn _ loc) pos = do
@@ -244,8 +251,8 @@ atPosInPattern (PatternAscription pat tdecl _) pos =
   atPosInPattern pat pos `mplus` atPosInTypeExp (declaredType tdecl) pos
 atPosInPattern (PatternConstr _ _ pats _) pos =
   msum $ map (`atPosInPattern` pos) pats
-atPosInPattern PatternLit{} _ = Nothing
-atPosInPattern Wildcard{} _ = Nothing
+atPosInPattern PatternLit {} _ = Nothing
+atPosInPattern Wildcard {} _ = Nothing
 
 atPosInExp :: Exp -> Pos -> Maybe RawAtPos
 atPosInExp (Var qn _ loc) pos = do
@@ -253,28 +260,21 @@ atPosInExp (Var qn _ loc) pos = do
   Just $ RawAtName qn $ locOf loc
 atPosInExp (QualParens (qn, loc) _ _) pos
   | loc `contains` pos = Just $ RawAtName qn $ locOf loc
-
 -- All the value cases are TODO - we need another RawAtPos constructor.
-atPosInExp Literal{} _ = Nothing
-atPosInExp IntLit{} _ = Nothing
-atPosInExp FloatLit{} _ = Nothing
-
+atPosInExp Literal {} _ = Nothing
+atPosInExp IntLit {} _ = Nothing
+atPosInExp FloatLit {} _ = Nothing
 atPosInExp (LetPat pat _ _ _ _) pos
   | pat `contains` pos = atPosInPattern pat pos
-
 atPosInExp (LetWith a b _ _ _ _ _) pos
   | a `contains` pos = Just $ RawAtName (qualName $ identName a) (locOf a)
   | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
-
 atPosInExp (DoLoop _ merge _ _ _ _ _) pos
   | merge `contains` pos = atPosInPattern merge pos
-
 atPosInExp (Ascript _ tdecl _) pos
   | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
-
 atPosInExp (Coerce _ tdecl _ _) pos
   | tdecl `contains` pos = atPosInTypeExp (declaredType tdecl) pos
-
 atPosInExp e pos = do
   guard $ e `contains` pos
   -- Use the Either monad for short-circuiting for efficiency reasons.
@@ -282,16 +282,19 @@ atPosInExp e pos = do
   case astMap mapper e of
     Left atpos -> Just atpos
     Right _ -> Nothing
-  where mapper = ASTMapper { mapOnExp = onExp
-                           , mapOnName = pure
-                           , mapOnQualName = pure
-                           , mapOnStructType = pure
-                           , mapOnPatternType = pure
-                           }
-        onExp e' =
-          case atPosInExp e' pos of
-            Just atpos -> Left atpos
-            Nothing -> Right e'
+  where
+    mapper =
+      ASTMapper
+        { mapOnExp = onExp,
+          mapOnName = pure,
+          mapOnQualName = pure,
+          mapOnStructType = pure,
+          mapOnPatternType = pure
+        }
+    onExp e' =
+      case atPosInExp e' pos of
+        Just atpos -> Left atpos
+        Nothing -> Right e'
 
 atPosInModExp :: ModExp -> Pos -> Maybe RawAtPos
 atPosInModExp (ModVar qn loc) pos = do
@@ -299,7 +302,7 @@ atPosInModExp (ModVar qn loc) pos = do
   Just $ RawAtName qn $ locOf loc
 atPosInModExp (ModParens me _) pos =
   atPosInModExp me pos
-atPosInModExp ModImport{} _ =
+atPosInModExp ModImport {} _ =
   Nothing
 atPosInModExp (ModDecs decs _) pos =
   msum $ map (`atPosInDec` pos) decs
@@ -315,15 +318,16 @@ atPosInSpec spec pos =
   case spec of
     ValSpec _ _ tdecl _ _ -> atPosInTypeExp (declaredType tdecl) pos
     TypeAbbrSpec tbind -> atPosInTypeBind tbind pos
-    TypeSpec{} -> Nothing
+    TypeSpec {} -> Nothing
     ModSpec _ se _ _ -> atPosInSigExp se pos
     IncludeSpec se _ -> atPosInSigExp se pos
 
 atPosInSigExp :: SigExp -> Pos -> Maybe RawAtPos
 atPosInSigExp se pos =
   case se of
-    SigVar qn _ loc -> do guard $ loc `contains` pos
-                          Just $ RawAtName qn $ locOf loc
+    SigVar qn _ loc -> do
+      guard $ loc `contains` pos
+      Just $ RawAtName qn $ locOf loc
     SigParens e _ -> atPosInSigExp e pos
     SigSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
     SigWith e _ _ -> atPosInSigExp e pos
@@ -331,20 +335,22 @@ atPosInSigExp se pos =
 
 atPosInValBind :: ValBind -> Pos -> Maybe RawAtPos
 atPosInValBind vbind pos =
-  msum (map (`atPosInPattern` pos) (valBindParams vbind)) `mplus`
-  atPosInExp (valBindBody vbind) pos `mplus`
-  join (atPosInTypeExp <$> valBindRetDecl vbind <*> pure pos)
+  msum (map (`atPosInPattern` pos) (valBindParams vbind))
+    `mplus` atPosInExp (valBindBody vbind) pos
+    `mplus` join (atPosInTypeExp <$> valBindRetDecl vbind <*> pure pos)
 
 atPosInTypeBind :: TypeBind -> Pos -> Maybe RawAtPos
 atPosInTypeBind = atPosInTypeExp . declaredType . typeExp
 
 atPosInModBind :: ModBind -> Pos -> Maybe RawAtPos
 atPosInModBind (ModBind _ params sig e _ _) pos =
-  msum (map inParam params) `mplus`
-  atPosInModExp e pos `mplus`
-  case sig of Nothing -> Nothing
-              Just (se, _) -> atPosInSigExp se pos
-  where inParam (ModParam _ se _ _) = atPosInSigExp se pos
+  msum (map inParam params)
+    `mplus` atPosInModExp e pos
+    `mplus` case sig of
+      Nothing -> Nothing
+      Just (se, _) -> atPosInSigExp se pos
+  where
+    inParam (ModParam _ se _ _) = atPosInSigExp se pos
 
 atPosInSigBind :: SigBind -> Pos -> Maybe RawAtPos
 atPosInSigBind = atPosInSigExp . sigExp
@@ -359,7 +365,7 @@ atPosInDec dec pos = do
     SigDec sbind -> atPosInSigBind sbind pos
     OpenDec e _ -> atPosInModExp e pos
     LocalDec dec' _ -> atPosInDec dec' pos
-    ImportDec{} -> Nothing
+    ImportDec {} -> Nothing
 
 atPosInProg :: Prog -> Pos -> Maybe RawAtPos
 atPosInProg prog pos =
@@ -367,9 +373,12 @@ atPosInProg prog pos =
 
 containingModule :: Imports -> Pos -> Maybe FileModule
 containingModule imports (Pos file _ _ _) =
-  snd <$> find ((==file') . fst) imports
-  where file' = includeToString $ mkInitialImport $
-                fst $ Posix.splitExtension file
+  snd <$> find ((== file') . fst) imports
+  where
+    file' =
+      includeToString $
+        mkInitialImport $
+          fst $ Posix.splitExtension file
 
 -- | Information about what is at the given source location.
 data AtPos = AtName (QualName VName) (Maybe BoundTo) Loc

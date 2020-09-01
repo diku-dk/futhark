@@ -1,64 +1,71 @@
-{-# LANGUAGE FlexibleInstances, FlexibleContexts, UndecidableInstances, DeriveGeneric, Safe #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Safe #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 -- | Facilities for determining which names are used in some syntactic
 -- construct.  The most important interface is the 'FreeIn' class and
 -- its instances, but for reasons related to the Haskell type system,
 -- some constructs have specialised functions.
 module Futhark.IR.Prop.Names
-       ( -- * Free names
-         Names
-       , namesIntMap
-       , nameIn
-       , oneName
-       , namesFromList
-       , namesToList
-       , namesIntersection
-       , namesIntersect
-       , namesSubtract
-       , mapNames
-       -- * Class
-       , FreeIn (..)
-       , freeIn
-       -- * Specialised Functions
-       , freeInStmsAndRes
-       -- * Bound Names
-       , boundInBody
-       , boundByStm
-       , boundByStms
-       , boundByLambda
-       -- * Efficient computation
-       , FreeDec(..)
-       , FV
-       , fvBind
-       , fvName
-       , fvNames
-       )
-       where
+  ( -- * Free names
+    Names,
+    namesIntMap,
+    nameIn,
+    oneName,
+    namesFromList,
+    namesToList,
+    namesIntersection,
+    namesIntersect,
+    namesSubtract,
+    mapNames,
 
-import Prelude hiding ((.), id)
+    -- * Class
+    FreeIn (..),
+    freeIn,
+
+    -- * Specialised Functions
+    freeInStmsAndRes,
+
+    -- * Bound Names
+    boundInBody,
+    boundByStm,
+    boundByStms,
+    boundByLambda,
+
+    -- * Efficient computation
+    FreeDec (..),
+    FV,
+    fvBind,
+    fvName,
+    fvNames,
+  )
+where
+
 import Control.Category
+import Control.Monad.State.Strict
+import Data.Foldable
+import qualified Data.IntMap.Strict as IM
+import qualified Data.Map.Strict as M
+import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Scope
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
+import Futhark.Util.Pretty
 import GHC.Generics
 import Language.SexpGrammar as Sexp
 import Language.SexpGrammar.Generic
-import Control.Monad.State.Strict
-import qualified Data.IntMap.Strict as IM
-import qualified Data.Map.Strict as M
-import Data.Foldable
-
-import Futhark.IR.Syntax
-import Futhark.IR.Traversals
-import Futhark.IR.Prop.Patterns
-import Futhark.IR.Prop.Scope
-import Futhark.Util.Pretty
+import Prelude hiding (id, (.))
 
 -- | A set of names.  Note that the 'Ord' instance is a dummy that
 -- treats everything as 'EQ' if '==', and otherwise 'LT'.
 newtype Names = Names (IM.IntMap VName)
-              deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic)
 
 instance SexpIso Names where
   sexpIso = with $ \names ->
     (iso IM.fromList IM.toList . sexpIso) >>> names
-
 
 -- | Retrieve the data structure underlying the names representation.
 namesIntMap :: Names -> IM.IntMap VName
@@ -109,7 +116,8 @@ mapNames :: (VName -> VName) -> Names -> Names
 mapNames f vs = namesFromList $ map f $ namesToList vs
 
 -- | A computation to build a free variable set.
-newtype FV = FV { unFV :: Names }
+newtype FV = FV {unFV :: Names}
+
 -- Right now the variable set is just stored explicitly, without the
 -- fancy functional representation that GHC uses.  Turns out it's
 -- faster this way.
@@ -132,32 +140,39 @@ fvName v = FV $ oneName v
 fvNames :: Names -> FV
 fvNames = FV
 
-freeWalker :: (FreeDec (ExpDec lore),
-               FreeDec (BodyDec lore),
-               FreeIn (FParamInfo lore),
-               FreeIn (LParamInfo lore),
-               FreeIn (LetDec lore),
-               FreeIn (Op lore)) =>
-              Walker lore (State FV)
-freeWalker = identityWalker {
-               walkOnSubExp = modify . (<>) . freeIn'
-             , walkOnBody = \scope body -> do
-                 modify $ (<>) $ freeIn' body
-                 modify $ fvBind (namesFromList (M.keys scope))
-             , walkOnVName = modify . (<>) . fvName
-             , walkOnOp = modify . (<>) . freeIn'
-             }
+freeWalker ::
+  ( FreeDec (ExpDec lore),
+    FreeDec (BodyDec lore),
+    FreeIn (FParamInfo lore),
+    FreeIn (LParamInfo lore),
+    FreeIn (LetDec lore),
+    FreeIn (Op lore)
+  ) =>
+  Walker lore (State FV)
+freeWalker =
+  identityWalker
+    { walkOnSubExp = modify . (<>) . freeIn',
+      walkOnBody = \scope body -> do
+        modify $ (<>) $ freeIn' body
+        modify $ fvBind (namesFromList (M.keys scope)),
+      walkOnVName = modify . (<>) . fvName,
+      walkOnOp = modify . (<>) . freeIn'
+    }
 
 -- | Return the set of variable names that are free in the given
 -- statements and result.  Filters away the names that are bound by
 -- the statements.
-freeInStmsAndRes :: (FreeIn (Op lore),
-                     FreeIn (LetDec lore),
-                     FreeIn (LParamInfo lore),
-                     FreeIn (FParamInfo lore),
-                     FreeDec (BodyDec lore),
-                     FreeDec (ExpDec lore)) =>
-                    Stms lore -> Result -> FV
+freeInStmsAndRes ::
+  ( FreeIn (Op lore),
+    FreeIn (LetDec lore),
+    FreeIn (LParamInfo lore),
+    FreeIn (FParamInfo lore),
+    FreeDec (BodyDec lore),
+    FreeDec (ExpDec lore)
+  ) =>
+  Stms lore ->
+  Result ->
+  FV
 freeInStmsAndRes stms res =
   fvBind (boundByStms stms) $ foldMap freeIn' stms <> freeIn' res
 
@@ -180,71 +195,94 @@ instance FreeIn () where
 instance FreeIn Int where
   freeIn' = const mempty
 
-instance (FreeIn a, FreeIn b) => FreeIn (a,b) where
-  freeIn' (a,b) = freeIn' a <> freeIn' b
+instance (FreeIn a, FreeIn b) => FreeIn (a, b) where
+  freeIn' (a, b) = freeIn' a <> freeIn' b
 
-instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
-  freeIn' (a,b,c) = freeIn' a <> freeIn' b <> freeIn' c
+instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a, b, c) where
+  freeIn' (a, b, c) = freeIn' a <> freeIn' b <> freeIn' c
 
 instance FreeIn a => FreeIn [a] where
   freeIn' = foldMap freeIn'
 
-instance (FreeDec (ExpDec lore),
-          FreeDec (BodyDec lore),
-          FreeIn (FParamInfo lore),
-          FreeIn (LParamInfo lore),
-          FreeIn (LetDec lore),
-          FreeIn (RetType lore),
-          FreeIn (Op lore)) => FreeIn (FunDef lore) where
+instance
+  ( FreeDec (ExpDec lore),
+    FreeDec (BodyDec lore),
+    FreeIn (FParamInfo lore),
+    FreeIn (LParamInfo lore),
+    FreeIn (LetDec lore),
+    FreeIn (RetType lore),
+    FreeIn (Op lore)
+  ) =>
+  FreeIn (FunDef lore)
+  where
   freeIn' (FunDef _ _ _ rettype params body) =
     fvBind (namesFromList $ map paramName params) $
-    freeIn' rettype <> freeIn' params <> freeIn' body
+      freeIn' rettype <> freeIn' params <> freeIn' body
 
-instance (FreeDec (ExpDec lore),
-          FreeDec (BodyDec lore),
-          FreeIn (FParamInfo lore),
-          FreeIn (LParamInfo lore),
-          FreeIn (LetDec lore),
-          FreeIn (Op lore)) => FreeIn (Lambda lore) where
+instance
+  ( FreeDec (ExpDec lore),
+    FreeDec (BodyDec lore),
+    FreeIn (FParamInfo lore),
+    FreeIn (LParamInfo lore),
+    FreeIn (LetDec lore),
+    FreeIn (Op lore)
+  ) =>
+  FreeIn (Lambda lore)
+  where
   freeIn' (Lambda params body rettype) =
     fvBind (namesFromList $ map paramName params) $
-    freeIn' rettype <> freeIn' params <> freeIn' body
+      freeIn' rettype <> freeIn' params <> freeIn' body
 
-instance (FreeDec (ExpDec lore),
-          FreeDec (BodyDec lore),
-          FreeIn (FParamInfo lore),
-          FreeIn (LParamInfo lore),
-          FreeIn (LetDec lore),
-          FreeIn (Op lore)) => FreeIn (Body lore) where
+instance
+  ( FreeDec (ExpDec lore),
+    FreeDec (BodyDec lore),
+    FreeIn (FParamInfo lore),
+    FreeIn (LParamInfo lore),
+    FreeIn (LetDec lore),
+    FreeIn (Op lore)
+  ) =>
+  FreeIn (Body lore)
+  where
   freeIn' (Body dec stms res) =
     precomputed dec $ freeIn' dec <> freeInStmsAndRes stms res
 
-instance (FreeDec (ExpDec lore),
-          FreeDec (BodyDec lore),
-          FreeIn (FParamInfo lore),
-          FreeIn (LParamInfo lore),
-          FreeIn (LetDec lore),
-          FreeIn (Op lore)) => FreeIn (Exp lore) where
+instance
+  ( FreeDec (ExpDec lore),
+    FreeDec (BodyDec lore),
+    FreeIn (FParamInfo lore),
+    FreeIn (LParamInfo lore),
+    FreeIn (LetDec lore),
+    FreeIn (Op lore)
+  ) =>
+  FreeIn (Exp lore)
+  where
   freeIn' (DoLoop ctxmerge valmerge form loopbody) =
     let (ctxparams, ctxinits) = unzip ctxmerge
         (valparams, valinits) = unzip valmerge
-        bound_here = namesFromList $ M.keys $
-                     scopeOf form <>
-                     scopeOfFParams (ctxparams ++ valparams)
-    in fvBind bound_here $
-       freeIn' (ctxinits ++ valinits) <> freeIn' form <>
-       freeIn' (ctxparams ++ valparams) <> freeIn' loopbody
+        bound_here =
+          namesFromList $
+            M.keys $
+              scopeOf form
+                <> scopeOfFParams (ctxparams ++ valparams)
+     in fvBind bound_here $
+          freeIn' (ctxinits ++ valinits) <> freeIn' form
+            <> freeIn' (ctxparams ++ valparams)
+            <> freeIn' loopbody
   freeIn' e = execState (walkExpM freeWalker e) mempty
 
-instance (FreeDec (ExpDec lore),
-          FreeDec (BodyDec lore),
-          FreeIn (FParamInfo lore),
-          FreeIn (LParamInfo lore),
-          FreeIn (LetDec lore),
-          FreeIn (Op lore)) => FreeIn (Stm lore) where
+instance
+  ( FreeDec (ExpDec lore),
+    FreeDec (BodyDec lore),
+    FreeIn (FParamInfo lore),
+    FreeIn (LParamInfo lore),
+    FreeIn (LetDec lore),
+    FreeIn (Op lore)
+  ) =>
+  FreeIn (Stm lore)
+  where
   freeIn' (Let pat (StmAux cs attrs dec) e) =
-    freeIn' cs <> freeIn' attrs <>
-    precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
+    freeIn' cs <> freeIn' attrs
+      <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
 
 instance FreeIn (Stm lore) => FreeIn (Stms lore) where
   freeIn' = foldMap freeIn'
@@ -266,7 +304,7 @@ instance FreeIn Ident where
 
 instance FreeIn SubExp where
   freeIn' (Var v) = freeIn' v
-  freeIn' Constant{} = mempty
+  freeIn' Constant {} = mempty
 
 instance FreeIn Space where
   freeIn' (ScalarSpace d _) = freeIn' d
@@ -278,12 +316,12 @@ instance FreeIn d => FreeIn (ShapeBase d) where
 
 instance FreeIn d => FreeIn (Ext d) where
   freeIn' (Free x) = freeIn' x
-  freeIn' (Ext _)  = mempty
+  freeIn' (Ext _) = mempty
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn' (Array _ shape _) = freeIn' shape
-  freeIn' (Mem s)           = freeIn' s
-  freeIn' (Prim _)          = mempty
+  freeIn' (Mem s) = freeIn' s
+  freeIn' (Prim _) = mempty
 
 instance FreeIn dec => FreeIn (Param dec) where
   freeIn' (Param _ dec) = freeIn' dec
@@ -304,7 +342,8 @@ instance FreeIn d => FreeIn (DimIndex d) where
 instance FreeIn dec => FreeIn (PatternT dec) where
   freeIn' (Pattern context values) =
     fvBind bound_here $ freeIn' $ context ++ values
-    where bound_here = namesFromList $ map patElemName $ context ++ values
+    where
+      bound_here = namesFromList $ map patElemName $ context ++ values
 
 instance FreeIn Certificates where
   freeIn' (Certificates cs) = freeIn' cs
@@ -325,14 +364,14 @@ class FreeIn dec => FreeDec dec where
   precomputed :: dec -> FV -> FV
   precomputed _ = id
 
-instance FreeDec () where
+instance FreeDec ()
 
-instance (FreeDec a, FreeIn b) => FreeDec (a,b) where
-  precomputed (a,_) = precomputed a
+instance (FreeDec a, FreeIn b) => FreeDec (a, b) where
+  precomputed (a, _) = precomputed a
 
 instance FreeDec a => FreeDec [a] where
   precomputed [] = id
-  precomputed (a:_) = precomputed a
+  precomputed (a : _) = precomputed a
 
 instance FreeDec a => FreeDec (Maybe a) where
   precomputed Nothing = id

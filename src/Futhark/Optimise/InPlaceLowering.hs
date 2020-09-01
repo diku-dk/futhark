@@ -1,10 +1,11 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
+
 -- | This module implements an optimisation that moves in-place
 -- updates into/before loops where possible, with the end goal of
 -- minimising memory copies.  As an example, consider this program:
@@ -63,21 +64,19 @@
 -- FIXME: the implementation is not finished yet.  Specifically, not
 -- all of the above conditions are checked.
 module Futhark.Optimise.InPlaceLowering
-       ( inPlaceLoweringKernels
-       , inPlaceLoweringSeq
-       )
+  ( inPlaceLoweringKernels,
+    inPlaceLoweringSeq,
+  )
 where
 
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
-
 import Futhark.Analysis.Alias
+import Futhark.Binder
 import Futhark.IR.Aliases
 import Futhark.IR.Kernels
 import Futhark.IR.Seq (Seq)
 import Futhark.Optimise.InPlaceLowering.LowerIntoStm
-import Futhark.MonadFreshNames
-import Futhark.Binder
 import Futhark.Pass
 
 -- | Apply the in-place lowering optimisation to the given program.
@@ -89,49 +88,62 @@ inPlaceLoweringSeq :: Pass Seq Seq
 inPlaceLoweringSeq = inPlaceLowering pure lowerUpdate
 
 -- | Apply the in-place lowering optimisation to the given program.
-inPlaceLowering :: Constraints lore =>
-                   OnOp lore -> LowerUpdate lore (ForwardingM lore)
-                -> Pass lore lore
+inPlaceLowering ::
+  Constraints lore =>
+  OnOp lore ->
+  LowerUpdate lore (ForwardingM lore) ->
+  Pass lore lore
 inPlaceLowering onOp lower =
   Pass "In-place lowering" "Lower in-place updates into loops" $
-  fmap removeProgAliases .
-  intraproceduralTransformationWithConsts optimiseConsts optimiseFunDef .
-  aliasAnalysis
-  where optimiseConsts stms =
-          modifyNameSource $ runForwardingM lower onOp $
+    fmap removeProgAliases
+      . intraproceduralTransformationWithConsts optimiseConsts optimiseFunDef
+      . aliasAnalysis
+  where
+    optimiseConsts stms =
+      modifyNameSource $
+        runForwardingM lower onOp $
           stmsFromList <$> optimiseStms (stmsToList stms) (pure ())
 
-        optimiseFunDef consts fundec =
-          modifyNameSource $ runForwardingM lower onOp $
-          descend (stmsToList consts) $ bindingFParams (funDefParams fundec) $ do
-          body <- optimiseBody $ funDefBody fundec
-          return $ fundec { funDefBody = body }
+    optimiseFunDef consts fundec =
+      modifyNameSource $
+        runForwardingM lower onOp $
+          descend (stmsToList consts) $
+            bindingFParams (funDefParams fundec) $ do
+              body <- optimiseBody $ funDefBody fundec
+              return $ fundec {funDefBody = body}
 
-        descend [] m = m
-        descend (stm:stms) m = bindingStm stm $ descend stms m
+    descend [] m = m
+    descend (stm : stms) m = bindingStm stm $ descend stms m
 
 type Constraints lore = (Bindable lore, CanBeAliased (Op lore))
 
-optimiseBody :: Constraints lore =>
-                Body (Aliases lore) -> ForwardingM lore (Body (Aliases lore))
+optimiseBody ::
+  Constraints lore =>
+  Body (Aliases lore) ->
+  ForwardingM lore (Body (Aliases lore))
 optimiseBody (Body als bnds res) = do
-  bnds' <- deepen $ optimiseStms (stmsToList bnds) $
-    mapM_ seen res
+  bnds' <-
+    deepen $
+      optimiseStms (stmsToList bnds) $
+        mapM_ seen res
   return $ Body als (stmsFromList bnds') res
-  where seen Constant{} = return ()
-        seen (Var v)    = seenVar v
+  where
+    seen Constant {} = return ()
+    seen (Var v) = seenVar v
 
-optimiseStms :: Constraints lore =>
-                [Stm (Aliases lore)] -> ForwardingM lore ()
-             -> ForwardingM lore [Stm (Aliases lore)]
+optimiseStms ::
+  Constraints lore =>
+  [Stm (Aliases lore)] ->
+  ForwardingM lore () ->
+  ForwardingM lore [Stm (Aliases lore)]
 optimiseStms [] m = m >> return []
-
-optimiseStms (bnd:bnds) m = do
+optimiseStms (bnd : bnds) m = do
   (bnds', bup) <- tapBottomUp $ bindingStm bnd $ optimiseStms bnds m
   bnd' <- optimiseInStm bnd
   case filter ((`elem` boundHere) . updateValue) $ forwardThese bup of
-    [] -> do checkIfForwardableUpdate bnd'
-             return $ bnd':bnds'
+    [] -> do
+      checkIfForwardableUpdate bnd'
+      return $ bnd' : bnds'
     updates -> do
       lower <- asks topLowerUpdate
       scope <- askScope
@@ -145,20 +157,23 @@ optimiseStms (bnd:bnds) m = do
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
       case lower scope bnd' updates of
-        Just lowering -> do new_bnds <- lowering
-                            new_bnds' <- optimiseStms new_bnds $
-                                         tell bup { forwardThese = [] }
-                            return $ new_bnds' ++ filter notUpdated bnds'
-        Nothing       -> do checkIfForwardableUpdate bnd'
-                            return $ bnd':bnds'
+        Just lowering -> do
+          new_bnds <- lowering
+          new_bnds' <-
+            optimiseStms new_bnds $
+              tell bup {forwardThese = []}
+          return $ new_bnds' ++ filter notUpdated bnds'
+        Nothing -> do
+          checkIfForwardableUpdate bnd'
+          return $ bnd' : bnds'
+  where
+    boundHere = patternNames $ stmPattern bnd
 
-  where boundHere = patternNames $ stmPattern bnd
-
-        checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
-            | Pattern [] [PatElem v dec] <- pat,
-              BasicOp (Update src slice (Var ve)) <- e =
-                maybeForward ve v dec cs src slice
-        checkIfForwardableUpdate _ = return ()
+    checkIfForwardableUpdate (Let pat (StmAux cs _ _) e)
+      | Pattern [] [PatElem v dec] <- pat,
+        BasicOp (Update src slice (Var ve)) <- e =
+        maybeForward ve v dec cs src slice
+    checkIfForwardableUpdate _ = return ()
 
 optimiseInStm :: Constraints lore => Stm (Aliases lore) -> ForwardingM lore (Stm (Aliases lore))
 optimiseInStm (Let pat dec e) =
@@ -167,46 +182,55 @@ optimiseInStm (Let pat dec e) =
 optimiseExp :: Constraints lore => Exp (Aliases lore) -> ForwardingM lore (Exp (Aliases lore))
 optimiseExp (DoLoop ctx val form body) =
   bindingScope (scopeOf form) $
-  bindingFParams (map fst $ ctx ++ val) $
-  DoLoop ctx val form <$> optimiseBody body
+    bindingFParams (map fst $ ctx ++ val) $
+      DoLoop ctx val form <$> optimiseBody body
 optimiseExp (Op op) = do
   f <- asks topOnOp
   Op <$> f op
 optimiseExp e = mapExpM optimise e
-  where optimise = identityMapper { mapOnBody = const optimiseBody
-                                  }
+  where
+    optimise =
+      identityMapper
+        { mapOnBody = const optimiseBody
+        }
+
 onKernelOp :: OnOp Kernels
 onKernelOp (SegOp op) =
   bindingScope (scopeOfSegSpace (segSpace op)) $ do
-    let mapper = identitySegOpMapper { mapOnSegOpBody = onKernelBody }
+    let mapper = identitySegOpMapper {mapOnSegOpBody = onKernelBody}
         onKernelBody kbody = do
-          stms <- deepen $ optimiseStms (stmsToList (kernelBodyStms kbody)) $
-                  mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
-          return kbody { kernelBodyStms = stmsFromList stms }
+          stms <-
+            deepen $
+              optimiseStms (stmsToList (kernelBodyStms kbody)) $
+                mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
+          return kbody {kernelBodyStms = stmsFromList stms}
     SegOp <$> mapSegOpM mapper op
 onKernelOp op = return op
 
-data Entry lore = Entry { entryNumber :: Int
-                        , entryAliases :: Names
-                        , entryDepth :: Int
-                        , entryOptimisable :: Bool
-                        , entryType :: NameInfo (Aliases lore)
-                        }
+data Entry lore = Entry
+  { entryNumber :: Int,
+    entryAliases :: Names,
+    entryDepth :: Int,
+    entryOptimisable :: Bool,
+    entryType :: NameInfo (Aliases lore)
+  }
 
 type VTable lore = M.Map VName (Entry lore)
 
 type OnOp lore = Op (Aliases lore) -> ForwardingM lore (Op (Aliases lore))
 
-data TopDown lore = TopDown { topDownCounter :: Int
-                            , topDownTable :: VTable lore
-                            , topDownDepth :: Int
-                            , topLowerUpdate :: LowerUpdate lore (ForwardingM lore)
-                            , topOnOp :: OnOp lore
-                            }
+data TopDown lore = TopDown
+  { topDownCounter :: Int,
+    topDownTable :: VTable lore,
+    topDownDepth :: Int,
+    topLowerUpdate :: LowerUpdate lore (ForwardingM lore),
+    topOnOp :: OnOp lore
+  }
 
-data BottomUp lore = BottomUp { bottomUpSeen :: Names
-                              , forwardThese :: [DesiredUpdate (LetDec (Aliases lore))]
-                              }
+data BottomUp lore = BottomUp
+  { bottomUpSeen :: Names,
+    forwardThese :: [DesiredUpdate (LetDec (Aliases lore))]
+  }
 
 instance Semigroup (BottomUp lore) where
   BottomUp seen1 forward1 <> BottomUp seen2 forward2 =
@@ -216,10 +240,14 @@ instance Monoid (BottomUp lore) where
   mempty = BottomUp mempty mempty
 
 newtype ForwardingM lore a = ForwardingM (RWS (TopDown lore) (BottomUp lore) VNameSource a)
-                      deriving (Monad, Applicative, Functor,
-                                MonadReader (TopDown lore),
-                                MonadWriter (BottomUp lore),
-                                MonadState VNameSource)
+  deriving
+    ( Monad,
+      Applicative,
+      Functor,
+      MonadReader (TopDown lore),
+      MonadWriter (BottomUp lore),
+      MonadState VNameSource
+    )
 
 instance MonadFreshNames (ForwardingM lore) where
   getNameSource = get
@@ -228,63 +256,81 @@ instance MonadFreshNames (ForwardingM lore) where
 instance Constraints lore => HasScope (Aliases lore) (ForwardingM lore) where
   askScope = M.map entryType <$> asks topDownTable
 
-runForwardingM :: LowerUpdate lore (ForwardingM lore) -> OnOp lore -> ForwardingM lore a
-               -> VNameSource -> (a, VNameSource)
-runForwardingM f g (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown src
-                                         in (x, src')
-  where emptyTopDown = TopDown { topDownCounter = 0
-                               , topDownTable = M.empty
-                               , topDownDepth = 0
-                               , topLowerUpdate = f
-                               , topOnOp = g
-                               }
+runForwardingM ::
+  LowerUpdate lore (ForwardingM lore) ->
+  OnOp lore ->
+  ForwardingM lore a ->
+  VNameSource ->
+  (a, VNameSource)
+runForwardingM f g (ForwardingM m) src =
+  let (x, src', _) = runRWS m emptyTopDown src
+   in (x, src')
+  where
+    emptyTopDown =
+      TopDown
+        { topDownCounter = 0,
+          topDownTable = M.empty,
+          topDownDepth = 0,
+          topLowerUpdate = f,
+          topOnOp = g
+        }
 
-bindingParams :: (dec -> NameInfo (Aliases lore))
-              -> [Param dec]
-               -> ForwardingM lore a
-               -> ForwardingM lore a
+bindingParams ::
+  (dec -> NameInfo (Aliases lore)) ->
+  [Param dec] ->
+  ForwardingM lore a ->
+  ForwardingM lore a
 bindingParams f params = local $ \(TopDown n vtable d x y) ->
   let entry fparam =
-        (paramName fparam,
-         Entry n mempty d False $ f $ paramDec fparam)
+        ( paramName fparam,
+          Entry n mempty d False $ f $ paramDec fparam
+        )
       entries = M.fromList $ map entry params
-  in TopDown (n+1) (M.union entries vtable) d x y
+   in TopDown (n + 1) (M.union entries vtable) d x y
 
-bindingFParams :: [FParam (Aliases lore)]
-               -> ForwardingM lore a
-               -> ForwardingM lore a
+bindingFParams ::
+  [FParam (Aliases lore)] ->
+  ForwardingM lore a ->
+  ForwardingM lore a
 bindingFParams = bindingParams FParamName
 
-bindingScope :: Scope (Aliases lore)
-             -> ForwardingM lore a
-             -> ForwardingM lore a
+bindingScope ::
+  Scope (Aliases lore) ->
+  ForwardingM lore a ->
+  ForwardingM lore a
 bindingScope scope = local $ \(TopDown n vtable d x y) ->
   let entries = M.map entry scope
       infoAliases (LetName (aliases, _)) = unAliases aliases
       infoAliases _ = mempty
       entry info = Entry n (infoAliases info) d False info
-  in TopDown (n+1) (entries<>vtable) d x y
+   in TopDown (n + 1) (entries <> vtable) d x y
 
-bindingStm :: Stm (Aliases lore)
-           -> ForwardingM lore a
-           -> ForwardingM lore a
+bindingStm ::
+  Stm (Aliases lore) ->
+  ForwardingM lore a ->
+  ForwardingM lore a
 bindingStm (Let pat _ _) = local $ \(TopDown n vtable d x y) ->
   let entries = M.fromList $ map entry $ patternElements pat
       entry patElem =
         let (aliases, _) = patElemDec patElem
-        in (patElemName patElem,
-            Entry n (unAliases aliases) d True $ LetName $ patElemDec patElem)
-  in TopDown (n+1) (M.union entries vtable) d x y
+         in ( patElemName patElem,
+              Entry n (unAliases aliases) d True $ LetName $ patElemDec patElem
+            )
+   in TopDown (n + 1) (M.union entries vtable) d x y
 
 bindingNumber :: VName -> ForwardingM lore Int
 bindingNumber name = do
   res <- asks $ fmap entryNumber . M.lookup name . topDownTable
-  case res of Just n  -> return n
-              Nothing -> error $ "bindingNumber: variable " ++
-                         pretty name ++ " not found."
+  case res of
+    Just n -> return n
+    Nothing ->
+      error $
+        "bindingNumber: variable "
+          ++ pretty name
+          ++ " not found."
 
 deepen :: ForwardingM lore a -> ForwardingM lore a
-deepen = local $ \env -> env { topDownDepth = topDownDepth env + 1 }
+deepen = local $ \env -> env {topDownDepth = topDownDepth env + 1}
 
 areAvailableBefore :: Names -> VName -> ForwardingM lore Bool
 areAvailableBefore names point = do
@@ -296,37 +342,53 @@ isInCurrentBody :: VName -> ForwardingM lore Bool
 isInCurrentBody name = do
   current <- asks topDownDepth
   res <- asks $ fmap entryDepth . M.lookup name . topDownTable
-  case res of Just d  -> return $ d == current
-              Nothing -> error $ "isInCurrentBody: variable " ++
-                         pretty name ++ " not found."
+  case res of
+    Just d -> return $ d == current
+    Nothing ->
+      error $
+        "isInCurrentBody: variable "
+          ++ pretty name
+          ++ " not found."
 
 isOptimisable :: VName -> ForwardingM lore Bool
 isOptimisable name = do
   res <- asks $ fmap entryOptimisable . M.lookup name . topDownTable
-  case res of Just b  -> return b
-              Nothing -> error $ "isOptimisable: variable " ++
-                         pretty name ++ " not found."
+  case res of
+    Just b -> return b
+    Nothing ->
+      error $
+        "isOptimisable: variable "
+          ++ pretty name
+          ++ " not found."
 
 seenVar :: VName -> ForwardingM lore ()
 seenVar name = do
-  aliases <- asks $
-             maybe mempty entryAliases .
-             M.lookup name . topDownTable
-  tell $ mempty { bottomUpSeen = oneName name <> aliases }
+  aliases <-
+    asks $
+      maybe mempty entryAliases
+        . M.lookup name
+        . topDownTable
+  tell $ mempty {bottomUpSeen = oneName name <> aliases}
 
 tapBottomUp :: ForwardingM lore a -> ForwardingM lore (a, BottomUp lore)
-tapBottomUp m = do (x,bup) <- listen m
-                   return (x, bup)
+tapBottomUp m = do
+  (x, bup) <- listen m
+  return (x, bup)
 
-maybeForward :: Constraints lore =>
-                VName
-             -> VName -> LetDec (Aliases lore)
-             -> Certificates -> VName -> Slice SubExp
-             -> ForwardingM lore ()
+maybeForward ::
+  Constraints lore =>
+  VName ->
+  VName ->
+  LetDec (Aliases lore) ->
+  Certificates ->
+  VName ->
+  Slice SubExp ->
+  ForwardingM lore ()
 maybeForward v dest_nm dest_dec cs src slice = do
   -- Checks condition (2)
-  available <- (freeIn src <> freeIn slice <> freeIn cs)
-               `areAvailableBefore` v
+  available <-
+    (freeIn src <> freeIn slice <> freeIn cs)
+      `areAvailableBefore` v
   -- Check condition (3)
   samebody <- isInCurrentBody v
   -- Check condition (6)
@@ -334,4 +396,4 @@ maybeForward v dest_nm dest_dec cs src slice = do
   not_prim <- not . primType <$> lookupType v
   when (available && samebody && optimisable && not_prim) $ do
     let fwd = DesiredUpdate dest_nm dest_dec cs src slice v
-    tell mempty { forwardThese = [fwd] }
+    tell mempty {forwardThese = [fwd]}

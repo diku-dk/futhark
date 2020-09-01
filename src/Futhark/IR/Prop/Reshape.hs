@@ -1,45 +1,42 @@
 -- | Facilities for creating, inspecting, and simplifying reshape and
 -- coercion operations.
 module Futhark.IR.Prop.Reshape
-       (
-         -- * Basic tools
-         newDim
-       , newDims
-       , newShape
+  ( -- * Basic tools
+    newDim,
+    newDims,
+    newShape,
 
-         -- * Construction
-       , shapeCoerce
+    -- * Construction
+    shapeCoerce,
 
-         -- * Execution
-       , reshapeOuter
-       , reshapeInner
+    -- * Execution
+    reshapeOuter,
+    reshapeInner,
 
-         -- * Inspection
-       , shapeCoercion
+    -- * Inspection
+    shapeCoercion,
 
-         -- * Simplification
-       , fuseReshape
-       , informReshape
+    -- * Simplification
+    fuseReshape,
+    informReshape,
 
-         -- * Shape calculations
-       , reshapeIndex
-       , flattenIndex
-       , unflattenIndex
-       , sliceSizes
-       )
-       where
+    -- * Shape calculations
+    reshapeIndex,
+    flattenIndex,
+    unflattenIndex,
+    sliceSizes,
+  )
+where
 
 import Data.Foldable
-
-import Prelude hiding (sum, product, quot)
-
 import Futhark.IR.Syntax
 import Futhark.Util.IntegralExp
+import Prelude hiding (product, quot, sum)
 
 -- | The new dimension.
 newDim :: DimChange d -> d
 newDim (DimCoercion se) = se
-newDim (DimNew      se) = se
+newDim (DimNew se) = se
 
 -- | The new dimensions resulting from a reshape operation.
 newDims :: ShapeChange d -> [d]
@@ -60,9 +57,10 @@ shapeCoerce newdims arr =
 reshapeOuter :: ShapeChange SubExp -> Int -> Shape -> ShapeChange SubExp
 reshapeOuter newshape n oldshape =
   newshape ++ map coercion_or_new (drop n (shapeDims oldshape))
-  where coercion_or_new
-          | length newshape == n = DimCoercion
-          | otherwise            = DimNew
+  where
+    coercion_or_new
+      | length newshape == n = DimCoercion
+      | otherwise = DimNew
 
 -- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
@@ -70,17 +68,19 @@ reshapeOuter newshape n oldshape =
 reshapeInner :: ShapeChange SubExp -> Int -> Shape -> ShapeChange SubExp
 reshapeInner newshape n oldshape =
   map coercion_or_new (take n (shapeDims oldshape)) ++ newshape
-  where coercion_or_new
-          | length newshape == m-n = DimCoercion
-          | otherwise              = DimNew
-        m = shapeRank oldshape
+  where
+    coercion_or_new
+      | length newshape == m - n = DimCoercion
+      | otherwise = DimNew
+    m = shapeRank oldshape
 
 -- | If the shape change is nothing but shape coercions, return the new dimensions.  Otherwise, return
 -- 'Nothing'.
 shapeCoercion :: ShapeChange d -> Maybe [d]
 shapeCoercion = mapM dimCoercion
-  where dimCoercion (DimCoercion d) = Just d
-        dimCoercion (DimNew      _) = Nothing
+  where
+    dimCoercion (DimCoercion d) = Just d
+    dimCoercion (DimNew _) = Nothing
 
 -- | @fuseReshape s1 s2@ creates a new 'ShapeChange' that is
 -- semantically the same as first applying @s1@ and then @s2@.  This
@@ -89,14 +89,15 @@ shapeCoercion = mapM dimCoercion
 fuseReshape :: Eq d => ShapeChange d -> ShapeChange d -> ShapeChange d
 fuseReshape s1 s2
   | length s1 == length s2 =
-      zipWith comb s1 s2
-  where comb (DimNew _)       (DimCoercion d2) =
-          DimNew d2
-        comb (DimCoercion d1) (DimNew d2)
-          | d1 == d2  = DimCoercion d2
-          | otherwise = DimNew d2
-        comb _                d2 =
-          d2
+    zipWith comb s1 s2
+  where
+    comb (DimNew _) (DimCoercion d2) =
+      DimNew d2
+    comb (DimCoercion d1) (DimNew d2)
+      | d1 == d2 = DimCoercion d2
+      | otherwise = DimNew d2
+    comb _ d2 =
+      d2
 -- TODO: intelligently handle case where s1 is a prefix of s2.
 fuseReshape _ s2 = s2
 
@@ -106,10 +107,11 @@ informReshape :: Eq d => [d] -> ShapeChange d -> ShapeChange d
 informReshape shape sc
   | length shape == length sc =
     zipWith inform shape sc
-  where inform d1 (DimNew d2)
-          | d1 == d2  = DimCoercion d2
-        inform _ dc =
-          dc
+  where
+    inform d1 (DimNew d2)
+      | d1 == d2 = DimCoercion d2
+    inform _ dc =
+      dc
 informReshape _ sc = sc
 
 -- | @reshapeIndex to_dims from_dims is@ transforms the index list
@@ -117,20 +119,30 @@ informReshape _ sc = sc
 -- list @is'@, which is into an array of shape @to_dims@.  @is@ must
 -- have the same length as @from_dims@, and @is'@ will have the same
 -- length as @to_dims@.
-reshapeIndex :: IntegralExp num =>
-                [num] -> [num] -> [num] -> [num]
+reshapeIndex ::
+  IntegralExp num =>
+  [num] ->
+  [num] ->
+  [num] ->
+  [num]
 reshapeIndex to_dims from_dims is =
   unflattenIndex to_dims $ flattenIndex from_dims is
 
 -- | @unflattenIndex dims i@ computes a list of indices into an array
 -- with dimension @dims@ given the flat index @i@.  The resulting list
 -- will have the same size as @dims@.
-unflattenIndex :: IntegralExp num =>
-                  [num] -> num -> [num]
+unflattenIndex ::
+  IntegralExp num =>
+  [num] ->
+  num ->
+  [num]
 unflattenIndex = unflattenIndexFromSlices . drop 1 . sliceSizes
 
-unflattenIndexFromSlices :: IntegralExp num =>
-                            [num] -> num -> [num]
+unflattenIndexFromSlices ::
+  IntegralExp num =>
+  [num] ->
+  num ->
+  [num]
 unflattenIndexFromSlices [] _ = []
 unflattenIndexFromSlices (size : slices) i =
   (i `quot` size) : unflattenIndexFromSlices slices (i - (i `quot` size) * size)
@@ -138,20 +150,26 @@ unflattenIndexFromSlices (size : slices) i =
 -- | @flattenIndex dims is@ computes the flat index of @is@ into an
 -- array with dimensions @dims@.  The length of @dims@ and @is@ must
 -- be the same.
-flattenIndex :: IntegralExp num =>
-                [num] -> [num] -> num
+flattenIndex ::
+  IntegralExp num =>
+  [num] ->
+  [num] ->
+  num
 flattenIndex dims is =
   sum $ zipWith (*) is slicesizes
-  where slicesizes = drop 1 $ sliceSizes dims
+  where
+    slicesizes = drop 1 $ sliceSizes dims
 
 -- | Given a length @n@ list of dimensions @dims@, @sizeSizes dims@
 -- will compute a length @n+1@ list of the size of each possible array
 -- slice.  The first element of this list will be the product of
 -- @dims@, and the last element will be 1.
-sliceSizes :: IntegralExp num =>
-              [num] -> [num]
+sliceSizes ::
+  IntegralExp num =>
+  [num] ->
+  [num]
 sliceSizes [] = [1]
-sliceSizes (n:ns) =
+sliceSizes (n : ns) =
   product (n : ns) : sliceSizes ns
 
 {- HLINT ignore sliceSizes -}

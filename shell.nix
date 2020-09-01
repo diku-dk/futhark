@@ -19,5 +19,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.zlib.out
     pkgs.cabal2nix
     pkgs.ghcid
+    pkgs.ormolu
   ];
 }
