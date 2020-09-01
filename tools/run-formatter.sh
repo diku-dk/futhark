@@ -6,4 +6,4 @@
 #
 #   ./run-formatter.sh src unittests
 
-find $@ -name '*.hs' -print -execdir ormolu --mode inplace --check-idempotence {} +
+find "$@" -name '*.hs' -print -exec ormolu --mode inplace --check-idempotence {} \;
