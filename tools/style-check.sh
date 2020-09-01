@@ -75,6 +75,15 @@ check() {
         echo
         echo "${cyan}$file ends in several blank lines.${NC}"
     fi
+
+    if hlintable "$file"; then
+        output=$(LC_ALL=C.UTF-8 ormolu --mode check "$file")
+        if [ $? != 0 ]; then
+            echo
+            echo "${cyan}$file:${NC} is not formatted correctly with Ormolu"
+            echo "$output"
+        fi
+    fi
 }
 
 output=$(find "$@" -type f | while read -r file; do check "$file"; done)

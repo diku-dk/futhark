@@ -15,10 +15,10 @@
 -- typeclasses that have been modified to make generic functions
 -- slightly easier to write.
 module Futhark.Util.IntegralExp
-       ( IntegralExp (..)
-       , Wrapped (..)
-       )
-       where
+  ( IntegralExp (..),
+    Wrapped (..),
+  )
+where
 
 import Data.Int
 import Prelude
@@ -38,22 +38,22 @@ class Num e => IntegralExp e where
   divUp x y =
     (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
-  fromInt8  :: Int8 -> e
-  fromInt16 :: Int16 -> e
-  fromInt32 :: Int32 -> e
-  fromInt64 :: Int64 -> e
-
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
-newtype Wrapped a = Wrapped { wrappedValue :: a }
-                  deriving (Eq, Ord, Show)
+newtype Wrapped a = Wrapped {wrappedValue :: a}
+  deriving (Eq, Ord, Show)
 
-liftOp :: (a -> a)
-        -> Wrapped a -> Wrapped a
+liftOp ::
+  (a -> a) ->
+  Wrapped a ->
+  Wrapped a
 liftOp op (Wrapped x) = Wrapped $ op x
 
-liftOp2 :: (a -> a -> a)
-        -> Wrapped a -> Wrapped a -> Wrapped a
+liftOp2 ::
+  (a -> a -> a) ->
+  Wrapped a ->
+  Wrapped a ->
+  Wrapped a
 liftOp2 op (Wrapped x) (Wrapped y) = Wrapped $ x `op` y
 
 instance Num a => Num (Wrapped a) where
@@ -71,8 +71,3 @@ instance Integral a => IntegralExp (Wrapped a) where
   div = liftOp2 Prelude.div
   mod = liftOp2 Prelude.mod
   sgn = Just . fromIntegral . signum . toInteger . wrappedValue
-
-  fromInt8  = fromInteger . toInteger
-  fromInt16 = fromInteger . toInteger
-  fromInt32 = fromInteger . toInteger
-  fromInt64 = fromInteger . toInteger

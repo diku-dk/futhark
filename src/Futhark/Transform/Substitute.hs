@@ -1,26 +1,27 @@
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE Safe #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 -- |
 --
 -- This module contains facilities for replacing variable names in
 -- syntactic constructs.
 module Futhark.Transform.Substitute
-  (Substitutions,
-   Substitute(..),
-   Substitutable)
-  where
+  ( Substitutions,
+    Substitute (..),
+    Substitutable,
+  )
+where
 
 import Control.Monad.Identity
 import qualified Data.Map.Strict as M
-
-import Futhark.IR.Syntax
-import Futhark.IR.Traversals
-import Futhark.IR.Prop.Scope
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Prop.Names
+import Futhark.IR.Prop.Scope
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.
@@ -40,22 +41,24 @@ instance Substitute a => Substitute [a] where
 instance Substitute (Stm lore) => Substitute (Stms lore) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance (Substitute a, Substitute b) => Substitute (a,b) where
-  substituteNames substs (x,y) =
+instance (Substitute a, Substitute b) => Substitute (a, b) where
+  substituteNames substs (x, y) =
     (substituteNames substs x, substituteNames substs y)
 
-instance (Substitute a, Substitute b, Substitute c) => Substitute (a,b,c) where
-  substituteNames substs (x,y,z) =
-    (substituteNames substs x,
-     substituteNames substs y,
-     substituteNames substs z)
+instance (Substitute a, Substitute b, Substitute c) => Substitute (a, b, c) where
+  substituteNames substs (x, y, z) =
+    ( substituteNames substs x,
+      substituteNames substs y,
+      substituteNames substs z
+    )
 
-instance (Substitute a, Substitute b, Substitute c, Substitute d) => Substitute (a,b,c,d) where
-  substituteNames substs (x,y,z,u) =
-    (substituteNames substs x,
-     substituteNames substs y,
-     substituteNames substs z,
-     substituteNames substs u)
+instance (Substitute a, Substitute b, Substitute c, Substitute d) => Substitute (a, b, c, d) where
+  substituteNames substs (x, y, z, u) =
+    ( substituteNames substs x,
+      substituteNames substs y,
+      substituteNames substs z,
+      substituteNames substs u
+    )
 
 instance Substitute a => Substitute (Maybe a) where
   substituteNames substs = fmap $ substituteNames substs
@@ -83,15 +86,15 @@ instance Substitute Attrs where
 instance Substitute dec => Substitute (StmAux dec) where
   substituteNames substs (StmAux cs attrs dec) =
     StmAux
-    (substituteNames substs cs)
-    (substituteNames substs attrs)
-    (substituteNames substs dec)
+      (substituteNames substs cs)
+      (substituteNames substs attrs)
+      (substituteNames substs dec)
 
 instance Substitute dec => Substitute (Param dec) where
   substituteNames substs (Param name dec) =
     Param
-    (substituteNames substs name)
-    (substituteNames substs dec)
+      (substituteNames substs name)
+      (substituteNames substs dec)
 
 instance Substitute dec => Substitute (PatternT dec) where
   substituteNames substs (Pattern context values) =
@@ -104,28 +107,29 @@ instance Substitute Certificates where
 instance Substitutable lore => Substitute (Stm lore) where
   substituteNames substs (Let pat annot e) =
     Let
-    (substituteNames substs pat)
-    (substituteNames substs annot)
-    (substituteNames substs e)
+      (substituteNames substs pat)
+      (substituteNames substs annot)
+      (substituteNames substs e)
 
 instance Substitutable lore => Substitute (Body lore) where
   substituteNames substs (Body dec stms res) =
     Body
-    (substituteNames substs dec)
-    (substituteNames substs stms)
-    (substituteNames substs res)
+      (substituteNames substs dec)
+      (substituteNames substs stms)
+      (substituteNames substs res)
 
 replace :: Substitutable lore => M.Map VName VName -> Mapper lore lore Identity
-replace substs = Mapper {
-                   mapOnVName = return . substituteNames substs
-                 , mapOnSubExp = return . substituteNames substs
-                 , mapOnBody = const $ return . substituteNames substs
-                 , mapOnRetType = return . substituteNames substs
-                 , mapOnBranchType = return . substituteNames substs
-                 , mapOnFParam = return . substituteNames substs
-                 , mapOnLParam = return . substituteNames substs
-                 , mapOnOp = return . substituteNames substs
-                 }
+replace substs =
+  Mapper
+    { mapOnVName = return . substituteNames substs,
+      mapOnSubExp = return . substituteNames substs,
+      mapOnBody = const $ return . substituteNames substs,
+      mapOnRetType = return . substituteNames substs,
+      mapOnBranchType = return . substituteNames substs,
+      mapOnFParam = return . substituteNames substs,
+      mapOnLParam = return . substituteNames substs,
+      mapOnOp = return . substituteNames substs
+    }
 
 instance Substitute Rank where
   substituteNames _ = id
@@ -139,7 +143,7 @@ instance Substitute d => Substitute (ShapeBase d) where
 
 instance Substitute d => Substitute (Ext d) where
   substituteNames substs (Free x) = Free $ substituteNames substs x
-  substituteNames _      (Ext x)  = Ext x
+  substituteNames _ (Ext x) = Ext x
 
 instance Substitute Names where
   substituteNames = mapNames . substituteNames
@@ -154,14 +158,15 @@ instance Substitute shape => Substitute (TypeBase shape u) where
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype) =
     Lambda
-    (substituteNames substs params)
-    (substituteNames substs body)
-    (map (substituteNames substs) rettype)
+      (substituteNames substs params)
+      (substituteNames substs body)
+      (map (substituteNames substs) rettype)
 
 instance Substitute Ident where
   substituteNames substs v =
-    v { identName = substituteNames substs $ identName v
-      , identType = substituteNames substs $ identType v
+    v
+      { identName = substituteNames substs $ identName v,
+        identType = substituteNames substs $ identType v
       }
 
 instance Substitute d => Substitute (DimChange d) where
@@ -172,6 +177,10 @@ instance Substitute d => Substitute (DimIndex d) where
 
 instance Substitute v => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
+
+instance Substitute v => Substitute (TPrimExp t v) where
+  substituteNames substs =
+    TPrimExp . fmap (substituteNames substs) . untyped
 
 instance Substitutable lore => Substitute (NameInfo lore) where
   substituteNames subst (LetName dec) =
@@ -188,12 +197,14 @@ instance Substitute FV where
 
 -- | Lores in which all annotations support name
 -- substitution.
-type Substitutable lore = (Decorations lore,
-                           Substitute (ExpDec lore),
-                           Substitute (BodyDec lore),
-                           Substitute (LetDec lore),
-                           Substitute (FParamInfo lore),
-                           Substitute (LParamInfo lore),
-                           Substitute (RetType lore),
-                           Substitute (BranchType lore),
-                           Substitute (Op lore))
+type Substitutable lore =
+  ( Decorations lore,
+    Substitute (ExpDec lore),
+    Substitute (BodyDec lore),
+    Substitute (LetDec lore),
+    Substitute (FParamInfo lore),
+    Substitute (LParamInfo lore),
+    Substitute (RetType lore),
+    Substitute (BranchType lore),
+    Substitute (Op lore)
+  )

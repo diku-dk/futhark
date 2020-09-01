@@ -1,82 +1,118 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 module Futhark.IR.Kernels.Kernel
   ( -- * Size operations
-    SizeOp(..)
+    SizeOp (..),
 
     -- * Host operations
-  , HostOp(..)
-  , typeCheckHostOp
+    HostOp (..),
+    typeCheckHostOp,
 
     -- * SegOp refinements
-  , SegLevel(..)
+    SegLevel (..),
 
     -- * Reexports
-  , module Futhark.IR.Kernels.Sizes
-  , module Futhark.IR.SegOp
+    module Futhark.IR.Kernels.Sizes,
+    module Futhark.IR.SegOp,
   )
 where
 
-import Futhark.IR
-import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Util.Pretty as PP
-import Futhark.Util.Pretty
-  ((</>), (<+>), ppr, commasep, parens, text)
-import Futhark.Transform.Substitute
-import Futhark.Transform.Rename
-import Futhark.Optimise.Simplify.Lore
-import qualified Futhark.Optimise.Simplify.Engine as Engine
-import Futhark.IR.Prop.Aliases
-import Futhark.IR.Aliases (Aliases)
-import Futhark.IR.SegOp
-import Futhark.IR.Kernels.Sizes
-import qualified Futhark.TypeCheck as TC
+import Control.Category
 import Futhark.Analysis.Metrics
+import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.IR
+import Futhark.IR.Aliases (Aliases)
+import Futhark.IR.Kernels.Sizes
+import Futhark.IR.Prop.Aliases
+import Futhark.IR.SegOp
+import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify.Lore
+import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
+import qualified Futhark.TypeCheck as TC
+import Futhark.Util.Pretty
+  ( commasep,
+    parens,
+    ppr,
+    text,
+    (<+>),
+    (</>),
+  )
+import qualified Futhark.Util.Pretty as PP
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Prelude hiding (id, (.))
 
 -- | At which level the *body* of a t'SegOp' executes.
-data SegLevel = SegThread { segNumGroups :: Count NumGroups SubExp
-                          , segGroupSize :: Count GroupSize SubExp
-                          , segVirt :: SegVirt }
-              | SegGroup { segNumGroups :: Count NumGroups SubExp
-                         , segGroupSize :: Count GroupSize SubExp
-                         , segVirt :: SegVirt }
-              deriving (Eq, Ord, Show)
+data SegLevel
+  = SegThread
+      { segNumGroups :: Count NumGroups SubExp,
+        segGroupSize :: Count GroupSize SubExp,
+        segVirt :: SegVirt
+      }
+  | SegGroup
+      { segNumGroups :: Count NumGroups SubExp,
+        segGroupSize :: Count GroupSize SubExp,
+        segVirt :: SegVirt
+      }
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SegLevel where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "thread") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With
+          (. Sexp.list (Sexp.el (Sexp.sym "group") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+          End
 
 
 instance PP.Pretty SegLevel where
   ppr lvl =
-    lvl' </>
-    PP.parens (text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi <+>
-               text "groupsize=" <> ppr (segGroupSize lvl) <>
-               case segVirt lvl of
-                 SegNoVirt -> mempty
-                 SegNoVirtFull -> PP.semi <+> text "full"
-                 SegVirt -> PP.semi <+> text "virtualise")
-
-    where lvl' = case lvl of SegThread{} -> "_thread"
-                             SegGroup{} -> "_group"
+    lvl'
+      </> PP.parens
+        ( text "#groups=" <> ppr (segNumGroups lvl) <> PP.semi
+            <+> text "groupsize="
+            <> ppr (segGroupSize lvl)
+            <> case segVirt lvl of
+              SegNoVirt -> mempty
+              SegNoVirtFull -> PP.semi <+> text "full"
+              SegVirt -> PP.semi <+> text "virtualise"
+        )
+    where
+      lvl' = case lvl of
+        SegThread {} -> "_thread"
+        SegGroup {} -> "_group"
 
 instance Engine.Simplifiable SegLevel where
   simplify (SegThread num_groups group_size virt) =
-    SegThread <$> traverse Engine.simplify num_groups <*>
-    traverse Engine.simplify group_size <*> pure virt
+    SegThread <$> traverse Engine.simplify num_groups
+      <*> traverse Engine.simplify group_size
+      <*> pure virt
   simplify (SegGroup num_groups group_size virt) =
-    SegGroup <$> traverse Engine.simplify num_groups <*>
-    traverse Engine.simplify group_size <*> pure virt
+    SegGroup <$> traverse Engine.simplify num_groups
+      <*> traverse Engine.simplify group_size
+      <*> pure virt
 
 instance Substitute SegLevel where
   substituteNames substs (SegThread num_groups group_size virt) =
     SegThread
-    (substituteNames substs num_groups) (substituteNames substs group_size) virt
+      (substituteNames substs num_groups)
+      (substituteNames substs group_size)
+      virt
   substituteNames substs (SegGroup num_groups group_size virt) =
     SegGroup
-    (substituteNames substs num_groups) (substituteNames substs group_size) virt
+      (substituteNames substs num_groups)
+      (substituteNames substs group_size)
+      virt
 
 instance Rename SegLevel where
   rename = substituteRename
@@ -89,8 +125,7 @@ instance FreeIn SegLevel where
 
 -- | A simple size-level query or computation.
 data SizeOp
-  = SplitSpace SplitOrdering SubExp SubExp SubExp
-    -- ^ @SplitSpace o w i elems_per_thread@.
+  = -- | @SplitSpace o w i elems_per_thread@.
     --
     -- Computes how to divide array elements to
     -- threads in a kernel.  Returns the number of
@@ -111,42 +146,54 @@ data SizeOp
     -- the thread will receive elements @i,
     -- i+stride, i+2*stride, ...,
     -- i+(elems_per_thread-1)*stride@.
-  | GetSize Name SizeClass
-    -- ^ Produce some runtime-configurable size.
-  | GetSizeMax SizeClass
-    -- ^ The maximum size of some class.
-  | CmpSizeLe Name SizeClass SubExp
-    -- ^ Compare size (likely a threshold) with some integer value.
-  | CalcNumGroups SubExp Name SubExp
-    -- ^ @CalcNumGroups w max_num_groups group_size@ calculates the
+    SplitSpace SplitOrdering SubExp SubExp SubExp
+  | -- | Produce some runtime-configurable size.
+    GetSize Name SizeClass
+  | -- | The maximum size of some class.
+    GetSizeMax SizeClass
+  | -- | Compare size (likely a threshold) with some integer value.
+    CmpSizeLe Name SizeClass SubExp
+  | -- | @CalcNumGroups w max_num_groups group_size@ calculates the
     -- number of GPU workgroups to use for an input of the given size.
     -- The @Name@ is a size name.  Note that @w@ is an i64 to avoid
     -- overflow issues.
-  deriving (Eq, Ord, Show)
+    CalcNumGroups SubExp Name SubExp
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SizeOp where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "split-space") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "get-size") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "get-size-max") >>> Sexp.el sexpIso)) $
+            With (. Sexp.list (Sexp.el (Sexp.sym "cmp-size-le") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+              With
+                (. Sexp.list (Sexp.el (Sexp.sym "calc-num-groups") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+                End
 
 instance Substitute SizeOp where
   substituteNames subst (SplitSpace o w i elems_per_thread) =
     SplitSpace
-    (substituteNames subst o)
-    (substituteNames subst w)
-    (substituteNames subst i)
-    (substituteNames subst elems_per_thread)
+      (substituteNames subst o)
+      (substituteNames subst w)
+      (substituteNames subst i)
+      (substituteNames subst elems_per_thread)
   substituteNames substs (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass (substituteNames substs x)
   substituteNames substs (CalcNumGroups w max_num_groups group_size) =
     CalcNumGroups
-    (substituteNames substs w)
-    max_num_groups
-    (substituteNames substs group_size)
+      (substituteNames substs w)
+      max_num_groups
+      (substituteNames substs group_size)
   substituteNames _ op = op
 
 instance Rename SizeOp where
   rename (SplitSpace o w i elems_per_thread) =
     SplitSpace
-    <$> rename o
-    <*> rename w
-    <*> rename i
-    <*> rename elems_per_thread
+      <$> rename o
+      <*> rename w
+      <*> rename i
+      <*> rename elems_per_thread
   rename (CmpSizeLe name sclass x) =
     CmpSizeLe name sclass <$> rename x
   rename (CalcNumGroups w max_num_groups group_size) =
@@ -158,11 +205,11 @@ instance IsOp SizeOp where
   cheapOp _ = True
 
 instance TypedOp SizeOp where
-  opType SplitSpace{} = pure [Prim int32]
+  opType SplitSpace {} = pure [Prim int32]
   opType (GetSize _ _) = pure [Prim int32]
   opType (GetSizeMax _) = pure [Prim int32]
-  opType CmpSizeLe{} = pure [Prim Bool]
-  opType CalcNumGroups{} = pure [Prim int32]
+  opType CmpSizeLe {} = pure [Prim Bool]
+  opType CalcNumGroups {} = pure [Prim int32]
 
 instance AliasedOp SizeOp where
   opAliases _ = [mempty]
@@ -177,50 +224,59 @@ instance FreeIn SizeOp where
 
 instance PP.Pretty SizeOp where
   ppr (SplitSpace o w i elems_per_thread) =
-    text "splitSpace" <> suff <>
-    parens (commasep [ppr w, ppr i, ppr elems_per_thread])
-    where suff = case o of SplitContiguous     -> mempty
-                           SplitStrided stride -> text "Strided" <> parens (ppr stride)
-
+    text "splitSpace" <> suff
+      <> parens (commasep [ppr w, ppr i, ppr elems_per_thread])
+    where
+      suff = case o of
+        SplitContiguous -> mempty
+        SplitStrided stride -> text "Strided" <> parens (ppr stride)
   ppr (GetSize name size_class) =
     text "get_size" <> parens (commasep [ppr name, ppr size_class])
-
   ppr (GetSizeMax size_class) =
     text "get_size_max" <> parens (commasep [ppr size_class])
-
   ppr (CmpSizeLe name size_class x) =
-    text "get_size" <> parens (commasep [ppr name, ppr size_class]) <+>
-    text "<=" <+> ppr x
-
+    text "get_size" <> parens (commasep [ppr name, ppr size_class])
+      <+> text "<="
+      <+> ppr x
   ppr (CalcNumGroups w max_num_groups group_size) =
     text "calc_num_groups" <> parens (commasep [ppr w, ppr max_num_groups, ppr group_size])
 
 instance OpMetrics SizeOp where
-  opMetrics SplitSpace{} = seen "SplitSpace"
-  opMetrics GetSize{} = seen "GetSize"
-  opMetrics GetSizeMax{} = seen "GetSizeMax"
-  opMetrics CmpSizeLe{} = seen "CmpSizeLe"
-  opMetrics CalcNumGroups{} = seen "CalcNumGroups"
+  opMetrics SplitSpace {} = seen "SplitSpace"
+  opMetrics GetSize {} = seen "GetSize"
+  opMetrics GetSizeMax {} = seen "GetSizeMax"
+  opMetrics CmpSizeLe {} = seen "CmpSizeLe"
+  opMetrics CalcNumGroups {} = seen "CalcNumGroups"
 
 typeCheckSizeOp :: TC.Checkable lore => SizeOp -> TC.TypeM lore ()
 typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
   case o of
-    SplitContiguous     -> return ()
+    SplitContiguous -> return ()
     SplitStrided stride -> TC.require [Prim int32] stride
   mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
-typeCheckSizeOp GetSize{} = return ()
-typeCheckSizeOp GetSizeMax{} = return ()
+typeCheckSizeOp GetSize {} = return ()
+typeCheckSizeOp GetSizeMax {} = return ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int32] x
-typeCheckSizeOp (CalcNumGroups w _ group_size) = do TC.require [Prim int64] w
-                                                    TC.require [Prim int32] group_size
+typeCheckSizeOp (CalcNumGroups w _ group_size) = do
+  TC.require [Prim int64] w
+  TC.require [Prim int32] group_size
 
 -- | A host-level operation; parameterised by what else it can do.
 data HostOp lore op
-  = SegOp (SegOp SegLevel lore)
-    -- ^ A segmented operation.
+  = -- | A segmented operation.
+    SegOp (SegOp SegLevel lore)
   | SizeOp SizeOp
   | OtherOp op
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance (SexpIso op, Decorations lore) => SexpIso (HostOp lore op) where
+  sexpIso =
+    match $
+      With (. sexpIso) $
+        With (. sexpIso) $
+          With
+            (. sexpIso)
+            End
 
 instance (ASTLore lore, Substitute op) => Substitute (HostOp lore op) where
   substituteNames substs (SegOp op) =
@@ -296,28 +352,32 @@ instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (HostOp lore op) where
   opMetrics (OtherOp op) = opMetrics op
   opMetrics (SizeOp op) = opMetrics op
 
-checkSegLevel :: TC.Checkable lore =>
-                 Maybe SegLevel -> SegLevel -> TC.TypeM lore ()
+checkSegLevel ::
+  TC.Checkable lore =>
+  Maybe SegLevel ->
+  SegLevel ->
+  TC.TypeM lore ()
 checkSegLevel Nothing lvl = do
   TC.require [Prim int32] $ unCount $ segNumGroups lvl
   TC.require [Prim int32] $ unCount $ segGroupSize lvl
-checkSegLevel (Just SegThread{}) _ =
+checkSegLevel (Just SegThread {}) _ =
   TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
 checkSegLevel (Just x) y
   | x == y = TC.bad $ TC.TypeError $ "Already at at level " ++ pretty x
   | segNumGroups x /= segNumGroups y || segGroupSize x /= segGroupSize y =
-      TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
+    TC.bad $ TC.TypeError "Physical layout for SegLevel does not match parent SegLevel."
   | otherwise =
-      return ()
+    return ()
 
-typeCheckHostOp :: TC.Checkable lore =>
-                   (SegLevel -> OpWithAliases (Op lore) -> TC.TypeM lore ())
-                -> Maybe SegLevel
-                -> (op -> TC.TypeM lore ())
-                -> HostOp (Aliases lore) op
-                -> TC.TypeM lore ()
+typeCheckHostOp ::
+  TC.Checkable lore =>
+  (SegLevel -> OpWithAliases (Op lore) -> TC.TypeM lore ()) ->
+  Maybe SegLevel ->
+  (op -> TC.TypeM lore ()) ->
+  HostOp (Aliases lore) op ->
+  TC.TypeM lore ()
 typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $
-  typeCheckSegOp (checkSegLevel lvl) op
+    typeCheckSegOp (checkSegLevel lvl) op
 typeCheckHostOp _ _ f (OtherOp op) = f op
 typeCheckHostOp _ _ _ (SizeOp op) = typeCheckSizeOp op

@@ -1,26 +1,25 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Dependency solver
 --
 -- This is a relatively simple problem due to the choice of the
 -- Minimum Package Version algorithm.  In fact, the only failure mode
 -- is referencing an unknown package or revision.
 module Futhark.Pkg.Solve
-  ( solveDeps
-  , solveDepsPure
-  , PkgRevDepInfo
-  ) where
-
-import Control.Monad.State
-import qualified Data.Set as S
-import qualified Data.Map as M
-import qualified Data.Text as T
+  ( solveDeps,
+    solveDepsPure,
+    PkgRevDepInfo,
+  )
+where
 
 import Control.Monad.Free.Church
-
+import Control.Monad.State
+import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Data.Text as T
 import Futhark.Pkg.Info
 import Futhark.Pkg.Types
-
 import Prelude
 
 data PkgOp a = OpGetDeps PkgPath SemVer (Maybe T.Text) (PkgRevDeps -> a)
@@ -32,7 +31,7 @@ instance Functor PkgOp where
 -- that are not reachable from the root.  Also contains the
 -- dependencies of each package.
 newtype RoughBuildList = RoughBuildList (M.Map PkgPath (SemVer, [PkgPath]))
-                       deriving (Show)
+  deriving (Show)
 
 emptyRoughBuildList :: RoughBuildList
 emptyRoughBuildList = RoughBuildList mempty
@@ -45,12 +44,13 @@ depRoots (PkgRevDeps m) = S.fromList $ M.keys m
 buildList :: S.Set PkgPath -> RoughBuildList -> BuildList
 buildList roots (RoughBuildList pkgs) =
   BuildList $ execState (mapM_ addPkg roots) mempty
-  where addPkg p = case M.lookup p pkgs of
-                     Nothing -> return ()
-                     Just (v, deps) -> do
-                       listed <- gets $ M.member p
-                       modify $ M.insert p v
-                       unless listed $ mapM_ addPkg deps
+  where
+    addPkg p = case M.lookup p pkgs of
+      Nothing -> return ()
+      Just (v, deps) -> do
+        listed <- gets $ M.member p
+        modify $ M.insert p v
+        unless listed $ mapM_ addPkg deps
 
 type SolveM = StateT RoughBuildList (F PkgOp)
 
@@ -62,38 +62,51 @@ getDeps p v h = lift $ liftF $ OpGetDeps p v h id
 -- dependencies.
 doSolveDeps :: PkgRevDeps -> SolveM ()
 doSolveDeps (PkgRevDeps deps) = mapM_ add $ M.toList deps
-  where add (p, (v, maybe_h)) = do
-          RoughBuildList l <- get
-          case M.lookup p l of
-            -- Already satisfied?
-            Just (cur_v, _) | v <= cur_v -> return ()
-            -- No; add 'p' and its dependencies.
-            _ -> do
-              PkgRevDeps p_deps <- getDeps p v maybe_h
-              put $ RoughBuildList $ M.insert p (v, M.keys p_deps) l
-              mapM_ add $ M.toList p_deps
+  where
+    add (p, (v, maybe_h)) = do
+      RoughBuildList l <- get
+      case M.lookup p l of
+        -- Already satisfied?
+        Just (cur_v, _) | v <= cur_v -> return ()
+        -- No; add 'p' and its dependencies.
+        _ -> do
+          PkgRevDeps p_deps <- getDeps p v maybe_h
+          put $ RoughBuildList $ M.insert p (v, M.keys p_deps) l
+          mapM_ add $ M.toList p_deps
 
 -- | Run the solver, producing both a package registry containing
 -- a cache of the lookups performed, as well as a build list.
-solveDeps :: MonadPkgRegistry m =>
-             PkgRevDeps -> m BuildList
-solveDeps deps = buildList (depRoots deps) <$> runF
-                 (execStateT (doSolveDeps deps) emptyRoughBuildList)
-                 return step
-  where step (OpGetDeps p v h c) = do
-          pinfo <- lookupPackageRev p v
+solveDeps ::
+  MonadPkgRegistry m =>
+  PkgRevDeps ->
+  m BuildList
+solveDeps deps =
+  buildList (depRoots deps)
+    <$> runF
+      (execStateT (doSolveDeps deps) emptyRoughBuildList)
+      return
+      step
+  where
+    step (OpGetDeps p v h c) = do
+      pinfo <- lookupPackageRev p v
 
-          checkHash p v pinfo h
+      checkHash p v pinfo h
 
-          d <- fmap pkgRevDeps . getManifest $ pkgRevGetManifest pinfo
-          c d
+      d <- fmap pkgRevDeps . getManifest $ pkgRevGetManifest pinfo
+      c d
 
-        checkHash _ _ _ Nothing = return ()
-        checkHash p v pinfo (Just h)
-          | h == pkgRevCommit pinfo = return ()
-          | otherwise = fail $ T.unpack $ "Package " <> p <> " " <> prettySemVer v <>
-                        " has commit hash " <> pkgRevCommit pinfo <>
-                        ", but expected " <> h <> " from package manifest."
+    checkHash _ _ _ Nothing = return ()
+    checkHash p v pinfo (Just h)
+      | h == pkgRevCommit pinfo = return ()
+      | otherwise =
+        fail $
+          T.unpack $
+            "Package " <> p <> " " <> prettySemVer v
+              <> " has commit hash "
+              <> pkgRevCommit pinfo
+              <> ", but expected "
+              <> h
+              <> " from package manifest."
 
 -- | A mapping of package revisions to the dependencies of that
 -- package.  Can be considered a 'PkgRegistry' without the option of
@@ -104,10 +117,14 @@ type PkgRevDepInfo = M.Map (PkgPath, SemVer) PkgRevDeps
 -- | Perform package resolution with only pre-known information.  This
 -- is useful for testing.
 solveDepsPure :: PkgRevDepInfo -> PkgRevDeps -> Either T.Text BuildList
-solveDepsPure r deps = buildList (depRoots deps) <$> runF
-                       (execStateT (doSolveDeps deps) emptyRoughBuildList)
-                       Right step
-  where step (OpGetDeps p v _ c) = do
-          let errmsg = "Unknown package/version: " <> p <> "-" <> prettySemVer v
-          d <- maybe (Left errmsg) Right $ M.lookup (p,v) r
-          c d
+solveDepsPure r deps =
+  buildList (depRoots deps)
+    <$> runF
+      (execStateT (doSolveDeps deps) emptyRoughBuildList)
+      Right
+      step
+  where
+    step (OpGetDeps p v _ c) = do
+      let errmsg = "Unknown package/version: " <> p <> "-" <> prettySemVer v
+      d <- maybe (Left errmsg) Right $ M.lookup (p, v) r
+      c d

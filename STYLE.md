@@ -18,6 +18,62 @@ guidelines on some of the principles underlying the compiler design.
 Style Rules
 ===========
 
+Ormolu
+------
+
+Futhark uses [Ormolu](https://github.com/tweag/ormolu/) to enforce consistency
+in formatting style. The style is checked by our CI, so you should make sure any
+pull requests comply with Ormolus formatting before trying to merge.
+
+### Installation
+
+Installing Ormolu can be done through Cabal, Stack, Nix or the Arch Linux
+package manager. For instance, to install through Cabal, run the following
+command:
+
+```
+cabal install ormolu
+```
+
+If you're running Nix or NixOS, you can just use `nix-shell` to enter a
+development environment with ormolu already installed.
+
+### Basic Usage
+
+The following command formats a single file:
+
+```
+ormolu -i FILE.hs
+```
+
+This command can be used to format all Haskell files in Futhark, while
+checking that the formatting is idempotent:
+
+```
+./tools/run-formatter.sh src unittests
+```
+
+The idempotence check is mostly done to make sure Ormolu (which is still a young
+tool in active development) doesn't introduce any unnecessary changes. Any
+idempotence errors should be reported upstream.
+
+### Editor Integration
+
+Emacs has [ormolu.el](https://github.com/vyorkin/ormolu.el) to help with
+formatting. Once installed (as per the instructions on that page), it will
+automatically format any open Haskell file on save.
+
+The Ormolu README lists further integrations for VS Code and vim.
+
+### Limitations
+
+Ormolu doesn't handle all aspects of coding style. For instance, it will do no
+significant rewrites of your code, like if-then-else to pattern matches or
+enforcing the 80 character line limit, but it will ensure consistency in
+alignment and basic formatting. Therefore, as a Futhark contributer, use Ormolu
+to ensure basic style consistency, while still taking care to follow the more
+general style rules listed below.
+
 Formatting
 ----------
 
@@ -25,183 +81,73 @@ Formatting
 
 Maximum line length is *80 characters*.
 
-### Indentation
+Ormolu doesn't enfore the 80 character line limit, so it is up to the user to
+introduce the necessary line breaks in the code. However, Ormolu will take a
+hint. Imagine you've got the following line of code:
 
-Tabs are illegal. Use spaces for indenting.  Indent your code blocks
-with *2 spaces*.  E.g, we write
-
-```haskell
-foo x = do
-  case whatever x of
-    Just bar ->
-      ...
-    Nothing ->
-      ...
+```
+onKernels :: (SegOp SegLevel KernelsMem -> ReuseAllocsM (SegOp SegLevel KernelsMem)) -> Stms KernelsMem -> ReuseAllocsM (Stms KernelsMem)
 ```
 
-It is okay to use a different number of spaces for alignment with
-other syntactic structures, e.g:
+If the user introduces a newline before `ReuseAllocsM`, turning the above into
+the following:
 
-```haskell
-case foo of Just x  -> do a
-                          b
-            Nothing -> do c
-                          d
+```
+onKernels :: (SegOp SegLevel KernelsMem -> ReuseAllocsM (SegOp SegLevel KernelsMem)) -> Stms KernelsMem ->
+  ReuseAllocsM (Stms KernelsMem)
 ```
 
-Tasteful alignment can made code easier to read, but do not go
-overboard.  The functions `inputs` and `lambda` in
-`Futhark.Analysis.HORepresentation.SOAC` are a good example of
-pointless use of alignment, and are retained to serve as a reminder of
-this.
+Ormolu will pick up the hint and reformat the entire declaration to this:
 
-If in doubt, don't align.  Spurious alignment makes the code feel weird
-and off-key, and it can be remarkably ugly when not maintained.  Alignment
-in expressions is usually a bad idea.
+```
+onKernels ::
+  (SegOp SegLevel KernelsMem -> ReuseAllocsM (SegOp SegLevel KernelsMem)) ->
+  Stms KernelsMem ->
+  ReuseAllocsM (Stms KernelsMem)
+```
+
 
 ### Blank Lines
-
-One blank line between top-level definitions.  No blank lines between
-type signatures and function definitions, except in very large
-functions, where each clause is also separated by whitespace.  Add one
-blank line between functions in a type class instance declaration if
-the functions bodies are large.  Use your judgement.
 
 In large `do`-blocks, separate logically separate chunks of code with
 a single blank line.
 
-### Whitespace
-
-Generally, surround binary operators with a single space on either
-side.  Use your better judgement for the insertion of spaces around
-arithmetic operators but always be consistent about whitespace on
-either side of a binary operator.  Don't insert a space after a
-lambda.  Trailing whitespace is not permitted.  Always have a space on
-each side of '<-' and '='.  E.g, this is bad:
-
-```haskell
-x<- foo
-let y =bar
-```
-
-But this is good:
-
-```
-x <- foo
-let y = bar
-```
-
-### Data Declarations
-
-Align the constructors in a data type definition.  Example:
-
-```haskell
-data Tree a = Branch !a !(Tree a) !(Tree a)
-            | Leaf
-```
-
-For long type names the following formatting is also acceptable:
-
-```haskell
-data HttpException
-    = InvalidStatusCode Int
-    | MissingContentHeader
-```
-
-Format records as follows:
-
-```haskell
-data Person = Person
-    { firstName :: !String  -- ^ First name
-    , lastName  :: !String  -- ^ Last name
-    , age       :: !Int     -- ^ Age
-    } deriving (Eq, Show)
-```
-
-### List Declarations
-
-Align the elements in the list.  Example:
-
-```haskell
-exceptions =
-    [ InvalidStatusCode
-    , MissingContentHeader
-    , InternalServerError
-    ]
-```
-
-Optionally, you can skip the first newline.  Use your judgement.
-
-```haskell
-directions = [ North
-             , East
-             , South
-             , West
-             ]
-```
 
 ### Long Expressions
 
-Long expressions should be split over multiple lines.  If splitting at
-an operator use your judgement as to whether the operator goes at the
-end or beginning of a line.  In the case of `$`, always put it at the
-end of the line.  If splitting a function call, use indentation to
-make more readable.
+Long expressions should be split over multiple lines.
 
-If splitting a definition, put a linebreak just after `=` or `<-`, and
-indent the following expression with two spaces.  E.g,
+If splitting a definition using the `$` operator, Ormolu will incrementally add
+more indentation, which may sometimes be undesirable.
+
+For instance, the following expression:
 
 ```haskell
 someAtrociouslyLongVariableName <- someFunction $ someOtherFunction withSomeVar $ someThirdFunction something $ map somethingElse
 ```
 
-Should be:
+Will turn in to:
 
 ```haskell
 someAtrociouslyLongVariableName <-
   someFunction $
     someOtherFunction withSomeVar $
-    someThirdFunction something $
-    map somethingElse
+      someThirdFunction something $
+        map somethingElse
 ```
 
-This would also be acceptable:
+If you'd rather keep everything equally nested, consider using the `&` operator
+instead, which is like a reverse `$`. The code above is semantically identical
+to this:
 
-```haskell
+```
 someAtrociouslyLongVariableName <-
-  someFunction $ someOtherFunction withSomeVar $
-                 someThirdFunction something $
-                 map somethingElse
+  map somethingElse
+    & someThirdFunction something
+    & someOtherFunction withSomeVar
+    & someFunction
 ```
 
-### Long Type Signatures
-
-Formatting of long type signature are different from long expressions,
-and should be done as
-
-```haskell
-analyseBindings :: Lore lore =>
-                   [In.Binding lore]
-                -> ([Out.Binding lore] -> RangeM a)
-                -> RangeM a
-```
-
-### Hanging Lambdas
-
-You may or may not indent the code following a "hanging" lambda.  Use
-your judgement. Some examples:
-
-```haskell
-bar :: IO ()
-bar = forM_ [1, 2, 3] $ \n -> do
-        putStrLn "Here comes a number!"
-        print n
-
-foo :: IO ()
-foo = alloca 10 $ \a ->
-      alloca 20 $ \b ->
-      cFunction a b
-```
 
 ### Export Lists
 
@@ -209,14 +155,13 @@ Format export lists as follows:
 
 ```haskell
 module Data.Set
-    (
-      -- * The @Set@ type
-      Set
-    , empty
-    , singleton
+    ( -- * The @Set@ type
+      empty,
+      Set,
+      singleton,
 
       -- * Querying
-    , member
+      member,
     ) where
 ```
 ### If-then-else clauses
@@ -240,47 +185,6 @@ foo True  = c
 Short cases should usually be put on a single line (when line length
 allows it).
 
-When writing non-monadic code (i.e. when not using `do`) and guards
-and pattern matches can't be used, you can align if-then-else clauses
-like you would normal expressions:
-
-```haskell
-foo = if ...
-      then ...
-      else ...
-```
-
-Otherwise, you should be consistent with the 2-spaces indent rule, and
-the `then` and the `else` keyword should be aligned.  Examples:
-
-```haskell
-foo = do
-  someCode
-  if condition
-    then someMoreCode
-    else someAlternativeCode
-```
-
-```haskell
-foo = bar $ \qux -> if predicate qux
-  then doSomethingSilly
-  else someOtherCode
-```
-
-The same rule applies to nested do blocks:
-
-```haskell
-foo = do
-  instruction <- decodeInstruction
-  skip <- load Memory.skip
-  if skip == 0x0000
-    then do
-      execute instruction
-      addCycles $ instructionCycles instruction
-    else do
-      store Memory.skip 0x0000
-      addCycles 1
-```
 
 ### Pattern matching
 
@@ -288,38 +192,9 @@ Prefer pattern-matching in function clauses to `case`.  Consider using
 [view patterns](https://ghc.haskell.org/trac/ghc/wiki/ViewPatterns),
 but be careful not to go overboard.
 
-### Case expressions
-
-The alternatives in a case expression can be indented using either of
-the two following styles:
-
-```haskell
-foobar = case something of
-    Just j  -> foo
-    Nothing -> bar
-```
-
-or as
-
-```haskell
-foobar = case something of
-             Just j  -> foo
-             Nothing -> bar
-```
-
-Align the `->` arrows when it helps readability.
 
 Imports
 -------
-
-Imports should be grouped in the following order:
-
-1. standard library imports
-2. related third party imports
-3. local application/library specific imports
-
-Put a blank line between each group of imports.  The imports in each
-group should be sorted alphabetically, by module name.
 
 Try to use explicit import lists or `qualified` imports for standard
 and third party libraries.  This makes the code more robust against
@@ -356,23 +231,23 @@ Record example:
 ```haskell
 -- | Bla bla bla.
 data Person = Person
-    { age  :: !Int     -- ^ Age
-    , name :: !String  -- ^ First name
-    }
+  { age  :: !Int     -- ^ Age
+  , name :: !String  -- ^ First name
+  }
 ```
 
 For fields that require longer comments format them like so:
 
 ```haskell
 data Record = Record
-    { -- | This is a very very very long comment that is split over
-      -- multiple lines.
-      field1 :: !Text
+  { -- | This is a very very very long comment that is split over
+    -- multiple lines.
+    field1 :: !Text
 
-      -- | This is a second very very very long comment that is split
-      -- over multiple lines.
-    , field2 :: !Int
-    }
+    -- | This is a second very very very long comment that is split
+    -- over multiple lines.
+  , field2 :: !Int
+  }
 ```
 
 Naming

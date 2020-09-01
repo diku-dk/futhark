@@ -1,13 +1,12 @@
 -- | @futhark query@
 module Futhark.CLI.Query (main) where
 
-import Text.Read (readMaybe)
-
 import Futhark.Compiler
-import Futhark.Util.Options
 import Futhark.Util.Loc
+import Futhark.Util.Options
 import Language.Futhark.Query
 import Language.Futhark.Syntax
+import Text.Read (readMaybe)
 
 -- | Run @futhark query@.
 main :: String -> [String] -> IO ()

@@ -1,12 +1,13 @@
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 -- | The core Futhark AST does not contain type information when we
 -- use a variable.  Therefore, most transformations expect to be able
 -- to access some kind of symbol table that maps names to their types.
@@ -16,42 +17,42 @@
 -- also provided to communicate that some monad or applicative functor
 -- maintains type information.
 module Futhark.IR.Prop.Scope
-       ( HasScope (..)
-       , NameInfo (..)
-       , LocalScope (..)
-       , Scope
-       , Scoped(..)
-       , inScopeOf
-       , scopeOfLParams
-       , scopeOfFParams
-       , scopeOfPattern
-       , scopeOfPatElem
+  ( HasScope (..),
+    NameInfo (..),
+    LocalScope (..),
+    Scope,
+    Scoped (..),
+    inScopeOf,
+    scopeOfLParams,
+    scopeOfFParams,
+    scopeOfPattern,
+    scopeOfPatElem,
+    SameScope,
+    castScope,
 
-       , SameScope
-       , castScope
-
-         -- * Extended type environment
-       , ExtendedScope
-       , extendedScope
-       ) where
+    -- * Extended type environment
+    ExtendedScope,
+    extendedScope,
+  )
+where
 
 import Control.Monad.Except
-import Control.Monad.Reader
-import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.RWS.Lazy
+import qualified Control.Monad.RWS.Strict
+import Control.Monad.Reader
 import qualified Data.Map.Strict as M
-
 import Futhark.IR.Decorations
-import Futhark.IR.Syntax
-import Futhark.IR.Prop.Types
-import Futhark.IR.Prop.Patterns
 import Futhark.IR.Pretty ()
+import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Types
+import Futhark.IR.Syntax
 
 -- | How some name in scope was bound.
-data NameInfo lore = LetName (LetDec lore)
-                   | FParamName (FParamInfo lore)
-                   | LParamName (LParamInfo lore)
-                   | IndexName IntType
+data NameInfo lore
+  = LetName (LetDec lore)
+  | FParamName (FParamInfo lore)
+  | LParamName (LParamInfo lore)
+  | IndexName IntType
 
 deriving instance Decorations lore => Show (NameInfo lore)
 
@@ -81,9 +82,11 @@ class (Applicative m, Decorations lore) => HasScope lore m | m -> lore where
   lookupInfo :: VName -> m (NameInfo lore)
   lookupInfo name =
     asksScope (M.findWithDefault notFound name)
-    where notFound =
-            error $ "Scope.lookupInfo: Name " ++ pretty name ++
-            " not found in type environment."
+    where
+      notFound =
+        error $
+          "Scope.lookupInfo: Name " ++ pretty name
+            ++ " not found in type environment."
 
   -- | Return the type environment contained in the applicative
   -- functor.
@@ -94,19 +97,25 @@ class (Applicative m, Decorations lore) => HasScope lore m | m -> lore where
   asksScope :: (Scope lore -> a) -> m a
   asksScope f = f <$> askScope
 
-instance (Applicative m, Monad m, Decorations lore) =>
-         HasScope lore (ReaderT (Scope lore) m) where
+instance
+  (Applicative m, Monad m, Decorations lore) =>
+  HasScope lore (ReaderT (Scope lore) m)
+  where
   askScope = ask
 
 instance (Monad m, HasScope lore m) => HasScope lore (ExceptT e m) where
   askScope = lift askScope
 
-instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
-         HasScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m) where
+instance
+  (Applicative m, Monad m, Monoid w, Decorations lore) =>
+  HasScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m)
+  where
   askScope = ask
 
-instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
-         HasScope lore (Control.Monad.RWS.Lazy.RWST (Scope lore) w s m) where
+instance
+  (Applicative m, Monad m, Monoid w, Decorations lore) =>
+  HasScope lore (Control.Monad.RWS.Lazy.RWST (Scope lore) w s m)
+  where
   askScope = ask
 
 -- | The class of monads that not only provide a 'Scope', but also
@@ -121,16 +130,22 @@ class (HasScope lore m, Monad m) => LocalScope lore m where
 instance (Monad m, LocalScope lore m) => LocalScope lore (ExceptT e m) where
   localScope = mapExceptT . localScope
 
-instance (Applicative m, Monad m, Decorations lore) =>
-         LocalScope lore (ReaderT (Scope lore) m) where
+instance
+  (Applicative m, Monad m, Decorations lore) =>
+  LocalScope lore (ReaderT (Scope lore) m)
+  where
   localScope = local . M.union
 
-instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
-         LocalScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m) where
+instance
+  (Applicative m, Monad m, Monoid w, Decorations lore) =>
+  LocalScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m)
+  where
   localScope = local . M.union
 
-instance (Applicative m, Monad m, Monoid w, Decorations lore) =>
-         LocalScope lore (Control.Monad.RWS.Lazy.RWST (Scope lore) w s m) where
+instance
+  (Applicative m, Monad m, Monoid w, Decorations lore) =>
+  LocalScope lore (Control.Monad.RWS.Lazy.RWST (Scope lore) w s m)
+  where
   localScope = local . M.union
 
 -- | The class of things that can provide a scope.  There is no
@@ -173,34 +188,46 @@ scopeOfPatElem :: LetDec lore ~ dec => PatElemT dec -> Scope lore
 scopeOfPatElem (PatElem name dec) = M.singleton name $ LetName dec
 
 -- | The scope of some lambda parameters.
-scopeOfLParams :: LParamInfo lore ~ dec =>
-                  [Param dec] -> Scope lore
+scopeOfLParams ::
+  LParamInfo lore ~ dec =>
+  [Param dec] ->
+  Scope lore
 scopeOfLParams = M.fromList . map f
-  where f param = (paramName param, LParamName $ paramDec param)
+  where
+    f param = (paramName param, LParamName $ paramDec param)
 
 -- | The scope of some function or loop parameters.
-scopeOfFParams :: FParamInfo lore ~ dec =>
-                  [Param dec] -> Scope lore
+scopeOfFParams ::
+  FParamInfo lore ~ dec =>
+  [Param dec] ->
+  Scope lore
 scopeOfFParams = M.fromList . map f
-  where f param = (paramName param, FParamName $ paramDec param)
+  where
+    f param = (paramName param, FParamName $ paramDec param)
 
 instance Scoped lore (Lambda lore) where
   scopeOf lam = scopeOfLParams $ lambdaParams lam
 
 -- | A constraint that indicates two lores have the same 'NameInfo'
 -- representation.
-type SameScope lore1 lore2 = (LetDec lore1 ~ LetDec lore2,
-                              FParamInfo lore1 ~ FParamInfo lore2,
-                              LParamInfo lore1 ~ LParamInfo lore2)
+type SameScope lore1 lore2 =
+  ( LetDec lore1 ~ LetDec lore2,
+    FParamInfo lore1 ~ FParamInfo lore2,
+    LParamInfo lore1 ~ LParamInfo lore2
+  )
 
 -- | If two scopes are really the same, then you can convert one to
 -- the other.
-castScope :: SameScope fromlore tolore =>
-             Scope fromlore -> Scope tolore
+castScope ::
+  SameScope fromlore tolore =>
+  Scope fromlore ->
+  Scope tolore
 castScope = M.map castNameInfo
 
-castNameInfo :: SameScope fromlore tolore =>
-                NameInfo fromlore -> NameInfo tolore
+castNameInfo ::
+  SameScope fromlore tolore =>
+  NameInfo fromlore ->
+  NameInfo tolore
 castNameInfo (LetName dec) = LetName dec
 castNameInfo (FParamName dec) = FParamName dec
 castNameInfo (LParamName dec) = LParamName dec
@@ -210,18 +237,25 @@ castNameInfo (IndexName it) = IndexName it
 -- Its 'lookupType' method will first look in the extended 'Scope',
 -- and then use the 'lookupType' method of the underlying monad.
 newtype ExtendedScope lore m a = ExtendedScope (ReaderT (Scope lore) m a)
-                            deriving (Functor, Applicative, Monad,
-                                      MonadReader (Scope lore))
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadReader (Scope lore)
+    )
 
-instance (HasScope lore m, Monad m) =>
-         HasScope lore (ExtendedScope lore m) where
+instance
+  (HasScope lore m, Monad m) =>
+  HasScope lore (ExtendedScope lore m)
+  where
   lookupType name = do
     res <- asks $ fmap typeOf . M.lookup name
     maybe (ExtendedScope $ lift $ lookupType name) return res
   askScope = asks M.union <*> ExtendedScope (lift askScope)
 
 -- | Run a computation in the extended type environment.
-extendedScope :: ExtendedScope lore m a
-              -> Scope lore
-              -> m a
+extendedScope ::
+  ExtendedScope lore m a ->
+  Scope lore ->
+  m a
 extendedScope (ExtendedScope m) = runReaderT m
