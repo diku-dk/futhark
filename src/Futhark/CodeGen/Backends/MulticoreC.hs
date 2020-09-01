@@ -1,49 +1,59 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE OverloadedStrings #-}
+
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program.
 module Futhark.CodeGen.Backends.MulticoreC
-  ( compileProg
-  , GC.CParts(..)
-  , GC.asLibrary
-  , GC.asExecutable
-  ) where
+  ( compileProg,
+    GC.CParts (..),
+    GC.asLibrary,
+    GC.asExecutable,
+  )
+where
 
 import Control.Monad
-
-import Data.Maybe
 import Data.FileEmbed
-
-
 import qualified Data.Map as M
-import qualified Language.C.Syntax as C
-import qualified Language.C.Quote.OpenCL as C
-import Futhark.IR.MCMem (Prog, MCMem)
-import Futhark.CodeGen.ImpCode.Multicore
-import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Data.Maybe
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRep
+import Futhark.CodeGen.ImpCode.Multicore
+import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGen
+import Futhark.IR.MCMem (MCMem, Prog)
+import Futhark.MonadFreshNames
+import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Syntax as C
 
-compileProg :: MonadFreshNames m => Prog MCMem
-            -> m (ImpGen.Warnings, GC.CParts)
+compileProg ::
+  MonadFreshNames m =>
+  Prog MCMem ->
+  m (ImpGen.Warnings, GC.CParts)
 compileProg =
-  traverse (GC.compileProg "multicore" operations generateContext
-            "" [DefaultSpace] cliOptions) <=<
-  ImpGen.compileProg
-  where generateContext = do
+  traverse
+    ( GC.compileProg
+        "multicore"
+        operations
+        generateContext
+        ""
+        [DefaultSpace]
+        cliOptions
+    )
+    <=< ImpGen.compileProg
+  where
+    generateContext = do
+      let multicore_defs_h = $(embedStringFile "rts/c/multicore_defs.h")
+          multicore_util_h = $(embedStringFile "rts/c/multicore_util.h")
+          subtask_queue_h = $(embedStringFile "rts/c/subtask_queue.h")
+          chaselev_h = $(embedStringFile "rts/c/chaselev.h")
+          scheduler_common_h = $(embedStringFile "rts/c/scheduler_common.h")
+          scheduler_h = $(embedStringFile "rts/c/scheduler.h")
+          scheduler_tune_h = $(embedStringFile "rts/c/scheduler_tune.h")
 
-          let multicore_defs_h = $(embedStringFile "rts/c/multicore_defs.h")
-              multicore_util_h  = $(embedStringFile "rts/c/multicore_util.h")
-              subtask_queue_h  = $(embedStringFile "rts/c/subtask_queue.h")
-              chaselev_h  = $(embedStringFile "rts/c/chaselev.h")
-              scheduler_common_h = $(embedStringFile "rts/c/scheduler_common.h")
-              scheduler_h = $(embedStringFile "rts/c/scheduler.h")
-              scheduler_tune_h = $(embedStringFile "rts/c/scheduler_tune.h")
-
-          mapM_ GC.earlyDecl [C.cunit|
+      mapM_
+        GC.earlyDecl
+        [C.cunit|
                               $esc:multicore_defs_h
                               $esc:multicore_util_h
                               $esc:chaselev_h
@@ -52,16 +62,17 @@ compileProg =
                               $esc:scheduler_h
                              |]
 
-          mapM_ GC.earlyDecl [C.cunit|int futhark_segred_tuning_program(struct futhark_context *ctx);|]
-          mapM_ GC.libDecl [C.cunit|$esc:scheduler_tune_h|]
+      mapM_ GC.earlyDecl [C.cunit|int futhark_segred_tuning_program(struct futhark_context *ctx);|]
+      mapM_ GC.libDecl [C.cunit|$esc:scheduler_tune_h|]
 
-          cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
-            ([C.cedecl|struct $id:s;|],
-             [C.cedecl|struct $id:s { int debugging; int profiling; };|])
+      cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
+        ( [C.cedecl|struct $id:s;|],
+          [C.cedecl|struct $id:s { int debugging; int profiling; };|]
+        )
 
-          GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
-            ([C.cedecl|struct $id:cfg* $id:s(void);|],
-             [C.cedecl|struct $id:cfg* $id:s(void) {
+      GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
+        ( [C.cedecl|struct $id:cfg* $id:s(void);|],
+          [C.cedecl|struct $id:cfg* $id:s(void) {
                                  struct $id:cfg *cfg = (struct $id:cfg*) malloc(sizeof(struct $id:cfg));
                                  if (cfg == NULL) {
                                    return NULL;
@@ -69,38 +80,43 @@ compileProg =
                                  cfg->debugging = 0;
                                  cfg->profiling = 0;
                                  return cfg;
-                               }|])
+                               }|]
+        )
 
-          GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
-            ([C.cedecl|void $id:s(struct $id:cfg* cfg);|],
-             [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+      GC.publicDef_ "context_config_free" GC.InitDecl $ \s ->
+        ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+          [C.cedecl|void $id:s(struct $id:cfg* cfg) {
                                  free(cfg);
-                               }|])
+                               }|]
+        )
 
-          GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
-             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-              [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
+      GC.publicDef_ "context_config_set_debugging" GC.InitDecl $ \s ->
+        ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+          [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
                           cfg->debugging = detail;
-                        }|])
+                        }|]
+        )
 
-          GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
-             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-              [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
+      GC.publicDef_ "context_config_set_profiling" GC.InitDecl $ \s ->
+        ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+          [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag) {
                           cfg->profiling = flag;
-                        }|])
+                        }|]
+        )
 
-          GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
-             ([C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
-              [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
+      GC.publicDef_ "context_config_set_logging" GC.InitDecl $ \s ->
+        ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int flag);|],
+          [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
                                  /* Does nothing for this backend. */
                                  (void)cfg; (void)detail;
-                               }|])
+                               }|]
+        )
 
-          (fields, init_fields) <- GC.contextContents
+      (fields, init_fields) <- GC.contextContents
 
-          ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
-            ([C.cedecl|struct $id:s;|],
-             [C.cedecl|struct $id:s {
+      ctx <- GC.publicDef "context" GC.InitDecl $ \s ->
+        ( [C.cedecl|struct $id:s;|],
+          [C.cedecl|struct $id:s {
                           struct scheduler scheduler;
                           int detail_memory;
                           int debugging;
@@ -115,11 +131,12 @@ compileProg =
                           // Tuning parameters
                           typename int64_t tuning_timing;
                           typename int64_t tuning_iter;
-                        };|])
+                        };|]
+        )
 
-          GC.publicDef_ "context_new" GC.InitDecl $ \s ->
-            ([C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
-             [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
+      GC.publicDef_ "context_new" GC.InitDecl $ \s ->
+        ( [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg);|],
+          [C.cedecl|struct $id:ctx* $id:s(struct $id:cfg* cfg) {
                  struct $id:ctx* ctx = (struct $id:ctx*) malloc(sizeof(struct $id:ctx));
                  if (ctx == NULL) {
                    return NULL;
@@ -182,11 +199,12 @@ compileProg =
 
 
                  return ctx;
-              }|])
+              }|]
+        )
 
-          GC.publicDef_ "context_free" GC.InitDecl $ \s ->
-            ([C.cedecl|void $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|void $id:s(struct $id:ctx* ctx) {
+      GC.publicDef_ "context_free" GC.InitDecl $ \s ->
+        ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
+          [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
 
                  // active_work = 1;
@@ -207,36 +225,40 @@ compileProg =
                  free(ctx->scheduler.workers);
                  free_lock(&ctx->lock);
                  free(ctx);
-               }|])
+               }|]
+        )
 
-          GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
-            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+      GC.publicDef_ "context_sync" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+          [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                                  (void)ctx;
                                  return 0;
-                               }|])
+                               }|]
+        )
 
-          GC.publicDef_ "context_get_num_threads" GC.InitDecl $ \s ->
-            ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-             [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+      GC.publicDef_ "context_get_num_threads" GC.InitDecl $ \s ->
+        ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+          [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                         return ctx->scheduler.num_threads;
-                       }|])
-
+                       }|]
+        )
 
 cliOptions :: [Option]
 cliOptions =
-  [ Option { optionLongName = "profile"
-           , optionShortName = Just 'P'
-           , optionArgument = NoArgument
-           , optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
-           }
+  [ Option
+      { optionLongName = "profile",
+        optionShortName = Just 'P',
+        optionArgument = NoArgument,
+        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+      }
   ]
 
 operations :: GC.Operations Multicore ()
-operations = GC.defaultOperations
-             { GC.opsCompiler = compileOp
-             , GC.opsCopy = copyMulticoreMemory
-             }
+operations =
+  GC.defaultOperations
+    { GC.opsCompiler = compileOp,
+      GC.opsCopy = copyMulticoreMemory
+    }
 
 copyMulticoreMemory :: GC.Copy Multicore ()
 copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
@@ -262,7 +284,6 @@ compileFreeStructFields = zipWith field
     field name (_, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
 
-
 compileRetvalStructFields :: [VName] -> [(C.Type, ValueType)] -> [C.FieldGroup]
 compileRetvalStructFields = zipWith field
   where
@@ -271,8 +292,12 @@ compileRetvalStructFields = zipWith field
     field name (_, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
 
-compileSetStructValues :: C.ToIdent a =>
-                          a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
+compileSetStructValues ::
+  C.ToIdent a =>
+  a ->
+  [VName] ->
+  [(C.Type, ValueType)] ->
+  [C.Stm]
 compileSetStructValues struct = zipWith field
   where
     field name (_, Prim) =
@@ -282,8 +307,12 @@ compileSetStructValues struct = zipWith field
     field name (_, RawMem) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
 
-compileSetRetvalStructValues :: C.ToIdent a =>
-                          a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
+compileSetRetvalStructValues ::
+  C.ToIdent a =>
+  a ->
+  [VName] ->
+  [(C.Type, ValueType)] ->
+  [C.Stm]
 compileSetRetvalStructValues struct = zipWith field
   where
     field name (_, Prim) =
@@ -303,8 +332,13 @@ compileGetRetvalStructVals struct = zipWith field
                  {.desc = $string:(pretty name),
                  .mem = $id:struct->$id:(closureRetvalStructField name),
                  .size = 0, .references = NULL};|]
-compileGetStructVals :: C.ToIdent a =>
-                        a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
+
+compileGetStructVals ::
+  C.ToIdent a =>
+  a ->
+  [VName] ->
+  [(C.Type, ValueType)] ->
+  [C.InitGroup]
 compileGetStructVals struct = zipWith field
   where
     field name (ty, Prim) =
@@ -324,7 +358,7 @@ compileWriteBackResVals struct = zipWith field
       [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
 paramToCType :: Param -> GC.CompilerM op s (C.Type, ValueType)
-paramToCType (ScalarParam _ pt)     = do
+paramToCType (ScalarParam _ pt) = do
   let t = GC.primTypeToCType pt
   return (t, Prim)
 paramToCType (MemParam name space') = mcMemToCType name space'
@@ -333,38 +367,42 @@ mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
 mcMemToCType v space = do
   refcount <- GC.fatMemory space
   cached <- isJust <$> GC.cacheMem v
-  return (GC.fatMemType space,
-          if refcount && not cached
-          then MemBlock
-          else RawMem)
+  return
+    ( GC.fatMemType space,
+      if refcount && not cached
+        then MemBlock
+        else RawMem
+    )
 
 functionRuntime :: Name -> C.Id
-functionRuntime = (`C.toIdent` mempty) . (<>"_total_runtime")
+functionRuntime = (`C.toIdent` mempty) . (<> "_total_runtime")
 
 functionRuns :: Name -> C.Id
-functionRuns = (`C.toIdent` mempty) . (<>"_runs")
+functionRuns = (`C.toIdent` mempty) . (<> "_runs")
 
 functionIter :: Name -> C.Id
-functionIter = (`C.toIdent` mempty) . (<>"_iter")
+functionIter = (`C.toIdent` mempty) . (<> "_iter")
 
 multiCoreReport :: [(Name, Bool)] -> [C.BlockItem]
 multiCoreReport names = report_kernels
-  where report_kernels = concatMap reportKernel names
-        max_name_len_pad = 40
-        format_string name True =
-          let name_s = nameToString name
-              padding = replicate (max_name_len_pad - length name_s) ' '
-          in unwords ["tid %2d -", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
-        format_string name False =
-          let name_s = nameToString name
-              padding = replicate (max_name_len_pad - length name_s) ' '
-          in unwords ["        ", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
-        reportKernel (name, is_array) =
-          let runs = functionRuns name
-              total_runtime = functionRuntime name
-              iters = functionIter name
-          in if is_array then
-                   [[C.citem|
+  where
+    report_kernels = concatMap reportKernel names
+    max_name_len_pad = 40
+    format_string name True =
+      let name_s = nameToString name
+          padding = replicate (max_name_len_pad - length name_s) ' '
+       in unwords ["tid %2d -", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
+    format_string name False =
+      let name_s = nameToString name
+          padding = replicate (max_name_len_pad - length name_s) ' '
+       in unwords ["        ", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
+    reportKernel (name, is_array) =
+      let runs = functionRuns name
+          total_runtime = functionRuntime name
+          iters = functionIter name
+       in if is_array
+            then
+              [ [C.citem|
                      for (int i = 0; i < ctx->scheduler.num_threads; i++) {
                        fprintf(stderr,
                          $string:(format_string name is_array),
@@ -377,10 +415,10 @@ multiCoreReport names = report_kernels
                          (long int) (ctx->$id:iters[i]) / (ctx->$id:runs[i] != 0 ? ctx->$id:runs[i] : 1)
                          );
                      }
-                   |]]
-
-
-             else [[C.citem|
+                   |]
+              ]
+            else
+              [ [C.citem|
                     fprintf(stderr,
                        $string:(format_string name is_array),
                        ctx->$id:runs,
@@ -390,9 +428,9 @@ multiCoreReport names = report_kernels
                        (long int) (ctx->$id:iters),
                        (long int) (ctx->$id:iters) / (ctx->$id:runs != 0 ? ctx->$id:runs : 1));
                    |],
-                   [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
-                   [C.citem|ctx->total_runs += ctx->$id:runs;|]]
-
+                [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
+                [C.citem|ctx->total_runs += ctx->$id:runs;|]
+              ]
 
 addBenchmarkFields :: Name -> Maybe VName -> GC.CompilerM op s ()
 addBenchmarkFields name (Just _) = do
@@ -404,11 +442,11 @@ addBenchmarkFields name Nothing = do
   GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
   GC.contextField (functionIter name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
 
-
 benchmarkCode :: Name -> Maybe VName -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
 benchmarkCode name tid code = do
   addBenchmarkFields name tid
-  return [C.citems|
+  return
+    [C.citems|
      typename uint64_t $id:start;
      if (ctx->profiling && !ctx->profiling_paused) {
        $id:start = get_wall_time();
@@ -420,22 +458,23 @@ benchmarkCode name tid code = do
        $items:(updateFields tid)
      }
      |]
-
-  where start = name <> "_start"
-        end = name <> "_end"
-        updateFields Nothing    = [C.citems|__atomic_fetch_add(&ctx->$id:(functionRuns name), 1, __ATOMIC_RELAXED);
+  where
+    start = name <> "_start"
+    end = name <> "_end"
+    updateFields Nothing =
+      [C.citems|__atomic_fetch_add(&ctx->$id:(functionRuns name), 1, __ATOMIC_RELAXED);
                                             __atomic_fetch_add(&ctx->$id:(functionRuntime name), elapsed, __ATOMIC_RELAXED);
                                             __atomic_fetch_add(&ctx->$id:(functionIter name), iterations, __ATOMIC_RELAXED);|]
-        updateFields (Just _tid') = [C.citems|ctx->$id:(functionRuns name)[tid]++;
+    updateFields (Just _tid') =
+      [C.citems|ctx->$id:(functionRuns name)[tid]++;
                                             ctx->$id:(functionRuntime name)[tid] += elapsed;
                                             ctx->$id:(functionIter name)[tid] += iterations;|]
+
 functionTiming :: Name -> C.Id
-functionTiming = (`C.toIdent` mempty) . (<>"_total_time")
+functionTiming = (`C.toIdent` mempty) . (<> "_total_time")
 
 functionIterations :: Name -> C.Id
-functionIterations = (`C.toIdent` mempty) . (<>"_total_iter")
-
-
+functionIterations = (`C.toIdent` mempty) . (<> "_total_iter")
 
 addTimingFields :: Name -> GC.CompilerM op s ()
 addTimingFields name = do
@@ -453,29 +492,32 @@ multicoreFunDef s f = do
   GC.libDecl =<< f s'
   return s'
 
-generateFunction :: C.ToIdent a => M.Map VName (Count Bytes (TExp Int64), Space)
-                  -> String
-                  -> Code
-                  -> a
-                  -> [(VName, (C.Type, ValueType))]
-                  -> [(VName, (C.Type, ValueType))]
-                  -> VName
-                  -> VName
-                  -> GC.CompilerM Multicore s Name
+generateFunction ::
+  C.ToIdent a =>
+  M.Map VName (Count Bytes (TExp Int64), Space) ->
+  String ->
+  Code ->
+  a ->
+  [(VName, (C.Type, ValueType))] ->
+  [(VName, (C.Type, ValueType))] ->
+  VName ->
+  VName ->
+  GC.CompilerM Multicore s Name
 generateFunction lexical basename code fstruct free retval tid ntasks = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreFunDef basename $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction False $
-             GC.cachingMemory lexical $
-             \decl_cached free_cached -> GC.blockScope $ do
-      mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
-      mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
-      mapM_ GC.item decl_cached
-      code' <- GC.blockScope $ GC.compileCode code
-      mapM_ GC.item [C.citems|$items:code'|]
-      mapM_ GC.stm free_cached
-    return [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
+      GC.cachingMemory lexical $
+        \decl_cached free_cached -> GC.blockScope $ do
+          mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
+          mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
+          mapM_ GC.item decl_cached
+          code' <- GC.blockScope $ GC.compileCode code
+          mapM_ GC.item [C.citems|$items:code'|]
+          mapM_ GC.stm free_cached
+    return
+      [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
                            int err = 0;
                            int $id:tid = tid;
                            int $id:ntasks = info.nsubtasks;
@@ -490,7 +532,6 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask tid e sched)) = do
-
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
   let free_args = map paramName params
@@ -503,7 +544,8 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
   let lexical_par = lexicalMemoryUsage $ Function False [] params seq_code [] []
 
   fstruct <- multicoreFunDef "task" $ \s ->
-    return [C.cedecl|struct $id:s {
+    return
+      [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                        $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
@@ -519,71 +561,75 @@ compileOp (Task name params seq_code par_code retvals (SchedulerInfo nsubtask ti
 
   let ftask_name = fstruct <> "_task"
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
-  GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
-  GC.stm  [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
-  GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
-  GC.stm  [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  GC.stm  [C.cstm|$id:ftask_name.total_iter = &ctx->$id:(functionIterations fpar_task);|]
-  GC.stm  [C.cstm|$id:ftask_name.total_time = &ctx->$id:(functionTiming fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
+  GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.iterations = $exp:e';|]
+  GC.stm [C.cstm|$id:ftask_name.total_iter = &ctx->$id:(functionIterations fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.total_time = &ctx->$id:(functionTiming fpar_task);|]
 
   case sched of
-    Dynamic -> GC.stm  [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
-    Static  -> GC.stm  [C.cstm|$id:ftask_name.sched = STATIC;|]
+    Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
+    Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
   fnpar_task <- case par_code of
-        Just code -> do
-          let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
-          fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") code fstruct free retval tid nsubtask
-          GC.stm  [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
-          return $ zip [fnpar_task] [True]
-        Nothing -> do
-          GC.stm [C.cstm|$id:ftask_name.par_fn=NULL;|]
-          return mempty
+    Just code -> do
+      let lexical_npar = lexicalMemoryUsage $ Function False [] params code [] []
+      fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") code fstruct free retval tid nsubtask
+      GC.stm [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
+      return $ zip [fnpar_task] [True]
+    Nothing -> do
+      GC.stm [C.cstm|$id:ftask_name.par_fn=NULL;|]
+      return mempty
 
   let ftask_err = fpar_task <> "_err"
-  let code' = [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
+  let code' =
+        [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                         if ($id:ftask_err != 0) {
                           futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                         }|]
 
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
-
-
-
 compileOp (ParLoop s' i prebody body postbody free tid) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
 
-  let lexical = lexicalMemoryUsage $
-                Function False [] free body [] []
+  let lexical =
+        lexicalMemoryUsage $
+          Function False [] free body [] []
 
   fstruct <- multicoreFunDef (s' ++ "_parloop_struct") $ \s ->
-    return [C.cedecl|struct $id:s {
+    return
+      [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
                        $sdecls:(compileFreeStructFields free_args free_ctypes)
                      };|]
   ftask <- multicoreFunDef (s' ++ "_parloop") $ \s -> do
-    fbody <- benchmarkCode s (Just tid) <=<
-             GC.inNewFunction False $ GC.cachingMemory lexical $
-             \decl_cached free_cached -> GC.blockScope $ do
-      mapM_ GC.item
-        [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
+    fbody <- benchmarkCode s (Just tid)
+      <=< GC.inNewFunction False
+      $ GC.cachingMemory lexical $
+        \decl_cached free_cached -> GC.blockScope $ do
+          mapM_
+            GC.item
+            [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
 
-      mapM_ GC.item decl_cached
+          mapM_ GC.item decl_cached
 
-      GC.decl [C.cdecl|typename int64_t iterations = end - start;|]
-      GC.decl [C.cdecl|typename int64_t $id:i = start;|]
-      GC.compileCode prebody
-      body' <- GC.blockScope $ GC.compileCode body
-      GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
+          GC.decl [C.cdecl|typename int64_t iterations = end - start;|]
+          GC.decl [C.cdecl|typename int64_t $id:i = start;|]
+          GC.compileCode prebody
+          body' <- GC.blockScope $ GC.compileCode body
+          GC.stm
+            [C.cstm|for (; $id:i < end; $id:i++) {
                        $items:body'
                      }|]
-      GC.compileCode postbody
-      GC.stm [C.cstm|cleanup: {}|]
-      mapM_ GC.stm free_cached
+          GC.compileCode postbody
+          GC.stm [C.cstm|cleanup: {}|]
+          mapM_ GC.stm free_cached
 
-    return [C.cedecl|int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
+    return
+      [C.cedecl|int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
@@ -597,58 +643,59 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
 
   let ftask_name = ftask <> "_task"
   GC.decl [C.cdecl|struct scheduler_parloop $id:ftask_name;|]
-  GC.stm  [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
-  GC.stm  [C.cstm|$id:ftask_name.fn = $id:ftask;|]
-  GC.stm  [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
-  GC.stm  [C.cstm|$id:ftask_name.iterations = iterations;|]
-  GC.stm  [C.cstm|$id:ftask_name.info = info;|]
+  GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString ftask);|]
+  GC.stm [C.cstm|$id:ftask_name.fn = $id:ftask;|]
+  GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
+  GC.stm [C.cstm|$id:ftask_name.iterations = iterations;|]
+  GC.stm [C.cstm|$id:ftask_name.info = info;|]
 
   let ftask_err = ftask <> "_err"
       ftask_total = ftask <> "_total"
-  code' <- benchmarkCode ftask_total Nothing
-    [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler, &$id:ftask_name);
+  code' <-
+    benchmarkCode
+      ftask_total
+      Nothing
+      [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler, &$id:ftask_name);
               if ($id:ftask_err != 0) {
                 futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
               }|]
 
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
-
 compileOp (MulticoreCall Nothing f) =
   GC.stm [C.cstm|$id:f(ctx);|]
-
 compileOp (MulticoreCall (Just retval) f) =
   GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
-
 compileOp (Atomic aop) =
   atomicOps aop
 
-doAtomic :: (C.ToIdent a1, C.ToIdent a2) => a1
-         -> a2
-         -> Count u (TExp Int32)
-         -> Exp
-         -> String
-         -> C.Type
-         -> GC.CompilerM op s ()
+doAtomic ::
+  (C.ToIdent a1, C.ToIdent a2) =>
+  a1 ->
+  a2 ->
+  Count u (TExp Int32) ->
+  Exp ->
+  String ->
+  C.Type ->
+  GC.CompilerM op s ()
 doAtomic old arr ind val op ty = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:ty*)$id:arr.mem)[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
-
 
 atomicOps :: AtomicOp -> GC.CompilerM op s ()
 atomicOps (AtomicCmpXchg t old arr ind res val) = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   let cast = [C.cty|$ty:(GC.primTypeToCType t)*|]
-  GC.stm [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
+  GC.stm
+    [C.cstm|$id:res = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'],
                 ($ty:cast)&$id:old,
                  $exp:new_val',
                  0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);|]
   where
     op :: String
     op = "__atomic_compare_exchange_n"
-
 atomicOps (AtomicXchg t old arr ind val) = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
@@ -657,20 +704,13 @@ atomicOps (AtomicXchg t old arr ind val) = do
   where
     op :: String
     op = "__atomic_exchange_n"
-
-
-
 atomicOps (AtomicAdd t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|]
-
 atomicOps (AtomicSub t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|]
-
 atomicOps (AtomicAnd t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|]
-
 atomicOps (AtomicOr t old arr ind val) =
-  doAtomic old arr ind val "__atomic_fetch_or"  [C.cty|$ty:(GC.intTypeToCType t)|]
-
+  doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|]
 atomicOps (AtomicXor t old arr ind val) =
   doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|]

@@ -1,40 +1,39 @@
 {-# LANGUAGE Strict #-}
+
 -- | A usage-table is sort of a bottom-up symbol table, describing how
 -- (and if) a variable is used.
 module Futhark.Analysis.UsageTable
-  ( UsageTable
-  , without
-  , lookup
-  , used
-  , expand
-  , isConsumed
-  , isInResult
-  , isUsedDirectly
-  , isSize
-  , usages
-  , usage
-  , consumedUsage
-  , inResultUsage
-  , sizeUsage
-  , sizeUsages
-  , Usages
-  , usageInStm
+  ( UsageTable,
+    without,
+    lookup,
+    used,
+    expand,
+    isConsumed,
+    isInResult,
+    isUsedDirectly,
+    isSize,
+    usages,
+    usage,
+    consumedUsage,
+    inResultUsage,
+    sizeUsage,
+    sizeUsages,
+    Usages,
+    usageInStm,
   )
-  where
+where
 
 import Data.Bits
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap.Strict as IM
 import Data.List (foldl')
-
-import Prelude hiding (lookup)
-
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
+import Prelude hiding (lookup)
 
 -- | A usage table.
 newtype UsageTable = UsageTable (IM.IntMap Usages)
-                   deriving (Eq, Show)
+  deriving (Eq, Show)
 
 instance Semigroup UsageTable where
   UsageTable table1 <> UsageTable table2 =
@@ -62,9 +61,11 @@ used = lookupPred $ const True
 -- | Expand the usage table based on aliasing information.
 expand :: (VName -> Names) -> UsageTable -> UsageTable
 expand look (UsageTable m) = UsageTable $ foldl' grow m $ IM.toList m
-  where grow m' (k, v) = foldl' (grow'' $ v `withoutU` presentU) m' $
-                         namesIntMap $ look $ VName (nameFromString "") k
-        grow'' v m'' k = IM.insertWith (<>) (baseTag k) v m''
+  where
+    grow m' (k, v) =
+      foldl' (grow'' $ v `withoutU` presentU) m' $
+        namesIntMap $ look $ VName (nameFromString "") k
+    grow'' v m'' k = IM.insertWith (<>) (baseTag k) v m''
 
 is :: Usages -> VName -> UsageTable -> Bool
 is = lookupPred . matches
@@ -144,33 +145,45 @@ withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 -- a single statement.
 usageInStm :: (ASTLore lore, Aliased lore) => Stm lore -> UsageTable
 usageInStm (Let pat lore e) =
-  mconcat [usageInPat,
-           usageInExpLore,
-           usageInExp e,
-           usages (freeIn e)]
-  where usageInPat =
-          usages (mconcat (map freeIn $ patternElements pat)
-                  `namesSubtract`
-                  namesFromList (patternNames pat)) <>
-          sizeUsages (foldMap (freeIn . patElemType) (patternElements pat))
-        usageInExpLore =
-          usages $ freeIn lore
+  mconcat
+    [ usageInPat,
+      usageInExpLore,
+      usageInExp e,
+      usages (freeIn e)
+    ]
+  where
+    usageInPat =
+      usages
+        ( mconcat (map freeIn $ patternElements pat)
+            `namesSubtract` namesFromList (patternNames pat)
+        )
+        <> sizeUsages (foldMap (freeIn . patElemType) (patternElements pat))
+    usageInExpLore =
+      usages $ freeIn lore
 
 usageInExp :: Aliased lore => Exp lore -> UsageTable
 usageInExp (Apply _ args _ _) =
-  mconcat [ mconcat $ map consumedUsage $
-            namesToList $ subExpAliases arg
-          | (arg,d) <- args, d == Consume ]
+  mconcat
+    [ mconcat $
+        map consumedUsage $
+          namesToList $ subExpAliases arg
+      | (arg, d) <- args,
+        d == Consume
+    ]
 usageInExp (DoLoop _ merge _ _) =
-  mconcat [ mconcat $ map consumedUsage $
-            namesToList $ subExpAliases se
-          | (v,se) <- merge, unique $ paramDeclType v ]
+  mconcat
+    [ mconcat $
+        map consumedUsage $
+          namesToList $ subExpAliases se
+      | (v, se) <- merge,
+        unique $ paramDeclType v
+    ]
 usageInExp (If _ tbranch fbranch _) =
-  foldMap consumedUsage $ namesToList $
-  consumedInBody tbranch <> consumedInBody fbranch
+  foldMap consumedUsage $
+    namesToList $
+      consumedInBody tbranch <> consumedInBody fbranch
 usageInExp (BasicOp (Update src _ _)) =
   consumedUsage src
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)
 usageInExp _ = mempty
-

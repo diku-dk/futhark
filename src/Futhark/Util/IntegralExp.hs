@@ -15,10 +15,10 @@
 -- typeclasses that have been modified to make generic functions
 -- slightly easier to write.
 module Futhark.Util.IntegralExp
-       ( IntegralExp (..)
-       , Wrapped (..)
-       )
-       where
+  ( IntegralExp (..),
+    Wrapped (..),
+  )
+where
 
 import Data.Int
 import Prelude
@@ -40,15 +40,20 @@ class Num e => IntegralExp e where
 
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
-newtype Wrapped a = Wrapped { wrappedValue :: a }
-                  deriving (Eq, Ord, Show)
+newtype Wrapped a = Wrapped {wrappedValue :: a}
+  deriving (Eq, Ord, Show)
 
-liftOp :: (a -> a)
-        -> Wrapped a -> Wrapped a
+liftOp ::
+  (a -> a) ->
+  Wrapped a ->
+  Wrapped a
 liftOp op (Wrapped x) = Wrapped $ op x
 
-liftOp2 :: (a -> a -> a)
-        -> Wrapped a -> Wrapped a -> Wrapped a
+liftOp2 ::
+  (a -> a -> a) ->
+  Wrapped a ->
+  Wrapped a ->
+  Wrapped a
 liftOp2 op (Wrapped x) (Wrapped y) = Wrapped $ x `op` y
 
 instance Num a => Num (Wrapped a) where

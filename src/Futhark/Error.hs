@@ -1,19 +1,18 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Safe #-}
+
 -- | Futhark error definitions.
 module Futhark.Error
-  ( CompilerError(..)
-  , ErrorClass(..)
-
-  , externalError
-  , externalErrorS
-
-  , InternalError(..)
-  , compilerBug
-  , compilerBugS
-  , compilerLimitation
-  , compilerLimitationS
-  , internalErrorS
+  ( CompilerError (..),
+    ErrorClass (..),
+    externalError,
+    externalErrorS,
+    InternalError (..),
+    compilerBug,
+    compilerBugS,
+    compilerLimitation,
+    compilerLimitationS,
+    internalErrorS,
   )
 where
 
@@ -25,18 +24,19 @@ import Futhark.Util.Pretty
 -- | There are two classes of internal errors: actual bugs, and
 -- implementation limitations.  The latter are already known and need
 -- not be reported.
-data ErrorClass = CompilerBug
-                | CompilerLimitation
-                deriving (Eq, Ord, Show)
+data ErrorClass
+  = CompilerBug
+  | CompilerLimitation
+  deriving (Eq, Ord, Show)
 
 -- | A compiler error.
-data CompilerError =
-    ExternalError Doc
-    -- ^ An error that happened due to something the user did, such as
+data CompilerError
+  = -- | An error that happened due to something the user did, such as
     -- provide incorrect code or options.
-  | InternalError T.Text T.Text ErrorClass
-    -- ^ An internal compiler error.  The second text is extra data
+    ExternalError Doc
+  | -- | An internal compiler error.  The second text is extra data
     -- for debugging, which can be written to a file.
+    InternalError T.Text T.Text ErrorClass
 
 instance Show CompilerError where
   show (ExternalError s) = pretty s
