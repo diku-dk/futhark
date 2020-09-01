@@ -49,7 +49,7 @@ compileMCOp ::
   MCOp MCMem () ->
   ImpM MCMem HostEnv Imp.Multicore ()
 compileMCOp _ (OtherOp ()) = pure ()
-compileMCOp pat (ParOp _par_op op) = do
+compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int32)
   iterations <- getIterationDomain op space
@@ -59,20 +59,20 @@ compileMCOp pat (ParOp _par_op op) = do
 
   let scheduling_info = Imp.SchedulerInfo nsubtasks (segFlat space) (untyped iterations)
 
-  -- par_code <- case par_op of
-  --   Just nested_op -> do
-  --     let space' = getSpace nested_op
-  --     dPrimV_ (segFlat space') 0
-  --     compileSegOp pat nested_op
-  --   Nothing -> return mempty
+  par_code <- case par_op of
+    Just nested_op -> do
+      let space' = getSpace nested_op
+      dPrimV_ (segFlat space') (0 :: Imp.TExp Int32)
+      compileSegOp pat nested_op nsubtasks
+    Nothing -> return mempty
 
-  -- let maybe_par_code = case par_op of
-  --       Just _ -> Just par_code
-  --       Nothing -> Nothing
+  let maybe_par_code = case par_op of
+        Just _ -> Just par_code
+        Nothing -> Nothing
 
   s <- segOpString op
   free_params <- freeParams seq_code ([segFlat space, nsubtasks] ++ map Imp.paramName retvals)
-  emit $ Imp.Op $ Imp.Task s free_params seq_code Nothing retvals $ scheduling_info (decideScheduling' op seq_code)
+  emit $ Imp.Op $ Imp.Task s free_params seq_code maybe_par_code retvals $ scheduling_info (decideScheduling' op seq_code)
 
 compileSegOp ::
   Pattern MCMem ->

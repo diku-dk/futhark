@@ -4,6 +4,35 @@
 
 #if defined(MCJOBQUEUE)
 
+
+
+
+
+static int dummy_counter = 0;
+static int64_t dummy_timer = 0;
+static int64_t dummy_iter = 0;
+
+static int dummy_fn(void *args, int64_t start, int64_t end, int subtask_id, int tid) {
+  return 0;
+}
+
+
+static inline void wake_up_threads(struct scheduler *scheduler, int start_tid, int end_tid) {
+
+  assert(start_tid >= 1);
+  assert(end_tid <= scheduler->num_threads);
+  for (int i = start_tid; i < end_tid; i++) {
+
+    struct subtask *subtask = setup_subtask(dummy_fn, NULL, "dummy_fn",
+                                            &dummy_counter,
+                                            &dummy_timer, &dummy_iter,
+                                            0, 0,
+                                            0, 0,
+                                            0);
+    CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[i], subtask), "subtask_queue_enqueue");
+  }
+}
+
 static inline int is_finished(struct worker *worker) {
   return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
 }
@@ -43,12 +72,14 @@ static inline void *scheduler_worker(void* arg)
 
     } else if (active_work) {
       /* steal */
-      while (!is_finished(worker) && __atomic_load_n(&active_work, __ATOMIC_RELAXED)) {
-        if (steal_from_random_worker(worker))
+      while (!is_finished(worker) && active_work) {
+        if (steal_from_random_worker(worker)) {
           break;
+        }
       }
     } else {
       // go back to sleep
+
       int retval = subtask_queue_dequeue(worker, &subtask, 1);
       if (retval == 0) {
         assert(subtask != NULL);
@@ -89,6 +120,12 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   /* Each subtasks can be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
   int64_t iter = 1;
+
+  if (worker->nested == 0 && nsubtasks < scheduler->num_threads) {
+    __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    wake_up_threads(scheduler, nsubtasks, scheduler->num_threads);
+  }
 
   if (sched == DYNAMIC)
     __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
@@ -139,8 +176,10 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     }
   }
 
-  if (sched == DYNAMIC)
+
+  if (nsubtasks < scheduler->num_threads || sched == DYNAMIC) {
     __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
+  }
 
   // Write back timing results
   (*timer) += task_timer;
@@ -322,7 +361,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     err = task->fn(task->args, 0, task->iterations, 0, worker->tid);
     /* int64_t end = get_wall_time_ns(); */
     /* task_timer = end - start; */
-    /* worker_local->time_spent_working += task_timer; */
+    /* worker->time_spent_working += task_timer; */
     // Report time measurements
     // TODO the update of both of these should really both be atomic!!
     /* __atomic_fetch_add(task->info.total_time, task_timer, __ATOMIC_RELAXED); */
@@ -373,6 +412,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
+    return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
   } else {
     info.iter_pr_subtask = task->iterations / max_num_tasks;
     info.remainder = task->iterations % max_num_tasks;
@@ -390,6 +430,12 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
       assert(!"Got unknown scheduling");
     }
 
+  }
+
+  // We use the nested parallel task function is we can't exchaust all cores
+  // using the outer most level
+  if (task->par_fn != NULL && info.nsubtasks < scheduler->num_threads) {
+    return task->par_fn(task->args, task->iterations, worker_local->tid, info);
   }
   return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
 }
