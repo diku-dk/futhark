@@ -575,6 +575,9 @@ existentializeArray ::
   Space ->
   VName ->
   AllocM fromlore tolore (SubExp, ExtIxFun, [TPrimExp Int32 VName], VName)
+existentializeArray ScalarSpace {} v = do
+  (mem', ixfun) <- lookupArraySummary v
+  return (Var v, fmap (fmap Free) ixfun, mempty, mem')
 existentializeArray space v = do
   (mem', ixfun) <- lookupArraySummary v
   sp <- lookupMemSpace mem'
