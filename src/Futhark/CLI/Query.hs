@@ -10,7 +10,7 @@ import Text.Read (readMaybe)
 
 -- | Run @futhark query@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions () [] "program line:col" $ \args () ->
+main = mainWithOptions () [] "program line col" $ \args () ->
   case args of
     [file, line, col] -> do
       line' <- readMaybe line
