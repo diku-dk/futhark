@@ -121,11 +121,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   int chunkable = sched == STATIC ? 0 : 1;
   int64_t iter = 1;
 
-  if (worker->nested == 0 && nsubtasks < scheduler->num_threads) {
-    __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    wake_up_threads(scheduler, nsubtasks, scheduler->num_threads);
-  }
+
 
   if (sched == DYNAMIC)
     __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
@@ -151,6 +147,12 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     // Update range params
     start = end;
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
+  }
+
+  if (info.wake_up_threads) {
+    __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    wake_up_threads(scheduler, nsubtasks, scheduler->num_threads);
   }
 
   // Join (wait for subtasks to finish)
@@ -432,11 +434,15 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 
   }
 
+  info.wake_up_threads = 0;
   // We use the nested parallel task function is we can't exchaust all cores
   // using the outer most level
   if (task->par_fn != NULL && info.nsubtasks < scheduler->num_threads) {
+    if (worker->tid == 0)
+      info.wake_up_threads = 1;
     return task->par_fn(task->args, task->iterations, worker_local->tid, info);
   }
+
   return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
 }
 

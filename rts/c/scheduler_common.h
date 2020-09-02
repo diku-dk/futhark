@@ -16,6 +16,7 @@ struct scheduler_info {
   int64_t remainder;
   int nsubtasks;
   enum scheduling sched;
+  int wake_up_threads;
 
   int64_t *total_time;
   int64_t *total_iter;
