@@ -369,6 +369,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 
     err = scheduler_execute_parallel(scheduler, task, &task_timer);
 
+    /* fprintf(stderr, "worker %d - starting %d tasks\n", worker->tid, task->info.nsubtasks); */
 
     // Report time measurements
     // TODO the update of both of these should really both be atomic!!
@@ -400,38 +401,38 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
     compute_max_num_subtasks(scheduler->num_threads, info, task->iterations):
     scheduler->num_threads;
 
-  info.iter_pr_subtask = task->iterations / max_num_tasks;
-  info.remainder = task->iterations % max_num_tasks;
-  info.sched = task->sched;
-  switch (task->sched) {
-  case STATIC:
-    info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
-    break;
-  case DYNAMIC:
-    // As any thread can take any subtasks, we are being safe with returning
-    // an upper bound on the number of tasks such that the task allocate enough memory
-    info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
-    break;
-  default:
-    assert(!"Got unknown scheduling");
-  }
-
-
   // Decide if task should be scheduled sequentially
-  if (info.nsubtasks <= 1 || is_small(task, info.nsubtasks)) {
+  if (max_num_tasks <= 1 || is_small(task, max_num_tasks)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
     return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+  } else {
+    info.iter_pr_subtask = task->iterations / max_num_tasks;
+    info.remainder = task->iterations % max_num_tasks;
+    info.sched = task->sched;
+    switch (task->sched) {
+    case STATIC:
+      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
+      break;
+    case DYNAMIC:
+      // As any thread can take any subtasks, we are being safe with returning
+      // an upper bound on the number of tasks such that the task allocate enough memory
+      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
+      break;
+    default:
+      assert(!"Got unknown scheduling");
+    }
+
   }
 
   int err = 0;
-  // We use the nested parallel task function if we can't exchaust all cores
+  // We use the nested parallel task function is we can't exchaust all cores
   // using the outer most level
   if (task->par_fn != NULL && info.nsubtasks < scheduler->num_threads) {
     __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    if (worker->nested == 0)
+    if (worker->tid == 0)
       wake_up_threads(scheduler, info.nsubtasks, scheduler->num_threads);
     err = task->par_fn(task->args, task->iterations, worker->tid, info);
     __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
