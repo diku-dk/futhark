@@ -26,6 +26,7 @@ module Futhark.Analysis.SymbolTable
     lookupSubExp,
     lookupAliases,
     lookupLoopVar,
+    lookupLoopParam,
     available,
     consume,
     index,
@@ -40,6 +41,7 @@ module Futhark.Analysis.SymbolTable
     insertFParams,
     insertLParam,
     insertLoopVar,
+    insertLoopMerge,
 
     -- * Misc
     hideCertified,
@@ -154,7 +156,10 @@ data LetBoundEntry lore = LetBoundEntry
 
 data FParamEntry lore = FParamEntry
   { fparamDec :: FParamInfo lore,
-    fparamAliases :: Names
+    fparamAliases :: Names,
+    -- | If a loop parameter, the initial value and the eventual
+    -- result.  The result need not be in scope in the symbol table.
+    fparamMerge :: Maybe (SubExp, SubExp)
   }
 
 data LParamEntry lore = LParamEntry
@@ -234,6 +239,11 @@ lookupLoopVar :: VName -> SymbolTable lore -> Maybe SubExp
 lookupLoopVar name vtable = do
   LoopVar e <- entryType <$> M.lookup name (bindings vtable)
   return $ loopVarBound e
+
+lookupLoopParam :: VName -> SymbolTable lore -> Maybe (SubExp, SubExp)
+lookupLoopParam name vtable = do
+  FParam e <- entryType <$> M.lookup name (bindings vtable)
+  fparamMerge e
 
 -- | In symbol table and not consumed.
 available :: VName -> SymbolTable lore -> Bool
@@ -443,7 +453,8 @@ insertFParam fparam = insertEntry name entry
       FParam
         FParamEntry
           { fparamDec = AST.paramDec fparam,
-            fparamAliases = mempty
+            fparamAliases = mempty,
+            fparamMerge = Nothing
           }
 
 insertFParams ::
@@ -463,6 +474,29 @@ insertLParam param = insertEntry name bind
             lparamIndex = const Nothing
           }
     name = AST.paramName param
+
+-- | Insert entries corresponding to the parameters of a loop (not
+-- distinguishing contect and value part).  Apart from the parameter
+-- itself, we also insert the initial value and the subexpression
+-- providing the final value.  Note that the latter is likely not in
+-- scope in the symbol at this point.  This is OK, and can still be
+-- used to help some loop optimisations detect invariant loop
+-- parameters.
+insertLoopMerge ::
+  ASTLore lore =>
+  [(AST.FParam lore, SubExp, SubExp)] ->
+  SymbolTable lore ->
+  SymbolTable lore
+insertLoopMerge = flip $ foldl' $ flip bind
+  where
+    bind (p, initial, res) =
+      insertEntry (paramName p) $
+        FParam
+          FParamEntry
+            { fparamDec = AST.paramDec p,
+              fparamAliases = mempty,
+              fparamMerge = Just (initial, res)
+            }
 
 insertLoopVar :: ASTLore lore => VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name it bound = insertEntry name bind
