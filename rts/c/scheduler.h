@@ -401,6 +401,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 {
   assert(task != NULL);
 
+  struct worker *worker = worker_local;
   struct scheduler_info info;
   info.total_time = task->total_time;
   info.total_iter = task->total_iter;
@@ -414,7 +415,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
-    return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+    return task->seq_fn(task->args, task->iterations, worker->tid, info);
   } else {
     info.iter_pr_subtask = task->iterations / max_num_tasks;
     info.remainder = task->iterations % max_num_tasks;
@@ -440,10 +441,10 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   if (task->par_fn != NULL && info.nsubtasks < scheduler->num_threads) {
     if (worker->tid == 0)
       info.wake_up_threads = 1;
-    return task->par_fn(task->args, task->iterations, worker_local->tid, info);
+    return task->par_fn(task->args, task->iterations, worker->tid, info);
   }
 
-  return task->seq_fn(task->args, task->iterations, worker_local->tid, info);
+  return task->seq_fn(task->args, task->iterations, worker->tid, info);
 }
 
 #endif
