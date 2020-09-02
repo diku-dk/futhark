@@ -586,7 +586,7 @@ entryPointNameIsAcceptable :: Name -> Bool
 entryPointNameIsAcceptable = check . nameToString
   where check [] = True -- academic
         check (c:cs) = isAlpha c && all constituent cs
-        constituent c = isAlphaNum c || c == '-'
+        constituent c = isAlphaNum c || c == '_'
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
