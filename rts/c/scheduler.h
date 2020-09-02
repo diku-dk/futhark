@@ -179,7 +179,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   }
 
 
-  if (nsubtasks < scheduler->num_threads || sched == DYNAMIC) {
+  if (info.wake_up_threads || sched == DYNAMIC) {
     __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
   }
 
