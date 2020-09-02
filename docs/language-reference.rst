@@ -329,6 +329,9 @@ executable to select the entry point you wish to run.
 Any top-level function named ``main`` will always be considered an
 entry point, whether it is declared with ``entry`` or not.
 
+The name of an entry point must not contain an apostrophe (``'``),
+even though that is normally permitted in Futhark identifiers.
+
 Value Declarations
 ~~~~~~~~~~~~~~~~~~
 

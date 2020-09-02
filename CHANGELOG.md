@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Entry points with names that are not valid C (or Python)
+    identifiers are now pointed out as problematic, rather than
+    generating invalid C code.
+
 ## [0.16.4]
 
 ### Added

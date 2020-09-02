@@ -20,6 +20,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
+import Data.Char (isAlphaNum, isAlpha)
 import Data.Either
 import Data.List (isPrefixOf)
 import qualified Data.Map.Strict as M
@@ -581,6 +582,12 @@ entryPoint params orig_ret_te orig_ret =
     onRetType te t =
       ([], EntryType t te)
 
+entryPointNameIsAcceptable :: Name -> Bool
+entryPointNameIsAcceptable = check . nameToString
+  where check [] = True -- academic
+        check (c:cs) = isAlpha c && all constituent cs
+        constituent c = isAlphaNum c || c == '-'
+
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
   (fname', tparams', params', maybe_tdecl', rettype, retext, body') <-
@@ -591,6 +598,8 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
 
   case entry' of
     Just _
+      | not $ entryPointNameIsAcceptable fname ->
+        typeError loc mempty "Entry point names may not contain apostrophes."
       | any isTypeParam tparams' ->
         typeError loc mempty "Entry point functions may not be polymorphic."
       | not (all patternOrderZero params')
