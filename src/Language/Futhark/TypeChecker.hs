@@ -20,7 +20,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
-import Data.Char (isAlphaNum, isAlpha)
+import Data.Char (isAlpha, isAlphaNum)
 import Data.Either
 import Data.List (isPrefixOf)
 import qualified Data.Map.Strict as M
@@ -584,9 +584,10 @@ entryPoint params orig_ret_te orig_ret =
 
 entryPointNameIsAcceptable :: Name -> Bool
 entryPointNameIsAcceptable = check . nameToString
-  where check [] = True -- academic
-        check (c:cs) = isAlpha c && all constituent cs
-        constituent c = isAlphaNum c || c == '_'
+  where
+    check [] = True -- academic
+    check (c : cs) = isAlpha c && all constituent cs
+    constituent c = isAlphaNum c || c == '_'
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
