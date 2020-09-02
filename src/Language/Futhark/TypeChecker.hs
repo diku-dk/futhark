@@ -599,7 +599,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
   case entry' of
     Just _
       | not $ entryPointNameIsAcceptable fname ->
-        typeError loc mempty "Entry point names may not contain apostrophes."
+        typeError loc mempty "Entry point names must start with a letter and contain only letters, digits, and underscores."
       | any isTypeParam tparams' ->
         typeError loc mempty "Entry point functions may not be polymorphic."
       | not (all patternOrderZero params')
