@@ -153,11 +153,11 @@ removeRedundantMergeVariables _ _ _ _ =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: BinderOps lore => TopDownRuleDoLoop lore
-hoistLoopInvariantMergeVariables _ pat aux (ctx, val, form, loopbody) =
+hoistLoopInvariantMergeVariables vtable pat aux (ctx, val, form, loopbody) =
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $
-    zip merge res of
+    zip3 (patternNames pat) merge res of
     ([], _, _, _) ->
       -- Nothing is invariant.
       Skip
@@ -199,11 +199,11 @@ hoistLoopInvariantMergeVariables _ pat aux (ctx, val, form, loopbody) =
           (Nothing, explpat')
 
     checkInvariance
-      ((mergeParam, mergeInit), resExp)
+      (pat_name, (mergeParam, mergeInit), resExp)
       (invariant, explpat', merge', resExps)
         | not (unique (paramDeclType mergeParam))
             || arrayRank (paramDeclType mergeParam) == 1,
-          isInvariant resExp,
+          isInvariant,
           -- Also do not remove the condition in a while-loop.
           not $ paramName mergeParam `nameIn` freeIn form =
           let (bnd, explpat'') =
@@ -214,21 +214,36 @@ hoistLoopInvariantMergeVariables _ pat aux (ctx, val, form, loopbody) =
                 resExps
               )
         where
-          -- A non-unique merge variable is invariant if the corresponding
-          -- subexp in the result is EITHER:
+          -- A non-unique merge variable is invariant if one of the
+          -- following is true:
           --
-          --  (0) a variable of the same name as the parameter, where
-          --  all existential parameters are already known to be
-          --  invariant
-          isInvariant (Var v2)
-            | paramName mergeParam == v2 =
+          -- (0) The result is a variable of the same name as the
+          -- parameter, where all existential parameters are already
+          -- known to be invariant
+          isInvariant
+            | Var v2 <- resExp,
+              paramName mergeParam == v2 =
               allExistentialInvariant
                 (namesFromList $ map (identName . fst) invariant)
                 mergeParam
-          --  (1) or identical to the initial value of the parameter.
-          isInvariant _ = mergeInit == resExp
-    checkInvariance ((mergeParam, mergeInit), resExp) (invariant, explpat', merge', resExps) =
-      (invariant, explpat', (mergeParam, mergeInit) : merge', resExp : resExps)
+            -- (1) The result is identical to the initial parameter value.
+            | mergeInit == resExp = True
+            -- (2) The initial parameter value is equal to an outer
+            -- loop parameter 'P', where the initial value of 'P' is
+            -- equal to 'resExp', AND 'resExp' ultimately becomes the
+            -- new value of 'P'.  XXX: it's a bit clumsy that this
+            -- only works for one level of nesting, and I think it
+            -- would not be too hard to generalise.
+            | Var init_v <- mergeInit,
+              Just (p_init, p_res) <- ST.lookupLoopParam init_v vtable,
+              p_init == resExp,
+              p_res == Var pat_name =
+              True
+            | otherwise = False
+    checkInvariance
+      (_pat_name, (mergeParam, mergeInit), resExp)
+      (invariant, explpat', merge', resExps) =
+        (invariant, explpat', (mergeParam, mergeInit) : merge', resExp : resExps)
 
     allExistentialInvariant namesOfInvariant mergeParam =
       all (invariantOrNotMergeParam namesOfInvariant) $
