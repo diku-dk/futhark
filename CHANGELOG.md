@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     identifiers are now pointed out as problematic, rather than
     generating invalid C code.
 
+  * Exotic tiling bug (#1112).
+
 ## [0.16.4]
 
 ### Added
