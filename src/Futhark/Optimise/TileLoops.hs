@@ -355,7 +355,9 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
         let live_set =
               namesToList $
                 liveSet precomputed_variant_prestms $
-                  freeIn recomputed_variant_prestms <> used_in_body
+                  freeIn recomputed_variant_prestms
+                    <> used_in_body
+                    <> freeIn poststms
 
         prelude_arrs <-
           inScopeOf precomputed_variant_prestms $
@@ -399,7 +401,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           letTupExp "tiled_inside_loop" $
             DoLoop [] merge' (ForLoop i it bound []) loopbody'
 
-        postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts
+        postludeGeneric tiling inloop_privstms pat accs' poststms poststms_res res_ts
 
   return (host_stms, tiling, tiledBody')
   where
