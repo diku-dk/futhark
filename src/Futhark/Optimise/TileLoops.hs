@@ -352,7 +352,11 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
       tiledBody' privstms = inScopeOf host_stms $ do
         addStms invariant_prestms
 
-        let live_set = namesToList $ liveSet precomputed_variant_prestms used_in_body
+        let live_set =
+              namesToList $
+                liveSet precomputed_variant_prestms $
+                  freeIn recomputed_variant_prestms <> used_in_body
+
         prelude_arrs <-
           inScopeOf precomputed_variant_prestms $
             doPrelude tiling precomputed_variant_prestms live_set
