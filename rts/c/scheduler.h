@@ -5,9 +5,6 @@
 #if defined(MCJOBQUEUE)
 
 
-
-
-
 static int dummy_counter = 0;
 static int64_t dummy_timer = 0;
 static int64_t dummy_iter = 0;
@@ -123,8 +120,8 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 
 
 
-  if (sched == DYNAMIC)
-    __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
+  if (info.wake_up_threads || sched == DYNAMIC)
+    __atomic_add_fetch(&active_work, nsubtasks, __ATOMIC_RELAXED);
 
   int subtask_id = 0;
   int64_t start = 0;
@@ -150,8 +147,6 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   }
 
   if (info.wake_up_threads) {
-    __atomic_add_fetch(&active_work, 1, __ATOMIC_RELAXED);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     wake_up_threads(scheduler, nsubtasks, scheduler->num_threads);
   }
 
@@ -180,7 +175,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
 
 
   if (info.wake_up_threads || sched == DYNAMIC) {
-    __atomic_sub_fetch(&active_work, 1, __ATOMIC_RELAXED);
+    __atomic_sub_fetch(&active_work, nsubtasks, __ATOMIC_RELAXED);
   }
 
   // Write back timing results
@@ -435,11 +430,12 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 
   }
 
+  /* fprintf(stderr, "starting task %s with %d - iter %ldd - nested %d \n", task->name, info.nsubtasks, task->iterations, worker->nested); */
   info.wake_up_threads = 0;
   // We use the nested parallel task function is we can't exchaust all cores
   // using the outer most level
-  if (task->par_fn != NULL && info.nsubtasks < scheduler->num_threads) {
-    if (worker->tid == 0)
+  if (task->par_fn != NULL && (info.nsubtasks + active_work) < scheduler->num_threads) {
+    if (worker->nested == 0)
       info.wake_up_threads = 1;
     return task->par_fn(task->args, task->iterations, worker->tid, info);
   }
