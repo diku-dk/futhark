@@ -19,26 +19,25 @@ import Prelude hiding (quot)
 
 -- | The pass definition.
 tileLoops :: Pass Kernels Kernels
-tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
-  \(Prog consts funs) ->
-    Prog consts <$> mapM optimiseFunDef funs
-
-optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-optimiseFunDef fundec = do
-  body' <-
-    modifyNameSource $
-      runState $
-        runReaderT m (scopeOfFParams (funDefParams fundec))
-  return fundec {funDefBody = body'}
+tileLoops =
+  Pass "tile loops" "Tile stream loops inside kernels" $
+    intraproceduralTransformation onStms
   where
-    m = optimiseBody $ funDefBody fundec
+    onStms scope stms =
+      modifyNameSource $
+        runState $
+          runReaderT (optimiseStms stms) scope
 
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
-optimiseBody (Body () bnds res) =
-  localScope (scopeOf bnds) $
-    Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
+optimiseBody (Body () stms res) =
+  Body () <$> optimiseStms stms <*> pure res
+
+optimiseStms :: Stms Kernels -> TileM (Stms Kernels)
+optimiseStms stms =
+  localScope (scopeOf stms) $
+    mconcat <$> mapM optimiseStm (stmsToList stms)
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm (Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
