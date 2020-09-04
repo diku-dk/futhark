@@ -34,12 +34,11 @@ Identifiers and Keywords
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
 a module, we use a qualified name (`qualid`).  The constructor names
-of a sum type (:ref:`compounds`) are identifiers prefixed with ``#``,
-with no space afterwards.  The fields of a record are named with
-`fieldid`.  Note that a `fieldid` can be a decimal number.  Futhark
-has three distinct name spaces: terms, module types, and types.
-Modules (including parametric modules) and values both share the term
-namespace.
+of a sum type are identifiers prefixed with ``#``, with no space
+afterwards.  The fields of a record are named with `fieldid`.  Note
+that a `fieldid` can be a decimal number.  Futhark has three distinct
+name spaces: terms, module types, and types.  Modules (including
+parametric modules) and values both share the term namespace.
 
 .. _primitives:
 
@@ -93,8 +92,6 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    decdigit: "0"..."9"
    hexdigit: `decdigit` | "a"..."f" | "A"..."F"
    bindigit: "0" | "1"
-
-.. _compounds:
 
 Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~
