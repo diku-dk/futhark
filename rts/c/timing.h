@@ -68,7 +68,7 @@ void initialize_cpuinfo() {
 }
 
 static inline int64_t get_wall_time_ns() {
-  return (int64_t)__rdtsc();
+  return (int64_t)__rdtsc()/cpu_frequency_ghz;
 }
 
 
