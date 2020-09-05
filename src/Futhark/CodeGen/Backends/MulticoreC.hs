@@ -144,8 +144,6 @@ compileProg =
 
                  // Initialize rand()
                  fast_srand(time(0));
-                 initialize_cpuinfo();
-
                  ctx->detail_memory = cfg->debugging;
                  ctx->debugging = cfg->debugging;
                  ctx->profiling = cfg->profiling;
