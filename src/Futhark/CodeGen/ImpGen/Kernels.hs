@@ -224,7 +224,7 @@ callKernelCopy
           size_x,
           size_y
           ) <-
-        isMapTransposeKernel bt destloc destslice srcloc srcslice = do
+        isMapTransposeCopy bt destloc destslice srcloc srcslice = do
       fname <- mapTransposeForType bt
       emit $
         Imp.Call
@@ -267,7 +267,7 @@ mapTransposeForType bt = do
   return fname
 
 mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ pretty bt
+mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
 
 mapTransposeFunction :: PrimType -> Imp.Function
 mapTransposeFunction bt =
@@ -387,56 +387,3 @@ mapTransposeFunction bt =
             block
           )
           bt
-
-isMapTransposeKernel ::
-  PrimType ->
-  MemLocation ->
-  Slice (Imp.TExp Int32) ->
-  MemLocation ->
-  Slice (Imp.TExp Int32) ->
-  Maybe
-    ( Imp.TExp Int32,
-      Imp.TExp Int32,
-      Imp.TExp Int32,
-      Imp.TExp Int32,
-      Imp.TExp Int32
-    )
-isMapTransposeKernel
-  bt
-  (MemLocation _ _ destIxFun)
-  destslice
-  (MemLocation _ _ srcIxFun)
-  srcslice
-    | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun' bt_size,
-      (perm, destshape) <- unzip perm_and_destshape,
-      Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk destshape swap r1 r2 dest_offset src_offset
-    | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
-      Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
-      (perm, srcshape) <- unzip perm_and_srcshape,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk srcshape id r1 r2 dest_offset src_offset
-    | otherwise =
-      Nothing
-    where
-      bt_size = primByteSize bt
-      swap (x, y) = (y, x)
-
-      destIxFun' = IxFun.slice destIxFun destslice
-      srcIxFun' = IxFun.slice srcIxFun srcslice
-
-      isOk shape f r1 r2 dest_offset src_offset = do
-        let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-        return
-          ( dest_offset,
-            src_offset,
-            num_arrays,
-            size_x,
-            size_y
-          )
-
-      getSizes shape f r1 r2 =
-        let (mapped, notmapped) = splitAt r1 shape
-            (pretrans, posttrans) = f $ splitAt r2 notmapped
-         in (product mapped, product pretrans, product posttrans)
