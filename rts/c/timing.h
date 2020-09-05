@@ -26,6 +26,12 @@ static int64_t get_wall_time(void) {
   return time.tv_sec * 1000000 + time.tv_usec;
 }
 
+static inline uint64_t rdtsc() {
+  unsigned int hi, lo;
+  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+  return  ((uint64_t) lo) | (((uint64_t) hi) << 32);
+}
+
 
 /* static int64_t get_wall_time_ns(void) { */
 /*   struct timespec time; */
@@ -68,7 +74,7 @@ void initialize_cpuinfo() {
 }
 
 static inline int64_t get_wall_time_ns() {
-  return (int64_t)__rdtsc()/cpu_frequency_ghz;
+  return (int64_t)rdtsc()/cpu_frequency_ghz;
 }
 
 

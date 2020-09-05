@@ -19,12 +19,6 @@ static const int strong = 0;
 static const int backoff_nb_cycles = 1l << 10;
 
 
-static inline uint64_t rdtsc() {
-  unsigned int hi, lo;
-  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-  return  ((uint64_t) lo) | (((uint64_t) hi) << 32);
-}
-
 static inline void rdtsc_wait(uint64_t n) {
   const uint64_t start = rdtsc();
   while (rdtsc() < (start + n)) {
