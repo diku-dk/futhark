@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Obscure loop optimisation (#1110).
 
+  * Faster matrix transposition in C backend.
+
 ### Removed
 
 ### Changed
