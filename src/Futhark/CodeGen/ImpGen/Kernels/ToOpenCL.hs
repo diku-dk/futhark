@@ -624,7 +624,8 @@ inKernelOperations mode body =
       GC.opsStaticArray = noStaticArrays,
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
-      GC.opsCall = callInKernel
+      GC.opsCall = callInKernel,
+      GC.opsCritical = mempty
     }
   where
     has_communication = hasCommunication body

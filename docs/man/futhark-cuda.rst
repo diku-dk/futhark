@@ -23,9 +23,13 @@ used, and GCC is invoked with ``-O``, ``-lm``, and ``-std=c99``. The
 resulting program will otherwise behave exactly as one compiled with
 ``futhark c``.
 
-``futhark cuda`` uses ``-lcuda -lnvrtc`` to link.  If using
+``futhark cuda`` uses ``-lcuda -lcudart -lnvrtc`` to link.  If using
 ``--library``, you will need to do the same when linking the final
 binary.
+
+The generated CUDA code can be called from multiple CPU threads, as it
+brackets every API operation with ``cuCtxPushCurrent()`` and
+``cuCtxPopCurrent()``.
 
 OPTIONS
 =======

@@ -422,6 +422,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                 CUDA_SUCCEED(cuCtxPushCurrent(ctx->cuda.cu_ctx));
                  CUDA_SUCCEED(cuCtxSynchronize());
                  if (ctx->failure_is_an_option) {
                    // Check for any delayed error.
@@ -452,6 +453,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                      return 1;
                    }
                  }
+                 CUDA_SUCCEED(cuCtxPopCurrent(&ctx->cuda.cu_ctx));
                  return 0;
                }|]
     )
