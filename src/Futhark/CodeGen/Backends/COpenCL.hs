@@ -1,105 +1,146 @@
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
+
 -- | Code generation for C with OpenCL.
 module Futhark.CodeGen.Backends.COpenCL
-  ( compileProg
-  , GC.CParts(..)
-  , GC.asLibrary
-  , GC.asExecutable
-  ) where
+  ( compileProg,
+    GC.CParts (..),
+    GC.asLibrary,
+    GC.asExecutable,
+  )
+where
 
 import Control.Monad hiding (mapM)
 import Data.List (intercalate)
-
-import qualified Language.C.Syntax as C
-import qualified Language.C.Quote.OpenCL as C
-
-import Futhark.IR.KernelsMem
-  hiding (GetSize, CmpSizeLe, GetSizeMax)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
+import Futhark.IR.KernelsMem hiding
+  ( CmpSizeLe,
+    GetSize,
+    GetSizeMax,
+  )
 import Futhark.MonadFreshNames
+import qualified Language.C.Quote.OpenCL as C
+import qualified Language.C.Syntax as C
 
 -- | Compile the program to C with calls to OpenCL.
 compileProg :: MonadFreshNames m => Prog KernelsMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg prog = do
-  (ws, Program opencl_code opencl_prelude kernels
-       types sizes failures prog') <- ImpGen.compileProg prog
+  ( ws,
+    Program
+      opencl_code
+      opencl_prelude
+      kernels
+      types
+      sizes
+      failures
+      prog'
+    ) <-
+    ImpGen.compileProg prog
   let cost_centres =
-        [copyDevToDev, copyDevToHost, copyHostToDev,
-         copyScalarToDev, copyScalarFromDev]
-  (ws,) <$>
-    GC.compileProg "opencl" operations
-    (generateBoilerplate opencl_code opencl_prelude
-     cost_centres kernels types sizes failures)
-    include_opencl_h [Space "device", DefaultSpace]
-    cliOptions prog'
-  where operations :: GC.Operations OpenCL ()
-        operations = GC.defaultOperations
-                     { GC.opsCompiler = callKernel
-                     , GC.opsWriteScalar = writeOpenCLScalar
-                     , GC.opsReadScalar = readOpenCLScalar
-                     , GC.opsAllocate = allocateOpenCLBuffer
-                     , GC.opsDeallocate = deallocateOpenCLBuffer
-                     , GC.opsCopy = copyOpenCLMemory
-                     , GC.opsStaticArray = staticOpenCLArray
-                     , GC.opsMemoryType = openclMemoryType
-                     , GC.opsFatMemory = True
-                     }
-        include_opencl_h = unlines ["#define CL_TARGET_OPENCL_VERSION 120",
-                                    "#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
-                                    "#ifdef __APPLE__",
-                                    "#define CL_SILENCE_DEPRECATION",
-                                    "#include <OpenCL/cl.h>",
-                                    "#else",
-                                    "#include <CL/cl.h>",
-                                    "#endif"]
+        [ copyDevToDev,
+          copyDevToHost,
+          copyHostToDev,
+          copyScalarToDev,
+          copyScalarFromDev
+        ]
+  (ws,)
+    <$> GC.compileProg
+      "opencl"
+      operations
+      ( generateBoilerplate
+          opencl_code
+          opencl_prelude
+          cost_centres
+          kernels
+          types
+          sizes
+          failures
+      )
+      include_opencl_h
+      [Space "device", DefaultSpace]
+      cliOptions
+      prog'
+  where
+    operations :: GC.Operations OpenCL ()
+    operations =
+      GC.defaultOperations
+        { GC.opsCompiler = callKernel,
+          GC.opsWriteScalar = writeOpenCLScalar,
+          GC.opsReadScalar = readOpenCLScalar,
+          GC.opsAllocate = allocateOpenCLBuffer,
+          GC.opsDeallocate = deallocateOpenCLBuffer,
+          GC.opsCopy = copyOpenCLMemory,
+          GC.opsStaticArray = staticOpenCLArray,
+          GC.opsMemoryType = openclMemoryType,
+          GC.opsFatMemory = True
+        }
+    include_opencl_h =
+      unlines
+        [ "#define CL_TARGET_OPENCL_VERSION 120",
+          "#define CL_USE_DEPRECATED_OPENCL_1_2_APIS",
+          "#ifdef __APPLE__",
+          "#define CL_SILENCE_DEPRECATION",
+          "#include <OpenCL/cl.h>",
+          "#else",
+          "#include <CL/cl.h>",
+          "#endif"
+        ]
 
 cliOptions :: [Option]
 cliOptions =
-  commonOptions ++
-  [ Option { optionLongName = "platform"
-           , optionShortName = Just 'p'
-           , optionArgument = RequiredArgument "NAME"
-           , optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
-           }
-  , Option { optionLongName = "dump-opencl"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
+  commonOptions
+    ++ [ Option
+           { optionLongName = "platform",
+             optionShortName = Just 'p',
+             optionArgument = RequiredArgument "NAME",
+             optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
+           },
+         Option
+           { optionLongName = "dump-opencl",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction =
+               [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
                                      entry_point = NULL;}|]
-           }
-  , Option { optionLongName = "load-opencl"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
-           }
-  , Option { optionLongName = "dump-opencl-binary"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|{futhark_context_config_dump_binary_to(cfg, optarg);
+           },
+         Option
+           { optionLongName = "load-opencl",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+           },
+         Option
+           { optionLongName = "dump-opencl-binary",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction =
+               [C.cstm|{futhark_context_config_dump_binary_to(cfg, optarg);
                                      entry_point = NULL;}|]
+           },
+         Option
+           { optionLongName = "load-opencl-binary",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction = [C.cstm|futhark_context_config_load_binary_from(cfg, optarg);|]
+           },
+         Option
+           { optionLongName = "build-option",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "OPT",
+             optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
+           },
+         Option
+           { optionLongName = "profile",
+             optionShortName = Just 'P',
+             optionArgument = NoArgument,
+             optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
            }
-  , Option { optionLongName = "load-opencl-binary"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|futhark_context_config_load_binary_from(cfg, optarg);|]
-           }
-  , Option { optionLongName = "build-option"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "OPT"
-           , optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
-           }
-  , Option { optionLongName = "profile"
-           , optionShortName = Just 'P'
-           , optionArgument = NoArgument
-           , optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
-           }
-  ]
+       ]
 
 -- We detect the special case of writing a constant and turn it into a
 -- non-blocking write.  This may be slightly faster, as it prevents
@@ -112,9 +153,10 @@ writeOpenCLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
   let (decl, blocking) =
         case val of
-          C.Const{} -> ([C.citem|static $ty:t $id:val' = $exp:val;|], [C.cexp|CL_FALSE|])
-          _         -> ([C.citem|$ty:t $id:val' = $exp:val;|], [C.cexp|CL_TRUE|])
-  GC.stm [C.cstm|{$item:decl
+          C.Const {} -> ([C.citem|static $ty:t $id:val' = $exp:val;|], [C.cexp|CL_FALSE|])
+          _ -> ([C.citem|$ty:t $id:val' = $exp:val;|], [C.cexp|CL_TRUE|])
+  GC.stm
+    [C.cstm|{$item:decl
                   OPENCL_SUCCEED_OR_RETURN(
                     clEnqueueWriteBuffer(ctx->opencl.queue, $exp:mem, $exp:blocking,
                                          $exp:i * sizeof($ty:t), sizeof($ty:t),
@@ -132,14 +174,16 @@ readOpenCLScalar :: GC.ReadScalar OpenCL ()
 readOpenCLScalar mem i t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(
+  GC.stm
+    [C.cstm|OPENCL_SUCCEED_OR_RETURN(
                    clEnqueueReadBuffer(ctx->opencl.queue, $exp:mem,
                                        ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
                                        $exp:i * sizeof($ty:t), sizeof($ty:t),
                                        &$id:val,
                                        0, NULL, $exp:(profilingEvent copyScalarFromDev)));
               |]
-  GC.stm [C.cstm|if (ctx->failure_is_an_option &&
+  GC.stm
+    [C.cstm|if (ctx->failure_is_an_option &&
                      futhark_context_sync(ctx) != 0) { return 1; }|]
   return [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space _ =
@@ -162,7 +206,8 @@ copyOpenCLMemory :: GC.Copy OpenCL ()
 -- out of bounds, even if asked to read zero bytes.  We protect with a
 -- branch to avoid this.
 copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
-  GC.stm [C.cstm|
+  GC.stm
+    [C.cstm|
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueReadBuffer(ctx->opencl.queue, $exp:srcmem,
@@ -175,7 +220,8 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nby
    }
   |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
-  GC.stm [C.cstm|
+  GC.stm
+    [C.cstm|
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueWriteBuffer(ctx->opencl.queue, $exp:destmem, CL_TRUE,
@@ -187,7 +233,8 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nby
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
   -- Be aware that OpenCL swaps the usual order of operands for
   -- memcpy()-like functions.  The order below is not a typo.
-  GC.stm [C.cstm|{
+  GC.stm
+    [C.cstm|{
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED_OR_RETURN(
         clEnqueueCopyBuffer(ctx->opencl.queue,
@@ -225,7 +272,8 @@ staticOpenCLArray name "device" t vs = do
   -- Fake a memory block.
   GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
-  GC.atInit [C.cstm|{
+  GC.atInit
+    [C.cstm|{
     typename cl_int success;
     ctx->$id:name.references = NULL;
     ctx->$id:name.size = 0;
@@ -243,7 +291,6 @@ staticOpenCLArray name "device" t vs = do
     }
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
-
 staticOpenCLArray _ space _ _ =
   error $ "OpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
@@ -253,25 +300,25 @@ callKernel (GetSize v key) =
 callKernel (CmpSizeLe v key x) = do
   x' <- GC.compileExp x
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
-  GC.stm [C.cstm|if (ctx->logging) {
+  GC.stm
+    [C.cstm|if (ctx->logging) {
     fprintf(stderr, "Compared %s <= %d.\n", $string:(pretty key), $exp:x');
     }|]
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
-  in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
-
+   in GC.stm [C.cstm|$id:v = ctx->opencl.$id:field;|]
 callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
-
   -- The other failure args are set automatically when the kernel is
   -- first created.
   when (safety == SafetyFull) $
-    GC.stm [C.cstm|
+    GC.stm
+      [C.cstm|
       OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, 1,
                                               sizeof(ctx->failure_is_an_option),
                                               &ctx->failure_is_an_option));
     |]
 
-  zipWithM_ setKernelArg [numFailureParams safety..] args
+  zipWithM_ setKernelArg [numFailureParams safety ..] args
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM GC.compileExp workgroup_size
   local_bytes <- foldM localBytes [C.cexp|0|] args
@@ -280,32 +327,38 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
 
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
-
-  where setKernelArg i (ValueKArg e bt) = do
-          v <- GC.compileExpToName "kernel_arg" bt e
-          GC.stm [C.cstm|
+  where
+    setKernelArg i (ValueKArg e bt) = do
+      v <- GC.compileExpToName "kernel_arg" bt e
+      GC.stm
+        [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($id:v), &$id:v));
           |]
-
-        setKernelArg i (MemKArg v) = do
-          v' <- GC.rawMem v
-          GC.stm [C.cstm|
+    setKernelArg i (MemKArg v) = do
+      v' <- GC.rawMem v
+      GC.stm
+        [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
           |]
-
-        setKernelArg i (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ unCount num_bytes
-          GC.stm [C.cstm|
+    setKernelArg i (SharedMemoryKArg num_bytes) = do
+      num_bytes' <- GC.compileExp $ unCount num_bytes
+      GC.stm
+        [C.cstm|
             OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->$id:name, $int:i, $exp:num_bytes', NULL));
             |]
 
-        localBytes cur (SharedMemoryKArg num_bytes) = do
-          num_bytes' <- GC.compileExp $ unCount num_bytes
-          return [C.cexp|$exp:cur + $exp:num_bytes'|]
-        localBytes cur _ = return cur
+    localBytes cur (SharedMemoryKArg num_bytes) = do
+      num_bytes' <- GC.compileExp $ unCount num_bytes
+      return [C.cexp|$exp:cur + $exp:num_bytes'|]
+    localBytes cur _ = return cur
 
-launchKernel :: C.ToExp a =>
-                KernelName -> [a] -> [a] -> a -> GC.CompilerM op s ()
+launchKernel ::
+  C.ToExp a =>
+  KernelName ->
+  [a] ->
+  [a] ->
+  a ->
+  GC.CompilerM op s ()
 launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
   global_work_size <- newVName "global_work_size"
   time_start <- newVName "time_start"
@@ -313,7 +366,8 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
   time_diff <- newVName "time_diff"
   local_work_size <- newVName "local_work_size"
 
-  GC.stm [C.cstm|
+  GC.stm
+    [C.cstm|
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
@@ -338,18 +392,19 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
                 $string:(pretty kernel_name), $id:time_diff);
       }
     }|]
-  where kernel_rank = length kernel_dims
-        kernel_dims = zipWith multExp num_workgroups workgroup_dims
-        kernel_dims' = map toInit kernel_dims
-        workgroup_dims' = map toInit workgroup_dims
-        total_elements = foldl multExp [C.cexp|1|] kernel_dims
+  where
+    kernel_rank = length kernel_dims
+    kernel_dims = zipWith multExp num_workgroups workgroup_dims
+    kernel_dims' = map toInit kernel_dims
+    workgroup_dims' = map toInit workgroup_dims
+    total_elements = foldl multExp [C.cexp|1|] kernel_dims
 
-        toInit e = [C.cinit|$exp:e|]
-        multExp x y = [C.cexp|$exp:x * $exp:y|]
+    toInit e = [C.cinit|$exp:e|]
+    multExp x y = [C.cexp|$exp:x * $exp:y|]
 
-        printKernelSize :: VName -> [C.Stm]
-        printKernelSize work_size =
-          intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
-          map (printKernelDim work_size) [0..kernel_rank-1]
-        printKernelDim global_work_size i =
-          [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
+    printKernelSize :: VName -> [C.Stm]
+    printKernelSize work_size =
+      intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
+        map (printKernelDim work_size) [0 .. kernel_rank -1]
+    printKernelDim global_work_size i =
+      [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]

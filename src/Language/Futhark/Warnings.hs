@@ -1,21 +1,21 @@
 {-# LANGUAGE Safe #-}
+
 -- | A very simple representation of collections of warnings.
 -- Warnings have a position (so they can be ordered), and their
 -- 'Show'-instance produces a human-readable string.
 module Language.Futhark.Warnings
-  ( Warnings
-  , singleWarning
-  , singleWarning'
-  ) where
+  ( Warnings,
+    singleWarning,
+    singleWarning',
+  )
+where
 
+import Data.List (intercalate, sortOn)
 import Data.Monoid
-import Data.List (sortOn, intercalate)
-
-import Prelude
-
-import Language.Futhark.Core (locStr, prettyStacktrace)
 import Futhark.Util.Console (inRed)
 import Futhark.Util.Loc
+import Language.Futhark.Core (locStr, prettyStacktrace)
+import Prelude
 
 -- | The warnings produced by the compiler.  The 'Show' instance
 -- produces a human-readable description.
@@ -31,17 +31,20 @@ instance Show Warnings where
   show (Warnings []) = ""
   show (Warnings ws) =
     intercalate "\n\n" ws' ++ "\n"
-    where ws' = map showWarning $ sortOn (rep . wloc) ws
-          wloc (x, _, _) = locOf x
-          rep NoLoc = ("", 0)
-          rep (Loc p _) = (posFile p, posCoff p)
-          showWarning (loc, [], w) =
-            inRed ("Warning at " ++ locStr loc ++ ":") ++ "\n" ++
-            intercalate "\n" (map ("  "<>) $ lines w)
-          showWarning (loc, locs, w) =
-            inRed ("Warning at\n" ++
-                   prettyStacktrace 0 (map locStr (loc:locs))) ++
-            intercalate "\n" (map ("  "<>) $ lines w)
+    where
+      ws' = map showWarning $ sortOn (rep . wloc) ws
+      wloc (x, _, _) = locOf x
+      rep NoLoc = ("", 0)
+      rep (Loc p _) = (posFile p, posCoff p)
+      showWarning (loc, [], w) =
+        inRed ("Warning at " ++ locStr loc ++ ":") ++ "\n"
+          ++ intercalate "\n" (map ("  " <>) $ lines w)
+      showWarning (loc, locs, w) =
+        inRed
+          ( "Warning at\n"
+              ++ prettyStacktrace 0 (map locStr (loc : locs))
+          )
+          ++ intercalate "\n" (map ("  " <>) $ lines w)
 
 -- | A single warning at the given location.
 singleWarning :: SrcLoc -> String -> Warnings

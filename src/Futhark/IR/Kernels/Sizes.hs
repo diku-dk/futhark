@@ -1,24 +1,26 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Trustworthy #-}
+
 -- | In the context of this module, a "size" is any kind of tunable
 -- (run-time) constant.
 module Futhark.IR.Kernels.Sizes
-  ( SizeClass (..)
-  , sizeDefault
-  , KernelPath
-  , Count(..)
-  , NumGroups, GroupSize, NumThreads
+  ( SizeClass (..),
+    sizeDefault,
+    KernelPath,
+    Count (..),
+    NumGroups,
+    GroupSize,
+    NumThreads,
   )
-  where
+where
 
 import Data.Int (Int32)
 import Data.Traversable
-
-import Futhark.Util.Pretty
-import Futhark.Transform.Substitute
-import Language.Futhark.Core (Name)
-import Futhark.Util.IntegralExp (IntegralExp)
 import Futhark.IR.Prop.Names (FreeIn)
+import Futhark.Transform.Substitute
+import Futhark.Util.IntegralExp (IntegralExp)
+import Futhark.Util.Pretty
+import Language.Futhark.Core (Name)
 
 -- | An indication of which comparisons have been performed to get to
 -- this point, as well as the result of each comparison.
@@ -26,22 +28,24 @@ type KernelPath = [(Name, Bool)]
 
 -- | The class of some kind of configurable size.  Each class may
 -- impose constraints on the valid values.
-data SizeClass = SizeThreshold KernelPath (Maybe Int32)
-                 -- ^ A threshold with an optional default.
-               | SizeGroup
-               | SizeNumGroups
-               | SizeTile
-               | SizeLocalMemory
-               -- ^ Likely not useful on its own, but querying the
-               -- maximum can be handy.
-               | SizeBespoke Name Int32
-               -- ^ A bespoke size with a default.
-               deriving (Eq, Ord, Show)
+data SizeClass
+  = -- | A threshold with an optional default.
+    SizeThreshold KernelPath (Maybe Int32)
+  | SizeGroup
+  | SizeNumGroups
+  | SizeTile
+  | -- | Likely not useful on its own, but querying the
+    -- maximum can be handy.
+    SizeLocalMemory
+  | -- | A bespoke size with a default.
+    SizeBespoke Name Int32
+  deriving (Eq, Ord, Show)
 
 instance Pretty SizeClass where
   ppr (SizeThreshold path _) = text $ "threshold (" ++ unwords (map pStep path) ++ ")"
-    where pStep (v, True) = pretty v
-          pStep (v, False) = '!' : pretty v
+    where
+      pStep (v, True) = pretty v
+      pStep (v, False) = '!' : pretty v
   ppr SizeGroup = text "group_size"
   ppr SizeNumGroups = text "num_groups"
   ppr SizeTile = text "tile_size"
@@ -55,7 +59,7 @@ sizeDefault (SizeBespoke _ x) = Just x
 sizeDefault _ = Nothing
 
 -- | A wrapper supporting a phantom type for indicating what we are counting.
-newtype Count u e = Count { unCount :: e }
+newtype Count u e = Count {unCount :: e}
   deriving (Eq, Ord, Show, Num, IntegralExp, FreeIn, Pretty, Substitute)
 
 instance Functor (Count u) where

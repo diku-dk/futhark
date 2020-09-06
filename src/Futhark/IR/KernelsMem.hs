@@ -1,47 +1,48 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Futhark.IR.KernelsMem
-  ( KernelsMem
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 
-  -- * Simplification
-  , simplifyProg
-  , simplifyStms
-  , simpleKernelsMem
+module Futhark.IR.KernelsMem
+  ( KernelsMem,
+
+    -- * Simplification
+    simplifyProg,
+    simplifyStms,
+    simpleKernelsMem,
 
     -- * Module re-exports
-  , module Futhark.IR.Mem
-  , module Futhark.IR.Kernels.Kernel
+    module Futhark.IR.Mem,
+    module Futhark.IR.Kernels.Kernel,
   )
-  where
+where
 
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.MonadFreshNames
-import Futhark.Pass
-import Futhark.IR.Syntax
-import Futhark.IR.Prop
-import Futhark.IR.Traversals
-import Futhark.IR.Pretty
 import Futhark.IR.Kernels.Kernel
 import Futhark.IR.Kernels.Simplify (simplifyKernelOp)
-import qualified Futhark.TypeCheck as TC
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
-import Futhark.Pass.ExplicitAllocations (BinderOps(..), mkLetNamesB', mkLetNamesB'')
+import Futhark.IR.Pretty
+import Futhark.IR.Prop
+import Futhark.IR.Syntax
+import Futhark.IR.Traversals
+import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Pass
+import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')
+import qualified Futhark.TypeCheck as TC
 
 data KernelsMem
 
 instance Decorations KernelsMem where
-  type LetDec     KernelsMem = LetDecMem
+  type LetDec KernelsMem = LetDecMem
   type FParamInfo KernelsMem = FParamMem
   type LParamInfo KernelsMem = LParamMem
-  type RetType    KernelsMem = RetTypeMem
+  type RetType KernelsMem = RetTypeMem
   type BranchType KernelsMem = BranchTypeMem
-  type Op         KernelsMem = MemOp (HostOp KernelsMem ())
+  type Op KernelsMem = MemOp (HostOp KernelsMem ())
 
 instance ASTLore KernelsMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
@@ -52,14 +53,15 @@ instance OpReturns KernelsMem where
   opReturns (Inner (SegOp op)) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
-instance PrettyLore KernelsMem where
+instance PrettyLore KernelsMem
 
 instance TC.CheckableOp KernelsMem where
   checkOp = typeCheckMemoryOp Nothing
-    where typeCheckMemoryOp _ (Alloc size _) =
-            TC.require [Prim int64] size
-          typeCheckMemoryOp lvl (Inner op) =
-            typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ return ()) op
+    where
+      typeCheckMemoryOp _ (Alloc size _) =
+        TC.require [Prim int64] size
+      typeCheckMemoryOp lvl (Inner op) =
+        typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ return ()) op
 
 instance TC.Checkable KernelsMem where
   checkFParamLore = checkMemInfo
@@ -85,10 +87,13 @@ instance BinderOps (Engine.Wise KernelsMem) where
 simplifyProg :: Prog KernelsMem -> PassM (Prog KernelsMem)
 simplifyProg = simplifyProgGeneric simpleKernelsMem
 
-simplifyStms :: (HasScope KernelsMem m, MonadFreshNames m) =>
-                 Stms KernelsMem
-             -> m (Engine.SymbolTable (Engine.Wise KernelsMem),
-                   Stms KernelsMem)
+simplifyStms ::
+  (HasScope KernelsMem m, MonadFreshNames m) =>
+  Stms KernelsMem ->
+  m
+    ( Engine.SymbolTable (Engine.Wise KernelsMem),
+      Stms KernelsMem
+    )
 simplifyStms = simplifyStmsGeneric simpleKernelsMem
 
 simpleKernelsMem :: Engine.SimpleOps KernelsMem
@@ -100,7 +105,7 @@ simpleKernelsMem =
     -- usages for those sizes.  This is necessary so the simplifier
     -- will hoist those sizes out as far as possible (most
     -- importantly, past the versioning If).
-    usage (SegOp (SegMap SegGroup{} _ _ kbody)) = localAllocs kbody
+    usage (SegOp (SegMap SegGroup {} _ _ kbody)) = localAllocs kbody
     usage _ = mempty
     localAllocs = foldMap stmLocalAlloc . kernelBodyStms
     stmLocalAlloc = expLocalAlloc . stmExp

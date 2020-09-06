@@ -2,71 +2,71 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
+
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.IR.Syntax" in order for
 -- "Futhark.IR.Decorations" to use these definitions.  This
 -- module is re-exported from "Futhark.IR.Syntax" and
 -- there should be no reason to include it explicitly.
 module Futhark.IR.Syntax.Core
-       (
-           module Language.Futhark.Core
-         , module Futhark.IR.Primitive
+  ( module Language.Futhark.Core,
+    module Futhark.IR.Primitive,
 
-         -- * Types
-         , Uniqueness(..)
-         , NoUniqueness(..)
-         , ShapeBase(..)
-         , Shape
-         , Ext(..)
-         , ExtSize
-         , ExtShape
-         , Rank(..)
-         , ArrayShape(..)
-         , Space (..)
-         , SpaceId
-         , ElemType(..)
-         , TypeBase(..)
-         , Type
-         , ExtType
-         , DeclType
-         , DeclExtType
-         , Diet(..)
-         , ErrorMsg (..)
-         , ErrorMsgPart (..)
-         , errorMsgArgTypes
+    -- * Types
+    Uniqueness (..),
+    NoUniqueness (..),
+    ShapeBase (..),
+    Shape,
+    Ext (..),
+    ExtSize,
+    ExtShape,
+    Rank (..),
+    ArrayShape (..),
+    Space (..),
+    SpaceId,
+    ElemType (..),
+    TypeBase (..),
+    Type,
+    ExtType,
+    DeclType,
+    DeclExtType,
+    Diet (..),
+    ErrorMsg (..),
+    ErrorMsgPart (..),
+    errorMsgArgTypes,
 
-         -- * Values
-         , PrimValue(..)
+    -- * Values
+    PrimValue (..),
 
-         -- * Abstract syntax tree
-         , Ident (..)
-         , Certificates(..)
-         , SubExp(..)
-         , Param (..)
-         , DimIndex (..)
-         , Slice
-         , dimFix
-         , sliceIndices
-         , sliceDims
-         , unitSlice
-         , fixSlice
-         , sliceSlice
-         , PatElemT (..)
-         ) where
+    -- * Abstract syntax tree
+    Ident (..),
+    Certificates (..),
+    SubExp (..),
+    Param (..),
+    DimIndex (..),
+    Slice,
+    dimFix,
+    sliceIndices,
+    sliceDims,
+    unitSlice,
+    fixSlice,
+    sliceSlice,
+    PatElemT (..),
+  )
+where
 
 import Control.Monad.State
+import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.String
-import qualified Data.Map.Strict as M
 import Data.Traversable (fmapDefault, foldMapDefault)
-
-import Language.Futhark.Core
 import Futhark.IR.Primitive
+import Language.Futhark.Core
 
 -- | The size of an array type as a list of its dimension sizes, with
 -- the type of sizes being parametric.
-newtype ShapeBase d = Shape { shapeDims :: [d] }
-                    deriving (Eq, Ord, Show)
+newtype ShapeBase d = Shape {shapeDims :: [d]}
+  deriving (Eq, Ord, Show)
 
 instance Functor ShapeBase where
   fmap = fmapDefault
@@ -88,9 +88,10 @@ instance Monoid (ShapeBase d) where
 type Shape = ShapeBase SubExp
 
 -- | Something that may be existential.
-data Ext a = Ext Int
-           | Free a
-           deriving (Eq, Ord, Show)
+data Ext a
+  = Ext Int
+  | Free a
+  deriving (Eq, Ord, Show)
 
 instance Functor Ext where
   fmap = fmapDefault
@@ -112,15 +113,17 @@ type ExtShape = ShapeBase ExtSize
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
 newtype Rank = Rank Int
-             deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord)
 
 -- | A class encompassing types containing array shape information.
 class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Return the rank of an array with the given size.
   shapeRank :: a -> Int
+
   -- | @stripDims n shape@ strips the outer @n@ dimensions from
   -- @shape@.
   stripDims :: Int -> a -> a
+
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
 
@@ -135,18 +138,21 @@ instance ArrayShape (ShapeBase ExtSize) where
   subShapeOf (Shape ds1) (Shape ds2) =
     -- Must agree on Free dimensions, and ds1 may not be existential
     -- where ds2 is Free.  Existentials must also be congruent.
-    length ds1 == length ds2 &&
-    evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
-    where subDimOf (Free se1) (Free se2) = return $ se1 == se2
-          subDimOf (Ext _)    (Free _)   = return False
-          subDimOf (Free _)   (Ext _)    = return True
-          subDimOf (Ext x)    (Ext y)    = do
-            extmap <- get
-            case M.lookup y extmap of
-              Just ywas | ywas == x -> return True
-                        | otherwise -> return False
-              Nothing -> do put $ M.insert y x extmap
-                            return True
+    length ds1 == length ds2
+      && evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
+    where
+      subDimOf (Free se1) (Free se2) = return $ se1 == se2
+      subDimOf (Ext _) (Free _) = return False
+      subDimOf (Free _) (Ext _) = return True
+      subDimOf (Ext x) (Ext y) = do
+        extmap <- get
+        case M.lookup y extmap of
+          Just ywas
+            | ywas == x -> return True
+            | otherwise -> return False
+          Nothing -> do
+            put $ M.insert y x extmap
+            return True
 
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
@@ -165,20 +171,21 @@ instance ArrayShape Rank where
 -- used to distinguish between constant, global and shared memory
 -- spaces.  In GPU-enabled host code, it is used to distinguish
 -- between host memory ('DefaultSpace') and GPU space.
-data Space = DefaultSpace
-           | Space SpaceId
-           | ScalarSpace [SubExp] PrimType
-             -- ^ A special kind of memory that is a statically sized
-             -- array of some primitive type.  Used for private memory
-             -- on GPUs.
-             deriving (Show, Eq, Ord)
+data Space
+  = DefaultSpace
+  | Space SpaceId
+  | -- | A special kind of memory that is a statically sized
+    -- array of some primitive type.  Used for private memory
+    -- on GPUs.
+    ScalarSpace [SubExp] PrimType
+  deriving (Show, Eq, Ord)
 
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
 -- | A fancier name for @()@ - encodes no uniqueness information.
 data NoUniqueness = NoUniqueness
-                  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show)
 
 instance Semigroup NoUniqueness where
   NoUniqueness <> NoUniqueness = NoUniqueness
@@ -188,19 +195,20 @@ instance Monoid NoUniqueness where
 
 -- | The type of things that can be array elements.
 data ElemType
-  = ElemAcc [VName]
-    -- ^ Accumulator corresponding to some arrays in scope.
+  = -- | Accumulator corresponding to some arrays in scope.
+    ElemAcc [VName]
   | ElemPrim PrimType
   deriving (Show, Eq, Ord)
 
 -- | The type of a value.  When comparing types for equality with
 -- '==', shapes must match.
-data TypeBase shape u = Prim PrimType
-                      | Acc [VName]
-                        -- ^ See 'ElemAcc'.
-                      | Array ElemType shape u
-                      | Mem Space
-                    deriving (Show, Eq, Ord)
+data TypeBase shape u
+  = Prim PrimType
+  | -- | See 'ElemAcc'.
+    Acc [VName]
+  | Array ElemType shape u
+  | Mem Space
+  deriving (Show, Eq, Ord)
 
 -- | A type with shape information, used for describing the type of
 -- variables.
@@ -223,20 +231,25 @@ type DeclExtType = TypeBase ExtShape Uniqueness
 -- example, we might say that a function taking three arguments of
 -- types @([int], *[int], [int])@ has diet @[Observe, Consume,
 -- Observe]@.
-data Diet = Consume -- ^ Consumes this value.
-          | Observe -- ^ Only observes value in this position, does
-                    -- not consume.  A result may alias this.
-          | ObservePrim -- ^ As 'Observe', but the result will not
-                        -- alias, because the parameter does not carry
-                        -- aliases.
-            deriving (Eq, Ord, Show)
+data Diet
+  = -- | Consumes this value.
+    Consume
+  | -- | Only observes value in this position, does
+    -- not consume.  A result may alias this.
+    Observe
+  | -- | As 'Observe', but the result will not
+    -- alias, because the parameter does not carry
+    -- aliases.
+    ObservePrim
+  deriving (Eq, Ord, Show)
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data Ident = Ident { identName :: VName
-                   , identType :: Type
-                   }
-               deriving (Show)
+data Ident = Ident
+  { identName :: VName,
+    identType :: Type
+  }
+  deriving (Show)
 
 instance Eq Ident where
   x == y = identName x == identName y
@@ -245,8 +258,8 @@ instance Ord Ident where
   x `compare` y = identName x `compare` identName y
 
 -- | A list of names used for certificates in some expressions.
-newtype Certificates = Certificates { unCertificates :: [VName] }
-                     deriving (Eq, Ord, Show)
+newtype Certificates = Certificates {unCertificates :: [VName]}
+  deriving (Eq, Ord, Show)
 
 instance Semigroup Certificates where
   Certificates x <> Certificates y = Certificates (x <> y)
@@ -257,17 +270,19 @@ instance Monoid Certificates where
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
 -- guaranteed to complete in constant time.
-data SubExp = Constant PrimValue
-            | Var      VName
-            deriving (Show, Eq, Ord)
+data SubExp
+  = Constant PrimValue
+  | Var VName
+  deriving (Show, Eq, Ord)
 
 -- | A function or lambda parameter.
 data Param dec = Param
-                 { paramName :: VName
-                   -- ^ Name of the parameter.
-                 , paramDec :: dec
-                   -- ^ Function parameter decoration.
-                 } deriving (Ord, Show, Eq)
+  { -- | Name of the parameter.
+    paramName :: VName,
+    -- | Function parameter decoration.
+    paramDec :: dec
+  }
+  deriving (Ord, Show, Eq)
 
 instance Foldable Param where
   foldMap = foldMapDefault
@@ -279,11 +294,13 @@ instance Traversable Param where
   traverse f (Param name dec) = Param name <$> f dec
 
 -- | How to index a single dimension of an array.
-data DimIndex d = DimFix
-                  d -- ^ Fix index in this dimension.
-                | DimSlice d d d
-                  -- ^ @DimSlice start_offset num_elems stride@.
-                  deriving (Eq, Ord, Show)
+data DimIndex d
+  = -- | Fix index in this dimension.
+    DimFix
+      d
+  | -- | @DimSlice start_offset num_elems stride@.
+    DimSlice d d d
+  deriving (Eq, Ord, Show)
 
 instance Functor DimIndex where
   fmap f (DimFix i) = DimFix $ f i
@@ -315,8 +332,9 @@ sliceIndices = mapM dimFix
 -- | The dimensions of the array produced by this slice.
 sliceDims :: Slice d -> [d]
 sliceDims = mapMaybe dimSlice
-  where dimSlice (DimSlice _ d _) = Just d
-        dimSlice DimFix{}         = Nothing
+  where
+    dimSlice (DimSlice _ d _) = Just d
+    dimSlice DimFix {} = Nothing
 
 -- | A slice with a stride of one.
 unitSlice :: Num d => d -> d -> DimIndex d
@@ -325,32 +343,33 @@ unitSlice offset n = DimSlice offset n 1
 -- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
 -- the length of 'sliceDims' for the slice.
 fixSlice :: Num d => Slice d -> [d] -> [d]
-fixSlice (DimFix j:mis') is' =
+fixSlice (DimFix j : mis') is' =
   j : fixSlice mis' is'
-fixSlice (DimSlice orig_k _ orig_s:mis') (i:is') =
-  (orig_k+i*orig_s) : fixSlice mis' is'
+fixSlice (DimSlice orig_k _ orig_s : mis') (i : is') =
+  (orig_k + i * orig_s) : fixSlice mis' is'
 fixSlice _ _ = []
 
 -- | Further slice the 'DimSlice's of a slice.  The number of slices
 -- must equal the length of 'sliceDims' for the slice.
 sliceSlice :: Num d => Slice d -> Slice d -> Slice d
-sliceSlice (DimFix j:js') is' =
+sliceSlice (DimFix j : js') is' =
   DimFix j : sliceSlice js' is'
-sliceSlice (DimSlice j _ s:js') (DimFix i:is') =
-  DimFix (j + (i*s)) : sliceSlice js' is'
-sliceSlice (DimSlice j _ s0:js') (DimSlice i n s1:is') =
-  DimSlice (j+(s0*i)) n (s0*s1) : sliceSlice js' is'
+sliceSlice (DimSlice j _ s : js') (DimFix i : is') =
+  DimFix (j + (i * s)) : sliceSlice js' is'
+sliceSlice (DimSlice j _ s0 : js') (DimSlice i n s1 : is') =
+  DimSlice (j + (s0 * i)) n (s0 * s1) : sliceSlice js' is'
 sliceSlice _ _ = []
 
 -- | An element of a pattern - consisting of a name and an addditional
 -- parametric decoration.  This decoration is what is expected to
 -- contain the type of the resulting variable.
-data PatElemT dec = PatElem { patElemName :: VName
-                               -- ^ The name being bound.
-                             , patElemDec :: dec
-                               -- ^ Pattern element decoration.
-                             }
-                   deriving (Ord, Show, Eq)
+data PatElemT dec = PatElem
+  { -- | The name being bound.
+    patElemName :: VName,
+    -- | Pattern element decoration.
+    patElemDec :: dec
+  }
+  deriving (Ord, Show, Eq)
 
 instance Functor PatElemT where
   fmap = fmapDefault
@@ -371,9 +390,12 @@ instance IsString (ErrorMsg a) where
   fromString = ErrorMsg . pure . fromString
 
 -- | A part of an error message.
-data ErrorMsgPart a = ErrorString String -- ^ A literal string.
-                    | ErrorInt32 a -- ^ A run-time integer value.
-                    deriving (Eq, Ord, Show)
+data ErrorMsgPart a
+  = -- | A literal string.
+    ErrorString String
+  | -- | A run-time integer value.
+    ErrorInt32 a
+  deriving (Eq, Ord, Show)
 
 instance IsString (ErrorMsgPart a) where
   fromString = ErrorString
@@ -392,7 +414,7 @@ instance Functor ErrorMsgPart where
   fmap f (ErrorInt32 a) = ErrorInt32 $ f a
 
 instance Foldable ErrorMsgPart where
-  foldMap _ ErrorString{} = mempty
+  foldMap _ ErrorString {} = mempty
   foldMap f (ErrorInt32 a) = f a
 
 instance Traversable ErrorMsgPart where
@@ -403,5 +425,6 @@ instance Traversable ErrorMsgPart where
 -- is their type?
 errorMsgArgTypes :: ErrorMsg a -> [PrimType]
 errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
-  where onPart ErrorString{} = Nothing
-        onPart ErrorInt32{} = Just $ IntType Int32
+  where
+    onPart ErrorString {} = Nothing
+    onPart ErrorInt32 {} = Just $ IntType Int32
