@@ -1,6 +1,9 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE Safe #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
@@ -16,6 +19,7 @@ module Futhark.IR.Primitive
     allFloatTypes,
     PrimType (..),
     allPrimTypes,
+    module Data.Int,
 
     -- * Values
     IntValue (..),
@@ -106,13 +110,14 @@ module Futhark.IR.Primitive
   )
 where
 
-import Control.Applicative
+import Control.Category
 import qualified Data.Binary.Get as G
 import qualified Data.Binary.Put as P
 import Data.Bits
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
+import qualified Data.Text as T
 import Data.Word
 import Futhark.Util
   ( ceilDouble,
@@ -127,7 +132,11 @@ import Futhark.Util
     tgammaf,
   )
 import Futhark.Util.Pretty
-import Prelude
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Text.Read (readMaybe)
+import Prelude hiding (id, (.))
 
 -- | An integer type, ordered by size.  Note that signedness is not a
 -- property of the type, but a property of the operations performed on
@@ -137,7 +146,17 @@ data IntType
   | Int16
   | Int32
   | Int64
-  deriving (Eq, Ord, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
+
+instance SexpIso IntType where
+  sexpIso =
+    match $
+      With (sym "i8" >>>) $
+        With (sym "i16" >>>) $
+          With (sym "i32" >>>) $
+            With
+              (sym "i64" >>>)
+              End
 
 instance Pretty IntType where
   ppr Int8 = text "i8"
@@ -153,7 +172,15 @@ allIntTypes = [minBound .. maxBound]
 data FloatType
   = Float32
   | Float64
-  deriving (Eq, Ord, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
+
+instance SexpIso FloatType where
+  sexpIso =
+    match $
+      With (sym "f32" >>>) $
+        With
+          (sym "f64" >>>)
+          End
 
 instance Pretty FloatType where
   ppr Float32 = text "f32"
@@ -169,7 +196,17 @@ data PrimType
   | FloatType FloatType
   | Bool
   | Cert
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso PrimType where
+  sexpIso =
+    match $
+      With (. sexpIso) $
+        With (. sexpIso) $
+          With (sym "bool" >>>) $
+            With
+              (sym "cert" >>>)
+              End
 
 instance Enum PrimType where
   toEnum 0 = IntType Int8
@@ -207,13 +244,35 @@ allPrimTypes =
     ++ map FloatType allFloatTypes
     ++ [Bool, Cert]
 
+numberIso :: (Read a, Pretty a) => T.Text -> Grammar p (T.Text :- t) (a :- t)
+numberIso postfix = partialOsi (fromS postfix) (toS postfix)
+  where
+    toS t s = prettyText s <> t
+
+    fromS t s
+      | t `T.isSuffixOf` s,
+        Just v <- readMaybe $ T.unpack $ T.dropEnd (T.length t) s =
+        Right v
+      | otherwise =
+        Left $ expected $ "Couldn't parse " <> t
+
 -- | An integer value.
 data IntValue
   = Int8Value !Int8
   | Int16Value !Int16
   | Int32Value !Int32
   | Int64Value !Int64
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso IntValue where
+  sexpIso =
+    match $
+      With (. numberIso "i8" . Sexp.symbol) $
+        With (. numberIso "i16" . Sexp.symbol) $
+          With (. numberIso "i32" . Sexp.symbol) $
+            With
+              (. numberIso "i64" . Sexp.symbol)
+              End
 
 instance Pretty IntValue where
   ppr (Int8Value v) = text $ show v ++ "i8"
@@ -246,7 +305,13 @@ valueIntegral (Int64Value v) = fromIntegral v
 data FloatValue
   = Float32Value !Float
   | Float64Value !Double
-  deriving (Eq, Show)
+  deriving (Show, Generic)
+
+instance Eq FloatValue where
+  Float32Value x == Float32Value y = isNaN x && isNaN y || x == y
+  Float64Value x == Float64Value y = isNaN x && isNaN y || x == y
+  Float32Value _ == Float64Value _ = False
+  Float64Value _ == Float32Value _ = False
 
 -- The derived Ord instance does not handle NaNs correctly.
 instance Ord FloatValue where
@@ -262,6 +327,14 @@ instance Ord FloatValue where
 
   (>) = flip (<)
   (>=) = flip (<=)
+
+instance SexpIso FloatValue where
+  sexpIso =
+    match $
+      With (. numberIso "f32" . Sexp.symbol) $
+        With
+          (. numberIso "f64" . Sexp.symbol)
+          End
 
 instance Pretty FloatValue where
   ppr (Float32Value v)
@@ -292,7 +365,17 @@ data PrimValue
   | BoolValue !Bool
   | -- | The only value of type @cert@.
     Checked
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso PrimValue where
+  sexpIso =
+    match $
+      With (. sexpIso) $
+        With (. sexpIso) $
+          With (. sexpIso) $
+            With
+              (sym "checked" >>>)
+              End
 
 instance Pretty PrimValue where
   ppr (IntValue v) = ppr v
@@ -337,7 +420,19 @@ data UnOp
     SSignum IntType
   | -- | Unsigned sign function: @usignum(2)@ = 1.
     USignum IntType
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso UnOp where
+  sexpIso =
+    match $
+      With (. Sexp.sym "not") $
+        With (. Sexp.list (Sexp.el (Sexp.sym "complement") >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "abs") >>> Sexp.el sexpIso)) $
+            With (. Sexp.list (Sexp.el (Sexp.sym "fabs") >>> Sexp.el sexpIso)) $
+              With (. Sexp.list (Sexp.el (Sexp.sym "ssignum") >>> Sexp.el sexpIso)) $
+                With
+                  (. Sexp.list (Sexp.el (Sexp.sym "usignum") >>> Sexp.el sexpIso))
+                  End
 
 -- | What to do in case of arithmetic overflow.  Futhark's semantics
 -- are that overflow does wraparound, but for generated code (like
@@ -348,7 +443,15 @@ data UnOp
 -- Note that all values of this type are considered equal for 'Eq' and
 -- 'Ord'.
 data Overflow = OverflowWrap | OverflowUndef
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance SexpIso Overflow where
+  sexpIso =
+    match $
+      With (. Sexp.sym "wrap") $
+        With
+          (. Sexp.sym "undef")
+          End
 
 instance Eq Overflow where
   _ == _ = True
@@ -372,7 +475,15 @@ instance Ord Overflow where
 -- result will only be used when it is non-zero (so it doesn't matter
 -- what result is provided with a zero divisor, as long as the program
 -- keeps running).
-data Safety = Unsafe | Safe deriving (Eq, Ord, Show)
+data Safety = Unsafe | Safe deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso Safety where
+  sexpIso =
+    match $
+      With (. Sexp.sym "unsafe") $
+        With
+          (. Sexp.sym "safe")
+          End
 
 -- | Binary operators.  These correspond closely to the binary operators in
 -- LLVM.  Most are parametrised by their expected input and output
@@ -452,7 +563,7 @@ data BinOp
     LogAnd
   | -- | Boolean or - not short-circuiting.
     LogOr
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 -- | Comparison operators are like 'BinOp's, but they always return a
 -- boolean value.  The somewhat ugly constructor names are straight
@@ -481,7 +592,7 @@ data CmpOp
     CmpLlt
   | -- | Boolean less than or equal.
     CmpLle
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 -- | Conversion operators try to generalise the @from t0 x to t1@
 -- instructions from LLVM.
@@ -514,7 +625,7 @@ data ConvOp
   | -- | Convert a boolean to an integer.  True is converted
     -- to 1 and False to 0.
     BToI IntType
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 -- | A list of all unary operators for all types.
 allUnOps :: [UnOp]
@@ -893,6 +1004,8 @@ doCmpOp _ _ _ = Nothing
 
 -- | Compare any two primtive values for exact equality.
 doCmpEq :: PrimValue -> PrimValue -> Bool
+doCmpEq (FloatValue (Float32Value v1)) (FloatValue (Float32Value v2)) = v1 == v2
+doCmpEq (FloatValue (Float64Value v1)) (FloatValue (Float64Value v2)) = v1 == v2
 doCmpEq v1 v2 = v1 == v2
 
 -- | Unsigned less than.
@@ -1403,6 +1516,76 @@ commutativeBinOp UMin {} = True
 commutativeBinOp FMax {} = True
 commutativeBinOp FMin {} = True
 commutativeBinOp _ = False
+
+-- SexpIso instances
+
+instance SexpIso BinOp where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "add") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "fadd") >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "sub") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+            With (. Sexp.list (Sexp.el (Sexp.sym "fsub") >>> Sexp.el sexpIso)) $
+              With (. Sexp.list (Sexp.el (Sexp.sym "mul") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                With (. Sexp.list (Sexp.el (Sexp.sym "fmul") >>> Sexp.el sexpIso)) $
+                  With (. Sexp.list (Sexp.el (Sexp.sym "udiv") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                    With (. Sexp.list (Sexp.el (Sexp.sym "udivup") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                      With (. Sexp.list (Sexp.el (Sexp.sym "sdiv") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                        With (. Sexp.list (Sexp.el (Sexp.sym "sdivup") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                          With (. Sexp.list (Sexp.el (Sexp.sym "fdiv") >>> Sexp.el sexpIso)) $
+                            With (. Sexp.list (Sexp.el (Sexp.sym "fmod") >>> Sexp.el sexpIso)) $
+                              With (. Sexp.list (Sexp.el (Sexp.sym "umod") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                                With (. Sexp.list (Sexp.el (Sexp.sym "smod") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                                  With (. Sexp.list (Sexp.el (Sexp.sym "squot") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                                    With (. Sexp.list (Sexp.el (Sexp.sym "srem") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                                      With (. Sexp.list (Sexp.el (Sexp.sym "smin") >>> Sexp.el sexpIso)) $
+                                        With (. Sexp.list (Sexp.el (Sexp.sym "umin") >>> Sexp.el sexpIso)) $
+                                          With (. Sexp.list (Sexp.el (Sexp.sym "fmin") >>> Sexp.el sexpIso)) $
+                                            With (. Sexp.list (Sexp.el (Sexp.sym "smax") >>> Sexp.el sexpIso)) $
+                                              With (. Sexp.list (Sexp.el (Sexp.sym "umax") >>> Sexp.el sexpIso)) $
+                                                With (. Sexp.list (Sexp.el (Sexp.sym "fmap") >>> Sexp.el sexpIso)) $
+                                                  With (. Sexp.list (Sexp.el (Sexp.sym "shl") >>> Sexp.el sexpIso)) $
+                                                    With (. Sexp.list (Sexp.el (Sexp.sym "lshr") >>> Sexp.el sexpIso)) $
+                                                      With (. Sexp.list (Sexp.el (Sexp.sym "ashr") >>> Sexp.el sexpIso)) $
+                                                        With (. Sexp.list (Sexp.el (Sexp.sym "and") >>> Sexp.el sexpIso)) $
+                                                          With (. Sexp.list (Sexp.el (Sexp.sym "or") >>> Sexp.el sexpIso)) $
+                                                            With (. Sexp.list (Sexp.el (Sexp.sym "xor") >>> Sexp.el sexpIso)) $
+                                                              With (. Sexp.list (Sexp.el (Sexp.sym "pow") >>> Sexp.el sexpIso)) $
+                                                                With (. Sexp.list (Sexp.el (Sexp.sym "fpow") >>> Sexp.el sexpIso)) $
+                                                                  With (. Sexp.sym "logand") $
+                                                                    With
+                                                                      (. Sexp.sym "logor")
+                                                                      End
+
+instance SexpIso CmpOp where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "eq") >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "ult") >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "ule") >>> Sexp.el sexpIso)) $
+            With (. Sexp.list (Sexp.el (Sexp.sym "slt") >>> Sexp.el sexpIso)) $
+              With (. Sexp.list (Sexp.el (Sexp.sym "sle") >>> Sexp.el sexpIso)) $
+                With (. Sexp.list (Sexp.el (Sexp.sym "lt") >>> Sexp.el sexpIso)) $
+                  With (. Sexp.list (Sexp.el (Sexp.sym "le") >>> Sexp.el sexpIso)) $
+                    With (. Sexp.sym "llt") $
+                      With
+                        (. Sexp.sym "lle")
+                        End
+
+instance SexpIso ConvOp where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "zext") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "sext") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "fpconv") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+            With (. Sexp.list (Sexp.el (Sexp.sym "fptoui") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+              With (. Sexp.list (Sexp.el (Sexp.sym "fptosi") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                With (. Sexp.list (Sexp.el (Sexp.sym "uitofp") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                  With (. Sexp.list (Sexp.el (Sexp.sym "sitofp") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                    With (. Sexp.list (Sexp.el (Sexp.sym "itob") >>> Sexp.el sexpIso)) $
+                      With
+                        (. Sexp.list (Sexp.el (Sexp.sym "btoi") >>> Sexp.el sexpIso))
+                        End
 
 -- Prettyprinting instances
 

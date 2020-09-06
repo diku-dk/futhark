@@ -24,10 +24,9 @@ compileSegMap ::
   CallKernelGen ()
 compileSegMap pat lvl space kbody = do
   let (is, dims) = unzip $ unSegSpace space
-  dims' <- mapM toExp dims
-
-  num_groups' <- traverse toExp $ segNumGroups lvl
-  group_size' <- traverse toExp $ segGroupSize lvl
+      dims' = map toInt32Exp dims
+      num_groups' = toInt32Exp <$> segNumGroups lvl
+      group_size' = toInt32Exp <$> segGroupSize lvl
 
   case lvl of
     SegThread {} -> do
@@ -36,9 +35,12 @@ compileSegMap pat lvl space kbody = do
       sKernelThread "segmap" num_groups' group_size' (segFlat space) $
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
-          let global_tid = Imp.vi32 group_id * unCount group_size' + local_tid
+          let global_tid =
+                sExt64 (Imp.vi32 group_id) * sExt64 (unCount group_size')
+                  + sExt64 local_tid
 
-          zipWithM_ dPrimV_ is $ unflattenIndex dims' global_tid
+          zipWithM_ dPrimV_ is $
+            map sExt32 $ unflattenIndex (map sExt64 dims') global_tid
 
           sWhen (isActive $ unSegSpace space) $
             compileStms mempty (kernelBodyStms kbody) $

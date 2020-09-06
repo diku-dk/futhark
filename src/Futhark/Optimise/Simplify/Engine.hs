@@ -65,7 +65,6 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
-import Control.Monad.Writer
 import Data.Either
 import Data.List (find, foldl', mapAccumL, nub)
 import Data.Maybe
@@ -240,6 +239,13 @@ bindArrayLParams ::
 bindArrayLParams params =
   localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
 
+bindMerge ::
+  SimplifiableLore lore =>
+  [(FParam (Wise lore), SubExp, SubExp)] ->
+  SimpleM lore a ->
+  SimpleM lore a
+bindMerge = localVtable . ST.insertLoopMerge
+
 bindLoopVar :: SimplifiableLore lore => VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
@@ -380,9 +386,9 @@ emptyOfType _ Acc {} =
   error "emptyOfType: Cannot hoist accumulator."
 emptyOfType _ (Prim pt) =
   return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
-emptyOfType ctx_names (Array pt shape _) = do
+emptyOfType ctx_names (Array et shape _) = do
   let dims = map zeroIfContext $ shapeDims shape
-  return $ BasicOp $ Scratch pt dims
+  return $ BasicOp $ Scratch et dims
   where
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
     zeroIfContext se = se
@@ -803,7 +809,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
   ((loopstms, loopres), hoisted) <-
     enterLoop $
       consumeMerge $
-        bindFParams (ctxparams' ++ valparams') $
+      bindMerge (zipWith withRes (ctx' ++ val') (bodyResult loopbody)) $
           wrapbody $
             blockIf
               ( hasFree boundnames `orIf` isConsumed
@@ -822,6 +828,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       localVtable $ flip (foldl' (flip ST.consume)) $ namesToList consumed_by_merge
     consumed_by_merge =
       freeIn $ map snd $ filter (unique . paramDeclType . fst) val
+    withRes (p, x) y = (p, x, y)
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
   return (Op op', stms)

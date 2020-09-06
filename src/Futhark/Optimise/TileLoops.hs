@@ -19,26 +19,25 @@ import Prelude hiding (quot)
 
 -- | The pass definition.
 tileLoops :: Pass Kernels Kernels
-tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
-  \(Prog consts funs) ->
-    Prog consts <$> mapM optimiseFunDef funs
-
-optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-optimiseFunDef fundec = do
-  body' <-
-    modifyNameSource $
-      runState $
-        runReaderT m (scopeOfFParams (funDefParams fundec))
-  return fundec {funDefBody = body'}
+tileLoops =
+  Pass "tile loops" "Tile stream loops inside kernels" $
+    intraproceduralTransformation onStms
   where
-    m = optimiseBody $ funDefBody fundec
+    onStms scope stms =
+      modifyNameSource $
+        runState $
+          runReaderT (optimiseStms stms) scope
 
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
-optimiseBody (Body () bnds res) =
-  localScope (scopeOf bnds) $
-    Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
+optimiseBody (Body () stms res) =
+  Body () <$> optimiseStms stms <*> pure res
+
+optimiseStms :: Stms Kernels -> TileM (Stms Kernels)
+optimiseStms stms =
+  localScope (scopeOf stms) $
+    mconcat <$> mapM optimiseStm (stmsToList stms)
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm (Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
@@ -352,7 +351,13 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
       tiledBody' privstms = inScopeOf host_stms $ do
         addStms invariant_prestms
 
-        let live_set = namesToList $ liveSet precomputed_variant_prestms used_in_body
+        let live_set =
+              namesToList $
+                liveSet precomputed_variant_prestms $
+                  freeIn recomputed_variant_prestms
+                    <> used_in_body
+                    <> freeIn poststms
+
         prelude_arrs <-
           inScopeOf precomputed_variant_prestms $
             doPrelude tiling precomputed_variant_prestms live_set
@@ -395,7 +400,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           letTupExp "tiled_inside_loop" $
             DoLoop [] merge' (ForLoop i it bound []) loopbody'
 
-        postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts
+        postludeGeneric tiling inloop_privstms pat accs' poststms poststms_res res_ts
 
   return (host_stms, tiling, tiledBody')
   where
@@ -611,7 +616,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
         inScopeOf loopform $
           localScope (scopeOfFParams $ map fst merge) $ do
             -- Collectively read a tile.
-            tile <- tilingReadTile tiling TileFull privstms (Var tile_id) arrs_and_perms
+            tile <- tilingReadTile tiling TilePartial privstms (Var tile_id) arrs_and_perms
 
             -- Now each thread performs a traversal of the tile and
             -- updates its accumulator.
@@ -689,6 +694,9 @@ segMap1D desc lvl manifest f = do
       SegOp $
         SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
 
+v32 :: VName -> TPrimExp Int32 VName
+v32 v = TPrimExp $ LeafExp v int32
+
 reconstructGtids1D ::
   Count GroupSize SubExp ->
   VName ->
@@ -697,11 +705,7 @@ reconstructGtids1D ::
   Binder Kernels ()
 reconstructGtids1D group_size gtid gid ltid =
   letBindNames [gtid]
-    =<< toExp
-      ( LeafExp gid int32
-          * primExpFromSubExp int32 (unCount group_size)
-          + LeafExp ltid int32
-      )
+    =<< toExp (v32 gid * pe32 (unCount group_size) + v32 ltid)
 
 readTile1D ::
   SubExp ->
@@ -727,11 +731,7 @@ readTile1D
     segMap1D "full_tile" (SegThread num_groups group_size SegNoVirt) ResultNoSimplify $ \ltid -> do
       j <-
         letSubExp "j"
-          =<< toExp
-            ( primExpFromSubExp int32 tile_id
-                * primExpFromSubExp int32 tile_size
-                + LeafExp ltid int32
-            )
+          =<< toExp (pe32 tile_id * pe32 tile_size + v32 ltid)
 
       reconstructGtids1D group_size gtid gid ltid
       addPrivStms [DimFix $ Var ltid] privstms
@@ -749,10 +749,7 @@ readTile1D
           TilePartial ->
             letTupExp "pre"
               =<< eIf
-                ( toExp $
-                    primExpFromSubExp int32 j
-                      .<. primExpFromSubExp int32 w
-                )
+                (toExp $ pe32 j .<. pe32 w)
                 (resultBody <$> mapM (fmap Var . readTileElem) arrs)
                 (eBody $ map eBlank tile_ts)
           TileFull ->
@@ -801,7 +798,7 @@ processTile1D
       fmap (map Var) $
         letTupExp "acc"
           =<< eIf
-            (toExp $ LeafExp gtid int32 .<. primExpFromSubExp int32 kdim)
+            (toExp $ v32 gtid .<. pe32 kdim)
             (eBody [pure $ Op $ OtherOp $ Screma tile_size form' tile])
             (resultBodyM thread_accs)
 
@@ -844,7 +841,7 @@ processResidualTile1D
 
     letTupExp "acc_after_residual"
       =<< eIf
-        (toExp $ primExpFromSubExp int32 residual_input .==. 0)
+        (toExp $ pe32 residual_input .==. 0)
         (resultBodyM $ map Var accs)
         (nonemptyTile residual_input)
     where
@@ -922,13 +919,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
     Tiling
       { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
           letBindNames [gtid]
-            =<< toExp
-              ( LeafExp gid int32 * primExpFromSubExp int32 tile_size
-                  + LeafExp ltid int32
-              )
-          f
-            (LeafExp gtid int32 .<. primExpFromSubExp int32 kdim)
-            [DimFix $ Var ltid],
+            =<< toExp (v32 gid * pe32 tile_size + v32 ltid)
+          f (untyped $ v32 gtid .<. pe32 kdim) [DimFix $ Var ltid],
         tilingReadTile =
           readTile1D tile_size gid gtid (segNumGroups lvl) (segGroupSize lvl),
         tilingProcessTile =
@@ -995,15 +987,9 @@ reconstructGtids2D ::
 reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = do
   -- Reconstruct the original gtids from gid_x/gid_y and ltid_x/ltid_y.
   letBindNames [gtid_x]
-    =<< toExp
-      ( LeafExp gid_x int32 * primExpFromSubExp int32 tile_size
-          + LeafExp ltid_x int32
-      )
+    =<< toExp (v32 gid_x * pe32 tile_size + v32 ltid_x)
   letBindNames [gtid_y]
-    =<< toExp
-      ( LeafExp gid_y int32 * primExpFromSubExp int32 tile_size
-          + LeafExp ltid_y int32
-      )
+    =<< toExp (v32 gid_y * pe32 tile_size + v32 ltid_y)
 
 readTile2D ::
   (SubExp, SubExp) ->
@@ -1026,18 +1012,10 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
     $ \(ltid_x, ltid_y) -> do
       i <-
         letSubExp "i"
-          =<< toExp
-            ( primExpFromSubExp int32 tile_id
-                * primExpFromSubExp int32 tile_size
-                + LeafExp ltid_x int32
-            )
+          =<< toExp (pe32 tile_id * pe32 tile_size + v32 ltid_x)
       j <-
         letSubExp "j"
-          =<< toExp
-            ( primExpFromSubExp int32 tile_id
-                * primExpFromSubExp int32 tile_size
-                + LeafExp ltid_y int32
-            )
+          =<< toExp (pe32 tile_id * pe32 tile_size + v32 ltid_y)
 
       reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
       addPrivStms [DimFix $ Var ltid_x, DimFix $ Var ltid_y] privstms
@@ -1060,13 +1038,11 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
                   last $
                     rearrangeShape
                       perm
-                      [ LeafExp gtid_y int32 .<. primExpFromSubExp int32 kdim_y,
-                        LeafExp gtid_x int32 .<. primExpFromSubExp int32 kdim_x
+                      [ isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y,
+                        isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x
                       ]
             eIf
-              ( toExp $
-                  primExpFromSubExp int32 idx .<. primExpFromSubExp int32 w .&&. othercheck
-              )
+              (toExp $ pe32 idx .<. pe32 w .&&. othercheck)
               (eBody [return $ BasicOp $ Index arr [DimFix idx]])
               (eBody [eBlank tile_t])
 
@@ -1138,8 +1114,8 @@ processTile2D
           letTupExp "acc"
             =<< eIf
               ( toExp $
-                  LeafExp gtid_x int32 .<. primExpFromSubExp int32 kdim_x
-                    .&&. LeafExp gtid_y int32 .<. primExpFromSubExp int32 kdim_y
+                  isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x
+                    .&&. isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y
               )
               (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size form' tiles'])
               (resultBodyM thread_accs)
@@ -1183,7 +1159,7 @@ processResidualTile2D
 
     letTupExp "acc_after_residual"
       =<< eIf
-        (toExp $ primExpFromSubExp int32 residual_input .==. 0)
+        (toExp $ pe32 residual_input .==. 0)
         (resultBodyM $ map Var accs)
         (nonemptyTile residual_input)
     where
@@ -1264,8 +1240,9 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
           segMap2D desc lvl' manifest (tile_size, tile_size) $ \(ltid_x, ltid_y) -> do
             reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
             f
-              ( LeafExp gtid_x int32 .<. primExpFromSubExp int32 kdim_x
-                  .&&. LeafExp gtid_y int32 .<. primExpFromSubExp int32 kdim_y
+              ( untyped $
+                  isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x
+                    .&&. isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y
               )
               [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
         tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size (segNumGroups lvl) (segGroupSize lvl),

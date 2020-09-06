@@ -11,12 +11,10 @@ module Futhark.Internalise.Bindings
 where
 
 import Control.Monad.Reader hiding (mapM)
-import Control.Monad.State hiding (mapM)
 import qualified Data.Map.Strict as M
 import qualified Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
-import Futhark.MonadFreshNames
 import Futhark.Util
 import Language.Futhark as E hiding (matchDims)
 

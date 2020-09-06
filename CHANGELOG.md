@@ -9,9 +9,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Obscure loop optimisation (#1110).
+
+  * Faster matrix transposition in C backend.
+
+  * Library code generated with CUDA backend can now be called from
+    multiple threads.
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+  * Entry points with names that are not valid C (or Python)
+    identifiers are now pointed out as problematic, rather than
+    generating invalid C code.
+
+  * Exotic tiling bug (#1112).
+
+## [0.16.4]
+
+### Added
+
+  * `#[unroll]` attribute.
+
+  * Better error message when writing `a[i][j]` (#1095).
+
+  * Better error message when missing "in" (#1091).
 
 ### Fixed
 
@@ -22,6 +47,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix incorrect movement of array indexing into branches `if`s
     (#1073).
+
+  * Fix defunctorisation bug (#1088).
+
+  * Fix issue where loop tiling might generate out-of-bounds reads
+    (#1094).
+
+  * Scans of empty arrays no longer result in out-of-bounds memory
+    reads.
+
+  * Fix yet another defunctionalisation bug due to missing
+    eta-expansion (#1100).
 
 ## [0.16.3]
 

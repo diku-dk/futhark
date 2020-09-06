@@ -23,7 +23,6 @@ import Control.Monad.Trans
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
-import Control.Arrow
 import Data.Array
 import qualified Data.Text as T
 import Codec.Binary.UTF8.String (encode)
@@ -38,6 +37,7 @@ import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Prop
 import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
+import Futhark.Util.Pretty
 import Futhark.Util.Loc hiding (L) -- Lexer has replacements.
 
 }
@@ -610,9 +610,7 @@ Exp2 :: { UncheckedExp }
      | Apply_ { $1 }
 
 Apply_ :: { UncheckedExp }
-       : ApplyList { case $1 of
-                       ((Constr n [] _ loc1):_) -> Constr n (tail $1) NoInfo (srcspan loc1 (last $1))
-                       _                -> foldl1 (\f x -> Apply f x NoInfo (NoInfo, NoInfo) (srcspan f x)) $1 }
+       : ApplyList {% applyExp $1 }
 
 ApplyList :: { [UncheckedExp] }
           : ApplyList Atom %prec juxtprec
@@ -725,7 +723,7 @@ Fields1 :: { [FieldBase NoInfo Name] }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
-                      { LetPat $2 $4 $5 (NoInfo, NoInfo) (srcspan $1 $>) }
+       { LetPat $2 $4 $5 (NoInfo, NoInfo) (srcspan $1 $>) }
 
      | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2
@@ -733,24 +731,26 @@ LetExp :: { UncheckedExp }
             $8 NoInfo (srcspan $1 $>) }
 
      | let VarSlice '=' Exp LetBody
-                      { let ((v,_),slice,loc) = $2; ident = Ident v NoInfo loc
-                        in LetWith ident ident slice $4 $5 NoInfo (srcspan $1 $>) }
+       { let ((v,_),slice,loc) = $2; ident = Ident v NoInfo loc
+         in LetWith ident ident slice $4 $5 NoInfo (srcspan $1 $>) }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
+    | error {% throwError "Unexpected end of file - missing \"in\"?" }
 
 MatchExp :: { UncheckedExp }
-          : match Exp Cases  { let loc = srcspan $1 (NE.toList $>)
-                               in Match $2 $> (NoInfo, NoInfo) loc  }
+          : match Exp Cases
+            { let loc = srcspan $1 (NE.toList $>)
+              in Match $2 $> (NoInfo, NoInfo) loc  }
 
 Cases :: { NE.NonEmpty (CaseBase NoInfo Name) }
        : Case  %prec caseprec { $1 NE.:| [] }
        | Case Cases           { NE.cons $1 $2 }
 
 Case :: { CaseBase NoInfo Name }
-      : case CPattern '->' Exp       { let loc = srcspan $1 $>
-                                       in CasePat $2 $> loc }
+      : case CPattern '->' Exp
+        { let loc = srcspan $1 $> in CasePat $2 $> loc }
 
 CPattern :: { PatternBase NoInfo Name }
           : CInnerPattern ':' TypeExpDecl { PatternAscription $1 $3 (srcspan $1 $>) }
@@ -815,8 +815,8 @@ LoopForm : for VarId '<' Exp
 
 VarSlice :: { ((Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
           : 'id[' DimIndices ']'
-              { let L vloc (INDEXING v) = $1
-                in ((v, vloc), $2, srcspan $1 $>) }
+            { let L vloc (INDEXING v) = $1
+              in ((v, vloc), $2, srcspan $1 $>) }
 
 QualVarSlice :: { ((QualName Name, SrcLoc), [UncheckedDimIndex], SrcLoc) }
               : VarSlice
@@ -873,7 +873,7 @@ FieldPattern :: { (Name, PatternBase NoInfo Name) }
               : FieldId '=' Pattern
                 { (fst $1, $3) }
               | FieldId ':' TypeExpDecl
-              { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
+                { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3 (srcspan (snd $1) $>)) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
@@ -1083,6 +1083,20 @@ combArrayElements t ts = foldM comb t ts
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
+
+applyExp :: [UncheckedExp] -> ParserMonad UncheckedExp
+applyExp all@((Constr n [] _ loc1):es) =
+  return $ Constr n es NoInfo (srcspan loc1 (last all))
+applyExp es =
+  foldM ap (head es) (tail es)
+  where
+     ap (Index e is _ floc) (ArrayLit xs _ xloc) =
+       parseErrorAt (srcspan floc xloc) $
+       Just $ pretty $ "Incorrect syntax for multi-dimensional indexing." </>
+       "Use" <+> align (ppr index)
+       where index = Index e (is++map DimFix xs) (NoInfo, NoInfo) xloc
+     ap f x =
+        return $ Apply f x NoInfo (NoInfo, NoInfo) (srcspan f x)
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id v _ loc) = return $ Var (qualName v) NoInfo loc

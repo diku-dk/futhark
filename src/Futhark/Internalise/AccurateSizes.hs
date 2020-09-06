@@ -11,10 +11,9 @@ module Futhark.Internalise.AccurateSizes
 where
 
 import Control.Monad
-import Data.List (find)
 import qualified Data.Map.Strict as M
+import Data.List (find)
 import Data.Maybe
-import qualified Data.Set as S
 import Futhark.Construct
 import Futhark.IR.SOACS
 import Futhark.Internalise.Monad
@@ -24,7 +23,7 @@ shapeMapping ::
   (HasScope SOACS m, Monad m) =>
   [FParam] ->
   [Type] ->
-  m (M.Map VName (S.Set SubExp))
+  m (M.Map VName SubExp)
 shapeMapping all_params value_arg_types =
   mconcat <$> zipWithM f value_params value_arg_types
   where
@@ -37,13 +36,13 @@ shapeMapping all_params value_arg_types =
     f (Param _ (Acc arrs1)) (Acc arrs2)
       | Just arrs1_params <- mapM findArrParam arrs1 = do
         arrs2_ts <- mapM lookupType arrs2
-        let arr_m = M.fromList $ zip arrs1 $ map (S.singleton . Var) arrs2
+        let arr_m = M.fromList $ zip arrs1 $ map Var arrs2
         arr_sizes_m <- mconcat <$> zipWithM f arrs1_params arrs2_ts
         return $ arr_m <> arr_sizes_m
     f _ _ =
       pure mempty
 
-    match (Var v, se) = Just (v, S.singleton se)
+    match (Var v, se) = Just (v, se)
     match _ = Nothing
 
 argShapes ::
@@ -56,8 +55,10 @@ argShapes shapes all_params valargts = do
   mapping <- shapeMapping all_params valargts
   let addShape name =
         case M.lookup name mapping of
-          Just s | se : _ <- S.toList s -> se
-          _ -> error $ "argShapes: no mapping for " ++ pretty name
+          Just se -> se
+          _ -> intConst Int32 0 -- FIXME: we only need this because
+          -- the defunctionaliser throws away
+          -- sizes.
   return $ map addShape shapes
 
 ensureResultShape ::

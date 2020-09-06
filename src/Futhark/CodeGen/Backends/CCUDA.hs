@@ -68,7 +68,11 @@ compileProg prog = do
           GC.opsStaticArray = staticCUDAArray,
           GC.opsMemoryType = cudaMemoryType,
           GC.opsCompiler = callKernel,
-          GC.opsFatMemory = True
+          GC.opsFatMemory = True,
+          GC.opsCritical =
+            ( [C.citems|CUDA_SUCCEED(cuCtxPushCurrent(ctx->cuda.cu_ctx));|],
+              [C.citems|CUDA_SUCCEED(cuCtxPopCurrent(&ctx->cuda.cu_ctx));|]
+            )
         }
     cuda_includes =
       unlines

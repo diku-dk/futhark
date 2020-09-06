@@ -23,6 +23,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
     SizeClass (..),
     errorMsgArgTypes,
     sizeDefault,
+    untyped,
   )
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util.Pretty (prettyText)
@@ -117,7 +118,10 @@ sizeHeuristicsToPython = List . map f
           TileSize -> String "tile_size"
           Threshold -> String "threshold"
 
-        what' = Lambda "device" $ runIdentity $ Py.compilePrimExp onLeaf what
+        what' =
+          Lambda "device" $
+            runIdentity $
+              Py.compilePrimExp onLeaf $ untyped what
 
         onLeaf (DeviceInfo s) =
           pure $

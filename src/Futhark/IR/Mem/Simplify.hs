@@ -19,20 +19,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Construct
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
-import Futhark.IR.Syntax hiding
-  ( BasicOp,
-    Body,
-    Exp,
-    FParam,
-    FunDef,
-    LParam,
-    Lambda,
-    PatElem,
-    Pattern,
-    Prog,
-    RetType,
-    Stm,
-  )
 import qualified Futhark.IR.Syntax as AST
 import qualified Futhark.Optimise.Simplify as Simplify
 import qualified Futhark.Optimise.Simplify.Engine as Engine
@@ -197,7 +183,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
         not $ freeIn ixfun `namesIntersect` namesFromList (patternNames pat),
         fse /= tse =
         let mem_size =
-              sExt Int64 $ product $ primByteSize pt : IxFun.base ixfun
+              sExt Int64 $ untyped $ product $ primByteSize pt : IxFun.base ixfun
          in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
         fixable

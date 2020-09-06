@@ -1,5 +1,7 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Safe #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | Facilities for determining which names are used in some syntactic
@@ -41,6 +43,7 @@ module Futhark.IR.Prop.Names
   )
 where
 
+import Control.Category
 import Control.Monad.State.Strict
 import Data.Foldable
 import qualified Data.IntMap.Strict as IM
@@ -50,11 +53,19 @@ import Futhark.IR.Prop.Scope
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Prelude hiding (id, (.))
 
 -- | A set of names.  Note that the 'Ord' instance is a dummy that
 -- treats everything as 'EQ' if '==', and otherwise 'LT'.
 newtype Names = Names (IM.IntMap VName)
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance SexpIso Names where
+  sexpIso = with $ \names ->
+    (iso IM.fromList IM.toList . sexpIso) >>> names
 
 -- | Retrieve the data structure underlying the names representation.
 namesIntMap :: Names -> IM.IntMap VName

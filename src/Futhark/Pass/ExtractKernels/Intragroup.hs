@@ -175,7 +175,7 @@ parallelMin ws =
 
 intraGroupBody :: SegLevel -> Body -> IntraGroupM (Out.Body Out.Kernels)
 intraGroupBody lvl body = do
-  stms <- collectStms_ $ mapM_ (intraGroupStm lvl) $ bodyStms body
+  stms <- collectStms_ $ intraGroupStms lvl $ bodyStms body
   return $ mkBody stms $ bodyResult body
 
 intraGroupStm :: SegLevel -> Stm -> IntraGroupM ()
@@ -201,7 +201,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
         letBind pat $ If cond tbody' fbody' ifdec
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
-        mapM_ (intraGroupStm lvl) . fmap (certify (stmAuxCerts aux))
+        intraGroupStms lvl . fmap (certify (stmAuxCerts aux))
           =<< runBinder_ (FOT.transformSOAC pat soac)
     Op (Screma w form arrs)
       | Just lam <- isMapSOAC form -> do
@@ -216,14 +216,8 @@ intraGroupStm lvl stm@(Let pat aux e) = do
                       <> scope,
                   distOnInnerMap =
                     distributeMap,
-                  distOnTopLevelStms = \stms -> do
-                    -- Stuff might have happened before we got
-                    -- here.
-                    cur_scope <- askScope
-                    lift $
-                      localScope cur_scope $
-                        collectStms_ $
-                          intraGroupStms lvl stms,
+                  distOnTopLevelStms =
+                    liftInner . collectStms_ . intraGroupStms lvl,
                   distSegLevel = \minw _ _ -> do
                     lift $ parallelMin minw
                     return lvl,
@@ -275,7 +269,7 @@ intraGroupStm lvl stm@(Let pat aux e) = do
             replace se = se
             replaceSets (IntraAcc x y log) =
               IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
-        censor replaceSets $ mapM_ (intraGroupStm lvl) stream_bnds
+        censor replaceSets $ intraGroupStms lvl stream_bnds
     Op (Scatter w lam ivs dests) -> do
       write_i <- newVName "write_i"
       space <- mkSegSpace [(write_i, w)]

@@ -1,4 +1,6 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | Futhark Compiler Driver
 module Futhark.CLI.Dev (main) where
@@ -6,14 +8,17 @@ module Futhark.CLI.Dev (main) where
 import Control.Category (id)
 import Control.Monad
 import Control.Monad.State
+import qualified Data.ByteString.Lazy as ByteString
 import Data.List (intersperse)
 import Data.Maybe
 import qualified Data.Text.IO as T
 import Futhark.Actions
-import Futhark.Compiler
-import Futhark.IR (Prog, pretty)
+import Futhark.Analysis.Metrics (OpMetrics)
+import Futhark.Compiler.CLI
+import Futhark.IR (ASTLore, Op, Prog, pretty)
 import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
+import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
 import qualified Futhark.IR.SeqMem as SeqMem
@@ -37,14 +42,15 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Passes
-import Futhark.Pipeline
 import Futhark.TypeCheck (Checkable)
 import Futhark.Util.Log
 import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
 import Language.Futhark.Parser (parseFuthark)
+import qualified Language.SexpGrammar as Sexp
 import System.Console.GetOpt
 import System.Exit
+import System.FilePath
 import System.IO
 import Prelude hiding (id)
 
@@ -119,27 +125,26 @@ newtype UntypedPass
         FutharkM UntypedPassState
       )
 
-data AllActions = AllActions
-  { actionSOACS :: Action SOACS.SOACS,
-    actionKernels :: Action Kernels.Kernels,
-    actionSeq :: Action Seq.Seq,
-    actionKernelsMem :: Action KernelsMem.KernelsMem,
-    actionSeqMem :: Action SeqMem.SeqMem
-  }
-
 data UntypedAction
   = SOACSAction (Action SOACS.SOACS)
   | KernelsAction (Action Kernels.Kernels)
-  | KernelsMemAction (Action KernelsMem.KernelsMem)
-  | SeqMemAction (Action SeqMem.SeqMem)
-  | PolyAction AllActions
+  | KernelsMemAction (FilePath -> Action KernelsMem.KernelsMem)
+  | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
+  | PolyAction
+      ( forall lore.
+        ( ASTLore lore,
+          (CanBeAliased (Op lore)),
+          (OpMetrics (Op lore))
+        ) =>
+        Action lore
+      )
 
 untypedActionName :: UntypedAction -> String
 untypedActionName (SOACSAction a) = actionName a
 untypedActionName (KernelsAction a) = actionName a
-untypedActionName (SeqMemAction a) = actionName a
-untypedActionName (KernelsMemAction a) = actionName a
-untypedActionName (PolyAction a) = actionName (actionSOACS a)
+untypedActionName (SeqMemAction a) = actionName $ a ""
+untypedActionName (KernelsMemAction a) = actionName $ a ""
+untypedActionName (PolyAction a) = actionName (a :: Action SOACS.SOACS)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
@@ -151,7 +156,7 @@ instance Representation UntypedAction where
 newConfig :: Config
 newConfig = Config newFutharkConfig (Pipeline []) action False
   where
-    action = PolyAction $ AllActions printAction printAction printAction printAction printAction
+    action = PolyAction printAction
 
 changeFutharkConfig ::
   (FutharkConfig -> FutharkConfig) ->
@@ -366,7 +371,7 @@ commandLineOptions =
       ["compile-imperative"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = SeqMemAction impCodeGenAction}
+            opts {futharkAction = SeqMemAction $ const impCodeGenAction}
       )
       "Translate program into the imperative IL and write it on standard output.",
     Option
@@ -374,25 +379,40 @@ commandLineOptions =
       ["compile-imperative-kernels"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = KernelsMemAction kernelImpCodeGenAction}
+            opts {futharkAction = KernelsMemAction $ const kernelImpCodeGenAction}
       )
       "Translate program into the imperative IL with kernels and write it on standard output.",
     Option
-      "p"
-      ["print"]
+      []
+      ["compile-opencl"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = PolyAction $ AllActions printAction printAction printAction printAction printAction}
+            opts {futharkAction = KernelsMemAction $ compileOpenCLAction newFutharkConfig ToExecutable}
       )
+      "Compile the program using the OpenCL backend.",
+    Option
+      []
+      ["compile-c"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = SeqMemAction $ compileCAction newFutharkConfig ToExecutable}
+      )
+      "Compile the program using the C backend.",
+    Option
+      "p"
+      ["print"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAction})
       "Prettyprint the resulting internal representation on standard output (default action).",
     Option
       "m"
       ["metrics"]
-      ( NoArg $
-          Right $ \opts ->
-            opts {futharkAction = PolyAction $ AllActions metricsAction metricsAction metricsAction metricsAction metricsAction}
-      )
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})
       "Print AST metrics of the resulting internal representation on standard output.",
+    Option
+      []
+      ["sexp"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction sexpAction})
+      "Print the resulting IR as S-expressions to standard output.",
     Option
       []
       ["defunctorise"]
@@ -530,16 +550,38 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= Monomorphise.transformProg
                   >>= Defunctionalise.transformProg
-        Pipeline {} -> do
-          prog <- runPipelineOnProgram (futharkConfig config) id file
-          runPolyPasses config prog
+        Pipeline {} ->
+          case splitExtensions file of
+            (base, ".fut") -> do
+              prog <- runPipelineOnProgram (futharkConfig config) id file
+              runPolyPasses config base (SOACS prog)
+            (base, ".sexp") -> do
+              input <- liftIO $ ByteString.readFile file
+              prog <- case Sexp.decode @(Prog SOACS.SOACS) input of
+                Right prog' -> return $ SOACS prog'
+                Left _ ->
+                  case Sexp.decode @(Prog Kernels.Kernels) input of
+                    Right prog' -> return $ Kernels prog'
+                    Left _ ->
+                      case Sexp.decode @(Prog Seq.Seq) input of
+                        Right prog' -> return $ Seq prog'
+                        Left _ ->
+                          case Sexp.decode @(Prog KernelsMem.KernelsMem) input of
+                            Right prog' -> return $ KernelsMem prog'
+                            Left _ ->
+                              case Sexp.decode @(Prog SeqMem.SeqMem) input of
+                                Right prog' -> return $ SeqMem prog'
+                                Left e -> externalErrorS $ "Couldn't parse sexp input: " ++ show e
+              runPolyPasses config base prog
+            (_, ext) ->
+              externalErrorS $ unwords ["Unsupported extension", show ext, ". Supported extensions: sexp, fut"]
 
-runPolyPasses :: Config -> Prog SOACS.SOACS -> FutharkM ()
-runPolyPasses config initial_prog = do
+runPolyPasses :: Config -> FilePath -> UntypedPassState -> FutharkM ()
+runPolyPasses config base initial_prog = do
   end_prog <-
     foldM
       (runPolyPass pipeline_config)
-      (SOACS initial_prog)
+      initial_prog
       (getFutharkPipeline config)
   logMsg $ "Running action " ++ untypedActionName (futharkAction config)
   case (end_prog, futharkAction config) of
@@ -548,19 +590,19 @@ runPolyPasses config initial_prog = do
     (Kernels prog, KernelsAction action) ->
       actionProcedure action prog
     (SeqMem prog, SeqMemAction action) ->
-      actionProcedure action prog
+      actionProcedure (action base) prog
     (KernelsMem prog, KernelsMemAction action) ->
-      actionProcedure action prog
+      actionProcedure (action base) prog
     (SOACS soacs_prog, PolyAction acs) ->
-      actionProcedure (actionSOACS acs) soacs_prog
+      actionProcedure acs soacs_prog
     (Kernels kernels_prog, PolyAction acs) ->
-      actionProcedure (actionKernels acs) kernels_prog
+      actionProcedure acs kernels_prog
     (Seq seq_prog, PolyAction acs) ->
-      actionProcedure (actionSeq acs) seq_prog
+      actionProcedure acs seq_prog
     (KernelsMem mem_prog, PolyAction acs) ->
-      actionProcedure (actionKernelsMem acs) mem_prog
+      actionProcedure acs mem_prog
     (SeqMem mem_prog, PolyAction acs) ->
-      actionProcedure (actionSeqMem acs) mem_prog
+      actionProcedure acs mem_prog
     (_, action) ->
       externalErrorS $
         "Action "

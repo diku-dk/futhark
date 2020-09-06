@@ -6,7 +6,6 @@
 module Futhark.Pass.ExpandAllocations (expandAllocations) where
 
 import Control.Monad.Except
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
@@ -395,7 +394,7 @@ expandedInvariantAllocations
             M.singleton mem $ newBase lvl
           )
 
-      untouched d = DimSlice (fromInt32 0) d (fromInt32 1)
+      untouched d = DimSlice 0 d 1
 
       newBase SegThread {} (old_shape, _) =
         let num_dims = length old_shape
@@ -403,21 +402,21 @@ expandedInvariantAllocations
             root_ixfun =
               IxFun.iota
                 ( old_shape
-                    ++ [ primExpFromSubExp int32 num_groups
-                           * primExpFromSubExp int32 group_size
+                    ++ [ pe32 num_groups
+                           * pe32 group_size
                        ]
                 )
             permuted_ixfun = IxFun.permute root_ixfun perm
             offset_ixfun =
               IxFun.slice permuted_ixfun $
-                DimFix (LeafExp (segFlat segspace) int32) :
+                DimFix (le32 (segFlat segspace)) :
                 map untouched old_shape
          in offset_ixfun
       newBase SegGroup {} (old_shape, _) =
-        let root_ixfun = IxFun.iota (primExpFromSubExp int32 num_groups : old_shape)
+        let root_ixfun = IxFun.iota (pe32 num_groups : old_shape)
             offset_ixfun =
               IxFun.slice root_ixfun $
-                DimFix (LeafExp (segFlat segspace) int32) :
+                DimFix (le32 (segFlat segspace)) :
                 map untouched old_shape
          in offset_ixfun
 
@@ -464,23 +463,20 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
           M.singleton mem $ newBase offset
         )
 
-    num_threads' = primExpFromSubExp int32 num_threads
-    gtid = LeafExp (segFlat kspace) int32
+    num_threads' = pe32 num_threads
+    gtid = isInt32 $ LeafExp (segFlat kspace) int32
 
     -- For the variant allocations, we add an inner dimension,
     -- which is then offset by a thread-specific amount.
     newBase size_per_thread (old_shape, pt) =
-      let pt_size = fromInt32 $ primByteSize pt
-          elems_per_thread =
-            sExt
-              Int32
-              (primExpFromSubExp int64 size_per_thread)
-              `quot` pt_size
+      let elems_per_thread =
+            isInt32 (sExt Int32 (primExpFromSubExp int64 size_per_thread))
+              `quot` primByteSize pt
           root_ixfun = IxFun.iota [elems_per_thread, num_threads']
           offset_ixfun =
             IxFun.slice
               root_ixfun
-              [ DimSlice (fromInt32 0) num_threads' (fromInt32 1),
+              [ DimSlice 0 num_threads' 1,
                 DimFix gtid
               ]
           shapechange =
@@ -490,7 +486,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
        in IxFun.reshape offset_ixfun shapechange
 
 -- | A map from memory block names to new index function bases.
-type RebaseMap = M.Map VName (([PrimExp VName], PrimType) -> IxFun)
+type RebaseMap = M.Map VName (([TPrimExp Int32 VName], PrimType) -> IxFun)
 
 newtype OffsetM a
   = OffsetM
@@ -515,7 +511,7 @@ runOffsetM scope offsets (OffsetM m) =
 askRebaseMap :: OffsetM RebaseMap
 askRebaseMap = OffsetM $ lift ask
 
-lookupNewBase :: VName -> ([PrimExp VName], PrimType) -> OffsetM (Maybe IxFun)
+lookupNewBase :: VName -> ([TPrimExp Int32 VName], PrimType) -> OffsetM (Maybe IxFun)
 lookupNewBase name x = do
   offsets <- askRebaseMap
   return $ ($ x) <$> M.lookup name offsets
@@ -779,8 +775,8 @@ sliceKernelSizes num_threads sizes space kstms = do
         let (kspace_gtids, kspace_dims) = unzip $ unSegSpace space
             new_inds =
               unflattenIndex
-                (map (primExpFromSubExp int32) kspace_dims)
-                (primExpFromSubExp int32 $ Var $ paramName flat_gtid_lparam)
+                (map pe32 kspace_dims)
+                (pe32 $ Var $ paramName flat_gtid_lparam)
         zipWithM_ letBindNames (map pure kspace_gtids) =<< mapM toExp new_inds
 
         mapM_ addStm kstms'

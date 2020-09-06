@@ -19,7 +19,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR.Aliases
 import Futhark.IR.Kernels
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 data DesiredUpdate dec = DesiredUpdate
@@ -130,12 +129,11 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
         Returns _ se <- Just ret
 
         Just $ do
-          let pexp = primExpFromSubExp int32
           (slice', bodystms) <-
             flip runBinderT scope $
               traverse (toSubExp "index") $
-                fixSlice (map (fmap pexp) slice) $
-                  map (pexp . Var) gtids
+                fixSlice (map (fmap pe32) slice) $
+                  map (pe32 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
               ret' = WriteReturns res_dims src [(map DimFix slice', se)]

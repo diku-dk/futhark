@@ -73,9 +73,6 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.RWS
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Bits (shiftR, xor)
 import Data.Char (isAlphaNum, isDigit, ord)
@@ -202,7 +199,9 @@ data Operations op s = Operations
     opsCall :: CallCompiler op s,
     -- | If true, use reference counting.  Otherwise, bare
     -- pointers.
-    opsFatMemory :: Bool
+    opsFatMemory :: Bool,
+    -- | Code to bracket critical sections.
+    opsCritical :: ([C.BlockItem], [C.BlockItem])
   }
 
 defError :: ErrorCompiler op s
@@ -246,7 +245,8 @@ defaultOperations =
       opsCompiler = defCompiler,
       opsFatMemory = True,
       opsError = defError,
-      opsCall = defCall
+      opsCall = defCall,
+      opsCritical = mempty
     }
   where
     defWriteScalar _ _ _ _ _ =
@@ -845,13 +845,14 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
           )
     iter x = ((x :: Word32) `shiftR` 16) `xor` x
 
-criticalSection :: [C.BlockItem] -> [C.BlockItem]
-criticalSection x =
-  [C.citems|
-                       lock_lock(&ctx->lock);
-                       $items:x
-                       lock_unlock(&ctx->lock);
-                     |]
+criticalSection :: Operations op s -> [C.BlockItem] -> [C.BlockItem]
+criticalSection ops x =
+  [C.citems|lock_lock(&ctx->lock);
+            $items:(fst (opsCritical ops))
+            $items:x
+            $items:(snd (opsCritical ops))
+            lock_unlock(&ctx->lock);
+           |]
 
 arrayLibraryFunctions ::
   Space ->
@@ -928,6 +929,7 @@ arrayLibraryFunctions space pt signed shape = do
         [C.cexp|((size_t)$exp:arr_size_array) * sizeof($ty:pt')|]
 
   ctx_ty <- contextType
+  ops <- asks envOperations
 
   headerDecl
     (ArrayDecl name)
@@ -959,7 +961,7 @@ arrayLibraryFunctions space pt signed shape = do
             if (arr == NULL) {
               return bad;
             }
-            $items:(criticalSection new_body)
+            $items:(criticalSection ops new_body)
             return arr;
           }
 
@@ -970,18 +972,18 @@ arrayLibraryFunctions space pt signed shape = do
             if (arr == NULL) {
               return bad;
             }
-            $items:(criticalSection new_raw_body)
+            $items:(criticalSection ops new_raw_body)
             return arr;
           }
 
           int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
-            $items:(criticalSection free_body)
+            $items:(criticalSection ops free_body)
             free(arr);
             return 0;
           }
 
           int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data) {
-            $items:(criticalSection values_body)
+            $items:(criticalSection ops values_body)
             return 0;
           }
 
@@ -1193,29 +1195,32 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
                                       $params:entry_point_output_params,
                                       $params:entry_point_input_params);|]
 
+  let critical =
+        [C.citems|
+         $items:unpack_entry_inputs
+
+         int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
+
+         if (ret == 0) {
+           $items:pack_entry_outputs
+         }
+        |]
+
+  ops <- asks envOperations
+
   return
-    ( [C.cedecl|int $id:entry_point_function_name
-                         ($ty:ctx_ty *ctx,
-                          $params:entry_point_output_params,
-                          $params:entry_point_input_params) {
-    $items:inputdecls
-    $items:outputdecls
+    ( [C.cedecl|
+       int $id:entry_point_function_name
+           ($ty:ctx_ty *ctx,
+            $params:entry_point_output_params,
+            $params:entry_point_input_params) {
+         $items:inputdecls
+         $items:outputdecls
 
-    lock_lock(&ctx->lock);
+         $items:(criticalSection ops critical)
 
-    $items:unpack_entry_inputs
-
-    int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
-
-    if (ret == 0) {
-      $items:pack_entry_outputs
-    }
-
-    lock_unlock(&ctx->lock);
-
-    return ret;
-}
-    |],
+         return ret;
+       }|],
       cli_entry_point,
       cli_init
     )
@@ -2055,21 +2060,21 @@ compileExp = compilePrimExp compileLeaf
     compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
       src' <- rawMem src
       derefPointer src'
-        <$> compileExp iexp
+        <$> compileExp (untyped iexp)
         <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType restype)*|]
     compileLeaf (Index src (Count iexp) restype (Space space) vol) =
       join $
         asks envReadScalar
           <*> rawMem src
-          <*> compileExp iexp
+          <*> compileExp (untyped iexp)
           <*> pure (primTypeToCType restype)
           <*> pure space
           <*> pure vol
     compileLeaf (Index src (Count iexp) _ ScalarSpace {} _) = do
-      iexp' <- compileExp iexp
+      iexp' <- compileExp $ untyped iexp
       return [C.cexp|$id:src[$exp:iexp']|]
     compileLeaf (SizeOf t) =
-      return [C.cexp|(typename int32_t)sizeof($ty:t')|]
+      return [C.cexp|(typename int64_t)sizeof($ty:t')|]
       where
         t' = primTypeToCType t
 
@@ -2188,7 +2193,7 @@ compileCode (Allocate _ _ ScalarSpace {}) =
   -- Handled by the declaration of the memory block, which is
   -- translated to an actual array.
   return ()
-compileCode (Allocate name (Count e) space) = do
+compileCode (Allocate name (Count (TPrimExp e)) space) = do
   size <- compileExp e
   cached <- cacheMem name
   case cached of
@@ -2203,24 +2208,24 @@ compileCode (Allocate name (Count e) space) = do
 compileCode (Free name space) = do
   cached <- isJust <$> cacheMem name
   unless cached $ unRefMem name space
-compileCode (For i it bound body) = do
+compileCode (For i bound body) = do
   let i' = C.toIdent i
-      it' = primTypeToCType $ IntType it
+      t = primTypeToCType $ primExpType bound
   bound' <- compileExp bound
   body' <- blockScope $ compileCode body
   stm
-    [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+    [C.cstm|for ($ty:t $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 compileCode (While cond body) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ untyped cond
   body' <- blockScope $ compileCode body
   stm
     [C.cstm|while ($exp:cond') {
             $items:body'
           }|]
 compileCode (If cond tbranch fbranch) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ untyped cond
   tbranch' <- blockScope $ compileCode tbranch
   fbranch' <- blockScope $ compileCode fbranch
   stm $ case (tbranch', fbranch') of
@@ -2234,38 +2239,38 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
   join $
     copyMemoryDefaultSpace
       <$> rawMem dest
-      <*> compileExp destoffset
+      <*> compileExp (untyped destoffset)
       <*> rawMem src
-      <*> compileExp srcoffset
-      <*> compileExp size
+      <*> compileExp (untyped srcoffset)
+      <*> compileExp (untyped size)
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
   join $
     copy
       <$> rawMem dest
-      <*> compileExp destoffset
+      <*> compileExp (untyped destoffset)
       <*> pure destspace
       <*> rawMem src
-      <*> compileExp srcoffset
+      <*> compileExp (untyped srcoffset)
       <*> pure srcspace
-      <*> compileExp size
+      <*> compileExp (untyped size)
 compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <-
     derefPointer dest'
-      <$> compileExp idx
+      <$> compileExp (untyped idx)
       <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 compileCode (Write dest (Count idx) _ ScalarSpace {} _ elemexp) = do
-  idx' <- compileExp idx
+  idx' <- compileExp (untyped idx)
   elemexp' <- compileExp elemexp
   stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
 compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $
     asks envWriteScalar
       <*> rawMem dest
-      <*> compileExp idx
+      <*> compileExp (untyped idx)
       <*> pure (primTypeToCType elemtype)
       <*> pure space
       <*> pure vol

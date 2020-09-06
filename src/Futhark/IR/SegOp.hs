@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -49,6 +50,7 @@ module Futhark.IR.SegOp
   )
 where
 
+import Control.Category
 import Control.Monad.Identity hiding (mapM_)
 import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
@@ -93,12 +95,24 @@ import Futhark.Util.Pretty
     (</>),
   )
 import qualified Futhark.Util.Pretty as PP
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Prelude hiding (id, (.))
 
 -- | How an array is split into chunks.
 data SplitOrdering
   = SplitContiguous
   | SplitStrided SubExp
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SplitOrdering where
+  sexpIso =
+    match $
+      With (. Sexp.sym "contiguous") $
+        With
+          (. Sexp.list (Sexp.el (Sexp.sym "strided") >>> Sexp.el sexpIso))
+          End
 
 instance FreeIn SplitOrdering where
   freeIn' SplitContiguous = mempty
@@ -130,7 +144,19 @@ data HistOp lore = HistOp
     histShape :: Shape,
     histOp :: Lambda lore
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (HistOp lore) where
+  sexpIso = with $ \histop ->
+    Sexp.list
+      ( Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+      )
+      >>> histop
 
 -- | The type of a histogram produced by a 'HistOp'.  This can be
 -- different from the type of the 'histDest's in case we are
@@ -155,7 +181,17 @@ data SegBinOp lore = SegBinOp
     -- code.
     segBinOpShape :: Shape
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance Decorations lore => SexpIso (SegBinOp lore) where
+  sexpIso = with $ \segbinop ->
+    Sexp.list
+      ( Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+      )
+      >>> segbinop
 
 -- | How many reduction results are produced by these 'SegBinOp's?
 segBinOpResults :: [SegBinOp lore] -> Int
@@ -172,6 +208,16 @@ data KernelBody lore = KernelBody
     kernelBodyStms :: Stms lore,
     kernelBodyResult :: [KernelResult]
   }
+  deriving (Generic)
+
+instance Decorations lore => SexpIso (KernelBody lore) where
+  sexpIso = with $ \kernelbody ->
+    Sexp.list
+      ( Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+      )
+      >>> kernelbody
 
 deriving instance Decorations lore => Ord (KernelBody lore)
 
@@ -193,7 +239,16 @@ data ResultManifest
     -- same physical thread later on, and can thus be
     -- kept in registers.
     ResultPrivate
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show, Ord, Generic)
+
+instance SexpIso ResultManifest where
+  sexpIso =
+    match $
+      With (. Sexp.sym "no-simplify") $
+        With (. Sexp.sym "may-simplify") $
+          With
+            (. Sexp.sym "private")
+            End
 
 -- | A 'KernelBody' does not return an ordinary 'Result'.  Instead, it
 -- returns a list of these.
@@ -217,7 +272,17 @@ data KernelResult
       VName -- Tile written by this worker.
       -- The TileReturns must not expect more than one
       -- result to be written per physical thread.
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show, Ord, Generic)
+
+instance SexpIso KernelResult where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "write-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "concat-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+            With
+              (. Sexp.list (Sexp.el (Sexp.sym "tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+              End
 
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
@@ -412,7 +477,16 @@ data SegVirt
     -- that all physical threads participate in the work.  This can
     -- save some checks in code generation.
     SegNoVirtFull
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SegVirt where
+  sexpIso =
+    match $
+      With (. Sexp.sym "virt") $
+        With (. Sexp.sym "no-virt") $
+          With
+            (. Sexp.sym "no-virt-ful")
+            End
 
 -- | Index space of a 'SegOp'.
 data SegSpace = SegSpace
@@ -422,7 +496,15 @@ data SegSpace = SegSpace
     segFlat :: VName,
     unSegSpace :: [(VName, SubExp)]
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso SegSpace where
+  sexpIso = with $ \segspace ->
+    Sexp.list
+      ( Sexp.el sexpIso
+          >>> Sexp.el sexpIso
+      )
+      >>> segspace
 
 -- | The sizes spanned by the indexes of the 'SegSpace'.
 segSpaceDims :: SegSpace -> [SubExp]
@@ -455,7 +537,17 @@ data SegOp lvl lore
     SegRed lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
   | SegScan lvl SegSpace [SegBinOp lore] [Type] (KernelBody lore)
   | SegHist lvl SegSpace [HistOp lore] [Type] (KernelBody lore)
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance (SexpIso lvl, Decorations lore) => SexpIso (SegOp lvl lore) where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "segmap") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "segred") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "segscan") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+            With
+              (. Sexp.list (Sexp.el (Sexp.sym "seghist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+              End
 
 -- | The level of a 'SegOp'.
 segLevel :: SegOp lvl lore -> lvl
@@ -902,8 +994,8 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
     Returns ResultMaySimplify se <- maybeNth k $ kernelBodyResult kbody
     guard $ length gtids <= length is
-    let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty) is
-        idx_table' = foldl expandIndexedTable idx_table $ kernelBodyStms kbody
+    let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty . untyped) is
+        idx_table' = foldl' expandIndexedTable idx_table $ kernelBodyStms kbody
     case se of
       Var v -> M.lookup v idx_table'
       _ -> Nothing
@@ -927,7 +1019,7 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
                 ST.IndexedArray
                   (stmCerts stm <> cs)
                   arr
-                  (fixSlice slice' excess_is)
+                  (fixSlice (map (fmap isInt32) slice') excess_is)
            in M.insert v idx table
         | otherwise =
           table

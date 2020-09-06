@@ -118,6 +118,7 @@ library
       Futhark.CodeGen.ImpGen.Kernels.Transpose
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
+      Futhark.CodeGen.ImpGen.Transpose
       Futhark.CodeGen.OpenCL.Heuristics
       Futhark.CodeGen.SetDefaultSpace
       Futhark.Compiler
@@ -286,6 +287,7 @@ library
     , process >=1.4.3.0
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
+    , sexp-grammar >= 2.2.1
     , srcloc >=0.4
     , template-haskell >=2.11.1
     , temporary
@@ -342,6 +344,7 @@ test-suite unit
     , megaparsec
     , mtl
     , parser-combinators
+    , sexp-grammar
     , tasty
     , tasty-hunit
     , tasty-quickcheck

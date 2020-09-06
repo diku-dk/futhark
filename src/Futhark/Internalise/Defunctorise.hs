@@ -200,7 +200,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
                   p_substs' = M.fromList $ map forward $ M.toList p_substs
                   abs_substs =
                     M.filterWithKey (const . flip S.member abs) $
-                      p_substs'
+                      M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs'
                         <> scopeSubsts f_closure
                         <> scopeSubsts (modScope arg_mod)
               extendScope

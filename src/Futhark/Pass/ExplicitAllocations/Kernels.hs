@@ -85,10 +85,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
-      ixfun =
-        IxFun.permute
-          (IxFun.iota $ map (primExpFromSubExp int32) dims')
-          perm_inv
+      ixfun = IxFun.permute (IxFun.iota $ map pe32 dims') perm_inv
   return [Hint ixfun DefaultSpace]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@SegThread {} space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
@@ -110,8 +107,7 @@ mapResultHint ::
 mapResultHint lvl space = hint
   where
     num_threads =
-      primExpFromSubExp int32 (unCount $ segNumGroups lvl)
-        * primExpFromSubExp int32 (unCount $ segGroupSize lvl)
+      pe32 (unCount $ segNumGroups lvl) * pe32 (unCount $ segGroupSize lvl)
 
     -- Heuristic: do not rearrange for returned arrays that are
     -- sufficiently small.
@@ -129,9 +125,9 @@ mapResultHint lvl space = hint
       t_dims <- mapM dimAllocationSize $ arrayDims t
       return $ Hint (innermost [w] t_dims) DefaultSpace
     hint Prim {} (ConcatReturns SplitContiguous w elems_per_thread _) = do
-      let ixfun_base = IxFun.iota [num_threads, primExpFromSubExp int32 elems_per_thread]
+      let ixfun_base = IxFun.iota [num_threads, pe32 elems_per_thread]
           ixfun_tr = IxFun.permute ixfun_base [1, 0]
-          ixfun = IxFun.reshape ixfun_tr $ map (DimNew . primExpFromSubExp int32) [w]
+          ixfun = IxFun.reshape ixfun_tr $ map (DimNew . pe32) [w]
       return $ Hint ixfun DefaultSpace
     hint _ _ = return NoHint
 
@@ -144,7 +140,7 @@ innermost space_dims t_dims =
           ++ [0 .. length space_dims -1]
       perm_inv = rearrangeInverse perm
       dims_perm = rearrangeShape perm dims
-      ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) dims_perm
+      ixfun_base = IxFun.iota $ map pe32 dims_perm
       ixfun_rearranged = IxFun.permute ixfun_base perm_inv
    in ixfun_rearranged
 
@@ -159,18 +155,18 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
     return $ do
       (t, r) <- zip ts $ kernelBodyResult body
       return $
-        if private r && all (semiStatic consts) (arrayDims t)
-          then
-            let seg_dims = map (primExpFromSubExp int32) $ segSpaceDims space
-                dims = seg_dims ++ map (primExpFromSubExp int32) (arrayDims t)
-                nilSlice d = DimSlice 0 d 0
-                ElemPrim pt = elemType t
-             in Hint
-                  ( IxFun.slice (IxFun.iota dims) $
-                      fullSliceNum dims $ map nilSlice seg_dims
-                  )
-                  $ ScalarSpace (arrayDims t) pt
-          else NoHint
+        case elemType t of
+          ElemPrim pt
+            | private r && all (semiStatic consts) (arrayDims t) ->
+              let seg_dims = map pe32 $ segSpaceDims space
+                  dims = seg_dims ++ map pe32 (arrayDims t)
+                  nilSlice d = DimSlice 0 d 0
+               in Hint
+                    ( IxFun.slice (IxFun.iota dims) $
+                        fullSliceNum dims $ map nilSlice seg_dims
+                    )
+                    $ ScalarSpace (arrayDims t) pt
+          _ -> NoHint
   where
     private (Returns ResultPrivate _) = True
     private _ = False
@@ -184,10 +180,7 @@ inThreadExpHints e = do
     maybePrivate consts t
       | Just (Array (ElemPrim pt) shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
-        let ixfun =
-              IxFun.iota $
-                map (primExpFromSubExp int32) $
-                  shapeDims shape
+        let ixfun = IxFun.iota $ map pe32 $ shapeDims shape
         return $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
       | otherwise =
         return NoHint

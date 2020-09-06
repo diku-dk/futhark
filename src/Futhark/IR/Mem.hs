@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -102,6 +103,7 @@ module Futhark.IR.Mem
   )
 where
 
+import Control.Category
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
@@ -133,6 +135,10 @@ import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
 import Futhark.Util
 import qualified Futhark.Util.Pretty as PP
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Prelude hiding (id, (.))
 
 type LetDecMem = MemInfo SubExp NoUniqueness MemBind
 
@@ -174,7 +180,15 @@ data MemOp inner
     -- expression, but what are you gonna do...
     Alloc SubExp Space
   | Inner inner
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance SexpIso inner => SexpIso (MemOp inner) where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "alloc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With
+          (. Sexp.list (Sexp.el (Sexp.sym "inner") >>> Sexp.el sexpIso))
+          End
 
 instance AllocOp (MemOp inner) where
   allocOp = Alloc
@@ -235,10 +249,10 @@ instance ST.IndexOp inner => ST.IndexOp (MemOp inner) where
   indexOp _ _ _ _ = Nothing
 
 -- | The index function representation used for memory annotations.
-type IxFun = IxFun.IxFun (PrimExp VName)
+type IxFun = IxFun.IxFun (TPrimExp Int32 VName)
 
 -- | An index function that may contain existential variables.
-type ExtIxFun = IxFun.IxFun (PrimExp (Ext VName))
+type ExtIxFun = IxFun.IxFun (TPrimExp Int32 (Ext VName))
 
 -- | A summary of the memory information for every let-bound
 -- identifier, function parameter, and return value.  Parameterisered
@@ -262,7 +276,17 @@ data MemInfo d u ret
     -- handle to the underlying arrays which is what are really
     -- updated by 'UpdateAcc'.
     MemAcc [VName] (ShapeBase d)
-  deriving (Eq, Show, Ord) --- XXX Ord?
+  deriving (Eq, Show, Ord, Generic) --- XXX Ord?
+
+instance (SexpIso d, SexpIso u, SexpIso ret) => SexpIso (MemInfo d u ret) where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "prim") >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "mem") >>> Sexp.el sexpIso)) $
+          With
+            (. Sexp.list (Sexp.el (Sexp.sym "array") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+            With (. Sexp.list (Sexp.el (Sexp.sym "acc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+            End
 
 type MemBound u = MemInfo SubExp u MemBind
 
@@ -338,13 +362,13 @@ simplifyIxFun ::
   Engine.SimplifiableLore lore =>
   IxFun ->
   Engine.SimpleM lore IxFun
-simplifyIxFun = traverse simplifyPrimExp
+simplifyIxFun = traverse $ fmap isInt32 . simplifyPrimExp . untyped
 
 simplifyExtIxFun ::
   Engine.SimplifiableLore lore =>
   ExtIxFun ->
   Engine.SimpleM lore ExtIxFun
-simplifyExtIxFun = traverse simplifyExtPrimExp
+simplifyExtIxFun = traverse $ fmap isInt32 . simplifyExtPrimExp . untyped
 
 isStaticIxFun :: ExtIxFun -> Maybe IxFun
 isStaticIxFun = traverse $ traverse inst
@@ -396,7 +420,12 @@ data MemBind
   = -- | Located in this memory block with this index
     -- function.
     ArrayIn VName IxFun
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance SexpIso MemBind where
+  sexpIso = with $ \membind ->
+    Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)
+      >>> membind
 
 instance Eq MemBind where
   _ == _ = True
@@ -427,7 +456,29 @@ data MemReturn
   | -- | The operation returns a new (existential) memory
     -- block.
     ReturnsNewBlock Space Int ExtIxFun
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance SexpIso MemReturn where
+  sexpIso =
+    match $
+      With
+        ( .
+            Sexp.list
+              ( Sexp.el (Sexp.sym "returns-in-block")
+                  >>> Sexp.el sexpIso
+                  >>> Sexp.el sexpIso
+              )
+        )
+        $ With
+          ( .
+              Sexp.list
+                ( Sexp.el (Sexp.sym "returns-new-block")
+                    >>> Sexp.el sexpIso
+                    >>> Sexp.el sexpIso
+                    >>> Sexp.el sexpIso
+                )
+          )
+          End
 
 instance Eq MemReturn where
   _ == _ = True
@@ -465,7 +516,7 @@ instance FixExt MemReturn where
     ReturnsInBlock mem (fixExtIxFun i (primExpFromSubExp int32 se) ixfun)
 
 fixExtIxFun :: Int -> PrimExp VName -> ExtIxFun -> ExtIxFun
-fixExtIxFun i e = fmap $ replaceInPrimExp update
+fixExtIxFun i e = fmap $ isInt32 . replaceInPrimExp update . untyped
   where
     update (Ext j) t
       | j > i = LeafExp (Ext $ j - 1) t
@@ -473,8 +524,8 @@ fixExtIxFun i e = fmap $ replaceInPrimExp update
       | otherwise = LeafExp (Ext j) t
     update (Free x) t = LeafExp (Free x) t
 
-leafExp :: Int -> PrimExp (Ext a)
-leafExp i = LeafExp (Ext i) int32
+leafExp :: Int -> TPrimExp Int32 (Ext a)
+leafExp i = isInt32 $ LeafExp (Ext i) int32
 
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
 existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
@@ -647,15 +698,15 @@ matchBranchReturnType rettype (Body _ stms res) = do
 -- occurs.
 getExtMaps ::
   [(VName, Int)] ->
-  ( M.Map (Ext VName) (PrimExp (Ext VName)),
-    M.Map (Ext VName) (PrimExp (Ext VName))
+  ( M.Map (Ext VName) (TPrimExp Int32 (Ext VName)),
+    M.Map (Ext VName) (TPrimExp Int32 (Ext VName))
   )
 getExtMaps ctx_lst_ids =
   ( M.map leafExp $ M.mapKeys Free $ M.fromListWith (flip const) ctx_lst_ids,
     M.fromList $
       mapMaybe
         ( traverse
-            ( fmap (\i -> LeafExp (Ext i) int32)
+            ( fmap (\i -> isInt32 $ LeafExp (Ext i) int32)
                 . (`lookup` ctx_lst_ids)
             )
             . uncurry (flip (,))
@@ -924,7 +975,7 @@ subExpMemInfo (Constant v) = return $ MemPrim $ primValueType v
 lookupArraySummary ::
   (Mem lore, HasScope lore m, Monad m) =>
   VName ->
-  m (VName, IxFun.IxFun (PrimExp VName))
+  m (VName, IxFun.IxFun (TPrimExp Int32 VName))
 lookupArraySummary name = do
   summary <- lookupMemInfo name
   case summary of
@@ -958,7 +1009,7 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
             ++ "."
 
   TC.context ("in index function " ++ pretty ixfun) $ do
-    traverse_ (TC.requirePrimExp int32) ixfun
+    traverse_ (TC.requirePrimExp int32 . untyped) ixfun
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
     unless (ixfun_rank == ident_rank) $
@@ -1051,11 +1102,11 @@ extReturns ts =
       return $ MemAcc arrs shape
     addDec (Acc arrs) =
       return $ MemAcc arrs mempty
-    convert (Ext i) = LeafExp (Ext i) int32
-    convert (Free v) = Free <$> primExpFromSubExp int32 v
+    convert (Ext i) = le32 (Ext i)
+    convert (Free v) = Free <$> pe32 v
 
 data ArrayVar
-  = ArrayVar PrimType Shape VName (IxFun.IxFun (PrimExp VName))
+  = ArrayVar PrimType Shape VName (IxFun.IxFun (TPrimExp Int32 VName))
   | ArrayAccVar [VName] Shape
 
 arrayVarReturns ::
@@ -1113,7 +1164,7 @@ expReturns (BasicOp (Reshape newshape v)) = do
             Just $
               ReturnsInBlock mem $
                 existentialiseIxFun [] $
-                  IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape
+                  IxFun.reshape ixfun $ map (fmap pe32) newshape
         ]
     ArrayAccVar arrs _ ->
       return [MemAcc arrs shape]
@@ -1133,7 +1184,7 @@ expReturns (BasicOp (Rotate offsets v)) = do
   info <- arrayVarReturns v
   case info of
     ArrayVar et (Shape dims) mem ixfun -> do
-      let offsets' = map (primExpFromSubExp int32) offsets
+      let offsets' = map pe32 offsets
           ixfun' = IxFun.rotate ixfun offsets'
       return
         [ MemArray et (Shape $ map Free dims) NoUniqueness $
@@ -1219,7 +1270,7 @@ sliceInfo v slice = do
           ArrayIn mem $
             IxFun.slice
               ixfun
-              (map (fmap (primExpFromSubExp int32)) slice)
+              (map (fmap pe32) slice)
     (ArrayAccVar arrs _, dims) ->
       return $ MemAcc arrs (Shape dims)
 

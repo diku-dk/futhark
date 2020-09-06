@@ -65,7 +65,6 @@ module Futhark.Construct
     eBinOp,
     eCmpOp,
     eConvOp,
-    eNot,
     eSignum,
     eCopy,
     eAssert,
@@ -83,7 +82,6 @@ module Futhark.Construct
     resultBodyM,
     insertStmsM,
     mapResult,
-    bodyExtType,
     foldBinOp,
     binOpLambda,
     cmpOpLambda,
@@ -114,7 +112,6 @@ import Data.List (sortOn)
 import qualified Data.Map.Strict as M
 import Futhark.Binder
 import Futhark.IR
-import Futhark.MonadFreshNames
 
 letSubExp ::
   MonadBinder m =>
@@ -220,8 +217,8 @@ eIf' ce te fe if_sort = do
       where
         stmsscope = scopeOf stms
 
--- | The type of a body.  Watch out: this only works for the
--- degenerate case where the body does not already return its context.
+-- The type of a body.  Watch out: this only works for the degenerate
+-- case where the body does not already return its context.
 bodyExtType :: (HasScope lore m, Monad m) => Body lore -> m [ExtType]
 bodyExtType (Body _ stms res) =
   existentialiseExtTypes (M.keys stmsscope) . staticShapes
@@ -259,12 +256,6 @@ eConvOp ::
 eConvOp op x = do
   x' <- letSubExp "x" =<< x
   return $ BasicOp $ ConvOp op x'
-
-eNot ::
-  MonadBinder m =>
-  m (Exp (Lore m)) ->
-  m (Exp (Lore m))
-eNot e = BasicOp . UnOp Not <$> (letSubExp "not_arg" =<< e)
 
 eSignum ::
   MonadBinder m =>

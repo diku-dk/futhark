@@ -46,9 +46,6 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.RWS
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer
 import qualified Data.Map as M
 import Data.Maybe
 import Futhark.CodeGen.Backends.GenericPython.AST
@@ -533,6 +530,27 @@ badInputType i e t de dg =
           "The array given has elements of dtype: {}"
         ]
 
+badInputDim :: Int -> PyExp -> String -> Int -> PyStmt
+badInputDim i e typ dimf =
+  Raise $
+    simpleCall
+      "TypeError"
+      [ Call
+          (Field (String err_msg) "format")
+          [Arg eft, Arg aft]
+      ]
+  where
+    eft = String (concat (replicate dimf "[]") ++ typ)
+    aft = BinOp "+" (BinOp "*" (String "[]") (Field e "ndim")) (String typ)
+    err_msg =
+      unlines
+        [ "Argument #" ++ show i ++ " has invalid value",
+          "Dimensionality mismatch",
+          "Expected Futhark type: {}",
+          "Bad Python value passed",
+          "Actual Futhark type: {}"
+        ]
+
 entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
 entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
   let type_is_ok =
@@ -577,8 +595,9 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt 
           ]
       ]
 entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = do
-  let type_is_wrong = UnOp "not" $ BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"])
-  let dtype_is_wrong = UnOp "not" $ BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s))
+  let type_is_wrong = UnOp "not" $ BinOp "in" (simpleCall "type" [e]) $ List [Var "np.ndarray"]
+  let dtype_is_wrong = UnOp "not" $ BinOp "==" (Field e "dtype") $ Var $ compilePrimToExtNp t s
+  let dim_is_wrong = UnOp "not" $ BinOp "==" (Field e "ndim") $ Integer $ toInteger $ length dims
   stm $
     If
       type_is_wrong
@@ -597,6 +616,11 @@ entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem _ t s dims), e) = d
           (simpleCall "np.dtype" [Var (compilePrimToExtNp t s)])
           (Field e "dtype")
       ]
+      []
+  stm $
+    If
+      dim_is_wrong
+      [badInputDim i e (prettySigned (s == Imp.TypeUnsigned) t) (length dims)]
       []
 
   zipWithM_ (unpackDim e) dims [0 ..]
@@ -1024,11 +1048,11 @@ compileExp = compilePrimExp compileLeaf
       join $
         asks envReadScalar
           <*> compileVar src
-          <*> compileExp iexp
+          <*> compileExp (Imp.untyped iexp)
           <*> pure restype
           <*> pure space
     compileLeaf (Imp.Index src (Imp.Count iexp) bt _ _) = do
-      iexp' <- compileExp iexp
+      iexp' <- compileExp $ Imp.untyped iexp
       let bt' = compilePrimType bt
           nptype = compilePrimToNp bt
       src' <- compileVar src
@@ -1040,7 +1064,7 @@ compileCode Imp.DebugPrint {} =
 compileCode (Imp.Op op) =
   join $ asks envOpCompiler <*> pure op
 compileCode (Imp.If cond tb fb) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ Imp.untyped cond
   tb' <- collect $ compileCode tb
   fb' <- collect $ compileCode fb
   stm $ If cond' tb' fb'
@@ -1048,17 +1072,17 @@ compileCode (c1 Imp.:>>: c2) = do
   compileCode c1
   compileCode c2
 compileCode (Imp.While cond body) = do
-  cond' <- compileExp cond
+  cond' <- compileExp $ Imp.untyped cond
   body' <- collect $ compileCode body
   stm $ While cond' body'
-compileCode (Imp.For i it bound body) = do
+compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = compileName i
   body' <- collect $ compileCode body
   counter <- pretty <$> newVName "counter"
   one <- pretty <$> newVName "one"
-  stm $ Assign (Var i') $ simpleCall (compilePrimToNp (IntType it)) [Integer 0]
-  stm $ Assign (Var one) $ simpleCall (compilePrimToNp (IntType it)) [Integer 1]
+  stm $ Assign (Var i') $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 0]
+  stm $ Assign (Var one) $ simpleCall (compilePrimToNp (Imp.primExpType bound)) [Integer 1]
   stm $
     For counter (simpleCall "range" [bound']) $
       body' ++ [AssignOp "+" (Var i') (Var one)]
@@ -1137,24 +1161,24 @@ compileCode (Imp.Call dests fname args) = do
     compileArg (Imp.ExpArg e) = compileExp e
 compileCode (Imp.SetMem dest src _) =
   stm =<< Assign <$> compileVar dest <*> compileVar src
-compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
+compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) (Imp.Space space)) =
   join $
     asks envAllocate
       <*> compileVar name
       <*> compileExp e
       <*> pure space
-compileCode (Imp.Allocate name (Imp.Count e) _) = do
+compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) _) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
   stm =<< Assign <$> compileVar name <*> pure allocate'
 compileCode (Imp.Free name _) =
   stm =<< Assign <$> compileVar name <*> pure None
 compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
-  destoffset' <- compileExp destoffset
-  srcoffset' <- compileExp srcoffset
+  destoffset' <- compileExp $ Imp.untyped destoffset
+  srcoffset' <- compileExp $ Imp.untyped srcoffset
   dest' <- compileVar dest
   src' <- compileVar src
-  size' <- compileExp size
+  size' <- compileExp $ Imp.untyped size
   let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
   let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
   stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, size']
@@ -1163,23 +1187,23 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
   join $
     copy
       <$> compileVar dest
-      <*> compileExp destoffset
+      <*> compileExp (Imp.untyped destoffset)
       <*> pure destspace
       <*> compileVar src
-      <*> compileExp srcoffset
+      <*> compileExp (Imp.untyped srcoffset)
       <*> pure srcspace
-      <*> compileExp size
+      <*> compileExp (Imp.untyped size)
       <*> pure (IntType Int32) -- FIXME
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $
     asks envWriteScalar
       <*> compileVar dest
-      <*> compileExp idx
+      <*> compileExp (Imp.untyped idx)
       <*> pure elemtype
       <*> pure space
       <*> compileExp elemexp
 compileCode (Imp.Write dest (Imp.Count idx) elemtype _ _ elemexp) = do
-  idx' <- compileExp idx
+  idx' <- compileExp $ Imp.untyped idx
   elemexp' <- compileExp elemexp
   dest' <- compileVar dest
   let elemtype' = compilePrimType elemtype

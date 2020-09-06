@@ -22,7 +22,6 @@ import qualified Futhark.Analysis.HORep.SOAC as SOAC
 import Futhark.Construct
 import Futhark.IR hiding (typeOf)
 import qualified Futhark.IR.SOACS.SOAC as Futhark
-import Futhark.MonadFreshNames
 import Futhark.Transform.Substitute
 
 data Nesting lore = Nesting

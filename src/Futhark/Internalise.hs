@@ -12,7 +12,6 @@
 module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.Reader
-import Control.Monad.State
 import Data.Bitraversable
 import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
@@ -27,8 +26,6 @@ import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.TypesValues
-import Futhark.MonadFreshNames
-import Futhark.Tools
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
 import Language.Futhark as E hiding (TypeArg)
@@ -646,9 +643,12 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
               merge_ts
             =<< bodyBind loopbody'
 
+  attrs <- asks envAttrs
   loop_res <-
     map I.Var . dropCond
-      <$> letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody'')
+      <$> attributing
+        attrs
+        (letTupExp desc (I.DoLoop ctxmerge valmerge form' loopbody''))
   bindExtSizes (E.toStruct ret) retext loop_res
   return loop_res
   where
@@ -1630,6 +1630,15 @@ findFuncall (E.Apply f arg (Info (_, argext)) (Info ret, Info retext) _) = do
 findFuncall e =
   error $ "Invalid function expression in application: " ++ pretty e
 
+-- The type of a body.  Watch out: this only works for the degenerate
+-- case where the body does not already return its context.
+bodyExtType :: Body -> InternaliseM [ExtType]
+bodyExtType (Body _ stms res) =
+  existentialiseExtTypes (M.keys stmsscope) . staticShapes
+    <$> extendedScope (traverse subExpType res) stmsscope
+  where
+    stmsscope = scopeOf stms
+
 internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
@@ -1766,15 +1775,15 @@ isOverloadedFunction qname args loc = do
         I.Op $
           I.Screma w (I.mapSOAC lam') arr'
     handleSOACs [TupLit [k, lam, arr] _] "partition" = do
-      k' <- fromIntegral <$> isInt32 k
+      k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
         arrs <- internaliseExpToVars "partition_input" arr
         lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
         uncurry (++) <$> partitionWithSOACS k' lam' arrs
       where
-        isInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-        isInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
-        isInt32 _ = Nothing
+        fromInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
+        fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (Signed Int32)))) _) = Just $ fromInteger k'
+        fromInt32 _ = Nothing
     handleSOACs [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where
@@ -2119,8 +2128,7 @@ partitionWithSOACS k lam arrs = do
   -- Create scratch arrays for the result.
   blanks <- forM arr_ts $ \arr_t ->
     letExp "partition_dest" $
-      I.BasicOp $
-        Scratch (elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
+      I.BasicOp $ Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
   write_lam <- do

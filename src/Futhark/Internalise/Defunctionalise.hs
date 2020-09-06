@@ -337,14 +337,20 @@ defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
   return (LetPat pat' e1' e2' (Info t', retext) loc, sv2)
 
 -- Local functions are handled by rewriting them to lambdas, so that
--- the same machinery can be re-used.
-defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 _ loc) = do
-  (e1', sv1) <- defuncFun dims pats e1 (mempty, ret) loc
-  (e2', sv2) <- localEnv (M.singleton vn sv1) $ defuncExp e2
-  return
-    ( LetPat (Id vn (Info (typeOf e1')) loc) e1' e2' (Info $ typeOf e2', Info []) loc,
-      sv2
-    )
+-- the same machinery can be re-used.  But we may have to eta-expand
+-- first.
+defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 let_t loc)
+  | Scalar Arrow {} <- ret = do
+    (body_pats, e1', ret') <- etaExpand (fromStruct ret) e1
+    let f = (dims, pats <> body_pats, Nothing, Info ret', e1')
+    defuncExp $ LetFun vn f e2 let_t loc
+  | otherwise = do
+    (e1', sv1) <- defuncFun dims pats e1 (mempty, ret) loc
+    (e2', sv2) <- localEnv (M.singleton vn sv1) $ defuncExp e2
+    return
+      ( LetPat (Id vn (Info (typeOf e1')) loc) e1' e2' (Info $ typeOf e2', Info []) loc,
+        sv2
+      )
 defuncExp (If e1 e2 e3 tp loc) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2

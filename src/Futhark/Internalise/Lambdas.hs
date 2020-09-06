@@ -13,7 +13,6 @@ where
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Monad
-import Futhark.MonadFreshNames
 import Language.Futhark as E
 
 -- | A function for internalising lambdas.

@@ -110,15 +110,14 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_groups_maybe_zero =
-        BinOpExp
-          (SMin Int64)
-          ( toExp' int64 w64
-              `divUp` sExt Int64 (toExp' int32 group_size)
+        sMin64
+          ( toInt64Exp w64
+              `divUp` sExt64 (toInt32Exp group_size)
           )
-          $ sExt Int64 (Imp.vi32 max_num_groups)
+          $ sExt64 (Imp.vi32 max_num_groups)
   -- We also don't want zero groups.
-  let num_groups = BinOpExp (SMax Int64) 1 num_groups_maybe_zero
-  patElemName pe <-- sExt Int32 num_groups
+  let num_groups = sMax64 1 num_groups_maybe_zero
+  patElemName pe <-- sExt32 num_groups
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler pat e =
@@ -156,7 +155,7 @@ segOpCompiler pat segop =
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe Imp.Exp)
+checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe (Imp.TExp Bool))
 checkLocalMemoryReqs code = do
   scope <- askScope
   let alloc_sizes = map (sum . localAllocSizes . Imp.kernelBody) $ getKernels code
@@ -170,7 +169,7 @@ checkLocalMemoryReqs code = do
       sOp $ Imp.GetSizeMax local_memory_capacity SizeLocalMemory
 
       let local_memory_capacity_64 =
-            sExt Int64 $ Imp.vi32 local_memory_capacity
+            sExt64 $ Imp.vi32 local_memory_capacity
           fits size =
             unCount size .<=. local_memory_capacity_64
       return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
@@ -186,11 +185,10 @@ checkLocalMemoryReqs code = do
 expCompiler :: ExpCompiler KernelsMem HostEnv Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
-  n' <- toExp n
   x' <- toExp x
   s' <- toExp s
 
-  sIota (patElemName pe) n' x' s' et
+  sIota (patElemName pe) (toInt32Exp n) x' s' et
 expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
   sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
@@ -208,7 +206,7 @@ expCompiler dest (If cond tbranch fbranch (IfDec _ IfEquiv)) = do
   check <- checkLocalMemoryReqs tcode
   emit $ case check of
     Nothing -> fcode
-    Just ok -> Imp.If (ok .&&. toExp' Bool cond) tcode fcode
+    Just ok -> Imp.If (ok .&&. toBoolExp cond) tcode fcode
 expCompiler dest e =
   defCompileExp dest e
 
@@ -224,41 +222,37 @@ callKernelCopy
           srcoffset,
           num_arrays,
           size_x,
-          size_y,
-          src_elems,
-          dest_elems
+          size_y
           ) <-
-        isMapTransposeKernel bt destloc destslice srcloc srcslice = do
+        isMapTransposeCopy bt destloc destslice srcloc srcslice = do
       fname <- mapTransposeForType bt
       emit $
         Imp.Call
           []
           fname
           [ Imp.MemArg destmem,
-            Imp.ExpArg destoffset,
+            Imp.ExpArg $ untyped destoffset,
             Imp.MemArg srcmem,
-            Imp.ExpArg srcoffset,
-            Imp.ExpArg num_arrays,
-            Imp.ExpArg size_x,
-            Imp.ExpArg size_y,
-            Imp.ExpArg src_elems,
-            Imp.ExpArg dest_elems
+            Imp.ExpArg $ untyped srcoffset,
+            Imp.ExpArg $ untyped num_arrays,
+            Imp.ExpArg $ untyped size_x,
+            Imp.ExpArg $ untyped size_y
           ]
     | bt_size <- primByteSize bt,
       Just destoffset <-
         IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
       Just srcoffset <-
         IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
-      let num_elems = Imp.elements $ product $ map (toExp' int32) srcshape
+      let num_elems = Imp.elements $ product $ map toInt32Exp srcshape
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $
         Imp.Copy
           destmem
-          (bytes destoffset)
+          (bytes $ sExt64 destoffset)
           destspace
           srcmem
-          (bytes srcoffset)
+          (bytes $ sExt64 srcoffset)
           srcspace
           $ num_elems `Imp.withElemType` bt
     | otherwise = sCopy bt destloc destslice srcloc srcslice
@@ -273,7 +267,7 @@ mapTransposeForType bt = do
   return fname
 
 mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ pretty bt
+mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
 
 mapTransposeFunction :: PrimType -> Imp.Function
 mapTransposeFunction bt =
@@ -286,9 +280,7 @@ mapTransposeFunction bt =
         intparam srcoffset,
         intparam num_arrays,
         intparam x,
-        intparam y,
-        intparam in_elems,
-        intparam out_elems
+        intparam y
       ]
 
     space = Space "device"
@@ -302,8 +294,6 @@ mapTransposeFunction bt =
       num_arrays,
       x,
       y,
-      in_elems,
-      out_elems,
       mulx,
       muly,
       block
@@ -317,8 +307,6 @@ mapTransposeFunction bt =
             "num_arrays",
             "x_elems",
             "y_elems",
-            "in_elems",
-            "out_elems",
             -- The following is only used for low width/height
             -- transpose kernels
             "mulx",
@@ -327,45 +315,26 @@ mapTransposeFunction bt =
           ]
           [0 ..]
 
-    v32 v = Imp.var v int32
-
     block_dim_int = 16
 
     block_dim :: IntegralExp a => a
     block_dim = 16
 
     -- When an input array has either width==1 or height==1, performing a
-    -- transpose will be the same as performing a copy.  If 'input_size' or
-    -- 'output_size' is not equal to width*height, then this trick will not
-    -- work when there are more than one array to process, as it is a per
-    -- array limit. We could copy each array individually, but currently we
-    -- do not.
+    -- transpose will be the same as performing a copy.
     can_use_copy =
-      let in_out_eq = CmpOpExp (CmpEq $ IntType Int32) (v32 in_elems) (v32 out_elems)
-          onearr = CmpOpExp (CmpEq $ IntType Int32) (v32 num_arrays) 1
-          noprob_widthheight =
-            CmpOpExp
-              (CmpEq $ IntType Int32)
-              (v32 x * v32 y)
-              (v32 in_elems)
-          height_is_one = CmpOpExp (CmpEq $ IntType Int32) (v32 y) 1
-          width_is_one = CmpOpExp (CmpEq $ IntType Int32) (v32 x) 1
-       in BinOpExp
-            LogAnd
-            in_out_eq
-            ( BinOpExp
-                LogAnd
-                (BinOpExp LogOr onearr noprob_widthheight)
-                (BinOpExp LogOr width_is_one height_is_one)
-            )
+      let onearr = Imp.vi32 num_arrays .==. 1
+          height_is_one = Imp.vi32 y .==. 1
+          width_is_one = Imp.vi32 x .==. 1
+       in onearr .&&. (width_is_one .||. height_is_one)
 
     transpose_code =
       Imp.If input_is_empty mempty $
         mconcat
           [ Imp.DeclareScalar muly Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar muly $ block_dim `quot` v32 x,
+            Imp.SetScalar muly $ untyped $ block_dim `quot` Imp.vi32 x,
             Imp.DeclareScalar mulx Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar mulx $ block_dim `quot` v32 y,
+            Imp.SetScalar mulx $ untyped $ block_dim `quot` Imp.vi32 y,
             Imp.If can_use_copy copy_code $
               Imp.If should_use_lowwidth (callTransposeKernel TransposeLowWidth) $
                 Imp.If should_use_lowheight (callTransposeKernel TransposeLowHeight) $
@@ -374,35 +343,30 @@ mapTransposeFunction bt =
           ]
 
     input_is_empty =
-      v32 num_arrays .==. 0 .||. v32 x .==. 0 .||. v32 y .==. 0
+      Imp.vi32 num_arrays .==. 0 .||. Imp.vi32 x .==. 0 .||. Imp.vi32 y .==. 0
 
     should_use_small =
-      BinOpExp
-        LogAnd
-        (CmpOpExp (CmpSle Int32) (v32 x) (block_dim `quot` 2))
-        (CmpOpExp (CmpSle Int32) (v32 y) (block_dim `quot` 2))
+      Imp.vi32 x .<=. (block_dim `quot` 2)
+        .&&. Imp.vi32 y .<=. (block_dim `quot` 2)
 
     should_use_lowwidth =
-      BinOpExp
-        LogAnd
-        (CmpOpExp (CmpSle Int32) (v32 x) (block_dim `quot` 2))
-        (CmpOpExp (CmpSlt Int32) block_dim (v32 y))
+      Imp.vi32 x .<=. (block_dim `quot` 2)
+        .&&. block_dim .<. Imp.vi32 y
 
     should_use_lowheight =
-      BinOpExp
-        LogAnd
-        (CmpOpExp (CmpSle Int32) (v32 y) (block_dim `quot` 2))
-        (CmpOpExp (CmpSlt Int32) block_dim (v32 x))
+      Imp.vi32 y .<=. (block_dim `quot` 2)
+        .&&. block_dim .<. Imp.vi32 x
 
     copy_code =
       let num_bytes =
-            v32 in_elems * Imp.LeafExp (Imp.SizeOf bt) (IntType Int32)
+            sExt64 $
+              Imp.vi32 x * Imp.vi32 y * isInt32 (Imp.LeafExp (Imp.SizeOf bt) (IntType Int32))
        in Imp.Copy
             destmem
-            (Imp.Count $ v32 destoffset)
+            (Imp.Count $ sExt64 $ Imp.vi32 destoffset)
             space
             srcmem
-            (Imp.Count $ v32 srcoffset)
+            (Imp.Count $ sExt64 $ Imp.vi32 srcoffset)
             space
             (Imp.Count num_bytes)
 
@@ -412,73 +376,14 @@ mapTransposeFunction bt =
           (mapTransposeName bt)
           block_dim_int
           ( destmem,
-            v32 destoffset,
+            Imp.vi32 destoffset,
             srcmem,
-            v32 srcoffset,
-            v32 x,
-            v32 y,
-            v32 in_elems,
-            v32 out_elems,
-            v32 mulx,
-            v32 muly,
-            v32 num_arrays,
+            Imp.vi32 srcoffset,
+            Imp.vi32 x,
+            Imp.vi32 y,
+            Imp.vi32 mulx,
+            Imp.vi32 muly,
+            Imp.vi32 num_arrays,
             block
           )
           bt
-
-isMapTransposeKernel ::
-  PrimType ->
-  MemLocation ->
-  Slice Imp.Exp ->
-  MemLocation ->
-  Slice Imp.Exp ->
-  Maybe
-    ( Imp.Exp,
-      Imp.Exp,
-      Imp.Exp,
-      Imp.Exp,
-      Imp.Exp,
-      Imp.Exp,
-      Imp.Exp
-    )
-isMapTransposeKernel
-  bt
-  (MemLocation _ _ destIxFun)
-  destslice
-  (MemLocation _ _ srcIxFun)
-  srcslice
-    | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun' bt_size,
-      (perm, destshape) <- unzip perm_and_destshape,
-      Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (product destshape) destshape swap r1 r2 dest_offset src_offset
-    | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
-      Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
-      (perm, srcshape) <- unzip perm_and_srcshape,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (product srcshape) srcshape id r1 r2 dest_offset src_offset
-    | otherwise =
-      Nothing
-    where
-      bt_size = primByteSize bt
-      swap (x, y) = (y, x)
-
-      destIxFun' = IxFun.slice destIxFun destslice
-      srcIxFun' = IxFun.slice srcIxFun srcslice
-
-      isOk elems shape f r1 r2 dest_offset src_offset = do
-        let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-        return
-          ( dest_offset,
-            src_offset,
-            num_arrays,
-            size_x,
-            size_y,
-            elems,
-            elems
-          )
-
-      getSizes shape f r1 r2 =
-        let (mapped, notmapped) = splitAt r1 shape
-            (pretrans, posttrans) = f $ splitAt r2 notmapped
-         in (product mapped, product pretrans, product posttrans)

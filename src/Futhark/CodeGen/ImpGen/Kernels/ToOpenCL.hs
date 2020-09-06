@@ -624,7 +624,8 @@ inKernelOperations mode body =
       GC.opsStaticArray = noStaticArrays,
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
-      GC.opsCall = callInKernel
+      GC.opsCall = callInKernel,
+      GC.opsCritical = mempty
     }
   where
     has_communication = hasCommunication body
@@ -655,7 +656,7 @@ inKernelOperations mode body =
     kernelOps (LocalAlloc name size) = do
       name' <- newVName $ pretty name ++ "_backing"
       GC.modifyUserState $ \s ->
-        s {kernelLocalMemory = (name', size) : kernelLocalMemory s}
+        s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
       GC.stm [C.cstm|$id:name = (__local char*) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
@@ -680,7 +681,7 @@ inKernelOperations mode body =
     atomicSpace _ = "global"
 
     doAtomic s t old arr ind val op ty = do
-      ind' <- GC.compileExp $ unCount ind
+      ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- GC.compileExp val
       cast <- atomicCast s ty
       GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
@@ -706,7 +707,7 @@ inKernelOperations mode body =
     atomicOps s (AtomicXor t old arr ind val) =
       doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
     atomicOps s (AtomicCmpXchg t old arr ind cmp val) = do
-      ind' <- GC.compileExp $ unCount ind
+      ind' <- GC.compileExp $ untyped $ unCount ind
       cmp' <- GC.compileExp cmp
       val' <- GC.compileExp val
       cast <- atomicCast s [C.cty|int|]
@@ -714,7 +715,7 @@ inKernelOperations mode body =
       where
         op = "atomic_cmpxchg_" ++ pretty t ++ "_" ++ atomicSpace s
     atomicOps s (AtomicXchg t old arr ind val) = do
-      ind' <- GC.compileExp $ unCount ind
+      ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- GC.compileExp val
       cast <- atomicCast s [C.cty|int|]
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
@@ -800,16 +801,25 @@ typesInKernel kernel = typesInCode $ kernelBody kernel
 typesInCode :: ImpKernels.KernelCode -> S.Set PrimType
 typesInCode Skip = mempty
 typesInCode (c1 :>>: c2) = typesInCode c1 <> typesInCode c2
-typesInCode (For _ it e c) = IntType it `S.insert` typesInExp e <> typesInCode c
-typesInCode (While e c) = typesInExp e <> typesInCode c
+typesInCode (For _ e c) = typesInExp e <> typesInCode c
+typesInCode (While (TPrimExp e) c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem {} = mempty
 typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
-typesInCode (Allocate _ (Count e) _) = typesInExp e
+typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
-  typesInExp e1 <> typesInExp e2 <> typesInExp e3
-typesInCode (Write _ (Count e1) t _ _ e2) =
+typesInCode
+  ( Copy
+      _
+      (Count (TPrimExp e1))
+      _
+      _
+      (Count (TPrimExp e2))
+      _
+      (Count (TPrimExp e3))
+    ) =
+    typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e
 typesInCode SetMem {} = mempty
@@ -817,7 +827,7 @@ typesInCode (Call _ _ es) = mconcat $ map typesInArg es
   where
     typesInArg MemArg {} = mempty
     typesInArg (ExpArg e) = typesInExp e
-typesInCode (If e c1 c2) =
+typesInCode (If (TPrimExp e) c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
@@ -833,6 +843,6 @@ typesInExp (ConvOpExp op e) = S.fromList [from, to] <> typesInExp e
     (from, to) = convOpType op
 typesInExp (UnOpExp _ e) = typesInExp e
 typesInExp (FunExp _ args t) = S.singleton t <> mconcat (map typesInExp args)
-typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
+typesInExp (LeafExp (Index _ (Count (TPrimExp e)) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar {} _) = mempty
 typesInExp (LeafExp (SizeOf t) _) = S.singleton t

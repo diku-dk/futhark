@@ -32,9 +32,6 @@ where
 
 import Control.Monad.Except
 import Control.Monad.RWS
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames

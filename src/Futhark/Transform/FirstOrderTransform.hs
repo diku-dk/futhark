@@ -368,7 +368,7 @@ transformLambda (Lambda params body rettype) = do
 resultArray :: Transformer m => [Type] -> m [VName]
 resultArray = mapM oneArray
   where
-    oneArray t = letExp "result" $ BasicOp $ Scratch (elemType t) (arrayDims t)
+    oneArray t = letExp "result" =<< eBlank t
 
 letwith ::
   Transformer m =>

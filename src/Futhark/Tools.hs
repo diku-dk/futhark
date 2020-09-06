@@ -20,7 +20,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.SOACS.SOAC
-import Futhark.MonadFreshNames
 import Futhark.Util
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a

@@ -73,6 +73,7 @@ module Futhark.CodeGen.ImpGen
     copyElementWise,
     typeSize,
     inBounds,
+    isMapTransposeCopy,
 
     -- * Constructing code.
     dLParams,
@@ -104,6 +105,7 @@ module Futhark.CodeGen.ImpGen
     sUpdate,
     sLoopNest,
     (<--),
+    (<~~),
     function,
     warn,
     module Language.Futhark.Warnings,
@@ -130,12 +132,13 @@ import Futhark.CodeGen.ImpCode
     withElemType,
   )
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.Construct (fullSliceNum)
+import Futhark.CodeGen.ImpGen.Transpose
+import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.IR.SOACS (SOACS)
-import Futhark.MonadFreshNames
 import Futhark.Util
+import Futhark.Util.Loc (noLoc)
 import Language.Futhark.Warnings
 
 -- | How to compile an t'Op'.
@@ -150,13 +153,13 @@ type ExpCompiler lore r op = Pattern lore -> Exp lore -> ImpM lore r op ()
 type CopyCompiler lore r op =
   PrimType ->
   MemLocation ->
-  Slice Imp.Exp ->
+  Slice (Imp.TExp Int32) ->
   MemLocation ->
-  Slice Imp.Exp ->
+  Slice (Imp.TExp Int32) ->
   ImpM lore r op ()
 
 -- | An alternate way of compiling an allocation.
-type AllocCompiler lore r op = VName -> Count Bytes Imp.Exp -> ImpM lore r op ()
+type AllocCompiler lore r op = VName -> Count Bytes (Imp.TExp Int64) -> ImpM lore r op ()
 
 data Operations lore r op = Operations
   { opsExpCompiler :: ExpCompiler lore r op,
@@ -185,7 +188,7 @@ defaultOperations opc =
 data MemLocation = MemLocation
   { memLocationName :: VName,
     memLocationShape :: [Imp.DimSize],
-    memLocationIxFun :: IxFun.IxFun Imp.Exp
+    memLocationIxFun :: IxFun.IxFun (Imp.TExp Int32)
   }
   deriving (Eq, Show)
 
@@ -499,7 +502,7 @@ compileInParam fparam = case paramDec fparam of
     return $
       Right $
         ArrayDecl name bt $
-          MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
+          MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -758,7 +761,7 @@ defCompileExp ::
 defCompileExp pat (If cond tbranch fbranch _) = do
   tcode <- collect $ compileBody pat tbranch
   fcode <- collect $ compileBody pat fbranch
-  emit $ Imp.If (toExp' Bool cond) tcode fcode
+  emit $ Imp.If (toBoolExp cond) tcode fcode
 defCompileExp pat (Apply fname args _ _) = do
   dest <- destinationFromPattern pat
   targets <- funcallTargets dest
@@ -773,6 +776,9 @@ defCompileExp pat (Apply fname args _ _) = do
         _ -> return Nothing
 defCompileExp pat (BasicOp op) = defCompileBasicOp pat op
 defCompileExp pat (DoLoop ctx val form body) = do
+  attrs <- askAttrs
+  when ("unroll" `inAttrs` attrs) $
+    warn (noLoc :: SrcLoc) [] "#[unroll] on loop with unknown number of iterations." -- FIXME: no location.
   dFParams mergepat
   forM_ merge $ \(p, se) ->
     when ((== 0) $ arrayRank $ paramType p) $
@@ -781,18 +787,20 @@ defCompileExp pat (DoLoop ctx val form body) = do
   let doBody = compileLoopBody mergepat body
 
   case form of
-    ForLoop i it bound loopvars -> do
+    ForLoop i _ bound loopvars -> do
       let setLoopParam (p, a)
             | Prim _ <- paramType p =
               copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.vi32 i]
             | otherwise =
               return ()
 
+      bound' <- toExp bound
+
       dLParams $ map fst loopvars
-      sFor' i it (toExp' (IntType it) bound) $
+      sFor' i bound' $
         mapM_ setLoopParam loopvars >> doBody
     WhileLoop cond ->
-      sWhile (Imp.var cond Bool) doBody
+      sWhile (TPrimExp $ Imp.var cond Bool) doBody
 
   Destination _ pat_dests <- destinationFromPattern pat
   forM_ (zip pat_dests $ map (Var . paramName . fst) merge) $ \(d, r) ->
@@ -821,18 +829,18 @@ defCompileBasicOp (Pattern _ [pe]) (Opaque se) =
   copyDWIM (patElemName pe) [] se []
 defCompileBasicOp (Pattern _ [pe]) (UnOp op e) = do
   e' <- toExp e
-  patElemName pe <-- Imp.UnOpExp op e'
+  patElemName pe <~~ Imp.UnOpExp op e'
 defCompileBasicOp (Pattern _ [pe]) (ConvOp conv e) = do
   e' <- toExp e
-  patElemName pe <-- Imp.ConvOpExp conv e'
+  patElemName pe <~~ Imp.ConvOpExp conv e'
 defCompileBasicOp (Pattern _ [pe]) (BinOp bop x y) = do
   x' <- toExp x
   y' <- toExp y
-  patElemName pe <-- Imp.BinOpExp bop x' y'
+  patElemName pe <~~ Imp.BinOpExp bop x' y'
 defCompileBasicOp (Pattern _ [pe]) (CmpOp bop x y) = do
   x' <- toExp x
   y' <- toExp y
-  patElemName pe <-- Imp.CmpOpExp bop x' y'
+  patElemName pe <~~ Imp.CmpOpExp bop x' y'
 defCompileBasicOp _ (Assert e msg loc) = do
   e' <- toExp e
   msg' <- traverse toExp msg
@@ -843,25 +851,28 @@ defCompileBasicOp _ (Assert e msg loc) = do
     uncurry warn loc "Safety check required at run-time."
 defCompileBasicOp (Pattern _ [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
-    copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toExp' int32) idxs
+    copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . toInt32Exp) idxs
 defCompileBasicOp _ Index {} =
   return ()
 defCompileBasicOp (Pattern _ [pe]) (Update _ slice se) =
-  sUpdate (patElemName pe) (map (fmap (toExp' int32)) slice) se
+  sUpdate (patElemName pe) (map (fmap toInt32Exp) slice) se
 defCompileBasicOp (Pattern _ [pe]) (Replicate (Shape ds) se) = do
   ds' <- mapM toExp ds
   is <- replicateM (length ds) (newVName "i")
   copy_elem <- collect $ copyDWIM (patElemName pe) (map (DimFix . Imp.vi32) is) se []
-  emit $ foldl (.) id (zipWith (`Imp.For` Int32) is ds') copy_elem
+  emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 defCompileBasicOp _ Scratch {} =
   return ()
 defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
-  n' <- toExp n
   e' <- toExp e
   s' <- toExp s
-  sFor "i" n' $ \i -> do
-    let i' = sExt it i
-    x <- dPrimV "x" $ e' + i' * s'
+  sFor "i" (toInt32Exp n) $ \i -> do
+    let i' = sExt it $ untyped i
+    x <-
+      dPrimV "x" $
+        TPrimExp $
+          BinOpExp (Add it OverflowUndef) e' $
+            BinOpExp (Mul it OverflowUndef) i' s'
     copyDWIM (patElemName pe) [DimFix i] (Var x) []
 defCompileBasicOp (Pattern _ [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
@@ -869,19 +880,19 @@ defCompileBasicOp (Pattern _ [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
   offs_glb <- dPrim "tmp_offs" int32
-  emit $ Imp.SetScalar offs_glb 0
+  emit $ Imp.SetScalar offs_glb $ untyped (0 :: Imp.TExp Int32)
 
   forM_ (x : ys) $ \y -> do
     y_dims <- arrayDims <$> lookupType y
     let rows = case drop i y_dims of
           [] -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
-          r : _ -> toExp' int32 r
+          r : _ -> toInt32Exp r
         skip_dims = take i y_dims
         sliceAllDim d = DimSlice 0 d 1
-        skip_slices = map (sliceAllDim . toExp' int32) skip_dims
+        skip_slices = map (sliceAllDim . toInt32Exp) skip_dims
         destslice = skip_slices ++ [DimSlice (Imp.vi32 offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
-    emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
+    emit $ Imp.SetScalar offs_glb $ untyped $ Imp.vi32 offs_glb + rows
 defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
     dest_mem <- entryArrayLocation <$> lookupArray (patElemName pe)
@@ -911,7 +922,7 @@ defCompileBasicOp _ Reshape {} =
 defCompileBasicOp _ UnAcc {} =
   return ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = do
-  is' <- mapM (fmap DimFix . toExp) is
+  let is' = map (DimFix . toInt32Exp) is
 
   -- We need to figure out whether we are updating a scatter-like
   -- accumulator or a generalised reduction.
@@ -923,7 +934,7 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = do
   -- times, as they are duplicated every time we do an UpdateAcc for
   -- the same accumulator.
   sWhen (inBounds is' dims) $
-    sComment "UpdateAcc" $ do
+    sComment "UpdateAcc" $
       case op of
         Nothing ->
           -- Scatter-like.
@@ -1007,22 +1018,22 @@ dPrim name t = do
   dPrim_ name' t
   return name'
 
-dPrimV_ :: VName -> Imp.Exp -> ImpM lore r op ()
+dPrimV_ :: VName -> Imp.TExp t -> ImpM lore r op ()
 dPrimV_ name e = do
-  dPrim_ name $ primExpType e
+  dPrim_ name $ primExpType $ untyped e
   name <-- e
 
-dPrimV :: String -> Imp.Exp -> ImpM lore r op VName
+dPrimV :: String -> Imp.TExp t -> ImpM lore r op VName
 dPrimV name e = do
-  name' <- dPrim name $ primExpType e
+  name' <- dPrim name $ primExpType $ untyped e
   name' <-- e
   return name'
 
-dPrimVE :: String -> Imp.Exp -> ImpM lore r op Imp.Exp
+dPrimVE :: String -> Imp.TExp t -> ImpM lore r op (Imp.TExp t)
 dPrimVE name e = do
-  name' <- dPrim name $ primExpType e
+  name' <- dPrim name $ primExpType $ untyped e
   name' <-- e
-  return $ Imp.var name' $ primExpType e
+  return $ TPrimExp $ Imp.var name' $ primExpType $ untyped e
 
 memBoundToVarEntry ::
   Maybe (Exp lore) ->
@@ -1035,7 +1046,7 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc arrs space) =
   AccVar e arrs space
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
-  let location = MemLocation mem (shapeDims shape) $ fmap (toExp' int32) ixfun
+  let location = MemLocation mem (shapeDims shape) $ fmap (fmap Imp.ScalarVar) ixfun
    in ArrayVar
         e
         ArrayEntry
@@ -1106,6 +1117,15 @@ class ToExp a where
 
   -- | Compile where we know the type in advance.
   toExp' :: PrimType -> a -> Imp.Exp
+
+  toInt32Exp :: a -> Imp.TExp Int32
+  toInt32Exp = TPrimExp . toExp' int32
+
+  toInt64Exp :: a -> Imp.TExp Int64
+  toInt64Exp = TPrimExp . toExp' int64
+
+  toBoolExp :: a -> Imp.TExp Bool
+  toBoolExp = TPrimExp . toExp' Bool
 
 instance ToExp SubExp where
   toExp (Constant v) =
@@ -1215,7 +1235,7 @@ lookupAcc ::
     r
     op
     ( [VName],
-      [Imp.Exp],
+      [Imp.TExp Int32],
       Maybe (Lambda lore, [SubExp])
     )
 lookupAcc name = do
@@ -1223,7 +1243,7 @@ lookupAcc name = do
   case res of
     AccVar _ arrs _ -> do
       op <- gets $ M.lookup arrs . stateAccs
-      ds <- mapM toExp . arrayDims =<< lookupType (head arrs)
+      ds <- map toInt32Exp . arrayDims <$> lookupType (head arrs)
       return (arrs, ds, op)
     _ -> error $ "ImpGen.lookupAcc: not an accumulator: " ++ pretty name
 
@@ -1247,16 +1267,16 @@ destinationFromPattern pat =
 
 fullyIndexArray ::
   VName ->
-  [Imp.Exp] ->
-  ImpM lore r op (VName, Imp.Space, Count Elements Imp.Exp)
+  [Imp.TExp Int32] ->
+  ImpM lore r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
 fullyIndexArray name indices = do
   arr <- lookupArray name
   fullyIndexArray' (entryArrayLocation arr) indices
 
 fullyIndexArray' ::
   MemLocation ->
-  [Imp.Exp] ->
-  ImpM lore r op (VName, Imp.Space, Count Elements Imp.Exp)
+  [Imp.TExp Int32] ->
+  ImpM lore r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
 fullyIndexArray' (MemLocation mem _ ixfun) indices = do
   space <- entryMemSpace <$> lookupMemory mem
   let indices' = case space of
@@ -1264,10 +1284,13 @@ fullyIndexArray' (MemLocation mem _ ixfun) indices = do
           let (zero_is, is) = splitFromEnd (length ds) indices
            in map (const 0) zero_is ++ is
         _ -> indices
+
+      ixfun64 = fmap sExt64 ixfun
+      indices64 = fmap sExt64 indices'
   return
     ( mem,
       space,
-      elements $ IxFun.index ixfun indices'
+      elements $ IxFun.index ixfun64 indices64
     )
 
 -- More complicated read/write operations that use index functions.
@@ -1277,17 +1300,105 @@ copy bt dest destslice src srcslice = do
   cc <- asks envCopyCompiler
   cc bt dest destslice src srcslice
 
+-- | Is this copy really a mapping with transpose?
+isMapTransposeCopy ::
+  PrimType ->
+  MemLocation ->
+  Slice (Imp.TExp Int32) ->
+  MemLocation ->
+  Slice (Imp.TExp Int32) ->
+  Maybe
+    ( Imp.TExp Int32,
+      Imp.TExp Int32,
+      Imp.TExp Int32,
+      Imp.TExp Int32,
+      Imp.TExp Int32
+    )
+isMapTransposeCopy
+  bt
+  (MemLocation _ _ destIxFun)
+  destslice
+  (MemLocation _ _ srcIxFun)
+  srcslice
+    | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun' bt_size,
+      (perm, destshape) <- unzip perm_and_destshape,
+      Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
+      Just (r1, r2, _) <- isMapTranspose perm =
+      isOk destshape swap r1 r2 dest_offset src_offset
+    | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
+      Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
+      (perm, srcshape) <- unzip perm_and_srcshape,
+      Just (r1, r2, _) <- isMapTranspose perm =
+      isOk srcshape id r1 r2 dest_offset src_offset
+    | otherwise =
+      Nothing
+    where
+      bt_size = primByteSize bt
+      swap (x, y) = (y, x)
+
+      destIxFun' = IxFun.slice destIxFun destslice
+      srcIxFun' = IxFun.slice srcIxFun srcslice
+
+      isOk shape f r1 r2 dest_offset src_offset = do
+        let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
+        return
+          ( dest_offset,
+            src_offset,
+            num_arrays,
+            size_x,
+            size_y
+          )
+
+      getSizes shape f r1 r2 =
+        let (mapped, notmapped) = splitAt r1 shape
+            (pretrans, posttrans) = f $ splitAt r2 notmapped
+         in (product mapped, product pretrans, product posttrans)
+
+mapTransposeName :: PrimType -> String
+mapTransposeName bt = "map_transpose_" ++ pretty bt
+
+mapTransposeForType :: PrimType -> ImpM lore r op Name
+mapTransposeForType bt = do
+  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
+
+  exists <- hasFunction fname
+  unless exists $ emitFunction fname $ mapTransposeFunction fname bt
+
+  return fname
+
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler lore r op
-defaultCopy bt dest destslice src srcslice
+defaultCopy pt dest destslice src srcslice
+  | Just
+      ( destoffset,
+        srcoffset,
+        num_arrays,
+        size_x,
+        size_y
+        ) <-
+      isMapTransposeCopy pt dest destslice src srcslice = do
+    fname <- mapTransposeForType pt
+    emit $
+      Imp.Call
+        []
+        fname
+        $ transposeArgs
+          pt
+          destmem
+          (bytes $ sExt64 destoffset)
+          srcmem
+          (bytes $ sExt64 srcoffset)
+          (sExt64 num_arrays)
+          (sExt64 size_x)
+          (sExt64 size_y)
   | Just destoffset <-
-      IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
+      IxFun.linearWithOffset (IxFun.slice dest_ixfun64 destslice64) pt_size,
     Just srcoffset <-
-      IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
+      IxFun.linearWithOffset (IxFun.slice src_ixfun64 srcslice64) pt_size = do
     srcspace <- entryMemSpace <$> lookupMemory srcmem
     destspace <- entryMemSpace <$> lookupMemory destmem
     if isScalarSpace srcspace || isScalarSpace destspace
-      then copyElementWise bt dest destslice src srcslice
+      then copyElementWise pt dest destslice src srcslice
       else
         emit $
           Imp.Copy
@@ -1297,14 +1408,21 @@ defaultCopy bt dest destslice src srcslice
             srcmem
             (bytes srcoffset)
             srcspace
-            $ num_elems `withElemType` bt
+            $ num_elems `withElemType` pt
   | otherwise =
-    copyElementWise bt dest destslice src srcslice
+    copyElementWise pt dest destslice src srcslice
   where
-    bt_size = primByteSize bt
+    pt_size = primByteSize pt
     num_elems = Imp.elements $ product $ sliceDims srcslice
-    MemLocation destmem _ destIxFun = dest
-    MemLocation srcmem _ srcIxFun = src
+
+    MemLocation destmem _ dest_ixfun = dest
+    MemLocation srcmem _ src_ixfun = src
+
+    dest_ixfun64 = fmap sExt64 dest_ixfun
+    destslice64 = map (fmap sExt64) destslice
+    src_ixfun64 = fmap sExt64 src_ixfun
+    srcslice64 = map (fmap sExt64) srcslice
+
     isScalarSpace ScalarSpace {} = True
     isScalarSpace _ = False
 
@@ -1319,7 +1437,7 @@ copyElementWise bt dest destslice src srcslice = do
     fullyIndexArray' src $ fixSlice srcslice ivars
   vol <- asks envVolatility
   emit $
-    foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
+    foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
       Imp.Write destmem destidx bt destspace vol $
         Imp.index srcmem srcidx bt srcspace vol
 
@@ -1328,9 +1446,9 @@ copyElementWise bt dest destslice src srcslice = do
 copyArrayDWIM ::
   PrimType ->
   MemLocation ->
-  [DimIndex Imp.Exp] ->
+  [DimIndex (Imp.TExp Int32)] ->
   MemLocation ->
-  [DimIndex Imp.Exp] ->
+  [DimIndex (Imp.TExp Int32)] ->
   ImpM lore r op (Imp.Code op)
 copyArrayDWIM
   bt
@@ -1352,9 +1470,9 @@ copyArrayDWIM
           Imp.index srcmem srcoffset bt srcspace vol
     | otherwise = do
       let destslice' =
-            fullSliceNum (map (toExp' int32) destshape) destslice
+            fullSliceNum (map toInt32Exp destshape) destslice
           srcslice' =
-            fullSliceNum (map (toExp' int32) srcshape) srcslice
+            fullSliceNum (map toInt32Exp srcshape) srcslice
           destrank = length $ sliceDims destslice'
           srcrank = length $ sliceDims srcslice'
       if destrank /= srcrank
@@ -1378,9 +1496,9 @@ copyArrayDWIM
 -- instead of a variable name.
 copyDWIMDest ::
   ValueDestination ->
-  [DimIndex Imp.Exp] ->
+  [DimIndex (Imp.TExp Int32)] ->
   SubExp ->
-  [DimIndex Imp.Exp] ->
+  [DimIndex (Imp.TExp Int32)] ->
   ImpM lore r op ()
 copyDWIMDest _ _ (Constant v) (_ : _) =
   error $
@@ -1474,9 +1592,9 @@ copyDWIMDest dest dest_slice (Var src) src_slice = do
 -- Thing.  Both destination and source must be in scope.
 copyDWIM ::
   VName ->
-  [DimIndex Imp.Exp] ->
+  [DimIndex (Imp.TExp Int32)] ->
   SubExp ->
-  [DimIndex Imp.Exp] ->
+  [DimIndex (Imp.TExp Int32)] ->
   ImpM lore r op ()
 copyDWIM dest dest_slice src src_slice = do
   dest_entry <- lookupVar dest
@@ -1494,7 +1612,12 @@ copyDWIM dest dest_slice src src_slice = do
   copyDWIMDest dest_target dest_slice src src_slice
 
 -- | As 'copyDWIM', but implicitly 'DimFix'es the indexes.
-copyDWIMFix :: VName -> [Imp.Exp] -> SubExp -> [Imp.Exp] -> ImpM lore r op ()
+copyDWIMFix ::
+  VName ->
+  [Imp.TExp Int32] ->
+  SubExp ->
+  [Imp.TExp Int32] ->
+  ImpM lore r op ()
 copyDWIMFix dest dest_is src src_is =
   copyDWIM dest (map DimFix dest_is) src (map DimFix src_is)
 
@@ -1508,7 +1631,7 @@ compileAlloc ::
   Space ->
   ImpM lore r op ()
 compileAlloc (Pattern [] [mem]) e space = do
-  e' <- Imp.bytes <$> toExp e
+  let e' = Imp.bytes $ toInt64Exp e
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of
     Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
@@ -1518,20 +1641,19 @@ compileAlloc pat _ _ =
 
 -- | The number of bytes needed to represent the array in a
 -- straightforward contiguous format, as an 'Int64' expression.
-typeSize :: Type -> Count Bytes Imp.Exp
+typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
   Imp.bytes $
-    sExt Int64 elem_size
-      * product (map (sExt Int64 . toExp' int32) (arrayDims t))
+    elem_size * product (map (sExt64 . toInt32Exp) (arrayDims t))
   where
     elem_size = case elemType t of
-      ElemPrim t' -> Imp.LeafExp (Imp.SizeOf t') int32
+      ElemPrim t' -> isInt64 $ Imp.LeafExp (Imp.SizeOf t') int32
       ElemAcc {} -> 0
 
 -- | Is this indexing in-bounds for an array of the given shape?  This
 -- is useful for things like scatter, which ignores out-of-bounds
 -- writes.
-inBounds :: Slice Imp.Exp -> [Imp.Exp] -> Imp.Exp
+inBounds :: Slice (Imp.TExp Int32) -> [Imp.TExp Int32] -> Imp.TExp Bool
 inBounds slice dims =
   let condInBounds (DimFix i) d =
         0 .<=. i .&&. i .<. d
@@ -1541,23 +1663,22 @@ inBounds slice dims =
 
 --- Building blocks for constructing code.
 
-sFor' :: VName -> IntType -> Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
-sFor' i it bound body = do
+sFor' :: VName -> Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
+sFor' i bound body = do
+  let it = case primExpType bound of
+        IntType bound_t -> bound_t
+        t -> error $ "sFor': bound " ++ pretty bound ++ " is of type " ++ pretty t
   addLoopVar i it
   body' <- collect body
-  emit $ Imp.For i it bound body'
+  emit $ Imp.For i bound body'
 
-sFor :: String -> Imp.Exp -> (Imp.Exp -> ImpM lore r op ()) -> ImpM lore r op ()
+sFor :: String -> Imp.TExp t -> (Imp.TExp t -> ImpM lore r op ()) -> ImpM lore r op ()
 sFor i bound body = do
   i' <- newVName i
-  it <- case primExpType bound of
-    IntType it -> return it
-    t -> error $ "sFor: bound " ++ pretty bound ++ " is of type " ++ pretty t
-  addLoopVar i' it
-  body' <- collect $ body $ Imp.var i' $ IntType it
-  emit $ Imp.For i' it bound body'
+  sFor' i' (untyped bound) $
+    body $ TPrimExp $ Imp.var i' $ primExpType $ untyped bound
 
-sWhile :: Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
+sWhile :: Imp.TExp Bool -> ImpM lore r op () -> ImpM lore r op ()
 sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
@@ -1567,16 +1688,16 @@ sComment s code = do
   code' <- collect code
   emit $ Imp.Comment s code'
 
-sIf :: Imp.Exp -> ImpM lore r op () -> ImpM lore r op () -> ImpM lore r op ()
+sIf :: Imp.TExp Bool -> ImpM lore r op () -> ImpM lore r op () -> ImpM lore r op ()
 sIf cond tbranch fbranch = do
   tbranch' <- collect tbranch
   fbranch' <- collect fbranch
   emit $ Imp.If cond tbranch' fbranch'
 
-sWhen :: Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
+sWhen :: Imp.TExp Bool -> ImpM lore r op () -> ImpM lore r op ()
 sWhen cond tbranch = sIf cond tbranch (return ())
 
-sUnless :: Imp.Exp -> ImpM lore r op () -> ImpM lore r op ()
+sUnless :: Imp.TExp Bool -> ImpM lore r op () -> ImpM lore r op ()
 sUnless cond = sIf cond (return ())
 
 sOp :: op -> ImpM lore r op ()
@@ -1589,14 +1710,14 @@ sDeclareMem name space = do
   addVar name' $ MemVar Nothing $ MemEntry space
   return name'
 
-sAlloc_ :: VName -> Count Bytes Imp.Exp -> Space -> ImpM lore r op ()
+sAlloc_ :: VName -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM lore r op ()
 sAlloc_ name' size' space = do
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of
     Nothing -> emit $ Imp.Allocate name' size' space
     Just allocator' -> allocator' name' size'
 
-sAlloc :: String -> Count Bytes Imp.Exp -> Space -> ImpM lore r op VName
+sAlloc :: String -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM lore r op VName
 sAlloc name size space = do
   name' <- sDeclareMem name space
   sAlloc_ name' size space
@@ -1613,14 +1734,14 @@ sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM lore r op
 sArrayInMem name pt shape mem =
   sArray name pt shape $
     ArrayIn mem $
-      IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+      IxFun.iota $ map (isInt32 . primExpFromSubExp int32) $ shapeDims shape
 
 -- | Like 'sAllocArray', but permute the in-memory representation of the indices as specified.
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM lore r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array (ElemPrim pt) shape NoUniqueness)) space
-  let iota_ixfun = IxFun.iota $ map (primExpFromSubExp int32) permuted_dims
+  let iota_ixfun = IxFun.iota $ map (isInt32 . primExpFromSubExp int32) permuted_dims
   sArray name pt shape $
     ArrayIn mem $ IxFun.permute iota_ixfun $ rearrangeInverse perm
 
@@ -1641,29 +1762,34 @@ sStaticArray name space pt vs = do
   addVar mem $ MemVar Nothing $ MemEntry space
   sArray name pt shape $ ArrayIn mem $ IxFun.iota [fromIntegral num_elems]
 
-sWrite :: VName -> [Imp.Exp] -> PrimExp Imp.ExpLeaf -> ImpM lore r op ()
+sWrite :: VName -> [Imp.TExp Int32] -> Imp.Exp -> ImpM lore r op ()
 sWrite arr is v = do
   (mem, space, offset) <- fullyIndexArray arr is
   vol <- asks envVolatility
   emit $ Imp.Write mem offset (primExpType v) space vol v
 
-sUpdate :: VName -> Slice Imp.Exp -> SubExp -> ImpM lore r op ()
+sUpdate :: VName -> Slice (Imp.TExp Int32) -> SubExp -> ImpM lore r op ()
 sUpdate arr slice v = copyDWIM arr slice v []
 
 sLoopNest ::
   Shape ->
-  ([Imp.Exp] -> ImpM lore r op ()) ->
+  ([Imp.TExp Int32] -> ImpM lore r op ()) ->
   ImpM lore r op ()
 sLoopNest = sLoopNest' [] . shapeDims
   where
     sLoopNest' is [] f = f $ reverse is
-    sLoopNest' is (d : ds) f = do
-      d' <- toExp d
-      sFor "nest_i" d' $ \i -> sLoopNest' (i : is) ds f
+    sLoopNest' is (d : ds) f =
+      sFor "nest_i" (toInt32Exp d) $ \i -> sLoopNest' (i : is) ds f
 
--- | ASsignment.
-(<--) :: VName -> Imp.Exp -> ImpM lore r op ()
-x <-- e = emit $ Imp.SetScalar x e
+-- | Untyped assignment.
+(<~~) :: VName -> Imp.Exp -> ImpM lore r op ()
+x <~~ e = emit $ Imp.SetScalar x e
+
+infixl 3 <~~
+
+-- | Typed assignment.
+(<--) :: VName -> Imp.TExp t -> ImpM lore r op ()
+x <-- e = emit $ Imp.SetScalar x $ untyped e
 
 infixl 3 <--
 

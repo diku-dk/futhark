@@ -187,6 +187,10 @@ instance Substitute d => Substitute (DimIndex d) where
 instance Substitute v => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
 
+instance Substitute v => Substitute (TPrimExp t v) where
+  substituteNames substs =
+    TPrimExp . fmap (substituteNames substs) . untyped
+
 instance Substitutable lore => Substitute (NameInfo lore) where
   substituteNames subst (LetName dec) =
     LetName $ substituteNames subst dec

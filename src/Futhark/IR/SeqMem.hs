@@ -21,10 +21,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Kernels.Kernel
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
-import Futhark.IR.Pretty
-import Futhark.IR.Prop
-import Futhark.IR.Syntax
-import Futhark.IR.Traversals
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')

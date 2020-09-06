@@ -11,7 +11,7 @@
 
 typedef HANDLE lock_t;
 
-static lock_t create_lock(lock_t *lock) {
+static void create_lock(lock_t *lock) {
   *lock = CreateMutex(NULL,  // Default security attributes.
                       FALSE, // Initially unlocked.
                       NULL); // Unnamed.

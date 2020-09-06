@@ -21,7 +21,6 @@ module Language.Futhark.TypeChecker.Terms
 where
 
 import Control.Monad.Except
-import Control.Monad.Identity
 import Control.Monad.RWS hiding (Sum)
 import Control.Monad.State
 import Control.Monad.Writer hiding (Sum)

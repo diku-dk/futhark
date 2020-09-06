@@ -1,5 +1,7 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -57,6 +59,9 @@ import Futhark.IR.Traversals
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.Util.Pretty as PP
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
 
 -- | The lore for the basic representation.
 data Aliases lore
@@ -64,7 +69,10 @@ data Aliases lore
 -- | A wrapper around 'AliasDec to get around the fact that we need an
 -- 'Ord' instance, which 'AliasDec does not have.
 newtype AliasDec = AliasDec {unAliases :: Names}
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance SexpIso AliasDec where
+  sexpIso = with $ \vname -> sexpIso >>> vname
 
 instance Semigroup AliasDec where
   x <> y = AliasDec $ unAliases x <> unAliases y

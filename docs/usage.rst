@@ -107,8 +107,7 @@ Parallel Options
 ~~~~~~~~~~~~~~~~
 
 The following options are supported by executables generated with the
-GPU backends (``opencl``, ``pyopencl``, ``csopencl``, and
-``cuda``).
+GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
 
   ``-d DEVICE``
 
@@ -142,7 +141,7 @@ OpenCL-specific Options
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The following options are supported by executables generated with the
-OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
+OpenCL backends (``opencl``, ``pyopencl``):
 
   ``-P``
 

@@ -243,11 +243,10 @@ data Value
   | -- Stores the full shape.
     ValueRecord (M.Map Name Value)
   | ValueFun (Value -> EvalM Value)
-  | ValueSum ValueShape Name [Value]
   | -- Stores the full shape.
+    ValueSum ValueShape Name [Value]
+  | -- The update function and the array.
     ValueAcc (Value -> Value -> EvalM Value) !(Array Int Value)
-
--- The update function and the array.
 
 instance Eq Value where
   ValuePrim x == ValuePrim y = x == y
@@ -1623,7 +1622,7 @@ initialCtx =
           _ ->
             error $ "hist_stream expects array, but got: " ++ pretty (dest, vs)
     def "acc_write" = Just $
-      fun3t $ \acc i v -> do
+      fun3t $ \acc i v ->
         case (acc, i) of
           ( ValueAcc op acc_arr,
             ValuePrim (SignedValue (Int32Value i'))

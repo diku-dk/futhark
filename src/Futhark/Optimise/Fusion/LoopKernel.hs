@@ -29,7 +29,6 @@ import qualified Futhark.Analysis.HORep.SOAC as SOAC
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
 import qualified Futhark.IR.SOACS as Futhark
-import Futhark.MonadFreshNames
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)

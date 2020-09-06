@@ -54,9 +54,6 @@ module Futhark.TypeCheck
 where
 
 import Control.Monad.RWS.Strict
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer
 import Control.Parallel.Strategies
 import Data.List (find, intercalate, sort)
 import qualified Data.Map.Strict as M
@@ -1083,6 +1080,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                       scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM subExpAliasesM (bodyResult loopbody)
+
 checkExp (MkAcc shape arrs op) = do
   mapM_ (require [Prim int32]) (shapeDims shape)
   arrs_ts <- mapM checkArrIdent arrs
@@ -1101,6 +1099,7 @@ checkExp (MkAcc shape arrs op) = do
       checkLambda lam $ map mkArg $ arrs_ts ++ arrs_ts
     Nothing ->
       return ()
+
 checkExp (Op op) = do
   checker <- asks envCheckOp
   checker op

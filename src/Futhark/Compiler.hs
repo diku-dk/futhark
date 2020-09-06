@@ -20,7 +20,6 @@ where
 
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Reader
 import qualified Data.Text.IO as T
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Compiler.Program

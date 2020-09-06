@@ -35,6 +35,10 @@ import Futhark.Transform.CopyPropagate
 import Futhark.Transform.Rename
 
 parMapM :: MonadFreshNames m => (a -> State VNameSource b) -> [a] -> m [b]
+-- The special-casing of [] is quite important here!  If 'as' is
+-- empty, then we might otherwise create an empty name source below,
+-- which can wreak all kinds of havoc.
+parMapM _ [] = pure []
 parMapM f as =
   modifyNameSource $ \src ->
     let f' a = runState (f a) src
