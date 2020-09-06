@@ -262,12 +262,11 @@ data MemInfo d u ret
     MemPrim PrimType
   | -- | A memory block.
     MemMem Space
-  | -- | The array is stored in the named memory block,
-    -- and with the given index function.  The index
-    -- function maps indices in the array to /element/
-    -- offset, /not/ byte offsets!  To translate to byte
-    -- offsets, multiply the offset with the size of the
-    -- array element type.
+  | -- | The array is stored in the named memory block, and with the
+    -- given index function.  The index function maps indices in the
+    -- array to /element/ offset, /not/ byte offsets!  To translate to
+    -- byte offsets, multiply the offset with the size of the array
+    -- element type.
     MemArray PrimType (ShapeBase d) u ret
   deriving (Eq, Show, Ord, Generic) --- XXX Ord?
 
@@ -710,7 +709,7 @@ matchReturnType rettype res ts = do
             zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
             checkMemReturn x_ret y_ret
       checkReturn x y =
-        throwError $ unwords ["Expected ", pretty x, " but got ", pretty y]
+        throwError $ unwords ["Expected", pretty x, "but got", pretty y]
 
       checkDim (Free x) y
         | x == y = return ()
@@ -1046,8 +1045,8 @@ extReturns ts =
                 IxFun.iota $ map convert $ shapeDims shape
       | otherwise =
         return $ MemArray bt shape u Nothing
-    convert (Ext i) = isInt32 $ LeafExp (Ext i) int32
-    convert (Free v) = isInt32 $ Free <$> primExpFromSubExp int32 v
+    convert (Ext i) = le32 (Ext i)
+    convert (Free v) = Free <$> pe32 v
 
 arrayVarReturns ::
   (HasScope lore m, Monad m, Mem lore) =>
@@ -1097,7 +1096,7 @@ expReturns (BasicOp (Reshape newshape v)) = do
         Just $
           ReturnsInBlock mem $
             existentialiseIxFun [] $
-              IxFun.reshape ixfun $ map (fmap $ isInt32 . primExpFromSubExp int32) newshape
+              IxFun.reshape ixfun $ map (fmap pe32) newshape
     ]
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
@@ -1109,7 +1108,7 @@ expReturns (BasicOp (Rearrange perm v)) = do
     ]
 expReturns (BasicOp (Rotate offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let offsets' = map (isInt32 . primExpFromSubExp int32) offsets
+  let offsets' = map pe32 offsets
       ixfun' = IxFun.rotate ixfun offsets'
   return
     [ MemArray et (Shape $ map Free dims) NoUniqueness $
@@ -1135,17 +1134,19 @@ expReturns e@(DoLoop ctx val _ _) = do
   where
     typeWithDec t p =
       case (t, paramDec p) of
-        (Array bt shape u, MemArray _ _ _ (ArrayIn mem ixfun))
-          | Just (i, mem_p) <- isMergeVar mem,
-            Mem space <- paramType mem_p ->
-            return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ixfun'
-          | otherwise ->
-            return
-              ( MemArray bt shape u $
-                  Just $ ReturnsInBlock mem ixfun'
-              )
-          where
-            ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
+        ( Array bt shape u,
+          MemArray _ _ _ (ArrayIn mem ixfun)
+          )
+            | Just (i, mem_p) <- isMergeVar mem,
+              Mem space <- paramType mem_p ->
+              return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ixfun'
+            | otherwise ->
+              return
+                ( MemArray bt shape u $
+                    Just $ ReturnsInBlock mem ixfun'
+                )
+            where
+              ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
         (Array {}, _) ->
           error "expReturns: Array return type but not array merge variable."
         (Prim bt, _) ->
