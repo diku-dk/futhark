@@ -8,7 +8,7 @@ CFLAGS=-O3 -std=c99
 LDFLAGS=-lm -lpthread
 else ifeq ($(FUTHARK_BACKEND),cuda)
 CFLAGS=-O3 -std=c99
-LDFLAGS=-lm -lcuda -lnvrtc
+LDFLAGS=-lm -lcuda -lcudart -lnvrtc
 else
 CFLAGS=-O3 -std=c99
 LDFLAGS=-lm
