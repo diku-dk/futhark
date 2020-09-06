@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Faster matrix transposition in C backend.
 
+  * Library code generated with CUDA backend can now be called from
+    multiple threads.
+
 ### Removed
 
 ### Changed
