@@ -2,10 +2,10 @@ name: CI
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ master multicore ]
 
   push:
-    branches: [ master ]
+    branches: [ master multicore ]
 
 jobs:
   build-linux-nix:
