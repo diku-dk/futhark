@@ -183,7 +183,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
         not $ freeIn ixfun `namesIntersect` namesFromList (patternNames pat),
         fse /= tse =
         let mem_size =
-              sExt Int64 $ untyped $ product $ primByteSize pt : IxFun.base ixfun
+              untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
          in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
         fixable
