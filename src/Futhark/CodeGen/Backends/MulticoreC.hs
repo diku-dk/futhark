@@ -529,6 +529,27 @@ generateFunction lexical basename code fstruct free retval tid ntasks = do
                            return err;
                       }|]
 
+prepareTaskStruct ::
+  String ->
+  [VName] ->
+  [(C.Type, ValueType)] ->
+  [VName] ->
+  [(C.Type, ValueType)] ->
+  GC.CompilerM Multicore s Name
+prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
+  fstruct <- multicoreFunDef name $ \s ->
+    return
+      [C.cedecl|struct $id:s {
+                       struct futhark_context *ctx;
+                       $sdecls:(compileFreeStructFields free_args free_ctypes)
+                       $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
+                     };|]
+  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
+  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
+  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
+  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct retval_args retval_ctypes)|]
+  return fstruct
+
 -- Generate a function for parallel and sequential code here
 compileOp :: GC.OpCompiler Multicore ()
 compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
@@ -544,21 +565,11 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
 
   let lexical_par = lexicalMemoryUsage $ Function False [] params seq_code [] []
 
-  fstruct <- multicoreFunDef "task" $ \s ->
-    return
-      [C.cedecl|struct $id:s {
-                       struct futhark_context *ctx;
-                       $sdecls:(compileFreeStructFields free_args free_ctypes)
-                       $sdecls:(compileRetvalStructFields retval_args retval_ctypes)
-                     };|]
+  fstruct <-
+    prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
 
   fpar_task <- generateFunction lexical_par (name ++ "_task") seq_code fstruct free retval tid nsubtask
   addTimingFields fpar_task
-
-  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
-  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
-  GC.stms [C.cstms|$stms:(compileSetRetvalStructValues fstruct retval_args retval_ctypes)|]
 
   let ftask_name = fstruct <> "_task"
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
@@ -600,12 +611,9 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
         lexicalMemoryUsage $
           Function False [] free body [] []
 
-  fstruct <- multicoreFunDef (s' ++ "_parloop_struct") $ \s ->
-    return
-      [C.cedecl|struct $id:s {
-                       struct futhark_context *ctx;
-                       $sdecls:(compileFreeStructFields free_args free_ctypes)
-                     };|]
+  fstruct <-
+    prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
+
   ftask <- multicoreFunDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just tid)
       <=< GC.inNewFunction False
@@ -637,10 +645,6 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
                        $items:fbody
                        return err;
                      }|]
-
-  GC.decl [C.cdecl|struct $id:fstruct $id:fstruct;|]
-  GC.stm [C.cstm|$id:fstruct.ctx = ctx;|]
-  GC.stms [C.cstms|$stms:(compileSetStructValues fstruct free_args free_ctypes)|]
 
   let ftask_name = ftask <> "_task"
   GC.decl [C.cdecl|struct scheduler_parloop $id:ftask_name;|]
