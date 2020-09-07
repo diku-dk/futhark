@@ -936,10 +936,10 @@ arrayLibraryFunctions space pt signed shape = do
     [C.cedecl|struct $id:arr_name;|]
   headerDecl
     (ArrayDecl name)
-    [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params);|]
   headerDecl
     (ArrayDecl name)
-    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset, $params:shape_params);|]
   headerDecl
     (ArrayDecl name)
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
@@ -955,7 +955,7 @@ arrayLibraryFunctions space pt signed shape = do
 
   return
     [C.cunit|
-          $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
+          $ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params) {
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
@@ -965,7 +965,7 @@ arrayLibraryFunctions space pt signed shape = do
             return arr;
           }
 
-          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset,
                                             $params:shape_params) {
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
