@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -12,11 +13,13 @@ import Data.List (intersperse)
 import Data.Maybe
 import qualified Data.Text.IO as T
 import Futhark.Actions
+import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI
-import Futhark.IR (Prog, pretty)
+import Futhark.IR (ASTLore, Op, Prog, pretty)
 import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
 import qualified Futhark.IR.MCMem as MCMem
+import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
 import qualified Futhark.IR.SeqMem as SeqMem
@@ -126,22 +129,20 @@ newtype UntypedPass
         FutharkM UntypedPassState
       )
 
-data AllActions = AllActions
-  { actionSOACS :: Action SOACS.SOACS,
-    actionKernels :: Action Kernels.Kernels,
-    actionSeq :: Action Seq.Seq,
-    actionKernelsMem :: Action KernelsMem.KernelsMem,
-    actionSeqMem :: Action SeqMem.SeqMem,
-    actionMCMem :: Action MCMem.MCMem
-  }
-
 data UntypedAction
   = SOACSAction (Action SOACS.SOACS)
   | KernelsAction (Action Kernels.Kernels)
   | KernelsMemAction (FilePath -> Action KernelsMem.KernelsMem)
   | MCMemAction (FilePath -> Action MCMem.MCMem)
   | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
-  | PolyAction AllActions
+  | PolyAction
+      ( forall lore.
+        ( ASTLore lore,
+          (CanBeAliased (Op lore)),
+          (OpMetrics (Op lore))
+        ) =>
+        Action lore
+      )
 
 untypedActionName :: UntypedAction -> String
 untypedActionName (SOACSAction a) = actionName a
@@ -149,7 +150,7 @@ untypedActionName (KernelsAction a) = actionName a
 untypedActionName (SeqMemAction a) = actionName $ a ""
 untypedActionName (KernelsMemAction a) = actionName $ a ""
 untypedActionName (MCMemAction a) = actionName $ a ""
-untypedActionName (PolyAction a) = actionName (actionSOACS a)
+untypedActionName (PolyAction a) = actionName (a :: Action SOACS.SOACS)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
@@ -162,7 +163,7 @@ instance Representation UntypedAction where
 newConfig :: Config
 newConfig = Config newFutharkConfig (Pipeline []) action False
   where
-    action = PolyAction $ AllActions printAction printAction printAction printAction printAction printAction
+    action = PolyAction printAction
 
 changeFutharkConfig ::
   (FutharkConfig -> FutharkConfig) ->
@@ -419,36 +420,17 @@ commandLineOptions =
     Option
       "p"
       ["print"]
-      ( NoArg $
-          Right $ \opts ->
-            opts
-              { futharkAction =
-                  PolyAction $
-                    AllActions printAction printAction printAction printAction printAction printAction
-              }
-      )
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printAction})
       "Prettyprint the resulting internal representation on standard output (default action).",
     Option
       "m"
       ["metrics"]
-      ( NoArg $
-          Right $ \opts ->
-            opts
-              { futharkAction =
-                  PolyAction $
-                    AllActions metricsAction metricsAction metricsAction metricsAction metricsAction metricsAction
-              }
-      )
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction metricsAction})
       "Print AST metrics of the resulting internal representation on standard output.",
     Option
       []
       ["sexp"]
-      ( NoArg $
-          Right $ \opts ->
-            opts
-              { futharkAction = PolyAction $ AllActions sexpAction sexpAction sexpAction sexpAction sexpAction sexpAction
-              }
-      )
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction sexpAction})
       "Print the resulting IR as S-expressions to standard output.",
     Option
       []
@@ -641,17 +623,17 @@ runPolyPasses config base initial_prog = do
     (MCMem prog, MCMemAction action) ->
       actionProcedure (action base) prog
     (SOACS soacs_prog, PolyAction acs) ->
-      actionProcedure (actionSOACS acs) soacs_prog
+      actionProcedure acs soacs_prog
     (Kernels kernels_prog, PolyAction acs) ->
-      actionProcedure (actionKernels acs) kernels_prog
+      actionProcedure acs kernels_prog
     (Seq seq_prog, PolyAction acs) ->
-      actionProcedure (actionSeq acs) seq_prog
+      actionProcedure acs seq_prog
     (KernelsMem mem_prog, PolyAction acs) ->
-      actionProcedure (actionKernelsMem acs) mem_prog
+      actionProcedure acs mem_prog
     (SeqMem mem_prog, PolyAction acs) ->
-      actionProcedure (actionSeqMem acs) mem_prog
+      actionProcedure acs mem_prog
     (MCMem mem_prog, PolyAction acs) ->
-      actionProcedure (actionMCMem acs) mem_prog
+      actionProcedure acs mem_prog
     (_, action) ->
       externalErrorS $
         "Action "
