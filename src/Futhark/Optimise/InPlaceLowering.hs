@@ -78,7 +78,6 @@ import Futhark.IR.Aliases
 import Futhark.IR.Kernels
 import Futhark.IR.MC
 import Futhark.IR.Seq (Seq)
-import Futhark.MonadFreshNames
 import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.Pass
 

@@ -16,6 +16,7 @@ module Futhark.IR.MC.Op
   )
 where
 
+import Control.Category
 import Data.Bifunctor (first)
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -39,6 +40,7 @@ import Futhark.Util.Pretty
 import GHC.Generics (Generic)
 import Language.SexpGrammar as Sexp
 import Language.SexpGrammar.Generic
+import Prelude hiding (id, (.))
 
 -- | An operation for the multicore representation.  Feel free to
 -- extend this on an ad hoc basis as needed.  Parameterised with some
@@ -57,9 +59,9 @@ data MCOp lore op
 instance (Decorations lore, SexpIso op) => SexpIso (MCOp lore op) where
   sexpIso =
     match $
-      With (error "SexpIso MCOp") $
+      With (. Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)) $
         With
-          (error "SexpIso MCOp")
+          (. Sexp.list (Sexp.el sexpIso))
           End
 
 instance (ASTLore lore, Substitute op) => Substitute (MCOp lore op) where
