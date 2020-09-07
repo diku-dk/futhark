@@ -19,26 +19,25 @@ import Prelude hiding (quot)
 
 -- | The pass definition.
 tileLoops :: Pass Kernels Kernels
-tileLoops = Pass "tile loops" "Tile stream loops inside kernels" $
-  \(Prog consts funs) ->
-    Prog consts <$> mapM optimiseFunDef funs
-
-optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
-optimiseFunDef fundec = do
-  body' <-
-    modifyNameSource $
-      runState $
-        runReaderT m (scopeOfFParams (funDefParams fundec))
-  return fundec {funDefBody = body'}
+tileLoops =
+  Pass "tile loops" "Tile stream loops inside kernels" $
+    intraproceduralTransformation onStms
   where
-    m = optimiseBody $ funDefBody fundec
+    onStms scope stms =
+      modifyNameSource $
+        runState $
+          runReaderT (optimiseStms stms) scope
 
 type TileM = ReaderT (Scope Kernels) (State VNameSource)
 
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
-optimiseBody (Body () bnds res) =
-  localScope (scopeOf bnds) $
-    Body () <$> (mconcat <$> mapM optimiseStm (stmsToList bnds)) <*> pure res
+optimiseBody (Body () stms res) =
+  Body () <$> optimiseStms stms <*> pure res
+
+optimiseStms :: Stms Kernels -> TileM (Stms Kernels)
+optimiseStms stms =
+  localScope (scopeOf stms) $
+    mconcat <$> mapM optimiseStm (stmsToList stms)
 
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
 optimiseStm (Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
@@ -352,7 +351,13 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
       tiledBody' privstms = inScopeOf host_stms $ do
         addStms invariant_prestms
 
-        let live_set = namesToList $ liveSet precomputed_variant_prestms used_in_body
+        let live_set =
+              namesToList $
+                liveSet precomputed_variant_prestms $
+                  freeIn recomputed_variant_prestms
+                    <> used_in_body
+                    <> freeIn poststms
+
         prelude_arrs <-
           inScopeOf precomputed_variant_prestms $
             doPrelude tiling precomputed_variant_prestms live_set
@@ -395,7 +400,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           letTupExp "tiled_inside_loop" $
             DoLoop [] merge' (ForLoop i it bound []) loopbody'
 
-        postludeGeneric tiling privstms pat accs' poststms poststms_res res_ts
+        postludeGeneric tiling inloop_privstms pat accs' poststms poststms_res res_ts
 
   return (host_stms, tiling, tiledBody')
   where

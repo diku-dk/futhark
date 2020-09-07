@@ -206,7 +206,9 @@ data Operations op s = Operations
     opsCall :: CallCompiler op s,
     -- | If true, use reference counting.  Otherwise, bare
     -- pointers.
-    opsFatMemory :: Bool
+    opsFatMemory :: Bool,
+    -- | Code to bracket critical sections.
+    opsCritical :: ([C.BlockItem], [C.BlockItem])
   }
 
 defError :: ErrorCompiler op s
@@ -250,7 +252,8 @@ defaultOperations =
       opsCompiler = defCompiler,
       opsFatMemory = True,
       opsError = defError,
-      opsCall = defCall
+      opsCall = defCall,
+      opsCritical = mempty
     }
   where
     defWriteScalar _ _ _ _ _ =
@@ -867,13 +870,14 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
           )
     iter x = ((x :: Word32) `shiftR` 16) `xor` x
 
-criticalSection :: [C.BlockItem] -> [C.BlockItem]
-criticalSection x =
-  [C.citems|
-                       lock_lock(&ctx->lock);
-                       $items:x
-                       lock_unlock(&ctx->lock);
-                     |]
+criticalSection :: Operations op s -> [C.BlockItem] -> [C.BlockItem]
+criticalSection ops x =
+  [C.citems|lock_lock(&ctx->lock);
+            $items:(fst (opsCritical ops))
+            $items:x
+            $items:(snd (opsCritical ops))
+            lock_unlock(&ctx->lock);
+           |]
 
 arrayLibraryFunctions ::
   Space ->
@@ -950,6 +954,7 @@ arrayLibraryFunctions space pt signed shape = do
         [C.cexp|((size_t)$exp:arr_size_array) * sizeof($ty:pt')|]
 
   ctx_ty <- contextType
+  ops <- asks envOperations
 
   headerDecl
     (ArrayDecl name)
@@ -981,7 +986,7 @@ arrayLibraryFunctions space pt signed shape = do
             if (arr == NULL) {
               return bad;
             }
-            $items:(criticalSection new_body)
+            $items:(criticalSection ops new_body)
             return arr;
           }
 
@@ -992,18 +997,18 @@ arrayLibraryFunctions space pt signed shape = do
             if (arr == NULL) {
               return bad;
             }
-            $items:(criticalSection new_raw_body)
+            $items:(criticalSection ops new_raw_body)
             return arr;
           }
 
           int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
-            $items:(criticalSection free_body)
+            $items:(criticalSection ops free_body)
             free(arr);
             return 0;
           }
 
           int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data) {
-            $items:(criticalSection values_body)
+            $items:(criticalSection ops values_body)
             return 0;
           }
 
@@ -1215,29 +1220,32 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
                                       $params:entry_point_output_params,
                                       $params:entry_point_input_params);|]
 
+  let critical =
+        [C.citems|
+         $items:unpack_entry_inputs
+
+         int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
+
+         if (ret == 0) {
+           $items:pack_entry_outputs
+         }
+        |]
+
+  ops <- asks envOperations
+
   return
-    ( [C.cedecl|int $id:entry_point_function_name
-                         ($ty:ctx_ty *ctx,
-                          $params:entry_point_output_params,
-                          $params:entry_point_input_params) {
-    $items:inputdecls
-    $items:outputdecls
+    ( [C.cedecl|
+       int $id:entry_point_function_name
+           ($ty:ctx_ty *ctx,
+            $params:entry_point_output_params,
+            $params:entry_point_input_params) {
+         $items:inputdecls
+         $items:outputdecls
 
-    lock_lock(&ctx->lock);
+         $items:(criticalSection ops critical)
 
-    $items:unpack_entry_inputs
-
-    int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
-
-    if (ret == 0) {
-      $items:pack_entry_outputs
-    }
-
-    lock_unlock(&ctx->lock);
-
-    return ret;
-}
-    |],
+         return ret;
+       }|],
       cli_entry_point,
       cli_init
     )

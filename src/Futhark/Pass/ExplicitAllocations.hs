@@ -268,18 +268,17 @@ runPatAllocM (PatAllocM m) mems =
   where
     frob (a, s, w) = ((a, w), s)
 
+elemSize :: Num a => Type -> a
+elemSize = primByteSize . elemType
+
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
-  untyped $
-    foldl'
-      (*)
-      (primByteSize $ elemType t)
-      $ map (isInt64 . sExt Int64 . primExpFromSubExp int32) (arrayDims t)
+  untyped $ foldl' (*) (elemSize t) $ map (sExt64 . pe32) (arrayDims t)
 
 arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   dims <- mapM dimAllocationSize (arrayDims t)
-  let dim_prod_i32 = product $ map (isInt64 . sExt Int64 . primExpFromSubExp int32) dims
+  let dim_prod_i32 = product $ map (sExt64 . pe32) dims
       elm_size_i64 = primByteSize $ elemType t
   return $ untyped $ dim_prod_i32 * elm_size_i64
 
@@ -447,7 +446,7 @@ summaryForBindage t (Hint ixfun space) = do
     computeSize "bytes" $
       untyped $
         product
-          [ product $ map (isInt64 . sExt Int64 . untyped) $ IxFun.base ixfun,
+          [ product $ map sExt64 $ IxFun.base ixfun,
             fromIntegral (primByteSize (elemType t) :: Int64)
           ]
   m <- allocateMemory "mem" bytes space
@@ -725,10 +724,10 @@ memoryInDeclExtType ts = evalState (mapM addMem ts) $ startOfFreeIDRange ts
       return $
         MemArray bt shape u $
           ReturnsNewBlock DefaultSpace i $
-            IxFun.iota $ map (TPrimExp . convert) $ shapeDims shape
+            IxFun.iota $ map convert $ shapeDims shape
 
-    convert (Ext i) = LeafExp (Ext i) int32
-    convert (Free v) = Free <$> primExpFromSubExp int32 v
+    convert (Ext i) = le32 $ Ext i
+    convert (Free v) = Free <$> pe32 v
 
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
 startOfFreeIDRange = S.size . shapeContext
@@ -1002,13 +1001,13 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
           bodyret =
             MemArray pt shape u $
               ReturnsNewBlock space' 0 $
-                IxFun.iota $ map (TPrimExp . convert) $ shapeDims shape
+                IxFun.iota $ map convert $ shapeDims shape
        in bodyret
     inspect (Prim pt) _ = MemPrim pt
     inspect (Mem space) _ = MemMem space
 
-    convert (Ext i) = LeafExp (Ext i) int32
-    convert (Free v) = Free <$> primExpFromSubExp int32 v
+    convert (Ext i) = le32 (Ext i)
+    convert (Free v) = Free <$> pe32 v
 
     adjustExtV :: Int -> Ext VName -> Ext VName
     adjustExtV _ (Free v) = Free v
@@ -1054,7 +1053,7 @@ allocInLoopForm (ForLoop i it n loopvars) =
           dims <- map pe32 . arrayDims <$> lookupType a
           let ixfun' =
                 IxFun.slice ixfun $
-                  fullSliceNum dims [DimFix $ isInt32 $ LeafExp i int32]
+                  fullSliceNum dims [DimFix $ le32 i]
           return (p {paramDec = MemArray bt shape u $ ArrayIn mem ixfun'}, a)
         Prim bt ->
           return (p {paramDec = MemPrim bt}, a)

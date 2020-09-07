@@ -9,11 +9,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Obscure loop optimisation (#1110).
+
+  * Faster matrix transposition in C backend.
+
+  * Library code generated with CUDA backend can now be called from
+    multiple threads.
+
+  * Better optimisation of concatenations of array literals and
+    replicates.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+  * Entry points with names that are not valid C (or Python)
+    identifiers are now pointed out as problematic, rather than
+    generating invalid C code.
+
+  * Exotic tiling bug (#1112).
 
 ## [0.16.4]
 
