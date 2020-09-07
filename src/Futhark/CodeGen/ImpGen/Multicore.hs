@@ -66,18 +66,18 @@ compileMCOp pat (ParOp par_op op) = do
       compileSegOp pat nested_op nsubtasks
     Nothing -> return mempty
 
-
   let par_task = case par_op of
         Just nested_op -> Just $ Imp.ParallelTask par_code $ segFlat $ getSpace nested_op
         Nothing -> Nothing
 
-  let non_free = ([segFlat space, nsubtasks] ++
-                  map Imp.paramName retvals) ++
-                 case par_op of
-                   Just nested_op ->
-                     [segFlat $ getSpace nested_op]
-                   Nothing -> []
-
+  let non_free =
+        ( [segFlat space, nsubtasks]
+            ++ map Imp.paramName retvals
+        )
+          ++ case par_op of
+            Just nested_op ->
+              [segFlat $ getSpace nested_op]
+            Nothing -> []
 
   s <- segOpString op
   free_params <- freeParams (par_code <> seq_code) non_free

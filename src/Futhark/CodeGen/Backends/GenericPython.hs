@@ -46,9 +46,6 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.RWS
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Writer
 import qualified Data.Map as M
 import Data.Maybe
 import Futhark.CodeGen.Backends.GenericPython.AST
