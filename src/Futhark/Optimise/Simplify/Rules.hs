@@ -24,7 +24,7 @@ where
 
 import Control.Monad
 import Data.Either
-import Data.List (find, isSuffixOf, partition, sort)
+import Data.List (find, foldl', isSuffixOf, partition, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.DataDependencies
@@ -848,6 +848,55 @@ simplifyIndexing vtable seType idd inds consuming =
     worthInlining' FunExp {} = False
     worthInlining' _ = True
 
+data ConcatArg
+  = ArgArrayLit [SubExp]
+  | ArgReplicate [SubExp] SubExp
+  | ArgVar VName
+
+toConcatArg :: ST.SymbolTable lore -> VName -> (ConcatArg, Certificates)
+toConcatArg vtable v =
+  case ST.lookupBasicOp v vtable of
+    Just (ArrayLit ses _, cs) ->
+      (ArgArrayLit ses, cs)
+    Just (Replicate shape se, cs) ->
+      (ArgReplicate [shapeSize 0 shape] se, cs)
+    _ ->
+      (ArgVar v, mempty)
+
+fromConcatArg ::
+  MonadBinder m =>
+  Type ->
+  (ConcatArg, Certificates) ->
+  m VName
+fromConcatArg t (ArgArrayLit ses, cs) =
+  certifying cs $ letExp "concat_lit" $ BasicOp $ ArrayLit ses $ rowType t
+fromConcatArg elem_type (ArgReplicate ws se, cs) = do
+  let elem_shape = arrayShape elem_type
+  certifying cs $ do
+    w <- letSubExp "concat_rep_w" =<< toExp (sum $ map pe32 ws)
+    letExp "concat_rep" $ BasicOp $ Replicate (setDim 0 elem_shape w) se
+fromConcatArg _ (ArgVar v, _) =
+  pure v
+
+fuseConcatArg ::
+  [(ConcatArg, Certificates)] ->
+  (ConcatArg, Certificates) ->
+  [(ConcatArg, Certificates)]
+fuseConcatArg xs (ArgArrayLit [], _) =
+  xs
+fuseConcatArg xs (ArgReplicate [w] se, cs)
+  | isCt0 w =
+    xs
+  | isCt1 w =
+    fuseConcatArg xs (ArgArrayLit [se], cs)
+fuseConcatArg ((ArgArrayLit x_ses, x_cs) : xs) (ArgArrayLit y_ses, y_cs) =
+  (ArgArrayLit (x_ses ++ y_ses), x_cs <> y_cs) : xs
+fuseConcatArg ((ArgReplicate x_ws x_se, x_cs) : xs) (ArgReplicate y_ws y_se, y_cs)
+  | x_se == y_se =
+    (ArgReplicate (x_ws ++ y_ws) x_se, x_cs <> y_cs) : xs
+fuseConcatArg xs y =
+  y : xs
+
 simplifyConcat :: BinderOps lore => BottomUpRuleBasicOp lore
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
 simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
@@ -866,6 +915,12 @@ simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
           | perm1 == perm2 -> Just (v', vcs)
         _ -> Nothing
 
+-- Removing a concatenation that involves only a single array.  This
+-- may be produced as a result of other simplification rules.
+simplifyConcat _ pat aux (Concat _ x [] _) =
+  Simplify $
+    -- Still need a copy because Concat produces a fresh array.
+    auxing aux $ letBind pat $ BasicOp $ Copy x
 -- concat xs (concat ys zs) == concat xs ys zs
 simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i x xs new_d)
   | x' /= x || concat xs' /= xs =
@@ -881,25 +936,21 @@ simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i x xs new_d)
       Just (Concat j y ys _, v_cs) | j == i -> (y : ys, v_cs)
       _ -> ([v], mempty)
 
--- If concatenating a bunch of array literals (or equivalent
--- replicate), just construct the array literal instead.
-simplifyConcat (vtable, _) pat aux (Concat 0 x xs _)
-  | Just (vs, vcs) <- unzip <$> mapM isArrayLit (x : xs) = Simplify $ do
-    rt <- rowType <$> lookupType x
-    certifying (mconcat vcs) $
-      auxing aux $
-        letBind pat $ BasicOp $ ArrayLit (concat vs) rt
-  where
-    isArrayLit v
-      | Just (Replicate shape se, vcs) <- ST.lookupBasicOp v vtable,
-        unitShape shape =
-        Just ([se], vcs)
-      | Just (ArrayLit ses _, vcs) <- ST.lookupBasicOp v vtable =
-        Just (ses, vcs)
-      | otherwise =
-        Nothing
-
-    unitShape = (== Shape [Constant $ IntValue $ Int32Value 1])
+-- Fusing arguments to the concat when possible.  Only done when
+-- concatenating along the outer dimension for now.
+simplifyConcat (vtable, _) pat aux (Concat 0 x xs outer_w)
+  | -- We produce the to-be-concatenated arrays in reverse order, so
+    -- reverse them back.
+    y : ys <-
+      reverse $
+        foldl' fuseConcatArg mempty $
+          map (toConcatArg vtable) $ x : xs,
+    length xs /= length ys =
+    Simplify $ do
+      elem_type <- lookupType x
+      y' <- fromConcatArg elem_type y
+      ys' <- mapM (fromConcatArg elem_type) ys
+      auxing aux $ letBind pat $ BasicOp $ Concat 0 y' ys' outer_w
 simplifyConcat _ _ _ _ = Skip
 
 ruleIf :: BinderOps lore => TopDownRuleIf lore

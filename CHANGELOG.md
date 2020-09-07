@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Library code generated with CUDA backend can now be called from
     multiple threads.
 
+  * Better optimisation of concatenations of array literals and
+    replicates.
+
 ### Removed
 
 ### Changed
