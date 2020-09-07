@@ -211,6 +211,27 @@ jobs:
         futhark test -c --backend=c tests examples --no-tuning
         make -C libtests/c
 
+  test-multicore:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
+    - run: |
+        futhark test -c --backend=multicore tests examples --no-tuning
+        make -C libtests/c FUTHARK_BACKEND=multicore
+
   test-python:
     runs-on: ubuntu-20.04
     needs: [build-linux-nix]
