@@ -1964,6 +1964,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     return
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
+               (void)ctx;
                int err = 0;
                $items:decl_cached
                $items:get_constants
