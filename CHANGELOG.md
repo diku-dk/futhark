@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Better optimisation of concatenations of array literals and
     replicates.
 
+  * Array creation C API functions now accept `const` pointers.
+
 ### Removed
 
 ### Changed
