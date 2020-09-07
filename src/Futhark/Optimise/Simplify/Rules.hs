@@ -787,7 +787,15 @@ simplifyIndexing vtable seType idd inds consuming =
       | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ pure $ IndexResult cs v2 inds
     Just (Concat d x xs _, cs)
-      | Just (ibef, DimFix i, iaft) <- focusNth d inds,
+      | -- HACK: simplifying the indexing of an N-array concatenation
+        -- is going to produce an N-deep if expression, which is bad
+        -- when N is large.  To try to avoid that, we use the
+        -- heuristic not to simplify as long as any of the operands
+        -- are themselves Concats.  The hops it that this will give
+        -- simplification some time to cut down the concatenation to
+        -- something smaller, before we start inlining.
+        not $ any isConcat $ x : xs,
+        Just (ibef, DimFix i, iaft) <- focusNth d inds,
         Just (Prim res_t) <-
           (`setArrayDims` sliceDims inds)
             <$> ST.lookupType x vtable -> Just $ do
@@ -847,6 +855,12 @@ simplifyIndexing vtable seType idd inds consuming =
     worthInlining' (UnOpExp _ x) = worthInlining' x
     worthInlining' FunExp {} = False
     worthInlining' _ = True
+
+    isConcat v
+      | Just (Concat {}, _) <- defOf v =
+        True
+      | otherwise =
+        False
 
 data ConcatArg
   = ArgArrayLit [SubExp]
