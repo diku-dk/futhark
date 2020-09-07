@@ -65,9 +65,8 @@ data SchedulerInfo = SchedulerInfo
   }
 
 data ParallelTask = ParallelTask
-  {
-    task_code :: Code,
-    flatTid   :: VName -- the variable for the thread execution the code
+  { task_code :: Code,
+    flatTid :: VName -- the variable for the thread execution the code
   }
 
 -- | Whether the Scheduler can/should schedule the tasks as Dynamic

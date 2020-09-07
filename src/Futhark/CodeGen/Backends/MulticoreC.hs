@@ -574,7 +574,7 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
     Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
   fnpar_task <- case par_task of
-    Just (ParallelTask nested_code nested_tid)-> do
+    Just (ParallelTask nested_code nested_tid) -> do
       let lexical_npar = lexicalMemoryUsage $ Function False [] params nested_code [] []
       fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") nested_code fstruct free retval nested_tid nsubtask
       GC.stm [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
