@@ -1964,7 +1964,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     return
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
-               (void)ctx;
+               $stms:ignores
                int err = 0;
                $items:decl_cached
                $items:get_constants
@@ -1976,6 +1976,10 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
   }|]
       )
   where
+    -- Ignore all the boilerplate parameters, just in case we don't
+    -- actually need to use them.
+    ignores = [ [C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra ]
+
     compileInput (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
       return [C.cparam|$ty:ctp $id:name|]
