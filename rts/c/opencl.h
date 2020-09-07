@@ -843,6 +843,7 @@ static int opencl_alloc_actual(struct opencl_context *ctx, size_t size, cl_mem *
 }
 
 static int opencl_alloc(struct opencl_context *ctx, size_t min_size, const char *tag, cl_mem *mem_out) {
+  (void)tag;
   if (min_size < sizeof(int)) {
     min_size = sizeof(int);
   }
