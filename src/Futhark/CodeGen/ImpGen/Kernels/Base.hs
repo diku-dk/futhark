@@ -222,6 +222,18 @@ compileGroupExp (Pattern _ [dest]) (BasicOp (Iota n e s it)) = do
             BinOpExp (Mul it OverflowUndef) (untyped i') s'
     copyDWIMFix (patElemName dest) [i'] (Var (tvVar x)) []
   sOp $ Imp.Barrier Imp.FenceLocal
+
+-- When generating code for a scalar in-place update, we must make
+-- sure that only one thread performs the write.  When writing an
+-- array, the group-level copy code will take care of doing the right
+-- thing.
+compileGroupExp (Pattern _ [pe]) (BasicOp (Update _ slice se))
+  | null $ sliceDims slice = do
+    sOp $ Imp.Barrier Imp.FenceLocal
+    ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+    sWhen (ltid .==. 0) $
+      copyDWIM (patElemName pe) (map (fmap toInt32Exp) slice) se []
+    sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp dest e =
   defCompileExp dest e
 
