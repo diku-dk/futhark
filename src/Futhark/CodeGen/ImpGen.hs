@@ -54,6 +54,11 @@ module Futhark.CodeGen.ImpGen
     lookupMemory,
 
     -- * Building Blocks
+    TV,
+    mkTV,
+    tvSize,
+    tvExp,
+    tvVar,
     ToExp (..),
     compileAlloc,
     everythingVolatile,
@@ -79,7 +84,7 @@ module Futhark.CodeGen.ImpGen
     dScope,
     dArray,
     dPrim,
-    dPrimVol_,
+    dPrimVol,
     dPrim_,
     dPrimV_,
     dPrimV,
@@ -845,14 +850,13 @@ defCompileBasicOp (Pattern [] [pe]) (Iota n e s it) = do
         TPrimExp $
           BinOpExp (Add it OverflowUndef) e' $
             BinOpExp (Mul it OverflowUndef) i' s'
-    copyDWIM (patElemName pe) [DimFix i] (Var x) []
+    copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
 defCompileBasicOp (Pattern _ [pe]) (Copy src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pattern _ [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
-  offs_glb <- dPrim "tmp_offs" int32
-  emit $ Imp.SetScalar offs_glb $ untyped (0 :: Imp.TExp Int32)
+  offs_glb <- dPrimV "tmp_offs" (0 :: Imp.TExp Int32)
 
   forM_ (x : ys) $ \y -> do
     y_dims <- arrayDims <$> lookupType y
@@ -862,9 +866,9 @@ defCompileBasicOp (Pattern _ [pe]) (Concat i x ys _) = do
         skip_dims = take i y_dims
         sliceAllDim d = DimSlice 0 d 1
         skip_slices = map (sliceAllDim . toInt32Exp) skip_dims
-        destslice = skip_slices ++ [DimSlice (Imp.vi32 offs_glb) rows 1]
+        destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
-    emit $ Imp.SetScalar offs_glb $ untyped $ Imp.vi32 offs_glb + rows
+    offs_glb <-- tvExp offs_glb + rows
 defCompileBasicOp (Pattern [] [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
     dest_mem <- entryArrayLocation <$> lookupArray (patElemName pe)
@@ -939,28 +943,36 @@ dFParams = dScope Nothing . scopeOfFParams
 dLParams :: Mem lore => [LParam lore] -> ImpM lore r op ()
 dLParams = dScope Nothing . scopeOfLParams
 
-dPrimVol_ :: VName -> PrimType -> ImpM lore r op ()
-dPrimVol_ name t = do
-  emit $ Imp.DeclareScalar name Imp.Volatile t
-  addVar name $ ScalarVar Nothing $ ScalarEntry t
+dPrimVol :: String -> PrimType -> Imp.TExp t -> ImpM lore r op (TV t)
+dPrimVol name t e = do
+  name' <- newVName name
+  emit $ Imp.DeclareScalar name' Imp.Volatile t
+  addVar name' $ ScalarVar Nothing $ ScalarEntry t
+  name' <~~ untyped e
+  return $ TV name' t
 
 dPrim_ :: VName -> PrimType -> ImpM lore r op ()
 dPrim_ name t = do
   emit $ Imp.DeclareScalar name Imp.Nonvolatile t
   addVar name $ ScalarVar Nothing $ ScalarEntry t
 
-dPrim :: String -> PrimType -> ImpM lore r op VName
+-- | The return type is polymorphic, so there is no guarantee it
+-- actually matches the 'PrimType', but at least we have to use it
+-- consistently.
+dPrim :: String -> PrimType -> ImpM lore r op (TV t)
 dPrim name t = do
   name' <- newVName name
   dPrim_ name' t
-  return name'
+  return $ TV name' t
 
 dPrimV_ :: VName -> Imp.TExp t -> ImpM lore r op ()
 dPrimV_ name e = do
-  dPrim_ name $ primExpType $ untyped e
-  name <-- e
+  dPrim_ name t
+  TV name t <-- e
+  where
+    t = primExpType $ untyped e
 
-dPrimV :: String -> Imp.TExp t -> ImpM lore r op VName
+dPrimV :: String -> Imp.TExp t -> ImpM lore r op (TV t)
 dPrimV name e = do
   name' <- dPrim name $ primExpType $ untyped e
   name' <-- e
@@ -970,7 +982,7 @@ dPrimVE :: String -> Imp.TExp t -> ImpM lore r op (Imp.TExp t)
 dPrimVE name e = do
   name' <- dPrim name $ primExpType $ untyped e
   name' <-- e
-  return $ TPrimExp $ Imp.var name' $ primExpType $ untyped e
+  return $ tvExp name'
 
 memBoundToVarEntry ::
   Maybe (Exp lore) ->
@@ -1041,6 +1053,31 @@ funcallTargets (Destination _ dests) =
       return []
     funcallTarget (MemoryDestination name) =
       return [name]
+
+-- | A typed variable, which we can turn into a typed expression, or
+-- use as the target for an assignment.  This is used to aid in type
+-- safety when doing code generation, by keeping the types straight.
+-- It is still easy to cheat when you need to.
+data TV t = TV VName PrimType
+
+-- | Create a typed variable from a name and a dynamic type.  Note
+-- that there is no guarantee that the dynamic type corresponds to the
+-- inferred static type, but the latter will at least have to be used
+-- consistently.
+mkTV :: VName -> PrimType -> TV t
+mkTV = TV
+
+-- | Convert a typed variable to a size (a SubExp).
+tvSize :: TV t -> Imp.DimSize
+tvSize = Var . tvVar
+
+-- | Convert a typed variable to a similarly typed expression.
+tvExp :: TV t -> Imp.TExp t
+tvExp (TV v t) = Imp.TPrimExp $ Imp.var v t
+
+-- | Extract the underlying variable name from a typed variable.
+tvVar :: TV t -> VName
+tvVar (TV v _) = v
 
 -- | Compile things to 'Imp.Exp'.
 class ToExp a where
@@ -1681,8 +1718,8 @@ x <~~ e = emit $ Imp.SetScalar x e
 infixl 3 <~~
 
 -- | Typed assignment.
-(<--) :: VName -> Imp.TExp t -> ImpM lore r op ()
-x <-- e = emit $ Imp.SetScalar x $ untyped e
+(<--) :: TV t -> Imp.TExp t -> ImpM lore r op ()
+TV x _ <-- e = emit $ Imp.SetScalar x $ untyped e
 
 infixl 3 <--
 
