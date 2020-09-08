@@ -1978,7 +1978,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
   where
     -- Ignore all the boilerplate parameters, just in case we don't
     -- actually need to use them.
-    ignores = [ [C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra ]
+    ignores = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
 
     compileInput (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
