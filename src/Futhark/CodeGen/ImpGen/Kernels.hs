@@ -99,9 +99,9 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
   fname <- askFunction
-  max_num_groups <- dPrim "max_num_groups" int32
+  max_num_groups :: TV Int32 <- dPrim "max_num_groups" int32
   sOp $
-    Imp.GetSize max_num_groups (keyWithEntryPoint fname max_num_groups_key) $
+    Imp.GetSize (tvVar max_num_groups) (keyWithEntryPoint fname max_num_groups_key) $
       sizeClassWithEntryPoint fname SizeNumGroups
 
   -- If 'w' is small, we launch fewer groups than we normally would.
@@ -114,10 +114,10 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key
           ( toInt64Exp w64
               `divUp` sExt64 (toInt32Exp group_size)
           )
-          $ sExt64 (Imp.vi32 max_num_groups)
+          $ sExt64 (tvExp max_num_groups)
   -- We also don't want zero groups.
   let num_groups = sMax64 1 num_groups_maybe_zero
-  patElemName pe <-- sExt32 num_groups
+  mkTV (patElemName pe) int32 <-- sExt32 num_groups
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler pat e =
@@ -165,11 +165,11 @@ checkLocalMemoryReqs code = do
   if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
     then return Nothing
     else do
-      local_memory_capacity <- dPrim "local_memory_capacity" int32
-      sOp $ Imp.GetSizeMax local_memory_capacity SizeLocalMemory
+      local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
+      sOp $ Imp.GetSizeMax (tvVar local_memory_capacity) SizeLocalMemory
 
       let local_memory_capacity_64 =
-            sExt64 $ Imp.vi32 local_memory_capacity
+            sExt64 $ tvExp local_memory_capacity
           fits size =
             unCount size .<=. local_memory_capacity_64
       return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)

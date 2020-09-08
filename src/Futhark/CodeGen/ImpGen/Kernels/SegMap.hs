@@ -36,7 +36,7 @@ compileSegMap pat lvl space kbody = do
         virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
           let global_tid =
-                sExt64 (Imp.vi32 group_id) * sExt64 (unCount group_size')
+                sExt64 group_id * sExt64 (unCount group_size')
                   + sExt64 local_tid
 
           zipWithM_ dPrimV_ is $
@@ -51,7 +51,7 @@ compileSegMap pat lvl space kbody = do
         let virt_num_groups = product dims'
         precomputeSegOpIDs (kernelBodyStms kbody) $
           virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
-            zipWithM_ dPrimV_ is $ unflattenIndex dims' $ Imp.vi32 group_id
+            zipWithM_ dPrimV_ is $ unflattenIndex dims' group_id
 
             compileStms mempty (kernelBodyStms kbody) $
               zipWithM_ (compileGroupResult space) (patternElements pat) $
