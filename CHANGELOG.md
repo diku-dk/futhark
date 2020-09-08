@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Exotic tiling bug (#1112).
 
+  * Missing synchronisation for in-place updates at group level.
+
 ## [0.16.4]
 
 ### Added
