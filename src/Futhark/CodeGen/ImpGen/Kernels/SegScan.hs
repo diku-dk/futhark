@@ -152,7 +152,7 @@ scanStage1 ::
   SegSpace ->
   [SegBinOp KernelsMem] ->
   KernelBody KernelsMem ->
-  CallKernelGen (VName, Imp.TExp Int32, CrossesSegment)
+  CallKernelGen (TV Int32, Imp.TExp Int32, CrossesSegment)
 scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
   let num_groups' = fmap toInt32Exp num_groups
       group_size' = fmap toInt32Exp group_size
@@ -161,7 +161,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map toInt32Exp dims
   let num_elements = product dims'
-      elems_per_thread = num_elements `divUp` Imp.vi32 num_threads
+      elems_per_thread = num_elements `divUp` tvExp num_threads
       elems_per_group = unCount group_size' * elems_per_thread
 
   let crossesSegment =
@@ -172,7 +172,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
 
   sKernelThread "scan_stage1" num_groups' group_size' (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
-    all_local_arrs <- makeLocalArrays group_size (Var num_threads) scans
+    all_local_arrs <- makeLocalArrays group_size (tvSize num_threads) scans
 
     -- The variables from scan_op will be used for the carry and such
     -- in the big chunking loop.
@@ -188,9 +188,9 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
             + kernelGroupId constants * elems_per_group
       flat_idx <-
         dPrimV "flat_idx" $
-          Imp.vi32 chunk_offset + kernelLocalThreadId constants
+          tvExp chunk_offset + kernelLocalThreadId constants
       -- Construct segment indices.
-      zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ Imp.vi32 flat_idx
+      zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
       let per_scan_pes = segBinOpChunks scans all_pes
 
@@ -233,7 +233,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
                   in_bounds
                   ( do
                       readToScanValues (map Imp.vi32 gtids ++ vec_is) pes scan
-                      readCarries (Imp.vi32 chunk_offset) dims' vec_is pes scan
+                      readCarries (tvExp chunk_offset) dims' vec_is pes scan
                   )
                   ( forM_ (zip (yParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
                       copyDWIMFix (paramName p) [] ne []
@@ -247,8 +247,8 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
               let crossesSegment' = do
                     f <- crossesSegment
                     Just $ \from to ->
-                      let from' = from + Imp.vi32 chunk_offset
-                          to' = to + Imp.vi32 chunk_offset
+                      let from' = from + tvExp chunk_offset
+                          to' = to + tvExp chunk_offset
                        in f from' to'
 
               sOp $ Imp.ErrorSync fence
@@ -257,7 +257,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
               scan_op_renamed <- renameLambda scan_op
               groupScan
                 crossesSegment'
-                (Imp.vi32 num_threads)
+                (tvExp num_threads)
                 (kernelGroupSize constants)
                 scan_op_renamed
                 local_arrs
@@ -293,10 +293,10 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
                     Nothing -> false
                     Just f ->
                       f
-                        ( Imp.vi32 chunk_offset
+                        ( tvExp chunk_offset
                             + kernelGroupSize constants -1
                         )
-                        ( Imp.vi32 chunk_offset
+                        ( tvExp chunk_offset
                             + kernelGroupSize constants
                         )
                 should_load_carry <-
@@ -312,7 +312,7 @@ scanStage1 (Pattern _ all_pes) num_groups group_size space scans kbody = do
 
 scanStage2 ::
   Pattern KernelsMem ->
-  VName ->
+  TV Int32 ->
   Imp.TExp Int32 ->
   Count NumGroups SubExp ->
   CrossesSegment ->
@@ -334,7 +334,7 @@ scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups cro
 
   sKernelThread "scan_stage2" 1 group_size' (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
-    per_scan_local_arrs <- makeLocalArrays group_size (Var stage1_num_threads) scans
+    per_scan_local_arrs <- makeLocalArrays group_size (tvSize stage1_num_threads) scans
     let per_scan_rets = map (lambdaReturnType . segBinOpLambda) scans
         per_scan_pes = segBinOpChunks scans all_pes
 
@@ -342,7 +342,7 @@ scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups cro
       dPrimV "flat_idx" $
         (kernelLocalThreadId constants + 1) * elems_per_group - 1
     -- Construct segment indices.
-    zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ Imp.vi32 flat_idx
+    zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
     forM_ (zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
       \(SegBinOp _ scan_op nes vec_shape, local_arrs, rets, pes) ->
@@ -371,7 +371,7 @@ scanStage2 (Pattern _ all_pes) stage1_num_threads elems_per_group num_groups cro
 
           groupScan
             crossesSegment'
-            (Imp.vi32 stage1_num_threads)
+            (tvExp stage1_num_threads)
             (kernelGroupSize constants)
             scan_op
             local_arrs
@@ -410,7 +410,7 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
       -- Compute our logical index.
       flat_idx <-
         dPrimVE "flat_idx" $
-          Imp.vi32 virt_group_id * unCount group_size'
+          virt_group_id * unCount group_size'
             + kernelLocalThreadId constants
       zipWithM_ dPrimV_ gtids $ unflattenIndex dims' flat_idx
 
@@ -419,9 +419,9 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
       -- Then the index of the carry-in of the preceding group.
       carry_in_flat_idx <-
         dPrimV "carry_in_flat_idx" $
-          Imp.vi32 orig_group * elems_per_group - 1
+          tvExp orig_group * elems_per_group - 1
       -- Figure out the logical index of the carry-in.
-      let carry_in_idx = unflattenIndex dims' $ Imp.vi32 carry_in_flat_idx
+      let carry_in_idx = unflattenIndex dims' $ tvExp carry_in_flat_idx
 
       -- Apply the carry if we are not in the scan results for the first
       -- group, and are not the last element in such a group (because
@@ -432,10 +432,10 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
           crosses_segment =
             fromMaybe false $
               crossesSegment
-                <*> pure (Imp.vi32 carry_in_flat_idx)
+                <*> pure (tvExp carry_in_flat_idx)
                 <*> pure flat_idx
-          is_a_carry = flat_idx .==. (Imp.vi32 orig_group + 1) * elems_per_group - 1
-          no_carry_in = Imp.vi32 orig_group .==. 0 .||. is_a_carry .||. crosses_segment
+          is_a_carry = flat_idx .==. (tvExp orig_group + 1) * elems_per_group - 1
+          no_carry_in = tvExp orig_group .==. 0 .||. is_a_carry .||. crosses_segment
 
       let per_scan_pes = segBinOpChunks scans all_pes
       sWhen in_bounds $
@@ -485,14 +485,13 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
-  stage1_max_num_groups <-
-    dPrim "stage1_max_num_groups" int32
-  sOp $ Imp.GetSizeMax stage1_max_num_groups SizeGroup
+  stage1_max_num_groups <- dPrim "stage1_max_num_groups" int32
+  sOp $ Imp.GetSizeMax (tvVar stage1_max_num_groups) SizeGroup
 
   stage1_num_groups <-
-    fmap (Imp.Count . Var) $
+    fmap (Imp.Count . tvSize) $
       dPrimV "stage1_num_groups" $
-        sMin32 (Imp.vi32 stage1_max_num_groups) $
+        sMin32 (tvExp stage1_max_num_groups) $
           toInt32Exp $ Imp.unCount $ segNumGroups lvl
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
