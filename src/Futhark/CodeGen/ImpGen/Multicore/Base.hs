@@ -33,7 +33,6 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
-import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (maybeNth)
 import Prelude hiding (quot, rem)
@@ -158,8 +157,8 @@ getNumThreads' dest =
 getNumThreads :: MulticoreGen (Imp.TExp Int32)
 getNumThreads = do
   v <- dPrim "num_threads" (IntType Int32)
-  getNumThreads' v
-  return $ Imp.vi32 v
+  getNumThreads' $ tvVar v
+  return $ tvExp v
 
 isLoadBalanced :: Imp.Code -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
@@ -290,10 +289,10 @@ atomicUpdateLocking atomicBinOp lam
 
         (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
 
-        case opHasAtomicSupport old arr' (sExt32 <$> bucket_offset) op of
+        case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
           Just f -> sOp $ f $ Imp.var y t
           Nothing ->
-            atomicUpdateCAS t a old bucket x $
+            atomicUpdateCAS t a (tvVar old) bucket x $
               x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
@@ -310,13 +309,11 @@ atomicUpdateLocking _ op
     [xp, _] <- lambdaParams op,
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
     old <- dPrim "old" t
-    atomicUpdateCAS t arr old bucket (paramName xp) $
+    atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
       compileBody' [xp] $ lambdaBody op
 atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
   old <- dPrim "old" int32
-  continue <- newVName "continue"
-  dPrimVol_ continue int32
-  continue <-- (0 :: Imp.TExp Int32)
+  continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
 
   -- Correctly index into locks.
   (locks', _locks_space, locks_offset) <-
@@ -329,12 +326,12 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
           Imp.Atomic $
             Imp.AtomicCmpXchg
               int32
-              old
+              (tvVar old)
               locks'
               (sExt32 <$> locks_offset)
-              continue
+              (tvVar continue)
               (untyped (lockingToLock locking))
-      lock_acquired = Imp.vi32 continue -- .==. lockingIsUnlocked locking
+      lock_acquired = tvExp continue
       -- Even the releasing is done with an atomic rather than a
       -- simple write, for memory coherency reasons.
       release_lock = do
@@ -343,10 +340,10 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
           Imp.Atomic $
             Imp.AtomicCmpXchg
               int32
-              old
+              (tvVar old)
               locks'
               (sExt32 <$> locks_offset)
-              continue
+              (tvVar continue)
               (untyped (lockingToUnlock locking))
 
   -- Preparing parameters. It is assumed that the caller has already
@@ -369,7 +366,7 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
             zipWithM_ (writeArray bucket) arrs $ map (Var . paramName) acc_params
 
   -- While-loop: Try to insert your value
-  sWhile (Imp.vi32 continue .==. 0) $ do
+  sWhile (tvExp continue .==. 0) $ do
     try_acquire_lock
     sUnless (lock_acquired .==. 0) $ do
       dLParams acc_params
@@ -412,7 +409,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
             )
           _ -> (id, id)
 
-  sWhile (Imp.vi32 run_loop .==. 0) $ do
+  sWhile (tvExp run_loop .==. 0) $ do
     x <~~ Imp.var old t
     do_op -- Writes result into x
     sOp $
@@ -422,7 +419,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
           old
           arr'
           (sExt32 <$> bucket_offset)
-          run_loop
+          (tvVar run_loop)
           (toBits (Imp.var x t))
 
 -- | Horizontally fission a lambda that models a binary operator.

@@ -34,18 +34,18 @@ writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
 compileSegMapBody ::
-  VName ->
+  TV Int64 ->
   Pattern MCMem ->
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
 compileSegMapBody flat_idx pat space (KernelBody _ kstms kres) = do
   let (is, ns) = unzip $ unSegSpace space
-      ns' = map toInt32Exp ns
+      ns' = map (sExt64 . toInt32Exp) ns
   kstms' <- mapM renameStm kstms
   collect $ do
     emit $ Imp.DebugPrint "SegMap fbody" Nothing
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
+    zipWithM_ dPrimV_ is $ map sExt32 $ unflattenIndex ns' $ tvExp flat_idx
     compileStms (freeIn kres) kstms' $
       zipWithM_ (writeResult is) (patternElements pat) kres
 
@@ -58,9 +58,9 @@ compileSegMap pat space kbody =
   collect $ do
     flat_par_idx <- dPrim "iter" int64
     body <- compileSegMapBody flat_par_idx pat space kbody
-    free_params <- freeParams body [segFlat space, flat_par_idx]
+    free_params <- freeParams body [segFlat space, tvVar flat_par_idx]
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.ParLoop "segmap" flat_par_idx body_allocs body' mempty free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
 
 compileSequentialSegMap ::
   Pattern MCMem ->
@@ -69,7 +69,7 @@ compileSequentialSegMap ::
   MulticoreGen Imp.Code
 compileSequentialSegMap pat space kbody = do
   let ns = map snd $ unSegSpace space
-      ns' = map toInt32Exp ns
+      ns' = map (sExt64 . toInt32Exp) ns
   collect $ do
     emit $ Imp.DebugPrint "SegMap sequential" Nothing
     flat_seq_idx <- dPrim "seq_iter" int32
