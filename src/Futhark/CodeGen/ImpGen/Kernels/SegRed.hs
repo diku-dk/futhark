@@ -197,7 +197,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   sKernelThread "segred_nonseg" num_groups' group_size' (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
-    reds_arrs <- mapM (intermediateArrays group_size (Var num_threads)) reds
+    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
 
     -- Since this is the nonsegmented case, all outer segment IDs must
     -- necessarily be 0.
@@ -220,7 +220,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
         num_elements
         global_tid
         elems_per_thread
-        num_threads
+        (tvVar num_threads)
         slugs
         body
 
@@ -280,14 +280,13 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
       segment_size = last dims'
 
   -- Careful to avoid division by zero now.
-  segment_size_nonzero_v <-
-    dPrimV "segment_size_nonzero" $ sMax32 1 segment_size
+  segment_size_nonzero <-
+    dPrimVE "segment_size_nonzero" $ sMax32 1 segment_size
 
   let num_groups' = fmap toInt32Exp num_groups
       group_size' = fmap toInt32Exp group_size
   num_threads <- dPrimV "num_threads" $ unCount num_groups' * unCount group_size'
-  let segment_size_nonzero = Imp.vi32 segment_size_nonzero_v
-      num_segments = product $ init dims'
+  let num_segments = product $ init dims'
       segments_per_group = unCount group_size' `quot` segment_size_nonzero
       required_groups = num_segments `divUp` segments_per_group
 
@@ -299,13 +298,12 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
 
   sKernelThread "segred_small" num_groups' group_size' (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (Var num_threads)) reds
+    reds_arrs <- mapM (intermediateArrays group_size (Var $ tvVar num_threads)) reds
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
     -- duty; we put an outer loop to accomplish this.
-    virtualiseGroups SegVirt required_groups $ \group_id_var' -> do
-      let group_id' = Imp.vi32 group_id_var'
+    virtualiseGroups SegVirt required_groups $ \group_id' -> do
       -- Compute the 'n' input indices.  The outer 'n-1' correspond to
       -- the segment ID, and are computed from the group id.  The inner
       -- is computed from the local thread id, and may be out-of-bounds.
@@ -344,7 +342,7 @@ smallSegmentsReduction (Pattern _ segred_pes) num_groups group_size space reds b
           forM_ (zip reds reds_arrs) $ \(SegBinOp _ red_op _ _, red_arrs) ->
             groupScan
               (Just crossesSegment)
-              (Imp.vi32 num_threads)
+              (tvExp num_threads)
               (segment_size * segments_per_group)
               red_op
               red_arrs
@@ -407,13 +405,13 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
   emit $ Imp.DebugPrint "\n# SegRed-large" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just $ untyped num_segments
   emit $ Imp.DebugPrint "segment_size" $ Just $ untyped segment_size
-  emit $ Imp.DebugPrint "virt_num_groups" $ Just $ untyped $ Imp.vi32 virt_num_groups
+  emit $ Imp.DebugPrint "virt_num_groups" $ Just $ untyped $ tvExp virt_num_groups
   emit $ Imp.DebugPrint "num_groups" $ Just $ untyped $ Imp.unCount num_groups'
   emit $ Imp.DebugPrint "group_size" $ Just $ untyped $ Imp.unCount group_size'
   emit $ Imp.DebugPrint "elems_per_thread" $ Just $ untyped $ Imp.unCount elems_per_thread
   emit $ Imp.DebugPrint "groups_per_segment" $ Just $ untyped groups_per_segment
 
-  reds_group_res_arrs <- groupResultArrays (Count (Var virt_num_groups)) group_size reds
+  reds_group_res_arrs <- groupResultArrays (Count (tvSize virt_num_groups)) group_size reds
 
   -- In principle we should have a counter for every segment.  Since
   -- the number of segments is a dynamic quantity, we would have to
@@ -432,16 +430,15 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
 
   sKernelThread "segred_large" num_groups' group_size' (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (Var num_threads)) reds
+    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
     -- duty; we put an outer loop to accomplish this.
-    virtualiseGroups SegVirt (Imp.vi32 virt_num_groups) $ \group_id_var -> do
+    virtualiseGroups SegVirt (tvExp virt_num_groups) $ \group_id -> do
       let segment_gtids = init gtids
           w = last dims
-          group_id = Imp.vi32 group_id_var
           local_tid = kernelLocalThreadId constants
 
       flat_segment_id <-
@@ -470,7 +467,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
           num_elements
           global_tid
           elems_per_thread
-          threads_per_segment
+          (tvVar threads_per_segment)
           slugs
           body
 
@@ -586,7 +583,7 @@ segBinOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
         acc <- dPrim (baseString (paramName p) <> "_acc") t
-        return (acc, [])
+        return (tvVar acc, [])
       | otherwise =
         return (param_arr, [local_tid, group_id])
 
@@ -602,7 +599,7 @@ reductionStageZero ::
   InKernelGen ([Lambda KernelsMem], InKernelGen ())
 reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
   let (gtids, _dims) = unzip ispace
-      gtid = last gtids
+      gtid = mkTV (last gtids) int32
       local_tid = kernelLocalThreadId constants
 
   -- Figure out how many elements this thread should process.
@@ -649,10 +646,10 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
   let comm = slugsComm slugs
       (bound, check_bounds) =
         case comm of
-          Commutative -> (Imp.vi32 chunk_size, id)
+          Commutative -> (tvExp chunk_size, id)
           Noncommutative ->
             ( Imp.unCount elems_per_thread,
-              sWhen (Imp.vi32 gtid .<. Imp.unCount num_elements)
+              sWhen (tvExp gtid .<. Imp.unCount num_elements)
             )
 
   sFor "i" bound $ \i -> do
@@ -787,19 +784,19 @@ reductionStageTwo
           Imp.Atomic DefaultSpace $
             Imp.AtomicAdd
               Int32
-              old_counter
+              (tvVar old_counter)
               counter_mem
               (sExt32 <$> counter_offset)
               $ untyped (1 :: Imp.TExp Int32)
         -- Now check if we were the last group to write our result.  If
         -- so, it is our responsibility to produce the final result.
-        sWrite sync_arr [0] $ untyped $ Imp.vi32 old_counter .==. groups_per_segment - 1
+        sWrite sync_arr [0] $ untyped $ tvExp old_counter .==. groups_per_segment - 1
 
     sOp $ Imp.Barrier Imp.FenceGlobal
 
     is_last_group <- dPrim "is_last_group" Bool
-    copyDWIMFix is_last_group [] (Var sync_arr) [0]
-    sWhen (isBool $ Imp.var is_last_group Bool) $ do
+    copyDWIMFix (tvVar is_last_group) [] (Var sync_arr) [0]
+    sWhen (tvExp is_last_group) $ do
       -- The final group has written its result (and it was
       -- us!), so read in all the group results and perform the
       -- final stage of the reduction.  But first, we reset the
@@ -809,7 +806,7 @@ reductionStageTwo
       sWhen (local_tid .==. 0) $
         sOp $
           Imp.Atomic DefaultSpace $
-            Imp.AtomicAdd Int32 old_counter counter_mem (sExt32 <$> counter_offset) $
+            Imp.AtomicAdd Int32 (tvVar old_counter) counter_mem (sExt32 <$> counter_offset) $
               untyped $ negate groups_per_segment
 
       sLoopNest (slugShape slug) $ \vec_is -> do
