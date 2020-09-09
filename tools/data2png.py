@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 #
-# Turn a Futhark value encoded in the binary data format on stdin into
-# a PNG image to the provided file.  Very little error checking is
+# Turn a Futhark value encoded in the binary data format in some file
+# into a PNG image in another file.  Very little error checking is
 # done.  The following input types are supported:
 #
+#  [height][width]u8
 #  [height][width]i32
+#  [height][width]u32
+#
+#  [height][width]f32
 #
 #  [height][width][3]i8
-#
+#  [height][width][3]u8
 #
 # Requires purepng and Numpy.
+#
+# Example:
+#
+# $ cat input | ./some-futhark-program | tools/data2png.py /dev/stdin out.png
 
 import sys
 import struct
