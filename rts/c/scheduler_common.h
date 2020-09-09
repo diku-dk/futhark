@@ -59,7 +59,7 @@ static volatile int active_work = 0;
 static volatile sig_atomic_t num_workers;
 __thread struct worker* worker_local = NULL;
 
-static volatile int scheduler_error = 0;
+static volatile sig_atomic_t scheduler_error = 0;
 
 // kappa time unit in nanoseconds
 static double kappa = 5.1f * 1000;
@@ -134,6 +134,10 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,
                         worker->tid);
+  if (__atomic_load_n(&scheduler_error, __ATOMIC_RELAXED) != 0) {
+    free(subtask);
+    return 0;
+  }
   if (err != 0) {
     __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
   }
