@@ -73,19 +73,25 @@ typedef int (*parloop_fn)(void* args, int64_t start, int64_t end, int subtask_id
 
 /* A subtask that can be executed by a thread */
 struct subtask {
-  parloop_fn fn;
+  parloop_fn fn; // The parloop function
+  // Execution parameters
   void* args;
   int64_t start, end;
-  const char *name;
+  int id;
+
+  // Dynamic scheduling paramters
   int chunkable;
   int64_t chunk_size;
-  int stolen_from;
-  int id;
 
   // Shared variables across subtasks
   volatile int *counter; // Counter for ongoing subtasks
-  int64_t *total_time;
-  int64_t *total_iter;
+
+  // Shared task timers and iterators
+  int64_t *task_time;
+  int64_t *task_iter;
+
+  // For debugging
+  const char *name;
 };
 
 

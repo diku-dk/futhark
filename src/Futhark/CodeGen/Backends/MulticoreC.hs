@@ -574,24 +574,25 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
   let ftask_name = fstruct <> "_task"
   GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
   GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
-  GC.stm [C.cstm|$id:ftask_name.seq_fn = $id:fpar_task;|]
+  GC.stm [C.cstm|$id:ftask_name.sequential_fn = $id:fpar_task;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  GC.stm [C.cstm|$id:ftask_name.total_iter = &ctx->$id:(functionIterations fpar_task);|]
-  GC.stm [C.cstm|$id:ftask_name.total_time = &ctx->$id:(functionTiming fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(functionTiming fpar_task);|]
 
   case sched of
     Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
     Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
+  -- Generate the canonical task function too
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code nested_tid) -> do
       let lexical_npar = lexicalMemoryUsage $ Function False [] params nested_code [] []
       fnpar_task <- generateFunction lexical_npar (name ++ "_nested_par_task") nested_code fstruct free retval nested_tid nsubtask
-      GC.stm [C.cstm|$id:ftask_name.par_fn = $id:fnpar_task;|]
+      GC.stm [C.cstm|$id:ftask_name.canonical_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
     Nothing -> do
-      GC.stm [C.cstm|$id:ftask_name.par_fn=NULL;|]
+      GC.stm [C.cstm|$id:ftask_name.canonical_fn=NULL;|]
       return mempty
 
   let ftask_err = fpar_task <> "_err"

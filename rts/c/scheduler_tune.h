@@ -1,3 +1,4 @@
+/* The self-tuning program to estimate $\kappa$ */
 
 struct futhark_mc_segred_stage_1_struct {
   struct futhark_context *ctx;
@@ -79,8 +80,8 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     info.nsubtasks = iterations / min_iter_pr_subtask;
     info.remainder = iterations % min_iter_pr_subtask;
 
-    info.total_time = &tuning_time;
-    info.total_iter = &tuning_iter;
+    info.task_time = &tuning_time;
+    info.task_iter = &tuning_iter;
 
     info.sched = STATIC;
 

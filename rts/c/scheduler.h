@@ -95,9 +95,9 @@ static inline void *scheduler_worker(void* arg)
 
 
 
-static inline int scheduler_execute_parallel(struct scheduler *scheduler,
-                                             struct scheduler_parloop *task,
-                                             int64_t *timer)
+static inline int scheduler_execute_parloop(struct scheduler *scheduler,
+                                            struct scheduler_parloop *task,
+                                            int64_t *timer)
 {
 
   struct worker * worker = worker_local;
@@ -114,10 +114,9 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
   int64_t task_iter = 0;
 
   enum scheduling sched = info.sched;
-  /* Each subtasks can be processed in chunks */
+  /* If each subtasks should be processed in chunks */
   int chunkable = sched == STATIC ? 0 : 1;
-  int64_t iter = 1;
-
+  int64_t chunk_size = 1; // The initial chunk size when no info is avaliable
 
 
   if (info.wake_up_threads || sched == DYNAMIC)
@@ -131,7 +130,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
                                             &shared_counter,
                                             &task_timer, &task_iter,
                                             start, end,
-                                            chunkable, iter,
+                                            chunkable, chunk_size,
                                             subtask_id);
     assert(subtask != NULL);
     if (worker->nested){
@@ -270,7 +269,7 @@ static inline void wake_up_all_threads(struct scheduler *scheduler) {
 }
 
 
-static inline int scheduler_execute_parallel(struct scheduler *scheduler,
+static inline int scheduler_execute_parloop(struct scheduler *scheduler,
                                              struct scheduler_parloop *task,
                                              int64_t *timer)
 {
@@ -317,6 +316,7 @@ static inline int scheduler_execute_parallel(struct scheduler *scheduler,
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
   }
 
+  // Join wait for subtasks to finish
   while(shared_counter != 0 && scheduler_error == 0) {
     if (!empty(&worker->q)) {
       struct subtask * subtask = pop_back(&worker->q);
@@ -372,13 +372,13 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
       time_before = total_now(worker->total, worker->timer);
     }
 
-    err = scheduler_execute_parallel(scheduler, task, &task_timer);
+    err = scheduler_execute_parloop(scheduler, task, &task_timer);
 
 
     // Report time measurements
     // TODO the update of both of these should really both be atomic!!
-    __atomic_fetch_add(task->info.total_time, task_timer, __ATOMIC_RELAXED);
-    __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED);
+    __atomic_fetch_add(task->info.task_time, task_timer, __ATOMIC_RELAXED);
+    __atomic_fetch_add(task->info.task_iter, task->iterations, __ATOMIC_RELAXED);
 
     // Reset timers to account for new timings
     worker->total = time_before + task_timer;
@@ -398,19 +398,19 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 
   struct worker *worker = worker_local;
   struct scheduler_info info;
-  info.total_time = task->total_time;
-  info.total_iter = task->total_iter;
+  info.task_time = task->task_time;
+  info.task_iter = task->task_iter;
 
   int max_num_tasks = task->sched == STATIC ?
     compute_max_num_subtasks(scheduler->num_threads, info, task->iterations):
     scheduler->num_threads;
 
   // Decide if task should be scheduled sequentially
-  if (max_num_tasks <= 1 || is_small(task, max_num_tasks)) {
+  if (is_small(task, max_num_tasks)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = 1;
-    return task->seq_fn(task->args, task->iterations, worker->tid, info);
+    return task->sequential_fn(task->args, task->iterations, worker->tid, info);
   } else {
     info.iter_pr_subtask = task->iterations / max_num_tasks;
     info.remainder = task->iterations % max_num_tasks;
@@ -430,17 +430,16 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 
   }
 
-  /* fprintf(stderr, "starting task %s with %d - iter %ldd - nested %d \n", task->name, info.nsubtasks, task->iterations, worker->nested); */
   info.wake_up_threads = 0;
   // We use the nested parallel task function is we can't exchaust all cores
   // using the outer most level
-  if (task->par_fn != NULL && (info.nsubtasks + active_work) < scheduler->num_threads) {
+  if (task->canonical_fn != NULL && (info.nsubtasks + active_work) < scheduler->num_threads) {
     if (worker->nested == 0)
       info.wake_up_threads = 1;
-    return task->par_fn(task->args, task->iterations, worker->tid, info);
+    return task->canonical_fn(task->args, task->iterations, worker->tid, info);
   }
 
-  return task->seq_fn(task->args, task->iterations, worker->tid, info);
+  return task->sequential_fn(task->args, task->iterations, worker->tid, info);
 }
 
 #endif
