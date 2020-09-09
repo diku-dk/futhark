@@ -401,28 +401,25 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   info.task_time = task->task_time;
   info.task_iter = task->task_iter;
 
-  int max_num_tasks = task->sched == STATIC ?
-    compute_max_num_subtasks(scheduler->num_threads, info, task->iterations):
-    scheduler->num_threads;
-
+  int nsubtasks;
   // Decide if task should be scheduled sequentially
-  if (is_small(task, max_num_tasks)) {
+  if (is_small(task, scheduler->num_threads, &nsubtasks)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
-    info.nsubtasks = 1;
+    info.nsubtasks = nsubtasks;
     return task->sequential_fn(task->args, task->iterations, worker->tid, info);
   } else {
-    info.iter_pr_subtask = task->iterations / max_num_tasks;
-    info.remainder = task->iterations % max_num_tasks;
+    info.iter_pr_subtask = task->iterations / nsubtasks;
+    info.remainder = task->iterations % nsubtasks;
     info.sched = task->sched;
     switch (task->sched) {
     case STATIC:
       info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : ((task->iterations - info.remainder) / info.iter_pr_subtask);
       break;
     case DYNAMIC:
-      // As any thread can take any subtasks, we are being safe with returning
+      // As any thread can take any subtasks, we are being safe with using
       // an upper bound on the number of tasks such that the task allocate enough memory
-      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : max_num_tasks;
+      info.nsubtasks = info.iter_pr_subtask == 0 ? info.remainder : nsubtasks;
       break;
     default:
       assert(!"Got unknown scheduling");

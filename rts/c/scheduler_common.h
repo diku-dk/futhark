@@ -153,35 +153,31 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 }
 
 
-static inline int compute_max_num_subtasks(int nthreads,
-                                           struct scheduler_info info,
-                                           long int iterations)
-{
-  if (*info.task_iter == 0) return nthreads;
-  double C = (double)*info.task_time / (double)*info.task_iter;
-  int64_t min_iter_pr_subtask = (int64_t)(kappa / (C + DBL_EPSILON));
-  if (min_iter_pr_subtask == 0) return nthreads; // => kappa < C
-  return (int)min_int64(max_int64(iterations / min_iter_pr_subtask, 1), nthreads);
-}
-
-
-static inline int is_small(struct scheduler_task *task, int nsubtasks)
+static inline int is_small(struct scheduler_task *task, int nthreads, int *nsubtasks)
 {
   int64_t time = *task->task_time;
   int64_t iter = *task->task_iter;
 
-  if (task->sched == DYNAMIC) return 0;
-  if (*task->task_iter == 0) return 0;
+
+  if (task->sched == DYNAMIC || *task->task_iter == 0) {
+    *nsubtasks = nthreads;
+    return 0;
+  }
 
   // Estimate the constant C
   double C = (double)time / (double)iter;
   double cur_task_iter = (double) task->iterations;
 
-  // Returns true if the task is small if
-  // 1. If the number of maximum subtask worth creating is less or equal to 1
-  // 2. If the number of iterations times C is smaller than the overhead of task creation
-  if (nsubtasks <= 1 || C * cur_task_iter < kappa * nsubtasks)
+  // Returns true if the task is small i.e.
+  // if the number of iterations times C is smaller than the overhead of task creation
+  if (C * cur_task_iter < kappa) {
+    *nsubtasks = 1;
     return 1;
+  }
+
+  // Else compute how many subtasks this tasks should create
+  int64_t min_iter_pr_subtask = max_int64((int64_t)(kappa / (C + DBL_EPSILON)), 1);
+  *nsubtasks = (int)min_int64(max_int64(task->iterations / min_iter_pr_subtask, 1), nthreads);
 
   return 0;
 }
