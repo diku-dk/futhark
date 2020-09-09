@@ -22,7 +22,7 @@ compileSegRed ::
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  VName ->
+  TV Int32 ->
   MulticoreGen Imp.Code
 compileSegRed pat space reds kbody nsubtasks =
   compileSegRed' pat space reds nsubtasks $ \red_cont ->
@@ -40,7 +40,7 @@ compileSegRed' ::
   Pattern MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
-  VName ->
+  TV Int32 ->
   DoSegBody ->
   MulticoreGen Imp.Code
 compileSegRed' pat space reds nsubtasks kbody
@@ -82,18 +82,18 @@ nonsegmentedReduction ::
   Pattern MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
-  VName ->
+  TV Int32 ->
   DoSegBody ->
   MulticoreGen Imp.Code
 nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   -- Thread id for indexing into each threads accumulator element(s)
   let tid' = Imp.vi32 $ segFlat space
-  thread_red_arrs <- groupResultArrays "reduce_stage_1_tid_accum_arr" (Var nsubtasks) reds
+  thread_red_arrs <- groupResultArrays "reduce_stage_1_tid_accum_arr" (tvSize nsubtasks) reds
   slugs1 <- mapM (segBinOpOpSlug tid') $ zip reds thread_red_arrs
-  let nsubtasks' = Imp.vi32 nsubtasks
+  let nsubtasks' = tvExp nsubtasks
 
   sFor "i" nsubtasks' $ \i -> do
-    segFlat space <-- i
+    mkTV (segFlat space) int32 <-- i
     sComment "neutral-initialise the acc used by tid" $
       forM_ slugs1 $ \slug ->
         forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
@@ -103,7 +103,7 @@ nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
   reductionStage1 space slugs1 kbody
   reds2 <- renameSegBinOp reds
   slugs2 <- mapM (segBinOpOpSlug tid') $ zip reds2 thread_red_arrs
-  reductionStage2 pat space nsubtasks slugs2
+  reductionStage2 pat space nsubtasks' slugs2
 
 reductionStage1 ::
   SegSpace ->
@@ -141,7 +141,7 @@ reductionStage1 space slugs kbody = do
           _ -> return mempty
 
   fbody <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi64 flat_idx
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ tvExp flat_idx
     dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
     kbody $ \all_red_res -> do
       let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
@@ -187,19 +187,18 @@ reductionStage1 space slugs kbody = do
             copyDWIMFix acc acc_is (Var redout') []
           _ -> return mempty
 
-  free_params <- freeParams (prebody <> fbody) (segFlat space : [flat_idx])
+  free_params <- freeParams (prebody <> fbody) (segFlat space : [tvVar flat_idx])
   let (body_allocs, fbody') = extractAllocations fbody
-  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" flat_idx (body_allocs <> prebody) fbody' post_body free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" (tvVar flat_idx) (body_allocs <> prebody) fbody' post_body free_params $ segFlat space
 
 reductionStage2 ::
   Pattern MCMem ->
   SegSpace ->
-  VName ->
+  Imp.TExp Int32 ->
   [SegBinOpSlug] ->
   MulticoreGen ()
 reductionStage2 pat space nsubtasks slugs = do
   let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternValueElements pat
-      nsubtasks' = Imp.vi32 nsubtasks
   sComment "neutral-initialise the output" $
     forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
       forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
@@ -208,8 +207,8 @@ reductionStage2 pat space nsubtasks slugs = do
 
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
-  sFor "i" nsubtasks' $ \i' -> do
-    segFlat space <-- i'
+  sFor "i" nsubtasks $ \i' -> do
+    mkTV (segFlat space) int32 <-- i'
     sComment "Apply main thread reduction" $
       forM_ (zip slugs per_red_pes) $ \(slug, red_res) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
@@ -238,12 +237,12 @@ segmentedReduction pat space reds kbody =
   collect $ do
     n_par_segments <- dPrim "segment_iter" $ IntType Int64
     body <- compileSegRedBody n_par_segments pat space reds kbody
-    free_params <- freeParams body (segFlat space : [n_par_segments])
+    free_params <- freeParams body (segFlat space : [tvVar n_par_segments])
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" n_par_segments body_allocs body' mempty free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "segmented_segred" (tvVar n_par_segments) body_allocs body' mempty free_params $ segFlat space
 
 compileSegRedBody ::
-  VName ->
+  TV Int64 ->
   Pattern MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
@@ -253,12 +252,12 @@ compileSegRedBody n_segments pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map (sExt64 . toInt32Exp) ns
       inner_bound = last ns_64
-      n_segments' = Imp.vi32 n_segments
+      n_segments' = tvExp n_segments
 
   let per_red_pes = segBinOpChunks reds $ patternValueElements pat
   -- Perform sequential reduce on inner most dimension
   collect $ do
-    flat_idx <- dPrimVE "flat_idx" $ sExt64 n_segments' * inner_bound
+    flat_idx <- dPrimVE "flat_idx" $ n_segments' * inner_bound
     zipWithM_ dPrimV_ is $ map sExt32 $ unflattenIndex ns_64 flat_idx
     sComment "neutral-initialise the accumulators" $
       forM_ (zip per_red_pes reds) $ \(pes, red) ->
@@ -269,7 +268,10 @@ compileSegRedBody n_segments pat space reds kbody = do
     sComment "main body" $ do
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
       sFor "i" inner_bound $ \i -> do
-        forM_ (zip (init is) $ map sExt32 $ unflattenIndex (init ns_64) (sExt64 n_segments')) $ uncurry (<--)
+        zipWithM_
+          (<--)
+          (map (`mkTV` int32) $ init is)
+          (map sExt32 $ unflattenIndex (init ns_64) (sExt64 n_segments'))
         dPrimV_ (last is) i
         kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res

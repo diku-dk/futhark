@@ -372,7 +372,7 @@ bytes = Count
 -- per-element size.
 withElemType :: Count Elements (TExp Int32) -> PrimType -> Count Bytes (TExp Int64)
 withElemType (Count e) t =
-  bytes $ isInt64 (sExt Int64 (untyped e)) * isInt64 (LeafExp (SizeOf t) (IntType Int64))
+  bytes $ sExt64 e * isInt64 (LeafExp (SizeOf t) (IntType Int64))
 
 -- | Turn a 'VName' into a 'Imp.ScalarVar'.
 var :: VName -> PrimType -> Exp

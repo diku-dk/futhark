@@ -961,10 +961,10 @@ arrayLibraryFunctions space pt signed shape = do
     [C.cedecl|struct $id:arr_name;|]
   headerDecl
     (ArrayDecl name)
-    [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params);|]
   headerDecl
     (ArrayDecl name)
-    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset, $params:shape_params);|]
   headerDecl
     (ArrayDecl name)
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
@@ -980,7 +980,7 @@ arrayLibraryFunctions space pt signed shape = do
 
   return
     [C.cunit|
-          $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
+          $ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params) {
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
@@ -990,7 +990,7 @@ arrayLibraryFunctions space pt signed shape = do
             return arr;
           }
 
-          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset,
                                             $params:shape_params) {
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
@@ -2008,6 +2008,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     return
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
+               $stms:ignores
                int err = 0;
                $items:decl_cached
                $items:get_constants
@@ -2019,6 +2020,10 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
   }|]
       )
   where
+    -- Ignore all the boilerplate parameters, just in case we don't
+    -- actually need to use them.
+    ignores = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
+
     compileInput (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
       return [C.cparam|$ty:ctp $id:name|]

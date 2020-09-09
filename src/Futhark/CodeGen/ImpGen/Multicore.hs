@@ -57,7 +57,7 @@ compileMCOp pat (ParOp par_op op) = do
   seq_code <- compileSegOp pat op nsubtasks
   retvals <- getReturnParams pat op
 
-  let scheduling_info = Imp.SchedulerInfo nsubtasks (untyped iterations)
+  let scheduling_info = Imp.SchedulerInfo (tvVar nsubtasks) (untyped iterations)
 
   par_code <- case par_op of
     Just nested_op -> do
@@ -71,7 +71,7 @@ compileMCOp pat (ParOp par_op op) = do
         Nothing -> Nothing
 
   let non_free =
-        ( [segFlat space, nsubtasks]
+        ( [segFlat space, tvVar nsubtasks]
             ++ map Imp.paramName retvals
         )
           ++ case par_op of
@@ -87,7 +87,7 @@ compileMCOp pat (ParOp par_op op) = do
 compileSegOp ::
   Pattern MCMem ->
   SegOp () MCMem ->
-  VName ->
+  TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.Code
 compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
   compileSegHist pat space histops kbody ntasks

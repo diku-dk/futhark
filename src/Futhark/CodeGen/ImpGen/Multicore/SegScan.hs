@@ -18,7 +18,7 @@ compileSegScan ::
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  VName ->
+  TV Int32 ->
   MulticoreGen Imp.Code
 compileSegScan pat space reds kbody nsubtasks
   | [_] <- unSegSpace space =
@@ -40,7 +40,7 @@ nonsegmentedScan ::
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
-  VName ->
+  TV Int32 ->
   MulticoreGen Imp.Code
 nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
@@ -49,7 +49,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   collect $ do
     scanStage1 pat space nsubtasks scan_ops kbody
 
-    let nsubtasks' = Imp.vi32 nsubtasks
+    let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
       scan_ops2 <- renameSegBinOp scan_ops
       scanStage2 pat nsubtasks space scan_ops2 kbody
@@ -59,7 +59,7 @@ nonsegmentedScan pat space scan_ops kbody nsubtasks = do
 scanStage1 ::
   Pattern MCMem ->
   SegSpace ->
-  VName ->
+  TV Int32 ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   MulticoreGen ()
@@ -76,7 +76,7 @@ scanStage1 pat space nsubtasks scan_ops kbody = do
   -- Writes directly to the resulting array
 
   -- Accumulator array for each thread to use
-  accs <- groupResultArrays "scan_stage_1_accum_arr" (Var nsubtasks) scan_ops
+  accs <- groupResultArrays "scan_stage_1_accum_arr" (tvSize nsubtasks) scan_ops
   prebody <- collect $ do
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
     forM_ (zip scan_ops accs) $ \(scan_op, acc) ->
@@ -88,7 +88,7 @@ scanStage1 pat space nsubtasks scan_ops kbody = do
             copyDWIMFix acc' (tid' : vec_is) ne []
 
   body <- collect $ do
-    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 iter
+    zipWithM_ dPrimV_ is $ unflattenIndex ns' $ tvExp iter
     sComment "stage 1 scan body" $
       compileStms mempty (kernelBodyStms kbody) $ do
         sComment "write mapped values results to memory" $ do
@@ -117,13 +117,13 @@ scanStage1 pat space nsubtasks scan_ops kbody = do
                     [] -> copyDWIMFix (paramName p) [] se []
                     _ -> copyDWIMFix acc' (tid' : vec_is) se []
 
-  free_params <- freeParams (prebody <> body) (segFlat space : [iter])
+  free_params <- freeParams (prebody <> body) (segFlat space : [tvVar iter])
   let (body_allocs, body') = extractAllocations body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" iter (body_allocs <> prebody) body' mempty free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" (tvVar iter) (body_allocs <> prebody) body' mempty free_params $ segFlat space
 
 scanStage2 ::
   Pattern MCMem ->
-  VName ->
+  TV Int32 ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -133,16 +133,16 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map (sExt64 . toInt32Exp) ns
       per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
-      nsubtasks' = Imp.vi32 nsubtasks
+      nsubtasks' = tvExp nsubtasks
 
   -- Begin stage two of scan
   dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
 
   offset <- dPrimV "offset" (0 :: Imp.TExp Int32)
-  let offset' = Imp.vi32 offset
+  let offset' = tvExp offset
 
   offset_index <- dPrimV "offset_index" (0 :: Imp.TExp Int32)
-  let offset_index' = Imp.vi32 offset_index
+  let offset_index' = tvExp offset_index
 
   let iter_pr_subtask = sExt32 $ product ns_64 `quot` sExt64 nsubtasks'
       remainder = sExt32 $ product ns_64 `rem` sExt64 nsubtasks'
@@ -180,7 +180,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
 --           reading it's corresponding carry-in
 scanStage3 ::
   Pattern MCMem ->
-  VName ->
+  TV Int32 ->
   SegSpace ->
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
@@ -195,10 +195,10 @@ scanStage3 pat nsubtasks space scan_ops kbody = do
       ns' = map toInt32Exp ns
 
   iter <- dPrimV "iter" (0 :: Imp.TExp Int32)
-  let iter' = Imp.vi32 iter
+  let iter' = tvExp iter
       tid' = Imp.vi32 $ segFlat space
 
-  accs <- groupResultArrays "scan_stage_3_accum_arr" (Var nsubtasks) scan_ops
+  accs <- groupResultArrays "scan_stage_3_accum_arr" (tvSize nsubtasks) scan_ops
   prebody <- collect $ do
     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
     forM_ (zip3 scan_ops accs per_scan_pes) $ \(scan_op, acc, pes) ->
@@ -242,9 +242,9 @@ scanStage3 pat nsubtasks space scan_ops kbody = do
                     [] -> copyDWIMFix (paramName p) [] se []
                     _ -> copyDWIMFix acc' (tid' : vec_is) se []
 
-  free_params' <- freeParams (prebody <> body) (segFlat space : [iter])
+  free_params' <- freeParams (prebody <> body) (segFlat space : [tvVar iter])
   let (body_allocs, body') = extractAllocations body
-  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" iter (body_allocs <> prebody) body' mempty free_params' $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" (tvVar iter) (body_allocs <> prebody) body' mempty free_params' $ segFlat space
 
 segmentedScan ::
   Pattern MCMem ->
@@ -257,13 +257,13 @@ segmentedScan pat space scan_ops kbody = do
   collect $ do
     n_par_segments <- dPrim "segment_iter" $ IntType Int64
     -- iteration variable
-    body <- compileSegScanBody n_par_segments pat space scan_ops kbody
-    free_params <- freeParams body (segFlat space : [n_par_segments])
+    body <- compileSegScanBody (tvExp n_par_segments) pat space scan_ops kbody
+    free_params <- freeParams body (segFlat space : [tvVar n_par_segments])
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.ParLoop "seg_scan" n_par_segments body_allocs body' mempty free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "seg_scan" (tvVar n_par_segments) body_allocs body' mempty free_params $ segFlat space
 
 compileSegScanBody ::
-  VName ->
+  Imp.TExp Int64 ->
   Pattern MCMem ->
   SegSpace ->
   [SegBinOp MCMem] ->
@@ -272,7 +272,6 @@ compileSegScanBody ::
 compileSegScanBody idx pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map (sExt64 . toInt32Exp) ns
-      idx' = Imp.vi64 idx
 
   let per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
   collect $ do
@@ -286,7 +285,7 @@ compileSegScanBody idx pat space scan_ops kbody = do
 
       let inner_bound = last ns_64
       sFor "i" inner_bound $ \i -> do
-        zipWithM_ dPrimV_ (init is) $ map sExt32 $ unflattenIndex (init ns_64) idx'
+        zipWithM_ dPrimV_ (init is) $ map sExt32 $ unflattenIndex (init ns_64) idx
         dPrimV_ (last is) i
         compileStms mempty (kernelBodyStms kbody) $ do
           let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody

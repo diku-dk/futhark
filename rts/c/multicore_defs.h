@@ -30,7 +30,6 @@
 // Scheduler definitions
 struct scheduler;
 struct scheduler_info;
-enum scheduling;
 struct scheduler_subtask;
 struct scheduler_task;
 
