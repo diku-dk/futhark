@@ -257,12 +257,11 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
               ++ [(subhistogram_id, tvSize num_histos)]
 
     let segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
-        ns_red = map snd $ unSegSpace segred_space
-        ns_red' = map toInt32Exp ns_red
+        ns_red = map (toInt32Exp . snd) $ unSegSpace segred_space
+        iterations = case unSegSpace segred_space of
+          [_] -> product ns_red
+          _ -> product $ init ns_red -- Segmented reduction is over the inner most dimension
 
-    let iterations = case unSegSpace segred_space of
-          [_] -> product ns_red'
-          _ -> product $ init ns_red' -- Segmented reduction is over the inner most dimension
     let retvals = map patElemName red_pes
     retvals_ts <- mapM lookupType retvals
     retval_params <- zipWithM toParam retvals retvals_ts
