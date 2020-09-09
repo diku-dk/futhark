@@ -88,5 +88,16 @@ static inline unsigned int fast_rand(void) {
 }
 
 
+int64_t min_int64(int64_t x, int64_t y)
+{
+  return x < y ? x : y;
+}
+
+int64_t max_int64(int64_t x, int64_t y)
+{
+  return x > y ? x : y;
+}
+
+
 #endif
 // end of multicore_util.h
