@@ -66,7 +66,7 @@ primOpType (Opaque se) =
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where
-    n = Constant (value (length es))
+    n = intConst Int32 $ toInteger $ length es
 primOpType (BinOp bop _ _) =
   pure [Prim $ binOpType bop]
 primOpType (UnOp _ x) =

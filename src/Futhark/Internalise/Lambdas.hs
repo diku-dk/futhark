@@ -134,7 +134,11 @@ internalisePartitionLambda internaliseLambda k lam args = do
 
     mkResult _ i | i >= k = return $ result i
     mkResult eq_class i = do
-      is_i <- letSubExp "is_i" $ BasicOp $ CmpOp (CmpEq int32) eq_class (constant i)
+      is_i <-
+        letSubExp "is_i" $
+          BasicOp $
+            CmpOp (CmpEq int32) eq_class $
+              intConst Int32 $ toInteger i
       fmap (map I.Var) . letTupExp "part_res"
         =<< eIf
           (eSubExp is_i)

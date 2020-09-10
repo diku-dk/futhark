@@ -353,7 +353,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       flat_arr_t <- lookupType flat_arr
       let new_shape' =
             reshapeOuter
-              (map (DimNew . constant) new_shape)
+              (map (DimNew . intConst Int32 . toInteger) new_shape)
               1
               $ I.arrayShape flat_arr_t
       letSubExp desc $ I.BasicOp $ I.Reshape new_shape' flat_arr
@@ -2105,7 +2105,11 @@ partitionWithSOACS k lam arrs = do
     mkOffsetLambdaBody _ _ _ [] =
       return $ constant (-1 :: Int32)
     mkOffsetLambdaBody sizes c i (p : ps) = do
-      is_this_one <- letSubExp "is_this_one" $ I.BasicOp $ I.CmpOp (CmpEq int32) c (constant i)
+      is_this_one <-
+        letSubExp "is_this_one" $
+          I.BasicOp $
+            I.CmpOp (CmpEq int32) c $
+              intConst Int32 $ toInteger i
       next_one <- mkOffsetLambdaBody sizes c (i + 1) ps
       this_one <-
         letSubExp "this_offset"
