@@ -106,7 +106,9 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
     if (remaining_iter > subtask->chunk_size) {
       struct subtask *new_subtask = malloc(sizeof(struct subtask));
       *new_subtask = *subtask;
+      // increment the subtask join counter
       __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
+      // Update range parameters
       subtask->end = subtask->start + subtask->chunk_size;
       new_subtask->start = subtask->end;
 #if defined(MCCHASELEV)

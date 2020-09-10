@@ -31,7 +31,7 @@ static inline void wake_up_threads(struct scheduler *scheduler, int start_tid, i
 }
 
 static inline int is_finished(struct worker *worker) {
-  return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
+  return worker->dead && subtask_queue_is_empty(&worker->q);
 }
 
 // Try to steal from a random queue
@@ -53,9 +53,9 @@ static inline int steal_from_random_worker(struct worker* worker)
 /* Only one error can be returned at the time now
    Maybe we can provide a stack like structure for pushing errors onto
    if we wish to backpropagte multiple errors */
-static inline void *scheduler_worker(void* arg)
+static inline void *scheduler_worker(void* args)
 {
-  struct worker *worker = (struct worker*) arg;
+  struct worker *worker = (struct worker*) args;
   worker_local = worker;
   struct subtask * subtask = NULL;
   while(!is_finished(worker)) {
@@ -75,8 +75,7 @@ static inline void *scheduler_worker(void* arg)
         }
       }
     } else {
-      // go back to sleep
-
+      // go back to sleep and wait for work
       int retval = subtask_queue_dequeue(worker, &subtask, 1);
       if (retval == 0) {
         assert(subtask != NULL);
@@ -424,7 +423,6 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
     default:
       assert(!"Got unknown scheduling");
     }
-
   }
 
   info.wake_up_threads = 0;
