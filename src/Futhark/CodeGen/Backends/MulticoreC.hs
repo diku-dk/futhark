@@ -211,7 +211,8 @@ compileProg =
                  // __atomic_thread_fence(__ATOMIC_SEQ_CST);
                  // Wake up threads so we can kill them
                  // wake_up_all_threads(&ctx->scheduler);
-                 output_thread_usage(worker_local);
+
+                 // output_thread_usage(worker_local);
                  for (int i = 1; i < ctx->scheduler.num_threads; i++)
                  {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
