@@ -128,6 +128,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 
   worker->total = 0;
   worker->timer = get_wall_time_ns();
+  int64_t start = worker->timer;
   worker->nested++;
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,
@@ -142,14 +143,15 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   if (err != 0) {
     __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
   }
+  // Total sequential time spent
   int64_t time_elapsed = total_now(worker->total, worker->timer);
-  worker->time_spent_working += time_elapsed;
+  worker->time_spent_working += get_wall_time_ns() - start;
   int64_t iter = subtask->end - subtask->start;
   // report measurements
   __atomic_fetch_add(subtask->task_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->task_iter, iter, __ATOMIC_RELAXED);
   // We need a fence here, since if the counter is decremented before either
-  // of the two above are updated bad things can happen, if they are stack-allocated
+  // of the two above are updated bad things can happen, e.g. if they are stack-allocated
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
   __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
   free(subtask);

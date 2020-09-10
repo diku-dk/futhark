@@ -360,8 +360,8 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     /* worker->time_spent_working += task_timer; */
     // Report time measurements
     // TODO the update of both of these should really both be atomic!!
-    /* __atomic_fetch_add(task->info.total_time, task_timer, __ATOMIC_RELAXED); */
-    /* __atomic_fetch_add(task->info.total_iter, task->iterations, __ATOMIC_RELAXED); */
+    /* __atomic_fetch_add(task->info.task_time, task_timer, __ATOMIC_RELAXED); */
+    /* __atomic_fetch_add(task->info.task_iter, task->iterations, __ATOMIC_RELAXED); */
   }
   else
   {
