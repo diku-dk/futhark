@@ -3,31 +3,32 @@
 #ifndef _CHASELEV_H_
 #define _CHASELEV_H_
 
+/* Implementation of Chase-lev's concurrent lock-free deque
+   from ``Dynamic Circular Work-Stealing Deque`` (2005)
+   This implementation was ported from
+   https://github.com/deepsea-inria/heartbeat
+
+   !!!
+   This implementation leaks memory,
+   if the circular array is grown
+   as we don't maintain a list of the old buffers.
+   We can't safely free it either as a stealing thread might
+   be reading from it.
+   !!!
+ */
+
+
 #if defined(MCCHASELEV)
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 
 
-
-#define QUEUE_EMPTY NULL
-#define QUEUE_ABORT NULL
 static struct subtask* const STEAL_RES_EMPTY = (struct subtask*) 0;
 static struct subtask* const STEAL_RES_ABORT = (struct subtask*) 1;
 
 static const int strong = 0;
 static const int backoff_nb_cycles = 1l << 10;
-
-
-static inline void rdtsc_wait(uint64_t n) {
-  const uint64_t start = rdtsc();
-  while (rdtsc() < (start + n)) {
-    __asm__("PAUSE");
-  }
-}
-static inline void spin_for(uint64_t nb_cycles) {
-  rdtsc_wait(nb_cycles);
-}
 
 
 static inline struct subtask* cb_get(struct subtask **buf, int64_t capacity, int64_t i)  {
