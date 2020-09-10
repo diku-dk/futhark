@@ -86,15 +86,11 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
 }
 
 
-static inline int64_t compute_chunk_size(struct subtask* subtask, struct worker *worker)
+static inline int64_t compute_chunk_size(struct subtask* subtask)
 {
-  struct scheduler* scheduler = worker->scheduler;
-  int64_t rem_iter = subtask->end - subtask->start;
   double C = (double)*subtask->task_time / (double)*subtask->task_iter;
   assert(C >= 0.0f);
-  int64_t min_iter_pr_subtask = (int64_t)(kappa / (C + DBL_EPSILON));
-  min_iter_pr_subtask = min_iter_pr_subtask <= 0 ? 1 : min_iter_pr_subtask;
-  return min_iter_pr_subtask;
+  return max_int64((int64_t)(kappa / (C + DBL_EPSILON)), 1);
 }
 
 static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
@@ -102,7 +98,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
   if (subtask->chunkable) {
     // Do we have information from previous runs avaliable
     if (*subtask->task_iter > 0) {
-      subtask->chunk_size = compute_chunk_size(subtask, worker);
+      subtask->chunk_size = compute_chunk_size(subtask);
       assert(subtask->chunk_size > 0);
     }
     int64_t remaining_iter = subtask->end - subtask->start;
@@ -113,7 +109,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
       __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
       subtask->end = subtask->start + subtask->chunk_size;
       new_subtask->start = subtask->end;
-#ifdef MCCHASELEV
+#if defined(MCCHASELEV)
       push_back(&worker->q, new_subtask);
 #elif defined(MCJOBQUEUE)
       subtask_queue_enqueue(worker, new_subtask);
@@ -134,7 +130,10 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,
                         worker->tid);
-  if (__atomic_load_n(&scheduler_error, __ATOMIC_RELAXED) != 0) {
+  worker->nested--;
+  // Some error occured during some other subtask
+  // so we just clean-up and return
+  if (scheduler_error != 0) {
     free(subtask);
     return 0;
   }
@@ -144,7 +143,6 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   int64_t time_elapsed = total_now(worker->total, worker->timer);
   worker->time_spent_working += time_elapsed;
   int64_t iter = subtask->end - subtask->start;
-  worker->nested--;
   // report measurements
   __atomic_fetch_add(subtask->task_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->task_iter, iter, __ATOMIC_RELAXED);
@@ -163,7 +161,7 @@ static inline int is_small(struct scheduler_task *task, int nthreads, int *nsubt
   int64_t iter = *task->task_iter;
 
 
-  if (task->sched == DYNAMIC || *task->task_iter == 0) {
+  if (task->sched == DYNAMIC || iter == 0) {
     *nsubtasks = nthreads;
     return 0;
   }
