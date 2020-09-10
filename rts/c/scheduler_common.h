@@ -128,7 +128,9 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 
   worker->total = 0;
   worker->timer = get_wall_time_ns();
+#if defined(MCPROFILE)
   int64_t start = worker->timer;
+#endif
   worker->nested++;
   int err = subtask->fn(subtask->args, subtask->start, subtask->end,
                         subtask->chunkable ? worker->tid : subtask->id,
@@ -145,7 +147,9 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   }
   // Total sequential time spent
   int64_t time_elapsed = total_now(worker->total, worker->timer);
+#if defined(MCPROFILE)
   worker->time_spent_working += get_wall_time_ns() - start;
+#endif
   int64_t iter = subtask->end - subtask->start;
   // report measurements
   __atomic_fetch_add(subtask->task_time, time_elapsed, __ATOMIC_RELAXED);

@@ -87,8 +87,10 @@ static inline void *scheduler_worker(void* args)
 
   assert(subtask_queue_is_empty(&worker->q));
   __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
+#if defined(MCPROFILE)
   if (worker->output_usage)
     output_thread_usage(worker);
+#endif
   return NULL;
 }
 
@@ -362,9 +364,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     // TODO the update of both of these should really both be atomic!!
     /* __atomic_fetch_add(task->info.task_time, task_timer, __ATOMIC_RELAXED); */
     /* __atomic_fetch_add(task->info.task_iter, task->iterations, __ATOMIC_RELAXED); */
-  }
-  else
-  {
+  } else {
     // Add "before" time if we already are inside a task
     int64_t time_before = 0;
     if (worker->nested > 0) {
