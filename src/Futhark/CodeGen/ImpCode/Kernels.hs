@@ -165,17 +165,17 @@ data KernelOp
 -- This old value is stored in the first 'VName'.  The second 'VName'
 -- is the memory block to update.  The 'Exp' is the new value.
 data AtomicOp
-  = AtomicAdd IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicFAdd FloatType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicSMax IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicSMin IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicUMax IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicUMin IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicAnd IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicOr IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicXor IntType VName VName (Count Elements (Imp.TExp Int32)) Exp
-  | AtomicCmpXchg PrimType VName VName (Count Elements (Imp.TExp Int32)) Exp Exp
-  | AtomicXchg PrimType VName VName (Count Elements (Imp.TExp Int32)) Exp
+  = AtomicAdd IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicFAdd FloatType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicSMax IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicSMin IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicUMax IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicUMin IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicAnd IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicOr IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicXor IntType VName VName (Count Elements (Imp.TExp Int64)) Exp
+  | AtomicCmpXchg PrimType VName VName (Count Elements (Imp.TExp Int64)) Exp Exp
+  | AtomicXchg PrimType VName VName (Count Elements (Imp.TExp Int64)) Exp
   deriving (Show)
 
 instance FreeIn AtomicOp where

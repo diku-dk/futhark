@@ -974,7 +974,7 @@ ArrayValue :  '[' Value ']'
            | '[' ']'
              {% emptyArrayError $1 }
 
-Dim :: { Int32 }
+Dim :: { Int64 }
 Dim : intlit { let L _ (INTLIT num) = $1 in fromInteger num }
 
 ValueType :: { ValueType }

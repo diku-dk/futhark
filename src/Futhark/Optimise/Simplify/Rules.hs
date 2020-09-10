@@ -340,7 +340,7 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
                 letExp "for_in_partial" $
                   BasicOp $
                     Index arr' $
-                      DimSlice (intConst Int32 0) w (intConst Int32 1) : slice'
+                      DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
             return (Just (p, for_in_partial), mempty)
         SubExpResult cs se
           | all (notIndex . stmExp) x_stms -> do
@@ -355,16 +355,15 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
     notIndex _ = True
 simplifyLoopVariables _ _ _ _ = Skip
 
--- If a for-loop with no loop variables has a counter of a large
--- integer type, and the bound is just a constant or sign-extended
--- integer of smaller type, then change the loop to iterate over the
--- smaller type instead.  We then move the sign extension inside the
--- loop instead.  This addresses loops of the form @for i in x..<y@ in
--- the source language.
+-- If a for-loop with no loop variables has a counter of type Int64,
+-- and the bound is just a constant or sign-extended integer of
+-- smaller type, then change the loop to iterate over the smaller type
+-- instead.  We then move the sign extension inside the loop instead.
+-- This addresses loops of the form @for i in x..<y@ in the source
+-- language.
 narrowLoopType :: (BinderOps lore) => TopDownRuleDoLoop lore
-narrowLoopType vtable pat aux (ctx, val, ForLoop i it n [], body)
-  | Just (n', it', cs) <- smallerType,
-    it' < it =
+narrowLoopType vtable pat aux (ctx, val, ForLoop i Int64 n [], body)
+  | Just (n', it', cs) <- smallerType =
     Simplify $ do
       i' <- newVName $ baseString i
       let form' = ForLoop i' it' n' []
@@ -409,7 +408,7 @@ unroll n merge (iv, it, i) loop_vars body
         letBindNames [paramName p] $
           BasicOp $
             Index arr $
-              DimFix (intConst Int32 i) : fullSlice (paramType p) []
+              DimFix (intConst Int64 i) : fullSlice (paramType p) []
 
       -- Some of the sizes in the types here might be temporarily wrong
       -- until copy propagation fixes it up.
@@ -753,7 +752,7 @@ simplifyIndexing vtable seType idd inds consuming =
                 `add` primExpFromSubExp (IntType to_it) i_offset'
           i_stride'' <-
             letSubExp "iota_offset" $
-              BasicOp $ BinOp (Mul Int32 OverflowWrap) s i_stride'
+              BasicOp $ BinOp (Mul Int64 OverflowWrap) s i_stride'
           fmap (SubExpResult cs) $
             letSubExp "slice_iota" $
               BasicOp $ Iota i_n i_offset'' i_stride'' to_it
@@ -763,8 +762,8 @@ simplifyIndexing vtable seType idd inds consuming =
       | not $ or $ zipWith rotateAndSlice offsets inds -> Just $ do
         dims <- arrayDims <$> lookupType a
         let adjustI i o d = do
-              i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int32 OverflowWrap) i o
-              letSubExp "rot_i" (BasicOp $ BinOp (SMod Int32 Unsafe) i_p_o d)
+              i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int64 OverflowWrap) i o
+              letSubExp "rot_i" (BasicOp $ BinOp (SMod Int64 Unsafe) i_p_o d)
             adjust (DimFix i, o, d) =
               DimFix <$> adjustI i o d
             adjust (DimSlice i n s, o, d) =
@@ -791,7 +790,7 @@ simplifyIndexing vtable seType idd inds consuming =
           return $ IndexResult cs arr $ ds_inds' ++ rest_inds
       where
         index DimFix {} = Nothing
-        index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int32)) n s)
+        index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
     Just (Rearrange perm src, cs)
       | rearrangeReach perm <= length (takeWhile isIndex inds) ->
         let inds' = rearrangeShape (rearrangeInverse perm) inds
@@ -836,7 +835,7 @@ simplifyIndexing vtable seType idd inds consuming =
         xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
 
         let add n m = do
-              added <- letSubExp "index_concat_add" $ BasicOp $ BinOp (Add Int32 OverflowWrap) n m
+              added <- letSubExp "index_concat_add" $ BasicOp $ BinOp (Add Int64 OverflowWrap) n m
               return (added, n)
         (_, starts) <- mapAccumLM add x_len xs_lens
         let xs_and_starts = reverse $ zip xs starts
@@ -844,9 +843,9 @@ simplifyIndexing vtable seType idd inds consuming =
         let mkBranch [] =
               letSubExp "index_concat" $ BasicOp $ Index x $ ibef ++ DimFix i : iaft
             mkBranch ((x', start) : xs_and_starts') = do
-              cmp <- letSubExp "index_concat_cmp" $ BasicOp $ CmpOp (CmpSle Int32) start i
+              cmp <- letSubExp "index_concat_cmp" $ BasicOp $ CmpOp (CmpSle Int64) start i
               (thisres, thisbnds) <- collectStms $ do
-                i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int32 OverflowWrap) i start
+                i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int64 OverflowWrap) i start
                 letSubExp "index_concat" $ BasicOp $ Index x' $ ibef ++ DimFix i' : iaft
               thisbody <- mkBodyM thisbnds [thisres]
               (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
@@ -856,7 +855,7 @@ simplifyIndexing vtable seType idd inds consuming =
                   IfDec [primBodyType res_t] IfNormal
         SubExpResult cs <$> mkBranch xs_and_starts
     Just (ArrayLit ses _, cs)
-      | DimFix (Constant (IntValue (Int32Value i))) : inds' <- inds,
+      | DimFix (Constant (IntValue (Int64Value i))) : inds' <- inds,
         Just se <- maybeNth i ses ->
         case inds' of
           [] -> Just $ pure $ SubExpResult cs se
@@ -871,7 +870,7 @@ simplifyIndexing vtable seType idd inds consuming =
         Just $
           pure $
             IndexResult mempty idd $
-              DimFix (constant (0 :: Int32)) : inds'
+              DimFix (constant (0 :: Int64)) : inds'
     _ -> Nothing
   where
     defOf v = do
@@ -920,7 +919,7 @@ fromConcatArg t (ArgArrayLit ses, cs) =
 fromConcatArg elem_type (ArgReplicate ws se, cs) = do
   let elem_shape = arrayShape elem_type
   certifying cs $ do
-    w <- letSubExp "concat_rep_w" =<< toExp (sum $ map pe32 ws)
+    w <- letSubExp "concat_rep_w" =<< toExp (sum $ map pe64 ws)
     letExp "concat_rep" $ BasicOp $ Replicate (setDim 0 elem_shape w) se
 fromConcatArg _ (ArgVar v, _) =
   pure v
@@ -1241,7 +1240,7 @@ ruleBasicOp vtable pat _ (Update src _ (Var v))
 ruleBasicOp vtable pat aux (Update src [DimSlice i n s] (Var v))
   | isCt1 n,
     isCt1 s,
-    Just (ST.Indexed cs e) <- ST.index v [intConst Int32 0] vtable =
+    Just (ST.Indexed cs e) <- ST.index v [intConst Int64 0] vtable =
     Simplify $ do
       e' <- toSubExp "update_elem" e
       auxing aux $
@@ -1330,7 +1329,7 @@ ruleBasicOp vtable pat _ (Replicate shape (Var v))
 ruleBasicOp _ pat _ (ArrayLit (se : ses) _)
   | all (== se) ses =
     Simplify $
-      let n = constant (fromIntegral (length ses) + 1 :: Int32)
+      let n = constant (fromIntegral (length ses) + 1 :: Int64)
        in letBind pat $ BasicOp $ Replicate (Shape [n]) se
 ruleBasicOp vtable pat aux (Index idd slice)
   | Just inds <- sliceIndices slice,
@@ -1347,9 +1346,9 @@ ruleBasicOp vtable pat aux (Index idd slice)
           oldshape <- arrayDims <$> lookupType idd2
           let new_inds =
                 reshapeIndex
-                  (map pe32 oldshape)
-                  (map pe32 $ newDims newshape)
-                  (map pe32 inds)
+                  (map pe64 oldshape)
+                  (map pe64 $ newDims newshape)
+                  (map pe64 inds)
           new_inds' <-
             mapM (toSubExp "new_index") new_inds
           certifying idd_cs $
@@ -1400,7 +1399,7 @@ ruleBasicOp vtable pat aux (Rotate offsets v)
   | Just (BasicOp (Rearrange perm v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rotate offsets2 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do
     let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
-        addOffsets x y = letSubExp "summed_offset" $ BasicOp $ BinOp (Add Int32 OverflowWrap) x y
+        addOffsets x y = letSubExp "summed_offset" $ BasicOp $ BinOp (Add Int64 OverflowWrap) x y
     offsets' <- zipWithM addOffsets offsets offsets2'
     rotate_rearrange <-
       auxing aux $ letExp "rotate_rearrange" $ BasicOp $ Rearrange perm v3
@@ -1415,7 +1414,7 @@ ruleBasicOp vtable pat aux (Rotate offsets1 v)
       auxing aux $
         letBind pat $ BasicOp $ Rotate offsets v2
   where
-    add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int32 OverflowWrap) x y
+    add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int64 OverflowWrap) x y
 
 -- If we see an Update with a scalar where the value to be written is
 -- the result of indexing some other array, then we convert it into an
@@ -1430,8 +1429,8 @@ ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
     arr_y /= arr_x,
     Just (slice_x_bef, DimFix i, []) <- focusNth (length slice_x - 1) slice_x,
     Just (slice_y_bef, DimFix j, []) <- focusNth (length slice_y - 1) slice_y = Simplify $ do
-    let slice_x' = slice_x_bef ++ [DimSlice i (intConst Int32 1) (intConst Int32 1)]
-        slice_y' = slice_y_bef ++ [DimSlice j (intConst Int32 1) (intConst Int32 1)]
+    let slice_x' = slice_x_bef ++ [DimSlice i (intConst Int64 1) (intConst Int64 1)]
+        slice_y' = slice_y_bef ++ [DimSlice j (intConst Int64 1) (intConst Int64 1)]
     v' <- letExp (baseString v ++ "_slice") $ BasicOp $ Index arr_y slice_y'
     certifying cs_y $
       auxing aux $
@@ -1439,7 +1438,7 @@ ruleBasicOp vtable pat aux (Update arr_x slice_x (Var v))
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)
-  | Constant (IntValue (Int32Value 0)) <- x,
+  | Constant (IntValue (Int64Value 0)) <- x,
     Var v <- y,
     Just _ <- ST.lookupLoopVar v vtable =
     Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True

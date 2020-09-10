@@ -6,7 +6,7 @@
 
 let eqb (x: bool) (y: bool): bool =
   (! ((x || y)) || (x && y))
-let reshape_int (l: i32) (x: []i32): []i32 =
+let reshape_int (l: i64) (x: []i32): []i32 =
   let roundUp = ((l + (length x - 1)) / length x) in
   let extend = flatten (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in

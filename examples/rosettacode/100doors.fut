@@ -6,10 +6,10 @@
 -- the doors we care about, while still remaining parallel.  0-indexes the doors.
 --
 -- ==
--- input { 10 }
+-- input { 10i64 }
 -- output { [false, true, false, false, true, false, false, false, false, true] }
 
-let main(n: i32): [n]bool =
+let main(n: i64): [n]bool =
   loop is_open = replicate n false for i < n do
     let js = map (*i+1) (iota n)
     let flips = map (\j ->

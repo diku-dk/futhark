@@ -1132,6 +1132,7 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc, locs)) = do
   e' <- compileExp e
   let onPart (Imp.ErrorString s) = return ("%s", String s)
       onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
+      onPart (Imp.ErrorInt64 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm $
     Assert

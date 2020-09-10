@@ -220,10 +220,10 @@ class Monad m => MonadTypeChecker m where
   checkNamedDim loc v = do
     (v', t) <- lookupVar loc v
     case t of
-      Scalar (Prim (Signed Int32)) -> return v'
+      Scalar (Prim (Signed Int64)) -> return v'
       _ ->
         typeError loc mempty $
-          "Dimension declaration" <+> ppr v <+> "should be of type i32."
+          "Dimension declaration" <+> ppr v <+> "should be of type i64."
 
   typeError :: Located loc => loc -> Notes -> Doc -> m a
 

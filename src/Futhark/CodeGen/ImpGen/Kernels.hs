@@ -188,7 +188,7 @@ expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
 
-  sIota (patElemName pe) (toInt32Exp n) x' s' et
+  sIota (patElemName pe) (toInt64Exp n) x' s' et
 expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
   sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
@@ -243,7 +243,7 @@ callKernelCopy
         IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
       Just srcoffset <-
         IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
-      let num_elems = Imp.elements $ product $ map toInt32Exp srcshape
+      let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $

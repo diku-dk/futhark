@@ -46,8 +46,8 @@ import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-i32 :: TypeBase dim als
-i32 = Scalar $ Prim $ Signed Int32
+i64 :: TypeBase dim als
+i64 = Scalar $ Prim $ Signed Int64
 
 -- The monomorphization monad reads 'PolyBinding's and writes
 -- 'ValBind's.  The 'TypeParam's in the 'ValBind's can only be size
@@ -223,7 +223,7 @@ transformFName loc fname t
           f
           size_arg
           (Info (Observe, Nothing))
-          (Info (foldFunType (replicate i i32) (fromStruct t)), Info [])
+          (Info (foldFunType (replicate i i64) (fromStruct t)), Info [])
           loc
       )
 
@@ -236,7 +236,7 @@ transformFName loc fname t
               (qualName fname')
               ( Info
                   ( foldFunType
-                      (map (const i32) size_args)
+                      (map (const i64) size_args)
                       (fromStruct t')
                   )
               )
@@ -593,7 +593,7 @@ desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: "
 noticeDims :: TypeBase (DimDecl VName) as -> MonoM ()
 noticeDims = mapM_ notice . nestedDims
   where
-    notice (NamedDim v) = void $ transformFName mempty v i32
+    notice (NamedDim v) = void $ transformFName mempty v i64
     notice _ = return ()
 
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
@@ -670,9 +670,9 @@ inferSizeArgs tparams bind_t t =
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
         Just (NamedDim d) ->
-          Just $ Var d (Info i32) mempty
+          Just $ Var d (Info i64) mempty
         Just (ConstDim x) ->
-          Just $ Literal (SignedValue $ Int32Value $ fromIntegral x) mempty
+          Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         _ ->
           Nothing
 
@@ -768,7 +768,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
           mapOnPatternType = pure . applySubst substs
         }
 
-    shapeParam tp = Id (typeParamName tp) (Info i32) $ srclocOf tp
+    shapeParam tp = Id (typeParamName tp) (Info i64) $ srclocOf tp
 
     toValBinding name' tparams' params'' rettype' body'' =
       ValBind
