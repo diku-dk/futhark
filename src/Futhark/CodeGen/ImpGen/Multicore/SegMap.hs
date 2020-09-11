@@ -1,6 +1,5 @@
 module Futhark.CodeGen.ImpGen.Multicore.SegMap
   ( compileSegMap,
-    compileSequentialSegMap,
   )
 where
 
@@ -61,21 +60,3 @@ compileSegMap pat space kbody =
     free_params <- freeParams body [segFlat space, tvVar flat_par_idx]
     let (body_allocs, body') = extractAllocations body
     emit $ Imp.Op $ Imp.ParLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
-
-compileSequentialSegMap ::
-  Pattern MCMem ->
-  SegSpace ->
-  KernelBody MCMem ->
-  MulticoreGen Imp.Code
-compileSequentialSegMap pat space kbody = do
-  let ns = map snd $ unSegSpace space
-      ns' = map (sExt64 . toInt32Exp) ns
-  collect $ do
-    emit $ Imp.DebugPrint "SegMap sequential" Nothing
-    flat_seq_idx <- dPrim "seq_iter" int32
-    body <- compileSegMapBody flat_seq_idx pat space kbody
-    let (body_allocs, body') = extractAllocations body
-    emit body_allocs
-    sFor "i" (product ns') $ \i -> do
-      flat_seq_idx <-- i
-      emit body'
