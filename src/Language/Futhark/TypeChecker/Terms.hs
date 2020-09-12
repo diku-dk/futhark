@@ -1277,7 +1277,7 @@ checkExp (ArrayLit all_es _ loc) =
       t <- arrayOfM loc et' (ShapeDecl [ConstDim $ length all_es]) Unique
       return $ ArrayLit (e' : es') (Info t) loc
 checkExp (Range start maybe_step end _ loc) = do
-  start' <- require "use in range expression" anyIntType =<< checkExp start
+  start' <- require "use in range expression" anySignedType =<< checkExp start
   start_t <- toStruct <$> expTypeFully start'
   maybe_step' <- case maybe_step of
     Nothing -> return Nothing

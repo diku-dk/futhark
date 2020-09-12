@@ -647,9 +647,9 @@ have the same type and shape.
 ``x..y...z``
 ............
 
-Construct an integer array whose first element is ``x`` and which
-proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
-``..y`` part can be elided in which case a stride of 1 is used.  A
+Construct a signed integer array whose first element is ``x`` and
+which proceeds stride of ``y-x`` until reaching ``z`` (inclusive).
+The ``..y`` part can be elided in which case a stride of 1 is used.  A
 run-time error occurs if ``z`` is lesser than ``x`` or ``y``, or if
 ``x`` and ``y`` are the same value.
 
@@ -666,8 +666,8 @@ This holds only if ``n`` is a variable or constant.
 ``x..y..<z``
 ............
 
-Construct an integer array whose first elements is ``x``, and which
-proceeds upwards with a stride of ``y`` until reaching ``z``
+Construct a signed integer array whose first elements is ``x``, and
+which proceeds upwards with a stride of ``y`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 1 is used.  A run-time error occurs if ``z`` is lesser than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
@@ -681,8 +681,8 @@ This holds only if ``n`` is a variable or constant.
 ``x..y..>z``
 ...............
 
-Construct an integer array whose first elements is ``x``, and which
-proceeds downwards with a stride of ``y`` until reaching ``z``
+Construct a signed integer array whose first elements is ``x``, and
+which proceeds downwards with a stride of ``y`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 -1 is used.  A run-time error occurs if ``z`` is greater than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
