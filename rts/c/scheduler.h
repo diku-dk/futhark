@@ -428,7 +428,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   info.wake_up_threads = 0;
   // We use the nested parallel task function is we can't exchaust all cores
   // using the outer most level
-  if (task->canonical_fn != NULL && (info.nsubtasks + active_work) < scheduler->num_threads) {
+  if (task->canonical_fn != NULL && info.nsubtasks < scheduler->num_threads && info.nsubtasks == task->iterations) {
     if (worker->nested == 0)
       info.wake_up_threads = 1;
     return task->canonical_fn(task->args, task->iterations, worker->tid, info);
