@@ -45,6 +45,7 @@ topDownRules =
     RuleDoLoop simplifyClosedFormLoop,
     RuleDoLoop simplifyKnownIterationLoop,
     RuleDoLoop simplifyLoopVariables,
+    RuleDoLoop narrowLoopType,
     RuleGeneric constantFoldPrimFun,
     RuleIf ruleIf,
     RuleIf hoistBranchInvariant,
@@ -277,8 +278,8 @@ simpleRules =
   ]
 
 simplifyClosedFormLoop :: BinderOps lore => TopDownRuleDoLoop lore
-simplifyClosedFormLoop _ pat _ ([], val, ForLoop i _ bound [], body) =
-  Simplify $ loopClosedForm pat val (oneName i) bound body
+simplifyClosedFormLoop _ pat _ ([], val, ForLoop i it bound [], body) =
+  Simplify $ loopClosedForm pat val (oneName i) it bound body
 simplifyClosedFormLoop _ _ _ _ = Skip
 
 simplifyLoopVariables :: (BinderOps lore, Aliased lore) => TopDownRuleDoLoop lore
@@ -353,6 +354,38 @@ simplifyLoopVariables vtable pat aux (ctx, val, form@(ForLoop i it num_iters loo
     notIndex (BasicOp Index {}) = False
     notIndex _ = True
 simplifyLoopVariables _ _ _ _ = Skip
+
+-- If a for-loop with no loop variables has a counter of a large
+-- integer type, and the bound is just a constant or sign-extended
+-- integer of smaller type, then change the loop to iterate over the
+-- smaller type instead.  We then move the sign extension inside the
+-- loop instead.  This addresses loops of the form @for i in x..<y@ in
+-- the source language.
+narrowLoopType :: (BinderOps lore) => TopDownRuleDoLoop lore
+narrowLoopType vtable pat aux (ctx, val, ForLoop i it n [], body)
+  | Just (n', it', cs) <- smallerType,
+    it' < it =
+    Simplify $ do
+      i' <- newVName $ baseString i
+      let form' = ForLoop i' it' n' []
+      body' <- insertStmsM $
+        inScopeOf form' $ do
+          letBindNames [i] $ BasicOp $ ConvOp (SExt it' Int64) (Var i')
+          pure body
+      auxing aux $
+        certifying cs $
+          letBind pat $ DoLoop ctx val form' body'
+  where
+    smallerType
+      | Var n' <- n,
+        Just (ConvOp (SExt it' _) n'', cs) <- ST.lookupBasicOp n' vtable =
+        Just (n'', it', cs)
+      | Constant (IntValue (Int64Value n')) <- n,
+        toInteger n' <= toInteger (maxBound :: Int32) =
+        Just (intConst Int32 (toInteger n'), Int32, mempty)
+      | otherwise =
+        Nothing
+narrowLoopType _ _ _ _ = Skip
 
 unroll ::
   BinderOps lore =>
