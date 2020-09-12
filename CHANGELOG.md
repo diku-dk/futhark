@@ -25,7 +25,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+  * The integer modules no longer contain `iota` and `replicate`
+    functions.  The top-level ones still exist.
+
+  * The `size` module type has been removed from the prelude.
+
 ### Changed
+
+  * Range literals may no longer be produced from unsigned integers.
 
 ### Fixed
 

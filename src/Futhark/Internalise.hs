@@ -409,7 +409,7 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
 
   -- Construct an error message in case the range is invalid.
   let conv = case E.typeOf start of
-        E.Scalar (E.Prim (E.Unsigned _)) -> asIntZ Int32
+        E.Scalar (E.Prim (E.Unsigned _)) -> asIntS Int32
         _ -> asIntS Int32
   start'_i32 <- conv start'
   end'_i32 <- conv end'
@@ -470,14 +470,14 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
       distance <-
         letSubExp "distance" $
           I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) start' end'
-      distance_i32 <- asIntZ Int32 distance
+      distance_i32 <- asIntS Int32 distance
       return (distance_i32, step_wrong_dir, bounds_invalid_downwards)
     UpToExclusive {} -> do
       step_wrong_dir <-
         letSubExp "step_wrong_dir" $
           I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
       distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
-      distance_i32 <- asIntZ Int32 distance
+      distance_i32 <- asIntS Int32 distance
       return (distance_i32, step_wrong_dir, bounds_invalid_upwards)
     ToInclusive {} -> do
       downwards <-
@@ -504,7 +504,7 @@ internaliseExp desc (E.Range start maybe_second end (Info ret, Info retext) loc)
             (resultBody [distance_downwards_exclusive])
             (resultBody [distance_upwards_exclusive])
             $ ifCommon [I.Prim $ IntType it]
-      distance_exclusive_i32 <- asIntZ Int32 distance_exclusive
+      distance_exclusive_i32 <- asIntS Int32 distance_exclusive
       distance <-
         letSubExp "distance" $
           I.BasicOp $
@@ -1367,7 +1367,6 @@ internaliseDimExp s e = do
   e' <- internaliseExp1 s e
   case E.typeOf e of
     E.Scalar (E.Prim (Signed it)) -> (,it) <$> asIntS Int32 e'
-    E.Scalar (E.Prim (Unsigned it)) -> (,it) <$> asIntZ Int32 e'
     _ -> error "internaliseDimExp: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
