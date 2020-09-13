@@ -594,7 +594,7 @@ Each field may only be defined once.
 Return the element at the given position in the array.  The index may
 be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
-array is returned.
+array is returned.  The index may be of any unsigned integer type.
 
 The array ``a`` must be a variable name or a parenthesised expression.
 Furthermore, there *may not* be a space between ``a`` and the opening
@@ -610,7 +610,8 @@ Return a slice of the array ``a`` from index ``i`` to ``j``, the
 former inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
-(not inclusive).
+(not inclusive).  Slicing can be done only with expressions of type
+``i32``.
 
 It is generally a bad idea for ``s`` to be non-constant.
 Slicing of multiple dimensions can be done by separating with commas,
