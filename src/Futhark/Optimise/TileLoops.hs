@@ -113,7 +113,7 @@ tileInBody branch_variant private initial_variance initial_lvl initial_space res
         not $ gtid `nameIn` branch_variant,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
-        used <- freeIn stm_to_tile <> freeIn stms_res =
+        used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
         Just . injectPrelude initial_space private variance prestms' used
           <$> tileGeneric
             (tiling1d $ reverse top_space_rev)
@@ -135,7 +135,7 @@ tileInBody branch_variant private initial_variance initial_lvl initial_space res
         kdim_y : kdim_x : top_kdims_rev <- reverse kdims,
         (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms),
-        used <- freeIn stm_to_tile <> freeIn stms_res =
+        used <- freeIn stm_to_tile <> freeIn poststms' <> freeIn stms_res =
         Just . injectPrelude initial_space private variance prestms' used
           <$> tileGeneric
             (tiling2d $ reverse $ zip top_gtids_rev top_kdims_rev)
