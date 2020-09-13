@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Array creation C API functions now accept `const` pointers.
 
-  * Arrays can now be indexed with any signed integer type (#1122).
+  * Arrays can now be indexed (but not sliced) with any signed integer
+    type (#1122).
 
 ### Removed
 
