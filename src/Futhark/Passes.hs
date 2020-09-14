@@ -99,7 +99,7 @@ gpuPipeline =
       [ simplifyKernelsMem,
         performCSE False,
         simplifyKernelsMem,
-        doubleBuffer,
+        doubleBufferKernels,
         simplifyKernelsMem,
         expandAllocations,
         simplifyKernelsMem
@@ -125,5 +125,7 @@ multicorePipeline =
     >>> passes
       [ simplifyMCMem,
         performCSE False,
+        simplifyMCMem,
+        doubleBufferMC,
         simplifyMCMem
       ]
