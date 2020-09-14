@@ -632,6 +632,8 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       isNotHoistableBnd _ usages (Let pat _ _)
         | any (`UT.isSize` usages) $ patternNames pat =
           False
+      isNotHoistableBnd _ _ stm
+        | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
         -- Hoist aggressively out of versioning branches.
         ifsort /= IfEquiv
