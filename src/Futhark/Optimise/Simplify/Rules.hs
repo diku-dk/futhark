@@ -47,6 +47,7 @@ topDownRules =
     RuleDoLoop simplifyLoopVariables,
     RuleDoLoop narrowLoopType,
     RuleGeneric constantFoldPrimFun,
+    RuleGeneric decertifySafeStm,
     RuleIf ruleIf,
     RuleIf hoistBranchInvariant,
     RuleBasicOp ruleBasicOp
@@ -65,6 +66,16 @@ bottomUpRules =
 -- memory block merging.
 standardRules :: (BinderOps lore, Aliased lore) => RuleBook lore
 standardRules = ruleBook topDownRules bottomUpRules
+
+-- | If an expression is statically known to be safe, then we can
+-- remove the certificates on it.  This can help hoist things that
+-- would otherwise be forced inside loops.
+decertifySafeStm :: BinderOps lore => TopDownRuleGeneric lore
+decertifySafeStm _ (Let pat (StmAux cs attrs _) e)
+  | cs /= mempty,
+    safeExp e =
+    Simplify $ attributing attrs $ letBind pat e
+decertifySafeStm _ _ = Skip
 
 -- This next one is tricky - it's easy enough to determine that some
 -- loop result is not used after the loop, but here, we must also make
