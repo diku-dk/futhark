@@ -161,10 +161,8 @@ type Mem lore =
     LetDec lore ~ LetDecMem,
     RetType lore ~ RetTypeMem,
     BranchType lore ~ BranchTypeMem,
-    CanBeAliased (Op lore),
     ASTLore lore,
     Decorations lore,
-    TC.Checkable lore,
     OpReturns lore
   )
 
@@ -234,6 +232,7 @@ instance OpMetrics inner => OpMetrics (MemOp inner) where
   opMetrics (Inner k) = opMetrics k
 
 instance IsOp inner => IsOp (MemOp inner) where
+  safeOp (Alloc (Constant (IntValue (Int64Value k))) _) = k >= 0
   safeOp Alloc {} = False
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
@@ -567,7 +566,7 @@ bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 matchRetTypeToResult ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [FunReturns] ->
   Result ->
   TC.TypeM lore ()
@@ -577,7 +576,7 @@ matchRetTypeToResult rettype result = do
   matchReturnType rettype result result_ts
 
 matchFunctionReturnType ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [FunReturns] ->
   Result ->
   TC.TypeM lore ()
@@ -603,7 +602,7 @@ matchFunctionReturnType rettype result = do
                   ++ pretty ixfun
 
 matchLoopResultMem ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [FParam (Aliases lore)] ->
   [FParam (Aliases lore)] ->
   [SubExp] ->
@@ -638,7 +637,7 @@ matchLoopResultMem ctx val = matchRetTypeToResult rettype
         ixfun' = existentialiseIxFun ctx_names ixfun
 
 matchBranchReturnType ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [BodyReturns] ->
   Body (Aliases lore) ->
   TC.TypeM lore ()
@@ -821,7 +820,7 @@ matchReturnType rettype res ts = do
   either bad return =<< runExceptT (zipWithM_ checkReturn rettype val_ts)
 
 matchPatternToExp ::
-  (Mem lore) =>
+  (Mem lore, TC.Checkable lore) =>
   Pattern (Aliases lore) ->
   Exp (Aliases lore) ->
   TC.TypeM lore ()
