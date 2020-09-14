@@ -309,22 +309,22 @@ transformSOAC pat _ (Scatter w lam ivs dests) = do
         Op $
           ParOp Nothing $
             SegMap () space rets kbody
-transformSOAC pat _ (Hist w ops lam arrs) = do
+transformSOAC pat _ (Hist w ops lam arrs) = runBinderT'_ $ do
   ops' <- forM ops $ \(SOACS.HistOp num_bins rf dests nes op) -> do
-    op' <- transformLambda op
-    return $ MC.HistOp num_bins rf dests nes mempty op'
+    (op', nes', shape) <- determineReduceOp op nes
+    op'' <- lift $ transformLambda op'
+    return $ MC.HistOp num_bins rf dests nes' shape op''
 
-  (gtid, space) <- mkSegSpace w
+  (gtid, space) <- lift $ mkSegSpace w
 
-  Body () kstms res <- mapLambdaToBody transformBody gtid lam arrs
+  Body () kstms res <- lift $ mapLambdaToBody transformBody gtid lam arrs
   let kbody = KernelBody () kstms $ map (Returns ResultMaySimplify) res
 
-  return $
-    oneStm $
-      Let pat (defAux ()) $
-        Op $
-          ParOp Nothing $
-            SegHist () space ops' (lambdaReturnType lam) kbody
+  addStm $
+    Let pat (defAux ()) $
+      Op $
+        ParOp Nothing $
+          SegHist () space ops' (lambdaReturnType lam) kbody
 transformSOAC pat attrs (Stream w (Parallel _ comm red_lam red_nes) fold_lam arrs)
   | not $ null red_nes = do
     map_lam <- unstreamLambda attrs red_nes fold_lam
