@@ -18,6 +18,7 @@ import Futhark.Compiler.CLI
 import Futhark.IR (ASTLore, Op, Prog, pretty)
 import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
+import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.MCMem as MCMem
 import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
@@ -39,6 +40,7 @@ import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Pass.ExtractKernels
+import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
@@ -92,6 +94,7 @@ getFutharkPipeline = toPipeline . futharkPipeline
 data UntypedPassState
   = SOACS (Prog SOACS.SOACS)
   | Kernels (Prog Kernels.Kernels)
+  | MC (Prog MC.MC)
   | Seq (Prog Seq.Seq)
   | KernelsMem (Prog KernelsMem.KernelsMem)
   | MCMem (Prog MCMem.MCMem)
@@ -109,6 +112,7 @@ class Representation s where
 instance Representation UntypedPassState where
   representation (SOACS _) = "SOACS"
   representation (Kernels _) = "Kernels"
+  representation (MC _) = "MC"
   representation (Seq _) = "Seq"
   representation (KernelsMem _) = "KernelsMem"
   representation (MCMem _) = "MCMem"
@@ -117,6 +121,7 @@ instance Representation UntypedPassState where
 instance PP.Pretty UntypedPassState where
   ppr (SOACS prog) = PP.ppr prog
   ppr (Kernels prog) = PP.ppr prog
+  ppr (MC prog) = PP.ppr prog
   ppr (Seq prog) = PP.ppr prog
   ppr (SeqMem prog) = PP.ppr prog
   ppr (MCMem prog) = PP.ppr prog
@@ -254,6 +259,8 @@ simplifyOption short =
       SOACS <$> runPipeline (onePass simplifySOACS) config prog
     perform (Kernels prog) config =
       Kernels <$> runPipeline (onePass simplifyKernels) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass simplifyMC) config prog
     perform (Seq prog) config =
       Seq <$> runPipeline (onePass simplifySeq) config prog
     perform (SeqMem prog) config =
@@ -308,6 +315,8 @@ cseOption short =
       SOACS <$> runPipeline (onePass $ performCSE True) config prog
     perform (Kernels prog) config =
       Kernels <$> runPipeline (onePass $ performCSE True) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass $ performCSE True) config prog
     perform (Seq prog) config =
       Seq <$> runPipeline (onePass $ performCSE True) config prog
     perform (SeqMem prog) config =
@@ -465,9 +474,10 @@ commandLineOptions =
     kernelsPassOption unstreamKernels [],
     kernelsPassOption sinkKernels [],
     typedPassOption soacsProg Kernels extractKernels [],
+    typedPassOption soacsProg MC extractMulticore [],
     iplOption [],
     allocateOption "a",
-    kernelsMemPassOption doubleBuffer [],
+    kernelsMemPassOption doubleBufferKernels [],
     kernelsMemPassOption expandAllocations [],
     cseOption [],
     simplifyOption "e",
@@ -626,6 +636,8 @@ runPolyPasses config base initial_prog = do
       actionProcedure acs soacs_prog
     (Kernels kernels_prog, PolyAction acs) ->
       actionProcedure acs kernels_prog
+    (MC mc_prog, PolyAction acs) ->
+      actionProcedure acs mc_prog
     (Seq seq_prog, PolyAction acs) ->
       actionProcedure acs seq_prog
     (KernelsMem mem_prog, PolyAction acs) ->
