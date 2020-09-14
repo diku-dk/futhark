@@ -2282,7 +2282,7 @@ checkDimIndex (DimSlice i j s) =
   where
     check =
       maybe (return Nothing) $
-        fmap Just . require "use as index" anySignedType <=< checkExp
+        fmap Just . unifies "use as index" (Scalar $ Prim $ Signed Int32) <=< checkExp
 
 sequentially :: TermTypeM a -> (a -> Occurences -> TermTypeM b) -> TermTypeM b
 sequentially m1 m2 = do
