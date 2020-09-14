@@ -38,7 +38,6 @@ module Language.Futhark.TypeChecker.Monad
     MTy (..),
     anySignedType,
     anyUnsignedType,
-    anyIntType,
     anyFloatType,
     anyNumberType,
     anyPrimType,

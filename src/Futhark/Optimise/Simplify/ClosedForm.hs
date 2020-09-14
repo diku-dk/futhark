@@ -62,6 +62,7 @@ foldClosedForm look pat lam accs arrs = do
       (patternNames pat)
       inputsize
       mempty
+      Int32
       knownBnds
       (map paramName (lambdaParams lam))
       (lambdaBody lam)
@@ -85,10 +86,11 @@ loopClosedForm ::
   Pattern lore ->
   [(FParam lore, SubExp)] ->
   Names ->
+  IntType ->
   SubExp ->
   Body lore ->
   RuleM lore ()
-loopClosedForm pat merge i bound body = do
+loopClosedForm pat merge i it bound body = do
   t <- case patternTypes pat of
     [Prim t] -> return t
     _ -> cannotSimplify
@@ -98,13 +100,14 @@ loopClosedForm pat merge i bound body = do
       mergenames
       bound
       i
+      it
       knownBnds
       (map identName mergeidents)
       body
       mergeexp
   isEmpty <- newVName "bound_is_zero"
   letBindNames [isEmpty] $
-    BasicOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
+    BasicOp $ CmpOp (CmpSlt it) bound (intConst it 0)
 
   letBind pat
     =<< ( If (Var isEmpty)
@@ -123,13 +126,14 @@ checkResults ::
   [VName] ->
   SubExp ->
   Names ->
+  IntType ->
   M.Map VName SubExp ->
   -- | Lambda-bound
   [VName] ->
   Body lore ->
   [SubExp] ->
   RuleM lore (Body lore)
-checkResults pat size untouchable knownBnds params body accs = do
+checkResults pat size untouchable it knownBnds params body accs = do
   ((), bnds) <-
     collectStms $
       zipWithM_ checkResult (zip pat res) (zip accparams accs)
@@ -183,12 +187,12 @@ checkResults pat size untouchable knownBnds params body accs = do
     properIntSize t =
       Just $
         letSubExp "converted_size" $
-          BasicOp $ ConvOp (SExt Int32 t) size
+          BasicOp $ ConvOp (SExt it t) size
 
     properFloatSize t =
       Just $
         letSubExp "converted_size" $
-          BasicOp $ ConvOp (SIToFP Int32 t) size
+          BasicOp $ ConvOp (SIToFP it t) size
 
 determineKnownBindings ::
   VarLookup lore ->

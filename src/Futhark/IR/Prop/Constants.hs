@@ -17,9 +17,6 @@ import Futhark.IR.Syntax.Core
 class IsValue a where
   value :: a -> PrimValue
 
-instance IsValue Int where
-  value = IntValue . Int32Value . fromIntegral
-
 instance IsValue Int8 where
   value = IntValue . Int8Value
 

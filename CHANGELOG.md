@@ -21,9 +21,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Array creation C API functions now accept `const` pointers.
 
+  * Arrays can now be indexed (but not sliced) with any signed integer
+    type (#1122).
+
 ### Removed
 
+  * The integer modules no longer contain `iota` and `replicate`
+    functions.  The top-level ones still exist.
+
+  * The `size` module type has been removed from the prelude.
+
 ### Changed
+
+  * Range literals may no longer be produced from unsigned integers.
 
 ### Fixed
 
