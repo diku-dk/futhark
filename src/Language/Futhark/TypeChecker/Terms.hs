@@ -1277,7 +1277,7 @@ checkExp (ArrayLit all_es _ loc) =
       t <- arrayOfM loc et' (ShapeDecl [ConstDim $ length all_es]) Unique
       return $ ArrayLit (e' : es') (Info t) loc
 checkExp (Range start maybe_step end _ loc) = do
-  start' <- require "use in range expression" anyIntType =<< checkExp start
+  start' <- require "use in range expression" anySignedType =<< checkExp start
   start_t <- toStruct <$> expTypeFully start'
   maybe_step' <- case maybe_step of
     Nothing -> return Nothing
@@ -2276,7 +2276,7 @@ checkIdent (Ident name _ loc) = do
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
 checkDimIndex (DimFix i) =
-  DimFix <$> (unifies "use as index" (Scalar $ Prim $ Signed Int32) =<< checkExp i)
+  DimFix <$> (require "use as index" anySignedType =<< checkExp i)
 checkDimIndex (DimSlice i j s) =
   DimSlice <$> check i <*> check j <*> check s
   where
@@ -2520,7 +2520,7 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   let t = toStruct $ typeOf e'
   (tparams, _, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
-  fixOverloadedTypes
+  fixOverloadedTypes $ typeVars t
   e'' <- updateTypes e'
   checkUnmatched e''
   causalityCheck e''
@@ -2708,7 +2708,8 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 
       -- Since this is a top-level function, we also resolve overloaded
       -- types, using either defaults or complaining about ambiguities.
-      fixOverloadedTypes
+      fixOverloadedTypes $
+        typeVars rettype' <> foldMap (typeVars . patternType) params'
 
       -- Then replace all inferred types in the body and parameters.
       body'' <- updateTypes body'
@@ -2735,18 +2736,21 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 
 -- | This is "fixing" as in "setting them", not "correcting them".  We
 -- only make very conservative fixing.
-fixOverloadedTypes :: TermTypeM ()
-fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
+fixOverloadedTypes :: Names -> TermTypeM ()
+fixOverloadedTypes tyvars_at_toplevel =
+  getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
   where
     fixOverloaded (v, Overloaded ots usage)
       | Signed Int32 `elem` ots = do
         unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
           Scalar $ Prim $ Signed Int32
-        warn usage "Defaulting ambiguous type to i32."
+        when (v `S.member` tyvars_at_toplevel) $
+          warn usage "Defaulting ambiguous type to i32."
       | FloatType Float64 `elem` ots = do
         unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
           Scalar $ Prim $ FloatType Float64
-        warn usage "Defaulting ambiguous type to f64."
+        when (v `S.member` tyvars_at_toplevel) $
+          warn usage "Defaulting ambiguous type to f64."
       | otherwise =
         typeError usage mempty $
           "Type is ambiguous (could be one of" <+> commasep (map ppr ots) <> ")."

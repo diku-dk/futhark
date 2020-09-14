@@ -361,7 +361,7 @@ jobs:
         echo "::add-path::$HOME/.local/bin"
 
     - run: |
-        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
+        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl  --pass-compiler-option=--Werror futhark-benchmarks
 
   deploy-nightly:
     runs-on: ubuntu-20.04
