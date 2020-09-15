@@ -90,7 +90,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install cabal-install ghc
+        brew install cabal-install ghc sphinx-doc
+        echo "::add-path::/usr/local/opt/sphinx-doc/bin"
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -103,8 +104,24 @@ jobs:
 
     - name: Build
       run: |
+        cp -r tools/release/skeleton futhark-nightly-macos-x86_64
+
+        mkdir -p futhark-nightly-macos-x86_64/bin
         cabal v2-update
-        cabal install --install-method=copy --overwrite-policy=always
+        cabal install --install-method=copy --overwrite-policy=always --installdir=futhark-nightly-macos-x86_64/bin
+        mkdir -p futhark-nightly-macos-x86_64/share/man/man1/
+        (cd docs; make man)
+        cp -r docs/_build/man/* futhark-nightly-macos-x86_64/share/man/man1/
+
+        mkdir -p futhark-nightly-macos-x86_64/share/futhark
+        cp LICENSE futhark-nightly-macos-x86_64/share/futhark/
+        echo "${GITHUB_SHA}" > futhark-nightly-macos-x86_64/commit-id
+        tar -Jcf futhark-nightly-macos-x86_64.tar.xz futhark-nightly-macos-x86_64
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-nightly-macos-x86_64.tar.xz
+        path: futhark-nightly-macos-x86_64.tar.xz
 
   build-windows:
     runs-on: windows-2019
@@ -358,6 +375,11 @@ jobs:
       with:
         name: futhark-nightly-windows-x86_64.zip
 
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-maxos-x86_64.tar.xz
+
     - uses: actions/download-artifact@v2
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -367,7 +389,7 @@ jobs:
         name: prelude-docs.tar.xz
 
     - name: scp tarballs to server
-      run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+      run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark-nightly-maxos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |
