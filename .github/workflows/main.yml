@@ -378,7 +378,7 @@ jobs:
 
     - uses: actions/download-artifact@v2
       with:
-        name: futhark-nightly-maxos-x86_64.tar.xz
+        name: futhark-nightly-macos-x86_64.tar.xz
 
     - uses: actions/download-artifact@v2
       with:
