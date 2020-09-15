@@ -355,15 +355,15 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
   int64_t task_timer = 0;
   /* Execute task sequential or parallel based on decision made earlier */
   if (task->info.nsubtasks == 1) {
-    /* int64_t start = get_wall_time_ns(); */
+    int64_t start = get_wall_time_ns();
     err = task->fn(task->args, 0, task->iterations, 0, worker->tid);
-    /* int64_t end = get_wall_time_ns(); */
-    /* task_timer = end - start; */
-    /* worker->time_spent_working += task_timer; */
+    int64_t end = get_wall_time_ns();
+    task_timer = end - start;
+    worker->time_spent_working += task_timer;
     // Report time measurements
     // TODO the update of both of these should really both be atomic!!
-    /* __atomic_fetch_add(task->info.task_time, task_timer, __ATOMIC_RELAXED); */
-    /* __atomic_fetch_add(task->info.task_iter, task->iterations, __ATOMIC_RELAXED); */
+    __atomic_fetch_add(task->info.task_time, task_timer, __ATOMIC_RELAXED);
+    __atomic_fetch_add(task->info.task_iter, task->iterations, __ATOMIC_RELAXED);
   } else {
     // Add "before" time if we already are inside a task
     int64_t time_before = 0;
