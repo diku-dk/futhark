@@ -207,6 +207,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                        }|]
     )
 
+  GC.publicDef_ "context_config_list_devices" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         list_devices(&cfg->opencl);
+                       }|]
+    )
+
   GC.publicDef_ "context_config_dump_program_to" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {

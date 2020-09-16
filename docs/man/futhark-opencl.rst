@@ -155,6 +155,10 @@ The following additional options are accepted.
 
   Read size=value assignments from the given file.
 
+--list-devices
+
+  List all OpenCL devices and platforms available on the system.
+
 SEE ALSO
 ========
 

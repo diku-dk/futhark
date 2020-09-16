@@ -139,6 +139,14 @@ cliOptions =
              optionShortName = Just 'P',
              optionArgument = NoArgument,
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+           },
+         Option
+           { optionLongName = "list-devices",
+             optionShortName = Nothing,
+             optionArgument = NoArgument,
+             optionAction =
+               [C.cstm|{futhark_context_config_list_devices(cfg);
+                        entry_point = NULL;}|]
            }
        ]
 

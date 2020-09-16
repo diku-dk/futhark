@@ -206,6 +206,10 @@ OpenCL backends (``opencl``, ``pyopencl``):
     options are supported.  Be careful - some options can easily
     result in invalid results.
 
+  ``--list-devices``
+
+    List all OpenCL devices and platforms available on the system.
+
 There is rarely a need to use both ``-p`` and ``-d``.  For example, to
 run on the first available NVIDIA GPU, ``-p NVIDIA`` is sufficient, as
 there is likely only a single device associated with this platform.
