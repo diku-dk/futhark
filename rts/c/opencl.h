@@ -556,11 +556,18 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   // Futhark reserves 4 bytes for bookkeeping information.
   max_local_memory -= 4;
 
-  // NVIDIA reserves some more bytes for who-knows-what.  The number
-  // of bytes here has been experimentally determined, but the
-  // overhead seems to vary a bit depending on what the kernel does.
+  // The OpenCL implementation may reserve some local memory bytes for
+  // various purposes.  In principle, we should use
+  // clGetKernelWorkGroupInfo() to figure out for each kernel how much
+  // is actually available, but our current code generator design
+  // makes this infeasible.  Instead, we have this nasty hack where we
+  // arbitrarily subtract some bytes, based on empirical measurements
+  // (but which might be arbitrarily wrong).  Fortunately, we rarely
+  // try to really push the local memory usage.
   if (strstr(device_option.platform_name, "NVIDIA CUDA") != NULL) {
     max_local_memory -= 12;
+  } else if (strstr(device_option.platform_name, "AMD") != NULL) {
+    max_local_memory -= 16;
   }
 
   // Make sure this function is defined.

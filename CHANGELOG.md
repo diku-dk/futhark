@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Missing synchronisation for in-place updates at group level.
 
+  * Fixed (in a hacky way) an issue where `reduce_by_index` would use
+    too much local memory on AMD GPUs when using the OpenCL backend.
+
 ## [0.16.4]
 
 ### Added
