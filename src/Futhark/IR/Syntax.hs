@@ -156,6 +156,7 @@ module Futhark.IR.Syntax
     FParam,
     LParam,
     FunDef (..),
+    ForeignType,
     EntryPoint,
     EntryPointType (..),
     Prog (..),
@@ -650,7 +651,8 @@ data FunDef lore = FunDef
     funDefName :: Name,
     funDefRetType :: [RetType lore],
     funDefParams :: [FParam lore],
-    funDefBody :: BodyT lore
+    funDefBody :: BodyT lore,
+    funDefForeignTypes :: [ForeignType]
   }
   deriving (Generic)
 
@@ -658,6 +660,7 @@ instance Decorations lore => SexpIso (FunDef lore) where
   sexpIso = with $ \fundef ->
     Sexp.list
       ( Sexp.el (Sexp.sym "fundef")
+          >>> Sexp.el sexpIso
           >>> Sexp.el sexpIso
           >>> Sexp.el sexpIso
           >>> Sexp.el sexpIso
@@ -677,6 +680,8 @@ deriving instance Decorations lore => Ord (FunDef lore)
 -- point.  The first element is for parameters, the second for return
 -- value.
 type EntryPoint = ([EntryPointType], [EntryPointType])
+
+type ForeignType = Name
 
 -- | Every entry point argument and return value has an annotation
 -- indicating how it maps to the original source program type.

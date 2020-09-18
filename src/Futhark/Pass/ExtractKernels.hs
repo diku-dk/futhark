@@ -239,11 +239,11 @@ transformFunDef ::
   Scope Out.Kernels ->
   FunDef SOACS ->
   m (Out.FunDef Out.Kernels)
-transformFunDef scope (FunDef entry attrs name rettype params body) = runDistribM $ do
+transformFunDef scope (FunDef entry attrs name rettype params body foreigns) = runDistribM $ do
   body' <-
     localScope (scope <> scopeOfFParams params) $
       transformBody mempty body
-  return $ FunDef entry attrs name rettype params body'
+  return $ FunDef entry attrs name rettype params body' foreigns
 
 type KernelsStms = Stms Out.Kernels
 

@@ -215,7 +215,7 @@ instance
   ) =>
   FreeIn (FunDef lore)
   where
-  freeIn' (FunDef _ _ _ rettype params body) =
+  freeIn' (FunDef _ _ _ rettype params body _) =
     fvBind (namesFromList $ map paramName params) $
       freeIn' rettype <> freeIn' params <> freeIn' body
 

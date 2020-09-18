@@ -135,5 +135,7 @@ findNoninlined prog =
     noinlineDef fd
       | "noinline" `inAttrs` funDefAttrs fd =
         S.singleton $ funDefName fd
+      | not $ (funDefForeignTypes fd) == [] =
+        S.singleton $ funDefName fd
       | otherwise =
         mempty

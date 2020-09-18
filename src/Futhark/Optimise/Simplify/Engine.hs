@@ -1030,9 +1030,9 @@ simplifyFun ::
   SimplifiableLore lore =>
   FunDef lore ->
   SimpleM lore (FunDef (Wise lore))
-simplifyFun (FunDef entry attrs fname rettype params body) = do
+simplifyFun (FunDef entry attrs fname rettype params body foreigns) = do
   rettype' <- simplify rettype
   params' <- mapM (traverse simplify) params
   let ds = map (diet . declExtTypeOf) rettype'
   body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
-  return $ FunDef entry attrs fname rettype' params' body'
+  return $ FunDef entry attrs fname rettype' params' body' foreigns

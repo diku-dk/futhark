@@ -31,6 +31,7 @@ import Futhark.Util (splitAt3)
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
 
+
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
 internaliseProg ::
@@ -67,6 +68,18 @@ internaliseFunName ofname _ = do
   case info of
     Just _ -> nameFromString . pretty <$> newNameFromString (baseString ofname)
     Nothing -> return $ nameFromString $ pretty ofname
+
+
+findForeigns :: Attrs -> [ForeignType]
+findForeigns att =
+  concatMap findForeigns' (S.toList $ unAttrs att)
+  where
+    findForeigns' (I.AttrComp "foreign" l) = concatMap atomName l
+    findForeigns' _ = []
+
+    atomName (I.AttrAtom n) = [n]
+    atomName _ = []
+
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
@@ -110,14 +123,16 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           free_params = nub $ free_shape_params ++ used_free_params
           all_params = free_params ++ shapeparams ++ concat params'
 
+      let int_attrs = (internaliseAttrs attrs)
       let fd =
             I.FunDef
               Nothing
-              (internaliseAttrs attrs)
+              int_attrs
               fname'
               rettype'
               all_params
               body'
+              (findForeigns int_attrs)
 
       if null params'
         then bindConstant fname fd
@@ -200,14 +215,16 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
           <$> mapM (fmap I.arrayDims . subExpType) vals
       resultBodyM (ctx ++ vals)
 
+    let int_attrs = (internaliseAttrs attrs)
     addFunDef $
       I.FunDef
         (Just entry')
-        (internaliseAttrs attrs)
+        int_attrs
         (baseName ofname)
         (concat entry_rettype)
         (shapeparams ++ concat params')
         entry_body
+        (findForeigns int_attrs)
 
 entryPoint ::
   [(E.EntryType, [I.FParam])] ->

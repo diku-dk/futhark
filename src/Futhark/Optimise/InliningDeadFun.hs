@@ -124,8 +124,10 @@ inlineInFunDef ::
   M.Map Name (FunDef SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
-inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
-  FunDef entry attrs name rtp args <$> inlineInBody fdmap body
+inlineInFunDef fdmap (FunDef entry attrs name rtp args body foreigns) =
+  let fd = \b -> FunDef entry attrs name rtp args b foreigns
+  in
+    fd <$> inlineInBody fdmap body
 
 inlineFunction ::
   MonadFreshNames m =>
@@ -183,7 +185,9 @@ inlineInBody fdmap = onBody
     inline (Let pat aux (Apply fname args _ what) : rest)
       | Just fd <- M.lookup fname fdmap,
         not $ "noinline" `inAttrs` funDefAttrs fd,
-        not $ "noinline" `inAttrs` stmAuxAttrs aux =
+        not $ "noinline" `inAttrs` stmAuxAttrs aux,
+        (funDefForeignTypes fd) == []
+        =
         (<>) <$> inlineFunction pat aux args what fd <*> inline rest
     inline (stm : rest) =
       (:) <$> onStm stm <*> inline rest

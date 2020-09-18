@@ -690,7 +690,7 @@ explicitAllocationsGeneric handleOp hints =
   where
     onStms stms = runAllocM handleOp hints $ allocInStms stms pure
 
-    allocInFun consts (FunDef entry attrs fname rettype params fbody) =
+    allocInFun consts (FunDef entry attrs fname rettype params fbody foreigns) =
       runAllocM handleOp hints $
         inScopeOf consts $
           allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
@@ -699,7 +699,7 @@ explicitAllocationsGeneric handleOp hints =
                 allocInFunBody
                   (map (const $ Just DefaultSpace) rettype)
                   fbody
-            return $ FunDef entry attrs fname (memoryInDeclExtType rettype) params' fbody'
+            return $ FunDef entry attrs fname (memoryInDeclExtType rettype) params' fbody' foreigns
 
 explicitAllocationsInStmsGeneric ::
   ( MonadFreshNames m,
