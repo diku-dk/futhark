@@ -88,6 +88,7 @@ cliOptions =
            { optionLongName = "dump-cuda",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Don’t run the program, but instead dump the embedded CUDA kernels to the indicated file.\nUseful if you want to see what is actually being executed.",
              optionAction =
                [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
                                      entry_point = NULL;}|]
@@ -96,12 +97,14 @@ cliOptions =
            { optionLongName = "load-cuda",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Instead of using the embedded CUDA kernels, load them from the indicated file.",
              optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
            },
          Option
            { optionLongName = "dump-ptx",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Don’t run the program, but instead dump the PTX-compiled version of the embedded kernels to the indicated file.",
              optionAction =
                [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
                                      entry_point = NULL;}|]
@@ -110,18 +113,21 @@ cliOptions =
            { optionLongName = "load-ptx",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Load PTX code from the indicated file.",
              optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
            },
          Option
            { optionLongName = "nvrtc-option",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "OPT",
+             optionDescription = "Add an additional build option to the string passed to NVRTC.\nRefer to the CUDA documentation for which options are supported.\nBe careful - some options can easily result in invalid results.",
              optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
            },
          Option
            { optionLongName = "profile",
              optionShortName = Just 'P',
              optionArgument = NoArgument,
+             optionDescription = "Gather profiling data while executing and print out a summary at the end.\nWhen -r is used, only the last run will be profiled.",
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
            }
        ]
