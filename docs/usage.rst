@@ -75,6 +75,10 @@ Executable Options
 
 All generated executables support the following options.
 
+  ``-h/--help``
+
+    Print help text to standard output and exit.
+
   ``-t FILE``
 
     Print the time taken to execute the program to the indicated file,

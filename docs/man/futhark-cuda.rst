@@ -73,6 +73,10 @@ nomenclature ("group" instead of "thread block").
 
 The following additional options are accepted.
 
+-h, --help
+
+  Print help text to standard output and exit.
+
 --default-group-size=INT
 
   The default size of thread blocks that are launched.  Capped to the
