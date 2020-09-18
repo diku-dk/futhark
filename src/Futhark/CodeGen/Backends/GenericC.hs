@@ -1485,14 +1485,14 @@ genericOptions =
       { optionLongName = "runs",
         optionShortName = Just 'r',
         optionArgument = RequiredArgument "INT",
-        optionDescription = "Perform NUM runs of the program.\nWith -t, the runtime for each individual run will be printed. \nAdditionally, a single leading warmup run will be performed (not counted).\nOnly the final run will have its result written to stdout.",
+        optionDescription = "Perform NUM runs of the program.",
         optionAction = set_num_runs
       },
     Option
       { optionLongName = "debugging",
         optionShortName = Just 'D',
         optionArgument = NoArgument,
-        optionDescription = "Perform possibly expensive internal correctness checks and verbose logging. Implies -L.",
+        optionDescription = "Perform possibly expensive internal correctness checks and verbose logging.",
         optionAction = [C.cstm|futhark_context_config_set_debugging(cfg, 1);|]
       },
     Option
@@ -1513,7 +1513,7 @@ genericOptions =
       { optionLongName = "binary-output",
         optionShortName = Just 'b',
         optionArgument = NoArgument,
-        optionDescription = "Print the program result in the binary output format. The default is human-readable text, which is very slow.",
+        optionDescription = "Print the program result in the binary output format.",
         optionAction = [C.cstm|binary_output = 1;|]
       },
     Option
@@ -1523,7 +1523,8 @@ genericOptions =
         optionDescription = "Print help information and exit.",
         optionAction =
           [C.cstm|{
-                   printf("Usage: %s [OPTION]...\nOptions:\n\n%s", fut_progname, option_descriptions);
+                   printf("Usage: %s [OPTION]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n",
+                          fut_progname, option_descriptions);
                    exit(0);
                   }|]
       }

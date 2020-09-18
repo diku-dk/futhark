@@ -88,7 +88,7 @@ cliOptions =
            { optionLongName = "dump-cuda",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
-             optionDescription = "Don’t run the program, but instead dump the embedded CUDA kernels to the indicated file.\nUseful if you want to see what is actually being executed.",
+             optionDescription = "Dump the embedded CUDA kernels to the indicated file.",
              optionAction =
                [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
                                      entry_point = NULL;}|]
@@ -104,7 +104,7 @@ cliOptions =
            { optionLongName = "dump-ptx",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
-             optionDescription = "Don’t run the program, but instead dump the PTX-compiled version of the embedded kernels to the indicated file.",
+             optionDescription = "Dump the PTX-compiled version of the embedded kernels to the indicated file.",
              optionAction =
                [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
                                      entry_point = NULL;}|]
@@ -120,14 +120,14 @@ cliOptions =
            { optionLongName = "nvrtc-option",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "OPT",
-             optionDescription = "Add an additional build option to the string passed to NVRTC.\nRefer to the CUDA documentation for which options are supported.\nBe careful - some options can easily result in invalid results.",
+             optionDescription = "Add an additional build option to the string passed to NVRTC.",
              optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
            },
          Option
            { optionLongName = "profile",
              optionShortName = Just 'P',
              optionArgument = NoArgument,
-             optionDescription = "Gather profiling data while executing and print out a summary at the end.\nWhen -r is used, only the last run will be profiled.",
+             optionDescription = "Gather profiling data while executing and print out a summary at the end.",
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
            }
        ]
