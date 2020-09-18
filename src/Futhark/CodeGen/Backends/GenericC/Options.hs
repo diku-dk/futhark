@@ -11,6 +11,9 @@ module Futhark.CodeGen.Backends.GenericC.Options
   )
 where
 
+import Data.Char (isSpace)
+import Data.Function ((&))
+import Data.List (intercalate)
 import Data.Maybe
 import qualified Language.C.Quote.C as C
 import qualified Language.C.Syntax as C
@@ -24,6 +27,7 @@ data Option = Option
   { optionLongName :: String,
     optionShortName :: Maybe Char,
     optionArgument :: OptionArgument,
+    optionDescription :: String,
     optionAction :: C.Stm
   }
 
@@ -48,6 +52,8 @@ generateOptionParser fname options =
 
        static struct option long_options[] = { $inits:option_fields, {0, 0, 0, 0} };
 
+       static char* option_descriptions = $string:option_descriptions;
+
        while (($id:chosen_option =
                  getopt_long(argc, argv, $string:option_string, long_options, NULL)) != -1) {
          $stms:option_applications
@@ -67,20 +73,39 @@ generateOptionParser fname options =
     option_string = ':' : optionString options
     option_applications = optionApplications chosen_option options
     option_fields = optionFields options
-    option_descriptions = unwords $ map describeOption options
+    option_descriptions = describeOptions options
 
-describeOption :: Option -> String
-describeOption opt =
-  concat
-    [ "[",
-      maybe "" (\c -> "-" ++ [c] ++ "/") $ optionShortName opt,
-      "--" ++ optionLongName opt,
-      case optionArgument opt of
-        NoArgument -> ""
-        RequiredArgument what -> " " ++ what
-        OptionalArgument -> " [ARG]",
-      "]"
-    ]
+trim :: String -> String
+trim = f . f
+  where
+    f = reverse . dropWhile isSpace
+
+describeOptions :: [Option] -> String
+describeOptions opts =
+  let
+   in unlines $ fmap extendDesc with_short_descs
+  where
+    with_short_descs = fmap (\opt -> (opt, shortDesc opt)) opts
+    max_short_desc_len = maximum $ fmap (length . snd) with_short_descs
+    extendDesc :: (Option, String) -> String
+    extendDesc (opt, short) =
+      take (max_short_desc_len + 1) (short ++ repeat ' ')
+        ++ ( optionDescription opt
+               & lines
+               & fmap trim
+               & intercalate ('\n' : replicate (max_short_desc_len + 1) ' ')
+           )
+    shortDesc :: Option -> String
+    shortDesc opt =
+      concat
+        [ "  ",
+          maybe "" (\c -> "-" ++ [c] ++ "/") $ optionShortName opt,
+          "--" ++ optionLongName opt,
+          case optionArgument opt of
+            NoArgument -> ""
+            RequiredArgument what -> " " ++ what
+            OptionalArgument -> " [ARG]"
+        ]
 
 optionFields :: [Option] -> [C.Initializer]
 optionFields = zipWith field [(1 :: Int) ..]

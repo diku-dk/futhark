@@ -73,6 +73,10 @@ data has been read from the buffers or the buffers have been released.
 
 The following additional options are accepted.
 
+-h, --help
+
+  Print help text to standard output and exit.
+
 --build-option=OPT
 
   Add an additional build option to the string passed to
@@ -154,6 +158,10 @@ The following additional options are accepted.
 --tuning=FILE
 
   Read size=value assignments from the given file.
+
+--list-devices
+
+  List all OpenCL devices and platforms available on the system.
 
 SEE ALSO
 ========

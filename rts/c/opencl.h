@@ -342,6 +342,33 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
 }
 
 // Returns 0 on success.
+static int list_devices(struct opencl_config *cfg) {
+  struct opencl_device_option *devices;
+  size_t num_devices;
+
+  opencl_all_device_options(&devices, &num_devices);
+
+  const char *cur_platform = "";
+  for (size_t i = 0; i < num_devices; i++) {
+    struct opencl_device_option device = devices[i];
+    if (strcmp(cur_platform, device.platform_name) != 0) {
+      printf("Platform: %s\n", device.platform_name);
+      cur_platform = device.platform_name;
+    }
+    printf("[%d]: %s\n", (int)i, device.device_name);
+  }
+
+  // Free all the platform and device names.
+  for (size_t j = 0; j < num_devices; j++) {
+    free(devices[j].platform_name);
+    free(devices[j].device_name);
+  }
+  free(devices);
+
+  return 0;
+}
+
+// Returns 0 on success.
 static int select_device_interactively(struct opencl_config *cfg) {
   struct opencl_device_option *devices;
   size_t num_devices;

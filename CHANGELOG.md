@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Arrays can now be indexed (but not sliced) with any signed integer
     type (#1122).
 
+  * Added --list-devices command to OpenCL binaries (#1131)
+
+  * Added --help command to C, CUDA and OpenCL binaries (#1131)
+
 ### Removed
 
   * The integer modules no longer contain `iota` and `replicate`

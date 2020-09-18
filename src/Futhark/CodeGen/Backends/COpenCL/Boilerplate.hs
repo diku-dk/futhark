@@ -207,6 +207,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                        }|]
     )
 
+  GC.publicDef_ "context_config_list_devices" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         list_devices(&cfg->opencl);
+                       }|]
+    )
+
   GC.publicDef_ "context_config_dump_program_to" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, const char *path) {
@@ -673,36 +680,42 @@ commonOptions =
       { optionLongName = "device",
         optionShortName = Just 'd',
         optionArgument = RequiredArgument "NAME",
+        optionDescription = "Use the first OpenCL device whose name contains the given string.",
         optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
       },
     Option
       { optionLongName = "default-group-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default size of OpenCL workgroups that are launched.",
         optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-num-groups",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default number of OpenCL workgroups that are launched.",
         optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-tile-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default tile size used when performing two-dimensional tiling.",
         optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-threshold",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default parallelism threshold.",
         optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "print-sizes",
         optionShortName = Nothing,
         optionArgument = NoArgument,
+        optionDescription = "Print all sizes that can be set with -size or --tuning.",
         optionAction =
           [C.cstm|{
                 int n = futhark_get_num_sizes();
@@ -716,7 +729,8 @@ commonOptions =
     Option
       { optionLongName = "size",
         optionShortName = Nothing,
-        optionArgument = RequiredArgument "NAME=INT",
+        optionArgument = RequiredArgument "ASSIGNMENT",
+        optionDescription = "Set a configurable run-time parameter to the given value.",
         optionAction =
           [C.cstm|{
                 char *name = optarg;
@@ -736,6 +750,7 @@ commonOptions =
       { optionLongName = "tuning",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "FILE",
+        optionDescription = "Read size=value assignments from the given file.",
         optionAction =
           [C.cstm|{
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
