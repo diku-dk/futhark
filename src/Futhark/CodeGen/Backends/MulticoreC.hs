@@ -250,7 +250,8 @@ cliOptions =
       { optionLongName = "profile",
         optionShortName = Just 'P',
         optionArgument = NoArgument,
-        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|],
+        optionDescription = "Gather profiling information."
       }
   ]
 
