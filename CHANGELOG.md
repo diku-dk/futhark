@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.17.0]
+## [0.18.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.17.2]
 
 ### Added
 
@@ -23,6 +33,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Arrays can now be indexed (but not sliced) with any signed integer
     type (#1122).
+
+  * Added --list-devices command to OpenCL binaries (#1131)
+
+  * Added --help command to C, CUDA and OpenCL binaries (#1131)
 
 ### Removed
 
@@ -44,6 +58,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Exotic tiling bug (#1112).
 
   * Missing synchronisation for in-place updates at group level.
+
+  * Fixed (in a hacky way) an issue where `reduce_by_index` would use
+    too much local memory on AMD GPUs when using the OpenCL backend.
 
 ## [0.16.4]
 

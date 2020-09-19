@@ -98,12 +98,14 @@ cliOptions =
            { optionLongName = "platform",
              optionShortName = Just 'p',
              optionArgument = RequiredArgument "NAME",
+             optionDescription = "Use the first OpenCL platform whose name contains the given string.",
              optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
            },
          Option
            { optionLongName = "dump-opencl",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Dump the embedded OpenCL program to the indicated file.",
              optionAction =
                [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
                                      entry_point = NULL;}|]
@@ -112,12 +114,14 @@ cliOptions =
            { optionLongName = "load-opencl",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Instead of using the embedded OpenCL program, load it from the indicated file.",
              optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
            },
          Option
            { optionLongName = "dump-opencl-binary",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Dump the compiled version of the embedded OpenCL program to the indicated file.",
              optionAction =
                [C.cstm|{futhark_context_config_dump_binary_to(cfg, optarg);
                                      entry_point = NULL;}|]
@@ -126,19 +130,31 @@ cliOptions =
            { optionLongName = "load-opencl-binary",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
+             optionDescription = "Load an OpenCL binary from the indicated file.",
              optionAction = [C.cstm|futhark_context_config_load_binary_from(cfg, optarg);|]
            },
          Option
            { optionLongName = "build-option",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "OPT",
+             optionDescription = "Add an additional build option to the string passed to clBuildProgram().",
              optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
            },
          Option
            { optionLongName = "profile",
              optionShortName = Just 'P',
              optionArgument = NoArgument,
+             optionDescription = "Gather profiling data while executing and print out a summary at the end.",
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+           },
+         Option
+           { optionLongName = "list-devices",
+             optionShortName = Nothing,
+             optionArgument = NoArgument,
+             optionDescription = "List all OpenCL devices and platforms available on the system.",
+             optionAction =
+               [C.cstm|{futhark_context_config_list_devices(cfg);
+                        entry_point = NULL;}|]
            }
        ]
 

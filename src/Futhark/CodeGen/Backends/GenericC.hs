@@ -1497,43 +1497,61 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                       .fun = $id:cli_entry_point_function_name }|]
     )
 
-benchmarkOptions :: [Option]
-benchmarkOptions =
+genericOptions :: [Option]
+genericOptions =
   [ Option
       { optionLongName = "write-runtime-to",
         optionShortName = Just 't',
         optionArgument = RequiredArgument "FILE",
+        optionDescription = "Print the time taken to execute the program to the indicated file, an integral number of microseconds.",
         optionAction = set_runtime_file
       },
     Option
       { optionLongName = "runs",
         optionShortName = Just 'r',
         optionArgument = RequiredArgument "INT",
+        optionDescription = "Perform NUM runs of the program.",
         optionAction = set_num_runs
       },
     Option
       { optionLongName = "debugging",
         optionShortName = Just 'D',
         optionArgument = NoArgument,
+        optionDescription = "Perform possibly expensive internal correctness checks and verbose logging.",
         optionAction = [C.cstm|futhark_context_config_set_debugging(cfg, 1);|]
       },
     Option
       { optionLongName = "log",
         optionShortName = Just 'L',
         optionArgument = NoArgument,
+        optionDescription = "Print various low-overhead logging information to stderr while running.",
         optionAction = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
       },
     Option
       { optionLongName = "entry-point",
         optionShortName = Just 'e',
         optionArgument = RequiredArgument "NAME",
+        optionDescription = "The entry point to run. Defaults to main.",
         optionAction = [C.cstm|if (entry_point != NULL) entry_point = optarg;|]
       },
     Option
       { optionLongName = "binary-output",
         optionShortName = Just 'b',
         optionArgument = NoArgument,
+        optionDescription = "Print the program result in the binary output format.",
         optionAction = [C.cstm|binary_output = 1;|]
+      },
+    Option
+      { optionLongName = "help",
+        optionShortName = Just 'h',
+        optionArgument = NoArgument,
+        optionDescription = "Print help information and exit.",
+        optionAction =
+          [C.cstm|{
+                   printf("Usage: %s [OPTION]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n",
+                          fut_progname, option_descriptions);
+                   exit(0);
+                  }|]
       }
   ]
   where
@@ -1619,7 +1637,7 @@ compileProg backend ops extra header_extra spaces options prog = do
         runCompilerM ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
-      option_parser = generateOptionParser "parse_options" $ benchmarkOptions ++ options
+      option_parser = generateOptionParser "parse_options" $ genericOptions ++ options
 
   let headerdefs =
         [C.cunit|
