@@ -81,6 +81,7 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.RWS
+import Data.Bifunctor (first)
 import Data.Bits (shiftR, xor)
 import Data.Char (isAlphaNum, isDigit, ord)
 import qualified Data.DList as DL
@@ -1969,7 +1970,7 @@ compileConstants (Constants ps init_consts) = do
       return [C.citem|$ty:ty $id:name = ctx->constants.$id:name;|]
 
 cachingMemory ::
-  M.Map VName (Count Bytes (TExp Int64), Space) ->
+  M.Map VName Space ->
   ([C.BlockItem] -> [C.Stm] -> CompilerM op s a) ->
   CompilerM op s a
 cachingMemory lexical f = do
@@ -1978,40 +1979,26 @@ cachingMemory lexical f = do
   -- heuristic based on GPU memory usually involving larger
   -- allocations, that do not suffer from the overhead of reference
   -- counting.
-  let mem_blocks = M.filter (\(_, s) -> s == DefaultSpace) lexical
-      cached = M.keys mem_blocks
-      sizes = map fst $ M.elems mem_blocks
+  let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
-  cached' <- forM (zip cached sizes) $ \(mem, c) -> do
-    size' <- case c of
-      Count 0 -> return Nothing
-      Count s -> do
-        s' <- compileExp $ untyped s
-        return $ Just s'
-
+  cached' <- forM cached $ \mem -> do
     size <- newVName $ pretty mem <> "_cached_size"
-    return (mem, size, size')
+    return (mem, size)
 
   let lexMem env =
         env
           { envCachedMem =
-              M.fromList (map (\(a, b, _) -> (C.toExp a noLoc, b)) cached')
+              M.fromList (map (first (`C.toExp` noLoc)) cached')
                 <> envCachedMem env
           }
 
-      declCached (mem, size, size') =
-        case size' of
-          Nothing ->
-            [ [C.citem|size_t $id:size = 0;|],
-              [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]
-            ]
-          Just e ->
-            [[C.citem|char $id:mem[$exp:e];|]]
+      declCached (mem, size) =
+        [ [C.citem|size_t $id:size = 0;|],
+          [C.citem|$ty:defaultMemBlockType $id:mem = NULL;|]
+        ]
 
-      freeCached (mem, _, size') =
-        case size' of
-          Nothing -> [C.cstm|free($id:mem);|]
-          _ -> [C.cstm|;|]
+      freeCached (mem, _) =
+        [C.cstm|free($id:mem);|]
 
   local lexMem $ f (concatMap declCached cached') (map freeCached cached')
 
@@ -2344,12 +2331,6 @@ compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
       <*> compileExp elemexp
 compileCode (DeclareMem name space) =
   declMem name space
-compileCode (DeclareStackMem name space (Count size)) = do
-  cached <- isJust <$> cacheMem name
-  unless cached $ do
-    size' <- compileExp $ untyped size
-    decl [C.cdecl|char $id:name[$exp:size'];|]
-    modify $ \s -> s {compDeclaredMem = (name, space) : compDeclaredMem s}
 compileCode (DeclareScalar name vol t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$tyquals:(volQuals vol) $ty:ct $id:name;|]

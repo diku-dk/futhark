@@ -804,7 +804,6 @@ typesInCode (c1 :>>: c2) = typesInCode c1 <> typesInCode c2
 typesInCode (For _ e c) = typesInExp e <> typesInCode c
 typesInCode (While (TPrimExp e) c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem {} = mempty
-typesInCode DeclareStackMem {} = mempty
 typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e

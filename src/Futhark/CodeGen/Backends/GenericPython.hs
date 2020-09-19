@@ -1089,7 +1089,6 @@ compileCode (Imp.For i bound body) = do
 compileCode (Imp.SetScalar name exp1) =
   stm =<< Assign <$> compileVar name <*> compileExp exp1
 compileCode Imp.DeclareMem {} = return ()
-compileCode Imp.DeclareStackMem {} = return ()
 compileCode (Imp.DeclareScalar v _ Cert) = do
   v' <- compileVar v
   stm $ Assign v' $ Var "True"

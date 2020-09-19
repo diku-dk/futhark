@@ -496,7 +496,7 @@ multicoreFunDef s f = do
 
 generateFunction ::
   C.ToIdent a =>
-  M.Map VName (Count Bytes (TExp Int64), Space) ->
+  M.Map VName Space ->
   String ->
   Code ->
   a ->
