@@ -56,8 +56,6 @@ setBodySpace space (Free v old_space) =
   Free v $ setSpace space old_space
 setBodySpace space (DeclareMem name old_space) =
   DeclareMem name $ setSpace space old_space
-setBodySpace space (DeclareStackMem name old_space size) =
-  DeclareStackMem name (setSpace space old_space) size
 setBodySpace space (DeclareArray name _ t vs) =
   DeclareArray name space t vs
 setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
