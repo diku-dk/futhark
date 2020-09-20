@@ -86,10 +86,12 @@ runBenchmarks opts paths = do
 
   putStrLn $ "Reporting average runtime of " ++ show (optRuns opts) ++ " runs for each dataset."
 
+  futhark <- FutharkExe . compFuthark <$> compileOptions opts
+
   results <-
     concat
       <$> mapM
-        (runBenchmark opts)
+        (runBenchmark opts futhark)
         (sortBy (comparing fst) compiled_benchmarks)
   case optJSON opts of
     Nothing -> return ()
@@ -159,8 +161,8 @@ compileBenchmark opts (program, spec) =
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
-runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO [BenchResult]
-runBenchmark opts (program, cases) = mapM forInputOutputs $ filter relevant cases
+runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
+runBenchmark opts futhark (program, cases) = mapM forInputOutputs $ filter relevant cases
   where
     forInputOutputs (InputOutputs entry_name runs) = do
       (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
@@ -172,7 +174,7 @@ runBenchmark opts (program, cases) = mapM forInputOutputs $ filter relevant case
                   optExtraOptions opts ++ tuning_opts
               }
       BenchResult program' . catMaybes
-        <$> mapM (runBenchmarkCase opts' program entry_name pad_to) runs
+        <$> mapM (runBenchmarkCase opts' futhark program entry_name pad_to) runs
       where
         program' =
           if entry_name == "main"
@@ -253,17 +255,18 @@ reportResult results = do
 
 runBenchmarkCase ::
   BenchOptions ->
+  FutharkExe ->
   FilePath ->
   T.Text ->
   Int ->
   TestRun ->
   IO (Maybe DataResult)
-runBenchmarkCase _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
+runBenchmarkCase _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase opts _ _ _ (TestRun tags _ _ _ _)
+runBenchmarkCase opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
     return Nothing
-runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
+runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc
 
   -- Report the dataset name before running the program, so that if an
@@ -273,6 +276,7 @@ runBenchmarkCase opts program entry pad_to tr@(TestRun _ input_spec (Succeeds ex
   res <-
     benchmarkDataset
       (runOptions (prompt . Just) opts)
+      futhark
       program
       entry
       input_spec

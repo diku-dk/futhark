@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Dataset generation for test programs now use the right `futhark`
+    executable (#1133).
+
 ## [0.17.2]
 
 ### Added
