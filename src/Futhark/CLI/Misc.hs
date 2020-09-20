@@ -14,6 +14,7 @@ import Data.List (isInfixOf, isPrefixOf, nubBy)
 import Futhark.Compiler
 import Futhark.Test
 import Futhark.Util.Options
+import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
@@ -47,9 +48,11 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
       let exact = filter ((dataset ==) . runDescription) runs
           infixes = filter ((dataset `isInfixOf`) . runDescription) runs
 
+      futhark <- FutharkExe <$> getExecutablePath
+
       case nubBy ((==) `on` runDescription) $
         if null exact then infixes else exact of
-        [x] -> BS.putStr =<< getValuesBS dir (runInput x)
+        [x] -> BS.putStr =<< getValuesBS futhark dir (runInput x)
         [] -> do
           hPutStr stderr $ "No dataset '" ++ dataset ++ "'.\n"
           hPutStr stderr "Available datasets:\n"
