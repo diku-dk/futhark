@@ -15,8 +15,8 @@ want to take a look at :ref:`usage`.  This User's Guide contains a
 better served by reading `Parallel Programming in Futhark
 <https://futhark-book.readthedocs.io>`_ first.
 
-Documentation for the included basis library is also `available online
-<https://futhark-lang.org/docs/>`_.
+Documentation for the built-in prelude is also `available online
+<https://futhark-lang.org/docs/prelude/>`_.
 
 The particularly interested reader may also want to peruse the
 `publications <https://futhark-lang.org/docs.html#publications>`_, or
