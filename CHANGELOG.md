@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * Improved parallelisation of `futhark bench` compilation.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+  * Dataset generation for test programs now use the right `futhark`
+    executable (#1133).
 
 ## [0.17.2]
 
