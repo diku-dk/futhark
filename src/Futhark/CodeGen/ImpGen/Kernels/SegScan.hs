@@ -18,6 +18,7 @@ import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- Aggressively try to reuse memory for different SegBinOps, because
 -- we will run them sequentially after another.
@@ -482,24 +483,25 @@ compileSegScan ::
 compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   emit $ Imp.DebugPrint "\n# SegScan" Nothing
 
-  -- Since stage 2 involves a group size equal to the number of groups
-  -- used for stage 1, we have to cap this number to the maximum group
-  -- size.
-  stage1_max_num_groups <- dPrim "stage1_max_num_groups" int32
-  sOp $ Imp.GetSizeMax (tvVar stage1_max_num_groups) SizeGroup
+  let (Pattern _ all_pes) =
+        unsafePerformIO (do putStrLn ("pat: " ++ show pat
+                                       ++ "\nlvl: " ++ show lvl
+                                       ++ "\nspace: " ++ show space
+                                       ++ "\nscans: " ++ show scans
+                                       ++ "\nkbody: " ++ show kbody)
+                            return pat)
 
-  stage1_num_groups <-
-    fmap (Imp.Count . tvSize) $
-      dPrimV "stage1_num_groups" $
-        sMin32 (tvExp stage1_max_num_groups) $
-          toInt32Exp $ Imp.unCount $ segNumGroups lvl
+  let num_groups = toInt32Exp <$> segNumGroups lvl
+      group_size = toInt32Exp <$> segGroupSize lvl
+      res        = patElemName $ last all_pes
+      (gtid, dim) = head $ unSegSpace space
 
-  (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat stage1_num_groups (segGroupSize lvl) space scans kbody
+  sKernelThread "segscan" num_groups group_size (segFlat space) $
+    do tid <- kernelGlobalThreadId . kernelConstants <$> askEnv
+       dPrimV_ gtid tid
+       compileStms mempty (kernelBodyStms kbody) $
+         do let mapRes = kernelResultSubExp $ head $ kernelBodyResult kbody
+            copyDWIMFix res [tid] mapRes []
 
-  emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
-
-  scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
-  scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scans
   where
     n = product $ map toInt32Exp $ segSpaceDims space
