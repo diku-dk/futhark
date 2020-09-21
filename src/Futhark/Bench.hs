@@ -213,20 +213,21 @@ follow f fname = go 0
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
   RunOptions ->
+  FutharkExe ->
   FilePath ->
   T.Text ->
   Values ->
   Maybe Success ->
   FilePath ->
   IO (Either T.Text ([RunResult], T.Text))
-benchmarkDataset opts program entry input_spec expected_spec ref_out =
+benchmarkDataset opts futhark program entry input_spec expected_spec ref_out =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
     hClose h -- We will be writing and reading this ourselves.
-    input <- getValuesBS dir input_spec
+    input <- getValuesBS futhark dir input_spec
     let getValuesAndBS (SuccessValues vs) = do
-          vs' <- getValues dir vs
-          bs <- getValuesBS dir vs
+          vs' <- getValues futhark dir vs
+          bs <- getValuesBS futhark dir vs
           return (LBS.toStrict bs, vs')
         getValuesAndBS SuccessGenerateValues =
           getValuesAndBS $ SuccessValues $ InFile ref_out
@@ -313,7 +314,7 @@ prepareBenchmarkProgram ::
 prepareBenchmarkProgram concurrency opts program cases = do
   let futhark = compFuthark opts
 
-  ref_res <- runExceptT $ ensureReferenceOutput concurrency futhark "c" program cases
+  ref_res <- runExceptT $ ensureReferenceOutput concurrency (FutharkExe futhark) "c" program cases
   case ref_res of
     Left err ->
       return $

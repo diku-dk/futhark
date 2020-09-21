@@ -10,7 +10,6 @@ import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
-import Futhark.MonadFreshNames
 import Futhark.Util (chunks)
 import Prelude hiding (quot, rem)
 
@@ -52,7 +51,9 @@ compileSegRed' pat space reds nsubtasks kbody
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug = SegBinOpSlug
   { slugOp :: SegBinOp MCMem,
-    slugAccs :: [(VName, [Imp.TExp Int32])]
+    -- | The array in which we write the intermediate results, indexed
+    -- by the flat/physical thread ID.
+    slugResArrs :: [VName]
   }
 
 slugBody :: SegBinOpSlug -> Body MCMem
@@ -71,13 +72,6 @@ accParams, nextParams :: SegBinOpSlug -> [LParam MCMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
 nextParams slug = drop (length (slugNeutral slug)) $ slugParams slug
 
-segBinOpOpSlug ::
-  Imp.TExp Int32 ->
-  (SegBinOp MCMem, [VName]) ->
-  MulticoreGen SegBinOpSlug
-segBinOpOpSlug local_tid (op, param_arrs) =
-  SegBinOpSlug op <$> mapM (\param_arr -> return (param_arr, [local_tid])) param_arrs
-
 nonsegmentedReduction ::
   Pattern MCMem ->
   SegSpace ->
@@ -86,23 +80,13 @@ nonsegmentedReduction ::
   DoSegBody ->
   MulticoreGen Imp.Code
 nonsegmentedReduction pat space reds nsubtasks kbody = collect $ do
-  -- Thread id for indexing into each threads accumulator element(s)
-  let tid' = Imp.vi32 $ segFlat space
-  thread_red_arrs <- groupResultArrays "reduce_stage_1_tid_accum_arr" (tvSize nsubtasks) reds
-  slugs1 <- mapM (segBinOpOpSlug tid') $ zip reds thread_red_arrs
-  let nsubtasks' = tvExp nsubtasks
-
-  sFor "i" nsubtasks' $ \i -> do
-    mkTV (segFlat space) int32 <-- i
-    sComment "neutral-initialise the acc used by tid" $
-      forM_ slugs1 $ \slug ->
-        forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
-          sLoopNest (slugShape slug) $ \vec_is ->
-            copyDWIMFix acc (acc_is ++ vec_is) ne []
+  thread_res_arrs <- groupResultArrays "reduce_stage_1_tid_res_arr" (tvSize nsubtasks) reds
+  let slugs1 = zipWith SegBinOpSlug reds thread_res_arrs
+      nsubtasks' = tvExp nsubtasks
 
   reductionStage1 space slugs1 kbody
   reds2 <- renameSegBinOp reds
-  slugs2 <- mapM (segBinOpOpSlug tid') $ zip reds2 thread_red_arrs
+  let slugs2 = zipWith SegBinOpSlug reds2 thread_res_arrs
   reductionStage2 pat space nsubtasks' slugs2
 
 reductionStage1 ::
@@ -115,49 +99,50 @@ reductionStage1 space slugs kbody = do
       ns' = map (sExt64 . toInt32Exp) ns
   flat_idx <- dPrim "iter" int64
 
-  -- Create new redout names
-  redouts <- forM (map slugOp slugs) $ \(SegBinOp _ lam _ _) ->
-    forM (lambdaReturnType lam) $ \_ -> newVName "redout"
+  -- Create local accumulator variables in which we carry out the
+  -- sequential reduction of this function.  If we are dealing with
+  -- vectorised operators, then this implies a private allocation.  If
+  -- the original operand type of the reduction is a memory block,
+  -- then our hands are unfortunately tied, and we have to use exactly
+  -- that memory.  This is likely to be slow.
 
-  -- Whenever the return value of the lambda is scalar value (collection of)
-  -- we use a local variable as a readout variable.
-  -- This can in some cases let GCC use registers to hold these variable,
-  -- requiring less memory instructions.
-  -- TODO this is a VERY hacky way; should refactor at some point
-  prebody <- collect $
-    -- Declare accumulator variables
-    forM_ (zip slugs redouts) $ \(slug, redout) -> do
-      let lam = segBinOpLambda $ slugOp slug
-          shape = segBinOpShape $ slugOp slug
-          vec_is = shapeDims $ slugShape slug
-      forM (zip3 (slugAccs slug) redout $ lambdaReturnType lam) $ \((acc, acc_is), redout', t) -> do
-        let array_shape = shapeDims $ shape <> arrayShape t
-        case (vec_is, array_shape) of
-          ([], []) -> do
-            let pt = elemType t
-            dPrim_ redout' pt
-            -- Initialize redouts
-            copyDWIMFix redout' [] (Var acc) acc_is
-          _ -> return mempty
+  (slug_local_accs, prebody) <- collect' $ do
+    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
+
+    forM slugs $ \slug -> do
+      let shape = segBinOpShape $ slugOp slug
+
+      forM (zip (accParams slug) (slugNeutral slug)) $ \(p, ne) -> do
+        -- Declare accumulator variable.
+        acc <-
+          case paramType p of
+            Prim pt
+              | shape == mempty ->
+                tvVar <$> dPrim "local_acc" pt
+              | otherwise ->
+                sAllocArray "local_acc" pt shape DefaultSpace
+            _ ->
+              pure $ paramName p
+
+        -- Now neutral-initialise the accumulator.
+        sLoopNest (slugShape slug) $ \vec_is ->
+          copyDWIMFix acc vec_is ne []
+
+        pure acc
 
   fbody <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ tvExp flat_idx
-    dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
     kbody $ \all_red_res -> do
       let all_red_res' = segBinOpChunks (map slugOp slugs) all_red_res
-      forM_ (zip3 all_red_res' slugs redouts) $ \(red_res, slug, redout) ->
+      forM_ (zip3 all_red_res' slugs slug_local_accs) $ \(red_res, slug, local_accs) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
-          let shape = segBinOpShape $ slugOp slug
           let lamtypes = lambdaReturnType $ segBinOpLambda $ slugOp slug
           -- Load accum params
           sComment "Load accum params" $
-            case vec_is of
-              [] -> forM_ (zip4 (accParams slug) redout lamtypes $ slugAccs slug) $ \(p, redout', t, (acc, acc_is)) ->
-                case shapeDims $ shape <> arrayShape t of
-                  [] -> copyDWIMFix (paramName p) [] (Var redout') []
-                  _ -> copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
-              _ -> forM_ (zip (accParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-                copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
+            forM_ (zip3 (accParams slug) local_accs lamtypes) $
+              \(p, local_acc, t) ->
+                when (primType t) $
+                  copyDWIMFix (paramName p) [] (Var local_acc) vec_is
 
           sComment "Load next params" $
             forM_ (zip (nextParams slug) red_res) $ \(p, (res, res_is)) ->
@@ -165,31 +150,19 @@ reductionStage1 space slugs kbody = do
 
           sComment "Red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
-              case vec_is of
-                [] -> forM_ (zip4 redout (bodyResult $ slugBody slug) lamtypes $ slugAccs slug) $ \(redout', se, t, (acc, acc_is)) ->
-                  case shapeDims $ shape <> arrayShape t of
-                    [] -> copyDWIMFix redout' [] se []
-                    _ -> copyDWIMFix acc (acc_is ++ vec_is) se []
-                _ -> forM_ (zip (slugAccs slug) (bodyResult $ slugBody slug)) $
-                  \((acc, acc_is), se) ->
-                    copyDWIMFix acc (acc_is ++ vec_is) se []
+              forM_ (zip local_accs (bodyResult $ slugBody slug)) $
+                \(local_acc, se) ->
+                  copyDWIMFix local_acc vec_is se []
 
-  post_body <- collect $
-    forM_ (zip slugs redouts) $ \(slug, redout) -> do
+  postbody <- collect $
+    forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) -> do
       let lam = segBinOpLambda $ slugOp slug
-      forM (zip3 (slugAccs slug) redout $ lambdaReturnType lam) $ \((acc, acc_is), redout', t) -> do
-        let vec_is = shapeDims $ slugShape slug
-            shape = segBinOpShape $ slugOp slug
-            array_shape = shapeDims $ shape <> arrayShape t
-        case (vec_is, array_shape) of
-          ([], []) ->
-            -- write back result to accum array redouts
-            copyDWIMFix acc acc_is (Var redout') []
-          _ -> return mempty
+      forM (zip3 (slugResArrs slug) local_accs $ lambdaReturnType lam) $ \(acc, local_acc, t) ->
+        copyDWIMFix acc [Imp.vi32 $ segFlat space] (Var local_acc) []
 
-  free_params <- freeParams (prebody <> fbody) (segFlat space : [tvVar flat_idx])
+  free_params <- freeParams (prebody <> fbody <> postbody) (segFlat space : [tvVar flat_idx])
   let (body_allocs, fbody') = extractAllocations fbody
-  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" (tvVar flat_idx) (body_allocs <> prebody) fbody' post_body free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "segred_stage_1" (tvVar flat_idx) (body_allocs <> prebody) fbody' postbody free_params $ segFlat space
 
 reductionStage2 ::
   Pattern MCMem ->
@@ -199,6 +172,7 @@ reductionStage2 ::
   MulticoreGen ()
 reductionStage2 pat space nsubtasks slugs = do
   let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternValueElements pat
+      phys_id = Imp.vi32 (segFlat space)
   sComment "neutral-initialise the output" $
     forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
       forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
@@ -216,8 +190,8 @@ reductionStage2 pat space nsubtasks slugs = do
             forM_ (zip (accParams slug) red_res) $ \(p, pe) ->
               copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
           sComment "load next params" $
-            forM_ (zip (nextParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
-              copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
+            forM_ (zip (nextParams slug) (slugResArrs slug)) $ \(p, acc) ->
+              copyDWIMFix (paramName p) [] (Var acc) (phys_id : vec_is)
           sComment "red body" $
             compileStms mempty (bodyStms $ slugBody slug) $
               forM_ (zip red_res (bodyResult $ slugBody slug)) $
@@ -293,57 +267,3 @@ compileSegRedBody n_segments pat space reds kbody = do
                   sComment "write back to res" $
                     forM_ (zip pes (bodyResult lbody)) $
                       \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) se' []
-
-----------------------------------------------------------
--------- ========= Dead code =========== -----------------
-----------------------------------------------------------
--- segmentedReduction pat space reds kbody ModeSequential =
---   collect $ do
---     let ns = map snd $ unSegSpace space
---     ns' <- mapM toExp ns
---     n_seq_segments <- dPrim "segment_iter" $ IntType Int32
---     seq_body   <- compileSegRedBody n_seq_segments pat space reds kbody
---     sFor "i" (product $ init ns') $ \i -> do
---       n_seq_segments <-- i
---       emit seq_body
-
--- nonsegmentedReduction pat space reds kbody ModeSequential = do
---   let ns = map snd $ unSegSpace space
---   ns' <- mapM toExp ns
-
---   collect $ localMode ModeSequential $ do
---     flat_seq_idx <- dPrimV "seq_iter" 0
---     seq_code_body <- sequentialRed pat flat_seq_idx space reds kbody
---     let (body_allocs, seq_code_body') = extractAllocations seq_code_body
---     emit body_allocs
---     sFor "i" (product ns') $ \i -> do
---       flat_seq_idx <-- i
---       emit seq_code_body'
-
--- sequentialRed :: Pattern MCMem
---               -> VName
---               -> SegSpace
---               -> [SegBinOp MCMem]
---               -> DoSegBody
---               -> MulticoreGen Imp.Code
--- sequentialRed pat flat_idx space reds kbody = do
---   let (is, ns) = unzip $ unSegSpace space
---   ns' <- mapM toExp ns
---   collect $ do
---     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ Imp.vi32 flat_idx
---     dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
---     kbody $ \all_red_res -> do
---       let all_red_res' = segBinOpChunks reds all_red_res
---       forM_ (zip all_red_res' reds) $ \(red_res, red) -> do
---         let (xParams, yParams) = splitAt (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
---         sLoopNest (segBinOpShape red) $ \vec_is -> do
---           sComment "load acc params" $
---             forM_ (zip xParams $ patternElements pat) $ \(p, pe) ->
---               copyDWIMFix (paramName p) [] (Var $ patElemName pe) vec_is
---           sComment "load next params" $
---             forM_ (zip yParams red_res) $ \(p, (res, res_is)) ->
---               copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
---           sComment "sequential red body" $
---             compileStms mempty (bodyStms $ (lambdaBody . segBinOpLambda) red) $
---                 forM_ (zip (patternElements pat) (bodyResult $ (lambdaBody . segBinOpLambda) red)) $
---                   \(pe, se) -> copyDWIMFix (patElemName pe) vec_is se []
