@@ -19,6 +19,7 @@ import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 import System.IO.Unsafe (unsafePerformIO)
+import Futhark.IR.Prop.Constants (constant)
 
 -- Aggressively try to reuse memory for different SegBinOps, because
 -- we will run them sequentially after another.
@@ -494,14 +495,20 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   let num_groups = toInt32Exp <$> segNumGroups lvl
       group_size = toInt32Exp <$> segGroupSize lvl
       res        = patElemName $ last all_pes
-      (gtid, dim) = head $ unSegSpace space
+      (mapIdx, dim) = head $ unSegSpace space
+      m           = 9
 
-  sKernelThread "segscan" num_groups group_size (segFlat space) $
-    do tid <- kernelGlobalThreadId . kernelConstants <$> askEnv
-       dPrimV_ gtid tid
-       compileStms mempty (kernelBodyStms kbody) $
-         do let mapRes = kernelResultSubExp $ head $ kernelBodyResult kbody
-            copyDWIMFix res [tid] mapRes []
+  -- TODO: Use dynamic block id instead of the static one
+  sKernelThread "segscan" num_groups group_size (segFlat space) $ do
+    constants <- kernelConstants <$> askEnv
+    shared <- sAlloc "shared" (Imp.bytes (zExt64 $ (unCount group_size) * m))
+                              (Space "local")
+    blockOff <- dPrimV "blockOff" $ (kernelGroupId constants) * m * (kernelGroupSize constants)
+    sFor "i" m $ \i -> do
+      dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
+      compileStms mempty (kernelBodyStms kbody) $
+        do let mapRes = kernelResultSubExp $ head $ kernelBodyResult kbody
+           copyDWIMFix res [Imp.vi32 mapIdx] mapRes []
 
   where
     n = product $ map toInt32Exp $ segSpaceDims space
