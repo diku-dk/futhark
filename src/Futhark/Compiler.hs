@@ -45,7 +45,9 @@ data FutharkConfig = FutharkConfig
     -- | If true, error on any warnings.
     futharkWerror :: Bool,
     -- | If True, ignore @unsafe@.
-    futharkSafe :: Bool
+    futharkSafe :: Bool,
+    -- | .c file containing foreign functions
+    futharkForeignInput :: Maybe FilePath
   }
 
 -- | The default compiler configuration.
@@ -55,7 +57,8 @@ newFutharkConfig =
     { futharkVerbose = (NotVerbose, Nothing),
       futharkWarn = True,
       futharkWerror = False,
-      futharkSafe = False
+      futharkSafe = False,
+      futharkForeignInput = Nothing
     }
 
 -- | Print a compiler error to stdout.  The 'FutharkConfig' controls

@@ -130,7 +130,15 @@ commandLineOptions =
       []
       ["safe"]
       (NoArg $ Right $ \config -> config {compilerSafe = True})
-      "Ignore 'unsafe' in code."
+      "Ignore 'unsafe' in code.",
+    Option
+      []
+      ["foreign"]
+      ( ReqArg
+          (\filename -> Right $ \config -> config {compilerForeignInput = Just filename})
+          "FILE"
+      )
+      "Name of the .c file with foreign function definitions"
   ]
 
 wrapOption :: CompilerOption cfg -> CoreCompilerOption cfg
@@ -156,6 +164,7 @@ data CompilerConfig cfg = CompilerConfig
     compilerWerror :: Bool,
     compilerSafe :: Bool,
     compilerWarn :: Bool,
+    compilerForeignInput :: Maybe FilePath,
     compilerConfig :: cfg
   }
 
@@ -172,6 +181,7 @@ newCompilerConfig x =
       compilerWerror = False,
       compilerSafe = False,
       compilerWarn = True,
+      compilerForeignInput = Nothing,
       compilerConfig = x
     }
 
@@ -185,5 +195,6 @@ futharkConfig config =
     { futharkVerbose = compilerVerbose config,
       futharkWerror = compilerWerror config,
       futharkSafe = compilerSafe config,
-      futharkWarn = compilerWarn config
+      futharkWarn = compilerWarn config,
+      futharkForeignInput = compilerForeignInput config
     }

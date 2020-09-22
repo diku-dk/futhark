@@ -97,8 +97,8 @@ sexpAction =
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCAction fcfg mode outpath =
   Action
-    { actionName = "Compile to OpenCL",
-      actionDescription = "Compile to OpenCL",
+    { actionName = "Compile sequential C",
+      actionDescription = "Compile sequential C",
       actionProcedure = helper
     }
   where
@@ -106,6 +106,8 @@ compileCAction fcfg mode outpath =
       cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
+          defArgs = [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
+          gccArgs = foreignDir defArgs $ futharkForeignInput fcfg
 
       case mode of
         ToLibrary -> do
@@ -118,7 +120,7 @@ compileCAction fcfg mode outpath =
             liftIO $
               runProgramWithExitCode
                 "gcc"
-                [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
+                gccArgs
                 mempty
           case ret of
             Left err ->
@@ -131,6 +133,11 @@ compileCAction fcfg mode outpath =
                   ++ gccerr
             Right (ExitSuccess, _, _) ->
               return ()
+
+    foreignDir :: [String] -> Maybe FilePath -> [String]
+    foreignDir args (Just fdir) = fdir : args
+    foreignDir args Nothing = args
+
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
