@@ -248,7 +248,14 @@ data Value
 -- Stores the full shape.
 
 instance Eq Value where
-  ValuePrim x == ValuePrim y = x == y
+  ValuePrim (SignedValue x) == ValuePrim (SignedValue y) =
+    P.doCmpEq (P.IntValue x) (P.IntValue y)
+  ValuePrim (UnsignedValue x) == ValuePrim (UnsignedValue y) =
+    P.doCmpEq (P.IntValue x) (P.IntValue y)
+  ValuePrim (FloatValue x) == ValuePrim (FloatValue y) =
+    P.doCmpEq (P.FloatValue x) (P.FloatValue y)
+  ValuePrim (BoolValue x) == ValuePrim (BoolValue y) =
+    P.doCmpEq (P.BoolValue x) (P.BoolValue y)
   ValueArray _ x == ValueArray _ y = x == y
   ValueRecord x == ValueRecord y = x == y
   ValueSum _ n1 vs1 == ValueSum _ n2 vs2 = n1 == n2 && vs1 == vs2

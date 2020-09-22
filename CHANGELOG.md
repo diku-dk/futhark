@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Dataset generation for test programs now use the right `futhark`
     executable (#1133).
 
+  * Really fix NaN comparisons in interpreter (#1070, again).
+
 ## [0.17.2]
 
 ### Added
