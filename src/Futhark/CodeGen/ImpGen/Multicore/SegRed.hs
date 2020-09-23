@@ -155,9 +155,8 @@ reductionStage1 space slugs kbody = do
                   copyDWIMFix local_acc vec_is se []
 
   postbody <- collect $
-    forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) -> do
-      let lam = segBinOpLambda $ slugOp slug
-      forM (zip3 (slugResArrs slug) local_accs $ lambdaReturnType lam) $ \(acc, local_acc, t) ->
+    forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
+      forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
         copyDWIMFix acc [Imp.vi32 $ segFlat space] (Var local_acc) []
 
   free_params <- freeParams (prebody <> fbody <> postbody) (segFlat space : [tvVar flat_idx])
