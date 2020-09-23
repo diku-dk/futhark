@@ -110,8 +110,8 @@ sexpAction =
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCAction fcfg mode outpath =
   Action
-    { actionName = "Compile to OpenCL",
-      actionDescription = "Compile to OpenCL",
+    { actionName = "Compile to to sequential C",
+      actionDescription = "Compile to sequential C",
       actionProcedure = helper
     }
   where
