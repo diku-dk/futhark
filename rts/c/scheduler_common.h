@@ -89,8 +89,8 @@ int random_other_worker(struct scheduler *scheduler, int my_id)
 static inline int64_t compute_chunk_size(struct subtask* subtask)
 {
   double C = (double)*subtask->task_time / (double)*subtask->task_iter;
-  assert(C >= 0.0f);
-  return max_int64((int64_t)(kappa / (C + DBL_EPSILON)), 1);
+  if (C == 0.0F) C += DBL_EPSILON;
+  return max_int64((int64_t)(kappa / C), 1);
 }
 
 static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
@@ -181,7 +181,7 @@ static inline int is_small(struct scheduler_task *task, int nthreads, int *nsubt
   // Returns true if the task is small i.e.
   // if the number of iterations times C is smaller
   // than the overhead of task creation
-  if (C <= 0.0F || C * cur_task_iter < kappa) {
+  if (C == 0.0F || C * cur_task_iter < kappa) {
     *nsubtasks = 1;
     return 1;
   }
