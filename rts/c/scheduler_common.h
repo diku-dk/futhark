@@ -179,14 +179,15 @@ static inline int is_small(struct scheduler_task *task, int nthreads, int *nsubt
   double cur_task_iter = (double) task->iterations;
 
   // Returns true if the task is small i.e.
-  // if the number of iterations times C is smaller than the overhead of task creation
-  if (C * cur_task_iter < kappa) {
+  // if the number of iterations times C is smaller
+  // than the overhead of task creation
+  if (C <= 0.0F || C * cur_task_iter < kappa) {
     *nsubtasks = 1;
     return 1;
   }
 
   // Else compute how many subtasks this tasks should create
-  int64_t min_iter_pr_subtask = max_int64((int64_t)(kappa / (C + DBL_EPSILON)), 1);
+  int64_t min_iter_pr_subtask = max_int64((int64_t)(kappa / C), 1);
   *nsubtasks = (int)min_int64(max_int64(task->iterations / min_iter_pr_subtask, 1), nthreads);
 
   return 0;
