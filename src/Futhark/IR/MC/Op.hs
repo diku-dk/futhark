@@ -146,8 +146,11 @@ typeCheckMCOp ::
   (op -> TC.TypeM lore ()) ->
   MCOp (Aliases lore) op ->
   TC.TypeM lore ()
-typeCheckMCOp _ (ParOp par_op op) = do
-  maybe (return ()) (typeCheckSegOp return) par_op
+typeCheckMCOp _ (ParOp (Just par_op) op) = do
+  -- It is valid for the same array to be consumed in both par_op and op.
+  _ <- typeCheckSegOp return par_op `TC.alternative` typeCheckSegOp return op
+  return ()
+typeCheckMCOp _ (ParOp Nothing op) =
   typeCheckSegOp return op
 typeCheckMCOp f (OtherOp op) = f op
 
