@@ -40,8 +40,8 @@ struct scheduler_parloop {
 /* A task for the scheduler to execute */
 struct scheduler_task {
   void *args;
-  task_fn sequential_fn;
-  task_fn canonical_fn;
+  segop_fn sequential_fn;
+  segop_fn canonical_fn;
   int64_t iterations;
   enum scheduling sched;
 

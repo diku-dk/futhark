@@ -66,7 +66,7 @@ struct deque {
 
 
 // Function definitions
-typedef int (*task_fn)(void* args, int64_t iterations, int tid, struct scheduler_info info);
+typedef int (*segop_fn)(void* args, int64_t iterations, int tid, struct scheduler_info info);
 typedef int (*parloop_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
 
 
