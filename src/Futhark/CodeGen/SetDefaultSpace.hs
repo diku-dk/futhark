@@ -22,9 +22,10 @@ setDefaultSpace space (Definitions (Constants ps consts) (Functions fundecs)) =
     )
 
 setFunctionSpace :: Space -> Function op -> Function op
-setFunctionSpace space (Function entry outputs inputs body results args) =
+setFunctionSpace space (Function entry isForeign outputs inputs body results args) =
   Function
     entry
+    isForeign
     (map (setParamSpace space) outputs)
     (map (setParamSpace space) inputs)
     (setBodySpace space body)

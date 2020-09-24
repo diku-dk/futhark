@@ -42,6 +42,7 @@ module Futhark.CodeGen.Backends.GenericC
     cachingMemory,
     blockScope,
     compileFun,
+    compileFunForeign,
     compileCode,
     compileExp,
     compilePrimExp,
@@ -1169,7 +1170,7 @@ onEntryPoint ::
   Name ->
   Function op ->
   CompilerM op s (C.Definition, C.Definition, C.Initializer)
-onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
+onEntryPoint fname function@(Function _ _ outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -1369,7 +1370,7 @@ cliEntryPoint ::
   Name ->
   FunctionT a ->
   CompilerM op s (C.Definition, C.Initializer)
-cliEntryPoint fname (Function _ _ _ _ results args) = do
+cliEntryPoint fname (Function _ _ _ _ _ results args) = do
   ((pack_input, free_input, free_parsed, input_args), input_items) <-
     collect' $ unzip4 <$> readInputs args
 
@@ -1758,7 +1759,7 @@ $edecls:prototypes
 
 $edecls:lib_decls
 
-$edecls:(map funcToDef definitions)
+$edecls:(map funcToDef $ catMaybes definitions)
 
 $edecls:(arrayDefinitions endstate)
 
@@ -1779,7 +1780,7 @@ $edecls:entry_point_decls
       ctx_ty <- contextType
 
       (prototypes, definitions) <-
-        unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
+        unzip <$> mapM (compileFunForeign get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       mapM_ earlyDecl memstructs
       entry_points <-
@@ -1953,8 +1954,63 @@ cachingMemory lexical f = do
 
   local lexMem $ f (concatMap declCached cached') (map freeCached cached')
 
+-- Ignore all the boilerplate parameters, just in case we don't
+-- actually need to use them.
+ignores :: [C.Param] -> [C.Stm]
+ignores extra = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
+
+compileInput :: Param -> CompilerM op s C.Param
+compileInput (ScalarParam name bt) = do
+  let ctp = primTypeToCType bt
+  return [C.cparam|$ty:ctp $id:name|]
+compileInput (MemParam name space) = do
+  ty <- memToCType name space
+  return [C.cparam|$ty:ty $id:name|]
+
+compileOutput :: Param -> CompilerM op s (C.Param, C.Exp)
+compileOutput (ScalarParam name bt) = do
+  let ctp = primTypeToCType bt
+  p_name <- newVName $ "out_" ++ baseString name
+  return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
+compileOutput (MemParam name space) = do
+  ty <- memToCType name space
+  p_name <- newVName $ baseString name ++ "_p"
+  return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
+
+compileFunForeign :: [C.BlockItem]
+            -> [C.Param]
+            -> (Name, Function op)
+            -> CompilerM op s (C.Definition, Maybe C.Func)
+compileFunForeign get_constants extra (fname, func@(Function _ isForeign outputs inputs body _ _)) = do
+  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
+  inparams <- mapM compileInput inputs
+
+  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
+    body' <- blockScope $ compileFunBody out_ptrs outputs body
+    if isForeign
+      then
+      return
+      ( [C.cedecl| int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
+        Nothing
+      )
+      else
+      return
+      ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
+        Just $ [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
+                      $stms:(ignores extra)
+                      int err = 0;
+                      $items:decl_cached
+                      $items:get_constants
+                      $items:body'
+                     cleanup:
+                      {}
+                      $stms:free_cached
+                      return err;
+               }|]
+      )
+
 compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)) = do
+compileFun get_constants extra (fname, func@(Function _ _ outputs inputs body _ _)) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   inparams <- mapM compileInput inputs
 
@@ -1964,7 +2020,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     return
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
-               $stms:ignores
+               $stms:(ignores extra)
                int err = 0;
                $items:decl_cached
                $items:get_constants
@@ -1973,28 +2029,8 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
                {}
                $stms:free_cached
                return err;
-  }|]
+         }|]
       )
-  where
-    -- Ignore all the boilerplate parameters, just in case we don't
-    -- actually need to use them.
-    ignores = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
-
-    compileInput (ScalarParam name bt) = do
-      let ctp = primTypeToCType bt
-      return [C.cparam|$ty:ctp $id:name|]
-    compileInput (MemParam name space) = do
-      ty <- memToCType name space
-      return [C.cparam|$ty:ty $id:name|]
-
-    compileOutput (ScalarParam name bt) = do
-      let ctp = primTypeToCType bt
-      p_name <- newVName $ "out_" ++ baseString name
-      return ([C.cparam|$ty:ctp *$id:p_name|], [C.cexp|$id:p_name|])
-    compileOutput (MemParam name space) = do
-      ty <- memToCType name space
-      p_name <- newVName $ baseString name ++ "_p"
-      return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compilePrimValue :: PrimValue -> C.Exp
 compilePrimValue (IntValue (Int8Value k)) = [C.cexp|$int:k|]

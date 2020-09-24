@@ -271,7 +271,7 @@ mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
 
 mapTransposeFunction :: PrimType -> Imp.Function
 mapTransposeFunction bt =
-  Imp.Function False [] params transpose_code [] []
+  Imp.Function False False [] params transpose_code [] []
   where
     params =
       [ memparam destmem,

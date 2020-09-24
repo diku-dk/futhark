@@ -107,7 +107,7 @@ compileCAction fcfg mode outpath =
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
           defArgs = [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
-          gccArgs = foreignDir defArgs $ futharkForeignInput fcfg
+          gccArgs = addForeignDir defArgs $ futharkForeignInput fcfg
 
       case mode of
         ToLibrary -> do
@@ -134,9 +134,9 @@ compileCAction fcfg mode outpath =
             Right (ExitSuccess, _, _) ->
               return ()
 
-    foreignDir :: [String] -> Maybe FilePath -> [String]
-    foreignDir args (Just fdir) = fdir : args
-    foreignDir args Nothing = args
+    addForeignDir :: [String] -> Maybe FilePath -> [String]
+    addForeignDir args (Just fdir) = fdir : args
+    addForeignDir args Nothing = args
 
 
 -- | The @futhark opencl@ action.

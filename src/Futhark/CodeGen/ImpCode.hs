@@ -156,6 +156,7 @@ data ExternalValue
 -- point.
 data FunctionT a = Function
   { functionEntry :: Bool,
+    functionForeign :: Bool,
     functionOutput :: [Param],
     functionInput :: [Param],
     functionBody :: Code a,
@@ -404,7 +405,7 @@ instance Pretty op => Pretty (Constants op) where
       </> indent 2 (ppr code)
 
 instance Pretty op => Pretty (FunctionT op) where
-  ppr (Function _ outs ins body results args) =
+  ppr (Function _ _ outs ins body results args) =
     text "Inputs:" </> block ins
       </> text "Outputs:"
       </> block outs
@@ -550,8 +551,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function entry outs ins body results args) =
-    Function entry outs ins <$> traverse f body <*> pure results <*> pure args
+  traverse f (Function external entry outs ins body results args) =
+    Function external entry outs ins <$> traverse f body <*> pure results <*> pure args
 
 instance Functor Code where
   fmap = fmapDefault
