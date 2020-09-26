@@ -554,7 +554,7 @@ checkProg (Prog consts funs) = do
     buildFtable = do
       table <- initialFtable
       foldM expand table funs
-    expand ftable (FunDef _ _ name ret params _ _)
+    expand ftable (FunDef _ _ name _ ret params _ _)
       | M.member name ftable =
         bad $ DupDefinitionError name
       | otherwise =
@@ -574,7 +574,7 @@ checkFun ::
   Checkable lore =>
   FunDef (Aliases lore) ->
   TypeM lore ()
-checkFun (FunDef _ _ fname rettype params body _) =
+checkFun (FunDef _ _ fname _ rettype params body _) =
   context ("In function " ++ nameToString fname) $
     checkFun'
       ( fname,

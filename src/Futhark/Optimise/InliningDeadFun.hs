@@ -124,8 +124,8 @@ inlineInFunDef ::
   M.Map Name (FunDef SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
-inlineInFunDef fdmap (FunDef entry attrs name rtp args body foreigns) =
-  let fd = \b -> FunDef entry attrs name rtp args b foreigns
+inlineInFunDef fdmap (FunDef entry attrs name bname rtp args body foreigns) =
+  let fd = \b -> FunDef entry attrs name bname rtp args b foreigns
   in
     fd <$> inlineInBody fdmap body
 

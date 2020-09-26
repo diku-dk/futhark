@@ -5,6 +5,7 @@
 module Futhark.CodeGen.Backends.SimpleRep
   ( tupleField,
     funName,
+    funNameForeign,
     defaultMemBlockType,
     primTypeToCType,
     signedPrimTypeToCType,
@@ -70,6 +71,9 @@ funName = ("futrts_" ++) . zEncodeString . nameToString
 
 funName' :: String -> String
 funName' = funName . nameFromString
+
+funNameForeign :: Name -> String
+funNameForeign = ("foreign_" ++) . zEncodeString . nameToString
 
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type

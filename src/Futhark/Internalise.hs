@@ -123,12 +123,13 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           free_params = nub $ free_shape_params ++ used_free_params
           all_params = free_params ++ shapeparams ++ concat params'
 
-      let int_attrs = (internaliseAttrs attrs)
+      let int_attrs = internaliseAttrs attrs
       let fd =
             I.FunDef
               Nothing
               int_attrs
               fname'
+              (baseName fname)
               rettype'
               all_params
               body'
@@ -220,6 +221,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
       I.FunDef
         (Just entry')
         int_attrs
+        (baseName ofname)
         (baseName ofname)
         (concat entry_rettype)
         (shapeparams ++ concat params')

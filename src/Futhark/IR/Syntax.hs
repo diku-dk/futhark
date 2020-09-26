@@ -649,6 +649,7 @@ data FunDef lore = FunDef
     funDefEntryPoint :: Maybe EntryPoint,
     funDefAttrs :: Attrs,
     funDefName :: Name,
+    funDefBaseName :: Name,
     funDefRetType :: [RetType lore],
     funDefParams :: [FParam lore],
     funDefBody :: BodyT lore,
@@ -660,6 +661,7 @@ instance Decorations lore => SexpIso (FunDef lore) where
   sexpIso = with $ \fundef ->
     Sexp.list
       ( Sexp.el (Sexp.sym "fundef")
+          >>> Sexp.el sexpIso
           >>> Sexp.el sexpIso
           >>> Sexp.el sexpIso
           >>> Sexp.el sexpIso

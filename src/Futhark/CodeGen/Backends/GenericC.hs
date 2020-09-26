@@ -42,7 +42,6 @@ module Futhark.CodeGen.Backends.GenericC
     cachingMemory,
     blockScope,
     compileFun,
-    compileFunForeign,
     compileCode,
     compileExp,
     compilePrimExp,
@@ -1170,7 +1169,7 @@ onEntryPoint ::
   Name ->
   Function op ->
   CompilerM op s (C.Definition, C.Definition, C.Initializer)
-onEntryPoint fname function@(Function _ _ outputs inputs _ results args) = do
+onEntryPoint fname function@(Function _ _ _ outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -1370,7 +1369,7 @@ cliEntryPoint ::
   Name ->
   FunctionT a ->
   CompilerM op s (C.Definition, C.Initializer)
-cliEntryPoint fname (Function _ _ _ _ _ results args) = do
+cliEntryPoint fname (Function _ _ _ _ _ _ results args) = do
   ((pack_input, free_input, free_parsed, input_args), input_items) <-
     collect' $ unzip4 <$> readInputs args
 
@@ -1591,7 +1590,7 @@ compileProg ::
   m CParts
 compileProg backend ops extra header_extra spaces options prog = do
   src <- getNameSource
-  let ((prototypes, definitions, entry_points), endstate) =
+  let ((prototypes, definitions, entry_points, fPrototypes), endstate) =
         runCompilerM ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
@@ -1757,9 +1756,11 @@ $edecls:early_decls
 
 $edecls:prototypes
 
+$edecls:(catMaybes fPrototypes)
+
 $edecls:lib_decls
 
-$edecls:(map funcToDef $ catMaybes definitions)
+$edecls:(map funcToDef definitions)
 
 $edecls:(arrayDefinitions endstate)
 
@@ -1780,7 +1781,10 @@ $edecls:entry_point_decls
       ctx_ty <- contextType
 
       (prototypes, definitions) <-
-        unzip <$> mapM (compileFunForeign get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
+        unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
+
+      -- add missing prototypes for the foreign functions
+      fPrototypes <- mapM compileForeignPrototype funs
 
       mapM_ earlyDecl memstructs
       entry_points <-
@@ -1792,7 +1796,7 @@ $edecls:entry_point_decls
 
       commonLibFuns memreport
 
-      return (prototypes, definitions, entry_points)
+      return (prototypes, definitions, entry_points, fPrototypes)
 
     funcToDef func = C.FuncDef func loc
       where
@@ -1959,13 +1963,13 @@ cachingMemory lexical f = do
 ignores :: [C.Param] -> [C.Stm]
 ignores extra = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
 
-compileInput :: Param -> CompilerM op s C.Param
+compileInput :: Param -> CompilerM op s (C.Param, C.Exp)
 compileInput (ScalarParam name bt) = do
   let ctp = primTypeToCType bt
-  return [C.cparam|$ty:ctp $id:name|]
+  return ([C.cparam|$ty:ctp $id:name|], [C.cexp|$id:name|])
 compileInput (MemParam name space) = do
   ty <- memToCType name space
-  return [C.cparam|$ty:ty $id:name|]
+  return ([C.cparam|$ty:ty $id:name|], [C.cexp|$id:name|])
 
 compileOutput :: Param -> CompilerM op s (C.Param, C.Exp)
 compileOutput (ScalarParam name bt) = do
@@ -1977,60 +1981,45 @@ compileOutput (MemParam name space) = do
   p_name <- newVName $ baseString name ++ "_p"
   return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
-compileFunForeign :: [C.BlockItem]
-            -> [C.Param]
-            -> (Name, Function op)
-            -> CompilerM op s (C.Definition, Maybe C.Func)
-compileFunForeign get_constants extra (fname, func@(Function _ isForeign outputs inputs body _ _)) = do
+compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
+compileFun get_constants extra (fname, func@(Function _ isForeign bname outputs inputs body _ _)) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
-  inparams <- mapM compileInput inputs
+  (inparams, in_args) <- unzip <$> mapM compileInput inputs
 
   cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
     body' <- blockScope $ compileFunBody out_ptrs outputs body
     if isForeign
       then
       return
-      ( [C.cedecl| int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
-        Nothing
+      ( [C.cedecl|static inline int
+          $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
+        [C.cfun|static inline int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
+                       return $id:(funNameForeign bname)($args:out_ptrs, $args:in_args);
+         }|]
       )
       else
       return
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
-        Just $ [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
-                      $stms:(ignores extra)
-                      int err = 0;
-                      $items:decl_cached
-                      $items:get_constants
-                      $items:body'
-                     cleanup:
-                      {}
-                      $stms:free_cached
-                      return err;
-               }|]
-      )
-
-compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants extra (fname, func@(Function _ _ outputs inputs body _ _)) = do
-  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
-  inparams <- mapM compileInput inputs
-
-  cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
-    body' <- blockScope $ compileFunBody out_ptrs outputs body
-
-    return
-      ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
-               $stms:(ignores extra)
-               int err = 0;
-               $items:decl_cached
-               $items:get_constants
-               $items:body'
-              cleanup:
-               {}
-               $stms:free_cached
-               return err;
+                $stms:(ignores extra)
+                int err = 0;
+                $items:decl_cached
+                $items:get_constants
+                $items:body'
+               cleanup:
+                {}
+                $stms:free_cached
+                return err;
          }|]
       )
+
+compileForeignPrototype :: (Name, Function op) -> CompilerM op s (Maybe C.Definition)
+compileForeignPrototype (_, (Function _ isForeign bname outputs inputs _ _ _)) = do
+  (outparams, _) <- unzip <$> mapM compileOutput outputs
+  (inparams, _) <- unzip <$> mapM compileInput inputs
+  if isForeign
+    then return . Just $ [C.cedecl| int $id:(funNameForeign bname)($params:outparams, $params:inparams);|]
+    else return Nothing
 
 compilePrimValue :: PrimValue -> C.Exp
 compilePrimValue (IntValue (Int8Value k)) = [C.cexp|$int:k|]

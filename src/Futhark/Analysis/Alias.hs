@@ -37,8 +37,8 @@ analyseFun ::
   (ASTLore lore, CanBeAliased (Op lore)) =>
   FunDef lore ->
   FunDef (Aliases lore)
-analyseFun (FunDef entry attrs fname restype params body foreigns) =
-  FunDef entry attrs fname restype params body' foreigns
+analyseFun (FunDef entry attrs fname bname restype params body foreigns) =
+  FunDef entry attrs fname bname restype params body' foreigns
   where
     body' = analyseBody mempty body
 

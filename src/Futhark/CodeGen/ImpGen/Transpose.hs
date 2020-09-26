@@ -44,6 +44,7 @@ mapTransposeFunction fname pt =
   Function
     False
     False
+    fname
     []
     params
     ( mconcat
