@@ -501,14 +501,22 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   -- TODO: Use dynamic block id instead of the static one
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
-    shared <- sAlloc "shared" (Imp.bytes (zExt64 $ (unCount group_size) * m))
-                              (Space "local")
+    sharedSize <- dPrimV "sharedSize" (zExt64 $ (unCount group_size) * m)
+    shared <- sAllocArray "shared" (FloatType Float32) (Shape [Var $ tvVar sharedSize]) (Space "local")
     blockOff <- dPrimV "blockOff" $ (kernelGroupId constants) * m * (kernelGroupSize constants)
     sFor "i" m $ \i -> do
       dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
       compileStms mempty (kernelBodyStms kbody) $
-        do let mapRes = kernelResultSubExp $ head $ kernelBodyResult kbody
-           copyDWIMFix res [Imp.vi32 mapIdx] mapRes []
+        do let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
+           forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) -> do
+             copyDWIMFix (patElemName dest) [Imp.vi32 mapIdx] (kernelResultSubExp src) []
+
+           sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
+           forM_ (map kernelResultSubExp $ take 1 all_scan_res) $ \(Var src) -> do
+             src_entry <- lookupVar src
+             let src' = unsafePerformIO (do putStrLn ("src: " ++ show src_entry)
+                                            return src)
+             copyDWIMFix shared [tvExp sharedIdx] (Var src') []
 
   where
     n = product $ map toInt32Exp $ segSpaceDims space
