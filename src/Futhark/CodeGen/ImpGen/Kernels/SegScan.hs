@@ -492,31 +492,37 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                                        ++ "\nkbody: " ++ show kbody)
                             return pat)
 
-  let num_groups = toInt32Exp <$> segNumGroups lvl
-      group_size = toInt32Exp <$> segGroupSize lvl
-      res        = patElemName $ last all_pes
+  let num_groups    = toInt32Exp <$> segNumGroups lvl
+      group_size    = toInt32Exp <$> segGroupSize lvl
+      res           = patElemName $ last all_pes
       (mapIdx, dim) = head $ unSegSpace space
-      m           = 9
+      m             = 9
 
   -- TODO: Use dynamic block id instead of the static one
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
-    constants <- kernelConstants <$> askEnv
+
+    constants  <- kernelConstants <$> askEnv
+    blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * m * (kernelGroupSize constants)
+    -- Allocate the shared memory for (TODO: each) output component
     sharedSize <- dPrimV "sharedSize" (zExt64 $ (unCount group_size) * m)
-    shared <- sAllocArray "shared" (FloatType Float32) (Shape [Var $ tvVar sharedSize]) (Space "local")
-    blockOff <- dPrimV "blockOff" $ (kernelGroupId constants) * m * (kernelGroupSize constants)
+    shared     <- sAllocArray "shared" (FloatType Float32) (Shape [Var $ tvVar sharedSize]) (Space "local")
+
+    -- Load and map
     sFor "i" m $ \i -> do
+      -- The map's input index
       dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
+      -- Perform the map
       compileStms mempty (kernelBodyStms kbody) $
         do let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
            forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) -> do
+             -- Write map results to their global memory destinations
              copyDWIMFix (patElemName dest) [Imp.vi32 mapIdx] (kernelResultSubExp src) []
 
            sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
+           -- Write scan inputs to shared memory
+           -- TODO: Make it work on mulitple scan inputs
            forM_ (map kernelResultSubExp $ take 1 all_scan_res) $ \(Var src) -> do
-             src_entry <- lookupVar src
-             let src' = unsafePerformIO (do putStrLn ("src: " ++ show src_entry)
-                                            return src)
-             copyDWIMFix shared [tvExp sharedIdx] (Var src') []
+             copyDWIMFix shared [tvExp sharedIdx] (Var src) []
 
   where
     n = product $ map toInt32Exp $ segSpaceDims space
