@@ -175,9 +175,10 @@ transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname t
   | baseTag (qualLeaf fname) <= maxIntrinsicTag = return $ var fname
   | otherwise = do
-    maybe_fname <- lookupLifted (qualLeaf fname) (monoType t)
-    maybe_funbind <- lookupFun $ qualLeaf fname
     t' <- removeTypeVariablesInType t
+    let mono_t = monoType t'
+    maybe_fname <- lookupLifted (qualLeaf fname) mono_t
+    maybe_funbind <- lookupFun $ qualLeaf fname
     case (maybe_fname, maybe_funbind) of
       -- The function has already been monomorphised.
       (Just (fname', infer), _) ->
@@ -186,9 +187,9 @@ transformFName loc fname t
       (Nothing, Nothing) -> return $ var fname
       -- A polymorphic function.
       (Nothing, Just funbind) -> do
-        (fname', infer, funbind') <- monomorphiseBinding False funbind (monoType t')
+        (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
         tell $ Seq.singleton (qualLeaf fname, funbind')
-        addLifted (qualLeaf fname) (monoType t) (fname', infer)
+        addLifted (qualLeaf fname) mono_t (fname', infer)
         return $ applySizeArgs fname' t' $ infer t'
   where
     var fname' = Var fname' (Info (fromStruct t)) loc
