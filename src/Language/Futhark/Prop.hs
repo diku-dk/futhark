@@ -413,7 +413,18 @@ combineTypeShapes ::
   TypeBase dim as
 combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
   | M.keys ts1 == M.keys ts2 =
-    Scalar $ Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
+    Scalar $
+      Record $
+        M.map
+          (uncurry combineTypeShapes)
+          (M.intersectionWith (,) ts1 ts2)
+combineTypeShapes (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | M.keys cs1 == M.keys cs2 =
+    Scalar $
+      Sum $
+        M.map
+          (uncurry $ zipWith combineTypeShapes)
+          (M.intersectionWith (,) cs1 cs2)
 combineTypeShapes (Scalar (Arrow als1 p1 a1 b1)) (Scalar (Arrow als2 _p2 a2 b2)) =
   Scalar $ Arrow (als1 <> als2) p1 (combineTypeShapes a1 a2) (combineTypeShapes b1 b2)
 combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
