@@ -171,12 +171,39 @@ allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
     <*> mapM allDimsFreshInPat pats
     <*> pure loc
 
+data EntryTrust
+  = -- | This parameter or return value is an opaque type.  When a
+    -- parameter, this implies that it must have been returned by a
+    -- previous call to Futhark, and hence we can preserve (constant)
+    -- size constraints.
+    EntryTrusted
+  | -- | The type is directly exposed.  Any size constraint cannot be
+    -- trusted.
+    EntryUntrusted
+
+entryTrust :: EntryType -> EntryTrust
+entryTrust t
+  | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
+    EntryUntrusted
+  | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
+    EntryUntrusted
+  | E.Scalar E.Prim {} <- E.entryType t =
+    EntryUntrusted
+  | E.Array _ _ E.Prim {} _ <- E.entryType t =
+    EntryUntrusted
+  | otherwise =
+    EntryTrusted
+
+fixEntryParamSizes :: MonadFreshNames m => E.Pattern -> EntryTrust -> m E.Pattern
+fixEntryParamSizes p EntryTrusted = pure p
+fixEntryParamSizes p EntryUntrusted = allDimsFreshInPat p
+
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ attrs loc) = vb
   -- We replace all shape annotations, so there should be no constant
   -- parameters here.
-  params_fresh <- mapM allDimsFreshInPat params
+  params_fresh <- zipWithM fixEntryParamSizes params $ map entryTrust e_paramts
   let tparams =
         map (`E.TypeParamDim` mempty) $
           S.toList $
