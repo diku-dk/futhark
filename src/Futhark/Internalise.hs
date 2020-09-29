@@ -12,6 +12,7 @@
 module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.Reader
+import Control.Monad.State
 import Data.Bitraversable
 import Data.List (find, intercalate, intersperse, nub, transpose)
 import qualified Data.List.NonEmpty as NE
@@ -198,6 +199,22 @@ fixEntryParamSizes :: MonadFreshNames m => E.Pattern -> EntryTrust -> m E.Patter
 fixEntryParamSizes p EntryTrusted = pure p
 fixEntryParamSizes p EntryUntrusted = allDimsFreshInPat p
 
+-- When we are returning a value from the entry point, we fully
+-- existentialise the return type.  This is because it might otherwise
+-- refer to sizes that are not in scope, because the generated entry
+-- point function does not keep the size parameters of the original
+-- entry point.
+fullyExistential ::
+  [[I.TypeBase ExtShape u]] ->
+  [[I.TypeBase ExtShape u]]
+fullyExistential tss =
+  evalState (mapM (mapM (bitraverse (traverse onDim) pure)) tss) 0
+  where
+    onDim _ = do
+      i <- get
+      modify (+ 1)
+      pure $ Ext i
+
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
   let (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ attrs loc) = vb
@@ -209,7 +226,7 @@ generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
           S.toList $
             mconcat $ map E.patternDimNames params_fresh
   bindingParams tparams params_fresh $ \shapeparams params' -> do
-    entry_rettype <- internaliseEntryReturnType $ anySizes rettype
+    entry_rettype <- fullyExistential <$> internaliseEntryReturnType rettype
     let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 

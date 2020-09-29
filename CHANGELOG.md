@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     multiple constructors contain arrays of the same statically known
     size.
 
+  * Fix in monomorphisation of types with constant sizes.
+
 ## [0.17.2]
 
 ### Added
