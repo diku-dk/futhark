@@ -1986,12 +1986,20 @@ funcall desc (QualName _ fname) args loc = do
   case rettype_fun $ zip args' argts' of
     Nothing ->
       error $
-        "Cannot apply " ++ pretty fname ++ " to arguments\n "
-          ++ pretty args'
-          ++ "\nof types\n "
-          ++ pretty argts'
-          ++ "\nFunction has parameters\n "
-          ++ pretty fun_params
+        concat
+          [ "Cannot apply ",
+            pretty fname,
+            " to ",
+            show (length args'),
+            " arguments\n ",
+            pretty args',
+            "\nof types\n ",
+            pretty argts',
+            "\nFunction has ",
+            show (length fun_params),
+            " parameters\n ",
+            pretty fun_params
+          ]
     Just ts -> do
       safety <- askSafety
       attrs <- asks envAttrs
