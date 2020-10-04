@@ -38,7 +38,7 @@ struct scheduler_parloop {
 
 
 /* A task for the scheduler to execute */
-struct scheduler_task {
+struct scheduler_segop {
   void *args;
   segop_fn sequential_fn;
   segop_fn canonical_fn;
@@ -163,11 +163,10 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 }
 
 
-static inline int is_small(struct scheduler_task *task, int nthreads, int *nsubtasks)
+static inline int is_small(struct scheduler_segop *task, int nthreads, int *nsubtasks)
 {
   int64_t time = *task->task_time;
   int64_t iter = *task->task_iter;
-
 
   if (task->sched == DYNAMIC || iter == 0) {
     *nsubtasks = nthreads;
