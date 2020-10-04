@@ -142,6 +142,22 @@ segmentedHist pat space histops kbody = do
     let (body_allocs, body') = extractAllocations par_body
     emit $ Imp.Op $ Imp.ParLoop "segmented_hist" (tvVar n_segments) body_allocs body' mempty free_params $ segFlat space
 
+updateHisto :: HistOp MCMem -> [VName] -> [Imp.TExp Int32] -> MulticoreGen ()
+updateHisto op arrs bucket = do
+  let acc_params = take (length arrs) $ lambdaParams $ histOp op
+      bind_acc_params =
+        forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
+          copyDWIMFix (paramName acc_p) [] (Var arr) bucket
+      op_body = compileBody' [] $ lambdaBody $ histOp op
+      writeArray arr val = copyDWIMFix arr bucket val []
+      do_hist = zipWithM_ writeArray arrs $ bodyResult $ lambdaBody $ histOp op
+
+  sComment "Start of body" $ do
+    dLParams acc_params
+    bind_acc_params
+    op_body
+    do_hist
+
 -- Generates num_threads sub histograms of the size
 -- of the destination histogram
 -- Then for each chunk of the input each subhistogram
@@ -168,41 +184,37 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
 
   let per_red_pes = segHistOpChunks histops $ patternValueElements pat
 
-  init_histograms <- mapM (onOp num_histos) histops
-
-  hist_widths <- forM (map histWidth histops) $ \w ->
-    dPrimV "hist_width" $ toInt32Exp w
+  -- Allocate array of subhistograms in the calling thread.  Each
+  -- tasks will work in its own private allocations (to avoid false
+  -- sharing), but this is where they will ultimately copy their
+  -- results.
+  global_subhistograms <- forM histops $ \histop ->
+    forM (histType histop) $ \t -> do
+      let shape = Shape [tvSize num_histos] <> arrayShape t
+      sAllocArray "subhistogram" (elemType t) shape DefaultSpace
 
   let tid' = Imp.vi32 $ segFlat space
       flat_idx' = tvExp flat_idx
 
-  -- Actually allocate subhistograms
-  histograms <- forM (zip init_histograms hist_widths) $
-    \(init_local_subhistos, hist_width) -> do
-      (local_subhistos, do_op) <- init_local_subhistos (tvSize hist_width)
-      return (local_subhistos, hist_width, do_op)
-
-  prebody <- collect $ do
+  (local_subhistograms, prebody) <- collect' $ do
     zipWithM_ dPrimV_ is $ map sExt32 $ unflattenIndex ns_64 $ sExt64 flat_idx'
-    forM_ (zip4 per_red_pes histograms hist_widths histops) $ \(pes', (hists, _, _), hist_width, histop) ->
-      forM_ (zip3 pes' hists (histNeutral histop)) $ \(pe, hist, ne) -> do
-        let hist_H_chk' = tvExp hist_width
 
-        -- First thread initializes histrogram wtih dest vals
-        -- Others initialize with neutral element
-        let is_first_tid = tid' .==. 0
-        sFor "i" hist_H_chk' $ \i ->
-          sIf
-            is_first_tid
-            ( copyDWIMFix
-                hist
-                (tid' : [i])
-                (Var $ patElemName pe)
-                (map Imp.vi32 (init is) ++ [i])
-            )
-            ( sLoopNest (histShape histop) $ \vec_is ->
-                copyDWIMFix hist (tid' : i : vec_is) ne []
-            )
+    forM (zip per_red_pes histops) $ \(pes', histop) -> do
+      op_local_subhistograms <- forM (histType histop) $ \t ->
+        sAllocArray "subhistogram" (elemType t) (arrayShape t) DefaultSpace
+
+      forM_ (zip3 pes' op_local_subhistograms (histNeutral histop)) $ \(pe, hist, ne) ->
+        -- First thread initializes histogram with dest vals. Others
+        -- initialize with neutral element
+        sIf
+          (tid' .==. 0)
+          (copyDWIMFix hist [] (Var $ patElemName pe) [])
+          ( sFor "i" (toInt32Exp $ histWidth histop) $ \i ->
+              sLoopNest (histShape histop) $ \vec_is ->
+                copyDWIMFix hist (i : vec_is) ne []
+          )
+
+      return op_local_subhistograms
 
   -- Generate loop body of parallel function
   body <- collect $ do
@@ -220,9 +232,9 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
             (kernelResultSubExp res)
             []
 
-      forM_ (zip4 histops histograms buckets (perOp vs)) $
-        \( HistOp dest_w _ _ _ shape lam,
-           (_, _hist_H_chk, do_op),
+      forM_ (zip4 histops local_subhistograms buckets (perOp vs)) $
+        \( histop@(HistOp dest_w _ _ _ shape lam),
+           histop_subhistograms,
            bucket,
            vs'
            ) -> do
@@ -230,7 +242,7 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
                 dest_w' = toInt32Exp dest_w
                 bucket_in_bounds = bucket' .<. dest_w' .&&. 0 .<=. bucket'
                 vs_params = takeLast (length vs') $ lambdaParams lam
-                bucket_is = [tid', bucket']
+                bucket_is = [bucket']
 
             sComment "perform updates" $
               sWhen bucket_in_bounds $ do
@@ -238,13 +250,19 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
                 sLoopNest shape $ \is' -> do
                   forM_ (zip vs_params vs') $ \(p, res) ->
                     copyDWIMFix (paramName p) [] (kernelResultSubExp res) is'
-                  do_op (bucket_is ++ is')
+                  updateHisto histop histop_subhistograms (bucket_is ++ is')
 
-  free_params <- freeParams (prebody <> body) (segFlat space : [tvVar flat_idx])
+  -- Copy the task-local subhistograms to the global subhistograms,
+  -- where they will be combined.
+  postbody <- collect $
+    forM_ (zip (concat global_subhistograms) (concat local_subhistograms)) $
+      \(global, local) -> copyDWIMFix global [tid'] (Var local) []
+
+  free_params <- freeParams (prebody <> body <> postbody) (segFlat space : [tvVar flat_idx])
   let (body_allocs, body') = extractAllocations body
-  emit $ Imp.Op $ Imp.ParLoop "seghist_stage_1" (tvVar flat_idx) (body_allocs <> prebody) body' mempty free_params $ segFlat space
+  emit $ Imp.Op $ Imp.ParLoop "seghist_stage_1" (tvVar flat_idx) (body_allocs <> prebody) body' postbody free_params $ segFlat space
 
-  forM_ (zip3 per_red_pes histograms histops) $ \(red_pes, (hists, _, _), op) -> do
+  forM_ (zip3 per_red_pes global_subhistograms histops) $ \(red_pes, hists, op) -> do
     bucket_id <- newVName "bucket_id"
     subhistogram_id <- newVName "subhistogram_id"
 
@@ -261,7 +279,6 @@ smallDestHistogram pat flat_idx space histops num_histos kbody = do
         iterations = case unSegSpace segred_space of
           [_] -> product ns_red
           _ -> product $ init ns_red -- Segmented reduction is over the inner most dimension
-
     let retvals = map patElemName red_pes
     retvals_ts <- mapM lookupType retvals
     retval_params <- zipWithM toParam retvals retvals_ts
@@ -338,36 +355,3 @@ compileSegHistBody idx pat space histops kbody = do
                   compileStms mempty (bodyStms $ lambdaBody lam) $
                     forM_ (zip red_res $ bodyResult $ lambdaBody lam) $
                       \(pe, se) -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ [buck] ++ is') se []
-
-type InitLocalHistograms = SubExp -> MulticoreGen ([VName], [Imp.TExp Int32] -> MulticoreGen ())
-
-onOp :: TV Int32 -> HistOp MCMem -> MulticoreGen InitLocalHistograms
-onOp num_subhistos_per_group op = do
-  let mk_op arrs bucket = do
-        let acc_params = take (length arrs) $ lambdaParams $ histOp op
-            bind_acc_params =
-              forM_ (zip acc_params arrs) $ \(acc_p, arr) ->
-                copyDWIMFix (paramName acc_p) [] (Var arr) bucket
-            op_body = compileBody' [] $ lambdaBody $ histOp op
-            do_hist = zipWithM_ (writeArray bucket) arrs $ bodyResult $ lambdaBody $ histOp op
-
-        sComment "Start of body" $ do
-          dLParams acc_params
-          bind_acc_params
-          op_body
-          do_hist
-
-  -- Initialise local-memory sub-histograms.  These are
-  -- represented as two-dimensional arrays.
-  let init_local_subhistos hist_H_chk = do
-        local_subhistos <-
-          forM (histType op) $ \t -> do
-            let sub_local_shape =
-                  Shape [tvSize num_subhistos_per_group]
-                    <> (arrayShape t `setOuterDim` hist_H_chk)
-            sAllocArray "subhistogram" (elemType t) sub_local_shape DefaultSpace
-
-        return (local_subhistos, mk_op local_subhistos)
-  return init_local_subhistos
-  where
-    writeArray bucket arr val = copyDWIMFix arr bucket val []
