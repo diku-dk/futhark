@@ -500,15 +500,19 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       m             = 9
       tM            = 9
 
+  -- Allocate the shared memory for (TODO: each) output component
+  sharedSize <- dPrimV "sharedSize" ((unCount group_size) * tM)
+
   -- TODO: Use dynamic block id instead of the static one
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
 
     constants  <- kernelConstants <$> askEnv
     blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * tM * (kernelGroupSize constants)
-    -- Allocate the shared memory for (TODO: each) output component
-    sharedSize <- dPrimV "sharedSize" (zExt64 $ (unCount group_size) * tM)
     -- TODO: Maybe don't hardcode the type?
-    shared     <- sAllocArray "shared" (FloatType Float32) (Shape [Var $ tvVar sharedSize]) (Space "local")
+    shared     <- sAllocArray "shared"
+                              (FloatType Float32)
+                              (Shape [Var $ tvVar sharedSize])
+                              (Space "local")
 
     let barrier = Imp.Barrier Imp.FenceLocal
 
@@ -535,8 +539,12 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                            (FloatType Float32)
                            (Shape [constant m])
                            (ScalarSpace [constant m] (FloatType Float32))
+
     sFor "i" tM $ \i -> do
-      return ()
+      -- The index into shared:
+      sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * (kernelGroupSize constants) + i
+      copyDWIMFix private [i] (Var shared) [tvExp sharedIdx]
+
 
   where
     n = product $ map toInt32Exp $ segSpaceDims space
