@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Trustworthy #-}
 
@@ -39,6 +40,7 @@ import Data.Maybe
 import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import Futhark.MonadFreshNames
+import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
@@ -140,19 +142,40 @@ lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 -- Given instantiated type of function, produce size arguments.
 type InferSizeArgs = StructType -> [Exp]
 
--- The kind of type relative to which we monomorphise.  What is
+data MonoSize
+  = -- | The integer encodes an equivalence class, so we can keep
+    -- track of sizes that are statically identical.
+    MonoKnown Int
+  | MonoAnon
+  deriving (Eq, Ord, Show)
+
+instance Pretty MonoSize where
+  ppr (MonoKnown i) = text "?" <> ppr i
+  ppr MonoAnon = text "?"
+
+instance Pretty (ShapeDecl MonoSize) where
+  ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
+
+-- The kind of type relative to which we monomorphise.  What is most
 -- important to us is not the specific dimensions, but merely whether
--- they are known or anonymous/local (the latter False).
-type MonoType = TypeBase Bool ()
+-- they are known or anonymous/local.
+type MonoType = TypeBase MonoSize ()
 
 monoType :: TypeBase (DimDecl VName) als -> MonoType
-monoType = runIdentity . traverseDims onDim . toStruct
+monoType = (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
     onDim bound _ (NamedDim d)
       -- A locally bound size.
-      | qualLeaf d `S.member` bound = pure False
-    onDim _ _ AnyDim = pure False
-    onDim _ _ _ = pure True
+      | qualLeaf d `S.member` bound = pure MonoAnon
+    onDim _ _ AnyDim = pure MonoAnon
+    onDim _ _ d = do
+      (i, m) <- get
+      case M.lookup d m of
+        Just prev ->
+          pure $ MonoKnown prev
+        Nothing -> do
+          put (i + 1, M.insert d i m)
+          pure $ MonoKnown i
 
 -- Mapping from function name and instance list to a new function name in case
 -- the function has already been instantiated with those concrete types.
@@ -175,9 +198,10 @@ transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname t
   | baseTag (qualLeaf fname) <= maxIntrinsicTag = return $ var fname
   | otherwise = do
-    maybe_fname <- lookupLifted (qualLeaf fname) (monoType t)
-    maybe_funbind <- lookupFun $ qualLeaf fname
     t' <- removeTypeVariablesInType t
+    let mono_t = monoType t'
+    maybe_fname <- lookupLifted (qualLeaf fname) mono_t
+    maybe_funbind <- lookupFun $ qualLeaf fname
     case (maybe_fname, maybe_funbind) of
       -- The function has already been monomorphised.
       (Just (fname', infer), _) ->
@@ -186,9 +210,9 @@ transformFName loc fname t
       (Nothing, Nothing) -> return $ var fname
       -- A polymorphic function.
       (Nothing, Just funbind) -> do
-        (fname', infer, funbind') <- monomorphiseBinding False funbind (monoType t')
+        (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
         tell $ Seq.singleton (qualLeaf fname, funbind')
-        addLifted (qualLeaf fname) (monoType t) (fname', infer)
+        addLifted (qualLeaf fname) mono_t (fname', infer)
         return $ applySizeArgs fname' t' $ infer t'
   where
     var fname' = Var fname' (Info (fromStruct t)) loc
@@ -658,7 +682,7 @@ explicitSizes t1 t2 =
   where
     onDims d1 d2 = do
       case (d1, d2) of
-        (NamedDim v, True) -> modify $ S.insert $ qualLeaf v
+        (NamedDim v, MonoKnown _) -> modify $ S.insert $ qualLeaf v
         _ -> return ()
       return d1
 
@@ -768,7 +792,7 @@ typeSubstsM ::
   m (M.Map VName StructType, [TypeParam])
 typeSubstsM loc orig_t1 orig_t2 =
   let m = sub orig_t1 orig_t2
-   in runWriterT $ execStateT m mempty
+   in runWriterT $ fst <$> execStateT m (mempty, mempty)
   where
     sub t1@Array {} t2@Array {}
       | Just t1' <- peelArray (arrayRank t1) t1,
@@ -793,16 +817,22 @@ typeSubstsM loc orig_t1 orig_t2 =
     sub t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", pretty t1, pretty t2]
 
     addSubst (TypeName _ v) t = do
-      exists <- gets $ M.member v
-      unless exists $ do
+      (ts, sizes) <- get
+      unless (v `M.member` ts) $ do
         t' <- bitraverse onDim pure t
-        modify $ M.insert v t'
+        put (M.insert v t' ts, sizes)
 
-    onDim True = do
-      d <- lift $ lift $ newVName "d"
-      tell [TypeParamDim d loc]
-      return $ NamedDim $ qualName d
-    onDim False = return AnyDim
+    onDim (MonoKnown i) = do
+      (ts, sizes) <- get
+      case M.lookup i sizes of
+        Nothing -> do
+          d <- lift $ lift $ newVName "d"
+          tell [TypeParamDim d loc]
+          put (ts, M.insert i d sizes)
+          return $ NamedDim $ qualName d
+        Just d ->
+          return $ NamedDim $ qualName d
+    onDim MonoAnon = return AnyDim
 
 -- Perform a given substitution on the types in a pattern.
 substPattern :: Bool -> (PatternType -> PatternType) -> Pattern -> Pattern

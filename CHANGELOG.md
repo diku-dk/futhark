@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Really fix NaN comparisons in interpreter (#1070, again).
 
+  * Fix entry points with a parameter that is a sum type where
+    multiple constructors contain arrays of the same statically known
+    size.
+
+  * Fix in monomorphisation of types with constant sizes.
+
 ## [0.17.2]
 
 ### Added

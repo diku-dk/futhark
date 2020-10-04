@@ -58,6 +58,9 @@ where
 
 import Control.Category
 import Control.Monad.State
+import Data.Bifoldable
+import Data.Bifunctor
+import Data.Bitraversable
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.String
@@ -232,6 +235,17 @@ data TypeBase shape u
   | Array PrimType shape u
   | Mem Space
   deriving (Show, Eq, Ord, Generic)
+
+instance Bitraversable TypeBase where
+  bitraverse f g (Array t shape u) = Array t <$> f shape <*> g u
+  bitraverse _ _ (Prim pt) = pure $ Prim pt
+  bitraverse _ _ (Mem s) = pure $ Mem s
+
+instance Bifunctor TypeBase where
+  bimap = bimapDefault
+
+instance Bifoldable TypeBase where
+  bifoldMap = bifoldMapDefault
 
 instance (SexpIso shape, SexpIso u) => SexpIso (TypeBase shape u) where
   sexpIso =
