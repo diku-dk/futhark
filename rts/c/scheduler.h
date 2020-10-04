@@ -391,7 +391,7 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 /* Decide on how schedule the incoming task i.e. how many subtasks and
    to run sequential or (potentially nested) parallel code body */
 static inline int scheduler_prepare_task(struct scheduler* scheduler,
-                                         struct scheduler_task *task)
+                                         struct scheduler_segop *task)
 {
   assert(task != NULL);
 

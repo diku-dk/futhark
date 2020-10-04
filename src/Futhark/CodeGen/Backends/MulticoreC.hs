@@ -574,7 +574,7 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
-  GC.decl [C.cdecl|struct scheduler_task $id:ftask_name;|]
+  GC.decl [C.cdecl|struct scheduler_segop $id:ftask_name;|]
   GC.stm [C.cstm|$id:ftask_name.args = &$id:fstruct;|]
   GC.stm [C.cstm|$id:ftask_name.sequential_fn = $id:fpar_task;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
