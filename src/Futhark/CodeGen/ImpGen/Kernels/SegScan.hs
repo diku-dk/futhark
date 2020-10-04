@@ -496,19 +496,24 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       group_size    = toInt32Exp <$> segGroupSize lvl
       res           = patElemName $ last all_pes
       (mapIdx, dim) = head $ unSegSpace space
+      m :: Int32
       m             = 9
+      tM            = 9
 
   -- TODO: Use dynamic block id instead of the static one
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
 
     constants  <- kernelConstants <$> askEnv
-    blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * m * (kernelGroupSize constants)
+    blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * tM * (kernelGroupSize constants)
     -- Allocate the shared memory for (TODO: each) output component
-    sharedSize <- dPrimV "sharedSize" (zExt64 $ (unCount group_size) * m)
+    sharedSize <- dPrimV "sharedSize" (zExt64 $ (unCount group_size) * tM)
+    -- TODO: Maybe don't hardcode the type?
     shared     <- sAllocArray "shared" (FloatType Float32) (Shape [Var $ tvVar sharedSize]) (Space "local")
 
+    let barrier = Imp.Barrier Imp.FenceLocal
+
     -- Load and map
-    sFor "i" m $ \i -> do
+    sFor "i" tM $ \i -> do
       -- The map's input index
       dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
       -- Perform the map
@@ -523,6 +528,15 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
            -- TODO: Make it work on mulitple scan inputs
            forM_ (map kernelResultSubExp $ take 1 all_scan_res) $ \(Var src) -> do
              copyDWIMFix shared [tvExp sharedIdx] (Var src) []
+    sOp barrier
+
+    -- TODO: See `shared`
+    private <- sAllocArray "private"
+                           (FloatType Float32)
+                           (Shape [constant m])
+                           (ScalarSpace [constant m] (FloatType Float32))
+    sFor "i" tM $ \i -> do
+      return ()
 
   where
     n = product $ map toInt32Exp $ segSpaceDims space
