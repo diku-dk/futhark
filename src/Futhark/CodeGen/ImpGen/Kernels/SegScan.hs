@@ -581,5 +581,20 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       (kernelGroupSize constants)
       scanOp'
       [shared]
+
+    scanOp'' <- renameLambda scanOp'
+
+    -- Distribute results
+    sWhen ((kernelLocalThreadId constants) .>. 0) $ do
+      let xParam = (paramName $ head $ lambdaParams scanOp'')
+          yParam = (paramName $ last $ lambdaParams scanOp'')
+      dPrim_ xParam $ FloatType Float32
+      dPrim_ yParam $ FloatType Float32
+      copyDWIMFix xParam [] (Var shared) [(kernelLocalThreadId constants) - 1]
+
+      sFor "i" tM $ \i -> do
+        copyDWIMFix yParam [] (Var private) [i]
+        compileStms mempty (bodyStms $ lambdaBody scanOp'') $
+          copyDWIMFix private [i] (head $ bodyResult $ lambdaBody scanOp'') []
   where
     n = product $ map toInt32Exp $ segSpaceDims space
