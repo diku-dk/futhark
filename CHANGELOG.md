@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix in monomorphisation of types with constant sizes.
 
+  * Fix in in-place loweing (#1142).
+
 ## [0.17.2]
 
 ### Added
