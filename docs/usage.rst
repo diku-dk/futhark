@@ -75,6 +75,10 @@ Executable Options
 
 All generated executables support the following options.
 
+  ``-h/--help``
+
+    Print help text to standard output and exit.
+
   ``-t FILE``
 
     Print the time taken to execute the program to the indicated file,
@@ -107,8 +111,13 @@ Parallel Options
 ~~~~~~~~~~~~~~~~
 
 The following options are supported by executables generated with the
-parallel backends (``opencl``, ``pyopencl``, ``csopencl``, and
-``cuda``).
+GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
+
+  ``-d DEVICE``
+
+    Pick the first device whose name contains the given string.  The
+    special string ``#k``, where ``k`` is an integer, can be used to
+    pick the *k*-th device, numbered from zero.
 
   ``--tuning=FILE``
 
@@ -136,7 +145,7 @@ OpenCL-specific Options
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The following options are supported by executables generated with the
-OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
+OpenCL backends (``opencl``, ``pyopencl``):
 
   ``-P``
 
@@ -149,7 +158,9 @@ OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
 
     Pick the first OpenCL platform whose name contains the given
     string.  The special string ``#k``, where ``k`` is an integer, can
-    be used to pick the *k*-th platform, numbered from zero.
+    be used to pick the *k*-th platform, numbered from zero.  If used
+    in conjunction with ``-d``, only the devices from matching
+    platforms are considered.
 
   ``-d DEVICE``
 
@@ -198,6 +209,10 @@ OpenCL backends (``opencl``, ``pyopencl``, and ``csopencl``):
     ``clBuildProgram()``.  Refer to the OpenCL documentation for which
     options are supported.  Be careful - some options can easily
     result in invalid results.
+
+  ``--list-devices``
+
+    List all OpenCL devices and platforms available on the system.
 
 There is rarely a need to use both ``-p`` and ``-d``.  For example, to
 run on the first available NVIDIA GPU, ``-p NVIDIA`` is sufficient, as

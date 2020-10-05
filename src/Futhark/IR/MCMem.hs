@@ -1,44 +1,41 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Futhark.IR.MCMem
-  ( MCMem
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 
-  -- * Simplification
-  , simplifyProg
+module Futhark.IR.MCMem
+  ( MCMem,
+
+    -- * Simplification
+    simplifyProg,
 
     -- * Module re-exports
-  , module Futhark.IR.Mem
-  , module Futhark.IR.SegOp
-  , module Futhark.IR.MC.Op
+    module Futhark.IR.Mem,
+    module Futhark.IR.SegOp,
+    module Futhark.IR.MC.Op,
   )
-  where
+where
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Pass
-import Futhark.IR.Syntax
-import Futhark.IR.Prop
-import Futhark.IR.Traversals
-import Futhark.IR.Pretty
-import Futhark.IR.SegOp
-import qualified Futhark.TypeCheck as TC
 import Futhark.IR.MC.Op
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
-import Futhark.Pass.ExplicitAllocations (BinderOps(..), mkLetNamesB', mkLetNamesB'')
+import Futhark.IR.SegOp
 import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Pass
+import Futhark.Pass.ExplicitAllocations (BinderOps (..), mkLetNamesB', mkLetNamesB'')
+import qualified Futhark.TypeCheck as TC
 
 data MCMem
 
 instance Decorations MCMem where
-  type LetDec      MCMem = LetDecMem
-  type FParamInfo  MCMem = FParamMem
-  type LParamInfo  MCMem = LParamMem
-  type RetType     MCMem = RetTypeMem
-  type BranchType  MCMem = BranchTypeMem
-  type Op          MCMem = MemOp (MCOp MCMem ())
+  type LetDec MCMem = LetDecMem
+  type FParamInfo MCMem = FParamMem
+  type LParamInfo MCMem = LParamMem
+  type RetType MCMem = RetTypeMem
+  type BranchType MCMem = BranchTypeMem
+  type Op MCMem = MemOp (MCOp MCMem ())
 
 instance ASTLore MCMem where
   expTypesFromPattern = return . map snd . snd . bodyReturnsFromPattern
@@ -48,14 +45,15 @@ instance OpReturns MCMem where
   opReturns (Inner (ParOp _ op)) = segOpReturns op
   opReturns (Inner (OtherOp ())) = pure []
 
-instance PrettyLore MCMem where
+instance PrettyLore MCMem
 
 instance TC.CheckableOp MCMem where
   checkOp = typeCheckMemoryOp
-    where typeCheckMemoryOp (Alloc size _) =
-            TC.require [Prim int64] size
-          typeCheckMemoryOp (Inner op) =
-            typeCheckMCOp pure op
+    where
+      typeCheckMemoryOp (Alloc size _) =
+        TC.require [Prim int64] size
+      typeCheckMemoryOp (Inner op) =
+        typeCheckMCOp pure op
 
 instance TC.Checkable MCMem where
   checkFParamLore = checkMemInfo

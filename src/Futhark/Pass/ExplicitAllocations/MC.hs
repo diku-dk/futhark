@@ -2,12 +2,11 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Futhark.Pass.ExplicitAllocations.MC
-  ( explicitAllocations )
-where
 
-import Futhark.IR.MCMem
+module Futhark.Pass.ExplicitAllocations.MC (explicitAllocations) where
+
 import Futhark.IR.MC
+import Futhark.IR.MCMem
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
@@ -18,14 +17,15 @@ handleSegOp :: SegOp () MC -> AllocM MC MCMem (SegOp () MCMem)
 handleSegOp op = do
   let num_threads = intConst Int32 256 -- FIXME
   mapSegOpM (mapper num_threads) op
-  where scope = scopeOfSegSpace $ segSpace op
-        mapper num_threads =
-          identitySegOpMapper
-          { mapOnSegOpBody =
-              localScope scope . allocInKernelBody
-          , mapOnSegOpLambda =
-              allocInBinOpLambda num_threads (segSpace op)
-          }
+  where
+    scope = scopeOfSegSpace $ segSpace op
+    mapper num_threads =
+      identitySegOpMapper
+        { mapOnSegOpBody =
+            localScope scope . allocInKernelBody,
+          mapOnSegOpLambda =
+            allocInBinOpLambda num_threads (segSpace op)
+        }
 
 handleMCOp :: Op MC -> AllocM MC MCMem (Op MCMem)
 handleMCOp (ParOp par_op op) =

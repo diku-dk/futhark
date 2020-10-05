@@ -1,51 +1,68 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
+
 -- | Definitions for multicore operations.
 --
 -- Most of the interesting stuff is in "Futhark.IR.SegOp", which is
 -- also re-exported from here.
 module Futhark.IR.MC.Op
-  ( MCOp(..)
-
-  , typeCheckMCOp
-  , simplifyMCOp
-
-  , module Futhark.IR.SegOp
+  ( MCOp (..),
+    typeCheckMCOp,
+    simplifyMCOp,
+    module Futhark.IR.SegOp,
   )
 where
 
+import Control.Category
 import Data.Bifunctor (first)
-
-import Futhark.IR
-import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Util.Pretty
-  ((</>), (<+>), ppr, nestedBlock, Pretty)
-import Futhark.Transform.Substitute
-import Futhark.Transform.Rename
-import Futhark.Optimise.Simplify.Lore
-import qualified Futhark.Optimise.Simplify.Engine as Engine
-import qualified Futhark.Optimise.Simplify as Simplify
-import Futhark.IR.Prop.Aliases
-import Futhark.IR.Aliases (Aliases)
-import Futhark.IR.SegOp
-import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
+import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.IR
+import Futhark.IR.Aliases (Aliases)
+import Futhark.IR.Prop.Aliases
+import Futhark.IR.SegOp
+import qualified Futhark.Optimise.Simplify as Simplify
+import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify.Lore
+import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
+import qualified Futhark.TypeCheck as TC
+import Futhark.Util.Pretty
+  ( Pretty,
+    nestedBlock,
+    ppr,
+    (<+>),
+    (</>),
+  )
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Prelude hiding (id, (.))
 
 -- | An operation for the multicore representation.  Feel free to
 -- extend this on an ad hoc basis as needed.  Parameterised with some
 -- other operation.
 data MCOp lore op
-  = ParOp
-    (Maybe (SegOp () lore))
-    (SegOp () lore)
-    -- ^ The first 'SegOp' (if it exists) contains nested parallelism,
+  = -- | The first 'SegOp' (if it exists) contains nested parallelism,
     -- while the second one has a fully sequential body.  They are
     -- semantically fully equivalent.
-  | OtherOp op
-    -- ^ Something else (in practice often a SOAC).
-  deriving (Eq, Ord, Show)
+    ParOp
+      (Maybe (SegOp () lore))
+      (SegOp () lore)
+  | -- | Something else (in practice often a SOAC).
+    OtherOp op
+  deriving (Eq, Ord, Show, Generic)
+
+instance (Decorations lore, SexpIso op) => SexpIso (MCOp lore op) where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With
+          (. Sexp.list (Sexp.el sexpIso))
+          End
 
 instance (ASTLore lore, Substitute op) => Substitute (MCOp lore op) where
   substituteNames substs (ParOp par_op op) =
@@ -72,16 +89,20 @@ instance TypedOp op => TypedOp (MCOp lore op) where
   opType (ParOp _ op) = opType op
   opType (OtherOp op) = opType op
 
-instance (Aliased lore, AliasedOp op, ASTLore lore) =>
-         AliasedOp (MCOp lore op) where
+instance
+  (Aliased lore, AliasedOp op, ASTLore lore) =>
+  AliasedOp (MCOp lore op)
+  where
   opAliases (ParOp _ op) = opAliases op
   opAliases (OtherOp op) = opAliases op
 
   consumedInOp (ParOp _ op) = consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
 
-instance (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) =>
-         CanBeAliased (MCOp lore op) where
+instance
+  (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) =>
+  CanBeAliased (MCOp lore op)
+  where
   type OpWithAliases (MCOp lore op) = MCOp (Aliases lore) (OpWithAliases op)
 
   addOpAliases (ParOp par_op op) =
@@ -94,8 +115,10 @@ instance (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) =>
   removeOpAliases (OtherOp op) =
     OtherOp $ removeOpAliases op
 
-instance (CanBeWise (Op lore), CanBeWise op, ASTLore lore) =>
-         CanBeWise (MCOp lore op) where
+instance
+  (CanBeWise (Op lore), CanBeWise op, ASTLore lore) =>
+  CanBeWise (MCOp lore op)
+  where
   type OpWithWisdom (MCOp lore op) = MCOp (Wise lore) (OpWithWisdom op)
 
   removeOpWisdom (ParOp par_op op) =
@@ -110,33 +133,37 @@ instance (ASTLore lore, ST.IndexOp op) => ST.IndexOp (MCOp lore op) where
 instance (PrettyLore lore, Pretty op) => Pretty (MCOp lore op) where
   ppr (ParOp Nothing op) = ppr op
   ppr (ParOp (Just par_op) op) =
-    "par" <+> nestedBlock "{" "}" (ppr par_op) </>
-    "seq" <+> nestedBlock "{" "}" (ppr op)
+    "par" <+> nestedBlock "{" "}" (ppr par_op)
+      </> "seq" <+> nestedBlock "{" "}" (ppr op)
   ppr (OtherOp op) = ppr op
 
 instance (OpMetrics (Op lore), OpMetrics op) => OpMetrics (MCOp lore op) where
   opMetrics (ParOp par_op op) = opMetrics par_op >> opMetrics op
   opMetrics (OtherOp op) = opMetrics op
 
-typeCheckMCOp :: TC.Checkable lore =>
-                 (op -> TC.TypeM lore ())
-              -> MCOp (Aliases lore) op
-              -> TC.TypeM lore ()
-typeCheckMCOp _ (ParOp par_op op) = do
-  maybe (return ()) (typeCheckSegOp return) par_op
+typeCheckMCOp ::
+  TC.Checkable lore =>
+  (op -> TC.TypeM lore ()) ->
+  MCOp (Aliases lore) op ->
+  TC.TypeM lore ()
+typeCheckMCOp _ (ParOp (Just par_op) op) = do
+  -- It is valid for the same array to be consumed in both par_op and op.
+  _ <- typeCheckSegOp return par_op `TC.alternative` typeCheckSegOp return op
+  return ()
+typeCheckMCOp _ (ParOp Nothing op) =
   typeCheckSegOp return op
 typeCheckMCOp f (OtherOp op) = f op
 
-simplifyMCOp :: (Engine.SimplifiableLore lore,
-                 BodyDec lore ~ ()) =>
-                Simplify.SimplifyOp lore op
-             -> MCOp lore op
-             -> Engine.SimpleM lore (MCOp (Wise lore) (OpWithWisdom op), Stms (Wise lore))
-
+simplifyMCOp ::
+  ( Engine.SimplifiableLore lore,
+    BodyDec lore ~ ()
+  ) =>
+  Simplify.SimplifyOp lore op ->
+  MCOp lore op ->
+  Engine.SimpleM lore (MCOp (Wise lore) (OpWithWisdom op), Stms (Wise lore))
 simplifyMCOp f (OtherOp op) = do
   (op', stms) <- f op
   return (OtherOp op', stms)
-
 simplifyMCOp _ (ParOp par_op op) = do
   (par_op', par_op_hoisted) <-
     case par_op of

@@ -111,16 +111,11 @@ module type integral = {
   -- | Count number of zero bits preceding the most significant set
   -- bit.
   val clz: t -> i32
-}
 
--- | An extension of `size`@mtype that further includes facilities for
--- constructing arrays where the size is provided as a value of the
--- given integral type.
-module type size = {
-  include integral
-
-  val iota: t -> *[]t
-  val replicate 'v: t -> v -> *[]v
+  -- | Count number of trailing zero bits following the least
+  -- significant set bit.  Returns the number of bits in the type if
+  -- the argument is all-zero.
+  val ctz: t -> i32
 }
 
 -- | Numbers that model real numbers to some degree.
@@ -234,7 +229,7 @@ module bool: from_prim with t = bool = {
   let bool (x: bool) = x
 }
 
-module i8: (size with t = i8) = {
+module i8: (integral with t = i8) = {
   type t = i8
 
   let (x: i8) + (y: i8) = intrinsics.add8 (x, y)
@@ -298,9 +293,7 @@ module i8: (size with t = i8) = {
   let mul_hi a b = intrinsics.mul_hi8 (i8 a, i8 b)
   let mad_hi a b c = intrinsics.mad_hi8 (i8 a, i8 b, i8 c)
   let clz = intrinsics.clz8
-
-  let iota (n: i8) = 0i8..1i8..<n
-  let replicate 'v (n: i8) (x: v) = map (const x) (iota n)
+  let ctz = intrinsics.ctz8
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
@@ -308,7 +301,7 @@ module i8: (size with t = i8) = {
   let minimum = reduce min highest
 }
 
-module i16: (size with t = i16) = {
+module i16: (integral with t = i16) = {
   type t = i16
 
   let (x: i16) + (y: i16) = intrinsics.add16 (x, y)
@@ -372,9 +365,7 @@ module i16: (size with t = i16) = {
   let mul_hi a b = intrinsics.mul_hi16 (i16 a, i16 b)
   let mad_hi a b c = intrinsics.mad_hi16 (i16 a, i16 b, i16 c)
   let clz = intrinsics.clz16
-
-  let iota (n: i16) = 0i16..1i16..<n
-  let replicate 'v (n: i16) (x: v) = map (const x) (iota n)
+  let ctz = intrinsics.ctz16
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
@@ -382,7 +373,7 @@ module i16: (size with t = i16) = {
   let minimum = reduce min highest
 }
 
-module i32: (size with t = i32) = {
+module i32: (integral with t = i32) = {
   type t = i32
 
   let sign (x: u32) = intrinsics.sign_i32 x
@@ -449,9 +440,7 @@ module i32: (size with t = i32) = {
   let mul_hi a b = intrinsics.mul_hi32 (i32 a, i32 b)
   let mad_hi a b c = intrinsics.mad_hi32 (i32 a, i32 b, i32 c)
   let clz = intrinsics.clz32
-
-  let iota (n: i32) = 0..1..<n
-  let replicate 'v (n: i32) (x: v) = map (const x) (iota n)
+  let ctz = intrinsics.ctz32
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
@@ -459,7 +448,7 @@ module i32: (size with t = i32) = {
   let minimum = reduce min highest
 }
 
-module i64: (size with t = i64) = {
+module i64: (integral with t = i64) = {
   type t = i64
 
   let sign (x: u64) = intrinsics.sign_i64 x
@@ -526,9 +515,7 @@ module i64: (size with t = i64) = {
   let mul_hi a b = intrinsics.mul_hi64 (i64 a, i64 b)
   let mad_hi a b c = intrinsics.mad_hi64 (i64 a, i64 b, i64 c)
   let clz = intrinsics.clz64
-
-  let iota (n: i64) = 0i64..1i64..<n
-  let replicate 'v (n: i64) (x: v) = map (const x) (iota n)
+  let ctz = intrinsics.ctz64
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
@@ -536,7 +523,7 @@ module i64: (size with t = i64) = {
   let minimum = reduce min highest
 }
 
-module u8: (size with t = u8) = {
+module u8: (integral with t = u8) = {
   type t = u8
 
   let sign (x: u8) = intrinsics.sign_i8 x
@@ -603,9 +590,7 @@ module u8: (size with t = u8) = {
   let mul_hi a b = unsign (intrinsics.mul_hi8 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi8 (sign a, sign b, sign c))
   let clz x = intrinsics.clz8 (sign x)
-
-  let iota (n: u8) = 0u8..1u8..<n
-  let replicate 'v (n: u8) (x: v) = map (const x) (iota n)
+  let ctz x = intrinsics.ctz8 (sign x)
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
@@ -613,7 +598,7 @@ module u8: (size with t = u8) = {
   let minimum = reduce min highest
 }
 
-module u16: (size with t = u16) = {
+module u16: (integral with t = u16) = {
   type t = u16
 
   let sign (x: u16) = intrinsics.sign_i16 x
@@ -680,9 +665,7 @@ module u16: (size with t = u16) = {
   let mul_hi a b = unsign (intrinsics.mul_hi16 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi16 (sign a, sign b, sign c))
   let clz x = intrinsics.clz16 (sign x)
-
-  let iota (n: u16) = 0u16..1u16..<n
-  let replicate 'v (n: u16) (x: v) = map (const x) (iota n)
+  let ctz x = intrinsics.ctz16 (sign x)
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
@@ -690,7 +673,7 @@ module u16: (size with t = u16) = {
   let minimum = reduce min highest
 }
 
-module u32: (size with t = u32) = {
+module u32: (integral with t = u32) = {
   type t = u32
 
   let sign (x: u32) = intrinsics.sign_i32 x
@@ -757,9 +740,7 @@ module u32: (size with t = u32) = {
   let mul_hi a b = unsign (intrinsics.mul_hi32 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi32 (sign a, sign b, sign c))
   let clz x = intrinsics.clz32 (sign x)
-
-  let iota (n: u32) = 0u32..1u32..<n
-  let replicate 'v (n: u32) (x: v) = map (const x) (iota n)
+  let ctz x = intrinsics.ctz32 (sign x)
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
@@ -767,7 +748,7 @@ module u32: (size with t = u32) = {
   let minimum = reduce min highest
 }
 
-module u64: (size with t = u64) = {
+module u64: (integral with t = u64) = {
   type t = u64
 
   let sign (x: u64) = intrinsics.sign_i64 x
@@ -834,9 +815,7 @@ module u64: (size with t = u64) = {
   let mul_hi a b = unsign (intrinsics.mul_hi64 (sign a, sign b))
   let mad_hi a b c = unsign (intrinsics.mad_hi64 (sign a, sign b, sign c))
   let clz x = intrinsics.clz64 (sign x)
-
-  let iota (n: u64) = 0u64..1u64..<n
-  let replicate 'v (n: u64) (x: v) = map (const x) (iota n)
+  let ctz x = intrinsics.ctz64 (sign x)
 
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)

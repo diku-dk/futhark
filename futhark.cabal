@@ -1,7 +1,7 @@
 cabal-version: 2.4
 
 name:           futhark
-version:        0.17.0
+version:        0.18.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -127,6 +127,7 @@ library
       Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
+      Futhark.CodeGen.ImpGen.Transpose
       Futhark.CodeGen.OpenCL.Heuristics
       Futhark.CodeGen.SetDefaultSpace
       Futhark.Compiler
@@ -300,6 +301,7 @@ library
     , process >=1.4.3.0
     , process-extras >=0.7.2
     , regex-tdfa >=1.2
+    , sexp-grammar >= 2.2.1
     , srcloc >=0.4
     , template-haskell >=2.11.1
     , temporary
@@ -356,6 +358,7 @@ test-suite unit
     , megaparsec
     , mtl
     , parser-combinators
+    , sexp-grammar
     , tasty
     , tasty-hunit
     , tasty-quickcheck

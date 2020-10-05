@@ -115,6 +115,8 @@ def initialise_opencl_object(self,
     # See comment in rts/c/opencl.h.
     if self.platform.name.find('NVIDIA CUDA') >= 0:
         self.max_local_memory -= 12
+    elif self.platform.name.find('AMD') >= 0:
+        self.max_local_memory -= 16
 
     self.free_list = {}
 

@@ -34,12 +34,11 @@ Identifiers and Keywords
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
 a module, we use a qualified name (`qualid`).  The constructor names
-of a sum type (:ref:`compounds`) are identifiers prefixed with ``#``,
-with no space afterwards.  The fields of a record are named with
-`fieldid`.  Note that a `fieldid` can be a decimal number.  Futhark
-has three distinct name spaces: terms, module types, and types.
-Modules (including parametric modules) and values both share the term
-namespace.
+of a sum type are identifiers prefixed with ``#``, with no space
+afterwards.  The fields of a record are named with `fieldid`.  Note
+that a `fieldid` can be a decimal number.  Futhark has three distinct
+name spaces: terms, module types, and types.  Modules (including
+parametric modules) and values both share the term namespace.
 
 .. _primitives:
 
@@ -79,7 +78,7 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    binary: 0 ("b" | "B") `bindigit` (`bindigit` | "_")*
 
 .. productionlist::
-   floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
+   floatnumber: (`pointfloat` | `exponentfloat` | `hexadecimalfloat`) [`float_type`]
    pointfloat: [`intpart`] `fraction`
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
    hexadecimalfloat: 0 ("x" | "X") `hexintpart` `hexfraction` ("p"|"P") ["+" | "-"] `decdigit`+
@@ -93,8 +92,6 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    decdigit: "0"..."9"
    hexdigit: `decdigit` | "a"..."f" | "A"..."F"
    bindigit: "0" | "1"
-
-.. _compounds:
 
 Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -329,6 +326,9 @@ executable to select the entry point you wish to run.
 Any top-level function named ``main`` will always be considered an
 entry point, whether it is declared with ``entry`` or not.
 
+The name of an entry point must not contain an apostrophe (``'``),
+even though that is normally permitted in Futhark identifiers.
+
 Value Declarations
 ~~~~~~~~~~~~~~~~~~
 
@@ -452,7 +452,7 @@ literals and variables, but also more complicated forms.
       : | "(" `pat` ")"
       : | "(" `pat` ("," `pat`)+ ")"
       : | "{" "}"
-      : | "{" `fieldid` ["=" `pat`] ["," `fieldid` ["=" `pat`]] "}"
+      : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
    loopform :   "for" `id` "<" `exp`
@@ -594,7 +594,7 @@ Each field may only be defined once.
 Return the element at the given position in the array.  The index may
 be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
-array is returned.
+array is returned.  The index may be of any unsigned integer type.
 
 The array ``a`` must be a variable name or a parenthesised expression.
 Furthermore, there *may not* be a space between ``a`` and the opening
@@ -610,7 +610,8 @@ Return a slice of the array ``a`` from index ``i`` to ``j``, the
 former inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
-(not inclusive).
+(not inclusive).  Slicing can be done only with expressions of type
+``i32``.
 
 It is generally a bad idea for ``s`` to be non-constant.
 Slicing of multiple dimensions can be done by separating with commas,
@@ -647,9 +648,9 @@ have the same type and shape.
 ``x..y...z``
 ............
 
-Construct an integer array whose first element is ``x`` and which
-proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
-``..y`` part can be elided in which case a stride of 1 is used.  A
+Construct a signed integer array whose first element is ``x`` and
+which proceeds stride of ``y-x`` until reaching ``z`` (inclusive).
+The ``..y`` part can be elided in which case a stride of 1 is used.  A
 run-time error occurs if ``z`` is lesser than ``x`` or ``y``, or if
 ``x`` and ``y`` are the same value.
 
@@ -666,8 +667,8 @@ This holds only if ``n`` is a variable or constant.
 ``x..y..<z``
 ............
 
-Construct an integer array whose first elements is ``x``, and which
-proceeds upwards with a stride of ``y`` until reaching ``z``
+Construct a signed integer array whose first elements is ``x``, and
+which proceeds upwards with a stride of ``y`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 1 is used.  A run-time error occurs if ``z`` is lesser than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
@@ -681,8 +682,8 @@ This holds only if ``n`` is a variable or constant.
 ``x..y..>z``
 ...............
 
-Construct an integer array whose first elements is ``x``, and which
-proceeds downwards with a stride of ``y`` until reaching ``z``
+Construct a signed integer array whose first elements is ``x``, and
+which proceeds downwards with a stride of ``y`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 -1 is used.  A run-time error occurs if ``z`` is greater than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
@@ -1660,6 +1661,17 @@ preserve any inner parallelism.
 ....................
 
 Exploit only outer parallelism in the attributed SOAC.
+
+``unroll``
+..........
+
+Fully unroll the attributed ``loop``.  If the compiler cannot
+determine the exact number of iterations (possibly after other
+optimisations and simplifications have taken place), then this
+attribute has no code generation effect, but instead results in a
+warning.  Be very careful with this attribute: it can massively
+increase program size (possibly crashing the compiler) if the loop has
+a huge number of iterations.
 
 ``unsafe``
 ..........

@@ -2,14 +2,14 @@ name: CI
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ master multicore ]
 
   push:
-    branches: [ master ]
+    branches: [ master multicore ]
 
 jobs:
   build-linux-nix:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -31,7 +31,7 @@ jobs:
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
   build-linux-cabal:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -40,7 +40,7 @@ jobs:
       run: |
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
-        sudo apt-get install ghc-8.8.2
+        sudo apt-get install ghc-8.8.4
         echo "::add-path::/opt/ghc/bin"
 
     - uses: actions/cache@v2
@@ -59,7 +59,7 @@ jobs:
         cabal install --install-method=copy --overwrite-policy=always
 
   build-linux-stack:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -90,7 +90,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install cabal-install ghc
+        brew install cabal-install ghc sphinx-doc
+        echo "::add-path::/usr/local/opt/sphinx-doc/bin"
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -103,8 +104,24 @@ jobs:
 
     - name: Build
       run: |
+        cp -r tools/release/skeleton futhark-nightly-macos-x86_64
+
+        mkdir -p futhark-nightly-macos-x86_64/bin
         cabal v2-update
-        cabal install --install-method=copy --overwrite-policy=always
+        cabal install --install-method=copy --overwrite-policy=always --installdir=futhark-nightly-macos-x86_64/bin
+        mkdir -p futhark-nightly-macos-x86_64/share/man/man1/
+        (cd docs; make man)
+        cp -r docs/_build/man/* futhark-nightly-macos-x86_64/share/man/man1/
+
+        mkdir -p futhark-nightly-macos-x86_64/share/futhark
+        cp LICENSE futhark-nightly-macos-x86_64/share/futhark/
+        echo "${GITHUB_SHA}" > futhark-nightly-macos-x86_64/commit-id
+        tar -Jcf futhark-nightly-macos-x86_64.tar.xz futhark-nightly-macos-x86_64
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-nightly-macos-x86_64.tar.xz
+        path: futhark-nightly-macos-x86_64.tar.xz
 
   build-windows:
     runs-on: windows-2019
@@ -144,7 +161,7 @@ jobs:
         path: futhark-nightly-windows-x86_64.zip
 
   test-unit-and-style:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -162,7 +179,7 @@ jobs:
         key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-style
 
     - name: Style check
-      run: nix-shell --pure --run "tools/style-check.sh src"
+      run: nix-shell --pure --run "tools/style-check.sh src unittests"
 
     - name: Unit tests
       run: |
@@ -171,7 +188,7 @@ jobs:
 
 
   test-interpreter:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -191,7 +208,7 @@ jobs:
         futhark test -i tests examples
 
   test-c:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -211,8 +228,29 @@ jobs:
         futhark test -c --backend=c tests examples --no-tuning
         make -C libtests/c
 
+  test-multicore:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "::add-path::$HOME/.local/bin"
+
+    - run: |
+        futhark test -c --backend=multicore tests examples --no-tuning
+        make -C libtests/c FUTHARK_BACKEND=multicore
+
   test-python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -237,7 +275,7 @@ jobs:
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
 
   test-opencl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -246,7 +284,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
 
     - uses: actions/download-artifact@v2
       with:
@@ -259,10 +297,10 @@ jobs:
         echo "::add-path::$HOME/.local/bin"
 
     - run: |
-        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl tests examples
+        futhark test -c --no-terminal --backend=opencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-cuda:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -287,7 +325,7 @@ jobs:
         futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
 
   test-tools:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -306,8 +344,17 @@ jobs:
     - run: |
         cd pkgtests && sh test.sh
 
+    - run: |
+        futhark doc -o prelude-docs prelude
+        tar -Jcf prelude-docs.tar.xz prelude-docs
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: prelude-docs.tar.xz
+        path: prelude-docs.tar.xz
+
   benchmark-opencl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
     steps:
@@ -331,11 +378,11 @@ jobs:
         echo "::add-path::$HOME/.local/bin"
 
     - run: |
-        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl futhark-benchmarks
+        futhark test -C --no-terminal --backend=opencl --exclude=no_opencl  --pass-compiler-option=--Werror futhark-benchmarks
 
   deploy-nightly:
-    runs-on: ubuntu-latest
-    needs: [build-windows, build-linux-nix]
+    runs-on: ubuntu-20.04
+    needs: [build-windows, build-linux-nix, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
@@ -349,9 +396,23 @@ jobs:
       with:
         name: futhark-nightly-windows-x86_64.zip
 
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-macos-x86_64.tar.xz
+
     - uses: actions/download-artifact@v2
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
-    - name: scp to server
-      run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+    - uses: actions/download-artifact@v2
+      with:
+        name: prelude-docs.tar.xz
+
+    - name: scp tarballs to server
+      run: scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+
+    - name: copy docs to server
+      run: |
+        tar -xf prelude-docs.tar.xz
+        rsync -rv -e 'ssh -o "StrictHostKeyChecking no"' prelude-docs/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/docs/prelude/

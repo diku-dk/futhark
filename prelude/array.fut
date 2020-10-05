@@ -57,7 +57,7 @@ let rotate [n] 't (r: i32) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
 let iota (n: i32): *[n]i32 =
-  i32.iota n :> [n]i32
+  0..1..<n
 
 -- | Construct an array comprising valid indexes into some other
 -- array, starting at 0.
@@ -67,7 +67,7 @@ let indices [n] 't (_: [n]t) : *[n]i32 =
 -- | Construct an array of the given length containing the given
 -- value.
 let replicate 't (n: i32) (x: t): *[n]t =
-  i32.replicate n x :> [n]t
+  map (\_ -> x) (iota n)
 
 -- | Copy a value.  The result will not alias anything.
 let copy 't (a: t): *t =
@@ -107,11 +107,11 @@ let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
 
 -- | True if all of the input elements are true.  Produces true on an
 -- empty array.
-let and: []bool -> bool = all id
+let and [n] (xs: [n]bool) = all id xs
 
 -- | True if any of the input elements are true.  Produces false on an
 -- empty array.
-let or: []bool -> bool = any id
+let or [n] (xs: [n]bool) = any id xs
 
 -- | Perform a *sequential* left-fold of an array.
 let foldl [n] 'a 'b (f: a -> b -> a) (acc: a) (bs: [n]b): a =

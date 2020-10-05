@@ -3,21 +3,24 @@ module Futhark.CLI.Check (main) where
 
 import Control.Monad
 import Control.Monad.IO.Class
+import Futhark.Compiler
+import Futhark.Util.Options
 import System.Console.GetOpt
 import System.IO
 
-import Futhark.Compiler
-import Futhark.Util.Options
-
-newtype CheckConfig = CheckConfig { checkWarn :: Bool }
+newtype CheckConfig = CheckConfig {checkWarn :: Bool}
 
 newCheckConfig :: CheckConfig
 newCheckConfig = CheckConfig True
 
 options :: [FunOptDescr CheckConfig]
-options = [Option "w" []
-           (NoArg $ Right $ \cfg -> cfg { checkWarn = False })
-           "Disable all warnings."]
+options =
+  [ Option
+      "w"
+      []
+      (NoArg $ Right $ \cfg -> cfg {checkWarn = False})
+      "Disable all warnings."
+  ]
 
 -- | Run @futhark check@.
 main :: String -> [String] -> IO ()

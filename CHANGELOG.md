@@ -5,9 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.17.0]
+## [0.18.0]
 
 ### Added
+
+  * Improved parallelisation of `futhark bench` compilation.
 
 ### Removed
 
@@ -15,8 +17,121 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Dataset generation for test programs now use the right `futhark`
+    executable (#1133).
+
+  * Really fix NaN comparisons in interpreter (#1070, again).
+
+  * Fix entry points with a parameter that is a sum type where
+    multiple constructors contain arrays of the same statically known
+    size.
+
+  * Fix in monomorphisation of types with constant sizes.
+
+## [0.17.2]
+
+### Added
+
+  * Obscure loop optimisation (#1110).
+
+  * Faster matrix transposition in C backend.
+
+  * Library code generated with CUDA backend can now be called from
+    multiple threads.
+
+  * Better optimisation of concatenations of array literals and
+    replicates.
+
+  * Array creation C API functions now accept `const` pointers.
+
+  * Arrays can now be indexed (but not sliced) with any signed integer
+    type (#1122).
+
+  * Added --list-devices command to OpenCL binaries (#1131)
+
+  * Added --help command to C, CUDA and OpenCL binaries (#1131)
+
+### Removed
+
+  * The integer modules no longer contain `iota` and `replicate`
+    functions.  The top-level ones still exist.
+
+  * The `size` module type has been removed from the prelude.
+
+### Changed
+
+  * Range literals may no longer be produced from unsigned integers.
+
+### Fixed
+
+  * Entry points with names that are not valid C (or Python)
+    identifiers are now pointed out as problematic, rather than
+    generating invalid C code.
+
+  * Exotic tiling bug (#1112).
+
+  * Missing synchronisation for in-place updates at group level.
+
+  * Fixed (in a hacky way) an issue where `reduce_by_index` would use
+    too much local memory on AMD GPUs when using the OpenCL backend.
+
+## [0.16.4]
+
+### Added
+
+  * `#[unroll]` attribute.
+
+  * Better error message when writing `a[i][j]` (#1095).
+
+  * Better error message when missing "in" (#1091).
+
+### Fixed
+
+  * Fixed compiler crash on certain patterns of nested parallelism
+    (#1068, #1069).
+
+  * NaN comparisons are now done properly in interpreter (#1070).
+
+  * Fix incorrect movement of array indexing into branches `if`s
+    (#1073).
+
+  * Fix defunctorisation bug (#1088).
+
+  * Fix issue where loop tiling might generate out-of-bounds reads
+    (#1094).
+
+  * Scans of empty arrays no longer result in out-of-bounds memory
+    reads.
+
+  * Fix yet another defunctionalisation bug due to missing
+    eta-expansion (#1100).
+
+## [0.16.3]
+
+### Added
+
+  * `random` input blocks for `futhark test` and `futhark bench` now
+    support floating-point literals, which must always have either an
+    `f32` or `f64` suffix.
+
+  * The `cuda` backend now supports the `-d` option for executables.
+
+  * The integer modules now contain a `ctz` function for counting
+    trailing zeroes.
+
+### Fixed
+
   * The `pyopencl` backend now works with OpenCL devices that have
     multiple types (most importantly, oclgrind).
+
+  * Fix barrier divergence when generating code for group-level
+    colletive copies in GPU backend.
+
+  * Intra-group flattening now looks properly inside of branches.
+
+  * Intra-group flattened code versions are no longer used when the
+    resulting workgroups would have less than 32 threads (with default
+    thresholds anyway) (#1064).
 
 ## [0.16.2]
 
