@@ -15,10 +15,12 @@ static int dummy_fn(void *args, int64_t start, int64_t end, int subtask_id, int 
 // onto their queue
 static inline void wake_up_threads(struct scheduler *scheduler, int start_tid, int end_tid) {
 
+#if defined(MCDEBUG)
   assert(start_tid >= 1);
   assert(end_tid <= scheduler->num_threads);
+#endif
   for (int i = start_tid; i < end_tid; i++) {
-    struct subtask *subtask = setup_subtask(dummy_fn, NULL, "dummy_fn",
+    struct subtask *subtask = create_subtask(dummy_fn, NULL, "dummy_fn",
                                             &dummy_counter,
                                             &dummy_timer, &dummy_iter,
                                             0, 0,
@@ -48,9 +50,7 @@ static inline int steal_from_random_worker(struct worker* worker)
   return 0;
 }
 
-/* Only one error can be returned at the time now
-   Maybe we can provide a stack like structure for pushing errors onto
-   if we wish to backpropagte multiple errors */
+
 static inline void *scheduler_worker(void* args)
 {
   struct worker *worker = (struct worker*) args;
@@ -118,22 +118,21 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   if (info.wake_up_threads || sched == DYNAMIC)
     __atomic_add_fetch(&active_work, nsubtasks, __ATOMIC_RELAXED);
 
-  int subtask_id = 0;
   int64_t start = 0;
-  int64_t end = iter_pr_subtask + (int)(remainder != 0);
-  for (subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
-    struct subtask *subtask = setup_subtask(task->fn, task->args, task->name,
-                                            &shared_counter,
-                                            &task_timer, &task_iter,
-                                            start, end,
-                                            chunkable, chunk_size,
-                                            subtask_id);
+  int64_t end = iter_pr_subtask + (int64_t)(remainder != 0);
+  for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
+    struct subtask *subtask = create_subtask(task->fn, task->args, task->name,
+                                              &shared_counter,
+                                              &task_timer, &task_iter,
+                                              start, end,
+                                              chunkable, chunk_size,
+                                              subtask_id);
     assert(subtask != NULL);
     if (worker->nested){
       CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[worker->tid], subtask),
                 "subtask_queue_enqueue");
     } else {
-      CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id%scheduler->num_threads], subtask),
+      CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id], subtask),
                 "subtask_queue_enqueue");
     }
     // Update range params
@@ -155,14 +154,12 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
         CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
       }
     } else {
-      while (shared_counter != 0 && subtask_queue_is_empty(&worker->q) && scheduler_error == 0) {
-        if (steal_from_random_worker(worker)) {
-          struct subtask *subtask = NULL;
-          int err = subtask_queue_dequeue(worker, &subtask, 0);
-          if (err == 0 ) {
-            struct subtask* subtask_new = chunk_subtask(worker, subtask);
-            CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
-          }
+      if (steal_from_random_worker(worker)) {
+        struct subtask *subtask = NULL;
+        int err = subtask_queue_dequeue(worker, &subtask, 0);
+        if (err == 0 ) {
+          struct subtask* subtask_new = chunk_subtask(worker, subtask);
+          CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
         }
       }
     }
@@ -173,7 +170,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
     __atomic_sub_fetch(&active_work, nsubtasks, __ATOMIC_RELAXED);
   }
 
-  // Write back timing results
+  // Write back timing results of all sequential work
   (*timer) += task_timer;
   return scheduler_error;
 }
@@ -190,7 +187,9 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
     return err;
   }
 
+  // How much sequential work was performed by the task
   int64_t task_timer = 0;
+
   /* Execute task sequential or parallel based on decision made earlier */
   if (task->info.nsubtasks == 1) {
     int64_t start = get_wall_time_ns();
@@ -211,13 +210,12 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 
     err = scheduler_execute_parloop(scheduler, task, &task_timer);
 
-
     // Report time measurements
     // TODO the update of both of these should really be a single atomic!!
     __atomic_fetch_add(task->info.task_time, task_timer, __ATOMIC_RELAXED);
     __atomic_fetch_add(task->info.task_iter, task->iterations, __ATOMIC_RELAXED);
 
-    // Reset timers to account for new timings
+    // Update timers to account for new timings
     worker->total = time_before + task_timer;
     worker->timer = get_wall_time_ns();
   }
@@ -244,7 +242,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = nsubtasks;
-    return task->sequential_fn(task->args, task->iterations, worker->tid, info);
+    return task->top_level_fn(task->args, task->iterations, worker->tid, info);
   } else {
     info.iter_pr_subtask = task->iterations / nsubtasks;
     info.remainder = task->iterations % nsubtasks;
@@ -264,15 +262,15 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   }
 
   info.wake_up_threads = 0;
-  // We use the nested parallel task function is we can't exchaust all cores
+  // We only use the nested parallel segop function if we can't exchaust all cores
   // using the outer most level
-  if (task->canonical_fn != NULL && info.nsubtasks < scheduler->num_threads && info.nsubtasks == task->iterations) {
+  if (task->nested_fn != NULL && info.nsubtasks < scheduler->num_threads && info.nsubtasks == task->iterations) {
     if (worker->nested == 0)
       info.wake_up_threads = 1;
-    return task->canonical_fn(task->args, task->iterations, worker->tid, info);
+    return task->nested_fn(task->args, task->iterations, worker->tid, info);
   }
 
-  return task->sequential_fn(task->args, task->iterations, worker->tid, info);
+  return task->top_level_fn(task->args, task->iterations, worker->tid, info);
 }
 
 #endif

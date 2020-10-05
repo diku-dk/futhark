@@ -40,8 +40,8 @@ struct scheduler_parloop {
 /* A task for the scheduler to execute */
 struct scheduler_segop {
   void *args;
-  segop_fn sequential_fn;
-  segop_fn canonical_fn;
+  segop_fn top_level_fn;
+  segop_fn nested_fn;
   int64_t iterations;
   enum scheduling sched;
 
@@ -53,12 +53,19 @@ struct scheduler_segop {
   const char* name;
 };
 
-sigset_t scheduler_sig_set;
+// If there is work to steal => active_work > 0
 static volatile int active_work = 0;
-
+// Number of alive workers
 static volatile sig_atomic_t num_workers;
+
+// Thread local variable worker struct
+// Note that, accesses to tls variables are expensive
+// Minimize direct references to this variable
 __thread struct worker* worker_local = NULL;
 
+/* Only one error can be returned at the time now
+   Maybe we can provide a stack like structure for pushing errors onto
+   if we wish to backpropagte multiple errors */
 static volatile sig_atomic_t scheduler_error = 0;
 
 // kappa time unit in nanoseconds
@@ -148,6 +155,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 #endif
   int64_t iter = subtask->end - subtask->start;
   // report measurements
+  // These updates should really be done using a single atomic CAS operation
   __atomic_fetch_add(subtask->task_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->task_iter, iter, __ATOMIC_RELAXED);
   // We need a fence here, since if the counter is decremented before either
@@ -175,7 +183,7 @@ static inline int is_small(struct scheduler_segop *task, int nthreads, int *nsub
 
   // Returns true if the task is small i.e.
   // if the number of iterations times C is smaller
-  // than the overhead of task creation
+  // than the overhead of subtask creation
   if (C == 0.0F || C * cur_task_iter < kappa) {
     *nsubtasks = 1;
     return 1;
@@ -189,28 +197,28 @@ static inline int is_small(struct scheduler_segop *task, int nthreads, int *nsub
 }
 
 // TODO make this prettier
-static inline struct subtask* setup_subtask(parloop_fn fn,
-                                            void* args,
-                                            const char* name,
-                                            volatile int* counter,
-                                            int64_t *timer,
-                                            int64_t *iter,
-                                            int64_t start, int64_t end,
-                                            int chunkable,
-                                            int64_t chunk_size,
-                                            int id)
+static inline struct subtask* create_subtask(parloop_fn fn,
+                                             void* args,
+                                             const char* name,
+                                             volatile int* counter,
+                                             int64_t *timer,
+                                             int64_t *iter,
+                                             int64_t start, int64_t end,
+                                             int chunkable,
+                                             int64_t chunk_size,
+                                             int id)
 {
   struct subtask* subtask = malloc(sizeof(struct subtask));
   if (subtask == NULL) {
-    assert(!"malloc failed in setup_subtask");
-    return  NULL;
+    assert(!"malloc failed in create_subtask");
+    return NULL;
   }
   subtask->fn         = fn;
   subtask->args       = args;
 
-  subtask->counter   = counter;
-  subtask->task_time = timer;
-  subtask->task_iter = iter;
+  subtask->counter    = counter;
+  subtask->task_time  = timer;
+  subtask->task_iter  = iter;
 
   subtask->start      = start;
   subtask->end        = end;
