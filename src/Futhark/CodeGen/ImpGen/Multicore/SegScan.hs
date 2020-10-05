@@ -44,8 +44,6 @@ nonsegmentedScan ::
   MulticoreGen Imp.Code
 nonsegmentedScan pat space scan_ops kbody nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
-
-  -- sequentialScan pat space scan_ops kbody
   collect $ do
     scanStage1 pat space scan_ops kbody
 
@@ -135,15 +133,15 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
       per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
       nsubtasks' = tvExp nsubtasks
 
-  -- Begin stage two of scan
   dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
-
   offset <- dPrimV "offset" (0 :: Imp.TExp Int32)
   let offset' = tvExp offset
-
   offset_index <- dPrimV "offset_index" (0 :: Imp.TExp Int32)
   let offset_index' = tvExp offset_index
 
+  -- Parameters used to find the chunk sizes
+  -- Perhaps get this information from ``scheduling information``
+  -- instead of computing it manually here.
   let iter_pr_subtask = sExt32 $ product ns_64 `quot` sExt64 nsubtasks'
       remainder = sExt32 $ product ns_64 `rem` sExt64 nsubtasks'
 
@@ -153,7 +151,8 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
       forM_ (zip acc $ segBinOpNeutral scan_op) $ \(acc', ne) ->
         copyDWIMFix acc' vec_is ne []
 
-  sFor "i" (nsubtasks' -1) $ \i -> do
+  -- Perform sequential scan over the last element of each chunk
+  sFor "i" (nsubtasks' - 1) $ \i -> do
     offset <-- iter_pr_subtask
     sWhen (i .<. remainder) (offset <-- offset' + 1)
     offset_index <-- offset_index' + offset'
@@ -177,7 +176,7 @@ scanStage2 pat nsubtasks space scan_ops kbody = do
                 copyDWIMFix acc' vec_is se []
 
 -- Stage 3 : Finally each thread partially scans a chunk of the input
---           reading it's corresponding carry-in
+--           reading its corresponding carry-in
 scanStage3 ::
   Pattern MCMem ->
   SegSpace ->
@@ -208,6 +207,7 @@ scanStage3 pat space scan_ops kbody = do
               sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
         -- Initialise the accumulator with neutral from previous chunk.
+        -- or read neutral if first ``iter``
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           let read_carry_in =
                 copyDWIMFix acc vec_is (Var $ patElemName pe) (iter' - 1 : vec_is)
@@ -239,6 +239,9 @@ scanStage3 pat space scan_ops kbody = do
   let (body_allocs, body') = extractAllocations body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" (tvVar iter) (body_allocs <> prebody) body' mempty free_params' $ segFlat space
 
+-- This implementation for a Segmented scan only
+-- parallelize over the segments and each segment is
+-- scanned sequentially.
 segmentedScan ::
   Pattern MCMem ->
   SegSpace ->
@@ -248,12 +251,11 @@ segmentedScan ::
 segmentedScan pat space scan_ops kbody = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
-    n_par_segments <- dPrim "segment_iter" $ IntType Int64
-    -- iteration variable
-    body <- compileSegScanBody (tvExp n_par_segments) pat space scan_ops kbody
-    free_params <- freeParams body (segFlat space : [tvVar n_par_segments])
+    segment_iter <- dPrim "segment_iter" $ IntType Int64
+    body <- compileSegScanBody (tvExp segment_iter) pat space scan_ops kbody
+    free_params <- freeParams body (segFlat space : [tvVar segment_iter])
     let (body_allocs, body') = extractAllocations body
-    emit $ Imp.Op $ Imp.ParLoop "seg_scan" (tvVar n_par_segments) body_allocs body' mempty free_params $ segFlat space
+    emit $ Imp.Op $ Imp.ParLoop "seg_scan" (tvVar segment_iter) body_allocs body' mempty free_params $ segFlat space
 
 compileSegScanBody ::
   Imp.TExp Int64 ->
@@ -262,13 +264,12 @@ compileSegScanBody ::
   [SegBinOp MCMem] ->
   KernelBody MCMem ->
   MulticoreGen Imp.Code
-compileSegScanBody idx pat space scan_ops kbody = do
+compileSegScanBody segment_i pat space scan_ops kbody = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map (sExt64 . toInt32Exp) ns
 
   let per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
-  collect $ do
-    emit $ Imp.DebugPrint "segmented segScan stage 1" Nothing
+  collect $
     forM_ (zip scan_ops per_scan_pes) $ \(scan_op, scan_pes) -> do
       dScope Nothing $ scopeOfLParams $ lambdaParams $ segBinOpLambda scan_op
       let (scan_x_params, scan_y_params) = splitAt (length $ segBinOpNeutral scan_op) $ (lambdaParams . segBinOpLambda) scan_op
@@ -277,8 +278,9 @@ compileSegScanBody idx pat space scan_ops kbody = do
         copyDWIMFix (paramName p) [] ne []
 
       let inner_bound = last ns_64
+      -- Perform a sequential scan over the segment ``segment_i``
       sFor "i" inner_bound $ \i -> do
-        zipWithM_ dPrimV_ (init is) $ map sExt32 $ unflattenIndex (init ns_64) idx
+        zipWithM_ dPrimV_ (init is) $ map sExt32 $ unflattenIndex (init ns_64) segment_i
         dPrimV_ (last is) i
         compileStms mempty (kernelBodyStms kbody) $ do
           let (scan_res, map_res) = splitAt (length $ segBinOpNeutral scan_op) $ kernelBodyResult kbody

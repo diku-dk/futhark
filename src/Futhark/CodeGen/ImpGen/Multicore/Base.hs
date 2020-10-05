@@ -79,8 +79,14 @@ getIterationDomain _ space = do
       ns_64 = map (sExt64 . toInt32Exp) ns
   case unSegSpace space of
     [_] -> return $ product ns_64
-    _ -> return $ product $ init ns_64 -- Segmented reduction is over the inner most dimension
+    -- A segmented SegOp is over the segments
+    -- so drop the last dimension, which is
+    -- executed sequentially
+    _ -> return $ product $ init ns_64
 
+-- When the SegRed return value is a scalar
+-- we perform a call by value-result
+-- in the segop function
 getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} = do
   let retvals = map patElemName $ patternElements pat
@@ -230,9 +236,9 @@ extractAllocations segop_code = f segop_code
     f code =
       (mempty, code)
 
--------------------------
-------- SegHist ---------
--------------------------
+-------------------------------
+------- SegHist helpers -------
+-------------------------------
 renameHistOpLambda :: [HistOp MCMem] -> MulticoreGen [HistOp MCMem]
 renameHistOpLambda hist_ops =
   forM hist_ops $ \(HistOp w rf dest neutral shape lam) -> do
@@ -440,12 +446,15 @@ splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       return (op, t, paramName xp, paramName yp)
     splitStm _ = Nothing
 
+
+-- TODO for supporting 8 and 16 bits (and 128)
+-- we need a functions for converting to and from bits
 getBitConvertFunc :: Int -> MulticoreGen (String, String)
 -- getBitConvertFunc 8 = return $ ("to_bits8, from_bits8")
 -- getBitConvertFunc 16 = return $ ("to_bits8, from_bits8")
 getBitConvertFunc 32 = return ("to_bits32", "from_bits32")
 getBitConvertFunc 64 = return ("to_bits64", "from_bits64")
-getBitConvertFunc b = error $ "number of bytes is supported " ++ pretty b
+getBitConvertFunc b = error $ "number of bytes is not supported " ++ pretty b
 
 supportedPrims :: Int -> Bool
 supportedPrims 8 = True
