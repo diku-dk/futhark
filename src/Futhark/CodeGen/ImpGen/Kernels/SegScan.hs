@@ -540,9 +540,10 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                            (Shape [constant m])
                            (ScalarSpace [constant m] (FloatType Float32))
 
+    -- Read from shared into register memory, such that each thread has consecutive elements
     sFor "i" tM $ \i -> do
       -- The index into shared:
-      sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * (kernelGroupSize constants) + i
+      sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * tM + i
       copyDWIMFix private [i] (Var shared) [tvExp sharedIdx]
 
 
