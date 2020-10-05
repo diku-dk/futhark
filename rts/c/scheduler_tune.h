@@ -61,11 +61,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   ctx->scheduler.workers = malloc(sizeof(struct worker));
   worker_local = &ctx->scheduler.workers[0];
   worker_local->tid = 0;
-#ifdef MCCHASELEV
-  CHECK_ERR(deque_init(&ctx->scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
-#elif defined(MCJOBQUEUE)
   CHECK_ERR(subtask_queue_init(&ctx->scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
-#endif
 
   // Start tuning for kappa
   double kappa_tune = 1000;
@@ -113,11 +109,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
           end_tuning- start_tuning, kappa_tune, time_elapsed,  ratio);
   kappa = kappa_tune;
 
-#ifdef MCCHASELV
-  CHECK_ERR(deque_destroy(&ctx->scheduler.workers[0].q), "failed to destroy queue for worker %d\n", 0);
-#elif defined(MCJOBQUEUE)
   CHECK_ERR(subtask_queue_destroy(&ctx->scheduler.workers[0].q), "failed to destroy queue");
-#endif
   free(array);
   free(ctx->scheduler.workers);
   ctx->scheduler.num_threads = num_threads;

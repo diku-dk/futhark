@@ -9,6 +9,8 @@
 
 // Which queue implementation to use
 #define MCJOBQUEUE
+// Note MCCHASELEV is removed from multicore branch
+// Switch to multicore_deque branch to use chase-lev deque
 /* #define MCCHASELEV */
 
 
@@ -97,11 +99,7 @@ struct subtask {
 
 struct worker {
   pthread_t thread;
-#if defined(MCCHASELEV)
-  struct deque q;
-#elif defined(MCJOBQUEUE)
   struct subtask_queue q;
-#endif
   struct scheduler *scheduler;
   int cur_working;
   int dead;
@@ -109,10 +107,11 @@ struct worker {
   int tid;                     /* Just a thread id */
 
   uint64_t time_spent_working; /* Time spent in tasks functions */
-  // Timing field used for online algorithm
+
+  // "thread local" time fields used for online algorithm
   uint64_t timer;
   uint64_t total;
-  int nested;
+  int nested; // How deep the current computation is
 };
 
 #endif

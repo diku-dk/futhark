@@ -12,11 +12,10 @@
    This implementation leaks memory,
    if the circular array is grown
    as we don't maintain a list of the old buffers.
-   We can't safely free it either as a stealing thread might
+   However, we can't safely free it either as a stealing thread might
    be reading from it.
    !!!
  */
-
 
 #if defined(MCCHASELEV)
 #include <stdlib.h>

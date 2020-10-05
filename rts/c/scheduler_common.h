@@ -111,11 +111,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
       // Update range parameters
       subtask->end = subtask->start + subtask->chunk_size;
       new_subtask->start = subtask->end;
-#if defined(MCCHASELEV)
-      push_back(&worker->q, new_subtask);
-#elif defined(MCJOBQUEUE)
       subtask_queue_enqueue(worker, new_subtask);
-#endif
     }
   }
   return subtask;
