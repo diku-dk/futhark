@@ -566,5 +566,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                copyDWIMFix private [i] (head $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) []
         )
 
+    -- Publish results in shared memory
+    copyDWIMFix shared [constant kernelLocalThreadId] (Var private) [tM - 1]
+    sOp barrier
   where
     n = product $ map toInt32Exp $ segSpaceDims space
