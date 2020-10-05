@@ -499,6 +499,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       m :: Int32
       m             = 9
       tM            = 9
+      scanOp        = head scans
+      scanOpNe      = head $ segBinOpNeutral scanOp
 
   -- Allocate the shared memory for (TODO: each) output component
   sharedSize <- dPrimV "sharedSize" ((unCount group_size) * tM)
@@ -546,6 +548,23 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * tM + i
       copyDWIMFix private [i] (Var shared) [tvExp sharedIdx]
 
+    -- Per thread scan
+    sFor "i" tM $ \i -> do
+      let xParam = (paramName $ head $ lambdaParams $ segBinOpLambda scanOp)
+          yParam = (paramName $ last $ lambdaParams $ segBinOpLambda scanOp)
+      dPrim_ xParam $ FloatType Float32
+      dPrim_ yParam $ FloatType Float32
+      sIf (i .==. 0)
+        ( do copyDWIMFix xParam [] scanOpNe []
+             copyDWIMFix yParam [] (Var private) [i]
+             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
+               copyDWIMFix private [i] (head $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) []
+        )
+        ( do copyDWIMFix xParam [] (Var private) [i - 1]
+             copyDWIMFix yParam [] (Var private) [i]
+             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
+               copyDWIMFix private [i] (head $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) []
+        )
 
   where
     n = product $ map toInt32Exp $ segSpaceDims space
