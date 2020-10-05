@@ -13,10 +13,9 @@
 -- @
 --   let r =
 --     loop (r1 = r0) = for i < n do
---       let a = r1[i] in
---       let r1[i] = a * i in
---       r1
---       in
+--       let a = r1[i]
+--       let r1[i] = a * i
+--       in r1
 --   ...
 --   let x = y with [k] <- r in
 --   ...
@@ -27,11 +26,10 @@
 -- @
 --   let x0 = y with [k] <- r0
 --   loop (x = x0) = for i < n do
---     let a = a[k,i] in
---     let x[k,i] = a * i in
---     x
---     in
---   let r = x[y] in
+--     let a = a[k,i]
+--     let x[k,i] = a * i
+--     in x
+--   let r = x[k] in
 --   ...
 -- @
 --

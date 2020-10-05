@@ -60,7 +60,7 @@ import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
-import Futhark.IR.Aliases
+import Futhark.IR.Aliases hiding (lookupAliases)
 import Futhark.Util
 import Futhark.Util.Pretty (Pretty, align, indent, ppr, prettyDoc, text, (<+>))
 
