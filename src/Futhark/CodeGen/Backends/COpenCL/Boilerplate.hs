@@ -659,13 +659,14 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
       m <- get
       case M.lookup s m of
         Nothing ->
-          -- Cheating with the type here; works for the infos we
-          -- currently use, but should be made more size-aware in
-          -- the future.
+          -- XXX: Cheating with the type here; works for the infos we
+          -- currently use because we zero-initialise and assume a
+          -- little-endian platform, but should be made more
+          -- size-aware in the future.
           modify $
             M.insert
               s'
-              [C.citems|size_t $id:v;
+              [C.citems|size_t $id:v = 0;
                         clGetDeviceInfo(ctx->device, $id:s',
                                         sizeof($id:v), &$id:v,
                                         NULL);|]
