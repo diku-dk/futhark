@@ -913,7 +913,9 @@ checkExp ::
 checkExp (BasicOp op) = checkBasicOp op
 checkExp (If e1 e2 e3 info) = do
   require [Prim Bool] e1
-  _ <- checkBody e2 `alternative` checkBody e3
+  _ <-
+    context "in true branch" (checkBody e2)
+      `alternative` context "in false branch" (checkBody e3)
   context "in true branch" $ matchBranchType (ifReturns info) e2
   context "in false branch" $ matchBranchType (ifReturns info) e3
 checkExp (Apply fname args rettype_annot _) = do
