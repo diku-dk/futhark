@@ -28,7 +28,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix in monomorphisation of types with constant sizes.
 
-  * Fix in in-place loweing (#1142).
+  * Fix in in-place lowering (#1142).
+
+  * Fix tiling inside multiple nested loops (#1143).
 
 ## [0.17.2]
 

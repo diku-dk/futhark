@@ -348,7 +348,9 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
       -- Expand the loop merge parameters to be arrays.
       tileDim t = arrayOf t (tilingTileShape tiling) $ uniqueness t
 
-      tiledBody' privstms = inScopeOf host_stms $ do
+      merge_scope = M.insert i (IndexName it) $ scopeOfFParams mergeparams
+
+      tiledBody' privstms = localScope (scopeOf host_stms <> merge_scope) $ do
         addStms invariant_prestms
 
         let live_set =
@@ -357,6 +359,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
                   freeIn recomputed_variant_prestms
                     <> used_in_body
                     <> freeIn poststms
+                    <> freeIn poststms_res
 
         prelude_arrs <-
           inScopeOf precomputed_variant_prestms $
@@ -400,7 +403,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           letTupExp "tiled_inside_loop" $
             DoLoop [] merge' (ForLoop i it bound []) loopbody'
 
-        postludeGeneric tiling inloop_privstms pat accs' poststms poststms_res res_ts
+        postludeGeneric tiling (privstms <> inloop_privstms) pat accs' poststms poststms_res res_ts
 
   return (host_stms, tiling, tiledBody')
   where
