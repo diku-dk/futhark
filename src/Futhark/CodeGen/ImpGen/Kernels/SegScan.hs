@@ -494,6 +494,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
   let num_groups    = toInt32Exp <$> segNumGroups lvl
       group_size    = toInt32Exp <$> segGroupSize lvl
+      num_threads   = (unCount num_groups) * (unCount group_size)
       res           = patElemName $ last all_pes
       (mapIdx, dim) = head $ unSegSpace space
       m :: Int32
@@ -504,6 +505,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
   -- Allocate the shared memory for (TODO: each) output component
   sharedSize <- dPrimV "sharedSize" ((unCount group_size) * tM)
+
+  numThreads <- dPrimV "numThreads" num_threads
 
   -- TODO: Use dynamic block id instead of the static one
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
@@ -567,7 +570,16 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
         )
 
     -- Publish results in shared memory
-    copyDWIMFix shared [constant kernelLocalThreadId] (Var private) [tM - 1]
+    copyDWIMFix shared [kernelLocalThreadId constants] (Var private) [tM - 1]
     sOp barrier
+
+    -- Scan results (with warp scan)
+    scanOp' <- renameLambda $ segBinOpLambda scanOp
+    groupScan
+      Nothing -- TODO
+      (tvExp numThreads)
+      (kernelGroupSize constants)
+      scanOp'
+      [shared]
   where
     n = product $ map toInt32Exp $ segSpaceDims space
