@@ -3,16 +3,14 @@
 #ifndef SUBTASK_QUEUE_H
 #define SUBTASK_QUEUE_H
 
-#if defined(MCJOBQUEUE)
-
 /* Doubles the size of the queue */
 static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) {
 
+  int new_capacity = 2 * subtask_queue->capacity;
 #ifdef MCDEBUG
   fprintf(stderr, "Growing queue to %d\n", subtask_queue->capacity * 2);
 #endif
 
-  int new_capacity = 2 * subtask_queue->capacity;
   struct subtask **new_buffer = calloc(new_capacity, sizeof(struct subtask*));
   for (int i = 0; i < subtask_queue->num_used; i++) {
     new_buffer[i] = subtask_queue->buffer[(subtask_queue->first + i) % subtask_queue->capacity];
@@ -74,7 +72,6 @@ static inline void dump_queue(struct worker *worker)
     struct subtask * subtask = subtask_queue->buffer[(subtask_queue->first + i) % subtask_queue->capacity];
     printf("queue tid %d with %d task %s\n", worker->tid, i, subtask->name);
   }
-  // Broadcast a reader (if any) that there is now an element.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
 }
@@ -124,8 +121,11 @@ static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *s
 }
 
 
-/* Like subtask_queue_dequeue, but returns immediately if there is no tasks queued,
-   as we dont' want to block on another workers queue */
+/* Like subtask_queue_dequeue, but with two differences:
+   1) the subtask is stolen from the __front__ of the queue
+   2) returns immediately if there is no subtasks queued,
+      as we dont' want to block on another workers queue and
+*/
 static inline int subtask_queue_steal(struct worker *worker,
                                       struct subtask **subtask)
 {
@@ -152,6 +152,7 @@ static inline int subtask_queue_steal(struct worker *worker,
   struct subtask *cur_back = subtask_queue->buffer[subtask_queue->first];
   struct subtask *new_subtask = NULL;
   int remaining_iter = cur_back->end - cur_back->start;
+  // If subtask is chunkable, we steal half of the iterations
   if (cur_back->chunkable && remaining_iter > 1) {
       int64_t half = remaining_iter / 2;
       new_subtask = malloc(sizeof(struct subtask));
@@ -185,11 +186,10 @@ static inline int subtask_queue_steal(struct worker *worker,
 }
 
 
-// Pop an element from the front of the job queue.  Blocks if the
-// subtask_queue contains zero elements.  Returns non-zero on error.  If
-// subtask_queue_destroy() has been called (possibly after the call to
-// subtask_queue_pop() blocked), this function will return -1.
-static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **subtask, int blocking)
+// Pop an element from the back of the job queue.
+// Optional argument can be provided to block or not
+static inline int subtask_queue_dequeue(struct worker *worker,
+                                        struct subtask **subtask, int blocking)
 {
   assert(worker != NULL);
   struct subtask_queue *subtask_queue = &worker->q;
@@ -228,6 +228,7 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
   subtask_queue->time_dequeue += (end - start);
   subtask_queue->n_dequeues++;
 #endif
+
   // Broadcast a writer (if any) that there is now room for more.
   CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
   CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
@@ -235,13 +236,11 @@ static inline int subtask_queue_dequeue(struct worker *worker, struct subtask **
   return 0;
 }
 
-/* TODO: Do I need to acquire locks here? */
 static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 {
   return subtask_queue->num_used == 0;
 }
 
-#endif // end defined(MCJOBQUEUE)
 
 #endif
 

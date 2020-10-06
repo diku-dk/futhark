@@ -6,6 +6,7 @@ struct futhark_mc_segred_stage_1_struct {
   int32_t *array;
 };
 
+/* Reduction function over an integer array */
 int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
                                      int flat_tid_22, int tid)
 {
@@ -24,6 +25,8 @@ int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
     return err;
 }
 
+/* The main entry point for the tuning process */
+/* Sets the global variable ``kappa`` */
 int futhark_segred_tuning_program(struct futhark_context *ctx)
 {
   int err = 0;
@@ -55,7 +58,10 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   double C = (double)sequential_elapsed / (double)iterations;
   fprintf(stderr, " Time for sequential run is %lld - Found C %f\n", sequential_elapsed, C);
 
+  /* ********************** */
   /* Now run tuning process */
+  /* ********************** */
+  // Setup a scheduler with a single worker
   int num_threads = ctx->scheduler.num_threads;
   ctx->scheduler.num_threads = 1;
   ctx->scheduler.workers = malloc(sizeof(struct worker));
@@ -64,7 +70,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   CHECK_ERR(subtask_queue_init(&ctx->scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
 
   // Start tuning for kappa
-  double kappa_tune = 1000;
+  double kappa_tune = 1000; // Initial kappa is 1 us
   double ratio;
   int64_t time_elapsed;
   while(1) {
@@ -75,10 +81,8 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 
     info.nsubtasks = iterations / min_iter_pr_subtask;
     info.remainder = iterations % min_iter_pr_subtask;
-
     info.task_time = &tuning_time;
     info.task_iter = &tuning_iter;
-
     info.sched = STATIC;
 
     struct scheduler_parloop futhark_segred_tuning_scheduler_parloop;
@@ -100,15 +104,16 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
     if (ratio < 1.055) {
       break;
     }
-    kappa_tune += 100;
+    kappa_tune += 100; // Increase by 100 ns at the time
     fprintf(stderr, "nsubtask %d - kappa %f - ratio %f\n", nsubtasks, kappa_tune, ratio);
   }
 
   int64_t end_tuning = get_wall_time_ns();
   fprintf(stderr, "tuning took %lld ns and found kappa %f - time %lld - ratio %f\n",
-          end_tuning- start_tuning, kappa_tune, time_elapsed,  ratio);
+          end_tuning - start_tuning, kappa_tune, time_elapsed,  ratio);
   kappa = kappa_tune;
 
+  // Clean-up
   CHECK_ERR(subtask_queue_destroy(&ctx->scheduler.workers[0].q), "failed to destroy queue");
   free(array);
   free(ctx->scheduler.workers);

@@ -61,8 +61,7 @@ static inline void *scheduler_worker(void* args)
       int retval = subtask_queue_dequeue(worker, &subtask, 0);
       if (retval == 0) {
         assert(subtask != NULL);
-        struct subtask* subtask_new = chunk_subtask(worker, subtask);
-        CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
+        CHECK_ERR(run_subtask(worker, subtask), "run_subtask");
       } // else someone stole our work
 
     } else if (active_work) { /* steal */
@@ -75,8 +74,7 @@ static inline void *scheduler_worker(void* args)
       int retval = subtask_queue_dequeue(worker, &subtask, 1);
       if (retval == 0) {
         assert(subtask != NULL);
-        struct subtask* subtask_new = chunk_subtask(worker, subtask);
-        CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
+        CHECK_ERR(run_subtask(worker, subtask), "run_subtask");
       }
     }
   }
@@ -102,7 +100,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   int64_t iter_pr_subtask = info.iter_pr_subtask;
   int64_t remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
-  volatile int shared_counter = nsubtasks;
+  volatile int join_counter = nsubtasks;
 
   // Shared timer used to sum up all
   // sequential work from each subtask
@@ -122,7 +120,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   int64_t end = iter_pr_subtask + (int64_t)(remainder != 0);
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = create_subtask(task->fn, task->args, task->name,
-                                              &shared_counter,
+                                              &join_counter,
                                               &task_timer, &task_iter,
                                               start, end,
                                               chunkable, chunk_size,
@@ -145,21 +143,19 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   }
 
   // Join (wait for subtasks to finish)
-  while(shared_counter != 0 && scheduler_error == 0) {
+  while(join_counter != 0 && scheduler_error == 0) {
     if (!subtask_queue_is_empty(&worker->q)) {
       struct subtask *subtask = NULL;
       int err = subtask_queue_dequeue(worker, &subtask, 0);
       if (err == 0 ) {
-        struct subtask* subtask_new = chunk_subtask(worker, subtask);
-        CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
+        CHECK_ERR(run_subtask(worker, subtask), "run_subtask");
       }
     } else {
       if (steal_from_random_worker(worker)) {
         struct subtask *subtask = NULL;
         int err = subtask_queue_dequeue(worker, &subtask, 0);
-        if (err == 0 ) {
-          struct subtask* subtask_new = chunk_subtask(worker, subtask);
-          CHECK_ERR(run_subtask(worker, subtask_new), "run_subtask");
+        if (err == 0) {
+          CHECK_ERR(run_subtask(worker, subtask), "run_subtask");
         }
       }
     }

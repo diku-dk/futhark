@@ -169,12 +169,7 @@ compileProg =
                    struct worker *cur_worker = &ctx->scheduler.workers[i];
                    memset(cur_worker, 0, sizeof(struct worker));
                    cur_worker->tid = i;
-                   cur_worker->time_spent_working = 0;
-                   cur_worker->cur_working = 0;
-                   cur_worker->output_usage = 1;
-                   cur_worker->timer = 0;
-                   cur_worker->total = 0;
-                   cur_worker->nested = 0;
+                   cur_worker->output_usage = 0;
                    cur_worker->scheduler = &ctx->scheduler;
                    CHECK_ERR(subtask_queue_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
 
@@ -470,8 +465,8 @@ multicoreName s = do
   s' <- newVName ("futhark_mc_" ++ s)
   return $ nameFromString $ baseString s' ++ "_" ++ show (baseTag s')
 
-multicoreFunDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
-multicoreFunDef s f = do
+multicoreDef :: String -> (Name -> GC.CompilerM op s C.Definition) -> GC.CompilerM op s Name
+multicoreDef s f = do
   s' <- multicoreName s
   GC.libDecl =<< f s'
   return s'
@@ -490,7 +485,7 @@ generateFunction ::
 generateFunction lexical basename code fstruct free retval tid ntasks = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
-  multicoreFunDef basename $ \s -> do
+  multicoreDef basename $ \s -> do
     fbody <- benchmarkCode s (Just tid) <=< GC.inNewFunction False $
       GC.cachingMemory lexical $
         \decl_cached free_cached -> GC.blockScope $ do
@@ -521,7 +516,7 @@ prepareTaskStruct ::
   [(C.Type, ValueType)] ->
   GC.CompilerM Multicore s Name
 prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
-  fstruct <- multicoreFunDef name $ \s ->
+  fstruct <- multicoreDef name $ \s ->
     return
       [C.cedecl|struct $id:s {
                        struct futhark_context *ctx;
@@ -536,7 +531,7 @@ prepareTaskStruct name free_args free_ctypes retval_args retval_ctypes = do
 
 -- Generate a segop function for top_level and potentially nested SegOp code
 compileOp :: GC.OpCompiler Multicore ()
-compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
+compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e sched)) = do
   let (ParallelTask seq_code tid) = seq_task
   free_ctypes <- mapM paramToCType params
   retval_ctypes <- mapM paramToCType retvals
@@ -547,12 +542,12 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
 
   e' <- GC.compileExp e
 
-  let lexical_par = lexicalMemoryUsage $ Function False [] params seq_code [] []
+  let lexical = lexicalMemoryUsage $ Function False [] params seq_code [] []
 
   fstruct <-
     prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
 
-  fpar_task <- generateFunction lexical_par (name ++ "_task") seq_code fstruct free retval tid nsubtask
+  fpar_task <- generateFunction lexical (name ++ "_task") seq_code fstruct free retval tid nsubtask
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
@@ -561,8 +556,9 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
   GC.stm [C.cstm|$id:ftask_name.top_level_fn = $id:fpar_task;|]
   GC.stm [C.cstm|$id:ftask_name.name = $string:(nameToString fpar_task);|]
   GC.stm [C.cstm|$id:ftask_name.iterations = $exp:e';|]
-  GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
+  -- Create the timing fields for the task
   GC.stm [C.cstm|$id:ftask_name.task_time = &ctx->$id:(functionTiming fpar_task);|]
+  GC.stm [C.cstm|$id:ftask_name.task_iter = &ctx->$id:(functionIterations fpar_task);|]
 
   case sched of
     Dynamic -> GC.stm [C.cstm|$id:ftask_name.sched = DYNAMIC;|]
@@ -571,8 +567,8 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
   -- Generate the nested segop function if available
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code nested_tid) -> do
-      let lexical_npar = lexicalMemoryUsage $ Function False [] params nested_code [] []
-      fnpar_task <- generateFunction lexical_npar (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
+      let lexical_nested = lexicalMemoryUsage $ Function False [] params nested_code [] []
+      fnpar_task <- generateFunction lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
     Nothing -> do
@@ -580,14 +576,17 @@ compileOp (Task name params seq_task par_task retvals (SchedulerInfo nsubtask e 
       return mempty
 
   let ftask_err = fpar_task <> "_err"
-  let code' =
+  let code =
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                         if ($id:ftask_err != 0) {
                           futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
                         }|]
 
-  mapM_ GC.item code'
+  mapM_ GC.item code
+
+  -- Add profile fields for -P option
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
+
 compileOp (ParLoop s' i prebody body postbody free tid) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
@@ -599,7 +598,7 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
   fstruct <-
     prepareTaskStruct (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
 
-  ftask <- multicoreFunDef (s' ++ "_parloop") $ \s -> do
+  ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just tid)
       <=< GC.inNewFunction False
       $ GC.cachingMemory lexical $
@@ -652,10 +651,6 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
 
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
-compileOp (MulticoreCall Nothing f) =
-  GC.stm [C.cstm|$id:f(ctx);|]
-compileOp (MulticoreCall (Just retval) f) =
-  GC.stm [C.cstm|$id:retval = $id:f(ctx);|]
 compileOp (Atomic aop) =
   atomicOps aop
 

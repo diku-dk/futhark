@@ -11,6 +11,10 @@ enum scheduling {
   STATIC
 };
 
+/* How a given task should be executed */
+/* Filled out by the scheduler
+   and passed to the segop function
+*/
 struct scheduler_info {
   int64_t iter_pr_subtask;
   int64_t remainder;
@@ -100,6 +104,8 @@ static inline int64_t compute_chunk_size(struct subtask* subtask)
   return max_int64((int64_t)(kappa / C), 1);
 }
 
+/* Takes a chunk from subtask and enqueues the remaining iterations onto the worker's queue */
+/* A no-op if the subtask is not chunkable */
 static inline struct subtask* chunk_subtask(struct worker* worker, struct subtask *subtask)
 {
   if (subtask->chunkable) {
@@ -113,7 +119,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
     if (remaining_iter > subtask->chunk_size) {
       struct subtask *new_subtask = malloc(sizeof(struct subtask));
       *new_subtask = *subtask;
-      // increment the subtask join counter
+      // increment the subtask join counter to account for new subtask
       __atomic_fetch_add(subtask->counter, 1, __ATOMIC_RELAXED);
       // Update range parameters
       subtask->end = subtask->start + subtask->chunk_size;
@@ -129,6 +135,7 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   assert(subtask != NULL);
   assert(worker != NULL);
 
+  subtask = chunk_subtask(worker, subtask);
   worker->total = 0;
   worker->timer = get_wall_time_ns();
 #if defined(MCPROFILE)
@@ -231,7 +238,5 @@ static inline struct subtask* create_subtask(parloop_fn fn,
 }
 
 
-
 #endif
-
 // end of scheduler_common.h

@@ -6,8 +6,6 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     HostEnv (..),
     AtomicBinOp,
     MulticoreGen,
-    getNumThreads,
-    getNumThreads',
     decideScheduling,
     decideScheduling',
     groupResultArrays,
@@ -80,13 +78,12 @@ getIterationDomain _ space = do
   case unSegSpace space of
     [_] -> return $ product ns_64
     -- A segmented SegOp is over the segments
-    -- so drop the last dimension, which is
+    -- so we drop the last dimension, which is
     -- executed sequentially
     _ -> return $ product $ init ns_64
 
--- When the SegRed return value is a scalar
--- we perform a call by value-result
--- in the segop function
+-- When the SegRed's return value is a scalar
+-- we perform a call by value-result in the segop function
 getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} = do
   let retvals = map patElemName $ patternElements pat
@@ -136,8 +133,8 @@ freeParams code names = do
 
 -- | Arrays for storing group results.
 resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
-resultArrays s reds =
-  forM reds $ \(SegBinOp _ lam _ shape) ->
+resultArrays s segops =
+  forM segops $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
       let pt = elemType t
           full_shape = shape <> arrayShape t
@@ -155,16 +152,6 @@ groupResultArrays s num_threads reds =
       let pt = elemType t
           full_shape = Shape [num_threads] <> shape <> arrayShape t
       sAllocArray s pt full_shape DefaultSpace
-
-getNumThreads' :: VName -> MulticoreGen ()
-getNumThreads' dest =
-  emit $ Imp.Op $ Imp.MulticoreCall (Just dest) "futhark_context_get_num_threads"
-
-getNumThreads :: MulticoreGen (Imp.TExp Int32)
-getNumThreads = do
-  v <- dPrim "num_threads" (IntType Int32)
-  getNumThreads' $ tvVar v
-  return $ tvExp v
 
 isLoadBalanced :: Imp.Code -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b

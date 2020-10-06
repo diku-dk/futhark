@@ -8,7 +8,6 @@ module Futhark.CodeGen.ImpCode.Multicore
     Scheduling (..),
     SchedulerInfo (..),
     AtomicOp (..),
-    Time (..),
     ParallelTask (..),
     module Futhark.CodeGen.ImpCode,
   )
@@ -27,13 +26,11 @@ type Function = Imp.Function Multicore
 -- | A piece of imperative code, with multicore operations inside.
 type Code = Imp.Code Multicore
 
-data Time = NoTime | Time
 
 -- | A multicore operation.
 data Multicore
-  = Task String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
+  = Segop String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
   | ParLoop String VName Code Code Code [Param] VName
-  | MulticoreCall (Maybe VName) String
   | Atomic AtomicOp
 
 -- | Atomic operations return the value stored before the update.
@@ -59,19 +56,18 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 data SchedulerInfo = SchedulerInfo
-  { nsubtasks :: VName, -- The variable that describes how many subtasks the scheduler created
-    iterations :: Imp.Exp, -- The number of total iterations for a task
-    scheduling :: Scheduling -- The type scheduling that the task can be performed as
+  { nsubtasks :: VName,      -- The variable that describes how many subtasks the scheduler created
+    iterations :: Imp.Exp,   -- The number of total iterations for a task
+    scheduling :: Scheduling -- The type scheduling for the task
   }
 
 data ParallelTask = ParallelTask
   { task_code :: Code,
-    flatTid :: VName -- the variable for the thread execution the code
+    flatTid :: VName -- The variable for the thread id execution the code
   }
 
--- | Whether the Scheduler can/should schedule the tasks as Dynamic
+-- | Whether the Scheduler should schedule the tasks as Dynamic
 -- or it is restainted to Static
--- This could carry more information
 data Scheduling
   = Dynamic
   | Static
@@ -96,7 +92,7 @@ instance Pretty ParallelTask where
     ppr code
 
 instance Pretty Multicore where
-  ppr (Task s free _par_code seq_code retval scheduler) =
+  ppr (Segop s free _par_code seq_code retval scheduler) =
     text "parfor"
       <+> ppr scheduler
       <+> ppr free
@@ -113,8 +109,6 @@ instance Pretty Multicore where
       <+> langle
       <+> nestedBlock "{" "}" (ppr body)
       <+> ppr postbody
-  ppr (MulticoreCall dests f) =
-    ppr dests <+> ppr f
   ppr (Atomic _) = text "AtomicOp"
 
 instance FreeIn SchedulerInfo where
@@ -126,9 +120,8 @@ instance FreeIn ParallelTask where
     freeIn' code
 
 instance FreeIn Multicore where
-  freeIn' (Task _ _ par_code seq_code _ info) =
+  freeIn' (Segop _ _ par_code seq_code _ info) =
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
   freeIn' (ParLoop _ _ prebody body postbody _ _) =
     freeIn' prebody <> fvBind (Imp.declaredIn prebody) (freeIn' $ body <> postbody)
-  freeIn' (MulticoreCall dests _) = freeIn' dests
   freeIn' (Atomic aop) = freeIn' aop

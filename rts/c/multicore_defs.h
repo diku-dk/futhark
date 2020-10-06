@@ -9,7 +9,7 @@
 
 // Which queue implementation to use
 #define MCJOBQUEUE
-// Note MCCHASELEV is removed from multicore branch
+// NOTE! MCCHASELEV has been removed from multicore branch
 // Switch to multicore_deque branch to use chase-lev deque
 /* #define MCCHASELEV */
 
@@ -46,25 +46,15 @@ struct subtask_queue {
   pthread_cond_t cond;      // Condition variable used for synchronisation.
   int dead;
 
-
+#if defined(MCPROFILE)
   /* Profiling fields */
   uint64_t time_enqueue;
   uint64_t time_dequeue;
   uint64_t n_dequeues;
   uint64_t n_enqueues;
+#endif
 };
 
-
-struct deque_buffer {
-  struct subtask** array;
-  int64_t size;
-};
-
-struct deque {
-  struct deque_buffer *buffer;
-  int64_t top, bottom;
-  int dead;
-};
 
 
 // Function definitions
@@ -72,46 +62,45 @@ typedef int (*segop_fn)(void* args, int64_t iterations, int tid, struct schedule
 typedef int (*parloop_fn)(void* args, int64_t start, int64_t end, int subtask_id, int tid);
 
 
-/* A subtask that can be executed by a thread */
+/* A subtask that can be executed by a worker */
 struct subtask {
-  parloop_fn fn; // The parloop function
-  // Execution parameters
+  /* The parloop function */
+  parloop_fn fn;
+  /* Execution parameters */
   void* args;
   int64_t start, end;
   int id;
 
-  // Dynamic scheduling paramters
+  /* Dynamic scheduling parameters */
   int chunkable;
   int64_t chunk_size;
 
-  // Shared variables across subtasks
+  /* Shared variables across subtasks */
   volatile int *counter; // Counter for ongoing subtasks
-
   // Shared task timers and iterators
   int64_t *task_time;
   int64_t *task_iter;
 
-  // For debugging
+  /* For debugging */
   const char *name;
 };
 
 
-
 struct worker {
   pthread_t thread;
+  struct scheduler *scheduler;  /* Reference to the scheduler struct the worker belongs to*/
   struct subtask_queue q;
-  struct scheduler *scheduler;
-  int cur_working;
   int dead;
-  int output_usage;
-  int tid;                     /* Just a thread id */
+  int tid;                      /* Just a thread id */
 
-  uint64_t time_spent_working; /* Time spent in tasks functions */
-
-  // "thread local" time fields used for online algorithm
+  /* "thread local" time fields used for online algorithm */
   uint64_t timer;
   uint64_t total;
-  int nested; // How deep the current computation is
+  int nested; /* How nested the current computation is */
+
+  // Profiling fields
+  int output_usage;            /* Whether to dump thread usage */
+  uint64_t time_spent_working; /* Time spent in parloop functions */
 };
 
 #endif

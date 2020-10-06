@@ -282,7 +282,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
         scheduler_info = Imp.SchedulerInfo (tvVar nsubtasks_red) (untyped iterations) Imp.Static
         red_task       = Imp.ParallelTask red_code $ segFlat space
     free_params_red <- freeParams red_code [segFlat space, tvVar nsubtasks_red]
-    emit $ Imp.Op $ Imp.Task "seghist_red" free_params_red red_task Nothing mempty scheduler_info
+    emit $ Imp.Op $ Imp.Segop "seghist_red" free_params_red red_task Nothing mempty scheduler_info
   where
     segment_dims = init $ unSegSpace space
 
