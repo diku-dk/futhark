@@ -236,7 +236,16 @@ operations :: GC.Operations Multicore ()
 operations =
   GC.defaultOperations
     { GC.opsCompiler = compileOp,
-      GC.opsCopy = copyMulticoreMemory
+      GC.opsCopy = copyMulticoreMemory,
+      GC.opsCritical =
+        -- The thread entering an API function is always considered
+        -- the "first worker" - note that this might differ from the
+        -- thread that created the context!  This likely only matters
+        -- for entry points, since they are the only API functions
+        -- that contain parallel operations.
+        ( [C.citems|worker_local = &ctx->scheduler.workers[0];|],
+          []
+        )
     }
 
 copyMulticoreMemory :: GC.Copy Multicore ()
