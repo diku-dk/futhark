@@ -13,7 +13,6 @@ import Control.Monad
 import Control.Monad.Writer
 import Data.Either
 import Data.List (find, unzip4)
-import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
@@ -205,7 +204,7 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
   forM_ (zip val $ bodyAliases body) $ \((p, _), als) ->
     guard $ not $ paramName p `nameIn` als
 
-  mk_in_place_map <- summariseLoop updates usedInBody resmap val
+  mk_in_place_map <- summariseLoop scope updates usedInBody resmap val
 
   Just $ do
     in_place_map <- mk_in_place_map
@@ -217,10 +216,8 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
     let body' = mkBody (newbnds <> res_bnds) body_res
     return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
   where
-    usedInBody = mconcat $ map expandAliases $ namesToList $ freeIn body <> freeIn form
-    expandAliases v = case M.lookup v scope of
-      Just (LetName dec) -> oneName v <> aliasesOf dec
-      _ -> oneName v
+    usedInBody =
+      mconcat $ map (`lookupAliases` scope) $ namesToList $ freeIn body <> freeIn form
     resmap = zip (bodyResult body) $ patternValueIdents pat
 
     mkMerges ::
@@ -277,18 +274,22 @@ lowerUpdateIntoLoop scope updates pat ctx val form body = do
         Left (inPatternAs summary)
 
 summariseLoop ::
-  MonadFreshNames m =>
+  ( Aliased lore,
+    MonadFreshNames m
+  ) =>
+  Scope lore ->
   [DesiredUpdate (als, Type)] ->
   Names ->
   [(SubExp, Ident)] ->
   [(Param DeclType, SubExp)] ->
   Maybe (m [LoopResultSummary (als, Type)])
-summariseLoop updates usedInBody resmap merge =
+summariseLoop scope updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
   where
     summariseLoopResult (se, v) (fparam, mergeinit)
       | Just update <- find (updateHasValue $ identName v) updates =
-        if updateSource update `nameIn` usedInBody
+        -- Safety condition (7)
+        if usedInBody `namesIntersect` lookupAliases (updateSource update) scope
           then Nothing
           else
             if hasLoopInvariantShape fparam

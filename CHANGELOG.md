@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-  * Improved parallelisation of `futhark bench` compilation.
-
 ### Removed
 
+### Fixed
+
 ### Changed
+
+## [0.17.3]
+
+### Added
+
+  * Improved parallelisation of `futhark bench` compilation.
 
 ### Fixed
 
@@ -27,6 +33,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     size.
 
   * Fix in monomorphisation of types with constant sizes.
+
+  * Fix in in-place lowering (#1142).
+
+  * Fix tiling inside multiple nested loops (#1143).
 
 ## [0.17.2]
 
