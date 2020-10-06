@@ -41,6 +41,7 @@ module Futhark.CodeGen.ImpCode
     ErrorMsgPart (..),
     errorMsgArgTypes,
     ArrayContents (..),
+    declaredIn,
     lexicalMemoryUsage,
     calledFuncs,
 
@@ -302,7 +303,8 @@ lexicalMemoryUsage func =
     go f (Comment _ x) = f x
     go _ _ = mempty
 
-    declared (DeclareMem mem space) = M.singleton mem space
+    declared (DeclareMem mem space) =
+      M.singleton mem space
     declared x = go declared x
 
     set (SetMem x y _) = namesFromList [x, y]

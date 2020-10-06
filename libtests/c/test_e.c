@@ -21,7 +21,7 @@ int main() {
 
   err = futhark_entry_main(ctx, &out_fut, xs_fut, is0_fut);
 
-#ifdef FUTHARK_BACKEND_c
+#if defined(FUTHARK_BACKEND_c) || defined(FUTHARK_BACKEND_multicore)
   assert(err != 0);
   err = futhark_context_sync(ctx);
   assert(err == 0);

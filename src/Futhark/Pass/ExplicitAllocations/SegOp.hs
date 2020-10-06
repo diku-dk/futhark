@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Futhark.Pass.ExplicitAllocations.SegOp
   ( allocInKernelBody,
@@ -11,6 +12,9 @@ where
 import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
+
+instance SizeSubst (SegOp lvl lore) where
+  opSizeSubst _ _ = mempty
 
 allocInKernelBody ::
   Allocable fromlore tolore =>

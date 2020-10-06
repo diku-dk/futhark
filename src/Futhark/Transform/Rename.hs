@@ -20,6 +20,7 @@ module Futhark.Transform.Rename
     renameBody,
     renameLambda,
     renamePattern,
+    renameSomething,
 
     -- * Renaming annotations
     RenameM,
@@ -111,6 +112,13 @@ renamePattern ::
 renamePattern = modifyNameSource . runRenamer . rename'
   where
     rename' pat = bind (patternNames pat) $ rename pat
+
+-- | Rename the bound variables in something (does not affect free variables).
+renameSomething ::
+  (Rename a, MonadFreshNames m) =>
+  a ->
+  m a
+renameSomething = modifyNameSource . runRenamer . rename
 
 newtype RenameEnv = RenameEnv {envNameMap :: M.Map VName VName}
 

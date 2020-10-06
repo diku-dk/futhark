@@ -33,12 +33,13 @@ module Futhark.CodeGen.Backends.GenericC
 
     -- * Monadic compiler interface
     CompilerM,
-    CompilerState (compUserState),
+    CompilerState (compUserState, compNameSrc),
     getUserState,
     modifyUserState,
     contextContents,
     contextFinalInits,
     runCompilerM,
+    inNewFunction,
     cachingMemory,
     blockScope,
     compileFun,
@@ -64,9 +65,16 @@ module Futhark.CodeGen.Backends.GenericC
     publicName,
     contextType,
     contextField,
+    memToCType,
+    cacheMem,
+    fatMemory,
+    rawMemCType,
+    cproduct,
+    fatMemType,
 
     -- * Building Blocks
     primTypeToCType,
+    intTypeToCType,
     copyMemoryDefaultSpace,
   )
 where
@@ -403,6 +411,22 @@ collect' m = pass $ do
       const w {accItems = mempty}
     )
 
+-- | Used when we, inside an existing 'CompilerM' action, want to
+-- generate code for a new function.  Use this so that the compiler
+-- understands that previously declared memory doesn't need to be
+-- freed inside this action.
+inNewFunction :: Bool -> CompilerM op s a -> CompilerM op s a
+inNewFunction keep_cached m = do
+  old_mem <- gets compDeclaredMem
+  modify $ \s -> s {compDeclaredMem = mempty}
+  x <- local noCached m
+  modify $ \s -> s {compDeclaredMem = old_mem}
+  return x
+  where
+    noCached env
+      | keep_cached = env
+      | otherwise = env {envCachedMem = mempty}
+
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty {accItems = DL.singleton x}
 
@@ -675,7 +699,9 @@ defineMemorySpace space = do
   let setdef =
         [C.cedecl|static int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
   int ret = $id:(fatMemUnRef space)(ctx, lhs, lhs_desc);
-  (*(rhs->references))++;
+  if (rhs->references != NULL) {
+    (*(rhs->references))++;
+  }
   *lhs = *rhs;
   return ret;
 }
@@ -1617,6 +1643,11 @@ compileProg backend ops extra header_extra spaces options prog = do
   let headerdefs =
         [C.cunit|
 $esc:("// Headers\n")
+/* We need to define _GNU_SOURCE before
+   _any_ headers files are imported to get
+   the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
+   https://manpages.courier-mta.org/htmlman2/getrusage.2.html */
+$esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
@@ -2097,7 +2128,7 @@ compileExp = compilePrimExp compileLeaf
       iexp' <- compileExp $ untyped iexp
       return [C.cexp|$id:src[$exp:iexp']|]
     compileLeaf (SizeOf t) =
-      return [C.cexp|(typename int64_t)sizeof($ty:t')|]
+      return [C.cexp|(typename int32_t)sizeof($ty:t')|]
       where
         t' = primTypeToCType t
 
