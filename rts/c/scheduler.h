@@ -143,7 +143,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   }
 
   // Join (wait for subtasks to finish)
-  while(join_counter != 0 && scheduler_error == 0) {
+  while(join_counter != 0) {
     if (!subtask_queue_is_empty(&worker->q)) {
       struct subtask *subtask = NULL;
       int err = subtask_queue_dequeue(worker, &subtask, 0);

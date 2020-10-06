@@ -150,6 +150,8 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   // so we just clean-up and return
   if (scheduler_error != 0) {
     free(subtask);
+    // Even a failed task counts as finished.
+    __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
     return 0;
   }
   if (err != 0) {
