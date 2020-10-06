@@ -586,7 +586,6 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
 
   -- Add profile fields for -P option
   mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
-
 compileOp (ParLoop s' i prebody body postbody free tid) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free

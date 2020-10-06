@@ -18,7 +18,6 @@ import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
 import Prelude hiding (quot, rem)
 
-
 -- GCC supported primitve atomic Operations
 -- TODO: Add support for 1, 2, and 16 bytes too
 gccAtomics :: AtomicBinOp

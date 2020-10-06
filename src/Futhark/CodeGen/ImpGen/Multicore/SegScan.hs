@@ -79,7 +79,7 @@ scanStage1 pat space scan_ops kbody = do
         acc <-
           case shapeDims shape of
             [] -> pure $ paramName p
-            _      -> do
+            _ -> do
               let pt = elemType t
               sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 
@@ -88,7 +88,6 @@ scanStage1 pat space scan_ops kbody = do
           copyDWIMFix acc vec_is ne []
 
         pure acc
-
 
   body <- collect $ do
     zipWithM_ dPrimV_ is $ unflattenIndex ns' $ tvExp iter
@@ -202,7 +201,7 @@ scanStage3 pat space scan_ops kbody = do
         acc <-
           case shapeDims shape of
             [] -> pure $ paramName p
-            _  -> do
+            _ -> do
               let pt = elemType t
               sAllocArray "local_acc" pt (shape <> arrayShape t) DefaultSpace
 

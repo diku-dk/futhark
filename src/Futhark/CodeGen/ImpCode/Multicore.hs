@@ -26,7 +26,6 @@ type Function = Imp.Function Multicore
 -- | A piece of imperative code, with multicore operations inside.
 type Code = Imp.Code Multicore
 
-
 -- | A multicore operation.
 data Multicore
   = Segop String [Param] ParallelTask (Maybe ParallelTask) [Param] SchedulerInfo
@@ -56,8 +55,8 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 data SchedulerInfo = SchedulerInfo
-  { nsubtasks :: VName,      -- The variable that describes how many subtasks the scheduler created
-    iterations :: Imp.Exp,   -- The number of total iterations for a task
+  { nsubtasks :: VName, -- The variable that describes how many subtasks the scheduler created
+    iterations :: Imp.Exp, -- The number of total iterations for a task
     scheduling :: Scheduling -- The type scheduling for the task
   }
 

@@ -433,7 +433,6 @@ splitOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
       return (op, t, paramName xp, paramName yp)
     splitStm _ = Nothing
 
-
 -- TODO for supporting 8 and 16 bits (and 128)
 -- we need a functions for converting to and from bits
 getBitConvertFunc :: Int -> MulticoreGen (String, String)

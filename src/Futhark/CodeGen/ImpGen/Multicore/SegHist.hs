@@ -253,7 +253,6 @@ subHistogram pat flat_idx space histops num_histos kbody = do
   let (body_allocs, body') = extractAllocations body
   emit $ Imp.Op $ Imp.ParLoop "seghist_stage_1" (tvVar flat_idx) (body_allocs <> prebody) body' postbody free_params $ segFlat space
 
-
   -- Perform a segmented reduction over the subhistograms
   forM_ (zip3 per_red_pes global_subhistograms histops) $ \(red_pes, hists, op) -> do
     bucket_id <- newVName "bucket_id"
@@ -266,7 +265,7 @@ subHistogram pat flat_idx space histops num_histos kbody = do
               ++ [(bucket_id, num_buckets)]
               ++ [(subhistogram_id, tvSize num_histos)]
 
-        segred_op  = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
+        segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histShape op)
 
     nsubtasks_red <- dPrim "num_tasks" $ IntType Int32
     red_code <- compileSegRed' (Pattern [] red_pes) segred_space [segred_op] nsubtasks_red $ \red_cont ->
@@ -277,10 +276,10 @@ subHistogram pat flat_idx space histops num_histos kbody = do
               map fst segment_dims ++ [subhistogram_id, bucket_id]
           )
 
-    let ns_red         = map (toInt32Exp . snd) $ unSegSpace segred_space
-        iterations     = product $ init ns_red -- The segmented reduction is sequential over the inner most dimension
+    let ns_red = map (toInt32Exp . snd) $ unSegSpace segred_space
+        iterations = product $ init ns_red -- The segmented reduction is sequential over the inner most dimension
         scheduler_info = Imp.SchedulerInfo (tvVar nsubtasks_red) (untyped iterations) Imp.Static
-        red_task       = Imp.ParallelTask red_code $ segFlat space
+        red_task = Imp.ParallelTask red_code $ segFlat space
     free_params_red <- freeParams red_code [segFlat space, tvVar nsubtasks_red]
     emit $ Imp.Op $ Imp.Segop "seghist_red" free_params_red red_task Nothing mempty scheduler_info
   where
@@ -305,7 +304,6 @@ segmentedHist pat space histops kbody = do
     let (body_allocs, body') = extractAllocations par_body
     emit $ Imp.Op $ Imp.ParLoop "segmented_hist" (tvVar segments_i) body_allocs body' mempty free_params $ segFlat space
 
-
 compileSegHistBody ::
   Imp.TExp Int64 ->
   Pattern MCMem ->
@@ -318,7 +316,7 @@ compileSegHistBody idx pat space histops kbody = do
       ns_64 = map (sExt64 . toInt32Exp) ns
 
   let num_red_res = length histops + sum (map (length . histNeutral) histops)
-      map_pes     = drop num_red_res $ patternValueElements pat
+      map_pes = drop num_red_res $ patternValueElements pat
       per_red_pes = segHistOpChunks histops $ patternValueElements pat
 
   collect $ do
