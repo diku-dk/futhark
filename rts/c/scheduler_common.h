@@ -79,8 +79,8 @@ int64_t total_now(int64_t total, int64_t time) {
   return total + (get_wall_time_ns() - time);
 }
 
-int random_other_worker(struct scheduler *scheduler, int my_id)
-{
+int random_other_worker(struct scheduler *scheduler, int my_id) {
+  (void)scheduler;
   int my_num_workers = __atomic_load_n(&num_workers, __ATOMIC_RELAXED);
   assert(my_num_workers != 1);
   int i = fast_rand() % (my_num_workers - 1);

@@ -8,21 +8,23 @@ struct futhark_mc_segred_stage_1_struct {
 
 /* Reduction function over an integer array */
 int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
-                                     int flat_tid_22, int tid)
-{
-    int err = 0;
-    struct futhark_mc_segred_stage_1_struct *futhark_mc_segred_stage_1_struct = (struct futhark_mc_segred_stage_1_struct *) args;
-    struct futhark_context *ctx = futhark_mc_segred_stage_1_struct->ctx;
-    int32_t *array = futhark_mc_segred_stage_1_struct->array;
-    int32_t *tuning_res = futhark_mc_segred_stage_1_struct->free_tuning_res;
+                                     int flat_tid, int tid) {
+  (void)flat_tid;
+  (void)tid;
 
-    int32_t sum = 0;
-    for (int i = start; i < end; i++) {
-      int32_t y = array[i];
-      sum = add32(sum, y);
-    }
-    *tuning_res = sum;
-    return err;
+  int err = 0;
+  struct futhark_mc_segred_stage_1_struct *futhark_mc_segred_stage_1_struct = (struct futhark_mc_segred_stage_1_struct *) args;
+  struct futhark_context *ctx = futhark_mc_segred_stage_1_struct->ctx;
+  int32_t *array = futhark_mc_segred_stage_1_struct->array;
+  int32_t *tuning_res = futhark_mc_segred_stage_1_struct->free_tuning_res;
+
+  int32_t sum = 0;
+  for (int i = start; i < end; i++) {
+    int32_t y = array[i];
+    sum = add32(sum, y);
+  }
+  *tuning_res = sum;
+  return err;
 }
 
 /* The main entry point for the tuning process */
@@ -56,7 +58,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
   int64_t sequential_elapsed = tuning_sequentiual_end - tuning_sequentiual_start;
 
   double C = (double)sequential_elapsed / (double)iterations;
-  fprintf(stderr, " Time for sequential run is %lld - Found C %f\n", sequential_elapsed, C);
+  fprintf(stderr, " Time for sequential run is %lld - Found C %f\n", (long long)sequential_elapsed, C);
 
   /* ********************** */
   /* Now run tuning process */
@@ -110,7 +112,10 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
 
   int64_t end_tuning = get_wall_time_ns();
   fprintf(stderr, "tuning took %lld ns and found kappa %f - time %lld - ratio %f\n",
-          end_tuning - start_tuning, kappa_tune, time_elapsed,  ratio);
+          (long long)end_tuning - start_tuning,
+          kappa_tune,
+          (long long)time_elapsed,
+          ratio);
   kappa = kappa_tune;
 
   // Clean-up
