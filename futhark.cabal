@@ -79,6 +79,7 @@ library
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Misc
+      Futhark.CLI.Multicore
       Futhark.CLI.OpenCL
       Futhark.CLI.Pkg
       Futhark.CLI.PyOpenCL
@@ -97,6 +98,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
+      Futhark.CodeGen.Backends.MulticoreC
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
       Futhark.CodeGen.Backends.SequentialC
@@ -104,6 +106,7 @@ library
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.Kernels
+      Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential
       Futhark.CodeGen.ImpGen
@@ -116,6 +119,12 @@ library
       Futhark.CodeGen.ImpGen.Kernels.SegScan
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
+      Futhark.CodeGen.ImpGen.Multicore
+      Futhark.CodeGen.ImpGen.Multicore.Base
+      Futhark.CodeGen.ImpGen.Multicore.SegHist
+      Futhark.CodeGen.ImpGen.Multicore.SegMap
+      Futhark.CodeGen.ImpGen.Multicore.SegRed
+      Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
       Futhark.CodeGen.ImpGen.Transpose
@@ -136,6 +145,9 @@ library
       Futhark.IR.Kernels.Simplify
       Futhark.IR.Kernels.Sizes
       Futhark.IR.KernelsMem
+      Futhark.IR.MC
+      Futhark.IR.MC.Op
+      Futhark.IR.MCMem
       Futhark.IR.Mem
       Futhark.IR.Mem.IxFun
       Futhark.IR.Mem.Simplify
@@ -195,6 +207,7 @@ library
       Futhark.Pass.ExplicitAllocations.Kernels
       Futhark.Pass.ExplicitAllocations.SegOp
       Futhark.Pass.ExplicitAllocations.Seq
+      Futhark.Pass.ExplicitAllocations.MC
       Futhark.Pass.ExtractKernels
       Futhark.Pass.ExtractKernels.BlockedKernel
       Futhark.Pass.ExtractKernels.DistributeNests
@@ -204,6 +217,7 @@ library
       Futhark.Pass.ExtractKernels.Intragroup
       Futhark.Pass.ExtractKernels.StreamKernel
       Futhark.Pass.ExtractKernels.ToKernels
+      Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
       Futhark.Pass.Simplify

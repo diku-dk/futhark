@@ -6,10 +6,12 @@ module Futhark.Actions
   ( printAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
+    multicoreImpCodeGenAction,
     metricsAction,
     compileCAction,
     compileOpenCLAction,
     compileCUDAAction,
+    compileMulticoreAction,
     sexpAction,
   )
 where
@@ -21,12 +23,15 @@ import Futhark.Analysis.Alias
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
+import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
+import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import Futhark.Compiler.CLI
 import Futhark.IR
 import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Util (runProgramWithExitCode)
@@ -69,6 +74,14 @@ kernelImpCodeGenAction =
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
+    }
+
+multicoreImpCodeGenAction :: Action MCMem
+multicoreImpCodeGenAction =
+  Action
+    { actionName = "Compile to imperative multicore",
+      actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
+      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
     }
 
 -- | Print metrics about AST node counts to stdout.
@@ -207,6 +220,46 @@ compileCUDAAction fcfg mode outpath =
                 [cpath, "-O", "-std=c99", "-lm", "-o", outpath]
                   ++ extra_options
           ret <- liftIO $ runProgramWithExitCode "gcc" args mempty
+          case ret of
+            Left err ->
+              externalErrorS $ "Failed to run gcc: " ++ show err
+            Right (ExitFailure code, _, gccerr) ->
+              externalErrorS $
+                "gcc failed with code "
+                  ++ show code
+                  ++ ":\n"
+                  ++ gccerr
+            Right (ExitSuccess, _, _) ->
+              return ()
+
+-- | The @futhark multicore@ action.
+compileMulticoreAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
+compileMulticoreAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to multicore",
+      actionDescription = "Compile to multicore",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+
+      case mode of
+        ToLibrary -> do
+          let (header, impl) = MulticoreC.asLibrary cprog
+          liftIO $ writeFile hpath header
+          liftIO $ writeFile cpath impl
+        ToExecutable -> do
+          liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
+          -- let debug_flags = ["-g", "-fno-omit-frame-pointer", "-fsanitize=address", "-fsanitize=integer", "-fsanitize=undefined", "-fno-sanitize-recover=null"]
+          ret <-
+            liftIO $
+              runProgramWithExitCode
+                "gcc"
+                [cpath, "-O3", "-pthread", "-std=c11", "-lm", "-o", outpath]
+                mempty
           case ret of
             Left err ->
               externalErrorS $ "Failed to run gcc: " ++ show err

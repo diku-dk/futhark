@@ -27,9 +27,6 @@ instance SizeSubst (HostOp lore op) where
   opIsConst (SizeOp GetSizeMax {}) = True
   opIsConst _ = False
 
-instance SizeSubst (SegOp lvl lore) where
-  opSizeSubst _ _ = mempty
-
 allocAtLevel :: SegLevel -> AllocM fromlore tlore a -> AllocM fromlore tlore a
 allocAtLevel lvl = local $ \env ->
   env
