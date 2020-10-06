@@ -578,9 +578,9 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
   let ftask_err = fpar_task <> "_err"
   let code =
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
-                        if ($id:ftask_err != 0) {
-                          futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
-                        }|]
+                  if ($id:ftask_err != 0) {
+                    err = 1; goto cleanup;
+                  }|]
 
   mapM_ GC.item code
 
@@ -644,9 +644,10 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
       ftask_total
       Nothing
       [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler, &$id:ftask_name);
-              if ($id:ftask_err != 0) {
-                futhark_panic($id:ftask_err, futhark_context_get_error(ctx));
-              }|]
+               if ($id:ftask_err != 0) {
+                 err = 1;
+                 goto cleanup;
+               }|]
 
   mapM_ GC.item code'
   mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
