@@ -8,6 +8,11 @@ static int64_t dummy_timer = 0;
 static int64_t dummy_iter = 0;
 
 static int dummy_fn(void *args, int64_t start, int64_t end, int subtask_id, int tid) {
+  (void)args;
+  (void)start;
+  (void)end;
+  (void)subtask_id;
+  (void)tid;
   return 0;
 }
 
