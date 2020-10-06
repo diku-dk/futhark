@@ -4,7 +4,7 @@ module Futhark.CodeGen.ImpGen.Multicore.SegScan
 where
 
 import Control.Monad
-import Data.List
+import Data.List (zip4)
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base

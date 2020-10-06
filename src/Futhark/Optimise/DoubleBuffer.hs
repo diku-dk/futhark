@@ -315,7 +315,7 @@ doubleBufferResult ::
   [DoubleBuffer] ->
   Body lore ->
   Body lore
-doubleBufferResult valparams buffered (Body () bnds res) =
+doubleBufferResult valparams buffered (Body _ bnds res) =
   let (ctx_res, val_res) = splitAt (length res - length valparams) res
       (copybnds, val_res') =
         unzip $ zipWith3 buffer valparams buffered val_res

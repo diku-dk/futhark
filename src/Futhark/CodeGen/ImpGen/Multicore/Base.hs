@@ -25,7 +25,7 @@ where
 
 import Control.Monad
 import Data.Bifunctor
-import Data.List
+import Data.List (elemIndex, find)
 import Data.Maybe
 import qualified Futhark.CodeGen.ImpCode.Multicore as Imp
 import Futhark.CodeGen.ImpGen
