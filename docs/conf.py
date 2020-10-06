@@ -262,6 +262,7 @@ latex_documents = [
 man_pages = [
     ('man/futhark', 'futhark', 'a parallel functional array language', [], 1),
     ('man/futhark-c', 'futhark-c', 'compile Futhark to sequential C', [], 1),
+    ('man/futhark-multicore', 'futhark-multicore', 'compile Futhark to multithreaded C', [], 1),
     ('man/futhark-opencl', 'futhark-opencl', 'compile Futhark to OpenCL', [], 1),
     ('man/futhark-cuda', 'futhark-cuda', 'compile Futhark to CUDA', [], 1),
     ('man/futhark-python', 'futhark-python', 'compile Futhark to sequential Python', [], 1),

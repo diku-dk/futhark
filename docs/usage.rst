@@ -107,8 +107,8 @@ All generated executables support the following options.
     (:ref:`binary-data-format`).  For large outputs, this is
     significantly faster and takes up less space.
 
-Parallel Options
-~~~~~~~~~~~~~~~~
+GPU Options
+~~~~~~~~~~~
 
 The following options are supported by executables generated with the
 GPU backends (``opencl``, ``pyopencl``, and ``cuda``).

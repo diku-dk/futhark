@@ -45,6 +45,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-autotune.rst
    man/futhark-bench.rst
    man/futhark-c.rst
+   man/futhark-multicore.rst
    man/futhark-cuda.rst
    man/futhark-dataset.rst
    man/futhark-doc.rst
