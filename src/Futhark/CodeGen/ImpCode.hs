@@ -156,7 +156,7 @@ data ExternalValue
 -- point.
 data FunctionT a = Function
   { functionEntry :: Bool,
-    functionForeign :: Bool,
+    functionForeignTypes ::[ForeignType],
     functionBaseName :: Name,
     functionOutput :: [Param],
     functionInput :: [Param],
@@ -168,6 +168,8 @@ data FunctionT a = Function
 
 -- | Type alias for namespace control.
 type Function = FunctionT
+
+type ForeignType = Name
 
 -- | The contents of a statically declared constant array.  Such
 -- arrays are always unidimensional, and reshaped if necessary in the

@@ -1989,13 +1989,13 @@ compileFun :: String ->
 compileFun backend
            get_constants
            extra
-           (fname, func@(Function _ isForeign bname outputs inputs body _ _)) = do
+           (fname, func@(Function _ fTypes bname outputs inputs body _ _)) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   (inparams, in_args) <- unzip <$> mapM compileInput inputs
 
   cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
     body' <- blockScope $ compileFunBody out_ptrs outputs body
-    if isForeign && backend == "c"
+    if (nameFromString backend) `elem` fTypes
       then
       return
       ( [C.cedecl|static inline int
@@ -2021,10 +2021,10 @@ compileFun backend
       )
 
 compileForeignPrototype :: String -> (Name, Function op) -> CompilerM op s (Maybe C.Definition)
-compileForeignPrototype backend (_, (Function _ isForeign bname outputs inputs _ _ _)) = do
+compileForeignPrototype backend (_, (Function _ fTypes bname outputs inputs _ _ _)) = do
   (outparams, _) <- unzip <$> mapM compileOutput outputs
   (inparams, _) <- unzip <$> mapM compileInput inputs
-  if isForeign && backend == "c"
+  if (nameFromString backend) `elem` fTypes
     then return . Just $ [C.cedecl| int $id:(funNameForeign bname)($params:outparams, $params:inparams);|]
     else return Nothing
 

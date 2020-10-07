@@ -635,12 +635,11 @@ compileFunDef ::
   Mem lore =>
   FunDef lore ->
   ImpM lore r op ()
-compileFunDef (FunDef entry _ fname bname rettype params body foreignTypes) =
+compileFunDef (FunDef entry _ fname bname rettype params body fTypes) =
   local (\env -> env {envFunction = Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
-    emitFunction fname $ Imp.Function (isJust entry) isForeign bname outparams inparams body' results args
+    emitFunction fname $ Imp.Function (isJust entry) fTypes bname outparams inparams body' results args
   where
-    isForeign = "c" `elem` foreignTypes
     params_entry = maybe (replicate (length params) TypeDirect) fst entry
     ret_entry = maybe (replicate (length rettype) TypeDirect) snd entry
     compile = do
@@ -1737,7 +1736,7 @@ function fname outputs inputs m = local newFunction $ do
   body <- collect $ do
     mapM_ addParam $ outputs ++ inputs
     m
-  emitFunction fname $ Imp.Function False False fname outputs inputs body [] []
+  emitFunction fname $ Imp.Function False [] fname outputs inputs body [] []
   where
     addParam (Imp.MemParam name space) =
       addVar name $ MemVar Nothing $ MemEntry space

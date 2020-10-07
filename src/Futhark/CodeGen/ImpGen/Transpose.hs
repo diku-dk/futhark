@@ -43,7 +43,7 @@ mapTransposeFunction :: Name -> PrimType -> Function op
 mapTransposeFunction fname pt =
   Function
     False
-    False
+    []
     fname
     []
     params
