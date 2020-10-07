@@ -256,7 +256,7 @@ constructKernel ::
 constructKernel mk_lvl kernel_nest inner_body = runBinderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
   let aux = loopNestingAux first_nest
-      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int32
+      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int64
       pat = loopNestingPattern first_nest
       rts = map (stripArray (length ispace)) $ patternTypes pat
 

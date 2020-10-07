@@ -176,7 +176,7 @@ kerneliseLambda ::
   m (Lambda Kernels)
 kerneliseLambda nes lam = do
   thread_index <- newVName "thread_index"
-  let thread_index_param = Param thread_index $ Prim int32
+  let thread_index_param = Param thread_index $ Prim int64
       (fold_chunk_param, fold_acc_params, fold_inp_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
