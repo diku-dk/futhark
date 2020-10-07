@@ -620,6 +620,18 @@ histKernelLocalPass
     hist_H_chks <- forM (map (histWidth . slugOp) slugs) $ \w ->
       dPrimV "hist_H_chk" $ toInt64Exp w `divUp` sExt64 hist_S
 
+    histo_sizes <- forM (zip slugs hist_H_chks) $ \(slug, hist_H_chk) -> do
+      let histo_dims =
+            tvExp hist_H_chk :
+            map toInt64Exp (shapeDims (histShape (slugOp slug)))
+      histo_size <-
+        dPrimVE "histo_size" $ product histo_dims
+      let group_hists_size =
+            sExt64 num_subhistos_per_group * histo_size
+      init_per_thread <-
+        dPrimVE "init_per_thread" $ sExt32 $ group_hists_size `divUp` unCount group_size
+      return (histo_dims, histo_size, init_per_thread)
+
     sKernelThread "seghist_local" num_groups group_size (segFlat space) $
       virtualiseGroups SegVirt (sExt32 $ unCount groups_per_segment * num_segments) $ \group_id -> do
         constants <- kernelConstants <$> askEnv
@@ -652,20 +664,14 @@ histKernelLocalPass
           dPrimVE "thread_local_subhisto_i" $
             kernelLocalThreadId constants `rem` num_subhistos_per_group
 
-        let onSlugs f = forM_ (zip slugs histograms) $ \(slug, (dests, hist_H_chk, _)) -> do
-              let histo_dims =
-                    tvExp hist_H_chk :
-                    map toInt64Exp (shapeDims (histShape (slugOp slug)))
-              histo_size <- dPrimVE "histo_size" $ product histo_dims
-              f slug dests (tvExp hist_H_chk) histo_dims histo_size
+        let onSlugs f =
+              forM_ (zip3 slugs histograms histo_sizes) $
+                \(slug, (dests, hist_H_chk, _), (histo_dims, histo_size, init_per_thread)) ->
+                  f slug dests (tvExp hist_H_chk) histo_dims histo_size init_per_thread
 
         let onAllHistograms f =
-              onSlugs $ \slug dests hist_H_chk histo_dims histo_size -> do
+              onSlugs $ \slug dests hist_H_chk histo_dims histo_size init_per_thread -> do
                 let group_hists_size = num_subhistos_per_group * sExt32 histo_size
-                init_per_thread <-
-                  dPrimVE "init_per_thread" $
-                    group_hists_size
-                      `divUp` sExt32 (kernelGroupSize constants)
 
                 forM_ (zip dests (histNeutral $ slugOp slug)) $
                   \((dest_global, dest_local), ne) ->
@@ -760,11 +766,7 @@ histKernelLocalPass
         sOp $ Imp.ErrorSync Imp.FenceGlobal
 
         sComment "Compact the multiple local memory subhistograms to result in global memory" $
-          onSlugs $ \slug dests hist_H_chk histo_dims histo_size -> do
-            bins_per_thread <-
-              dPrimVE "init_per_thread" $
-                histo_size `divUp` sExt64 (kernelGroupSize constants)
-
+          onSlugs $ \slug dests hist_H_chk histo_dims _histo_size bins_per_thread -> do
             trunc_H <-
               dPrimV "trunc_H" $
                 sMin64 hist_H_chk $
@@ -773,17 +775,17 @@ histKernelLocalPass
             let trunc_histo_dims =
                   tvExp trunc_H :
                   map toInt64Exp (shapeDims (histShape (slugOp slug)))
-            trunc_histo_size <- dPrimVE "histo_size" $ product trunc_histo_dims
+            trunc_histo_size <- dPrimVE "histo_size" $ sExt32 $ product trunc_histo_dims
 
             sFor "local_i" bins_per_thread $ \i -> do
               j <-
                 dPrimVE "j" $
-                  i * sExt64 (kernelGroupSize constants)
-                    + sExt64 (kernelLocalThreadId constants)
+                  i * sExt32 (kernelGroupSize constants)
+                    + kernelLocalThreadId constants
               sWhen (j .<. trunc_histo_size) $ do
                 -- We are responsible for compacting the flat bin 'j', which
                 -- we immediately unflatten.
-                let local_bucket_is = unflattenIndex histo_dims j
+                let local_bucket_is = unflattenIndex histo_dims $ sExt64 j
                     global_bucket_is =
                       head local_bucket_is + sExt64 chk_i * hist_H_chk :
                       tail local_bucket_is
