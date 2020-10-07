@@ -41,7 +41,8 @@ failureSwitch failures =
             escapeChar c = [c]
          in concatMap escapeChar
       onPart (ErrorString s) = printfEscape s
-      onPart ErrorInt32 {} = "%d"
+      onPart ErrorInt32 {} = "%lld"
+      onPart ErrorInt64 {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
             msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg -1]]
@@ -375,7 +376,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->global_failure_args =
                        clCreateBuffer(ctx->opencl.ctx,
                                       CL_MEM_READ_WRITE,
-                                      sizeof(cl_int)*($int:max_failure_args+1), NULL, &error);
+                                      sizeof(int64_t)*($int:max_failure_args+1), NULL, &error);
                      OPENCL_SUCCEED_OR_RETURN(error);
 
                      // Load all the kernels.
@@ -472,7 +473,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                                          0, sizeof(cl_int), &no_failure,
                                          0, NULL, NULL));
 
-                   typename cl_int args[$int:max_failure_args+1];
+                   typename int64_t args[$int:max_failure_args+1];
                    OPENCL_SUCCEED_OR_RETURN(
                      clEnqueueReadBuffer(ctx->opencl.queue,
                                          ctx->global_failure_args,

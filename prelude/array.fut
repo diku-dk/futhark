@@ -24,13 +24,13 @@ let tail [n] 't (x: [n]t) = x[1:]
 let init [n] 't (x: [n]t) = x[0:n-1]
 
 -- | Take some number of elements from the head of the array.
-let take [n] 't (i: i32) (x: [n]t): [i]t = x[0:i]
+let take [n] 't (i: i64) (x: [n]t): [i]t = x[0:i]
 
 -- | Remove some number of elements from the head of the array.
-let drop [n] 't (i: i32) (x: [n]t) = x[i:]
+let drop [n] 't (i: i64) (x: [n]t) = x[i:]
 
 -- | Split an array at a given position.
-let split [n] 't (i: i32) (xs: [n]t): ([i]t, []t) =
+let split [n] 't (i: i64) (xs: [n]t): ([i]t, []t) =
   (xs[:i] :> [i]t, xs[i:])
 
 -- | Return the elements of the array in reverse order.
@@ -46,28 +46,28 @@ let concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = xs ++ ys
 -- | Concatenation where the result has a predetermined size.  If the
 -- provided size is wrong, the function will fail with a run-time
 -- error.
-let concat_to [n] [m] 't (k: i32) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]t
+let concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]t
 
 -- | Rotate an array some number of elements to the left.  A negative
 -- rotation amount is also supported.
 --
 -- For example, if `b==rotate r a`, then `b[x+r] = a[x]`.
-let rotate [n] 't (r: i32) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
+let rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs) :> [n]t
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
-let iota (n: i32): *[n]i32 =
+let iota (n: i64): *[n]i64 =
   0..1..<n
 
 -- | Construct an array comprising valid indexes into some other
 -- array, starting at 0.
-let indices [n] 't (_: [n]t) : *[n]i32 =
+let indices [n] 't (_: [n]t) : *[n]i64 =
   iota n
 
 -- | Construct an array of the given length containing the given
 -- value.
-let replicate 't (n: i32) (x: t): *[n]t =
-  map (\_ -> x) (iota n)
+let replicate 't (n: i64) (x: t): *[n]t =
+  map (const x) (iota n)
 
 -- | Copy a value.  The result will not alias anything.
 let copy 't (a: t): *t =
@@ -79,7 +79,7 @@ let flatten [n][m] 't (xs: [n][m]t): []t =
 
 -- | Like `flatten`@term, but where the final size is known.  Fails at
 -- runtime if the provided size is wrong.
-let flatten_to [n][m] 't (l: i32) (xs: [n][m]t): [l]t =
+let flatten_to [n][m] 't (l: i64) (xs: [n][m]t): [l]t =
   flatten xs :> [l]t
 
 -- | Combines the outer three dimensions of an array.
@@ -91,15 +91,15 @@ let flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): []t =
   flatten (flatten_3d xs)
 
 -- | Splits the outer dimension of an array in two.
-let unflatten [p] 't (n: i32) (m: i32) (xs: [p]t): [n][m]t =
+let unflatten [p] 't (n: i64) (m: i64) (xs: [p]t): [n][m]t =
   intrinsics.unflatten (n, m, xs) :> [n][m]t
 
 -- | Splits the outer dimension of an array in three.
-let unflatten_3d [p] 't (n: i32) (m: i32) (l: i32) (xs: [p]t): [n][m][l]t =
+let unflatten_3d [p] 't (n: i64) (m: i64) (l: i64) (xs: [p]t): [n][m][l]t =
   unflatten n m (unflatten (n*m) l xs)
 
 -- | Splits the outer dimension of an array in four.
-let unflatten_4d [p] 't (n: i32) (m: i32) (l: i32) (k: i32) (xs: [p]t): [n][m][l][k]t =
+let unflatten_4d [p] 't (n: i64) (m: i64) (l: i64) (k: i64) (xs: [p]t): [n][m][l][k]t =
   unflatten n m (unflatten_3d (n*m) l k xs)
 
 let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
@@ -122,13 +122,13 @@ let foldr [n] 'a 'b (f: b -> a -> a) (acc: a) (bs: [n]b): a =
   foldl (flip f) acc (reverse bs)
 
 -- | Create a value for each point in a one-dimensional index space.
-let tabulate 'a (n: i32) (f: i32 -> a): *[n]a =
+let tabulate 'a (n: i64) (f: i64 -> a): *[n]a =
   map1 f (iota n)
 
 -- | Create a value for each point in a two-dimensional index space.
-let tabulate_2d 'a (n: i32) (m: i32) (f: i32 -> i32 -> a): *[n][m]a =
+let tabulate_2d 'a (n: i64) (m: i64) (f: i64 -> i64 -> a): *[n][m]a =
   map1 (f >-> tabulate m) (iota n)
 
 -- | Create a value for each point in a three-dimensional index space.
-let tabulate_3d 'a (n: i32) (m: i32) (o: i32) (f: i32 -> i32 -> i32 -> a): *[n][m][o]a =
+let tabulate_3d 'a (n: i64) (m: i64) (o: i64) (f: i64 -> i64 -> i64 -> a): *[n][m][o]a =
   map1 (f >-> tabulate_2d m o) (iota n)

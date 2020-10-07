@@ -1,4 +1,4 @@
-let flatten_to [n][m] 't (k: i32) (xs: [n][m]t): [k]t =
+let flatten_to [n][m] 't (k: i64) (xs: [n][m]t): [k]t =
   flatten xs :> [k]t
 
 let main [n] (as: [100]i32) (bs: [100]i32) (is: [4]i32) (xsss : [][n][]f32) =
@@ -21,6 +21,6 @@ let main [n] (as: [100]i32) (bs: [100]i32) (is: [4]i32) (xsss : [][n][]f32) =
                   map (\zss -> zss[a:a+3, b:b+3] |> flatten_to 9)
                       zsss
                   |> flatten_to m)
-               as bs
+               (map i64.i32 as) (map i64.i32 bs)
         in (ysss, vss))
      xsss

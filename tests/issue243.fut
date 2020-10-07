@@ -5,7 +5,7 @@
 -- Thus, not technically a split feature, but where else to put it?
 --
 -- ==
--- input { 10 }
+-- input { 10i64 }
 -- output { [4i32, 3i32, 4i32, 2i32, 4i32, 2i32, 3i32, 2i32, 2i32, 1i32] }
 
 let boolToInt (x: bool): i32 =
@@ -18,10 +18,10 @@ let resi (x: i32) (y: i32): i32 =
   then y
   else (y % x)
 
-entry main (n: i32): []i32 =
-  let (_, t_v1) = split 1 (iota (n+1)) in
+entry main (n: i64): []i32 =
+  let (_, t_v1) = split 1 (map i32.i64 (iota (n+1))) in
   let t_v7 = transpose (replicate n (t_v1 :> [n]i32)) in
-  let t_v8 = unflatten n n (iota (n*n)) in
+  let t_v8 = unflatten n n (map i32.i64 (iota (n*n))) in
   let t_v12 = let (array: [][n]i32) = map2 (\(x: []i32) (y: []i32): [n]i32 ->
                                               map2 resi (x) (y)) t_v7 t_v8 in
               map (\(x: []i32): [n]bool ->

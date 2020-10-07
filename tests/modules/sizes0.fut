@@ -1,5 +1,5 @@
 module type sized = {
-  val len: i32
+  val len: i64
 }
 
 module arr (S: sized) = {

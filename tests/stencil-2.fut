@@ -37,8 +37,8 @@
 
 let main [n][m] (num_iterations: i32) (a: [n][m]f64): [][]f64 =
   loop (a) for i < num_iterations do
-    map (\(i: i32) ->
-          map (\(j: i32) ->
+    map (\i ->
+          map (\j ->
                 let center = a[i,j]
                 let north = if i == 0 then center else a[i-1,j]
                 let east = if j == m-1 then center else a[i,j+1]

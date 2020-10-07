@@ -4,6 +4,6 @@
 -- accepts an input indicating how many integers to generate.
 --
 -- ==
--- input { 10 } output { [0,1,2,3,4,5,6,7,8,9] }
+-- input { 10i64 } output { [0i64,1i64,2i64,3i64,4i64,5i64,6i64,7i64,8i64,9i64] }
 
-let main(n: i32): [n]i32 = iota n
+let main(n: i64): [n]i64 = iota n

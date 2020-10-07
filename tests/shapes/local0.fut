@@ -6,8 +6,8 @@ let getneighbors (_: i32): []f64 = []
 let main (x: i32) =
   let objxy = getneighbors x
 
-  let flikelihood (_: i32) : []i32 =
-    let ind = map t64 objxy
+  let flikelihood (_: i32) : []i64 =
+    let ind = map i64.f64 objxy
     in ind
 
   let res = flikelihood x

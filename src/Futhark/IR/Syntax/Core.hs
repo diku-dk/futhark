@@ -498,15 +498,18 @@ data ErrorMsgPart a
     ErrorString String
   | -- | A run-time integer value.
     ErrorInt32 a
+  | -- | A bigger run-time integer value.
+    ErrorInt64 a
   deriving (Eq, Ord, Show, Generic)
 
 instance SexpIso a => SexpIso (ErrorMsgPart a) where
   sexpIso =
     match $
       With (. Sexp.list (Sexp.el (Sexp.sym "error-string") . Sexp.el (iso T.unpack T.pack . sexpIso))) $
-        With
-          (. Sexp.list (Sexp.el (Sexp.sym "error-int32") . Sexp.el sexpIso))
-          End
+        With (. Sexp.list (Sexp.el (Sexp.sym "error-int32") . Sexp.el sexpIso)) $
+          With
+            (. Sexp.list (Sexp.el (Sexp.sym "error-int64") . Sexp.el sexpIso))
+            End
 
 instance IsString (ErrorMsgPart a) where
   fromString = ErrorString
@@ -523,14 +526,17 @@ instance Traversable ErrorMsg where
 instance Functor ErrorMsgPart where
   fmap _ (ErrorString s) = ErrorString s
   fmap f (ErrorInt32 a) = ErrorInt32 $ f a
+  fmap f (ErrorInt64 a) = ErrorInt64 $ f a
 
 instance Foldable ErrorMsgPart where
   foldMap _ ErrorString {} = mempty
   foldMap f (ErrorInt32 a) = f a
+  foldMap f (ErrorInt64 a) = f a
 
 instance Traversable ErrorMsgPart where
   traverse _ (ErrorString s) = pure $ ErrorString s
   traverse f (ErrorInt32 a) = ErrorInt32 <$> f a
+  traverse f (ErrorInt64 a) = ErrorInt64 <$> f a
 
 -- | How many non-constant parts does the error message have, and what
 -- is their type?
@@ -539,3 +545,4 @@ errorMsgArgTypes (ErrorMsg parts) = mapMaybe onPart parts
   where
     onPart ErrorString {} = Nothing
     onPart ErrorInt32 {} = Just $ IntType Int32
+    onPart ErrorInt64 {} = Just $ IntType Int64

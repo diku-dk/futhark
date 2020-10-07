@@ -62,14 +62,14 @@ foldClosedForm look pat lam accs arrs = do
       (patternNames pat)
       inputsize
       mempty
-      Int32
+      Int64
       knownBnds
       (map paramName (lambdaParams lam))
       (lambdaBody lam)
       accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames [isEmpty] $
-    BasicOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
+    BasicOp $ CmpOp (CmpEq int64) inputsize (intConst Int64 0)
   letBind pat
     =<< ( If (Var isEmpty)
             <$> resultBodyM accs
@@ -183,7 +183,7 @@ checkResults pat size untouchable it knownBnds params body accs = do
       | v `nameIn` nonFree = M.lookup v knownBnds
     asFreeSubExp se = Just se
 
-    properIntSize Int32 = Just $ return size
+    properIntSize Int64 = Just $ return size
     properIntSize t =
       Just $
         letSubExp "converted_size" $

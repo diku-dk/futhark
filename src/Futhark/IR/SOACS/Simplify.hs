@@ -517,7 +517,7 @@ mapOpToOp (_, used) pat aux1 e
     Simplify $
       certifying (stmAuxCerts aux1 <> cs) $
         letBind pat $
-          BasicOp $ Rotate (intConst Int32 0 : rots) arr
+          BasicOp $ Rotate (intConst Int64 0 : rots) arr
 mapOpToOp _ _ _ _ = Skip
 
 isMapWithOp ::
@@ -680,7 +680,7 @@ simplifyKnownIterationSOAC _ pat _ op
         bindMapParam p a = do
           a_t <- lookupType a
           letBindNames [paramName p] $
-            BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0 :: Int32)]
+            BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0 :: Int64)]
         bindArrayResult pe se =
           letBindNames [patElemName pe] $
             BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
@@ -705,7 +705,7 @@ simplifyKnownIterationSOAC _ pat _ op
           partitionChunkedFoldParameters (length nes) (lambdaParams fold_lam)
 
     letBindNames [paramName chunk_param] $
-      BasicOp $ SubExp $ intConst Int32 1
+      BasicOp $ SubExp $ intConst Int64 1
 
     forM_ (zip acc_params nes) $ \(p, ne) ->
       letBindNames [paramName p] $ BasicOp $ SubExp ne
@@ -858,7 +858,7 @@ simplifyMapIota vtable pat aux (Screma w (ScremaForm scan reduce map_lam) arrs)
               letExp (baseString arr ++ "_prefix") $
                 BasicOp $
                   Index arr $
-                    fullSlice arr_t [DimSlice (intConst Int32 0) w (intConst Int32 1)]
+                    fullSlice arr_t [DimSlice (intConst Int64 0) w (intConst Int64 1)]
       return $
         Just
           ( arr',
@@ -920,7 +920,7 @@ moveTransformToInput vtable pat aux (Screma w (ScremaForm scan reduce map_lam) a
     mapOverArr op
       | Just (_, arr) <- find ((== arrayOpArr op) . fst) (zip map_param_names arrs) = do
         arr_t <- lookupType arr
-        let whole_dim = DimSlice (intConst Int32 0) (arraySize 0 arr_t) (intConst Int32 1)
+        let whole_dim = DimSlice (intConst Int64 0) (arraySize 0 arr_t) (intConst Int64 1)
         arr_transformed <- certifying (arrayOpCerts op) $
           letExp (baseString arr ++ "_transformed") $
             case op of
@@ -929,7 +929,7 @@ moveTransformToInput vtable pat aux (Screma w (ScremaForm scan reduce map_lam) a
               ArrayRearrange _ _ perm ->
                 BasicOp $ Rearrange (0 : map (+ 1) perm) arr
               ArrayRotate _ _ rots ->
-                BasicOp $ Rotate (intConst Int32 0 : rots) arr
+                BasicOp $ Rotate (intConst Int64 0 : rots) arr
               ArrayVar {} ->
                 BasicOp $ SubExp $ Var arr
         arr_transformed_t <- lookupType arr_transformed

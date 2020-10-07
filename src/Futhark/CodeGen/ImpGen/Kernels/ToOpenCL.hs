@@ -180,7 +180,7 @@ generateDeviceFun fname host_func = do
 
   let params =
         [ [C.cparam|__global int *global_failure|],
-          [C.cparam|__global int *global_failure_args|]
+          [C.cparam|__global typename int64_t *global_failure_args|]
         ]
       (func, cstate) =
         genGPUCode FunMode (functionBody device_func) failures $
@@ -312,7 +312,7 @@ onKernel target kernel = do
       failure_params =
         [ [C.cparam|__global int *global_failure|],
           [C.cparam|int failure_is_an_option|],
-          [C.cparam|__global int *global_failure_args|]
+          [C.cparam|__global typename int64_t *global_failure_args|]
         ]
 
       params =
@@ -780,6 +780,10 @@ inKernelOperations mode body =
       let setArgs _ [] = return []
           setArgs i (ErrorString {} : parts') = setArgs i parts'
           setArgs i (ErrorInt32 x : parts') = do
+            x' <- GC.compileExp x
+            stms <- setArgs (i + 1) parts'
+            return $ [C.cstm|global_failure_args[$int:i] = (typename int64_t)$exp:x';|] : stms
+          setArgs i (ErrorInt64 x : parts') = do
             x' <- GC.compileExp x
             stms <- setArgs (i + 1) parts'
             return $ [C.cstm|global_failure_args[$int:i] = $exp:x';|] : stms

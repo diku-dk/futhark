@@ -15,8 +15,8 @@
 -- structure { /Screma 3 /Screma/Screma 1 }
 let main(t_v1: []i32) (t_v3: [][]i32): [][]bool =
   let n = 3
-  let t_v6 = map (\(x: i32): i32  -> (x + 1)) (iota(n))
-  let t_v12 = map (\(x: i32): i32  -> (x + 1)) (iota(30))
+  let t_v6 = map (\(x: i32): i32  -> (x + 1)) (map i32.i64 (iota(n)))
+  let t_v12 = map (\(x: i32): i32  -> (x + 1)) (map i32.i64 (iota(30)))
   let t_v18 = transpose (replicate 30 t_v6)
   let t_v19 = replicate n t_v12
   let t_v27 = map (\(x: []i32,y: []i32)  ->

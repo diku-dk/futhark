@@ -181,7 +181,7 @@ bindingTypeParams tparams = localEnv env
     typeParamEnv (TypeParamDim v _) =
       mempty
         { envVtable =
-            M.singleton v $ BoundV [] (Scalar $ Prim $ Signed Int32)
+            M.singleton v $ BoundV [] (Scalar $ Prim $ Signed Int64)
         }
     typeParamEnv (TypeParamType l v _) =
       mempty

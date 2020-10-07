@@ -2,7 +2,7 @@
 -- ==
 -- structure distributed {Manifest 0}
 
-let gauss_jordan [nm] (n:i32) (m:i32) (A: *[nm]f32): [nm]f32 =
+let gauss_jordan [nm] (n:i64) (m:i64) (A: *[nm]f32): [nm]f32 =
     loop A for i < n do
       -- the loop is outside the kernel, and hence `i` is a free
       -- variable in the kernel; hence fixing coalescing will likely

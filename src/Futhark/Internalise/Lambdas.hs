@@ -44,12 +44,12 @@ internaliseStreamMapLambda ::
   InternaliseM I.Lambda
 internaliseStreamMapLambda internaliseLambda lam args = do
   chunk_size <- newVName "chunk_size"
-  let chunk_param = I.Param chunk_size (I.Prim int32)
+  let chunk_param = I.Param chunk_size (I.Prim int64)
       outer = (`setOuterSize` I.Var chunk_size)
   localScope (scopeOfLParams [chunk_param]) $ do
     argtypes <- mapM I.subExpType args
     (lam_params, orig_body, rettype) <-
-      internaliseLambda lam $ I.Prim int32 : map outer argtypes
+      internaliseLambda lam $ I.Prim int64 : map outer argtypes
     let orig_chunk_param : params = lam_params
     body <- runBodyBinder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
@@ -96,11 +96,11 @@ internaliseStreamLambda ::
   InternaliseM ([LParam], Body)
 internaliseStreamLambda internaliseLambda lam rowts = do
   chunk_size <- newVName "chunk_size"
-  let chunk_param = I.Param chunk_size $ I.Prim int32
+  let chunk_param = I.Param chunk_size $ I.Prim int64
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
   localScope (scopeOfLParams [chunk_param]) $ do
     (lam_params, orig_body, _) <-
-      internaliseLambda lam $ I.Prim int32 : chunktypes
+      internaliseLambda lam $ I.Prim int64 : chunktypes
     let orig_chunk_param : params = lam_params
     body <- runBodyBinder $ do
       letBindNames [paramName orig_chunk_param] $ I.BasicOp $ I.SubExp $ I.Var chunk_size
@@ -126,19 +126,19 @@ internalisePartitionLambda internaliseLambda k lam args = do
       lambdaWithIncrement body
   return $ I.Lambda params body' rettype
   where
-    rettype = replicate (k + 2) $ I.Prim int32
+    rettype = replicate (k + 2) $ I.Prim int64
     result i =
       map constant $
-        (fromIntegral i :: Int32) :
-        (replicate i 0 ++ [1 :: Int32] ++ replicate (k - i) 0)
+        fromIntegral i :
+        (replicate i 0 ++ [1 :: Int64] ++ replicate (k - i) 0)
 
     mkResult _ i | i >= k = return $ result i
     mkResult eq_class i = do
       is_i <-
         letSubExp "is_i" $
           BasicOp $
-            CmpOp (CmpEq int32) eq_class $
-              intConst Int32 $ toInteger i
+            CmpOp (CmpEq int64) eq_class $
+              intConst Int64 $ toInteger i
       fmap (map I.Var) . letTupExp "part_res"
         =<< eIf
           (eSubExp is_i)

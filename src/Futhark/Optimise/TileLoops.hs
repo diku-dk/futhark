@@ -614,7 +614,7 @@ tileGeneric doTiling initial_lvl res_ts pat gtids kdims w form arrs_and_perms po
           <*> pure (Var mergeinit)
 
       tile_id <- newVName "tile_id"
-      let loopform = ForLoop tile_id Int32 num_whole_tiles []
+      let loopform = ForLoop tile_id Int64 num_whole_tiles []
       loopbody <- renameBody <=< runBodyBinder $
         inScopeOf loopform $
           localScope (scopeOfFParams $ map fst merge) $ do
@@ -664,7 +664,7 @@ mkReadPreludeValues prestms_live_arrs prestms_live slice =
 
 tileReturns :: [(VName, SubExp)] -> [(SubExp, SubExp)] -> VName -> Binder Kernels KernelResult
 tileReturns dims_on_top dims arr = do
-  let unit_dims = replicate (length dims_on_top) (intConst Int32 1)
+  let unit_dims = replicate (length dims_on_top) (intConst Int64 1)
   arr' <-
     if null dims_on_top
       then return arr
@@ -697,9 +697,6 @@ segMap1D desc lvl manifest f = do
       SegOp $
         SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
 
-v32 :: VName -> TPrimExp Int32 VName
-v32 v = TPrimExp $ LeafExp v int32
-
 reconstructGtids1D ::
   Count GroupSize SubExp ->
   VName ->
@@ -708,7 +705,7 @@ reconstructGtids1D ::
   Binder Kernels ()
 reconstructGtids1D group_size gtid gid ltid =
   letBindNames [gtid]
-    =<< toExp (v32 gid * pe32 (unCount group_size) + v32 ltid)
+    =<< toExp (le64 gid * pe64 (unCount group_size) + le64 ltid)
 
 readTile1D ::
   SubExp ->
@@ -734,7 +731,7 @@ readTile1D
     segMap1D "full_tile" (SegThread num_groups group_size SegNoVirt) ResultNoSimplify $ \ltid -> do
       j <-
         letSubExp "j"
-          =<< toExp (pe32 tile_id * pe32 tile_size + v32 ltid)
+          =<< toExp (pe64 tile_id * pe64 tile_size + le64 ltid)
 
       reconstructGtids1D group_size gtid gid ltid
       addPrivStms [DimFix $ Var ltid] privstms
@@ -752,7 +749,7 @@ readTile1D
           TilePartial ->
             letTupExp "pre"
               =<< eIf
-                (toExp $ pe32 j .<. pe32 w)
+                (toExp $ pe64 j .<. pe64 w)
                 (resultBody <$> mapM (fmap Var . readTileElem) arrs)
                 (eBody $ map eBlank tile_ts)
           TileFull ->
@@ -801,7 +798,7 @@ processTile1D
       fmap (map Var) $
         letTupExp "acc"
           =<< eIf
-            (toExp $ v32 gtid .<. pe32 kdim)
+            (toExp $ le64 gtid .<. pe64 kdim)
             (eBody [pure $ Op $ OtherOp $ Screma tile_size form' tile])
             (resultBodyM thread_accs)
 
@@ -840,11 +837,11 @@ processResidualTile1D
     -- the whole tiles.
     residual_input <-
       letSubExp "residual_input" $
-        BasicOp $ BinOp (SRem Int32 Unsafe) w tile_size
+        BasicOp $ BinOp (SRem Int64 Unsafe) w tile_size
 
     letTupExp "acc_after_residual"
       =<< eIf
-        (toExp $ pe32 residual_input .==. 0)
+        (toExp $ pe64 residual_input .==. 0)
         (resultBodyM $ map Var accs)
         (nonemptyTile residual_input)
     where
@@ -867,7 +864,7 @@ processResidualTile1D
             BasicOp $
               Index
                 tile
-                [DimSlice (intConst Int32 0) residual_input (intConst Int32 1)]
+                [DimSlice (intConst Int64 0) residual_input (intConst Int64 1)]
 
         -- Now each thread performs a traversal of the tile and
         -- updates its accumulator.
@@ -901,16 +898,16 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
       else do
         group_size <-
           letSubExp "computed_group_size" $
-            BasicOp $ BinOp (SMin Int32) (unCount (segGroupSize initial_lvl)) kdim
+            BasicOp $ BinOp (SMin Int64) (unCount (segGroupSize initial_lvl)) kdim
 
         -- How many groups we need to exhaust the innermost dimension.
         ldim <-
           letSubExp "ldim" $
-            BasicOp $ BinOp (SDivUp Int32 Unsafe) kdim group_size
+            BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim group_size
 
         num_groups <-
           letSubExp "computed_num_groups"
-            =<< foldBinOp (Mul Int32 OverflowUndef) ldim (map snd dims_on_top)
+            =<< foldBinOp (Mul Int64 OverflowUndef) ldim (map snd dims_on_top)
 
         return
           ( SegGroup (Count num_groups) (Count group_size) SegNoVirt,
@@ -922,8 +919,8 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
     Tiling
       { tilingSegMap = \desc lvl' manifest f -> segMap1D desc lvl' manifest $ \ltid -> do
           letBindNames [gtid]
-            =<< toExp (v32 gid * pe32 tile_size + v32 ltid)
-          f (untyped $ v32 gtid .<. pe32 kdim) [DimFix $ Var ltid],
+            =<< toExp (le64 gid * pe64 tile_size + le64 ltid)
+          f (untyped $ le64 gtid .<. pe64 kdim) [DimFix $ Var ltid],
         tilingReadTile =
           readTile1D tile_size gid gtid (segNumGroups lvl) (segGroupSize lvl),
         tilingProcessTile =
@@ -934,7 +931,7 @@ tiling1d dims_on_top initial_lvl gtid kdim w = do
         tilingTileShape = Shape [tile_size],
         tilingNumWholeTiles =
           letSubExp "num_whole_tiles" $
-            BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size,
+            BasicOp $ BinOp (SQuot Int64 Unsafe) w tile_size,
         tilingLevel = lvl,
         tilingSpace = space
       }
@@ -990,9 +987,9 @@ reconstructGtids2D ::
 reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y) = do
   -- Reconstruct the original gtids from gid_x/gid_y and ltid_x/ltid_y.
   letBindNames [gtid_x]
-    =<< toExp (v32 gid_x * pe32 tile_size + v32 ltid_x)
+    =<< toExp (le64 gid_x * pe64 tile_size + le64 ltid_x)
   letBindNames [gtid_y]
-    =<< toExp (v32 gid_y * pe32 tile_size + v32 ltid_y)
+    =<< toExp (le64 gid_y * pe64 tile_size + le64 ltid_y)
 
 readTile2D ::
   (SubExp, SubExp) ->
@@ -1015,10 +1012,10 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
     $ \(ltid_x, ltid_y) -> do
       i <-
         letSubExp "i"
-          =<< toExp (pe32 tile_id * pe32 tile_size + v32 ltid_x)
+          =<< toExp (pe64 tile_id * pe64 tile_size + le64 ltid_x)
       j <-
         letSubExp "j"
-          =<< toExp (pe32 tile_id * pe32 tile_size + v32 ltid_y)
+          =<< toExp (pe64 tile_id * pe64 tile_size + le64 ltid_y)
 
       reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
       addPrivStms [DimFix $ Var ltid_x, DimFix $ Var ltid_y] privstms
@@ -1041,11 +1038,11 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size num_groups
                   last $
                     rearrangeShape
                       perm
-                      [ isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y,
-                        isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x
+                      [ le64 gtid_y .<. pe64 kdim_y,
+                        le64 gtid_x .<. pe64 kdim_x
                       ]
             eIf
-              (toExp $ pe32 idx .<. pe32 w .&&. othercheck)
+              (toExp $ pe64 idx .<. pe64 w .&&. othercheck)
               (eBody [return $ BasicOp $ Index arr [DimFix idx]])
               (eBody [eBlank tile_t])
 
@@ -1116,9 +1113,7 @@ processTile2D
         fmap (map Var) $
           letTupExp "acc"
             =<< eIf
-              ( toExp $
-                  isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x
-                    .&&. isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y
+              ( toExp $ le64 gtid_x .<. pe64 kdim_x .&&. le64 gtid_y .<. pe64 kdim_y
               )
               (eBody [pure $ Op $ OtherOp $ Screma actual_tile_size form' tiles'])
               (resultBodyM thread_accs)
@@ -1158,11 +1153,11 @@ processResidualTile2D
     -- the whole tiles.
     residual_input <-
       letSubExp "residual_input" $
-        BasicOp $ BinOp (SRem Int32 Unsafe) w tile_size
+        BasicOp $ BinOp (SRem Int64 Unsafe) w tile_size
 
     letTupExp "acc_after_residual"
       =<< eIf
-        (toExp $ pe32 residual_input .==. 0)
+        (toExp $ pe64 residual_input .==. 0)
         (resultBodyM $ map Var accs)
         (nonemptyTile residual_input)
     where
@@ -1187,8 +1182,8 @@ processResidualTile2D
             BasicOp $
               Index
                 tile
-                [ DimSlice (intConst Int32 0) residual_input (intConst Int32 1),
-                  DimSlice (intConst Int32 0) residual_input (intConst Int32 1)
+                [ DimSlice (intConst Int64 0) residual_input (intConst Int64 1),
+                  DimSlice (intConst Int64 0) residual_input (intConst Int64 1)
                 ]
 
         -- Now each thread performs a traversal of the tile and
@@ -1215,19 +1210,19 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
 
   tile_size_key <- nameFromString . pretty <$> newVName "tile_size"
   tile_size <- letSubExp "tile_size" $ Op $ SizeOp $ GetSize tile_size_key SizeTile
-  group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) tile_size tile_size
+  group_size <- letSubExp "group_size" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) tile_size tile_size
 
   num_groups_x <-
     letSubExp "num_groups_x" $
-      BasicOp $ BinOp (SDivUp Int32 Unsafe) kdim_x tile_size
+      BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim_x tile_size
   num_groups_y <-
     letSubExp "num_groups_y" $
-      BasicOp $ BinOp (SDivUp Int32 Unsafe) kdim_y tile_size
+      BasicOp $ BinOp (SDivUp Int64 Unsafe) kdim_y tile_size
 
   num_groups <-
     letSubExp "num_groups_top"
       =<< foldBinOp
-        (Mul Int32 OverflowUndef)
+        (Mul Int64 OverflowUndef)
         num_groups_x
         (num_groups_y : map snd dims_on_top)
 
@@ -1244,8 +1239,8 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
             reconstructGtids2D tile_size (gtid_x, gtid_y) (gid_x, gid_y) (ltid_x, ltid_y)
             f
               ( untyped $
-                  isInt32 (LeafExp gtid_x int32) .<. pe32 kdim_x
-                    .&&. isInt32 (LeafExp gtid_y int32) .<. pe32 kdim_y
+                  le64 gtid_x .<. pe64 kdim_x
+                    .&&. le64 gtid_y .<. pe64 kdim_y
               )
               [DimFix $ Var ltid_x, DimFix $ Var ltid_y],
         tilingReadTile = readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size (segNumGroups lvl) (segGroupSize lvl),
@@ -1255,7 +1250,7 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
         tilingTileShape = Shape [tile_size, tile_size],
         tilingNumWholeTiles =
           letSubExp "num_whole_tiles" $
-            BasicOp $ BinOp (SQuot Int32 Unsafe) w tile_size,
+            BasicOp $ BinOp (SQuot Int64 Unsafe) w tile_size,
         tilingLevel = lvl,
         tilingSpace = space
       }

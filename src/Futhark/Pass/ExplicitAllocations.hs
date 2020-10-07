@@ -273,14 +273,14 @@ elemSize = primByteSize . elemType
 
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
-  untyped $ foldl' (*) (elemSize t) $ map (sExt64 . pe32) (arrayDims t)
+  untyped $ foldl' (*) (elemSize t) $ map pe64 (arrayDims t)
 
 arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   dims <- mapM dimAllocationSize (arrayDims t)
-  let dim_prod_i32 = product $ map (sExt64 . pe32) dims
+  let dim_prod_i64 = product $ map pe64 dims
       elm_size_i64 = primByteSize $ elemType t
-  return $ untyped $ dim_prod_i32 * elm_size_i64
+  return $ untyped $ dim_prod_i64 * elm_size_i64
 
 arraySizeInBytes :: Allocator lore m => Type -> m SubExp
 arraySizeInBytes = computeSize "bytes" <=< arraySizeInBytesExpM
@@ -330,7 +330,7 @@ allocsForPattern ::
       [PatElem lore]
     )
 allocsForPattern sizeidents validents rts hints = do
-  let sizes' = [PatElem size $ MemPrim int32 | size <- map identName sizeidents]
+  let sizes' = [PatElem size $ MemPrim int64 | size <- map identName sizeidents]
   (vals, (exts, mems)) <-
     runWriterT $
       forM (zip3 validents rts hints) $ \(ident, rt, hint) -> do
@@ -414,7 +414,7 @@ allocsForPattern sizeidents validents rts hints = do
               size_exts
               sizeidents
           substs = M.fromList $ new_substs <> size_substs
-      ixfn <- instantiateIxFun $ IxFun.substituteInIxFun (fmap isInt32 substs) ext_ixfn
+      ixfn <- instantiateIxFun $ IxFun.substituteInIxFun (fmap isInt64 substs) ext_ixfn
 
       return (patels, ixfn)
 
@@ -446,8 +446,8 @@ summaryForBindage t (Hint ixfun space) = do
     computeSize "bytes" $
       untyped $
         product
-          [ product $ map sExt64 $ IxFun.base ixfun,
-            fromIntegral (primByteSize (elemType t) :: Int64)
+          [ product $ IxFun.base ixfun,
+            primByteSize (elemType t)
           ]
   m <- allocateMemory "mem" bytes space
   return $ MemArray bt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
@@ -461,7 +461,7 @@ lookupMemSpace v = do
 
 directIxFun :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIxFun bt shape u mem t =
-  let ixf = IxFun.iota $ map pe32 $ arrayDims t
+  let ixf = IxFun.iota $ map pe64 $ arrayDims t
    in MemArray bt shape u $ ArrayIn mem ixf
 
 allocInFParams ::
@@ -488,7 +488,7 @@ allocInFParam param pspace =
   case paramDeclType param of
     Array bt shape u -> do
       let memname = baseString (paramName param) <> "_mem"
-          ixfun = IxFun.iota $ map pe32 $ shapeDims shape
+          ixfun = IxFun.iota $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
       tell ([], [Param mem $ MemMem pspace])
       return param {paramDec = MemArray bt shape u $ ArrayIn mem ixfun}
@@ -541,8 +541,8 @@ allocInMergeParams merge m = do
               ( \_ -> do
                   vname <- lift $ newVName "ctx_param_ext"
                   return
-                    ( Param vname $ MemPrim int32,
-                      fmap Free $ pe32 $ Var vname
+                    ( Param vname $ MemPrim int64,
+                      fmap Free $ pe64 $ Var vname
                     )
               )
               substs
@@ -573,7 +573,7 @@ existentializeArray ::
   (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
   Space ->
   VName ->
-  AllocM fromlore tolore (SubExp, ExtIxFun, [TPrimExp Int32 VName], VName)
+  AllocM fromlore tolore (SubExp, ExtIxFun, [TPrimExp Int64 VName], VName)
 existentializeArray space v = do
   (mem', ixfun) <- lookupArraySummary v
   sp <- lookupMemSpace mem'
@@ -604,7 +604,7 @@ ensureArrayIn space (Var v) = do
       <$> mapM
         ( \s -> do
             vname <- lift $ letExp "ctx_val" =<< toExp s
-            return (Var vname, fmap Free $ primExpFromSubExp int32 $ Var vname)
+            return (Var vname, fmap Free $ primExpFromSubExp int64 $ Var vname)
         )
         substs
 
@@ -726,8 +726,8 @@ memoryInDeclExtType ts = evalState (mapM addMem ts) $ startOfFreeIDRange ts
           ReturnsNewBlock DefaultSpace i $
             IxFun.iota $ map convert $ shapeDims shape
 
-    convert (Ext i) = le32 $ Ext i
-    convert (Free v) = Free <$> pe32 v
+    convert (Ext i) = le64 $ Ext i
+    convert (Free v) = Free <$> pe64 v
 
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
 startOfFreeIDRange = S.size . shapeContext
@@ -877,7 +877,7 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
     generalize ::
       (Maybe Space, Maybe IxFun) ->
       (Maybe Space, Maybe IxFun) ->
-      (Maybe Space, Maybe (ExtIxFun, [(TPrimExp Int32 VName, TPrimExp Int32 VName)]))
+      (Maybe Space, Maybe (ExtIxFun, [(TPrimExp Int64 VName, TPrimExp Int64 VName)]))
     generalize (Just sp1, Just ixf1) (Just sp2, Just ixf2) =
       if sp1 /= sp2
         then (Just sp1, Nothing)
@@ -938,7 +938,7 @@ addResCtxInIfBody ::
   [ExtType] ->
   Body tolore ->
   [Maybe Space] ->
-  [Maybe (ExtIxFun, [TPrimExp Int32 VName])] ->
+  [Maybe (ExtIxFun, [TPrimExp Int64 VName])] ->
   AllocM fromlore tolore (Body tolore, [BodyReturns])
 addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
   let num_vals = length ifrets
@@ -1006,8 +1006,8 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
     inspect (Prim pt) _ = MemPrim pt
     inspect (Mem space) _ = MemMem space
 
-    convert (Ext i) = le32 (Ext i)
-    convert (Free v) = Free <$> pe32 v
+    convert (Ext i) = le64 (Ext i)
+    convert (Free v) = Free <$> pe64 v
 
     adjustExtV :: Int -> Ext VName -> Ext VName
     adjustExtV _ (Free v) = Free v
@@ -1050,10 +1050,10 @@ allocInLoopForm (ForLoop i it n loopvars) =
       (mem, ixfun) <- lookupArraySummary a
       case paramType p of
         Array bt shape u -> do
-          dims <- map pe32 . arrayDims <$> lookupType a
+          dims <- map pe64 . arrayDims <$> lookupType a
           let ixfun' =
                 IxFun.slice ixfun $
-                  fullSliceNum dims [DimFix $ le32 i]
+                  fullSliceNum dims [DimFix $ le64 i]
           return (p {paramDec = MemArray bt shape u $ ArrayIn mem ixfun'}, a)
         Prim bt ->
           return (p {paramDec = MemPrim bt}, a)

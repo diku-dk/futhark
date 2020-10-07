@@ -13,4 +13,4 @@
 -- structure distributed { Iota 0 }
 
 let main(n: i32): i32 =
-  reduce (+) 0 (iota(n))
+  reduce (+) 0 (0..<n)

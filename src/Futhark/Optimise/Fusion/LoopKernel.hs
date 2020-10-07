@@ -442,7 +442,7 @@ fuseSOACwithKer unfus_set outVars soac_p soac_p_consumed ker = do
                   { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
                     lambdaBody = body',
                     lambdaReturnType =
-                      replicate (c_num_buckets + p_num_buckets) (Prim int32)
+                      replicate (c_num_buckets + p_num_buckets) (Prim int64)
                         ++ drop c_num_buckets (lambdaReturnType lam_c)
                         ++ drop p_num_buckets (lambdaReturnType lam_p)
                   }
@@ -844,7 +844,7 @@ pullReshape (SOAC.Screma _ form inps) ots
     SOAC.Reshape cs shape SOAC.:< ots' <- SOAC.viewf ots,
     all primType $ lambdaReturnType maplam = do
     let mapw' = case reverse $ newDims shape of
-          [] -> intConst Int32 0
+          [] -> intConst Int64 0
           d : _ -> d
         inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) inps
         inputTypes = map SOAC.inputType inputs'

@@ -38,4 +38,4 @@
 -- }
 
 let main [m][n] (hist : *[n]f32) (is: [m]i32) (image : [m]f32) : [n]f32 =
-  reduce_by_index hist (+) 0f32 is image
+  reduce_by_index hist (+) 0f32 (map i64.i32 is) image

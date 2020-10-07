@@ -1,14 +1,14 @@
 -- ==
 -- input {
---   42
+--   42i64
 -- }
 -- output {
---   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+--   [0i64, 1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64, 9i64]
 -- }
-let f(b_1: *[]i32): *[]i32 =
+let f(b_1: *[]i64): *[]i64 =
   iota(10)
 
-let main(n: i32): []i32 =
+let main(n: i64): []i64 =
   let a = iota(n)
   let x = if n == 0 then a else f(a) in
   x

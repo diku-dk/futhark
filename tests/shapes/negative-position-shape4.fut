@@ -1,6 +1,6 @@
 -- ==
--- input { 2 } output { [2i32, 2i32] }
+-- input { 2i64 } output { [2i64, 2i64] }
 
-let f [n] (x: i32) : [n]i32 = replicate n x
+let f [n] (x: i64) : [n]i64 = replicate n x
 
-let main (x: i32) : [x]i32 = f x
+let main (x: i64) : [x]i64 = f x

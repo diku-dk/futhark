@@ -160,7 +160,7 @@ unstreamLambda attrs nes lam = do
   body <- runBodyBinder $
     localScope (scopeOfLParams inp_params) $ do
       letBindNames [paramName chunk_param] $
-        BasicOp $ SubExp $ intConst Int32 1
+        BasicOp $ SubExp $ intConst Int64 1
 
       forM_ (zip acc_params nes) $ \(p, ne) ->
         letBindNames [paramName p] $ BasicOp $ SubExp ne
@@ -177,7 +177,7 @@ unstreamLambda attrs nes lam = do
         letSubExp "chunk" $
           BasicOp $
             Index v $
-              fullSlice v_t [DimFix $ intConst Int32 0]
+              fullSlice v_t [DimFix $ intConst Int64 0]
 
       pure $ resultBody $ red_res <> map_res'
 

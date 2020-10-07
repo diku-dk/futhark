@@ -17,7 +17,7 @@ module Futhark.IR.Kernels.Sizes
 where
 
 import Control.Category
-import Data.Int (Int32)
+import Data.Int (Int64)
 import Data.Traversable
 import Futhark.IR.Prop.Names (FreeIn)
 import Futhark.Transform.Substitute
@@ -37,7 +37,7 @@ type KernelPath = [(Name, Bool)]
 -- impose constraints on the valid values.
 data SizeClass
   = -- | A threshold with an optional default.
-    SizeThreshold KernelPath (Maybe Int32)
+    SizeThreshold KernelPath (Maybe Int64)
   | SizeGroup
   | SizeNumGroups
   | SizeTile
@@ -45,7 +45,7 @@ data SizeClass
     -- maximum can be handy.
     SizeLocalMemory
   | -- | A bespoke size with a default.
-    SizeBespoke Name Int32
+    SizeBespoke Name Int64
   deriving (Eq, Ord, Show, Generic)
 
 instance SexpIso SizeClass where
@@ -72,7 +72,7 @@ instance Pretty SizeClass where
   ppr (SizeBespoke k _) = ppr k
 
 -- | The default value for the size.  If 'Nothing', that means the backend gets to decide.
-sizeDefault :: SizeClass -> Maybe Int32
+sizeDefault :: SizeClass -> Maybe Int64
 sizeDefault (SizeThreshold _ x) = x
 sizeDefault (SizeBespoke _ x) = Just x
 sizeDefault _ = Nothing

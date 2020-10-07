@@ -576,9 +576,9 @@ instance MonadTypeChecker TermTypeM where
 
   checkNamedDim loc v = do
     (v', t) <- lookupVar loc v
-    onFailure (CheckingRequired [Scalar $ Prim $ Signed Int32] (toStruct t)) $
+    onFailure (CheckingRequired [Scalar $ Prim $ Signed Int64] (toStruct t)) $
       unify (mkUsage loc "use as array size") (toStruct t) $
-        Scalar $ Prim $ Signed Int32
+        Scalar $ Prim $ Signed Int64
     return v'
 
   typeError loc notes s = do
@@ -635,7 +635,7 @@ checkTypeDecl tdecl = do
   return tdecl'
   where
     observeDim (NamedDim v) =
-      observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int32) mempty
+      observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int64) mempty
     observeDim _ = return ()
 
 -- | Instantiate a type scheme with fresh type variables for its type
@@ -983,7 +983,7 @@ bindingTypeParams tparams =
 
 typeParamIdent :: TypeParam -> Maybe Ident
 typeParamIdent (TypeParamDim v loc) =
-  Just $ Ident v (Info $ Scalar $ Prim $ Signed Int32) loc
+  Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
 typeParamIdent _ = Nothing
 
 bindingIdent ::
@@ -1086,13 +1086,13 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
     -- Pattern match some known slices to be non-existential.
     adjustDims (DimSlice i j stride : idxes') (_ : dims)
       | refine_sizes,
-        maybe True ((== Just 0) . isInt32) i,
+        maybe True ((== Just 0) . isInt64) i,
         Just j' <- maybeDimFromExp =<< j,
-        maybe True ((== Just 1) . isInt32) stride =
+        maybe True ((== Just 1) . isInt64) stride =
         (j' :) <$> adjustDims idxes' dims
     adjustDims (DimSlice Nothing Nothing stride : idxes') (d : dims)
       | refine_sizes,
-        maybe True (maybe False ((== 1) . abs) . isInt32) stride =
+        maybe True (maybe False ((== 1) . abs) . isInt64) stride =
         (d :) <$> adjustDims idxes' dims
     adjustDims (DimSlice i j stride : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
@@ -1290,21 +1290,26 @@ checkExp (Range start maybe_step end _ loc) = do
       Just <$> (unifies "use in range expression" start_t =<< checkExp step)
 
   let unifyRange e = unifies "use in range expression" start_t =<< checkExp e
-  end' <- case end of
-    DownToExclusive e -> DownToExclusive <$> unifyRange e
-    UpToExclusive e -> UpToExclusive <$> unifyRange e
-    ToInclusive e -> ToInclusive <$> unifyRange e
+  end' <- traverse unifyRange end
+
+  end_t <- case end' of
+    DownToExclusive e -> expType e
+    ToInclusive e -> expType e
+    UpToExclusive e -> expType e
 
   -- Special case some ranges to give them a known size.
   let dimFromBound = dimFromExp (SourceBound . bareExp)
   (dim, retext) <-
-    case (isInt32 start', isInt32 <$> maybe_step', end') of
-      (Just 0, Just (Just 1), UpToExclusive end'') ->
-        dimFromBound end''
-      (Just 0, Nothing, UpToExclusive end'') ->
-        dimFromBound end''
-      (Just 1, Just (Just 2), ToInclusive end'') ->
-        dimFromBound end''
+    case (isInt64 start', isInt64 <$> maybe_step', end') of
+      (Just 0, Just (Just 1), UpToExclusive end'')
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+          dimFromBound end''
+      (Just 0, Nothing, UpToExclusive end'')
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+          dimFromBound end''
+      (Just 1, Just (Just 2), ToInclusive end'')
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+          dimFromBound end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
         return (NamedDim $ qualName d, Just d)
@@ -2282,7 +2287,7 @@ checkDimIndex (DimSlice i j s) =
   where
     check =
       maybe (return Nothing) $
-        fmap Just . unifies "use as index" (Scalar $ Prim $ Signed Int32) <=< checkExp
+        fmap Just . unifies "use as index" (Scalar $ Prim $ Signed Int64) <=< checkExp
 
 sequentially :: TermTypeM a -> (a -> Occurences -> TermTypeM b) -> TermTypeM b
 sequentially m1 m2 = do
@@ -2386,7 +2391,7 @@ checkApply
 
       return (tp1', tp2'', argext, ext)
     where
-      sizeSubst (Scalar (Prim (Signed Int32))) e = dimFromArg fname e
+      sizeSubst (Scalar (Prim (Signed Int64))) e = dimFromArg fname e
       sizeSubst _ _ = return (AnyDim, Nothing)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
@@ -2415,17 +2420,17 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
       | prev_applied == 1 = "argument"
       | otherwise = "arguments"
 
-isInt32 :: Exp -> Maybe Int32
-isInt32 (Literal (SignedValue (Int32Value k')) _) = Just $ fromIntegral k'
-isInt32 (IntLit k' _ _) = Just $ fromInteger k'
-isInt32 (Negate x _) = negate <$> isInt32 x
-isInt32 _ = Nothing
+isInt64 :: Exp -> Maybe Int64
+isInt64 (Literal (SignedValue (Int64Value k')) _) = Just $ fromIntegral k'
+isInt64 (IntLit k' _ _) = Just $ fromInteger k'
+isInt64 (Negate x _) = negate <$> isInt64 x
+isInt64 _ = Nothing
 
 maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
 maybeDimFromExp (Var v _ _) = Just $ NamedDim v
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstDim . fromIntegral <$> isInt32 e
+maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
 dimFromExp rf (Parens e _) = dimFromExp rf e

@@ -659,13 +659,13 @@ instance Decorations lore => ST.IndexOp (SOAC lore) where
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
 typeCheckSOAC (Stream size form lam arrexps) = do
   let accexps = getStreamAccums form
-  TC.require [Prim int32] size
+  TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
   _ <- TC.checkSOACArrayArgs size arrexps
   let chunk = head $ lambdaParams lam
   let asArg t = (t, mempty)
-      inttp = Prim int32
+      inttp = Prim int64
       lamarrs' = map (`setOuterSize` Var (paramName chunk)) arrargs
   let acc_len = length accexps
   let lamrtp = take acc_len $ lambdaReturnType lam
@@ -698,7 +698,7 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   --   1. The number of index types must be equal to the number of value types
   --      and the number of writes to arrays in @as@.
   --
-  --   2. Each index type must have the type i32.
+  --   2. Each index type must have the type i64.
   --
   --   3. Each array in @as@ and the value types must have the same type
   --
@@ -712,7 +712,7 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   -- Code:
 
   -- First check the input size.
-  TC.require [Prim int32] w
+  TC.require [Prim int64] w
 
   -- 0.
   let (_as_ws, as_ns, _as_vs) = unzip3 as
@@ -727,12 +727,12 @@ typeCheckSOAC (Scatter w lam ivs as) = do
 
   -- 2.
   forM_ rtsI $ \rtI ->
-    unless (Prim int32 == rtI) $
-      TC.bad $ TC.TypeError "Scatter: Index return type must be i32."
+    unless (Prim int64 == rtI) $
+      TC.bad $ TC.TypeError "Scatter: Index return type must be i64."
 
   forM_ (zip (chunks as_ns rtsV) as) $ \(rtVs, (aw, _, a)) -> do
-    -- All lengths must have type i32.
-    TC.require [Prim int32] aw
+    -- All lengths must have type i64.
+    TC.require [Prim int64] aw
 
     -- 3.
     forM_ rtVs $ \rtV -> TC.requireI [rtV `arrayOfRow` aw] a
@@ -744,13 +744,13 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   arrargs <- TC.checkSOACArrayArgs w ivs
   TC.checkLambda lam arrargs
 typeCheckSOAC (Hist len ops bucket_fun imgs) = do
-  TC.require [Prim int32] len
+  TC.require [Prim int64] len
 
   -- Check the operators.
   forM_ ops $ \(HistOp dest_w rf dests nes op) -> do
     nes' <- mapM TC.checkArg nes
-    TC.require [Prim int32] dest_w
-    TC.require [Prim int32] rf
+    TC.require [Prim int64] dest_w
+    TC.require [Prim int64] rf
 
     -- Operator type must match the type of neutral elements.
     TC.checkLambda op $ map TC.noArgAliases $ nes' ++ nes'
@@ -775,7 +775,7 @@ typeCheckSOAC (Hist len ops bucket_fun imgs) = do
   -- Return type of bucket function must be an index for each
   -- operation followed by the values to write.
   nes_ts <- concat <$> mapM (mapM subExpType . histNeutral) ops
-  let bucket_ret_t = replicate (length ops) (Prim int32) ++ nes_ts
+  let bucket_ret_t = replicate (length ops) (Prim int64) ++ nes_ts
   unless (bucket_ret_t == lambdaReturnType bucket_fun) $
     TC.bad $
       TC.TypeError $
@@ -784,7 +784,7 @@ typeCheckSOAC (Hist len ops bucket_fun imgs) = do
           ++ " but should have type "
           ++ prettyTuple bucket_ret_t
 typeCheckSOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
-  TC.require [Prim int32] w
+  TC.require [Prim int64] w
   arrs' <- TC.checkSOACArrayArgs w arrs
   TC.checkLambda map_lam $ map TC.noArgAliases arrs'
 

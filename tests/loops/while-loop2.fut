@@ -1,16 +1,16 @@
 -- While-loop with a condition that consumes something that it has allocated itself.
 -- ==
 -- input {
---   [5,4,2,8,1,9,9]
---   4
+--   [5i64,4i64,2i64,8i64,1i64,9i64,9i64]
+--   4i64
 -- }
 -- output {
---   [5, 4, 2, 8, 6, 9, 9]
+--   [5i64, 4i64, 2i64, 8i64, 6i64, 9i64, 9i64]
 -- }
 
-let pointlessly_consume(x: i32, a: *[]i32): bool =
+let pointlessly_consume(x: i64, a: *[]i64): bool =
   x < reduce (+) 0 a
 
-let main (a: *[]i32) (i: i32): []i32 =
+let main (a: *[]i64) (i: i64): []i64 =
   loop (a) while pointlessly_consume(a[i], iota(i)) do
     let a[i] = a[i] + 1 in a

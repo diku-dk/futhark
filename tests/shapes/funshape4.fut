@@ -1,9 +1,9 @@
 -- Left-side operands should be evaluated before before right-hand
 -- operands.
 -- ==
--- input { 2 } output { [[2,2,2]] }
+-- input { 2i64 } output { [[2i64,2i64,2i64]] }
 
-let f (x: i32) : [][]i32 =
+let f (x: i64) : [][]i64 =
   [replicate (x+1) 0]
 
 let main x =

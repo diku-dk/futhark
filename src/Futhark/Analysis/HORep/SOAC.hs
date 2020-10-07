@@ -526,7 +526,7 @@ soacToStream ::
   SOAC lore ->
   m (SOAC lore, [Ident])
 soacToStream soac = do
-  chunk_param <- newParam "chunk" $ Prim int32
+  chunk_param <- newParam "chunk" $ Prim int64
   let chvar = Futhark.Var $ paramName chunk_param
       (lam, inps) = (lambda soac, inputs soac)
       w = width soac
@@ -579,7 +579,7 @@ soacToStream soac = do
         lastel_tmp_ids <- mapM (newIdent "lstel_tmp") accrtps
         empty_arr <- newIdent "empty_arr" $ Prim Bool
         inpacc_ids <- mapM (newParam "inpacc") accrtps
-        outszm1id <- newIdent "szm1" $ Prim int32
+        outszm1id <- newIdent "szm1" $ Prim int64
         -- 1. let (scan0_ids,map_resids)  = scanomap(scan_lam,nes,map_lam,a_ch)
         let insbnd =
               mkLet [] (scan0_ids ++ map_resids) $
@@ -591,17 +591,17 @@ soacToStream soac = do
               mkLet [] [outszm1id] $
                 BasicOp $
                   BinOp
-                    (Sub Int32 OverflowUndef)
+                    (Sub Int64 OverflowUndef)
                     (Futhark.Var $ paramName chunk_param)
-                    (constant (1 :: Int32))
+                    (constant (1 :: Int64))
             -- 3. let lasteel_ids = ...
             empty_arr_bnd =
               mkLet [] [empty_arr] $
                 BasicOp $
                   CmpOp
-                    (CmpSlt Int32)
+                    (CmpSlt Int64)
                     (Futhark.Var $ identName outszm1id)
-                    (constant (0 :: Int32))
+                    (constant (0 :: Int64))
             leltmpbnds =
               zipWith
                 ( \lid arrid ->

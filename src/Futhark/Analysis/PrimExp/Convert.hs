@@ -7,6 +7,8 @@ module Futhark.Analysis.PrimExp.Convert
     primExpFromSubExp,
     pe32,
     le32,
+    pe64,
+    le64,
     primExpFromSubExpM,
     replaceInPrimExp,
     replaceInPrimExpM,
@@ -92,6 +94,14 @@ pe32 = isInt32 . primExpFromSubExp int32
 le32 :: a -> TPrimExp Int32 a
 le32 = isInt32 . flip LeafExp int32
 
+-- | Shorthand for constructing a 'TPrimExp' of type 'Int64'.
+pe64 :: SubExp -> TPrimExp Int64 VName
+pe64 = isInt64 . primExpFromSubExp int64
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Int64', from a leaf.
+le64 :: a -> TPrimExp Int64 a
+le64 = isInt64 . flip LeafExp int64
+
 -- | Applying a monadic transformation to the leaves in a 'PrimExp'.
 replaceInPrimExpM ::
   Monad m =>
@@ -133,9 +143,9 @@ substituteInPrimExp tab = replaceInPrimExp $ \v t ->
   fromMaybe (LeafExp v t) $ M.lookup v tab
 
 -- | Convert a 'SubExp' slice to a 'PrimExp' slice.
-primExpSlice :: Slice SubExp -> Slice (TPrimExp Int32 VName)
-primExpSlice = map $ fmap $ isInt32 . primExpFromSubExp int32
+primExpSlice :: Slice SubExp -> Slice (TPrimExp Int64 VName)
+primExpSlice = map $ fmap pe64
 
 -- | Convert a 'PrimExp' slice to a 'SubExp' slice.
-subExpSlice :: MonadBinder m => Slice (TPrimExp Int32 VName) -> m (Slice SubExp)
+subExpSlice :: MonadBinder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
 subExpSlice = mapM $ traverse $ toSubExp "slice"

@@ -3,6 +3,6 @@
 -- ==
 -- structure distributed { SegMap 1 }
 
-let main (n: i32) (accs: []i32) =
+let main (n: i64) (accs: []i64) =
   let ys = map (2**) (iota n)
-  in map (\(acc:i32) -> loop acc for y in ys do acc * y) accs
+  in map (\acc -> loop acc for y in ys do acc * y) accs

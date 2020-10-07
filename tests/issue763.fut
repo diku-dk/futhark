@@ -17,7 +17,7 @@ let dotprod(v1: vector, v2: vector): f64 =
 let square(v: vector): f64 =
 	dotprod(v,v)
 
-let init_matrix 't (nx: i32)(ny: i32)(x: t): [nx][ny]t =
+let init_matrix 't (nx: i64)(ny: i64)(x: t): [nx][ny]t =
 	map( \(_) ->
 		map( \(_):t ->
 			x
@@ -39,7 +39,7 @@ let init_f_in [nx][ny] (rho: [nx][ny]f64, u: [nx][ny]vector, g: vector, tau: f64
 		) (0..<ny)
 	) (0..<nx)
 
-let main (nx: i32)(ny: i32)(g_x: f64)(g_y: f64)(tau: f64) =
+let main (nx: i64)(ny: i64)(g_x: f64)(g_y: f64)(tau: f64) =
 	let g: vector 	= (g_x, g_y)
 	let u 			= init_matrix(nx)(ny)((0f64, 0f64))
 	let rho 		= init_matrix(nx)(ny)(1f64)

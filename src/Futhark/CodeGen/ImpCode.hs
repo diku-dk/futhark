@@ -366,7 +366,7 @@ bytes = Count
 
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
-withElemType :: Count Elements (TExp Int32) -> PrimType -> Count Bytes (TExp Int64)
+withElemType :: Count Elements (TExp Int64) -> PrimType -> Count Bytes (TExp Int64)
 withElemType (Count e) t =
   bytes $ sExt64 e * isInt64 (LeafExp (SizeOf t) (IntType Int64))
 

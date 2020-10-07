@@ -217,6 +217,7 @@ defError (ErrorMsg parts) stacktrace = do
   free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
   let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
       onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+      onPart (ErrorInt64 x) = ("%lld",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
   items

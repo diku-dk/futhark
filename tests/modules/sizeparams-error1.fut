@@ -5,12 +5,12 @@
 type ints [n] = [n]i32
 
 module type MT = {
-  val k: i32
+  val k: i64
   type k_ints = ints [k]
 }
 
 module M_k2: MT = {
-  let k = 2
+  let k = 2i64
   type k_ints = ints [2]
 }
 

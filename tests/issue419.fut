@@ -21,7 +21,7 @@ let sgmPrefSum [n] (flags: [n]i32) (data: [n]i32) : [n]i32 =
             (zip flags data))).1
 
 let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
-    let all_data = scatter (replicate q 0) all_perm all_data0
+    let all_data = scatter (replicate q 0) (map i64.i32 all_perm) all_data0
     let len   = q
     let cur_shape = replicate 0 0
     let goOn  = true
@@ -39,18 +39,18 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
         let flags = map (\i -> if i == 0 then 1
                                else if ini_sgms[i-1] == ini_sgms[i]
                                     then 0 else 1
-                        ) (iota len)
+                        ) (map i32.i64 (iota len))
         let ones  = replicate len 1
         let tmp   = sgmPrefSum flags ones
         let (inds1,inds2,vals) = unzip3 (
-            map (\ i -> if (i == len-1) || (flags[i+1] == 1)
+            map (\ i -> if (i == i32.i64 len-1) || (flags[i+1] == 1)
                              -- end of segment
                              then (i+1-tmp[i], ini_sgms[i], tmp[i])
                              else (-1,-1,0)
-                ) (iota len)
+                ) (map i32.i64 (iota len))
           )
-        let flags = scatter (replicate len 0) inds1 vals
-        let shapes= scatter (replicate num_sgms 0) inds2 vals
+        let flags = scatter (replicate len 0) (map i64.i32 inds1) vals
+        let shapes= scatter (replicate (i64.i32 num_sgms) 0) (map i64.i32 inds2) vals
 
         -- 2. try validate: whatever does not fit move it as a first segment
         let scan_data = sgmPrefSum flags data
@@ -65,7 +65,7 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
                          then 1 -- this start of segment should be moved
                          else 0
                     else 0
-                ) (iota len)
+                ) (map i32.i64 (iota len))
 
         let num_moves = reduce (+) 0 moves
         in
@@ -97,4 +97,4 @@ let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
       in  all_perm
 
 let main [arr_len] (arr : [arr_len]i32) =
-  bin_packing_ffh 10 (iota arr_len) arr
+  bin_packing_ffh 10 (map i32.i64 (iota arr_len)) arr

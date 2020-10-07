@@ -3,8 +3,8 @@
 
 -- ==
 -- entry: test_length
--- input { empty([0]i32) } output { 0 }
--- input { [1,2,3] } output { 3 }
+-- input { empty([0]i32) } output { 0i64 }
+-- input { [1,2,3] } output { 3i64 }
 
 entry test_length (x: []i32) = length x
 
@@ -55,7 +55,7 @@ entry test_last (x: []bool) = last x
 -- input { 1 [true,false] } output { [true] }
 -- input { 2 [true,false,true] } output { [true,false] }
 
-entry test_take (i: i32) (x: []bool) = take i x
+entry test_take (i: i32) (x: []bool) = take (i64.i32 i) x
 
 -- ==
 -- entry: test_drop
@@ -66,7 +66,7 @@ entry test_take (i: i32) (x: []bool) = take i x
 -- input { 1 [true,false] } output { [false] }
 -- input { 2 [true,false,true] } output { [true] }
 
-entry test_drop (i: i32) (x: []bool) = drop i x
+entry test_drop (i: i32) (x: []bool) = drop (i64.i32 i) x
 
 -- ==
 -- entry: test_reverse
@@ -108,10 +108,10 @@ entry test_flatten (xs: [][]i32) = flatten xs
 
 -- ==
 -- entry: test_foldl
--- input { 10 } output { -45 }
-entry test_foldl (n: i32) = foldl (-) 0 (iota n)
+-- input { 10i64 } output { -45i64 }
+entry test_foldl n = foldl (-) 0 (iota n)
 
 -- ==
 -- entry: test_foldr
--- input { 10 } output { -5 }
-entry test_foldr (n: i32) = foldr (-) 0 (iota n)
+-- input { 10i64 } output { -5i64 }
+entry test_foldr n = foldr (-) 0 (iota n)

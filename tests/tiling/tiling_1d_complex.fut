@@ -17,7 +17,8 @@ let closest_point (p1: (i32, f32)) (p2: (i32, f32)): (i32, f32) =
 
 let find_nearest_point [k] (pts: [k]point) (pt: point): i32 =
   let (i, _) = reduce_comm closest_point (0, euclid_dist_2 pt pts[0])
-                           (zip (0..<k) (map (euclid_dist_2 pt) pts))
+                           (zip (map i32.i64 (iota k))
+                                (map (euclid_dist_2 pt) pts))
   in i
 
 let main [n] (xs: [n]f32) (ys: [n]f32) =

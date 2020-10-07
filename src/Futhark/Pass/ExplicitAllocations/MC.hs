@@ -15,7 +15,7 @@ instance SizeSubst (MCOp lore op) where
 
 handleSegOp :: SegOp () MC -> AllocM MC MCMem (SegOp () MCMem)
 handleSegOp op = do
-  let num_threads = intConst Int32 256 -- FIXME
+  let num_threads = intConst Int64 256 -- FIXME
   mapSegOpM (mapper num_threads) op
   where
     scope = scopeOfSegSpace $ segSpace op

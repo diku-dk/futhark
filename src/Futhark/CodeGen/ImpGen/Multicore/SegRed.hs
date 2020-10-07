@@ -12,7 +12,7 @@ import Futhark.IR.MCMem
 import Futhark.Util (chunks)
 import Prelude hiding (quot, rem)
 
-type DoSegBody = (([(SubExp, [Imp.TExp Int32])] -> MulticoreGen ()) -> MulticoreGen ())
+type DoSegBody = (([(SubExp, [Imp.TExp Int64])] -> MulticoreGen ()) -> MulticoreGen ())
 
 -- | Generate code for a SegRed construct
 compileSegRed ::
@@ -156,7 +156,7 @@ reductionStage1 space slugs kbody = do
   postbody <- collect $
     forM_ (zip slugs slug_local_accs) $ \(slug, local_accs) ->
       forM (zip (slugResArrs slug) local_accs) $ \(acc, local_acc) ->
-        copyDWIMFix acc [Imp.vi32 $ segFlat space] (Var local_acc) []
+        copyDWIMFix acc [Imp.vi64 $ segFlat space] (Var local_acc) []
 
   free_params <- freeParams (prebody <> fbody <> postbody) (segFlat space : [tvVar flat_idx])
   let (body_allocs, fbody') = extractAllocations fbody
@@ -170,7 +170,7 @@ reductionStage2 ::
   MulticoreGen ()
 reductionStage2 pat space nsubtasks slugs = do
   let per_red_pes = segBinOpChunks (map slugOp slugs) $ patternValueElements pat
-      phys_id = Imp.vi32 (segFlat space)
+      phys_id = Imp.vi64 (segFlat space)
   sComment "neutral-initialise the output" $
     forM_ (zip (map slugOp slugs) per_red_pes) $ \(red, red_res) ->
       forM_ (zip red_res $ segBinOpNeutral red) $ \(pe, ne) ->
@@ -180,7 +180,7 @@ reductionStage2 pat space nsubtasks slugs = do
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
   sFor "i" nsubtasks $ \i' -> do
-    mkTV (segFlat space) int32 <-- i'
+    mkTV (segFlat space) int64 <-- i'
     sComment "Apply main thread reduction" $
       forM_ (zip slugs per_red_pes) $ \(slug, red_res) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
@@ -222,7 +222,7 @@ compileSegRedBody ::
   MulticoreGen Imp.Code
 compileSegRedBody n_segments pat space reds kbody = do
   let (is, ns) = unzip $ unSegSpace space
-      ns_64 = map (sExt64 . toInt32Exp) ns
+      ns_64 = map toInt64Exp ns
       inner_bound = last ns_64
       n_segments' = tvExp n_segments
 
@@ -230,20 +230,20 @@ compileSegRedBody n_segments pat space reds kbody = do
   -- Perform sequential reduce on inner most dimension
   collect $ do
     flat_idx <- dPrimVE "flat_idx" $ n_segments' * inner_bound
-    zipWithM_ dPrimV_ is $ map sExt32 $ unflattenIndex ns_64 flat_idx
+    zipWithM_ dPrimV_ is $ unflattenIndex ns_64 flat_idx
     sComment "neutral-initialise the accumulators" $
       forM_ (zip per_red_pes reds) $ \(pes, red) ->
         forM_ (zip pes (segBinOpNeutral red)) $ \(pe, ne) ->
           sLoopNest (segBinOpShape red) $ \vec_is ->
-            copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) ne []
+            copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ vec_is) ne []
 
     sComment "main body" $ do
       dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) reds
       sFor "i" inner_bound $ \i -> do
         zipWithM_
           (<--)
-          (map (`mkTV` int32) $ init is)
-          (map sExt32 $ unflattenIndex (init ns_64) (sExt64 n_segments'))
+          (map (`mkTV` int64) $ init is)
+          (unflattenIndex (init ns_64) (sExt64 n_segments'))
         dPrimV_ (last is) i
         kbody $ \all_red_res -> do
           let red_res' = chunks (map (length . segBinOpNeutral) reds) all_red_res
@@ -252,7 +252,7 @@ compileSegRedBody n_segments pat space reds kbody = do
               sComment "load accum" $ do
                 let acc_params = take (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
                 forM_ (zip acc_params pes) $ \(p, pe) ->
-                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi32 (init is) ++ vec_is)
+                  copyDWIMFix (paramName p) [] (Var $ patElemName pe) (map Imp.vi64 (init is) ++ vec_is)
 
               sComment "load new val" $ do
                 let next_params = drop (length (segBinOpNeutral red)) $ (lambdaParams . segBinOpLambda) red
@@ -264,4 +264,4 @@ compileSegRedBody n_segments pat space reds kbody = do
                 compileStms mempty (bodyStms lbody) $
                   sComment "write back to res" $
                     forM_ (zip pes (bodyResult lbody)) $
-                      \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi32 (init is) ++ vec_is) se' []
+                      \(pe, se') -> copyDWIMFix (patElemName pe) (map Imp.vi64 (init is) ++ vec_is) se' []
