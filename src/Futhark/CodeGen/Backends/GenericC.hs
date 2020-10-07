@@ -1781,10 +1781,10 @@ $edecls:entry_point_decls
       ctx_ty <- contextType
 
       (prototypes, definitions) <-
-        unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
+        unzip <$> mapM (compileFun backend get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       -- add missing prototypes for the foreign functions
-      fPrototypes <- mapM compileForeignPrototype funs
+      fPrototypes <- mapM (compileForeignPrototype backend) funs
 
       mapM_ earlyDecl memstructs
       entry_points <-
@@ -1981,14 +1981,21 @@ compileOutput (MemParam name space) = do
   p_name <- newVName $ baseString name ++ "_p"
   return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
-compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun get_constants extra (fname, func@(Function _ isForeign bname outputs inputs body _ _)) = do
+compileFun :: String ->
+              [C.BlockItem] ->
+              [C.Param] ->
+              (Name, Function op) ->
+              CompilerM op s (C.Definition, C.Func)
+compileFun backend
+           get_constants
+           extra
+           (fname, func@(Function _ isForeign bname outputs inputs body _ _)) = do
   (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
   (inparams, in_args) <- unzip <$> mapM compileInput inputs
 
   cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
     body' <- blockScope $ compileFunBody out_ptrs outputs body
-    if isForeign
+    if isForeign && backend == "c"
       then
       return
       ( [C.cedecl|static inline int
@@ -2013,11 +2020,11 @@ compileFun get_constants extra (fname, func@(Function _ isForeign bname outputs 
          }|]
       )
 
-compileForeignPrototype :: (Name, Function op) -> CompilerM op s (Maybe C.Definition)
-compileForeignPrototype (_, (Function _ isForeign bname outputs inputs _ _ _)) = do
+compileForeignPrototype :: String -> (Name, Function op) -> CompilerM op s (Maybe C.Definition)
+compileForeignPrototype backend (_, (Function _ isForeign bname outputs inputs _ _ _)) = do
   (outparams, _) <- unzip <$> mapM compileOutput outputs
   (inparams, _) <- unzip <$> mapM compileInput inputs
-  if isForeign
+  if isForeign && backend == "c"
     then return . Just $ [C.cedecl| int $id:(funNameForeign bname)($params:outparams, $params:inparams);|]
     else return Nothing
 

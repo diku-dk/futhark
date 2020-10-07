@@ -184,7 +184,7 @@ generateDeviceFun fname host_func = do
         ]
       (func, cstate) =
         genGPUCode FunMode (functionBody device_func) failures $
-          GC.compileFun mempty params (fname, device_func)
+          GC.compileFun "opencl" mempty params (fname, device_func)
       kstate = GC.compUserState cstate
 
   modify $ \s ->
