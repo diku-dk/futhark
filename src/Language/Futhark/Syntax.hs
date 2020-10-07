@@ -433,7 +433,7 @@ type PatternType = TypeBase (DimDecl VName) Aliasing
 type StructType = TypeBase (DimDecl VName) ()
 
 -- | A value type contains full, manifest size information.
-type ValueType = TypeBase Int32 ()
+type ValueType = TypeBase Int64 ()
 
 -- | A dimension declaration expression for use in a 'TypeExp'.
 data DimExp vn

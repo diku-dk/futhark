@@ -115,7 +115,7 @@ instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
 instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty (ShapeDecl Int32) where
+instance Pretty (ShapeDecl Int64) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
 
 instance Pretty (ShapeDecl Bool) where

@@ -2,16 +2,16 @@
 -- input {
 -- }
 -- output {
---   91
---   126
+--   91i64
+--   126i64
 -- }
 -- structure { Replicate 0 }
 
 
-let getInt (): i32 = 10
+let getInt (): i64 = 10
 let plus1(x: []i32): []i32 = map (\(y: i32): i32->y+1) x
 
-let main: (i32,i32) =
+let main: (i64,i64) =
     let n  = getInt()            -- Int
     let x  = iota(n)       -- [#n]Int
     let m  = (n * (5-4))

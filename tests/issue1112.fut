@@ -14,7 +14,7 @@ let v3mul (a:v3) (b:v3) : v3  = triadMap2 (*) a b
 let v3dot (a:v3) (b:v3) : f32 = v3mul a b |> v3sum
 
 let gauss_jordan [m] [n] (A:[m][n]f32) =
-    loop A for i < i32.min m n do
+    loop A for i < i64.min m n do
         let icol = map (\row -> row[i]) A
         let (j,_) = map f32.abs icol
                  |> zip (iota m)

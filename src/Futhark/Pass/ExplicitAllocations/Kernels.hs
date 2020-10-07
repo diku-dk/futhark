@@ -46,7 +46,7 @@ handleSegOp op = do
     letSubExp "num_threads" $
       BasicOp $
         BinOp
-          (Mul Int32 OverflowUndef)
+          (Mul Int64 OverflowUndef)
           (unCount (segNumGroups lvl))
           (unCount (segGroupSize lvl))
   allocAtLevel lvl $ mapSegOpM (mapper num_threads) op
@@ -82,7 +82,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
-      ixfun = IxFun.permute (IxFun.iota $ map pe32 dims') perm_inv
+      ixfun = IxFun.permute (IxFun.iota $ map pe64 dims') perm_inv
   return [Hint ixfun DefaultSpace]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@SegThread {} space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
@@ -104,12 +104,12 @@ mapResultHint ::
 mapResultHint lvl space = hint
   where
     num_threads =
-      pe32 (unCount $ segNumGroups lvl) * pe32 (unCount $ segGroupSize lvl)
+      pe64 (unCount $ segNumGroups lvl) * pe64 (unCount $ segGroupSize lvl)
 
     -- Heuristic: do not rearrange for returned arrays that are
     -- sufficiently small.
     coalesceReturnOfShape _ [] = False
-    coalesceReturnOfShape bs [Constant (IntValue (Int32Value d))] = bs * d > 4
+    coalesceReturnOfShape bs [Constant (IntValue (Int64Value d))] = bs * d > 4
     coalesceReturnOfShape _ _ = True
 
     hint t Returns {}
@@ -121,9 +121,9 @@ mapResultHint lvl space = hint
       t_dims <- mapM dimAllocationSize $ arrayDims t
       return $ Hint (innermost [w] t_dims) DefaultSpace
     hint Prim {} (ConcatReturns SplitContiguous w elems_per_thread _) = do
-      let ixfun_base = IxFun.iota [num_threads, pe32 elems_per_thread]
+      let ixfun_base = IxFun.iota [sExt64 num_threads, pe64 elems_per_thread]
           ixfun_tr = IxFun.permute ixfun_base [1, 0]
-          ixfun = IxFun.reshape ixfun_tr $ map (DimNew . pe32) [w]
+          ixfun = IxFun.reshape ixfun_tr $ map (DimNew . pe64) [w]
       return $ Hint ixfun DefaultSpace
     hint _ _ = return NoHint
 
@@ -136,7 +136,7 @@ innermost space_dims t_dims =
           ++ [0 .. length space_dims -1]
       perm_inv = rearrangeInverse perm
       dims_perm = rearrangeShape perm dims
-      ixfun_base = IxFun.iota $ map pe32 dims_perm
+      ixfun_base = IxFun.iota $ map pe64 dims_perm
       ixfun_rearranged = IxFun.permute ixfun_base perm_inv
    in ixfun_rearranged
 
@@ -153,8 +153,8 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
       return $
         if private r && all (semiStatic consts) (arrayDims t)
           then
-            let seg_dims = map pe32 $ segSpaceDims space
-                dims = seg_dims ++ map pe32 (arrayDims t)
+            let seg_dims = map pe64 $ segSpaceDims space
+                dims = seg_dims ++ map pe64 (arrayDims t)
                 nilSlice d = DimSlice 0 d 0
              in Hint
                   ( IxFun.slice (IxFun.iota dims) $
@@ -175,7 +175,7 @@ inThreadExpHints e = do
     maybePrivate consts t
       | Just (Array pt shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
-        let ixfun = IxFun.iota $ map pe32 $ shapeDims shape
+        let ixfun = IxFun.iota $ map pe64 $ shapeDims shape
         return $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
       | otherwise =
         return NoHint

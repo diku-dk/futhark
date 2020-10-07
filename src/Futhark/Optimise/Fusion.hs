@@ -690,7 +690,7 @@ fusionGatherStms
           (loop_params, loop_arrs) = unzip loop_vars
       chunk_size <- newVName "chunk_size"
       offset <- newVName "offset"
-      let chunk_param = Param chunk_size $ Prim int32
+      let chunk_param = Param chunk_size $ Prim int64
           offset_param = Param offset $ Prim $ IntType it
 
       acc_params <- forM merge_params $ \p ->
@@ -719,7 +719,7 @@ fusionGatherStms
             [ pure $
                 DoLoop [] merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
               pure $
-                BasicOp $ BinOp (Add Int32 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)
+                BasicOp $ BinOp (Add Int64 OverflowUndef) (Futhark.Var offset) (Futhark.Var chunk_size)
             ]
       let lam =
             Lambda
@@ -733,7 +733,7 @@ fusionGatherStms
       -- first element in the pattern, as we use the first element to
       -- identify the SOAC in the second phase of fusion.
       discard <- newVName "discard"
-      let discard_pe = PatElem discard $ Prim int32
+      let discard_pe = PatElem discard $ Prim int64
 
       fusionGatherStms
         fres
@@ -805,8 +805,8 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   fres' <- addNamesToInfusible fres $ freeIn form <> freeIn ctx <> freeIn val
   let form_idents =
         case form of
-          ForLoop i _ _ loopvars ->
-            Ident i (Prim int32) : map (paramIdent . fst) loopvars
+          ForLoop i it _ loopvars ->
+            Ident i (Prim (IntType it)) : map (paramIdent . fst) loopvars
           WhileLoop {} -> []
 
   new_res <-

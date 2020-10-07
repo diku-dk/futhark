@@ -126,7 +126,7 @@ lookupVar loc x = do
       | baseTag x <= maxIntrinsicTag -> return IntrinsicSV
       | otherwise -> -- Anything not in scope is going to be an
       -- existential size.
-        return $ Dynamic $ Scalar $ Prim $ Signed Int32
+        return $ Dynamic $ Scalar $ Prim $ Signed Int64
       | otherwise ->
         error $
           "Variable " ++ pretty x ++ " at "
@@ -842,7 +842,7 @@ envFromShapeParams = envFromDimNames . map dim
           ++ "."
 
 envFromDimNames :: [VName] -> Env
-envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Scalar $ Prim $ Signed Int32)
+envFromDimNames = M.fromList . flip zip (repeat $ Dynamic $ Scalar $ Prim $ Signed Int64)
 
 -- | Create a new top-level value declaration with the given function name,
 -- return type, list of parameters, and body expression.

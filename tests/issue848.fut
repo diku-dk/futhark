@@ -21,5 +21,5 @@ entry generate_terrain [depth] [width] (points: [depth][width]vector) =
                    :> [n2]triangle)
             (points[:depth-1] :> [m][width]vector)
             (points[1:] :> [m][width]vector)
-            ((0..<depth-1) :> [m]i32)
+            ((0..<depth-1) :> [m]i64)
   in triangles

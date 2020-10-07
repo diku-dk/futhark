@@ -1,7 +1,7 @@
 -- Test that scatter-scatter fusion works with more than two arrays.
 -- ==
 -- input {
---   [0]
+--   [0i64]
 --   [99]
 --   [10, 20, 30, 40, 50]
 --   [100, 200, 300, 400, 500]
@@ -14,7 +14,7 @@
 -- }
 -- structure { Scatter 1 }
 
-let main [k][n] (indexes: [k]i32)
+let main [k][n] (indexes: [k]i64)
                 (values: [k]i32)
                 (array1: *[n]i32)
                 (array2: *[n]i32)

@@ -2,5 +2,5 @@
 -- ==
 -- error: \[n\].*\[m\]
 
-let main (b: bool) (n: i32) (m: i32) : [2]i32 =
+let main (b: bool) (n: i64) (m: i64) : [2]i64 =
   if b then iota n else iota m

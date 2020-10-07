@@ -27,7 +27,7 @@ let predict [n][m][k] (c: centroid[n][m]) (xs: [k][m]bool): [k]f32 =
   map (\x -> f32.sum (map2 (\w x' -> w * kcn x x' c.d) c.w c.trx)) xs
 
 let lto [n][m] (c:centroid[n][m]) =
-  let mean x = f32.sum x / f32.i32 (length x)
+  let mean x = f32.sum x / f32.i64 (length x)
   let zero i x = tabulate n (\j -> if j == i then 0 else x[j])
   let cmod i c = {d=c.d, w=zero i c.w, trx=c.trx, try=c.try}
   let score i j = if c.try[i] || c.try[i] == c.try[j] then -1 else

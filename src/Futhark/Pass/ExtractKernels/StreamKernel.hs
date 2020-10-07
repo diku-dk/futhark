@@ -48,12 +48,14 @@ numberOfGroups ::
   SubExp ->
   SubExp ->
   m (SubExp, SubExp)
-numberOfGroups desc w64 group_size = do
+numberOfGroups desc w group_size = do
   max_num_groups_key <- nameFromString . pretty <$> newVName (desc ++ "_num_groups")
   num_groups <-
     letSubExp "num_groups" $
-      Op $ SizeOp $ CalcNumGroups w64 max_num_groups_key group_size
-  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) num_groups group_size
+      Op $ SizeOp $ CalcNumGroups w max_num_groups_key group_size
+  num_threads <-
+    letSubExp "num_threads" $
+      BasicOp $ BinOp (Mul Int64 OverflowUndef) num_groups group_size
   return (num_groups, num_threads)
 
 blockedKernelSize ::
@@ -64,12 +66,11 @@ blockedKernelSize ::
 blockedKernelSize desc w = do
   group_size <- getSize (desc ++ "_group_size") SizeGroup
 
-  w64 <- letSubExp "w64" $ BasicOp $ ConvOp (SExt Int32 Int64) w
-  (_, num_threads) <- numberOfGroups desc w64 group_size
+  (_, num_threads) <- numberOfGroups desc w group_size
 
   per_thread_elements <-
     letSubExp "per_thread_elements"
-      =<< eBinOp (SDivUp Int64 Unsafe) (eSubExp w64) (toExp =<< asIntS Int64 num_threads)
+      =<< eBinOp (SDivUp Int64 Unsafe) (eSubExp w) (eSubExp num_threads)
 
   return $ KernelSize per_thread_elements num_threads
 
@@ -87,13 +88,13 @@ splitArrays chunk_size split_bound ordering w i elems_per_i arrs = do
   letBindNames [chunk_size] $ Op $ SizeOp $ SplitSpace ordering w i elems_per_i
   case ordering of
     SplitContiguous -> do
-      offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int32 OverflowUndef) i elems_per_i
+      offset <- letSubExp "slice_offset" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) i elems_per_i
       zipWithM_ (contiguousSlice offset) split_bound arrs
     SplitStrided stride -> zipWithM_ (stridedSlice stride) split_bound arrs
   where
     contiguousSlice offset slice_name arr = do
       arr_t <- lookupType arr
-      let slice = fullSlice arr_t [DimSlice offset (Var chunk_size) (constant (1 :: Int32))]
+      let slice = fullSlice arr_t [DimSlice offset (Var chunk_size) (constant (1 :: Int64))]
       letBindNames [slice_name] $ BasicOp $ Index arr slice
 
     stridedSlice stride slice_name arr = do
@@ -132,7 +133,7 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
       red_ts = take num_nonconcat $ lambdaReturnType lam
       map_ts = map rowType $ drop num_nonconcat $ lambdaReturnType lam
 
-  per_thread <- asIntS Int32 $ kernelElementsPerThread kernel_size
+  per_thread <- asIntS Int64 $ kernelElementsPerThread kernel_size
   splitArrays
     (paramName chunk_size)
     (map paramName arr_params)
@@ -214,8 +215,6 @@ prepareStream size ispace w comm fold_lam nes arrs = do
 
   fold_lam' <- kerneliseLambda nes fold_lam
 
-  elems_per_thread_32 <- asIntS Int32 elems_per_thread
-
   gtid <- newVName "gtid"
   space <- mkSegSpace $ ispace ++ [(gtid, num_threads)]
   kbody <- fmap (uncurry (flip (KernelBody ()))) $
@@ -224,7 +223,7 @@ prepareStream size ispace w comm fold_lam nes arrs = do
         (chunk_red_pes, chunk_map_pes) <-
           blockedPerThread gtid w size ordering fold_lam' (length nes) arrs
         let concatReturns pe =
-              ConcatReturns split_ordering w elems_per_thread_32 $ patElemName pe
+              ConcatReturns split_ordering w elems_per_thread $ patElemName pe
         return
           ( map (Returns ResultMaySimplify . Var . patElemName) chunk_red_pes
               ++ map concatReturns chunk_map_pes
@@ -304,24 +303,20 @@ streamMap mk_lvl out_desc mapout_pes w comm fold_lam nes arrs = runBinderT' $ do
 -- array.
 segThreadCapped :: MonadFreshNames m => MkSegLevel Kernels m
 segThreadCapped ws desc r = do
-  w64 <-
+  w <-
     letSubExp "nest_size"
-      =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1)
-      =<< mapM (asIntS Int64) ws
+      =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ws
   group_size <- getSize (desc ++ "_group_size") SizeGroup
 
   case r of
     ManyThreads -> do
       usable_groups <-
         letSubExp "segmap_usable_groups"
-          . BasicOp
-          . ConvOp (SExt Int64 Int32)
-          =<< letSubExp "segmap_usable_groups_64"
           =<< eBinOp
             (SDivUp Int64 Unsafe)
-            (eSubExp w64)
+            (eSubExp w)
             (eSubExp =<< asIntS Int64 group_size)
       return $ SegThread (Count usable_groups) (Count group_size) SegNoVirt
     NoRecommendation v -> do
-      (num_groups, _) <- numberOfGroups desc w64 group_size
+      (num_groups, _) <- numberOfGroups desc w group_size
       return $ SegThread (Count num_groups) (Count group_size) v

@@ -112,7 +112,7 @@ compileThreadResult ::
   KernelResult ->
   MulticoreGen ()
 compileThreadResult space pe (Returns _ what) = do
-  let is = map (Imp.vi32 . fst) $ unSegSpace space
+  let is = map (Imp.vi64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ _ ConcatReturns {} =
   compilerBugS "compileThreadResult: ConcatReturn unhandled."
@@ -245,13 +245,13 @@ data Locking = Locking
     -- | A transformation from the logical lock index to the
     -- physical position in the array.  This can also be used
     -- to make the lock array smaller.
-    lockingMapping :: [Imp.TExp Int32] -> [Imp.TExp Int32]
+    lockingMapping :: [Imp.TExp Int64] -> [Imp.TExp Int64]
   }
 
 -- | A function for generating code for an atomic update.  Assumes
 -- that the bucket is in-bounds.
 type DoAtomicUpdate lore r =
-  [VName] -> [Imp.TExp Int32] -> MulticoreGen ()
+  [VName] -> [Imp.TExp Int64] -> MulticoreGen ()
 
 -- | The mechanism that will be used for performing the atomic update.
 -- Approximates how efficient it will be.  Ordered from most to least
@@ -374,7 +374,7 @@ atomicUpdateCAS ::
   PrimType ->
   VName ->
   VName ->
-  [Imp.TExp Int32] ->
+  [Imp.TExp Int64] ->
   VName ->
   MulticoreGen () ->
   MulticoreGen ()

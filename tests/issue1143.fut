@@ -22,7 +22,7 @@ let matadd [m][n] (xss: [m][n]f32) (yss: [m][n]f32): [m][n]f32 =
 let matmul_scalar [m][n] (xss: [m][n]f32) (k: f32): *[m][n]f32 =
   map (map (*k)) xss
 
-let block_householder [m][n] (A: [m][n]f32) (r: i32): ([][]f32, [][]f32) =
+let block_householder [m][n] (A: [m][n]f32) (r: i64): ([][]f32, [][]f32) =
   #[unsafe]
   let Q = replicate m (replicate m 0)
   let (Q,A) =

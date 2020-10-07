@@ -8,8 +8,8 @@
 --          xs[i*z + j]
 --       , zip(ys,zs,is,js))
 
-let main [n][m] (xs: [m]i32, ys: [n]i32, zs: [n]i32, is: [n]i32, js: [n]i32): []i32 =
-  map  (\(y: i32, z: i32, i: i32, j: i32): i32  ->
+let main [n][m] (xs: [m]i32, ys: [n]i64, zs: [n]i64, is: [n]i32, js: [n]i32): []i32 =
+  map  (\(y: i64, z: i64, i: i32, j: i32): i32  ->
          #[unsafe]
          let tmp = unflatten y z xs
          in tmp[i,j]
