@@ -214,13 +214,6 @@ compileProg =
                                }|]
         )
 
-      GC.publicDef_ "context_get_num_threads" GC.InitDecl $ \s ->
-        ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-          [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                        return ctx->scheduler.num_threads;
-                       }|]
-        )
-
 cliOptions :: [Option]
 cliOptions =
   [ Option
