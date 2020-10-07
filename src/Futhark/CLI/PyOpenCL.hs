@@ -18,7 +18,7 @@ main = compilerMain
   "Compile PyOpenCL"
   "Generate Python + OpenCL code from optimised Futhark program."
   gpuPipeline
-  $ \fcfg () mode outpath prog -> do
+  $ \fcfg () mode outpath prog _ -> do
     let class_name =
           case mode of
             ToLibrary -> Just $ takeBaseName outpath

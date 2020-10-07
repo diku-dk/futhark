@@ -110,9 +110,13 @@ runCompilerOnProgram config pipeline action file = do
       prog <- runPipelineOnProgram config pipeline file
       when ((> NotVerbose) . fst $ futharkVerbose config) $
         logMsg $ "Running action " ++ actionName action
-      actionProcedure action prog
+      foreignCode <- foreignCode' $ futharkForeignInput config
+      actionProcedure action prog foreignCode
       when ((> NotVerbose) . fst $ futharkVerbose config) $
         logMsg ("Done." :: String)
+
+    foreignCode' (Just gn) = readForeignFile gn
+    foreignCode' Nothing = return ""
 
 -- | Read a program from the given 'FilePath', run the given
 -- 'Pipeline', and return it.

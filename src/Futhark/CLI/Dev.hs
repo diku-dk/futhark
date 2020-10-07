@@ -586,23 +586,23 @@ runPolyPasses config base initial_prog = do
   logMsg $ "Running action " ++ untypedActionName (futharkAction config)
   case (end_prog, futharkAction config) of
     (SOACS prog, SOACSAction action) ->
-      actionProcedure action prog
+      actionProcedure action prog ""
     (Kernels prog, KernelsAction action) ->
-      actionProcedure action prog
+      actionProcedure action prog ""
     (SeqMem prog, SeqMemAction action) ->
-      actionProcedure (action base) prog
+      actionProcedure (action base) prog ""
     (KernelsMem prog, KernelsMemAction action) ->
-      actionProcedure (action base) prog
+      actionProcedure (action base) prog ""
     (SOACS soacs_prog, PolyAction acs) ->
-      actionProcedure acs soacs_prog
+      actionProcedure acs soacs_prog ""
     (Kernels kernels_prog, PolyAction acs) ->
-      actionProcedure acs kernels_prog
+      actionProcedure acs kernels_prog ""
     (Seq seq_prog, PolyAction acs) ->
-      actionProcedure acs seq_prog
+      actionProcedure acs seq_prog ""
     (KernelsMem mem_prog, PolyAction acs) ->
-      actionProcedure acs mem_prog
+      actionProcedure acs mem_prog ""
     (SeqMem mem_prog, PolyAction acs) ->
-      actionProcedure acs mem_prog
+      actionProcedure acs mem_prog ""
     (_, action) ->
       externalErrorS $
         "Action "

@@ -7,6 +7,7 @@
 module Futhark.Compiler.Program
   ( readLibraryWithBasis,
     readImports,
+    readForeignFile,
     Imports,
     FileModule (..),
     E.Warnings,
@@ -189,6 +190,17 @@ readLibrary' basis fps = runCompilerM basis $ mapM onFile fps
         Nothing -> externalErrorS $ fp ++ ": file not found."
       where
         (fp_name, _) = Posix.splitExtension fp
+
+readForeignFile ::
+  (MonadError CompilerError m, MonadIO m) =>
+  FilePath ->
+  m (String)
+readForeignFile fp = do
+  r <- liftIO $ readFileSafely fp
+  case r of
+    Just (Right (_, fs)) -> return $ T.unpack fs
+    Just (Left e) -> externalErrorS e
+    Nothing -> externalErrorS $ fp ++ ": file not found."
 
 -- | Read and type-check Futhark imports (no @.fut@ extension; may
 -- refer to baked-in prelude).  This is an exotic operation that

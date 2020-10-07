@@ -41,7 +41,7 @@ printAction =
   Action
     { actionName = "Prettyprint",
       actionDescription = "Prettyprint the resulting internal representation on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+      actionProcedure = const . liftIO . putStrLn . pretty . aliasAnalysis
     }
 
 -- | Print metrics about AST node counts to stdout.
@@ -50,7 +50,7 @@ metricsAction =
   Action
     { actionName = "Compute metrics",
       actionDescription = "Print metrics on the final AST.",
-      actionProcedure = liftIO . putStr . show . progMetrics
+      actionProcedure = const . liftIO . putStr . show . progMetrics
     }
 
 -- | Convert the program to sequential ImpCode and print it to stdout.
@@ -59,7 +59,7 @@ impCodeGenAction =
   Action
     { actionName = "Compile imperative",
       actionDescription = "Translate program into imperative IL and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenSequential.compileProg
+      actionProcedure = const . (liftIO . putStrLn . pretty . snd <=< ImpGenSequential.compileProg)
     }
 
 -- | Convert the program to GPU ImpCode and print it to stdout.
@@ -68,7 +68,7 @@ kernelImpCodeGenAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
+      actionProcedure = const . (liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL)
     }
 
 -- | Print metrics about AST node counts to stdout.
@@ -77,7 +77,7 @@ sexpAction =
   Action
     { actionName = "Print sexps",
       actionDescription = "Print sexps on the final IR.",
-      actionProcedure = liftIO . helper
+      actionProcedure = const . liftIO . helper
     }
   where
     helper :: ASTLore lore => Prog lore -> IO ()
@@ -102,25 +102,23 @@ compileCAction fcfg mode outpath =
       actionProcedure = helper
     }
   where
-    helper prog = do
+    helper prog foreignCode = do
       cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
       let cpath = outpath `addExtension` "c"
           hpath = outpath `addExtension` "h"
-          defArgs = [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
-          gccArgs = addForeignDir defArgs $ futharkForeignInput fcfg
-
       case mode of
         ToLibrary -> do
           let (header, impl) = SequentialC.asLibrary cprog
           liftIO $ writeFile hpath header
-          liftIO $ writeFile cpath impl
+          liftIO $ writeFile cpath $ fullImpl impl foreignCode
         ToExecutable -> do
-          liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
+          let impl = SequentialC.asExecutable cprog
+          liftIO $ writeFile cpath $ fullImpl impl foreignCode
           ret <-
             liftIO $
               runProgramWithExitCode
                 "gcc"
-                gccArgs
+                [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
                 mempty
           case ret of
             Left err ->
@@ -134,10 +132,20 @@ compileCAction fcfg mode outpath =
             Right (ExitSuccess, _, _) ->
               return ()
 
-    addForeignDir :: [String] -> Maybe FilePath -> [String]
-    addForeignDir args (Just fdir) = fdir : args
-    addForeignDir args Nothing = args
-
+    fullImpl :: String -> String -> String
+    fullImpl impl foreignCode =
+      case futharkForeignInput fcfg of
+        Just fp ->
+          impl
+          ++ "// Foreign code"
+          ++ "\n"
+          ++ "#line 0 "
+          ++ "\""
+          ++ (last $ splitPath fp)
+          ++ "\""
+          ++ "\n"
+          ++ foreignCode
+        Nothing -> impl
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -145,7 +153,7 @@ compileOpenCLAction fcfg mode outpath =
   Action
     { actionName = "Compile to OpenCL",
       actionDescription = "Compile to OpenCL",
-      actionProcedure = helper
+      actionProcedure = const . helper
     }
   where
     helper prog = do
@@ -191,7 +199,7 @@ compileCUDAAction fcfg mode outpath =
   Action
     { actionName = "Compile to CUDA",
       actionDescription = "Compile to CUDA",
-      actionProcedure = helper
+      actionProcedure = const . helper
     }
   where
     helper prog = do

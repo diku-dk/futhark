@@ -41,6 +41,7 @@ compilerMain ::
     CompilerMode ->
     FilePath ->
     Prog lore ->
+    String ->
     FutharkM ()
   ) ->
   -- | Program name
@@ -70,15 +71,19 @@ compilerMain cfg cfg_opts name desc pipeline doIt prog args = do
         filepath
 
     action config filepath =
-      Action
-        { actionName = name,
-          actionDescription = desc,
-          actionProcedure =
+      let procFun path foreignCode =
             doIt
               (futharkConfig config)
               (compilerConfig config)
               (compilerMode config)
               (outputFilePath filepath config)
+              path
+              foreignCode
+      in
+      Action
+        { actionName = name,
+          actionDescription = desc,
+          actionProcedure = procFun
         }
 
 -- | An option that modifies the configuration of type @cfg@.

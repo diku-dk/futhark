@@ -106,7 +106,7 @@ runFutharkM (FutharkM m) verbose = do
 data Action lore = Action
   { actionName :: String,
     actionDescription :: String,
-    actionProcedure :: Prog lore -> FutharkM ()
+    actionProcedure :: Prog lore -> String -> FutharkM ()
   }
 
 -- | Configuration object for running a compiler pipeline.

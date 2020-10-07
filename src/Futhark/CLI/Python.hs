@@ -18,7 +18,7 @@ main = compilerMain
   "Compile sequential Python"
   "Generate sequential Python code from optimised Futhark program."
   sequentialCpuPipeline
-  $ \fcfg () mode outpath prog -> do
+  $ \fcfg () mode outpath prog _ -> do
     let class_name =
           case mode of
             ToLibrary -> Just $ takeBaseName outpath
