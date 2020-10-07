@@ -890,7 +890,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   num_groups <-
     fmap (Imp.Count . tvSize) $
       dPrimV "num_groups" $
-        hist_T `divUp` sExt32 (toInt64Exp (unCount group_size))
+        sExt64 hist_T `divUp` toInt64Exp (unCount group_size)
   let num_groups' = toInt64Exp <$> num_groups
       group_size' = toInt64Exp <$> group_size
 
@@ -980,6 +980,13 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
         MustBeSinglePass -> 1
         MayBeMultiPass -> fromIntegral $ maxinum $ map slugMaxLocalMemPasses slugs
 
+  groups_per_segment <-
+    if segmented
+      then
+        fmap Count $
+          dPrimVE "groups_per_segment" $ unCount num_groups' `divUp` hist_Nout
+      else pure num_groups'
+
   -- We only use local memory if the number of updates per histogram
   -- at least matches the histogram size, as otherwise it is not
   -- asymptotically efficient.  This mostly matters for the segmented
@@ -990,10 +997,6 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
           .&&. (hist_S .<=. max_S)
           .&&. hist_C .<=. hist_B
           .&&. tvExp hist_M .>. 0
-
-      groups_per_segment
-        | segmented = num_groups' `divUp` Imp.Count hist_Nout
-        | otherwise = num_groups'
 
       run = do
         emit $ Imp.DebugPrint "## Using local memory" Nothing
