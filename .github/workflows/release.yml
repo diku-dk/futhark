@@ -60,4 +60,6 @@ jobs:
     - name: scp to server
       env:
         TARBALL: ${{ steps.metadata.outputs.TARBALL }}
-      run: scp -o StrictHostKeyChecking=no result/$TARBALL futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+      run: |
+        scp -o StrictHostKeyChecking=no result/$TARBALL futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+        scp -o StrictHostKeyChecking=no result/$TARBALL futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases/futhark-stable-linux-x86_64.tar.xz
