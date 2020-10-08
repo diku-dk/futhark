@@ -41,7 +41,7 @@ jobs:
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
         sudo apt-get install ghc-8.8.4
-        echo "::add-path::/opt/ghc/bin"
+        echo "/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -91,7 +91,7 @@ jobs:
     - name: Install dependencies
       run: |
         brew install cabal-install ghc sphinx-doc
-        echo "::add-path::/usr/local/opt/sphinx-doc/bin"
+        echo "/usr/local/opt/sphinx-doc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -202,7 +202,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -i tests examples
@@ -222,7 +222,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -c --backend=c tests examples --no-tuning
@@ -243,7 +243,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -c --backend=multicore tests examples --no-tuning
@@ -269,7 +269,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
@@ -294,7 +294,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -c --no-terminal --backend=opencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
@@ -319,7 +319,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
@@ -339,7 +339,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         cd pkgtests && sh test.sh
@@ -375,7 +375,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -C --no-terminal --backend=opencl --exclude=no_opencl  --pass-compiler-option=--Werror futhark-benchmarks
