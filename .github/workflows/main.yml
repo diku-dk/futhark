@@ -259,7 +259,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python-numpy
+        sudo apt-get install -y python-numpy python3-numpy
 
     - uses: actions/download-artifact@v2
       with:
