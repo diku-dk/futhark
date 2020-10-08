@@ -5,15 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.18.0]
+## [0.18.1]
 
 ### Added
 
-### Removed
-
-### Fixed
+  * Experimental multi-threaded CPU backend, `multicore`.
 
 ### Changed
+
+  * All sizes are now of type `i64`.  This has wide-ranging
+    implications and most programs will need to be updated (#134).
 
 ## [0.17.3]
 
