@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * PyOpenCL backend would mistakenly still streat entry point
+    argument sizes as 32 bit.
+
 ## [0.18.1]
 
 ### Added
