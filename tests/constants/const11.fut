@@ -1,6 +1,6 @@
 -- Errors in parallelism in constants.
 -- ==
--- input { 2 }
+-- input { 2i64 }
 -- error: out of bounds
 
 let n = 10i64
