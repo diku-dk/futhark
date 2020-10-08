@@ -116,7 +116,7 @@ themselves.
 We build such binary snapshots for the following operating systems:
 
 **Linux (x86_64)**
-  `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
+  `futhark-stable-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
 **Windows (x86_64)**
   `futhark-nightly-windows-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-windows-x86_64.zip>`_
