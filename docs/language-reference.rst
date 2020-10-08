@@ -991,6 +991,12 @@ types, as Futhark cannot assume that a given constructor only belongs
 to a single type.  Further, unique types (see `In-place updates`_)
 must be explicitly annotated.
 
+Type inference processes top-level declared in top-down order, and the
+type of a top-level function must be completely inferred at its
+definition site.  Specifically, if a top-level function uses
+overloaded arithmetic operators, the resolution of those overloads
+cannot be influenced by later uses of the function.
+
 .. _size-types:
 
 Size Types
