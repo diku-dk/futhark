@@ -475,7 +475,7 @@ unpackDim arr_name (Imp.Var var) i = do
   let shape_name = Field arr_name "shape"
       src = Index shape_name $ IdxExp $ Integer $ toInteger i
   var' <- compileVar var
-  stm $ Assign var' $ simpleCall "np.int32" [src]
+  stm $ Assign var' $ simpleCall "np.int64" [src]
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
 entryPointOutput (Imp.OpaqueValue desc vs) =
