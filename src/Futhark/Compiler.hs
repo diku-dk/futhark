@@ -31,6 +31,7 @@ import Futhark.Pipeline
 import qualified Futhark.TypeCheck as I
 import Futhark.Util.Log
 import Futhark.Util.Pretty (ppr, prettyText)
+import Language.Futhark.Warnings
 import System.Exit (ExitCode (..), exitWith)
 import System.IO
 
@@ -181,8 +182,8 @@ handleWarnings config m = do
   (ws, a) <- m
 
   when (futharkWarn config) $ do
-    liftIO $ hPutStr stderr $ show ws
-    when (futharkWerror config && ws /= mempty) $
+    liftIO $ hPutStr stderr $ pretty ws
+    when (futharkWerror config && anyWarnings ws) $
       externalErrorS "Treating above warnings as errors due to --Werror."
 
   return a

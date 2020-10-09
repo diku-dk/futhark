@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
@@ -48,7 +50,8 @@ module Language.Futhark.TypeChecker.Monad
 where
 
 import Control.Monad.Except
-import Control.Monad.RWS.Strict hiding (Sum)
+import Control.Monad.Reader
+import Control.Monad.State.Strict
 import Data.Either
 import Data.List (find, isPrefixOf)
 import qualified Data.Map.Strict as M
@@ -130,14 +133,20 @@ data Context = Context
     contextImportName :: ImportName
   }
 
+data TypeState = TypeState
+  { stateNameSource :: VNameSource,
+    stateWarnings :: Warnings
+  }
+
 -- | The type checker runs in this monad.
 newtype TypeM a
   = TypeM
-      ( RWST
-          Context -- Reader
-          Warnings -- Writer
-          VNameSource -- State
-          (Except TypeError) -- Inner monad
+      ( ReaderT
+          Context
+          ( StateT
+              TypeState
+              (Except (Warnings, TypeError))
+          )
           a
       )
   deriving
@@ -145,10 +154,20 @@ newtype TypeM a
       Functor,
       Applicative,
       MonadReader Context,
-      MonadWriter Warnings,
-      MonadState VNameSource,
-      MonadError TypeError
+      MonadState TypeState
     )
+
+instance MonadError TypeError TypeM where
+  throwError e = TypeM $ do
+    ws <- gets stateWarnings
+    throwError (ws, e)
+
+  catchError (TypeM m) f =
+    TypeM $ m `catchError` f'
+    where
+      f' (_, e) =
+        let TypeM m' = f e
+         in m'
 
 -- | Run a 'TypeM' computation.
 runTypeM ::
@@ -157,10 +176,13 @@ runTypeM ::
   ImportName ->
   VNameSource ->
   TypeM a ->
-  Either TypeError (a, Warnings, VNameSource)
+  (Warnings, Either TypeError (a, VNameSource))
 runTypeM env imports fpath src (TypeM m) = do
-  (x, src', ws) <- runExcept $ runRWST m (Context env imports fpath) src
-  return (x, ws, src')
+  let ctx = Context env imports fpath
+      s = TypeState src mempty
+  case runExcept $ runStateT (runReaderT m ctx) s of
+    Left (ws, e) -> (ws, Left e)
+    Right (x, TypeState src' ws) -> (ws, Right (x, src'))
 
 -- | Retrieve the current 'Env'.
 askEnv :: TypeM Env
@@ -202,7 +224,7 @@ localEnv env = local $ \ctx ->
 -- internal interface is because we use distinct monads for checking
 -- expressions and declarations.
 class Monad m => MonadTypeChecker m where
-  warn :: Located loc => loc -> String -> m ()
+  warn :: Located loc => loc -> Doc -> m ()
 
   newName :: VName -> m VName
   newID :: Name -> m VName
@@ -241,13 +263,17 @@ bindSpaced names body = do
   bindNameMap mapping body
 
 instance MonadTypeChecker TypeM where
-  warn loc problem = tell $ singleWarning (srclocOf loc) problem
+  warn loc problem =
+    modify $ \s ->
+      s
+        { stateWarnings = stateWarnings s <> singleWarning (srclocOf loc) problem
+        }
 
-  newName s = do
-    src <- get
-    let (s', src') = Futhark.FreshNames.newName src s
-    put src'
-    return s'
+  newName v = do
+    s <- get
+    let (v', src') = Futhark.FreshNames.newName (stateNameSource s) v
+    put $ s {stateNameSource = src'}
+    return v'
 
   newID s = newName $ VName s 0
 
