@@ -126,6 +126,7 @@ import Data.List (find, genericLength, sortOn)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import Data.String
 import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
@@ -394,7 +395,7 @@ warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 -- | Emit a warning about something the user should be aware of.
 warn :: Located loc => loc -> [loc] -> String -> ImpM lore r op ()
 warn loc locs problem =
-  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) problem
+  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (fromString problem)
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM lore r op ()

@@ -160,12 +160,13 @@ newFutharkiState count maybe_file = runExceptT $ do
       -- Then make the prelude available in the type checker.
       (tenv, d, src') <-
         badOnLeft pretty $
-          T.checkDec
-            imports
-            src
-            T.initialEnv
-            (T.mkInitialImport ".")
-            $ mkOpen "/prelude/prelude"
+          snd $
+            T.checkDec
+              imports
+              src
+              T.initialEnv
+              (T.mkInitialImport ".")
+              $ mkOpen "/prelude/prelude"
       -- Then in the interpreter.
       ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
@@ -177,7 +178,7 @@ newFutharkiState count maybe_file = runExceptT $ do
                 `catch` \(err :: IOException) ->
                   return (externalErrorS (show err))
             )
-      liftIO $ print ws
+      liftIO $ putStrLn $ pretty ws
 
       let imp = T.mkInitialImport "."
       ienv1 <-
@@ -185,12 +186,14 @@ newFutharkiState count maybe_file = runExceptT $ do
           map (fmap fileProg) imports
       (tenv1, d1, src') <-
         badOnLeft pretty $
-          T.checkDec imports src T.initialEnv imp $
-            mkOpen "/prelude/prelude"
+          snd $
+            T.checkDec imports src T.initialEnv imp $
+              mkOpen "/prelude/prelude"
       (tenv2, d2, src'') <-
         badOnLeft pretty $
-          T.checkDec imports src' tenv1 imp $
-            mkOpen $ toPOSIX $ dropExtension file
+          snd $
+            T.checkDec imports src' tenv1 imp $
+              mkOpen $ toPOSIX $ dropExtension file
       ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
       ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
       return (imports, src'', tenv2, ienv3)
@@ -290,8 +293,8 @@ onDec d = do
     Left e -> liftIO $ print e
     Right (_, imports', src') ->
       case T.checkDec imports' src' tenv cur_import d of
-        Left e -> liftIO $ putStrLn $ pretty e
-        Right (tenv', d', src'') -> do
+        (_, Left e) -> liftIO $ putStrLn $ pretty e
+        (_, Right (tenv', d', src'')) -> do
           let new_imports = filter ((`notElem` map fst imports) . fst) imports'
           int_r <- runInterpreter $ do
             let onImport ienv' (s, imp) =
@@ -310,10 +313,9 @@ onDec d = do
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
-  case either (Left . pretty) Right $
-    T.checkExp imports src tenv e of
-    Left err -> liftIO $ putStrLn err
-    Right (tparams, e')
+  case T.checkExp imports src tenv e of
+    (_, Left err) -> liftIO $ putStrLn $ pretty err
+    (_, Right (tparams, e'))
       | null tparams -> do
         r <- runInterpreter $ I.interpretExp ienv e'
         case r of
@@ -416,7 +418,7 @@ loadCommand file = do
 genTypeCommand ::
   Show err =>
   (String -> T.Text -> Either err a) ->
-  (Imports -> VNameSource -> T.Env -> a -> Either T.TypeError b) ->
+  (Imports -> VNameSource -> T.Env -> a -> (Warnings, Either T.TypeError b)) ->
   (b -> String) ->
   Command
 genTypeCommand f g h e = do
@@ -427,7 +429,7 @@ genTypeCommand f g h e = do
       imports <- gets futharkiImports
       src <- gets futharkiNameSource
       (tenv, _) <- gets futharkiEnv
-      case g imports src tenv e' of
+      case snd $ g imports src tenv e' of
         Left err -> liftIO $ putStrLn $ pretty err
         Right x -> liftIO $ putStrLn $ h x
 

@@ -3255,7 +3255,7 @@ checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
   | not $ identName v `S.member` allOccuring occs,
     not $ "_" `isPrefixOf` prettyName (identName v) =
-    warn (srclocOf v) $ "Unused variable " ++ quote (pretty $ baseName $ identName v) ++ "."
+    warn (srclocOf v) $ "Unused variable" <+> pquote (pprName $ identName v) <+> "."
   | otherwise =
     return ()
 
