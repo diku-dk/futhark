@@ -1089,9 +1089,6 @@ class ToExp a where
   -- | Compile where we know the type in advance.
   toExp' :: PrimType -> a -> Imp.Exp
 
-  toInt32Exp :: a -> Imp.TExp Int32
-  toInt32Exp = TPrimExp . toExp' int32
-
   toInt64Exp :: a -> Imp.TExp Int64
   toInt64Exp = TPrimExp . toExp' int64
 

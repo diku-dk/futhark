@@ -110,11 +110,8 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_groups_maybe_zero =
-        sMin64
-          ( toInt64Exp w64
-              `divUp` sExt64 (toInt32Exp group_size)
-          )
-          $ sExt64 (tvExp max_num_groups)
+        sMin64 (toInt64Exp w64 `divUp` toInt64Exp group_size) $
+          sExt64 (tvExp max_num_groups)
   -- We also don't want zero groups.
   let num_groups = sMax64 1 num_groups_maybe_zero
   mkTV (patElemName pe) int32 <-- sExt32 num_groups

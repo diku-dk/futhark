@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Warnings are now reported even for programs with type errors.
 
+  * Multicore backend now works properly for very large iteration
+    spaces.
+
 ## [0.18.1]
 
 ### Added

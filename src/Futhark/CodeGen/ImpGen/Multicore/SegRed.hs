@@ -95,7 +95,7 @@ reductionStage1 ::
   MulticoreGen ()
 reductionStage1 space slugs kbody = do
   let (is, ns) = unzip $ unSegSpace space
-      ns' = map (sExt64 . toInt32Exp) ns
+      ns' = map toInt64Exp ns
   flat_idx <- dPrim "iter" int64
 
   -- Create local accumulator variables in which we carry out the

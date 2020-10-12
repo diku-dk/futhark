@@ -1072,8 +1072,9 @@ compileSegHist (Pattern _ pes) num_groups group_size space ops kbody = do
     -- Compute RF as the average RF over all the histograms.
     hist_RF <-
       dPrimVE "hist_RF" $
-        sum (map (toInt32Exp . histRaceFactor . slugOp) slugs)
-          `quot` genericLength slugs
+        sExt32 $
+          sum (map (toInt64Exp . histRaceFactor . slugOp) slugs)
+            `quot` genericLength slugs
 
     let hist_T = sExt32 $ unCount num_groups' * unCount group_size'
     emit $ Imp.DebugPrint "\n# SegHist" Nothing
