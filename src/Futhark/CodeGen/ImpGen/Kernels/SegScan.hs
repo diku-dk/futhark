@@ -502,6 +502,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       tM            = 9
       scanOp        = head scans
       scanOpNe      = head $ segBinOpNeutral scanOp
+      tys           = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
 
   -- Allocate the shared memory for (TODO: each) output component
   sharedSize <- dPrimV "sharedSize" ((unCount group_size) * tM)
@@ -514,10 +515,12 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
     constants  <- kernelConstants <$> askEnv
     blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * tM * (kernelGroupSize constants)
     -- TODO: Maybe don't hardcode the type?
-    shared     <- sAllocArray "shared"
-                              (FloatType Float32)
-                              (Shape [Var $ tvVar sharedSize])
-                              (Space "local")
+    localArrays <- mapM (\ty ->
+                            sAllocArray "shared"
+                                        ty
+                                        (Shape [Var $ tvVar sharedSize])
+                                        (Space "local"))
+                   tys
 
     let barrier = Imp.Barrier Imp.FenceLocal
 
@@ -535,42 +538,51 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
            sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
            -- Write scan inputs to shared memory
            -- TODO: Make it work on mulitple scan inputs
-           forM_ (map kernelResultSubExp $ take 1 all_scan_res) $ \(Var src) -> do
-             copyDWIMFix shared [tvExp sharedIdx] (Var src) []
+           forM_ (zip localArrays $ map kernelResultSubExp all_scan_res) $ \(dest, (Var src)) -> do
+             copyDWIMFix dest [tvExp sharedIdx] (Var src) []
     sOp barrier
 
-    -- TODO: See `shared`
-    private <- sAllocArray "private"
-                           (FloatType Float32)
-                           (Shape [constant m])
-                           (ScalarSpace [constant m] (FloatType Float32))
+    privateArrays <-
+      mapM (\ty -> sAllocArray "private"
+                               ty
+                               (Shape [constant m])
+                               (ScalarSpace [constant m] (FloatType Float32)))
+           tys
 
     -- Read from shared into register memory, such that each thread has consecutive elements
     sFor "i" tM $ \i -> do
       -- The index into shared:
       sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * tM + i
-      copyDWIMFix private [i] (Var shared) [tvExp sharedIdx]
+      mapM_ (\(dest, src) ->
+               copyDWIMFix dest [i] (Var src) [tvExp sharedIdx])
+            $ zip privateArrays localArrays
 
     -- Per thread scan
     sFor "i" tM $ \i -> do
-      let xParam = (paramName $ head $ lambdaParams $ segBinOpLambda scanOp)
-          yParam = (paramName $ last $ lambdaParams $ segBinOpLambda scanOp)
-      dPrim_ xParam $ FloatType Float32
-      dPrim_ yParam $ FloatType Float32
-      sIf (i .==. 0)
-        ( do copyDWIMFix xParam [] scanOpNe []
-             copyDWIMFix yParam [] (Var private) [i]
-             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
-               copyDWIMFix private [i] (head $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) []
-        )
-        ( do copyDWIMFix xParam [] (Var private) [i - 1]
-             copyDWIMFix yParam [] (Var private) [i]
-             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
-               copyDWIMFix private [i] (head $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) []
-        )
+      let xs  = map paramName $ xParams scanOp
+          ys  = map paramName $ yParams scanOp
+          nes = segBinOpNeutral scanOp
+
+      mapM_
+        (\(src, (x, y, ne, ty)) ->
+           do dPrim_ x ty
+              dPrim_ y ty
+              sIf (i .==. 0)
+                (copyDWIMFix x [] ne [])
+                (copyDWIMFix x [] (Var src) [i - 1])
+              copyDWIMFix y [] (Var src) [i])
+        $ zip privateArrays $ zip4 xs ys nes tys
+
+      compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
+        mapM_
+          (\(dest, res) ->
+             copyDWIMFix dest [i] res [])
+          $ zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp
 
     -- Publish results in shared memory
-    copyDWIMFix shared [kernelLocalThreadId constants] (Var private) [tM - 1]
+    mapM_ (\(dest, src ) ->
+             copyDWIMFix dest [kernelLocalThreadId constants] (Var src) [tM - 1])
+          $ zip localArrays privateArrays
     sOp barrier
 
     -- Scan results (with warp scan)
@@ -580,21 +592,32 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       (tvExp numThreads)
       (kernelGroupSize constants)
       scanOp'
-      [shared]
+      localArrays
 
     scanOp'' <- renameLambda scanOp'
 
     -- Distribute results
     sWhen ((kernelLocalThreadId constants) .>. 0) $ do
-      let xParam = (paramName $ head $ lambdaParams scanOp'')
-          yParam = (paramName $ last $ lambdaParams scanOp'')
-      dPrim_ xParam $ FloatType Float32
-      dPrim_ yParam $ FloatType Float32
-      copyDWIMFix xParam [] (Var shared) [(kernelLocalThreadId constants) - 1]
+      let xs = map paramName $ take (length tys) $ lambdaParams scanOp''
+          ys = map paramName $ drop (length tys) $ lambdaParams scanOp''
+
+      mapM_
+        (\(src, x, y, ty) ->
+          do dPrim_ x ty
+             dPrim_ y ty
+             copyDWIMFix x [] (Var src) [(kernelLocalThreadId constants) - 1])
+        $ zip4 localArrays xs ys tys
 
       sFor "i" tM $ \i -> do
-        copyDWIMFix yParam [] (Var private) [i]
+        mapM_
+          (\(src, y) ->
+             copyDWIMFix y [] (Var src) [i])
+          $ zip privateArrays ys
+
         compileStms mempty (bodyStms $ lambdaBody scanOp'') $
-          copyDWIMFix private [i] (head $ bodyResult $ lambdaBody scanOp'') []
+          mapM_
+            (\(dest, res) ->
+               copyDWIMFix dest [i] res [])
+            $ zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp
   where
     n = product $ map toInt32Exp $ segSpaceDims space
