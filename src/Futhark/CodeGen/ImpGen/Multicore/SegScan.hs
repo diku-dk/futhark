@@ -66,7 +66,7 @@ scanStage1 pat space scan_ops kbody = do
       per_scan_pes = segBinOpChunks scan_ops $ patternValueElements pat
   let (is, ns) = unzip $ unSegSpace space
       ns' = map toInt64Exp ns
-  iter <- dPrim "iter" $ IntType Int32
+  iter <- dPrim "iter" $ IntType Int64
 
   -- Stage 1 : each thread partially scans a chunk of the input
   -- Writes directly to the resulting array
