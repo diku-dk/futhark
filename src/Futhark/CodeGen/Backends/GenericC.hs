@@ -2129,7 +2129,7 @@ compileExp = compilePrimExp compileLeaf
       iexp' <- compileExp $ untyped iexp
       return [C.cexp|$id:src[$exp:iexp']|]
     compileLeaf (SizeOf t) =
-      return [C.cexp|(typename int32_t)sizeof($ty:t')|]
+      return [C.cexp|(typename int64_t)sizeof($ty:t')|]
       where
         t' = primTypeToCType t
 
