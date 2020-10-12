@@ -70,11 +70,11 @@ getSpace (SegMap _ space _ _) = space
 getIterationDomain :: SegOp () MCMem -> SegSpace -> MulticoreGen (Imp.TExp Int64)
 getIterationDomain SegMap {} space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map (sExt64 . toInt32Exp) ns
+      ns_64 = map toInt64Exp ns
   return $ product ns_64
 getIterationDomain _ space = do
   let ns = map snd $ unSegSpace space
-      ns_64 = map (sExt64 . toInt32Exp) ns
+      ns_64 = map toInt64Exp ns
   case unSegSpace space of
     [_] -> return $ product ns_64
     -- A segmented SegOp is over the segments

@@ -53,7 +53,7 @@ compileMCOp ::
 compileMCOp _ (OtherOp ()) = pure ()
 compileMCOp pat (ParOp par_op op) = do
   let space = getSpace op
-  dPrimV_ (segFlat space) (0 :: Imp.TExp Int32)
+  dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
   nsubtasks <- dPrim "num_tasks" $ IntType Int32
   seq_code <- compileSegOp pat op nsubtasks
@@ -64,7 +64,7 @@ compileMCOp pat (ParOp par_op op) = do
   par_code <- case par_op of
     Just nested_op -> do
       let space' = getSpace nested_op
-      dPrimV_ (segFlat space') (0 :: Imp.TExp Int32)
+      dPrimV_ (segFlat space') (0 :: Imp.TExp Int64)
       compileSegOp pat nested_op nsubtasks
     Nothing -> return mempty
 
