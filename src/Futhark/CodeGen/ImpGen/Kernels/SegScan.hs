@@ -580,7 +580,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           $ zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp
 
     -- Publish results in shared memory
-    mapM_ (\(dest, src ) ->
+    mapM_ (\(dest, src) ->
              copyDWIMFix dest [kernelLocalThreadId constants] (Var src) [tM - 1])
           $ zip localArrays privateArrays
     sOp barrier
@@ -618,6 +618,6 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           mapM_
             (\(dest, res) ->
                copyDWIMFix dest [i] res [])
-            $ zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp
+            $ zip privateArrays $ bodyResult $ lambdaBody scanOp''
   where
     n = product $ map toInt32Exp $ segSpaceDims space
