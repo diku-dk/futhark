@@ -8,6 +8,7 @@ module Futhark.IR.Mem.IxFun
   ( IxFun (..),
     index,
     iota,
+    iotaOffset,
     permute,
     rotate,
     reshape,
@@ -364,11 +365,15 @@ index = indexFromLMADs . ixfunLMADs
                 (permuteInv (lmadPermutation lmad) inds)
        in off + prod
 
+-- | iota with offset.
+iotaOffset :: IntegralExp num => num -> Shape num -> IxFun num
+iotaOffset o ns =
+  let rs = replicate (length ns) 0
+   in IxFun (makeRotIota Inc o (zip rs ns) :| []) ns True
+
 -- | iota.
 iota :: IntegralExp num => Shape num -> IxFun num
-iota ns =
-  let rs = replicate (length ns) 0
-   in IxFun (makeRotIota Inc 0 (zip rs ns) :| []) ns True
+iota = iotaOffset 0
 
 -- | Permute dimensions.
 permute ::
