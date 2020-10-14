@@ -472,6 +472,28 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
                     (Var $ paramName p)
                     []
 
+
+createLocalArrays ::
+  Int64 -> -- GroupSize
+  [PrimType] -> -- Types
+  CallKernelGen [VName]
+createLocalArrays groupSize types = do
+  let size = Imp.bytes $ TPrimExp $ ValueExp $ IntValue $ Int64Value $ last byteOffsets
+  localMem <- sAlloc "local_mem" size (Space "local")
+
+  mapM (\(off, ty) -> do
+          let off' = pe32 $ constant (off `div` primByteSize ty)
+          sArray "cool_name"
+                 ty
+                 (Shape [constant groupSize])
+                 $ ArrayIn localMem $ IxFun.iotaOffset off' [pe32 $ constant groupSize]
+       )
+    $ zip (0 : byteOffsets) types
+
+  where
+    alignTo x a = ((x + a - 1) `div` a) * a
+    byteOffsets = scanl (\off cur -> groupSize * (alignTo off $ primByteSize cur)) 0 types
+
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
 compileSegScan ::
