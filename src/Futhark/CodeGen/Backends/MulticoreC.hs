@@ -56,9 +56,8 @@ compileProg =
                               $esc:multicore_util_h
                               $esc:subtask_queue_h
                               $esc:scheduler_h
+                              $esc:scheduler_tune_h
                              |]
-
-      mapM_ GC.libDecl [C.cunit|$esc:scheduler_tune_h|]
 
       cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
         ( [C.cedecl|struct $id:s;|],
@@ -151,7 +150,10 @@ compileProg =
 
                  $stms:init_fields
 
-                 // futhark_segred_tuning_program(ctx, &ctx->scheduler.kappa);
+                 int tune_kappa = 0;
+                 if (tune_kappa) {
+                   futhark_segred_tuning_program(&ctx->scheduler.kappa);
+                 }
 
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
