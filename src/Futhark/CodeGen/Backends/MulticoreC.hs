@@ -145,12 +145,13 @@ compileProg =
                  ctx->profiling_paused = 0;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
+                 ctx->scheduler.kappa = kappa_default;
                  ctx->scheduler.num_threads = num_processors();
                  if (ctx->scheduler.num_threads < 1) return NULL;
 
                  $stms:init_fields
 
-                 // futhark_segred_tuning_program(ctx, &kappa);
+                 // futhark_segred_tuning_program(ctx, &ctx->scheduler.kappa);
 
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
                  if (ctx->scheduler.workers == NULL) return NULL;
