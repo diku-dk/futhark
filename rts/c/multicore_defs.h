@@ -1,8 +1,5 @@
 // start of multicore_defs.h
 
-#ifndef MULTICORE_DEFS
-#define MULTICORE_DEFS
-
 #include <signal.h>
 
 /* #define MCPROFILE */
@@ -102,7 +99,5 @@ struct worker {
   int output_usage;            /* Whether to dump thread usage */
   uint64_t time_spent_working; /* Time spent in parloop functions */
 };
-
-#endif
 
 // end of multicore_defs.h

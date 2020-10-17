@@ -1,8 +1,5 @@
 // start of scheduler_common.h
 
-#ifndef _SCHEDULER_COMMON_H_
-#define _SCHEDULER_COMMON_H_
-
 #include <float.h>
 
 /* Scheduler definitions */
@@ -239,6 +236,4 @@ static inline struct subtask* create_subtask(parloop_fn fn,
   return subtask;
 }
 
-
-#endif
 // end of scheduler_common.h

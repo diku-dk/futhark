@@ -1,7 +1,4 @@
 // start of scheduler.h
-#ifndef _SCHEDULER_H_
-#define _SCHEDULER_H_
-
 
 static int dummy_counter = 0;
 static int64_t dummy_timer = 0;
@@ -274,5 +271,4 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   return task->top_level_fn(task->args, task->iterations, worker->tid, info);
 }
 
-#endif
 // End of scheduler.h
