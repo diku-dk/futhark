@@ -23,9 +23,14 @@ struct scheduler_info {
   int64_t *task_iter;
 };
 
+static const double kappa_default = 5.1f * 1000;
+
 struct scheduler {
   struct worker *workers;
   int num_threads;
+
+  // kappa time unit in nanoseconds
+  double kappa;
 };
 
 /* A parallel parloop task  */
@@ -69,9 +74,6 @@ __thread struct worker* worker_local = NULL;
    if we wish to backpropagte multiple errors */
 static volatile sig_atomic_t scheduler_error = 0;
 
-// kappa time unit in nanoseconds
-static double kappa = 5.1f * 1000;
-
 int64_t total_now(int64_t total, int64_t time) {
   return total + (get_wall_time_ns() - time);
 }
@@ -94,7 +96,7 @@ int random_other_worker(struct scheduler *scheduler, int my_id) {
 }
 
 
-static inline int64_t compute_chunk_size(struct subtask* subtask)
+static inline int64_t compute_chunk_size(double kappa, struct subtask* subtask)
 {
   double C = (double)*subtask->task_time / (double)*subtask->task_iter;
   if (C == 0.0F) C += DBL_EPSILON;
@@ -108,7 +110,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
   if (subtask->chunkable) {
     // Do we have information from previous runs avaliable
     if (*subtask->task_iter > 0) {
-      subtask->chunk_size = compute_chunk_size(subtask);
+      subtask->chunk_size = compute_chunk_size(worker->scheduler->kappa, subtask);
       assert(subtask->chunk_size > 0);
     }
     int64_t remaining_iter = subtask->end - subtask->start;
@@ -173,13 +175,13 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 }
 
 
-static inline int is_small(struct scheduler_segop *task, int nthreads, int *nsubtasks)
+static inline int is_small(struct scheduler_segop *task, struct scheduler *scheduler, int *nsubtasks)
 {
   int64_t time = *task->task_time;
   int64_t iter = *task->task_iter;
 
   if (task->sched == DYNAMIC || iter == 0) {
-    *nsubtasks = nthreads;
+    *nsubtasks = scheduler->num_threads;
     return 0;
   }
 
@@ -190,14 +192,14 @@ static inline int is_small(struct scheduler_segop *task, int nthreads, int *nsub
   // Returns true if the task is small i.e.
   // if the number of iterations times C is smaller
   // than the overhead of subtask creation
-  if (C == 0.0F || C * cur_task_iter < kappa) {
+  if (C == 0.0F || C * cur_task_iter < scheduler->kappa) {
     *nsubtasks = 1;
     return 1;
   }
 
   // Else compute how many subtasks this tasks should create
-  int64_t min_iter_pr_subtask = max_int64((int64_t)(kappa / C), 1);
-  *nsubtasks = (int)min_int64(max_int64(task->iterations / min_iter_pr_subtask, 1), nthreads);
+  int64_t min_iter_pr_subtask = max_int64(scheduler->kappa / C, 1);
+  *nsubtasks = min_int64(max_int64(task->iterations / min_iter_pr_subtask, 1), scheduler->num_threads);
 
   return 0;
 }
@@ -472,7 +474,7 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 
   int nsubtasks;
   // Decide if task should be scheduled sequentially
-  if (is_small(task, scheduler->num_threads, &nsubtasks)) {
+  if (is_small(task, scheduler, &nsubtasks)) {
     info.iter_pr_subtask = task->iterations;
     info.remainder = 0;
     info.nsubtasks = nsubtasks;
