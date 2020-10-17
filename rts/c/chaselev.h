@@ -1,8 +1,5 @@
 // Start of chaselev.h
 
-#ifndef _CHASELEV_H_
-#define _CHASELEV_H_
-
 /* Implementation of Chase-lev's concurrent lock-free deque
    from ``Dynamic Circular Work-Stealing Deque`` (2005)
    This implementation was ported from
@@ -175,6 +172,5 @@ static inline int empty(struct deque *q)
   return nb_subtasks(q) < 1;
 }
 
-#endif
 #endif
 // end of chaselev.h

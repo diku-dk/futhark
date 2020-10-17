@@ -1,8 +1,5 @@
 // start of subtask_queue.h
 
-#ifndef SUBTASK_QUEUE_H
-#define SUBTASK_QUEUE_H
-
 /* Doubles the size of the queue */
 static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) {
 
@@ -240,8 +237,5 @@ static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 {
   return subtask_queue->num_used == 0;
 }
-
-
-#endif
 
 // End of subtask_queue.h

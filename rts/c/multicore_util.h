@@ -2,9 +2,6 @@
 
 /* Multicore Utility functions */
 
-#ifndef _MULTICORE_UTIL_H_
-#define _MULTICORE_UTIL_H_
-
 /* A wrapper for getting rusage on Linux and MacOS */
 /* TODO maybe figure out this for windows */
 static inline int getrusage_thread(struct rusage *rusage)
@@ -98,6 +95,4 @@ int64_t max_int64(int64_t x, int64_t y)
   return x > y ? x : y;
 }
 
-
-#endif
 // end of multicore_util.h
