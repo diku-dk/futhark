@@ -28,9 +28,8 @@ int futhark_mc_tuning_segred_stage_1(void *args, int64_t start, int64_t end,
 }
 
 /* The main entry point for the tuning process */
-/* Sets the global variable ``kappa`` */
-int futhark_segred_tuning_program(struct futhark_context *ctx)
-{
+/* Sets the provided variable ``kappa`` */
+int futhark_segred_tuning_program(struct futhark_context *ctx, double *kappa) {
   int err = 0;
 
   int64_t iterations = 100000000;
@@ -116,7 +115,7 @@ int futhark_segred_tuning_program(struct futhark_context *ctx)
           kappa_tune,
           (long long)time_elapsed,
           ratio);
-  kappa = kappa_tune;
+  *kappa = kappa_tune;
 
   // Clean-up
   CHECK_ERR(subtask_queue_destroy(&ctx->scheduler.workers[0].q), "failed to destroy queue");
