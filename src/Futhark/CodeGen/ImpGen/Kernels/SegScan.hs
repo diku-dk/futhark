@@ -16,7 +16,7 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
-import Futhark.Util.IntegralExp (divUp, quot, rem)
+import Futhark.Util.IntegralExp (divUp, quot, rem, div)
 import Prelude hiding (quot, rem)
 import System.IO.Unsafe (unsafePerformIO)
 import Futhark.IR.Prop.Constants (constant)
@@ -474,25 +474,41 @@ scanStage3 (Pattern _ all_pes) num_groups group_size elems_per_group crossesSegm
 
 
 createLocalArrays ::
-  Int64 -> -- GroupSize
-  [PrimType] -> -- Types
-  CallKernelGen [VName]
-createLocalArrays groupSize types = do
-  let size = Imp.bytes $ TPrimExp $ ValueExp $ IntValue $ Int64Value $ last byteOffsets
+  Count GroupSize SubExp ->
+  SubExp ->
+  [PrimType] ->
+  InKernelGen ([VName], [VName])
+createLocalArrays (Count groupSize) m types = do
+  let pe64 x = isInt64 $ primExpFromSubExp int64 x
+  let groupSizeE = (toInt64Exp groupSize)
+  let workSize = (toInt64Exp m) * groupSizeE
+  let prefixArraysSize = foldl (\acc ty -> acc + (primByteSize ty) * groupSizeE) 0 types
+  let byteOffsets = scanl (\off tySize -> (alignTo off tySize) + (pe64 groupSize)) 0 $ map primByteSize types
+  let maxTransposedArraySize = foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
+  let size = Imp.bytes $ sMax64 prefixArraysSize maxTransposedArraySize
   localMem <- sAlloc "local_mem" size (Space "local")
+  transposeArrayLength <- dPrimV "trans_arr_len" $ workSize
 
-  mapM (\(off, ty) -> do
-          let off' = pe32 $ constant (off `div` primByteSize ty)
-          sArray "cool_name"
+  transposedArrays <-
+    mapM (\ty -> do
+             sArrayInMem "local_transpose_arr"
+                         ty
+                         (Shape [tvSize transposeArrayLength])
+                         localMem)
+         types
+
+  prefixArrays <-
+    mapM (\(off, ty) -> do
+          let off' = sExt32 (off `Futhark.Util.IntegralExp.div` primByteSize ty)
+          sArray "local_prefix_arr"
                  ty
-                 (Shape [constant groupSize])
-                 $ ArrayIn localMem $ IxFun.iotaOffset off' [pe32 $ constant groupSize]
-       )
+                 (Shape [groupSize])
+                 $ ArrayIn localMem $ IxFun.iotaOffset off' [pe32 $ groupSize])
     $ zip (0 : byteOffsets) types
 
+  return (transposedArrays, prefixArrays)
   where
-    alignTo x a = ((x + a - 1) `div` a) * a
-    byteOffsets = scanl (\off cur -> groupSize * (alignTo off $ primByteSize cur)) 0 types
+    alignTo x a = (x `divUp` a) * a
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -537,30 +553,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
     constants  <- kernelConstants <$> askEnv
     blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * tM * (kernelGroupSize constants)
-
-    -- Allocate backing memory for shared arrays
-    let maxSharedSize = Imp.bytes $ sMax64 (foldl sMax64 0 $ map (\ty -> ((unCount . typeSize . Prim) ty) * (Imp.sExt64 $ unCount group_size) * (Imp.sExt64 tM)) tys)
-                                           ((Imp.sExt64 $ unCount group_size) * (sum $ map (unCount . typeSize . Prim) tys))
-    localMem <- sAlloc "local_mem" maxSharedSize (Space "local")
-
-    -- Component copy arrays, not used at the same time:
-    transposedArrays <-
-      mapM (\ty ->
-              sArrayInMem "transposed_array"
-                          ty
-                          (Shape [Var $ tvVar tranposedSize])
-                          localMem)
-           tys
-
-    -- TODO: Use IxFun to share memory block
-    -- Block prefix arrays, used at the same time:
-    prefixArrays <-
-      mapM (\ty ->
-              sAllocArray "prefix_array"
-                          ty
-                          (Shape [Var $ tvVar prefixSize])
-                          (ScalarSpace [unCount $ segGroupSize lvl] ty))
-           tys
+    (transposedArrays, prefixArrays) <- createLocalArrays (segGroupSize lvl) (constant m) tys
 
     privateArrays <-
       mapM (\ty -> sAllocArray "private"
