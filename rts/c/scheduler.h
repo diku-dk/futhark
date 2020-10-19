@@ -1,15 +1,21 @@
 // start of scheduler.h
 
-/* Scheduler definitions */
+// First, the API that the generated code will access.  In principle,
+// we could then compile the scheduler separately and link an object
+// file with the generated code.  In practice, we will embed all of
+// this in the generated code.
+
+// Scheduler handle.
+struct scheduler;
+
+// How a segop should be scheduled.
 enum scheduling {
   DYNAMIC,
   STATIC
 };
 
-/* How a given task should be executed */
-/* Filled out by the scheduler
-   and passed to the segop function
-*/
+// How a given task should be executed.  Filled out by the scheduler
+// and passed to the segop function
 struct scheduler_info {
   int64_t iter_pr_subtask;
   int64_t remainder;
@@ -21,27 +27,14 @@ struct scheduler_info {
   int64_t *task_iter;
 };
 
-static const double kappa_default = 5.1f * 1000;
+// A segop function.  This is what you hand the scheduler for
+// execution.
+typedef int (*segop_fn)(void* args,
+                        int64_t iterations,
+                        int tid,
+                        struct scheduler_info info);
 
-struct scheduler {
-  struct worker *workers;
-  int num_threads;
-
-  // kappa time unit in nanoseconds
-  double kappa;
-};
-
-/* A parallel parloop task  */
-struct scheduler_parloop {
-  const char* name;
-  parloop_fn fn;
-  void* args;
-  int64_t iterations;
-  struct scheduler_info info;
-};
-
-
-/* A task for the scheduler to execute */
+// A task for the scheduler to execute.
 struct scheduler_segop {
   void *args;
   segop_fn top_level_fn;
@@ -55,6 +48,439 @@ struct scheduler_segop {
 
   // For debugging
   const char* name;
+};
+
+static inline int scheduler_prepare_task(struct scheduler *scheduler,
+                                         struct scheduler_segop *task);
+
+typedef int (*parloop_fn)(void* args,
+                          int64_t start,
+                          int64_t end,
+                          int subtask_id,
+                          int tid);
+
+// A parallel parloop task.
+struct scheduler_parloop {
+  void* args;
+  parloop_fn fn;
+  int64_t iterations;
+  struct scheduler_info info;
+
+  // For debugging
+  const char* name;
+};
+
+static inline int scheduler_execute_task(struct scheduler *scheduler,
+                                         struct scheduler_parloop *task);
+
+// Then the API implementation.
+
+#include <signal.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
+// For getting cpu usage of threads
+#include <mach/mach.h>
+#include <sys/resource.h>
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
+#include <sys/resource.h>
+#include <signal.h>
+#endif
+
+/* Multicore Utility functions */
+
+/* A wrapper for getting rusage on Linux and MacOS */
+/* TODO maybe figure out this for windows */
+static inline int getrusage_thread(struct rusage *rusage)
+{
+  int err = -1;
+#if  defined(__APPLE__)
+    thread_basic_info_data_t info = { 0 };
+    mach_msg_type_number_t info_count = THREAD_BASIC_INFO_COUNT;
+    kern_return_t kern_err;
+
+    kern_err = thread_info(mach_thread_self(),
+                           THREAD_BASIC_INFO,
+                           (thread_info_t)&info,
+                           &info_count);
+    if (kern_err == KERN_SUCCESS) {
+        memset(rusage, 0, sizeof(struct rusage));
+        rusage->ru_utime.tv_sec = info.user_time.seconds;
+        rusage->ru_utime.tv_usec = info.user_time.microseconds;
+        rusage->ru_stime.tv_sec = info.system_time.seconds;
+        rusage->ru_stime.tv_usec = info.system_time.microseconds;
+        err = 0;
+    } else {
+        errno = EINVAL;
+    }
+#elif defined(__linux__)
+    err = getrusage(RUSAGE_THREAD, rusage);
+#endif
+    return err;
+}
+
+/* returns the number of logical cores */
+static int num_processors()
+{
+#if  defined(_WIN32)
+/* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    int ncores = sysinfo.dwNumberOfProcessors;
+    fprintf(stderr, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
+    return ncores;
+#elif defined(__APPLE__)
+    int ncores;
+    size_t ncores_size = sizeof(ncores);
+    CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0),
+                "sysctlbyname (hw.logicalcpu)");
+    return ncores;
+#elif defined(__linux__)
+  return get_nprocs();
+#else
+  fprintf(stderr, "operating system not recognised\n");
+  return -1;
+#endif
+}
+
+static unsigned int g_seed;
+
+// Used to seed the generator.
+static inline void fast_srand(unsigned int seed) {
+    g_seed = seed;
+}
+
+// Compute a pseudorandom integer.
+// Output value in range [0, 32767]
+static inline unsigned int fast_rand(void) {
+    g_seed = (214013*g_seed+2531011);
+    return (g_seed>>16)&0x7FFF;
+}
+
+struct subtask_queue {
+  int capacity;             // Size of the buffer.
+  int first;                // Index of the start of the ring buffer.
+  int num_used;             // Number of used elements in the buffer.
+  struct subtask **buffer;
+
+  pthread_mutex_t mutex;    // Mutex used for synchronisation.
+  pthread_cond_t cond;      // Condition variable used for synchronisation.
+  int dead;
+
+#if defined(MCPROFILE)
+  /* Profiling fields */
+  uint64_t time_enqueue;
+  uint64_t time_dequeue;
+  uint64_t n_dequeues;
+  uint64_t n_enqueues;
+#endif
+};
+
+/* A subtask that can be executed by a worker */
+struct subtask {
+  /* The parloop function */
+  parloop_fn fn;
+  /* Execution parameters */
+  void* args;
+  int64_t start, end;
+  int id;
+
+  /* Dynamic scheduling parameters */
+  int chunkable;
+  int64_t chunk_size;
+
+  /* Shared variables across subtasks */
+  volatile int *counter; // Counter for ongoing subtasks
+  // Shared task timers and iterators
+  int64_t *task_time;
+  int64_t *task_iter;
+
+  /* For debugging */
+  const char *name;
+};
+
+
+struct worker {
+  pthread_t thread;
+  struct scheduler *scheduler;  /* Reference to the scheduler struct the worker belongs to*/
+  struct subtask_queue q;
+  int dead;
+  int tid;                      /* Just a thread id */
+
+  /* "thread local" time fields used for online algorithm */
+  uint64_t timer;
+  uint64_t total;
+  int nested; /* How nested the current computation is */
+
+  // Profiling fields
+  int output_usage;            /* Whether to dump thread usage */
+  uint64_t time_spent_working; /* Time spent in parloop functions */
+};
+
+static inline void output_worker_usage(struct worker *worker)
+{
+  struct rusage usage;
+  CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
+  struct timeval user_cpu_time = usage.ru_utime;
+  struct timeval sys_cpu_time = usage.ru_stime;
+  fprintf(stderr, "tid: %2d - work time %10llu us - user time: %10llu us - sys: %10llu us\n",
+          worker->tid,
+          (long long unsigned)worker->time_spent_working / 1000,
+          (long long unsigned)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
+          (long long unsigned)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec));
+}
+
+/* Doubles the size of the queue */
+static inline int subtask_queue_grow_queue(struct subtask_queue *subtask_queue) {
+
+  int new_capacity = 2 * subtask_queue->capacity;
+#ifdef MCDEBUG
+  fprintf(stderr, "Growing queue to %d\n", subtask_queue->capacity * 2);
+#endif
+
+  struct subtask **new_buffer = calloc(new_capacity, sizeof(struct subtask*));
+  for (int i = 0; i < subtask_queue->num_used; i++) {
+    new_buffer[i] = subtask_queue->buffer[(subtask_queue->first + i) % subtask_queue->capacity];
+  }
+
+  free(subtask_queue->buffer);
+  subtask_queue->buffer = new_buffer;
+  subtask_queue->capacity = new_capacity;
+  subtask_queue->first = 0;
+
+  return 0;
+}
+
+// Initialise a job queue with the given capacity.  The queue starts out
+// empty.  Returns non-zero on error.
+static inline int subtask_queue_init(struct subtask_queue *subtask_queue, int capacity)
+{
+  assert(subtask_queue != NULL);
+  memset(subtask_queue, 0, sizeof(struct subtask_queue));
+
+  subtask_queue->capacity = capacity;
+  subtask_queue->buffer = calloc(capacity, sizeof(struct subtask*));
+  if (subtask_queue->buffer == NULL) {
+    return -1;
+  }
+
+  CHECK_ERRNO(pthread_mutex_init(&subtask_queue->mutex, NULL), "pthread_mutex_init");
+  CHECK_ERRNO(pthread_cond_init(&subtask_queue->cond, NULL), "pthread_cond_init");
+
+  return 0;
+}
+
+// Destroy the job queue.  Blocks until the queue is empty before it
+// is destroyed.
+static inline int subtask_queue_destroy(struct subtask_queue *subtask_queue)
+{
+  assert(subtask_queue != NULL);
+
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+
+  while (subtask_queue->num_used != 0) {
+    CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
+  }
+
+  // Queue is now empty.  Let's kill it!
+  subtask_queue->dead = 1;
+  free(subtask_queue->buffer);
+  CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+
+  return 0;
+}
+
+static inline void dump_queue(struct worker *worker)
+{
+  struct subtask_queue *subtask_queue = &worker->q;
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+  for (int i = 0; i < subtask_queue->num_used; i++) {
+    struct subtask * subtask = subtask_queue->buffer[(subtask_queue->first + i) % subtask_queue->capacity];
+    printf("queue tid %d with %d task %s\n", worker->tid, i, subtask->name);
+  }
+  CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+}
+
+// Push an element onto the end of the job queue.  Blocks if the
+// subtask_queue is full (its size is equal to its capacity).  Returns
+// non-zero on error.  It is an error to push a job onto a queue that
+// has been destroyed.
+static inline int subtask_queue_enqueue(struct worker *worker, struct subtask *subtask )
+{
+  assert(worker != NULL);
+  struct subtask_queue *subtask_queue = &worker->q;
+
+#ifdef MCPROFILE
+  uint64_t start = get_wall_time();
+#endif
+
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+  // Wait until there is room in the subtask_queue.
+  while (subtask_queue->num_used == subtask_queue->capacity && !subtask_queue->dead) {
+    if (subtask_queue->num_used == subtask_queue->capacity) {
+      CHECK_ERR(subtask_queue_grow_queue(subtask_queue), "subtask_queue_grow_queue");
+      continue;
+    }
+    CHECK_ERR(pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex), "pthread_cond_wait");
+  }
+
+  if (subtask_queue->dead) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return -1;
+  }
+
+  // If we made it past the loop, there is room in the subtask_queue.
+  subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used) % subtask_queue->capacity] = subtask;
+  subtask_queue->num_used++;
+
+#ifdef MCPROFILE
+  uint64_t end = get_wall_time();
+  subtask_queue->time_enqueue += (end - start);
+  subtask_queue->n_enqueues++;
+#endif
+  // Broadcast a reader (if any) that there is now an element.
+  CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+
+  return 0;
+}
+
+
+/* Like subtask_queue_dequeue, but with two differences:
+   1) the subtask is stolen from the __front__ of the queue
+   2) returns immediately if there is no subtasks queued,
+      as we dont' want to block on another workers queue and
+*/
+static inline int subtask_queue_steal(struct worker *worker,
+                                      struct subtask **subtask)
+{
+  struct subtask_queue *subtask_queue = &worker->q;
+  assert(subtask_queue != NULL);
+
+#ifdef MCPROFILE
+  uint64_t start = get_wall_time();
+#endif
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+
+  if (subtask_queue->num_used == 0) {
+    CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return 1;
+  }
+
+  if (subtask_queue->dead) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return -1;
+  }
+
+  // Tasks gets stolen from the "front"
+  struct subtask *cur_back = subtask_queue->buffer[subtask_queue->first];
+  struct subtask *new_subtask = NULL;
+  int remaining_iter = cur_back->end - cur_back->start;
+  // If subtask is chunkable, we steal half of the iterations
+  if (cur_back->chunkable && remaining_iter > 1) {
+      int64_t half = remaining_iter / 2;
+      new_subtask = malloc(sizeof(struct subtask));
+      *new_subtask = *cur_back;
+      new_subtask->start = cur_back->end - half;
+      cur_back->end = new_subtask->start;
+      __atomic_fetch_add(cur_back->counter, 1, __ATOMIC_RELAXED);
+  } else {
+    new_subtask = cur_back;
+    subtask_queue->num_used--;
+    subtask_queue->first = (subtask_queue->first + 1) % subtask_queue->capacity;
+  }
+  *subtask = new_subtask;
+
+  if (*subtask == NULL) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
+    return 1;
+  }
+
+#ifdef MCPROFILE
+  uint64_t end = get_wall_time();
+  subtask_queue->time_dequeue += (end - start);
+  subtask_queue->n_dequeues++;
+#endif
+
+  // Broadcast a writer (if any) that there is now room for more.
+  CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+
+  return 0;
+}
+
+
+// Pop an element from the back of the job queue.
+// Optional argument can be provided to block or not
+static inline int subtask_queue_dequeue(struct worker *worker,
+                                        struct subtask **subtask, int blocking)
+{
+  assert(worker != NULL);
+  struct subtask_queue *subtask_queue = &worker->q;
+
+#ifdef MCPROFILE
+  uint64_t start = get_wall_time();
+#endif
+
+  CHECK_ERR(pthread_mutex_lock(&subtask_queue->mutex), "pthread_mutex_lock");
+  if (subtask_queue->num_used == 0 && !blocking) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return 1;
+  }
+  // Try to steal some work while the subtask_queue is empty
+  while (subtask_queue->num_used == 0 && !subtask_queue->dead) {
+    pthread_cond_wait(&subtask_queue->cond, &subtask_queue->mutex);
+  }
+
+  if (subtask_queue->dead) {
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+    return -1;
+  }
+
+  // dequeue pops from the back
+  *subtask = subtask_queue->buffer[(subtask_queue->first + subtask_queue->num_used - 1) % subtask_queue->capacity];
+  subtask_queue->num_used--;
+
+  if (*subtask == NULL) {
+    assert(!"got NULL ptr");
+    CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthred_mutex_unlock");
+    return -1;
+  }
+
+#ifdef MCPROFILE
+  uint64_t end = get_wall_time();
+  subtask_queue->time_dequeue += (end - start);
+  subtask_queue->n_dequeues++;
+#endif
+
+  // Broadcast a writer (if any) that there is now room for more.
+  CHECK_ERR(pthread_cond_broadcast(&subtask_queue->cond), "pthread_cond_broadcast");
+  CHECK_ERR(pthread_mutex_unlock(&subtask_queue->mutex), "pthread_mutex_unlock");
+
+  return 0;
+}
+
+static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
+{
+  return subtask_queue->num_used == 0;
+}
+
+/* Scheduler definitions */
+
+static const double kappa_default = 5.1f * 1000;
+
+struct scheduler {
+  struct worker *workers;
+  int num_threads;
+
+  // kappa time unit in nanoseconds
+  double kappa;
 };
 
 // If there is work to steal => active_work > 0
@@ -72,11 +498,11 @@ __thread struct worker* worker_local = NULL;
    if we wish to backpropagte multiple errors */
 static volatile sig_atomic_t scheduler_error = 0;
 
-int64_t total_now(int64_t total, int64_t time) {
+static int64_t total_now(int64_t total, int64_t time) {
   return total + (get_wall_time_ns() - time);
 }
 
-int random_other_worker(struct scheduler *scheduler, int my_id) {
+static int random_other_worker(struct scheduler *scheduler, int my_id) {
   (void)scheduler;
   int my_num_workers = __atomic_load_n(&num_workers, __ATOMIC_RELAXED);
   assert(my_num_workers != 1);
@@ -98,7 +524,7 @@ static inline int64_t compute_chunk_size(double kappa, struct subtask* subtask)
 {
   double C = (double)*subtask->task_time / (double)*subtask->task_iter;
   if (C == 0.0F) C += DBL_EPSILON;
-  return max_int64((int64_t)(kappa / C), 1);
+  return smax64((int64_t)(kappa / C), 1);
 }
 
 /* Takes a chunk from subtask and enqueues the remaining iterations onto the worker's queue */
@@ -196,8 +622,8 @@ static inline int is_small(struct scheduler_segop *task, struct scheduler *sched
   }
 
   // Else compute how many subtasks this tasks should create
-  int64_t min_iter_pr_subtask = max_int64(scheduler->kappa / C, 1);
-  *nsubtasks = min_int64(max_int64(task->iterations / min_iter_pr_subtask, 1), scheduler->num_threads);
+  int64_t min_iter_pr_subtask = smax64(scheduler->kappa / C, 1);
+  *nsubtasks = smin64(smax64(task->iterations / min_iter_pr_subtask, 1), scheduler->num_threads);
 
   return 0;
 }
@@ -507,6 +933,10 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
 
   return task->top_level_fn(task->args, task->iterations, worker->tid, info);
 }
+
+// Now some code for finding the proper value of kappa on a given
+// machine (the smallest amount of work that amortises the cost of
+// task creation).
 
 struct tuning_struct {
   int32_t *free_tuning_res;
