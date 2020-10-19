@@ -43,16 +43,16 @@ compileProg =
     <=< ImpGen.compileProg
   where
     generateContext = do
-      let multicore_defs_h = $(embedStringFile "rts/c/multicore_defs.h")
-          multicore_util_h = $(embedStringFile "rts/c/multicore_util.h")
+      let multicore_util_h = $(embedStringFile "rts/c/multicore_util.h")
+          multicore_defs_h = $(embedStringFile "rts/c/multicore_defs.h")
           subtask_queue_h = $(embedStringFile "rts/c/subtask_queue.h")
           scheduler_h = $(embedStringFile "rts/c/scheduler.h")
 
       mapM_
         GC.earlyDecl
         [C.cunit|
-                              $esc:multicore_defs_h
                               $esc:multicore_util_h
+                              $esc:multicore_defs_h
                               $esc:subtask_queue_h
                               $esc:scheduler_h
                              |]
@@ -188,7 +188,6 @@ compileProg =
           [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
 
-                 // output_thread_usage(worker_local);
                  for (int i = 1; i < ctx->scheduler.num_threads; i++)
                  {
                    struct worker *cur_worker = &ctx->scheduler.workers[i];

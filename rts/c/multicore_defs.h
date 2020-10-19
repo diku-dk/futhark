@@ -1,30 +1,5 @@
 // start of multicore_defs.h
 
-#include <signal.h>
-
-/* #define MCPROFILE */
-
-// Which queue implementation to use
-#define MCJOBQUEUE
-// NOTE! MCCHASELEV has been removed from multicore branch
-// Switch to multicore_deque branch to use chase-lev deque
-/* #define MCCHASELEV */
-
-
-#if defined(_WIN32)
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <sys/sysctl.h>
-// For getting cpu usage of threads
-#include <mach/mach.h>
-#include <sys/resource.h>
-#elif defined(__linux__)
-#include <sys/sysinfo.h>
-#include <sys/resource.h>
-#include <signal.h>
-#endif
-
-
 // Forward declarations
 // Scheduler definitions
 struct scheduler;
@@ -99,5 +74,18 @@ struct worker {
   int output_usage;            /* Whether to dump thread usage */
   uint64_t time_spent_working; /* Time spent in parloop functions */
 };
+
+static inline void output_worker_usage(struct worker *worker)
+{
+  struct rusage usage;
+  CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
+  struct timeval user_cpu_time = usage.ru_utime;
+  struct timeval sys_cpu_time = usage.ru_stime;
+  fprintf(stderr, "tid: %2d - work time %10llu us - user time: %10llu us - sys: %10llu us\n",
+          worker->tid,
+          (long long unsigned)worker->time_spent_working / 1000,
+          (long long unsigned)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
+          (long long unsigned)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec));
+}
 
 // end of multicore_defs.h

@@ -1,7 +1,5 @@
 // start of scheduler.h
 
-#include <float.h>
-
 /* Scheduler definitions */
 enum scheduling {
   DYNAMIC,
@@ -323,7 +321,7 @@ static inline void *scheduler_worker(void* args)
   __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
 #if defined(MCPROFILE)
   if (worker->output_usage)
-    output_thread_usage(worker);
+    output_worker_usage(worker);
 #endif
   return NULL;
 }

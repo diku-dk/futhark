@@ -1652,6 +1652,7 @@ $esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
+$esc:("#include <float.h>")
 $esc:(header_extra)
 
 $esc:("\n// Initialisation\n")
