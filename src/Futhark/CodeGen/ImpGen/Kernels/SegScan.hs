@@ -539,6 +539,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       (mapIdx, dim) = head $ unSegSpace space
       m :: Int32
       m             = 9
+      tM :: Imp.TExp Int32
       tM            = 9
       scanOp        = head scans
       scanOpNe      = head $ segBinOpNeutral scanOp
@@ -561,7 +562,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                       (Count 0)
                       (toExp' int32 $ constant (1 :: Int32))
 
-    blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * tM * (kernelGroupSize constants)
+    blockOff   <- dPrimV "blockOff" $ (tvExp dynamicId) * tM * (kernelGroupSize constants)
     (transposedArrays, prefixArrays) <-
       createLocalArrays (segGroupSize lvl) (constant m) tys
 
