@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Multicore backend now works properly for very large iteration
     spaces.
 
+  * A few internal generated functions (`init_constants()`,
+    `free_constants()`) were mistakenly declared non-static.
+
 ## [0.18.1]
 
 ### Added

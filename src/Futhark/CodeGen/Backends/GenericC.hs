@@ -1913,8 +1913,8 @@ compileConstants (Constants ps init_consts) = do
         | null const_fields = [[C.csdecl|int dummy;|]]
         | otherwise = const_fields
   contextField "constants" [C.cty|struct { $sdecls:const_fields' }|] Nothing
-  earlyDecl [C.cedecl|int init_constants($ty:ctx_ty*);|]
-  earlyDecl [C.cedecl|int free_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|static int init_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|static int free_constants($ty:ctx_ty*);|]
 
   -- We locally define macros for the constants, so that when we
   -- generate assignments to local variables, we actually assign into
@@ -1925,7 +1925,7 @@ compileConstants (Constants ps init_consts) = do
     mapM_ resetMemConst ps
     compileCode init_consts
   libDecl
-    [C.cedecl|int init_constants($ty:ctx_ty *ctx) {
+    [C.cedecl|static int init_constants($ty:ctx_ty *ctx) {
       (void)ctx;
       int err = 0;
       $items:defs
@@ -1937,7 +1937,7 @@ compileConstants (Constants ps init_consts) = do
 
   free_consts <- collect $ mapM_ freeConst ps
   libDecl
-    [C.cedecl|int free_constants($ty:ctx_ty *ctx) {
+    [C.cedecl|static int free_constants($ty:ctx_ty *ctx) {
       (void)ctx;
       $items:free_consts
       return 0;
