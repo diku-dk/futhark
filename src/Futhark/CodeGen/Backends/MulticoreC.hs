@@ -47,7 +47,6 @@ compileProg =
           multicore_util_h = $(embedStringFile "rts/c/multicore_util.h")
           subtask_queue_h = $(embedStringFile "rts/c/subtask_queue.h")
           scheduler_h = $(embedStringFile "rts/c/scheduler.h")
-          scheduler_tune_h = $(embedStringFile "rts/c/scheduler_tune.h")
 
       mapM_
         GC.earlyDecl
@@ -56,7 +55,6 @@ compileProg =
                               $esc:multicore_util_h
                               $esc:subtask_queue_h
                               $esc:scheduler_h
-                              $esc:scheduler_tune_h
                              |]
 
       cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
@@ -152,7 +150,7 @@ compileProg =
 
                  int tune_kappa = 0;
                  if (tune_kappa) {
-                   futhark_segred_tuning_program(&ctx->scheduler.kappa);
+                   determine_kappa(&ctx->scheduler.kappa);
                  }
 
                  ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));

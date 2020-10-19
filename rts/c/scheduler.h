@@ -366,13 +366,14 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
                                               chunkable, chunk_size,
                                               subtask_id);
     assert(subtask != NULL);
-    if (worker->nested){
-      CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[worker->tid], subtask),
-                "subtask_queue_enqueue");
-    } else {
-      CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[subtask_id], subtask),
-                "subtask_queue_enqueue");
-    }
+    // In most cases we will never have more subtasks than workers,
+    // but there can be exceptions (e.g. the kappa tuning function).
+    struct worker *subtask_worker =
+      worker->nested
+      ? &scheduler->workers[worker->tid]
+      : &scheduler->workers[subtask_id % scheduler->num_threads];
+    CHECK_ERR(subtask_queue_enqueue(subtask_worker, subtask),
+              "subtask_queue_enqueue");
     // Update range params
     start = end;
     end += iter_pr_subtask + ((subtask_id + 1) < remainder);
@@ -507,6 +508,127 @@ static inline int scheduler_prepare_task(struct scheduler* scheduler,
   }
 
   return task->top_level_fn(task->args, task->iterations, worker->tid, info);
+}
+
+struct tuning_struct {
+  int32_t *free_tuning_res;
+  int32_t *array;
+};
+
+// Reduction function over an integer array
+static int tuning_loop(void *args, int64_t start, int64_t end,
+                                     int flat_tid, int tid) {
+  (void)flat_tid;
+  (void)tid;
+
+  int err = 0;
+  struct tuning_struct *tuning_struct = (struct tuning_struct *) args;
+  int32_t *array = tuning_struct->array;
+  int32_t *tuning_res = tuning_struct->free_tuning_res;
+
+  int32_t sum = 0;
+  for (int i = start; i < end; i++) {
+    int32_t y = array[i];
+    sum = add32(sum, y);
+  }
+  *tuning_res = sum;
+  return err;
+}
+
+// The main entry point for the tuning process.  Sets the provided
+// variable ``kappa``.
+static int determine_kappa(double *kappa) {
+  int err = 0;
+
+  int64_t iterations = 100000000;
+  int64_t tuning_time = 0;
+  int64_t tuning_iter = 0;
+
+  int32_t *array = malloc(sizeof(int32_t) * iterations);
+  for (int64_t i = 0; i < iterations; i++) {
+    array[i] = fast_rand();
+  }
+
+  int64_t start_tuning = get_wall_time_ns();
+  /* **************************** */
+  /* Run sequential reduce first' */
+  /* **************************** */
+  int64_t tuning_sequentiual_start = get_wall_time_ns();
+  struct tuning_struct tuning_struct;
+  int32_t tuning_res;
+  tuning_struct.free_tuning_res = &tuning_res;
+  tuning_struct.array = array;
+
+  err = tuning_loop(&tuning_struct, 0, iterations, 0, 0);
+  int64_t tuning_sequentiual_end = get_wall_time_ns();
+  int64_t sequential_elapsed = tuning_sequentiual_end - tuning_sequentiual_start;
+
+  double C = (double)sequential_elapsed / (double)iterations;
+  fprintf(stderr, " Time for sequential run is %lld - Found C %f\n", (long long)sequential_elapsed, C);
+
+  /* ********************** */
+  /* Now run tuning process */
+  /* ********************** */
+  // Setup a scheduler with a single worker
+  struct scheduler scheduler;
+  scheduler.num_threads = 1;
+  scheduler.workers = malloc(sizeof(struct worker));
+  worker_local = &scheduler.workers[0];
+  worker_local->tid = 0;
+  CHECK_ERR(subtask_queue_init(&scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
+
+  // Start tuning for kappa
+  double kappa_tune = 1000; // Initial kappa is 1 us
+  double ratio;
+  int64_t time_elapsed;
+  while(1) {
+    int64_t min_iter_pr_subtask = (int64_t) (kappa_tune / C) == 0 ? 1 : (kappa_tune / C);
+    int nsubtasks = iterations / min_iter_pr_subtask;
+    struct scheduler_info info;
+    info.iter_pr_subtask = min_iter_pr_subtask;
+
+    info.nsubtasks = iterations / min_iter_pr_subtask;
+    info.remainder = iterations % min_iter_pr_subtask;
+    info.task_time = &tuning_time;
+    info.task_iter = &tuning_iter;
+    info.sched = STATIC;
+
+    struct scheduler_parloop parloop;
+    parloop.name = "tuning_loop";
+    parloop.fn = tuning_loop;
+    parloop.args = &tuning_struct;
+    parloop.iterations = iterations;
+    parloop.info = info;
+
+    int64_t tuning_chunked_start = get_wall_time_ns();
+    int determine_kappa_err =
+      scheduler_execute_task(&scheduler,
+                             &parloop);
+    assert(determine_kappa_err == 0);
+    int64_t tuning_chunked_end = get_wall_time_ns();
+    time_elapsed =  tuning_chunked_end - tuning_chunked_start;
+
+    ratio = (double)time_elapsed / (double)sequential_elapsed;
+    if (ratio < 1.055) {
+      break;
+    }
+    kappa_tune += 100; // Increase by 100 ns at the time
+    fprintf(stderr, "nsubtask %d - kappa %f - ratio %f\n", nsubtasks, kappa_tune, ratio);
+  }
+
+  int64_t end_tuning = get_wall_time_ns();
+  fprintf(stderr, "tuning took %lld ns and found kappa %f - time %lld - ratio %f\n",
+          (long long)end_tuning - start_tuning,
+          kappa_tune,
+          (long long)time_elapsed,
+          ratio);
+  *kappa = kappa_tune;
+
+  // Clean-up
+  CHECK_ERR(subtask_queue_destroy(&scheduler.workers[0].q), "failed to destroy queue");
+  free(array);
+  free(scheduler.workers);
+  return err;
 }
 
 // End of scheduler.h
