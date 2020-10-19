@@ -546,11 +546,21 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
   -- Allocate the shared memory for output component
   numThreads <- dPrimV "numThreads" num_threads
+  globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
 
   -- TODO: Use dynamic block id instead of the static one
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
-
     constants  <- kernelConstants <$> askEnv
+
+    dynamicId <- dPrim "dynamic_id" int32
+    sWhen (kernelLocalThreadId constants .==. 0) $
+      sOp $ Imp.Atomic (Space "global") $
+        Imp.AtomicAdd Int32
+                      (tvVar dynamicId)
+                      globalId
+                      (Count 0)
+                      (toExp' int32 $ constant (1 :: Int32))
+
     blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * tM * (kernelGroupSize constants)
     (transposedArrays, prefixArrays) <-
       createLocalArrays (segGroupSize lvl) (constant m) tys
