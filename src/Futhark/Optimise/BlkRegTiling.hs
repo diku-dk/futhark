@@ -366,12 +366,17 @@ mm_BlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbo
                 return [Var rss]
               let rssss : _ = rssss_list
               return rssss
-
+          -- Reshape (ShapeChange SubExp) VName
+          -- buckets'' <- certifying c $ letExp (baseString buckets') $
+          -- I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion w_img] 1 b_shape) buckets'
+          let shp_chng = map (\_ -> DimNew one_se) rem_outer_dims ++ [DimNew ty, DimNew tx] ++
+                         map (\_ -> DimNew one_se) rem_outer_dims ++ [DimNew ry, DimNew rx]
+          epilogue_res_reshaped <- letExp "res_reshaped" $ BasicOp $ Reshape shp_chng epilogue_res
           let regtile_ret_dims =
                 ( map (\(_, sz) -> (sz, one_se, one_se)) rem_outer_dims ) ++
                 [(height_A, ty, ry), (width_B, tx, rx)]
           -- TODO: RegTileReturns is still missing boundary checks.
-          return [RegTileReturns regtile_ret_dims epilogue_res]
+          return [RegTileReturns regtile_ret_dims epilogue_res_reshaped]
 
         let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
