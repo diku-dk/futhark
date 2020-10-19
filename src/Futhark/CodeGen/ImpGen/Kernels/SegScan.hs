@@ -545,9 +545,6 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       tys           = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
 
   -- Allocate the shared memory for output component
-  tranposedSize <- dPrimV "tranposedSize" ((unCount group_size) * tM)
-  prefixSize <- dPrimV "prefixedSize" (unCount group_size)
-
   numThreads <- dPrimV "numThreads" num_threads
 
   -- TODO: Use dynamic block id instead of the static one
@@ -555,7 +552,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
     constants  <- kernelConstants <$> askEnv
     blockOff   <- dPrimV "blockOff" $ (kernelGroupId constants) * tM * (kernelGroupSize constants)
-    (transposedArrays, prefixArrays) <- createLocalArrays (segGroupSize lvl) (constant m) tys
+    (transposedArrays, prefixArrays) <-
+      createLocalArrays (segGroupSize lvl) (constant m) tys
 
     privateArrays <-
       mapM (\ty -> sAllocArray "private"
@@ -566,99 +564,101 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
     let barrier = Imp.Barrier Imp.FenceLocal
 
-    -- Load and map
-    sFor "i" tM $ \i -> do
-      -- The map's input index
-      dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
-      -- Perform the map
-      compileStms mempty (kernelBodyStms kbody) $
-        do let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
-           forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) -> do
-             -- Write map results to their global memory destinations
-             copyDWIMFix (patElemName dest) [Imp.vi32 mapIdx] (kernelResultSubExp src) []
-
-           forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, (Var src)) -> do
-             copyDWIMFix dest [i] (Var src) []
-
-    -- Transpose scan inputs
-    forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
+    sComment "Load and map" $
       sFor "i" tM $ \i -> do
-        sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
-        copyDWIMFix trans [tvExp sharedIdx] (Var priv) [i]
-      sOp barrier
+        -- The map's input index
+        dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
+        -- Perform the map
+        compileStms mempty (kernelBodyStms kbody) $
+          do let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
+             forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) -> do
+               -- Write map results to their global memory destinations
+               copyDWIMFix (patElemName dest) [Imp.vi32 mapIdx] (kernelResultSubExp src) []
+
+             forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, (Var src)) -> do
+               copyDWIMFix dest [i] (Var src) []
+
+    sComment "Transpose scan inputs" $
+      forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
+        sFor "i" tM $ \i -> do
+          sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
+          copyDWIMFix trans [tvExp sharedIdx] (Var priv) [i]
+        sOp barrier
+        sFor "i" tM $ \i -> do
+          sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * tM + i
+          copyDWIMFix priv [i] (Var trans) [tvExp sharedIdx]
+
+    sComment "Per thread scan" $ do
       sFor "i" tM $ \i -> do
-        sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * tM + i
-        copyDWIMFix priv [i] (Var trans) [tvExp sharedIdx]
+        let xs  = map paramName $ xParams scanOp
+            ys  = map paramName $ yParams scanOp
+            nes = segBinOpNeutral scanOp
 
-    -- Per thread scan
-    sFor "i" tM $ \i -> do
-      let xs  = map paramName $ xParams scanOp
-          ys  = map paramName $ yParams scanOp
-          nes = segBinOpNeutral scanOp
-
-      mapM_
-        (\(src, (x, y, ne, ty)) ->
-           do dPrim_ x ty
-              dPrim_ y ty
-              sIf (i .==. 0)
-                (copyDWIMFix x [] ne [])
-                (copyDWIMFix x [] (Var src) [i - 1])
-              copyDWIMFix y [] (Var src) [i])
-        $ zip privateArrays $ zip4 xs ys nes tys
-
-      compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
         mapM_
-          (\(dest, res) ->
-             copyDWIMFix dest [i] res [])
-          $ zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp
+          (\(src, (x, y, ne, ty)) ->
+             do dPrim_ x ty
+                dPrim_ y ty
+                sIf (i .==. 0)
+                  (copyDWIMFix x [] ne [])
+                  (copyDWIMFix x [] (Var src) [i - 1])
+                copyDWIMFix y [] (Var src) [i])
+          $ zip privateArrays $ zip4 xs ys nes tys
 
-    -- Publish results in shared memory
-    mapM_ (\(dest, src) ->
-             copyDWIMFix dest [kernelLocalThreadId constants] (Var src) [tM - 1])
-          $ zip prefixArrays privateArrays
-    sOp barrier
+        compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
+          mapM_
+            (\(dest, res) ->
+               copyDWIMFix dest [i] res [])
+            $ zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp
 
-    -- Scan results (with warp scan)
+    sComment "Publish results in shared memory" $ do
+      mapM_ (\(dest, src) ->
+               copyDWIMFix dest [kernelLocalThreadId constants] (Var src) [tM - 1])
+            $ zip prefixArrays privateArrays
+      sOp barrier
+
+
     scanOp' <- renameLambda $ segBinOpLambda scanOp
-    groupScan
-      Nothing -- TODO
-      (tvExp numThreads)
-      (kernelGroupSize constants)
-      scanOp'
-      prefixArrays
+
+    sComment "Scan results (with warp scan)" $ do
+      groupScan
+        Nothing -- TODO
+        (tvExp numThreads)
+        (kernelGroupSize constants)
+        scanOp'
+        prefixArrays
 
     scanOp'' <- renameLambda scanOp'
 
     -- TODO: Distribution is broken
-    -- Distribute results
-    sWhen ((kernelLocalThreadId constants) .>. 0) $ do
-      let xs = map paramName $ take (length tys) $ lambdaParams scanOp''
-          ys = map paramName $ drop (length tys) $ lambdaParams scanOp''
+    sComment "Distribute results" $ do
+      sWhen ((kernelLocalThreadId constants) .>. 0) $ do
+        let xs = map paramName $ take (length tys) $ lambdaParams scanOp''
+            ys = map paramName $ drop (length tys) $ lambdaParams scanOp''
 
-      mapM_
-        (\(src, x, y, ty) ->
-          do dPrim_ x ty
-             dPrim_ y ty
-             copyDWIMFix x [] (Var src) [(kernelLocalThreadId constants) - 1])
-        $ zip4 prefixArrays xs ys tys
-
-      sFor "i" tM $ \i -> do
         mapM_
-          (\(src, y) ->
-             copyDWIMFix y [] (Var src) [i])
-          $ zip privateArrays ys
+          (\(src, x, y, ty) ->
+            do dPrim_ x ty
+               dPrim_ y ty
+               copyDWIMFix x [] (Var src) [(kernelLocalThreadId constants) - 1])
+          $ zip4 prefixArrays xs ys tys
 
-        compileStms mempty (bodyStms $ lambdaBody scanOp'') $
+        sFor "i" tM $ \i -> do
           mapM_
-            (\(dest, res) ->
-               copyDWIMFix dest [i] res [])
-            $ zip privateArrays $ bodyResult $ lambdaBody scanOp''
+            (\(src, y) ->
+               copyDWIMFix y [] (Var src) [i])
+            $ zip privateArrays ys
 
-    -- Write block scan results to global memory
-    forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) -> do
-      sFor "i" tM $ \i -> do
-        dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) * (tM) + i
-        sWhen ((Imp.vi32 mapIdx) .<. n) $ do
-          copyDWIMFix dest [Imp.vi32 mapIdx] (Var src) [i]
+          compileStms mempty (bodyStms $ lambdaBody scanOp'') $
+            mapM_
+              (\(dest, res) ->
+                 copyDWIMFix dest [i] res [])
+              $ zip privateArrays $ bodyResult $ lambdaBody scanOp''
+
+    sComment "Write block scan results to global memory" $
+      forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) -> do
+        sFor "i" tM $ \i -> do
+          dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) * (tM) + i
+          sWhen ((Imp.vi32 mapIdx) .<. n) $ do
+            copyDWIMFix dest [Imp.vi32 mapIdx] (Var src) [i]
   where
     n = product $ map toInt32Exp $ segSpaceDims space
