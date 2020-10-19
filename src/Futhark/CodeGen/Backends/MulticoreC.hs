@@ -426,7 +426,7 @@ benchmarkCode name tid code = do
   addBenchmarkFields name tid
   return
     [C.citems|
-     typename uint64_t $id:start;
+     typename uint64_t $id:start = 0;
      if (ctx->profiling && !ctx->profiling_paused) {
        $id:start = get_wall_time();
      }
