@@ -1,5 +1,20 @@
 // start of multicore_util.h
 
+#include <signal.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
+// For getting cpu usage of threads
+#include <mach/mach.h>
+#include <sys/resource.h>
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
+#include <sys/resource.h>
+#include <signal.h>
+#endif
+
 /* Multicore Utility functions */
 
 /* A wrapper for getting rusage on Linux and MacOS */
@@ -55,20 +70,6 @@ static int num_processors()
   return -1;
 #endif
 }
-
-static inline void output_thread_usage(struct worker *worker)
-{
-  struct rusage usage;
-  CHECK_ERRNO(getrusage_thread(&usage), "getrusage_thread");
-  struct timeval user_cpu_time = usage.ru_utime;
-  struct timeval sys_cpu_time = usage.ru_stime;
-  fprintf(stderr, "tid: %2d - work time %10llu us - user time: %10llu us - sys: %10llu us\n",
-          worker->tid,
-          (long long unsigned)worker->time_spent_working / 1000,
-          (long long unsigned)(user_cpu_time.tv_sec * 1000000 + user_cpu_time.tv_usec),
-          (long long unsigned)(sys_cpu_time.tv_sec * 1000000 + sys_cpu_time.tv_usec));
-}
-
 
 static unsigned int g_seed;
 
