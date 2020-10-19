@@ -479,13 +479,15 @@ createLocalArrays ::
   [PrimType] ->
   InKernelGen ([VName], [VName])
 createLocalArrays (Count groupSize) m types = do
-  let pe64 x = isInt64 $ primExpFromSubExp int64 x
   let groupSizeE = (toInt64Exp groupSize)
   let workSize = (toInt64Exp m) * groupSizeE
-  let prefixArraysSize = foldl (\acc ty -> acc + (primByteSize ty) * groupSizeE) 0 types
-  let byteOffsets = scanl (\off tySize -> (alignTo off tySize) + (pe64 groupSize)) 0 $ map primByteSize types
+  let prefixArraysSize = foldl (\acc tySize -> (alignTo acc tySize) + tySize * groupSizeE) 0 $ map primByteSize types
+  let byteOffsets = scanl (\off tySize -> (alignTo off tySize) + (pe32 groupSize) * tySize) 0 $ map primByteSize types
   let maxTransposedArraySize = foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
   let size = Imp.bytes $ sMax64 prefixArraysSize maxTransposedArraySize
+
+  sComment "Allocate reused shared memeory" $ return ()
+
   localMem <- sAlloc "local_mem" size (Space "local")
   transposeArrayLength <- dPrimV "trans_arr_len" $ workSize
 
@@ -499,12 +501,12 @@ createLocalArrays (Count groupSize) m types = do
 
   prefixArrays <-
     mapM (\(off, ty) -> do
-          let off' = sExt32 (off `Futhark.Util.IntegralExp.div` primByteSize ty)
+          let off' = off `Futhark.Util.IntegralExp.div` primByteSize ty
           sArray "local_prefix_arr"
                  ty
                  (Shape [groupSize])
                  $ ArrayIn localMem $ IxFun.iotaOffset off' [pe32 $ groupSize])
-    $ zip (0 : byteOffsets) types
+    $ zip byteOffsets types
 
   return (transposedArrays, prefixArrays)
   where
