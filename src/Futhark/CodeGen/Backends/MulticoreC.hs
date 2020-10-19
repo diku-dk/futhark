@@ -43,19 +43,8 @@ compileProg =
     <=< ImpGen.compileProg
   where
     generateContext = do
-      let multicore_util_h = $(embedStringFile "rts/c/multicore_util.h")
-          multicore_defs_h = $(embedStringFile "rts/c/multicore_defs.h")
-          subtask_queue_h = $(embedStringFile "rts/c/subtask_queue.h")
-          scheduler_h = $(embedStringFile "rts/c/scheduler.h")
-
-      mapM_
-        GC.earlyDecl
-        [C.cunit|
-                              $esc:multicore_util_h
-                              $esc:multicore_defs_h
-                              $esc:subtask_queue_h
-                              $esc:scheduler_h
-                             |]
+      let scheduler_h = $(embedStringFile "rts/c/scheduler.h")
+      mapM_ GC.earlyDecl [C.cunit|$esc:scheduler_h|]
 
       cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
         ( [C.cedecl|struct $id:s;|],
@@ -470,7 +459,7 @@ multicoreDef s f = do
   GC.libDecl =<< f s'
   return s'
 
-generateFunction ::
+generateParLoopFn ::
   C.ToIdent a =>
   M.Map VName Space ->
   String ->
@@ -481,7 +470,7 @@ generateFunction ::
   VName ->
   VName ->
   GC.CompilerM Multicore s Name
-generateFunction lexical basename code fstruct free retval tid ntasks = do
+generateParLoopFn lexical basename code fstruct free retval tid ntasks = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreDef basename $ \s -> do
@@ -546,7 +535,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
   fstruct <-
     prepareTaskStruct "task" free_args free_ctypes retval_args retval_ctypes
 
-  fpar_task <- generateFunction lexical (name ++ "_task") seq_code fstruct free retval tid nsubtask
+  fpar_task <- generateParLoopFn lexical (name ++ "_task") seq_code fstruct free retval tid nsubtask
   addTimingFields fpar_task
 
   let ftask_name = fstruct <> "_task"
@@ -567,7 +556,7 @@ compileOp (Segop name params seq_task par_task retvals (SchedulerInfo nsubtask e
   fnpar_task <- case par_task of
     Just (ParallelTask nested_code nested_tid) -> do
       let lexical_nested = lexicalMemoryUsage $ Function False [] params nested_code [] []
-      fnpar_task <- generateFunction lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
+      fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval nested_tid nsubtask
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
       return $ zip [fnpar_task] [True]
     Nothing -> do
@@ -620,7 +609,7 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
           mapM_ GC.stm free_cached
 
     return
-      [C.cedecl|int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
+      [C.cedecl|static int $id:s(void *args, typename int64_t start, typename int64_t end, int $id:tid, int tid) {
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
@@ -642,7 +631,8 @@ compileOp (ParLoop s' i prebody body postbody free tid) = do
     benchmarkCode
       ftask_total
       Nothing
-      [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler, &$id:ftask_name);
+      [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler,
+                                                           &$id:ftask_name);
                if ($id:ftask_err != 0) {
                  err = 1;
                  goto cleanup;
