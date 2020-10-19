@@ -116,11 +116,15 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
         ty_name    <- nameFromString . pretty <$> newVName "Ty"
         rx_name    <- nameFromString . pretty <$> newVName "Rx"
         ry_name    <- nameFromString . pretty <$> newVName "Ry"
-        tk         <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
-        tx         <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
-        ty         <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
-        rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeRegTile
-        ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeRegTile
+
+--        tk         <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
+--        tx         <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+--        ty         <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
+--        rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeRegTile
+--        ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeRegTile
+        (ty, ry)   <- getParTiles ("Ty","Ry") (ty_name, ry_name) height_A
+        (tx, rx)   <- getParTiles ("Tx","Rx") (tx_name, rx_name) width_B
+        tk         <- getSeqTile "Tk" tk_name common_dim ty tx
 
         tk_div_tx  <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
         tk_div_ty  <- letSubExp "tk_div_ty" =<< ceilDiv tk ty
@@ -648,3 +652,46 @@ processIndirections _ res_red_var acc stm'@(Let patt _ _)
     all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
       Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
+
+
+se1 :: SubExp
+se1 = Constant $ IntValue $ Int32Value 1
+se2 :: SubExp
+se2 = Constant $ IntValue $ Int32Value 2
+se4 :: SubExp
+se4 = Constant $ IntValue $ Int32Value 4
+se8 :: SubExp
+se8 = Constant $ IntValue $ Int32Value 8
+
+getParTiles :: (String,String) -> (Name,Name) -> SubExp -> Binder Kernels (SubExp, SubExp)
+getParTiles (t_str, r_str) (t_name, r_name) len_dim =
+  case len_dim of
+    Constant (IntValue (Int32Value 8))  -> do
+      t <- letSubExp t_str $ BasicOp $ SubExp se8
+      r <- letSubExp r_str $ BasicOp $ SubExp se1
+      return (t,r)    
+    Constant (IntValue (Int32Value 16)) -> do
+      t <- letSubExp t_str $ BasicOp $ SubExp se8
+      r <- letSubExp r_str $ BasicOp $ SubExp se2
+      return (t,r)
+    Constant (IntValue (Int32Value 32)) -> do
+      t <- letSubExp t_str $ BasicOp $ SubExp se8
+      r <- letSubExp r_str $ BasicOp $ SubExp se4
+      return (t,r)
+    _ -> do
+      t <- letSubExp t_str $ Op $ SizeOp $ GetSize t_name SizeTile
+      r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
+      return (t,r)
+
+getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Binder Kernels SubExp
+getSeqTile tk_str tk_name len_dim ty tx =
+  case (tx,ty) of
+    (Constant (IntValue (Int32Value v_x)), Constant (IntValue (Int32Value v_y))) -> do
+      let min_val = case len_dim of
+                      Constant (IntValue (Int32Value v_d)) -> min v_d $ min v_x v_y
+                      _ -> min v_x v_y
+      tk <- letSubExp tk_str $ BasicOp $ SubExp $ Constant $ IntValue $ Int32Value min_val
+      return tk
+    _ -> do
+      tk <- letSubExp tk_str $ Op $ SizeOp $ GetSize tk_name SizeTile
+      return tk
