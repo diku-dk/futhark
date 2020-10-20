@@ -131,42 +131,25 @@ compileProg =
                  ctx->profiling_paused = 0;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
-                 ctx->scheduler.kappa = kappa_default;
-                 ctx->scheduler.num_threads = num_processors();
-                 if (ctx->scheduler.num_threads < 1) return NULL;
+
+                 int tune_kappa = 0;
+                 double kappa = 5.1f * 1000;
+
+                 if (tune_kappa) {
+                   if (determine_kappa(&kappa) != 0) {
+                     return NULL;
+                   }
+                 }
+
+                 if (scheduler_init(&ctx->scheduler,
+                                    num_processors(),
+                                    kappa) != 0) {
+                   return NULL;
+                 }
 
                  $stms:init_fields
 
-                 int tune_kappa = 0;
-                 if (tune_kappa) {
-                   determine_kappa(&ctx->scheduler.kappa);
-                 }
-
-                 ctx->scheduler.workers = calloc(ctx->scheduler.num_threads, sizeof(struct worker));
-                 if (ctx->scheduler.workers == NULL) return NULL;
-                 num_workers = ctx->scheduler.num_threads;
-
-                 worker_local = &ctx->scheduler.workers[0];
-                 worker_local->tid = 0;
-                 worker_local->scheduler = &ctx->scheduler;
-                 CHECK_ERR(subtask_queue_init(&worker_local->q, 1024), "failed to init queue for worker %d\n", 0);
-
-
-                 for (int i = 1; i < ctx->scheduler.num_threads; i++) {
-                   struct worker *cur_worker = &ctx->scheduler.workers[i];
-                   memset(cur_worker, 0, sizeof(struct worker));
-                   cur_worker->tid = i;
-                   cur_worker->output_usage = 0;
-                   cur_worker->scheduler = &ctx->scheduler;
-                   CHECK_ERR(subtask_queue_init(&cur_worker->q, 1024), "failed to init queue for worker %d\n", i);
-
-                   CHECK_ERR(pthread_create(&cur_worker->thread, NULL, &scheduler_worker,
-                                            cur_worker),
-                             "Failed to create worker %d\n", i);
-                 }
-
                  init_constants(ctx);
-
 
                  return ctx;
               }|]
@@ -176,17 +159,7 @@ compileProg =
         ( [C.cedecl|void $id:s(struct $id:ctx* ctx);|],
           [C.cedecl|void $id:s(struct $id:ctx* ctx) {
                  free_constants(ctx);
-
-                 for (int i = 1; i < ctx->scheduler.num_threads; i++)
-                 {
-                   struct worker *cur_worker = &ctx->scheduler.workers[i];
-                   cur_worker->dead = 1;
-                   subtask_queue_destroy(&cur_worker->q);
-                   CHECK_ERR(pthread_join(ctx->scheduler.workers[i].thread, NULL), "pthread_join");
-                 }
-
-
-                 free(ctx->scheduler.workers);
+                 (void)scheduler_destroy(&ctx->scheduler);
                  free_lock(&ctx->lock);
                  free(ctx);
                }|]

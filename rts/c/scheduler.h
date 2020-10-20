@@ -8,6 +8,18 @@
 // Scheduler handle.
 struct scheduler;
 
+// Initialise a scheduler (and start worker threads).
+static int scheduler_init(struct scheduler *scheduler,
+                          int num_workers,
+                          double kappa);
+
+// Shut down a scheduler (and destroy worker threads).
+static int scheduler_destroy(struct scheduler *scheduler);
+
+// Figure out the smallest amount of work that amortises task
+// creation.
+static int determine_kappa(double *kappa);
+
 // How a segop should be scheduled.
 enum scheduling {
   DYNAMIC,
@@ -473,8 +485,6 @@ static inline int subtask_queue_is_empty(struct subtask_queue *subtask_queue)
 
 /* Scheduler definitions */
 
-static const double kappa_default = 5.1f * 1000;
-
 struct scheduler {
   struct worker *workers;
   int num_threads;
@@ -485,8 +495,6 @@ struct scheduler {
 
 // If there is work to steal => active_work > 0
 static volatile int active_work = 0;
-// Number of alive workers
-static volatile sig_atomic_t num_workers;
 
 // Thread local variable worker struct
 // Note that, accesses to tls variables are expensive
@@ -503,8 +511,7 @@ static int64_t total_now(int64_t total, int64_t time) {
 }
 
 static int random_other_worker(struct scheduler *scheduler, int my_id) {
-  (void)scheduler;
-  int my_num_workers = __atomic_load_n(&num_workers, __ATOMIC_RELAXED);
+  int my_num_workers = scheduler->num_threads;
   assert(my_num_workers != 1);
   int i = fast_rand() % (my_num_workers - 1);
   if (i >= my_id) {
@@ -744,7 +751,6 @@ static inline void *scheduler_worker(void* args)
   }
 
   assert(subtask_queue_is_empty(&worker->q));
-  __atomic_fetch_sub(&num_workers, 1, __ATOMIC_RELAXED);
 #if defined(MCPROFILE)
   if (worker->output_usage)
     output_worker_usage(worker);
@@ -1003,7 +1009,8 @@ static int determine_kappa(double *kappa) {
   scheduler.workers = malloc(sizeof(struct worker));
   worker_local = &scheduler.workers[0];
   worker_local->tid = 0;
-  CHECK_ERR(subtask_queue_init(&scheduler.workers[0].q, 1024), "failed to init queue for worker %d\n", 0);
+  CHECK_ERR(subtask_queue_init(&scheduler.workers[0].q, 1024),
+            "failed to init queue for worker %d\n", 0);
 
   // Start tuning for kappa
   double kappa_tune = 1000; // Initial kappa is 1 us
@@ -1057,6 +1064,68 @@ static int determine_kappa(double *kappa) {
   free(array);
   free(scheduler.workers);
   return err;
+}
+
+static int scheduler_init(struct scheduler *scheduler,
+                          int num_workers,
+                          double kappa) {
+  assert(num_workers > 0);
+
+  scheduler->kappa = kappa;
+  scheduler->num_threads = num_workers;
+
+  scheduler->workers = calloc(num_workers, sizeof(struct worker));
+
+  const int queue_capacity = 1024;
+
+  worker_local = &scheduler->workers[0];
+  worker_local->tid = 0;
+  worker_local->scheduler = scheduler;
+  CHECK_ERR(subtask_queue_init(&worker_local->q, queue_capacity),
+            "failed to init queue for worker %d\n", 0);
+
+  for (int i = 1; i < num_workers; i++) {
+    struct worker *cur_worker = &scheduler->workers[i];
+    memset(cur_worker, 0, sizeof(struct worker));
+    cur_worker->tid = i;
+    cur_worker->output_usage = 0;
+    cur_worker->scheduler = scheduler;
+    CHECK_ERR(subtask_queue_init(&cur_worker->q, queue_capacity),
+              "failed to init queue for worker %d\n", i);
+
+    CHECK_ERR(pthread_create(&cur_worker->thread,
+                             NULL,
+                             &scheduler_worker,
+                             cur_worker),
+              "Failed to create worker %d\n", i);
+  }
+
+  return 0;
+}
+
+static int scheduler_destroy(struct scheduler *scheduler) {
+  // First mark them all as dead.
+  for (int i = 1; i < scheduler->num_threads; i++) {
+    struct worker *cur_worker = &scheduler->workers[i];
+    cur_worker->dead = 1;
+  }
+
+  // Then destroy their task queues (this will wake up the threads and
+  // make them do their shutdown).
+  for (int i = 1; i < scheduler->num_threads; i++) {
+    struct worker *cur_worker = &scheduler->workers[i];
+    subtask_queue_destroy(&cur_worker->q);
+  }
+
+  // Then actually wait for them to stop.
+  for (int i = 1; i < scheduler->num_threads; i++) {
+    struct worker *cur_worker = &scheduler->workers[i];
+    CHECK_ERR(pthread_join(scheduler->workers[i].thread, NULL), "pthread_join");
+  }
+
+  free(scheduler->workers);
+
+  return 0;
 }
 
 // End of scheduler.h
