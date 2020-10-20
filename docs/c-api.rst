@@ -344,6 +344,19 @@ advanced usage.
    During :c:func:`futhark_context_new`, read PTX code from the given
    file instead of using the embedded program.
 
+Multicore
+---------
+
+The following API functions are available when using the ``multicore``
+backend.
+
+.. c:function:: void context_config_set_num_threads(struct futhark_context_config *cfg, int n);
+
+   The number of threads used to run parallel operations.  If set to a
+   value less than ``1``, then the runtime system will use one thread
+   per detected core.
+
+
 General guarantees
 ------------------
 

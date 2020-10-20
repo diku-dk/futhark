@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * A few internal generated functions (`init_constants()`,
     `free_constants()`) were mistakenly declared non-static.
 
+  * The number of threads used by the `multicore` backend is now
+    configurable (`--num-threads` and
+    `futhark_context_config_set_num_threads()`). (#1162)
+
 ## [0.18.1]
 
 ### Added
