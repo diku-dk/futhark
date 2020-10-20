@@ -88,10 +88,12 @@ reportingIOErrors = flip catches [Handler onExit, Handler onICE, Handler onError
       T.hPutStrLn stderr "Known compiler limitation encountered.  Sorry."
       T.hPutStrLn stderr "Revise your program or try a different Futhark compiler."
       T.hPutStrLn stderr s
+      exitWith $ ExitFailure 1
     onICE (Error CompilerBug s) = do
       T.hPutStrLn stderr "Internal compiler error."
       T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues."
       T.hPutStrLn stderr s
+      exitWith $ ExitFailure 1
 
     onError :: SomeException -> IO ()
     onError e

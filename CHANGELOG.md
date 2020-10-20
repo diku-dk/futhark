@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     configurable (`--num-threads` and
     `futhark_context_config_set_num_threads()`). (#1162)
 
+  * Process exit code is now nonzero when compiler bugs and
+    limitations are encountered.
+
 ## [0.18.1]
 
 ### Added
