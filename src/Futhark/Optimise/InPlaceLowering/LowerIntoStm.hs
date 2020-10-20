@@ -131,8 +131,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
           (slice', bodystms) <-
             flip runBinderT scope $
               traverse (toSubExp "index") $
-                fixSlice (map (fmap pe32) slice) $
-                  map (pe32 . Var) gtids
+                fixSlice (map (fmap pe64) slice) $
+                  map (pe64 . Var) gtids
 
           let res_dims = arrayDims $ snd bindee_dec
               ret' = WriteReturns res_dims src [(map DimFix slice', se)]
