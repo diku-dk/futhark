@@ -30,15 +30,19 @@ static char* msgprintf(const char *s, ...) {
 
 
 static inline void check_err(int errval, int sets_errno, const char *fun, int line,
-                            const char *msg, ...)
-{
+                            const char *msg, ...) {
   if (errval) {
     char str[256];
     char errnum[10];
-    sprintf(errnum, "%d", errval);
-    sprintf(str, "ERROR: %s in %s() at line %d with error code %s\n", msg, fun, line,
+
+    va_list vl;
+    va_start(vl, msg);
+
+    fprintf(stderr, "ERROR: ");
+    vfprintf(stderr, msg, vl);
+    fprintf(stderr, " in %s() at line %d with error code %s\n",
+            fun, line,
             sets_errno ? strerror(errno) : errnum);
-    fprintf(stderr, "%s", str);
     exit(errval);
   }
 }
