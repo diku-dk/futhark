@@ -323,6 +323,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
       isMap (stmExp stm)
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
     isMap Op {} = True
+    isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
     isMap _ = False
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
