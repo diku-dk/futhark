@@ -1,5 +1,5 @@
 let dotprod [n] (xs: [n]f32) (ys: [n]f32): f32 =
-  #[sequential] reduce (+) 0.0 (map2 (*) xs ys)
+  reduce (+) 0.0 (map2 (*) xs ys)
 
 let house [d] (x: [d]f32): ([d]f32, f32) =
   let dot = dotprod x x
