@@ -489,22 +489,23 @@ struct scheduler {
   struct worker *workers;
   int num_threads;
 
+  // If there is work to steal => active_work > 0
+  volatile int active_work;
+
+  // Only one error can be returned at the time now.  Maybe we can
+  // provide a stack like structure for pushing errors onto if we wish
+  // to backpropagte multiple errors
+  volatile int error;
+
   // kappa time unit in nanoseconds
   double kappa;
 };
 
-// If there is work to steal => active_work > 0
-static volatile int active_work = 0;
 
 // Thread local variable worker struct
 // Note that, accesses to tls variables are expensive
 // Minimize direct references to this variable
 __thread struct worker* worker_local = NULL;
-
-/* Only one error can be returned at the time now
-   Maybe we can provide a stack like structure for pushing errors onto
-   if we wish to backpropagte multiple errors */
-static volatile sig_atomic_t scheduler_error = 0;
 
 static int64_t total_now(int64_t total, int64_t time) {
   return total + (get_wall_time_ns() - time);
@@ -578,14 +579,14 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   worker->nested--;
   // Some error occured during some other subtask
   // so we just clean-up and return
-  if (scheduler_error != 0) {
+  if (worker->scheduler->error != 0) {
     // Even a failed task counts as finished.
     __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
     free(subtask);
     return 0;
   }
   if (err != 0) {
-    __atomic_store_n(&scheduler_error, err, __ATOMIC_RELAXED);
+    __atomic_store_n(&worker->scheduler->error, err, __ATOMIC_RELAXED);
   }
   // Total sequential time spent
   int64_t time_elapsed = total_now(worker->total, worker->timer);
@@ -725,8 +726,10 @@ static inline int steal_from_random_worker(struct worker* worker)
 static inline void *scheduler_worker(void* args)
 {
   struct worker *worker = (struct worker*) args;
+  struct scheduler *scheduler = worker->scheduler;
   worker_local = worker;
-  struct subtask * subtask = NULL;
+  struct subtask *subtask = NULL;
+
   while(!is_finished(worker)) {
     if (!subtask_queue_is_empty(&worker->q)) {
       int retval = subtask_queue_dequeue(worker, &subtask, 0);
@@ -735,8 +738,8 @@ static inline void *scheduler_worker(void* args)
         CHECK_ERR(run_subtask(worker, subtask), "run_subtask");
       } // else someone stole our work
 
-    } else if (active_work) { /* steal */
-      while (!is_finished(worker) && active_work) {
+    } else if (scheduler->active_work) { /* steal */
+      while (!is_finished(worker) && scheduler->active_work) {
         if (steal_from_random_worker(worker)) {
           break;
         }
@@ -764,7 +767,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
                                             int64_t *timer)
 {
 
-  struct worker * worker = worker_local;
+  struct worker *worker = worker_local;
 
   struct scheduler_info info = task->info;
   int64_t iter_pr_subtask = info.iter_pr_subtask;
@@ -784,7 +787,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
 
 
   if (info.wake_up_threads || sched == DYNAMIC)
-    __atomic_add_fetch(&active_work, nsubtasks, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&scheduler->active_work, nsubtasks, __ATOMIC_RELAXED);
 
   int64_t start = 0;
   int64_t end = iter_pr_subtask + (int64_t)(remainder != 0);
@@ -834,12 +837,12 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
 
 
   if (info.wake_up_threads || sched == DYNAMIC) {
-    __atomic_sub_fetch(&active_work, nsubtasks, __ATOMIC_RELAXED);
+    __atomic_sub_fetch(&scheduler->active_work, nsubtasks, __ATOMIC_RELAXED);
   }
 
   // Write back timing results of all sequential work
   (*timer) += task_timer;
-  return scheduler_error;
+  return scheduler->error;
 }
 
 
@@ -1073,6 +1076,8 @@ static int scheduler_init(struct scheduler *scheduler,
 
   scheduler->kappa = kappa;
   scheduler->num_threads = num_workers;
+  scheduler->active_work = 0;
+  scheduler->error = 0;
 
   scheduler->workers = calloc(num_workers, sizeof(struct worker));
 
