@@ -9,7 +9,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (foldl')
+import Data.List (find, foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.Rephrase
@@ -157,10 +157,18 @@ transformScanRed lvl space ops kbody = do
   let (kbody', kbody_allocs) =
         extractKernelBodyAllocations lvl bound_outside bound_in_kernel kbody
       (ops', ops_allocs) = unzip $ map (extractLambdaAllocations lvl bound_outside mempty) ops
-      variantAlloc (_, Var v, _) = v `nameIn` bound_in_kernel
+      variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
       variantAlloc _ = False
       allocs = kbody_allocs <> mconcat ops_allocs
       (variant_allocs, invariant_allocs) = M.partition variantAlloc allocs
+      badVariant (_, Var v, _) = not $ v `nameIn` bound_in_kernel
+      badVariant _ = False
+
+  case find badVariant $ M.elems variant_allocs of
+    Just v ->
+      throwError $ "Cannot handle un-sliceable allocation size: " ++ pretty v
+    Nothing ->
+      return ()
 
   case lvl of
     SegGroup {}
@@ -175,10 +183,11 @@ transformScanRed lvl space ops kbody = do
     return (alloc_stms, (ops'', kbody''))
   where
     bound_in_kernel =
-      namesFromList $
-        M.keys $
-          scopeOfSegSpace space
-            <> scopeOf (kernelBodyStms kbody)
+      namesFromList (M.keys $ scopeOfSegSpace space)
+        <> boundInKernelBody kbody
+
+boundInKernelBody :: KernelBody KernelsMem -> Names
+boundInKernelBody = namesFromList . M.keys . scopeOf . kernelBodyStms
 
 allocsForBody ::
   Extraction ->
@@ -288,10 +297,11 @@ extractGenericBodyAllocations ::
     Extraction
   )
 extractGenericBodyAllocations lvl bound_outside bound_kernel get_stms set_stms body =
-  let (stms, allocs) =
+  let bound_kernel' = bound_kernel <> boundByStms (get_stms body)
+      (stms, allocs) =
         runWriter $
           fmap catMaybes $
-            mapM (extractStmAllocations lvl bound_outside bound_kernel) $
+            mapM (extractStmAllocations lvl bound_outside bound_kernel') $
               stmsToList $ get_stms body
    in (set_stms (stmsFromList stms) body, allocs)
 
