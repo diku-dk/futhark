@@ -48,7 +48,10 @@ compileProg =
 
       cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
         ( [C.cedecl|struct $id:s;|],
-          [C.cedecl|struct $id:s { int debugging; int profiling; };|]
+          [C.cedecl|struct $id:s { int debugging;
+                                   int profiling;
+                                   int num_threads;
+                                 };|]
         )
 
       GC.publicDef_ "context_config_new" GC.InitDecl $ \s ->
@@ -60,6 +63,7 @@ compileProg =
                                  }
                                  cfg->debugging = 0;
                                  cfg->profiling = 0;
+                                 cfg->num_threads = 0;
                                  return cfg;
                                }|]
         )
@@ -90,6 +94,13 @@ compileProg =
           [C.cedecl|void $id:s(struct $id:cfg* cfg, int detail) {
                                  /* Does nothing for this backend. */
                                  (void)cfg; (void)detail;
+                               }|]
+        )
+
+      GC.publicDef_ "context_config_set_num_threads" GC.InitDecl $ \s ->
+        ( [C.cedecl|void $id:s(struct $id:cfg *cfg, int n);|],
+          [C.cedecl|void $id:s(struct $id:cfg *cfg, int n) {
+                                 cfg->num_threads = n;
                                }|]
         )
 
@@ -142,7 +153,8 @@ compileProg =
                  }
 
                  if (scheduler_init(&ctx->scheduler,
-                                    num_processors(),
+                                    cfg->num_threads > 0 ?
+                                    cfg->num_threads : num_processors(),
                                     kappa) != 0) {
                    return NULL;
                  }
@@ -181,6 +193,13 @@ cliOptions =
         optionArgument = NoArgument,
         optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|],
         optionDescription = "Gather profiling information."
+      },
+    Option
+      { optionLongName = "num-threads",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionAction = [C.cstm|futhark_context_config_set_num_threads(cfg, atoi(optarg));|],
+        optionDescription = "Set number of threads used for execution."
       }
   ]
 
