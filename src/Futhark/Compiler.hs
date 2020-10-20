@@ -181,9 +181,9 @@ handleWarnings :: FutharkConfig -> FutharkM (Warnings, a) -> FutharkM a
 handleWarnings config m = do
   (ws, a) <- m
 
-  when (futharkWarn config) $ do
-    liftIO $ hPutStr stderr $ pretty ws
-    when (futharkWerror config && anyWarnings ws) $
+  when (futharkWarn config && anyWarnings ws) $ do
+    liftIO $ hPutStrLn stderr $ pretty ws
+    when (futharkWerror config) $
       externalErrorS "Treating above warnings as errors due to --Werror."
 
   return a
