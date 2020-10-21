@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The GPU loop tiler can now handle loops where only a subset of the
+    input arrays are tiled.  Matrix-vector multiplication is one
+    important program where this helps (#1145).
+
 ### Removed
 
 ### Changed
