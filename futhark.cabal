@@ -291,7 +291,7 @@ library
     , gitrev >=1.2.0
     , haskeline
     , language-c-quote >=0.12
-    , mainland-pretty >=0.6.1
+    , prettyprinter >=1.7.0
     , cmark-gfm >=0.2.1
     , megaparsec >=8.0.0
     , mtl >=2.2.1

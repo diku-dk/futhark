@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Safe #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Strict #-}
@@ -1184,36 +1185,36 @@ deriving instance Showable f vn => Show (ProgBase f vn)
 --- the Attributes module.
 
 instance Pretty PrimType where
-  ppr (Unsigned Int8) = text "u8"
-  ppr (Unsigned Int16) = text "u16"
-  ppr (Unsigned Int32) = text "u32"
-  ppr (Unsigned Int64) = text "u64"
-  ppr (Signed t) = ppr t
-  ppr (FloatType t) = ppr t
-  ppr Bool = text "bool"
+  pretty (Unsigned Int8) = "u8"
+  pretty (Unsigned Int16) = "u16"
+  pretty (Unsigned Int32) = "u32"
+  pretty (Unsigned Int64) = "u64"
+  pretty (Signed t) = pretty t
+  pretty (FloatType t) = pretty t
+  pretty Bool = "bool"
 
 instance Pretty BinOp where
-  ppr Backtick = text "``"
-  ppr Plus = text "+"
-  ppr Minus = text "-"
-  ppr Pow = text "**"
-  ppr Times = text "*"
-  ppr Divide = text "/"
-  ppr Mod = text "%"
-  ppr Quot = text "//"
-  ppr Rem = text "%%"
-  ppr ShiftR = text ">>"
-  ppr ShiftL = text "<<"
-  ppr Band = text "&"
-  ppr Xor = text "^"
-  ppr Bor = text "|"
-  ppr LogAnd = text "&&"
-  ppr LogOr = text "||"
-  ppr Equal = text "=="
-  ppr NotEqual = text "!="
-  ppr Less = text "<"
-  ppr Leq = text "<="
-  ppr Greater = text ">"
-  ppr Geq = text ">="
-  ppr PipeLeft = text "<|"
-  ppr PipeRight = text "|>"
+  pretty Backtick = "``"
+  pretty Plus = "+"
+  pretty Minus = "-"
+  pretty Pow = "**"
+  pretty Times = "*"
+  pretty Divide = "/"
+  pretty Mod = "%"
+  pretty Quot = "//"
+  pretty Rem = "%%"
+  pretty ShiftR = ">>"
+  pretty ShiftL = "<<"
+  pretty Band = "&"
+  pretty Xor = "^"
+  pretty Bor = "|"
+  pretty LogAnd = "&&"
+  pretty LogOr = "||"
+  pretty Equal = "=="
+  pretty NotEqual = "!="
+  pretty Less = "<"
+  pretty Leq = "<="
+  pretty Greater = ">"
+  pretty Geq = ">="
+  pretty PipeLeft = "<|"
+  pretty PipeRight = "|>"

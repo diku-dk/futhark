@@ -1,8 +1,8 @@
 { mkDerivation, aeson, alex, ansi-terminal, array, base, binary
 , blaze-html, bytestring, cmark-gfm, containers, directory
 , directory-tree, dlist, file-embed, filepath, free, gitrev, happy
-, haskeline, language-c-quote, mainland-pretty, megaparsec, mtl
-, neat-interpolation, parallel, parser-combinators, pcg-random
+, haskeline, language-c-quote, megaparsec, mtl
+, neat-interpolation, parallel, parser-combinators, pcg-random, prettyprinter_1_7_0
 , process, process-extras, QuickCheck, regex-tdfa, sexp-grammar_2_2_1
 , srcloc, stdenv, tasty, tasty-hunit, tasty-quickcheck
 , template-haskell, temporary, terminal-size, text, time
@@ -18,8 +18,8 @@ mkDerivation {
   libraryHaskellDepends = [
     aeson ansi-terminal array base binary blaze-html bytestring
     cmark-gfm containers directory directory-tree dlist file-embed
-    filepath free gitrev haskeline language-c-quote mainland-pretty
-    megaparsec mtl neat-interpolation parallel pcg-random process
+    filepath free gitrev haskeline language-c-quote
+    megaparsec mtl neat-interpolation parallel pcg-random prettyprinter_1_7_0 process
     process-extras regex-tdfa sexp-grammar_2_2_1 srcloc template-haskell
     temporary terminal-size text time transformers unordered-containers
     utf8-string vector vector-binary-instances versions zip-archive

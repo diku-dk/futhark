@@ -768,7 +768,7 @@ patternParam p =
 namesToPrimTypes :: M.Map Name PrimType
 namesToPrimTypes =
   M.fromList
-    [ (nameFromString $ pretty t, t)
+    [ (nameFromString $ show $ pretty t, t)
       | t <-
           Bool :
           map Signed [minBound .. maxBound]
@@ -969,32 +969,32 @@ intrinsics =
     primFun (name, (ts, t, _)) =
       (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
 
-    unOpFun bop = (pretty bop, IntrinsicMonoFun [t] t)
+    unOpFun bop = (show $ pretty bop, IntrinsicMonoFun [t] t)
       where
         t = unPrim $ Primitive.unOpType bop
 
-    binOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] t)
+    binOpFun bop = (show $ pretty bop, IntrinsicMonoFun [t, t] t)
       where
         t = unPrim $ Primitive.binOpType bop
 
-    cmpOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] Bool)
+    cmpOpFun bop = (show $ pretty bop, IntrinsicMonoFun [t, t] Bool)
       where
         t = unPrim $ Primitive.cmpOpType bop
 
-    convOpFun cop = (pretty cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
+    convOpFun cop = (show $ pretty cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
       where
         (ft, tt) = Primitive.convOpType cop
 
-    signFun t = ("sign_" ++ pretty t, IntrinsicMonoFun [Unsigned t] $ Signed t)
+    signFun t = ("sign_" ++ show (pretty t), IntrinsicMonoFun [Unsigned t] $ Signed t)
 
-    unsignFun t = ("unsign_" ++ pretty t, IntrinsicMonoFun [Signed t] $ Unsigned t)
+    unsignFun t = ("unsign_" ++ show (pretty t), IntrinsicMonoFun [Signed t] $ Unsigned t)
 
     unPrim (Primitive.IntType t) = Signed t
     unPrim (Primitive.FloatType t) = FloatType t
     unPrim Primitive.Bool = Bool
     unPrim Primitive.Cert = Bool
 
-    intrinsicType t = (pretty t, IntrinsicType t)
+    intrinsicType t = (show $ pretty t, IntrinsicType t)
 
     anyIntType =
       map Signed [minBound .. maxBound]
@@ -1007,7 +1007,7 @@ intrinsics =
     mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
     mkIntrinsicBinOp op = do
       op' <- intrinsicBinOp op
-      return (pretty op, op')
+      return (show $ pretty op, op')
 
     binOp ts = Just $ IntrinsicOverloadedFun ts [Nothing, Nothing] Nothing
     ordering = Just $ IntrinsicOverloadedFun anyPrimType [Nothing, Nothing] (Just Bool)
@@ -1129,7 +1129,7 @@ leadingOperator s =
   maybe Backtick snd $
     find ((`isPrefixOf` s') . fst) $
       sortOn (Down . length . fst) $
-        zip (map pretty operators) operators
+        zip (map (show . pretty) operators) operators
   where
     s' = nameToString s
     operators :: [BinOp]

@@ -86,8 +86,8 @@ instance Monoid Uniqueness where
   mempty = Unique
 
 instance Pretty Uniqueness where
-  ppr Unique = star
-  ppr Nonunique = empty
+  pretty Unique = "*"
+  pretty Nonunique = mempty
 
 -- | Whether some operator is commutative or not.  The 'Monoid'
 -- instance returns the least commutative of its arguments.
@@ -124,7 +124,7 @@ instance SexpIso Name where
   sexpIso = with (. symbol)
 
 instance Pretty Name where
-  ppr = text . nameToString
+  pretty = pretty . nameToString
 
 -- | Convert a name to the corresponding list of characters.
 nameToString :: Name -> String
@@ -245,5 +245,5 @@ quote :: String -> String
 quote s = "\"" ++ s ++ "\""
 
 -- | As 'quote', but works on prettyprinted representation.
-pquote :: Doc -> Doc
+pquote :: Doc ann -> Doc ann
 pquote = dquotes
