@@ -534,8 +534,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                                        ++ "\nkbody: " ++ show kbody)
                             return pat)
 
-  let num_groups    = toInt32Exp <$> segNumGroups lvl
-      group_size    = toInt32Exp <$> segGroupSize lvl
+  let group_size    = toInt32Exp <$> segGroupSize lvl
+      num_groups    = Count (n `divUp` ((unCount group_size) * tM))
       num_threads   = (unCount num_groups) * (unCount group_size)
       res           = patElemName $ last all_pes
       (mapIdx, dim) = head $ unSegSpace space
