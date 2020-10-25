@@ -477,7 +477,7 @@ createLocalArrays ::
   Count GroupSize SubExp ->
   SubExp ->
   [PrimType] ->
-  InKernelGen ([VName], [VName])
+  InKernelGen (VName, [VName], [VName])
 createLocalArrays (Count groupSize) m types = do
   let groupSizeE = (toInt64Exp groupSize)
   let workSize = (toInt64Exp m) * groupSizeE
@@ -490,6 +490,8 @@ createLocalArrays (Count groupSize) m types = do
 
   localMem <- sAlloc "local_mem" size (Space "local")
   transposeArrayLength <- dPrimV "trans_arr_len" $ workSize
+
+  sharedId <- sArrayInMem "shared_id" int32 (Shape [constant (1 :: Int32)]) localMem
 
   transposedArrays <-
     mapM (\ty -> do
@@ -508,7 +510,7 @@ createLocalArrays (Count groupSize) m types = do
                  $ ArrayIn localMem $ IxFun.iotaOffset off' [pe32 $ groupSize])
     $ zip byteOffsets types
 
-  return (transposedArrays, prefixArrays)
+  return (sharedId, transposedArrays, prefixArrays)
   where
     alignTo x a = (x `divUp` a) * a
 
@@ -552,18 +554,26 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants  <- kernelConstants <$> askEnv
 
+    (sharedId, transposedArrays, prefixArrays) <-
+      createLocalArrays (segGroupSize lvl) (constant m) tys
+
     dynamicId <- dPrim "dynamic_id" int32
-    sWhen (kernelLocalThreadId constants .==. 0) $
+    sWhen (kernelLocalThreadId constants .==. 0) $ do
+      (globalIdMem, _, globalIdOff) <- fullyIndexArray globalId [0]
       sOp $ Imp.Atomic DefaultSpace $
         Imp.AtomicAdd Int32
                       (tvVar dynamicId)
-                      globalId
-                      (Count 0)
+                      globalIdMem
+                      (Count $ sExt32 $ unCount globalIdOff)
                       (toExp' int32 $ constant (1 :: Int32))
+      copyDWIMFix sharedId [0] (tvSize dynamicId) []
+
+    let barrier = Imp.Barrier Imp.FenceLocal
+    sOp barrier
+
+    copyDWIMFix (tvVar dynamicId) [] (Var sharedId) [0]
 
     blockOff   <- dPrimV "blockOff" $ (tvExp dynamicId) * tM * (kernelGroupSize constants)
-    (transposedArrays, prefixArrays) <-
-      createLocalArrays (segGroupSize lvl) (constant m) tys
 
     privateArrays <-
       mapM (\ty -> sAllocArray "private"
@@ -572,7 +582,6 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                                (ScalarSpace [constant m] ty))
            tys
 
-    let barrier = Imp.Barrier Imp.FenceLocal
 
     sComment "Load and map" $
       sFor "i" tM $ \i -> do
