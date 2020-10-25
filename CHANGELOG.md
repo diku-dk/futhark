@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Process exit code is now nonzero when compiler bugs and
     limitations are encountered.
 
+  * Multicore backend crashed on `reduce_by_index` with nonempty target
+    and empty input.
+
 ## [0.18.1]
 
 ### Added

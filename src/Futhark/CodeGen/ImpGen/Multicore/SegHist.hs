@@ -49,12 +49,14 @@ nonsegmentedHist pat space histops kbody num_histos = do
 
   histops' <- renameHistOpLambda histops
 
-  collect $ do
-    flat_idx <- dPrim "iter" int64
-    sIf
-      use_subhistogram
-      (subHistogram pat flat_idx space histops num_histos kbody)
-      (atomicHistogram pat flat_idx space histops' kbody)
+  -- Only do something if there is actually input.
+  collect $
+    sUnless (product ns_64 .==. 0) $ do
+      flat_idx <- dPrim "iter" int64
+      sIf
+        use_subhistogram
+        (subHistogram pat flat_idx space histops num_histos kbody)
+        (atomicHistogram pat flat_idx space histops' kbody)
 
 -- |
 -- Atomic Histogram approach
