@@ -313,7 +313,7 @@ library
     , utf8-string >=1
     , vector >=0.12
     , vector-binary-instances >=0.2.2.0
-    , versions >=3.3.1
+    , versions >=4.0.1
     , zip-archive >=0.3.1.1
     , zlib >=0.6.1.2
   default-language: Haskell2010

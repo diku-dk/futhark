@@ -2,47 +2,73 @@
 # Futhark binary and some manpages.  Likely to only work on linux.
 #
 # Just run 'nix-build' and fish the tarball out of 'result/'.
+#
+# For the Haskell dependencies that diverge from our pinned Nixpkgs,
+# we use cabal2nix like thus:
+#
+#  $ cabal2nix cabal://sexp-grammar-2.2.1 > nix/sexp-grammar.nix
+#
+# And then import them into the configuration.
+#
+# Also remember this guide: https://github.com/Gabriel439/haskell-nix/blob/master/project1/README.md
 
-{ compiler ? "ghc883",
+{ compiler ? "ghc883", # ignored ATM
   suffix ? "nightly",
   commit ? "" }:
 let
-  sources = import ./nix/sources.nix;
-  pkgs = import sources.nixpkgs {};
+  config = {
+    packageOverrides = pkgs: rec {
+      haskellPackages = pkgs.haskellPackages.override {
+        overrides = haskellPackagesNew: haskellPackagesOld: rec {
+          versions =
+            haskellPackagesNew.callPackage ./nix/versions.nix { };
 
-  futhark =
-    pkgs.haskell.lib.overrideCabal
-      (pkgs.haskell.lib.addBuildTools
-        (pkgs.haskell.packages.${compiler}.callPackage ./futhark.nix { })
-        [ pkgs.python37Packages.sphinx ])
-    ( _drv: {
-      isLibrary = false;
-      isExecutable = true;
-      enableSharedExecutables = false;
-      enableSharedLibraries = false;
-      enableLibraryProfiling = false;
-      configureFlags = [
-        "--ghc-option=-optl=-static"
-        "--ghc-option=-split-sections"
-        "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
-        "--extra-lib-dirs=${pkgs.glibc.static}/lib"
-        "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
-        "--extra-lib-dirs=${pkgs.zlib.static}/lib"
-        "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
-        ];
+          sexp-grammar =
+            haskellPackagesNew.callPackage ./nix/sexp-grammar.nix { };
 
-      postBuild = (_drv.postBuild or "") + ''
+          futhark =
+            pkgs.haskell.lib.overrideCabal
+              (pkgs.haskell.lib.addBuildTools
+                (haskellPackagesNew.callPackage ./futhark.nix { })
+                [ pkgs.python37Packages.sphinx ])
+              ( _drv: {
+                isLibrary = false;
+                isExecutable = true;
+                enableSharedExecutables = false;
+                enableSharedLibraries = false;
+                enableLibraryProfiling = false;
+                configureFlags = [
+                  "--ghc-option=-optl=-static"
+                  "--ghc-option=-split-sections"
+                  "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
+                  "--extra-lib-dirs=${pkgs.glibc.static}/lib"
+                  "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
+                  "--extra-lib-dirs=${pkgs.zlib.static}/lib"
+                  "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
+                ];
+
+                postBuild = (_drv.postBuild or "") + ''
         make -C docs man
         '';
 
-      postInstall = (_drv.postInstall or "") + ''
+                postInstall = (_drv.postInstall or "") + ''
         mkdir -p $out/share/man/man1
         cp docs/_build/man/*.1 $out/share/man/man1/
         mkdir -p $out/share/futhark/
         cp LICENSE $out/share/futhark/
         '';
-      }
-    );
+              }
+              );
+        };
+      };
+    };
+  };
+
+  sources = import ./nix/sources.nix;
+  pkgs = import sources.nixpkgs { inherit config; };
+
+  futhark = pkgs.haskellPackages.futhark;
+
 in pkgs.stdenv.mkDerivation rec {
   name = "futhark-" + suffix;
   version = futhark.version;
