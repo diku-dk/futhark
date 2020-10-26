@@ -546,10 +546,20 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       scanOp        = head scans
       scanOpNe      = head $ segBinOpNeutral scanOp
       tys           = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
+      statusX       = constant (0 :: Int8)
+      statusA       = constant (1 :: Int8)
+      statusP       = constant (2 :: Int8)
 
   -- Allocate the shared memory for output component
   numThreads <- dPrimV "numThreads" num_threads
+  numGroups <- dPrimV "numGroups" $ unCount num_groups
+
   globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
+  statusFlags <- sAllocArray "status_flags" int8 (Shape [tvSize numGroups]) (Space "device")
+  (aggregateArrays, incprefixArrays) <-
+    unzip <$> forM tys
+                (\ty -> (,) <$> (sAllocArray "aggregates" ty (Shape [tvSize numGroups]) (Space "device"))
+                            <*> (sAllocArray "incprefixes" ty (Shape [tvSize numGroups]) (Space "device")))
 
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants  <- kernelConstants <$> askEnv
@@ -567,8 +577,10 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                       (Count $ sExt32 $ unCount globalIdOff)
                       (toExp' int32 $ constant (1 :: Int32))
       copyDWIMFix sharedId [0] (tvSize dynamicId) []
+      copyDWIMFix statusFlags [tvExp dynamicId] statusX []
 
     let barrier = Imp.Barrier Imp.FenceLocal
+    let globalBarrier = Imp.Barrier Imp.FenceGlobal
     sOp barrier
 
     copyDWIMFix (tvVar dynamicId) [] (Var sharedId) [0]
@@ -635,9 +647,9 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
             $ zip prefixArrays privateArrays
       sOp barrier
 
-
     scanOp' <- renameLambda $ segBinOpLambda scanOp
 
+    accs <- forM tys (\ty -> dPrim "acc" ty)
     sComment "Scan results (with warp scan)" $ do
       groupScan
         Nothing -- TODO
@@ -646,9 +658,23 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
         scanOp'
         prefixArrays
 
+      forM_ (zip accs prefixArrays)
+        (\(acc, prefixes) ->
+           sIf ((kernelLocalThreadId constants) .==. 0)
+               (copyDWIMFix (tvVar acc) [] (Var prefixes) [(kernelGroupSize constants) - 1])
+               (copyDWIMFix (tvVar acc) [] (Var prefixes) [(kernelLocalThreadId constants) - 1]))
+
+      sOp barrier
+
+    -- sComment "Perform lookback" $ do
+    --   prefix <- dPrimV "prefix" scanOpNe
+    --   sWhen (dynamicId .==. 0 && (kernelLocalThreadId constants) .==. 0) $ do
+    --     copyDWIMFix incprefixArrays [tvSize dynamicId] (tvSize acc) []
+    --     sOp globalBarrier
+
+
     scanOp'' <- renameLambda scanOp'
 
-    -- TODO: Distribution is broken
     sComment "Distribute results" $ do
       sWhen ((kernelLocalThreadId constants) .>. 0) $ do
         let xs = map paramName $ take (length tys) $ lambdaParams scanOp''
