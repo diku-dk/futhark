@@ -544,7 +544,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       tM :: Imp.TExp Int32
       tM            = 9
       scanOp        = head scans
-      scanOpNe      = head $ segBinOpNeutral scanOp
+      scanOpNe      = segBinOpNeutral scanOp
       tys           = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
       statusX       = constant (0 :: Int8)
       statusA       = constant (1 :: Int8)
@@ -555,6 +555,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   numGroups <- dPrimV "numGroups" $ unCount num_groups
 
   globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
+  -- TODO: Should be zeroed.
   statusFlags <- sAllocArray "status_flags" int8 (Shape [tvSize numGroups]) (Space "device")
   (aggregateArrays, incprefixArrays) <-
     unzip <$> forM tys
@@ -666,12 +667,42 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
       sOp barrier
 
-    -- sComment "Perform lookback" $ do
-    --   prefix <- dPrimV "prefix" scanOpNe
-    --   sWhen (dynamicId .==. 0 && (kernelLocalThreadId constants) .==. 0) $ do
-    --     copyDWIMFix incprefixArrays [tvSize dynamicId] (tvSize acc) []
-    --     sOp globalBarrier
+    prefixes <- forM (zip scanOpNe tys) (\(ne, ty) -> dPrimV "prefix" $ TPrimExp $ toExp' ty ne)
+    sComment "Perform lookback" $ do
+      sWhen ((tvExp dynamicId) .==. 0 .&&. (kernelLocalThreadId constants) .==. 0) $ do
+        forM_ (zip incprefixArrays accs)
+          (\(incprefixArray, acc) ->
+             copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) [])
+        sOp globalBarrier
+        copyDWIMFix statusFlags [tvExp dynamicId] statusP []
+        forM_ (zip scanOpNe accs)
+          (\(ne, acc) ->
+             copyDWIMFix (tvVar acc) [] ne [])
 
+      sWhen ((bNot ((tvExp dynamicId) .==. 0)) .&&. (kernelLocalThreadId constants) .<. (kernelWaveSize constants)) $ do
+        warpSize <- dPrimV "warpsize" $ kernelWaveSize constants
+        warpscan <- sAllocArray "warpscan" int8 (Shape [tvSize warpSize]) (Space "local")
+
+        sWhen ((kernelLocalThreadId constants) .==. 0) $ do
+          forM_ (zip aggregateArrays accs)
+            (\(aggregateArray, acc) ->
+               copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) [])
+          sOp globalBarrier
+          copyDWIMFix statusFlags [tvExp dynamicId] statusA []
+          copyDWIMFix warpscan [0] (Var statusFlags) [(tvExp dynamicId) - 1]
+        sOp barrier
+
+        status <- dPrim "status" int8
+        copyDWIMFix (tvVar status) [] (Var warpscan) [0]
+
+        sIf ((tvExp status) .==. (TPrimExp $ toExp' int8 statusP))
+            (sWhen ((tvExp dynamicId) .==. 0)
+              $ forM_ (zip prefixes incprefixArrays)
+                  $ \(prefix, incprefixArray) -> copyDWIMFix (tvVar prefix) [] (Var incprefixArray) [(tvExp dynamicId) - 1])
+            (do readOffset <- dPrimV "readOffset" (tvExp dynamicId - 1)
+                loopStop <- dPrimV "loopStop" ((tvExp warpSize) * (-1))
+                return ()
+            )
 
     scanOp'' <- renameLambda scanOp'
 
