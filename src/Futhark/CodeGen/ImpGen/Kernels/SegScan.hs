@@ -546,9 +546,13 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       scanOp        = head scans
       scanOpNe      = segBinOpNeutral scanOp
       tys           = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
-      statusX       = constant (0 :: Int8)
-      statusA       = constant (1 :: Int8)
-      statusP       = constant (2 :: Int8)
+      statusX       = 0 :: Imp.TExp Int8
+      statusA       = 1 :: Imp.TExp Int8
+      statusP       = 2 :: Imp.TExp Int8
+      sStatusX      = constant (0 :: Int8)
+      sStatusA      = constant (1 :: Int8)
+      sStatusP      = constant (2 :: Int8)
+      makeStatusUsed flag used = (tvExp flag) .|. (TPrimExp $ BinOpExp (Shl Int8) (untyped $ tvExp used) (ValueExp $ value (2 :: Int8)))
 
   -- Allocate the shared memory for output component
   numThreads <- dPrimV "numThreads" num_threads
@@ -578,7 +582,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                       (Count $ sExt32 $ unCount globalIdOff)
                       (toExp' int32 $ constant (1 :: Int32))
       copyDWIMFix sharedId [0] (tvSize dynamicId) []
-      copyDWIMFix statusFlags [tvExp dynamicId] statusX []
+      copyDWIMFix statusFlags [tvExp dynamicId] sStatusX []
 
     let barrier = Imp.Barrier Imp.FenceLocal
     let globalBarrier = Imp.Barrier Imp.FenceGlobal
@@ -674,7 +678,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           (\(incprefixArray, acc) ->
              copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) [])
         sOp globalBarrier
-        copyDWIMFix statusFlags [tvExp dynamicId] statusP []
+        copyDWIMFix statusFlags [tvExp dynamicId] sStatusP []
         forM_ (zip scanOpNe accs)
           (\(ne, acc) ->
              copyDWIMFix (tvVar acc) [] ne [])
@@ -688,20 +692,38 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
             (\(aggregateArray, acc) ->
                copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) [])
           sOp globalBarrier
-          copyDWIMFix statusFlags [tvExp dynamicId] statusA []
+          copyDWIMFix statusFlags [tvExp dynamicId] sStatusA []
           copyDWIMFix warpscan [0] (Var statusFlags) [(tvExp dynamicId) - 1]
         sOp barrier
 
         status <- dPrim "status" int8
         copyDWIMFix (tvVar status) [] (Var warpscan) [0]
 
-        sIf ((tvExp status) .==. (TPrimExp $ toExp' int8 statusP))
+        sIf ((tvExp status) .==. statusP)
             (sWhen ((tvExp dynamicId) .==. 0)
               $ forM_ (zip prefixes incprefixArrays)
                   $ \(prefix, incprefixArray) -> copyDWIMFix (tvVar prefix) [] (Var incprefixArray) [(tvExp dynamicId) - 1])
             (do readOffset <- dPrimV "readOffset" (tvExp dynamicId - 1)
-                loopStop <- dPrimV "loopStop" ((tvExp warpSize) * (-1))
-                return ()
+                let loopStop = (tvExp warpSize) * (-1)
+                sWhile ((tvExp readOffset) .>. loopStop) $ do
+                  readI <- dPrimV "read_i" $ (tvExp readOffset) + (kernelLocalThreadId constants)
+                  aggrs <- forM (zip scanOpNe tys) (\(ne, ty) -> dPrimV "aggr" $ TPrimExp $ toExp' ty ne)
+                  flag <- dPrimV "flag" $ statusX
+                  used <- dPrimV "used" $ (0 :: Imp.TExp Int8)
+                  sWhen ((tvExp readI) .>=. 0) $ do
+                    copyDWIMFix (tvVar flag) [] (Var statusFlags) [tvExp readI]
+                    sIf ((tvExp flag) .==. statusP)
+                        (forM_ (zip incprefixArrays aggrs)
+                           (\(incprefix, aggr) -> copyDWIMFix (tvVar aggr) [] (Var incprefix) [tvExp readI]))
+                        $ sWhen ((tvExp flag) .==. statusA) $ do
+                            forM_ (zip aggrs aggregateArrays)
+                              (\(aggr, aggregate) -> copyDWIMFix (tvVar aggr) [] (Var aggregate) [tvExp readI])
+                            used <-- (1 :: Imp.TExp Int8)
+                    forM_ (zip prefixArrays aggrs) $
+                      \(prefixArray, aggr) ->
+                        copyDWIMFix prefixArray [kernelLocalThreadId constants] (tvSize aggr) []
+                    tmp <- dPrimV "tmp" $ makeStatusUsed flag used
+                    copyDWIMFix warpscan [kernelLocalThreadId constants] (tvSize tmp) []
             )
 
     scanOp'' <- renameLambda scanOp'
