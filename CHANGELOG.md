@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     input arrays are tiled.  Matrix-vector multiplication is one
     important program where this helps (#1145).
 
+  * The number of threads used by the `multicore` backend is now
+    configurable (`--num-threads` and
+    `futhark_context_config_set_num_threads()`). (#1162)
+
 ### Removed
 
 ### Changed
@@ -29,10 +33,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * A few internal generated functions (`init_constants()`,
     `free_constants()`) were mistakenly declared non-static.
-
-  * The number of threads used by the `multicore` backend is now
-    configurable (`--num-threads` and
-    `futhark_context_config_set_num_threads()`). (#1162)
 
   * Process exit code is now nonzero when compiler bugs and
     limitations are encountered.
