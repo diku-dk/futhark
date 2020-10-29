@@ -17,7 +17,7 @@
 --          the redomap produces one scalar result
 --          the kernel produces one scalar result
 module Futhark.Optimise.BlkRegTiling
-       ( mmBlkRegTiling )
+       ( mmBlkRegTiling, doRegTiling3D )
        where
 import Control.Monad.State
 import Control.Monad.Reader
@@ -106,7 +106,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
     not $ null red_nes = do
       let red_ne : _ = red_nes
       red_t <- subExpType red_ne
-      let one_se = Constant $ IntValue $ Int32Value 1
 
       ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBinder $ do -- host code
@@ -293,8 +292,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
                                             map_lam' <- renameLambda map_lam
                                             red_lam' <- renameLambda red_lam
                                             
-                                            addStms $ rebindLambda map_lam' [a, b] map_res
-                                                   <> rebindLambda red_lam' [c, map_res] c
+                                            addStms $ rebindLambda map_lam' [a, b] [map_res]
+                                                   <> rebindLambda red_lam' [c, map_res] [c]
                                             
                                             css <- update "css" css_merge' [i, j] c
                                             
@@ -366,7 +365,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbod
               return rssss
 
           let regtile_ret_dims =
-                map (\(_, sz) -> (sz, one_se, one_se)) rem_outer_dims ++
+                map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims ++
                 [(height_A, ty, ry), (width_B, tx, rx)]
 
           -- Add dummy dimensions to tile to reflect the outer dimensions.
@@ -453,21 +452,25 @@ forLoop i_bound merge body = do
 --   lambda body, and binding of lambda result to res_name.
 rebindLambda :: Lambda Kernels
              -> [VName]
-             -> VName
+             -> [VName]
              -> Stms Kernels
-rebindLambda lam new_params res_name =
+rebindLambda lam new_params res_names =
   stmsFromList
   (zipWith (\ident new_param ->
               mkLet [] [ident] $ BasicOp $ SubExp $ Var new_param)
     idents new_params)
   <> bodyStms lam_body
-  <> oneStm (mkLet [] [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res)
+  <> stmsFromList res_cpy_stms
   where
     (lam_params, lam_body, lam_ret_type : _) =
       (lambdaParams lam, lambdaBody lam, lambdaReturnType lam)
     idents = map (\param -> Ident (paramName param) (paramDec param))
                  lam_params
-    lam_res : _ = bodyResult lam_body
+    res_cpy_stms =
+      zipWith (\ res_name lam_res ->
+          mkLet [] [Ident res_name lam_ret_type] $ BasicOp $ SubExp lam_res
+        ) res_names lam_ress
+    lam_ress = bodyResult lam_body
 
 -- | Tries to identify the following pattern:
 --   code followed by some Screma followed by more code.
@@ -573,14 +576,14 @@ segMap2D :: String           -- desc
          -> ((VName, VName)  -- f
              -> Binder Kernels [SubExp])
          -> Binder Kernels [VName]
-segMap2D desc lvl manifest (dim_x, dim_y) f = do
+segMap2D desc lvl manifest (dim_y, dim_x) f = do
   ltid_x    <- newVName "ltid_x"
   ltid_flat <- newVName "ltid_flat"
   ltid_y    <- newVName "ltid_y"
-  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
+  let segspace = SegSpace ltid_flat [(ltid_y, dim_y), (ltid_x, dim_x)]
 
   ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_x, ltid_y)
+    res <- f (ltid_y, ltid_x)
     ts  <- mapM subExpType res
     return (ts, res)
   Body _ stms' res' <- renameBody $ mkBody stms res
@@ -653,7 +656,6 @@ processIndirections _ res_red_var acc stm'@(Let patt _ _)
       Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
 
-
 se1 :: SubExp
 se1 = Constant $ IntValue $ Int32Value 1
 se2 :: SubExp
@@ -695,3 +697,395 @@ getSeqTile tk_str tk_name len_dim ty tx =
     _ -> do
       tk <- letSubExp tk_str $ Op $ SizeOp $ GetSize tk_name SizeTile
       return tk
+
+----------------------------------------------------------------------------------------------
+--- 3D Tiling (RegTiling for the outermost dimension & Block tiling for the innermost two) ---
+----------------------------------------------------------------------------------------------
+
+maxRegTile :: Int32
+maxRegTile = 30
+
+mkRegTileSe :: Int32 -> SubExp
+mkRegTileSe = constant
+
+variantToDim :: VarianceTable -> VName -> VName -> Bool
+variantToDim variance gid_outer nm =
+  gid_outer == nm || (nameIn gid_outer $ M.findWithDefault mempty nm variance)
+
+
+-- | Checks that all streamed arrays are variant to exacly one of
+--   the two innermost parallel dimensions, and conversely, for
+--   each of the two innermost parallel dimensions, there is at
+--   least one streamed array variant to it. The result is the
+--   number of the only variant parallel dimension for each array.
+isInvarTo2of3InnerDims :: Names -> SegSpace -> VarianceTable -> [VName]
+                       -> Maybe [Int]
+isInvarTo2of3InnerDims branch_variant kspace variance arrs =
+  let inner_perm0 = map varToOnly1of3InnerDims arrs
+      inner_perm  = catMaybes inner_perm0
+      ok1 = elem 0 inner_perm && elem 1 inner_perm && elem 2 inner_perm
+      ok2 = length inner_perm0 == length inner_perm
+  in  if ok1 && ok2 then Just inner_perm else Nothing
+  where varToOnly1of3InnerDims :: VName -> Maybe Int
+        varToOnly1of3InnerDims arr = do
+          (k, _) : (j, _) : (i, _) : _ <- Just $ reverse $ unSegSpace kspace
+          let variant_to       = M.findWithDefault mempty arr variance
+              branch_invariant = not $ nameIn k branch_variant ||
+                                       nameIn j branch_variant ||
+                                       nameIn i branch_variant
+          if not branch_invariant then Nothing -- if i or j or k in branch_variant; return nothing
+          else if nameIn i variant_to && not (nameIn j variant_to || nameIn k variant_to) then Just 0
+          else if nameIn j variant_to && not (nameIn i variant_to || nameIn k variant_to) then Just 1
+          else if nameIn k variant_to && not (nameIn i variant_to || nameIn j variant_to) then Just 2
+          else Nothing
+
+
+
+-- | Expects a kernel statement as argument.
+--   CONDITIONS for 3D tiling optimization to fire are:
+--     1. a) The kernel body can be broken into
+--              scalar-code-1 ++ [Redomap stmt] ++ scalar-code-2.
+--        b) The kernels has a per-thread result, and obviously
+--              the result is variant to the 3rd dimension
+--              (counted from innermost to outermost)
+--     2. For the Redomap:
+--          a) the streamed arrays are one dimensional
+--          b) each of the array arguments of Redomap are variant
+--              to exactly one of the three innermost-parallel dimension
+--              of the kernel. This condition can be relaxed by interchanging
+--              kernel dimensions whenever possible.
+--     3. For scalar-code-1:
+--          a) each of the statements is a slice that produces one of the
+--             streamed arrays
+--
+-- mmBlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
+-- mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
+doRegTiling3D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
+doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
+  | SegMap (SegThread{}) space kertp (KernelBody () kstms kres) <- old_kernel,
+
+    -- build the variance table, that records, for
+    -- each variable name, the variables it depends on
+    initial_variance <- M.map mempty $ scopeOfSegSpace space,
+    variance <- varianceInStms initial_variance kstms,
+
+    -- we get the global-thread id for the two inner dimensions,
+    --   as we are probably going to use it in code generation
+    (gtid_x, d_Kx) : (gtid_y, d_Ky) : (gtid_z, d_M) : rem_outer_dims_rev <- reverse $ unSegSpace space,
+    rem_outer_dims <- reverse rem_outer_dims_rev,
+    
+    -- check that the code fits the pattern having:
+    -- some `code1`, followed by one Screma SOAC, followed by some `code2`
+    (code1, Just screma_stmt, code2) <- matchCodeStreamCode kstms,
+    Let pat_redomap _ (Op _) <- screma_stmt,
+
+    -- checks that the Screma SOAC is actually a redomap and normalize it
+    Just (common_dim, inp_soac_arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
+    not (null red_nes),
+
+    -- assuming we have a budget of maxRegTile registers, we distribute
+    -- that budget across the result of redomap 
+    reg_tile <- maxRegTile `quot` fromIntegral (length red_nes),
+    reg_tile_se <- mkRegTileSe reg_tile,
+
+    -- check that the element-type of the map and reduce are scalars:
+    foldl (&&) True $ map primType $ map paramDec $ lambdaParams map_lam,
+    red_res_tps <- map paramDec $ take (length red_nes) $ lambdaParams red_lam,
+    foldl (&&) True $ map primType red_res_tps,
+
+    -- checks that the input arrays to redomap are variant to
+    -- exactly one of the two innermost dimensions of the kernel
+    Just _ <- isInvarTo2of3InnerDims mempty space variance inp_soac_arrs,
+
+
+    -- get the free variables on which the result of redomap depends on
+    redomap_orig_res <- patternValueElements pat_redomap,
+    res_red_var <- -- variance of the reduce result
+      foldl (\acc nm ->case M.lookup nm variance of
+                          Nothing -> acc
+                          Just nms-> acc <> nms
+            ) mempty $ map patElemName redomap_orig_res,
+    not $ mempty == res_red_var, 
+
+    -- we furthermore check that code1 is only formed by
+    -- 1. statements that slice some globally-declared arrays
+    --    to produce the input for the redomap, and
+    -- 2. potentially some statements on which the redomap
+    --    is independent; these are recorded in `code2''`
+    Just (code2'', arr_tab0) <- foldl(processIndirections (namesFromList inp_soac_arrs) res_red_var)
+                                        (Just (Seq.empty, M.empty)) code1,
+
+
+    -- check that code1 contains exacly one slice for each of the input array to redomap
+    tmp_stms <- mapMaybe (`M.lookup` arr_tab0) inp_soac_arrs,
+    length tmp_stms == length inp_soac_arrs,
+
+    code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
+    code2' <- code2'' <> code2,
+
+    -- we assume the kernel results are variant to the thrid-outer parallel dimension
+    -- (for sanity sake, they should be)
+    ker_res_nms <- mapMaybe getResNm kres,
+    length ker_res_nms == length kres,
+    Pattern [] _  <- pat,
+    all primType kertp,
+    all (variantToDim variance gtid_z) ker_res_nms,
+    trace ("Cosmin3D debug: old_kernel: " ++ pretty old_kernel ++ "\ncode1':\n"++pretty code1'++
+           "\ncode 2:\n"++pretty code2++"\ncode2': \n"++pretty code2'++
+           "\n redomap orig result"++pretty redomap_orig_res++
+           "\n Kernel return: "++pretty ker_res_nms++" type: "++pretty kertp) $ True = do
+    -- HERE STARTS THE IMPLEMENTATION:
+    (new_kernel, host_stms) <- runBinder $ do -- host code
+        -- process the z-variant arrays that need transposition;
+        -- these "manifest" statements should come before the kernel
+        (tab_inn,tab_out) <- foldM (insertTranspose variance (gtid_z, d_M))
+                                   (M.empty, M.empty) $ M.toList arr_tab0
+
+        tx_name    <- nameFromString . pretty <$> newVName "Tx"
+        ty_name    <- nameFromString . pretty <$> newVName "Ty"
+
+        tx0        <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+        ty0        <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
+        ty <- limitTile "Ty" ty0 d_Ky
+        tx <- limitTile "Tx" tx0 d_Kx
+        let rz = reg_tile_se
+
+        gridDim_x  <- letSubExp "gridDim_x"  =<< ceilDiv d_Kx tx
+        gridDim_y  <- letSubExp "gridDim_y"  =<< ceilDiv d_Ky ty
+        gridDim_z  <- letSubExp "gridDim_z"  =<< ceilDiv d_M  rz
+        let gridxyz_pexp = pe32 gridDim_z * pe32 gridDim_y * pe32 gridDim_x
+        let grid_pexp = foldl (\ x d -> pe32 d * x) gridxyz_pexp $
+                              map snd rem_outer_dims_rev
+        grid_size  <- letSubExp "grid_size"  =<< toExp grid_pexp
+        group_size <- letSubExp "group_size" =<< toExp (pe32 ty * pe32 tx)
+        let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
+
+        count_shmem<- letSubExp "count_shmem" =<< ceilDiv rz group_size
+
+        gid_x      <- newVName "gid_x"
+        gid_y      <- newVName "gid_y"
+        gid_z      <- newVName "gid_z"
+        gid_flat   <- newVName "gid_flat"
+
+        ---- in this binder: outer seggroup ----
+        (ret_seggroup, stms_seggroup) <- runBinder $ do
+          ii  <- letExp "ii"  =<< toExp (le32 gid_z * pe32 rz)
+          jj1 <- letExp "jj1" =<< toExp (le32 gid_y * pe32 ty)
+          jj2 <- letExp "jj2" =<< toExp (le32 gid_x * pe32 tx)
+
+          -- initialize the register arrays corresponding to the result of redomap;
+          reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tx) $ \_ -> do
+            forM (zip red_nes red_res_tps) $ \ (red_ne, red_t) -> do
+              css_init <- scratch "res_init" (elemType red_t) [rz]
+              css <- forLoop rz [css_init] $ \i [css_merge] -> do
+                css' <- update' "css" css_merge [i] red_ne
+                resultBodyM [Var css']
+              return $ Var css
+
+          -- scratch the shared-memory arrays corresponding to the arrays that are
+          --   input to the redomap and are invariant to the outermost parallel dimension.
+          loc_arr_nms <- forM (M.toList tab_out) $ \ (nm, (ptp,_)) -> 
+                          scratch (baseString nm ++ "_loc") ptp [rz]
+
+          prologue_res_list <-
+            forLoop' common_dim (reg_arr_nms++loc_arr_nms) $
+            \ q var_nms -> do
+              let reg_arr_merge_nms = take (length red_nes) var_nms
+              let loc_arr_merge_nms = drop (length red_nes) var_nms
+
+              -- collective copy from global to shared memory
+              loc_arr_nms' <-
+                forLoop' count_shmem loc_arr_merge_nms $ \ tt loc_arr_merge2_nms -> do
+                  loc_arr_merge2_nms' <-
+                    forM (zip loc_arr_merge2_nms (M.toList tab_out)) $ \ (loc_Y_nm, (glb_Y_nm, (ptp_Y, load_Y))) -> do
+                      ltid_flat <- newVName "ltid_flat"
+                      ltid      <- newVName "ltid"
+                      let segspace = SegSpace ltid_flat [(ltid, group_size)]
+                      ((res_v, res_i), stms) <- runBinder $ do
+                        offs <- letExp "offs" =<< toExp (pe32 group_size * le32 tt)
+                        loc_ind <- letExp "loc_ind" =<< toExp (le32 ltid + le32 offs)
+                        letBindNames [gtid_z] =<< toExp (le32 ii + le32 loc_ind)
+                        let glb_ind = gtid_z
+                        y_elm <- letSubExp "y_elem" =<<
+                                    eIf (toExp $ le32 glb_ind .<. pe32 d_M)
+                                        (do addStm load_Y
+                                            res <- index "Y_elem" glb_Y_nm [q]
+                                            resultBodyM [Var res])
+                                        (eBody [eBlank $ Prim ptp_Y])
+                        y_ind <- letSubExp "y_loc_ind" =<<
+                                    eIf (toExp $ le32 loc_ind .<. pe32 rz)
+                                      (toExp loc_ind >>= letTupExp' "loc_fi" >>= resultBodyM)
+                                      (eBody [pure $ BasicOp $ SubExp $ intConst Int32 (-1)])
+                        --y_tp  <- subExpType y_elm
+                        return (y_elm, y_ind)
+
+                      Body _ stms' res' <- renameBody $ mkBody stms [res_i, res_v]
+                      let [res_i', res_v'] = res'
+                      let ret  = WriteReturns [rz] loc_Y_nm [([DimFix res_i'], res_v')]
+                      let body = KernelBody () stms' [ret]
+
+                      res_nms <- letTupExp "Y_glb2loc" $ Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
+                      let res_nm : _ = res_nms
+                      return res_nm
+                  resultBodyM $ map Var loc_arr_merge2_nms'
+
+              redomap_res <-
+                segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
+                  \(ltid_y, ltid_x) -> do
+                    letBindNames [gtid_y] =<< toExp (le32 jj1 + le32 ltid_y)
+                    letBindNames [gtid_x] =<< toExp (le32 jj2 + le32 ltid_x)
+                    reg_arr_merge_nms_slc <- forM reg_arr_merge_nms $ \ reg_arr_nm ->
+                      index "res_reg_slc" reg_arr_nm [ltid_y, ltid_x]
+                    letTupExp' "redomap_guarded" =<<
+                      eIf ( toExp $ le32 gtid_y .<. pe32 d_Ky .&&. le32 gtid_x .<. pe32 d_Kx )
+                          ( do  inp_scals_invar_outer <-
+                                  forM (M.toList tab_inn) $ \ (inp_arr_nm, load_stm) -> do
+                                    addStm load_stm
+                                    index (baseString inp_arr_nm) inp_arr_nm [q]
+                                -- build the loop of count R whose body is semantically the redomap code
+                                reg_arr_merge_nms' <-
+                                  forLoop' rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
+                                    letBindNames [gtid_z] =<< toExp (le32 ii + le32 i)
+                                    resultBodyM =<< letTupExp' "redomap_lam" =<<
+                                      eIf ( toExp $ le32 gtid_z .<. pe32 d_M)
+                                          ( do  -- read from shared memory
+                                                ys <- forM loc_arr_nms' $ \ loc_arr_nm -> do
+                                                        index "inp_reg_var2z" loc_arr_nm [i]
+                                                cs <- forM reg_arr_mm_nms $ \ reg_arr_nm -> do
+                                                        index "res_reg_var2z" reg_arr_nm [i]
+                                                -- here we need to put in order the scalar inputs to map:
+                                                let tab_scals = M.fromList $
+                                                                zip (map fst $ M.toList tab_out) ys ++
+                                                                zip (map fst $ M.toList tab_inn) inp_scals_invar_outer
+                                                map_inp_scals <- forM inp_soac_arrs $ \ arr_nm ->
+                                                  case M.lookup arr_nm tab_scals of
+                                                    Nothing -> error "Impossible case reached in tiling3D\n"
+                                                    Just nm -> return nm
+                                                map_res_scals <- forM (lambdaReturnType map_lam) $ \ _ -> newVName "map_res"
+                                                map_lam' <- renameLambda map_lam
+                                                red_lam' <- renameLambda red_lam
+                                                addStms $ rebindLambda map_lam' map_inp_scals map_res_scals
+                                                       <> rebindLambda red_lam' (cs ++ map_res_scals) cs
+                                                css <- forM (zip reg_arr_mm_nms cs) $ \ (reg_arr_nm,c) -> do
+                                                          update (baseString reg_arr_nm) reg_arr_nm [i] c
+                                                resultBodyM $ map Var css
+                                          )
+                                          ( resultBodyM $ map Var reg_arr_mm_nms )
+                                resultBodyM $ map Var reg_arr_merge_nms'
+                          )
+                          ( resultBodyM $ map Var reg_arr_merge_nms_slc )
+              resultBodyM $ map Var $ redomap_res ++ loc_arr_nms'
+
+          -- support for non-empty code2'
+          --  segmap (ltid_y < ty, ltid_x < tx) {
+          --    for i < rz do
+          --        res = if (ii+i < d_M && jj1+ltid_y < d_Ky && jj2 + ltid_x < d_Kx)
+          --              then code2' else dummy
+          --        final_res[i] = res
+          let redomap_res = take (length red_nes) prologue_res_list
+          epilogue_res <-
+            if length redomap_orig_res == length ker_res_nms &&
+               ker_res_nms == (map patElemName redomap_orig_res)
+               -- all (\ (a,b) -> patElemName a == b ) $ zip redomap_orig_res ker_res_nms
+            then return redomap_res
+            else segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
+                    letBindNames [gtid_y] =<< toExp (le32 jj1 + le32 ltid_y)
+                    letBindNames [gtid_x] =<< toExp (le32 jj2 + le32 ltid_x)
+                    rss_init <- forM kertp $ \ res_tp ->
+                        scratch "rss_init" (elemType res_tp) [rz]
+                    css <- forM redomap_res $ \ n_res ->
+                        index "redomap_thd" n_res [ltid_y, ltid_x]
+                    rss <- forLoop' rz rss_init $ \i rss_merge -> do
+                        letBindNames [gtid_z] =<< toExp (le32 ii + le32 i)
+                        forM_ (zip redomap_orig_res css) $ \(o_res, cs) -> do
+                            c <- index "redomap_elm" cs [i]
+                            letBindNames [patElemName o_res] =<< toExp (le32 c)
+                            return c
+                        res_els <- letTupExp' "res_elem" =<<
+                            eIf (toExp $ le32 gtid_y .<. pe32 d_Ky .&&.
+                                         le32 gtid_x .<. pe32 d_Kx .&&.
+                                         le32 gtid_z .<. pe32 d_M
+                                )
+                                (do addStms code2'
+                                    resultBodyM $ map Var ker_res_nms
+                                )
+                                (eBody $ map eBlank kertp)
+                        rss' <- forM (zip res_els rss_merge) $ \ (res_el, rs_merge) ->
+                            update' "rss" rs_merge [i] res_el
+                        resultBodyM $ map Var rss'
+                    return $ map Var rss
+
+          ----------------------------------------------------------------
+          -- Finally, reshape the result arrays for the RegTileReturn  ---
+          ----------------------------------------------------------------
+          let regtile_ret_dims =
+                map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims ++
+                [(d_M, se1, rz), (d_Ky, ty, se1), (d_Kx, tx, se1)]
+
+          epilogue_res' <- forM epilogue_res $ \ res -> do
+                res_tp <- lookupType res
+                let shape_res = map DimNew $ [se1] ++ arrayDims res_tp ++ [se1, se1]
+                res_rshp <- letExp "res_reshaped" $ BasicOp $ Reshape shape_res res
+                if null rem_outer_dims
+                then return res_rshp
+                else do -- Add dummy dimensions to tile to reflect the outer dimensions
+                        res_tp' <- lookupType res_rshp
+                        let (block_dims, rest_dims) = splitAt 2 $ arrayDims res_tp'
+                            ones = map (const se1) rem_outer_dims
+                            new_shape = concat [ones, block_dims, ones, rest_dims]
+                        letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res_rshp
+
+
+          -- TODO: RegTileReturns is still incorrect, please Fix It
+          return $ map (\x -> RegTileReturns regtile_ret_dims x) epilogue_res'
+        -- END (ret_seggroup, stms_seggroup) <- runBinder $ do 
+        let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
+            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z,gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
+            kbody' = KernelBody () stms_seggroup ret_seggroup
+
+        return $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
+    -- END (new_kernel, host_stms) <- runBinder $ do 
+    trace ("Cosmin3D end\nhost_stms: "++pretty host_stms ++ "\nnew kernel: "++pretty new_kernel++"\n") $
+          return $ Just (host_stms, new_kernel)
+
+  where getResNm (Returns ResultMaySimplify (Var res_nm)) = Just res_nm
+        getResNm _ = Nothing
+
+        limitTile :: String -> SubExp -> SubExp -> Binder Kernels SubExp
+        limitTile t_str t d_K = letSubExp t_str $ BasicOp $ BinOp (SMin Int32) t d_K
+
+        -- |   The second Map accumulator keeps tracks of the arrays that
+        --       are variant to the z-parallel dimension and need to be transposed;
+        --       the `Int` field refers to the index of the z-variant dimension, and
+        --       the `Type` field refers to the type of the original global array.
+        --     The first accumulator table is updated to refer to the transposed-array
+        --       name, whenever such a case is discovered; otherwise it just accumulates.
+        insertTranspose :: VarianceTable -> (VName,SubExp)
+                        -> (M.Map VName (Stm Kernels), M.Map VName (PrimType,Stm Kernels))
+                        -> (VName, Stm Kernels)
+                        -> Binder Kernels (M.Map VName (Stm Kernels), M.Map VName (PrimType,Stm Kernels))
+        insertTranspose variance (gidz,_) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
+          | [p] <- patternValueElements patt,
+            ptp <- elemType $ patElemType p,
+            p_nm == patElemName p = do
+          case findIndices (variantSliceDim variance gidz) slc of
+            [] -> return $ (M.insert p_nm stm tab_inn, tab_out)
+            i : _ -> do
+              arr_tp <- lookupType arr_nm
+              let perm = [i+1..arrayRank arr_tp-1] ++ [0..i]
+              let arr_tr_str = baseString arr_nm ++ "_transp"
+              arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest perm arr_nm
+              --let p' = p {patElemName = arr_tr_nm}
+              --let patt' = patt { patternValueElements = [p']}
+              let e_ind'= BasicOp $ Index arr_tr_nm slc
+              let stm' = Let patt yy e_ind'
+              return (tab_inn, M.insert p_nm (ptp, stm') tab_out)
+        insertTranspose _ _ _ _ = error "\nUnreachable case reached in insertTranspose case, doRegTiling3D\n"
+
+        variantSliceDim :: VarianceTable -> VName -> DimIndex SubExp -> Bool
+        variantSliceDim variance gidz (DimFix (Var vnm)) = variantToDim variance gidz vnm
+        variantSliceDim _ _ _ = False
+        --processDimSlice (DimFix d) = DimFix d
+        --processDimSlice (DimSlice beg n strd) = DimSlice se0 n se1
+
+doRegTiling3D _ = return Nothing
