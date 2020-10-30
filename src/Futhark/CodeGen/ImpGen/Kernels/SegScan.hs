@@ -477,14 +477,20 @@ createLocalArrays ::
   Count GroupSize SubExp ->
   SubExp ->
   [PrimType] ->
-  InKernelGen (VName, [VName], [VName])
+  InKernelGen (VName, [VName], [VName], VName, VName, [VName])
 createLocalArrays (Count groupSize) m types = do
   let groupSizeE = (toInt64Exp groupSize)
   let workSize = (toInt64Exp m) * groupSizeE
   let prefixArraysSize = foldl (\acc tySize -> (alignTo acc tySize) + tySize * groupSizeE) 0 $ map primByteSize types
   let byteOffsets = scanl (\off tySize -> (alignTo off tySize) + (pe32 groupSize) * tySize) 0 $ map primByteSize types
   let maxTransposedArraySize = foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
-  let size = Imp.bytes $ sMax64 prefixArraysSize maxTransposedArraySize
+  let warpSize = (32 :: Int32)
+  let warpSizeE = 32
+  let warpSize64 = 32
+  let maxWarpExchangeSize = foldl (\acc tySize -> (alignTo acc tySize) + tySize * warpSizeE) 0 $ map primByteSize types
+  let warpByteOffsets = scanl (\off tySize -> (alignTo off tySize) + warpSize64 * tySize) warpSize64 $ map primByteSize types
+  let maxLookbackSize = maxWarpExchangeSize + warpSizeE
+  let size = Imp.bytes $ sMax64 maxLookbackSize $ sMax64 prefixArraysSize maxTransposedArraySize
 
   sComment "Allocate reused shared memeory" $ return ()
 
@@ -492,6 +498,7 @@ createLocalArrays (Count groupSize) m types = do
   transposeArrayLength <- dPrimV "trans_arr_len" $ workSize
 
   sharedId <- sArrayInMem "shared_id" int32 (Shape [constant (1 :: Int32)]) localMem
+  sharedReadOffset <- sArrayInMem "shared_read_offset" int32 (Shape [constant (1 :: Int32)]) localMem
 
   transposedArrays <-
     mapM (\ty -> do
@@ -510,7 +517,17 @@ createLocalArrays (Count groupSize) m types = do
                  $ ArrayIn localMem $ IxFun.iotaOffset off' [pe32 $ groupSize])
     $ zip byteOffsets types
 
-  return (sharedId, transposedArrays, prefixArrays)
+  warpscan <- sArrayInMem "warpscan" int8 (Shape [constant warpSize]) localMem
+  warpExchanges <-
+    mapM (\(off, ty) -> do
+            let off' = off `Futhark.Util.IntegralExp.div` primByteSize ty
+            sArray "warp_exchange"
+                   ty
+                   (Shape [constant warpSize])
+                   $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize64])
+      (zip warpByteOffsets types)
+
+  return (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, warpExchanges)
   where
     alignTo x a = (x `divUp` a) * a
 
@@ -575,7 +592,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants  <- kernelConstants <$> askEnv
 
-    (sharedId, transposedArrays, prefixArrays) <-
+    (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, exchanges) <-
       createLocalArrays (segGroupSize lvl) (constant m) tys
 
     dynamicId <- dPrim "dynamic_id" int32
@@ -681,9 +698,6 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
     prefixes <- forM (zip scanOpNe tys) (\(ne, ty) -> dPrimV "prefix" $ TPrimExp $ toExp' ty ne)
     sComment "Perform lookback" $ do
-      warpscan <- sAllocArray "warpscan" int8 (Shape [waveSize]) (Space "local")
-      exchanges <- forM tys (\ty -> sAllocArray "exchange" ty (Shape [waveSize]) (Space "local"))
-      sharedReadOffset <- sAllocArray "sharedReadOffset" int32 (Shape [constant (1 :: Int32)]) (Space "local")
       sWhen ((tvExp dynamicId) .==. 0 .&&. (kernelLocalThreadId constants) .==. 0) $ do
         forM_ (zip incprefixArrays accs)
           (\(incprefixArray, acc) ->
