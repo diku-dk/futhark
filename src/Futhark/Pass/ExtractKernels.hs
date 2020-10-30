@@ -870,7 +870,9 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
           -- Normally the permutation is for the output pattern, but
           -- we can't really change that, so we change the result
           -- order instead.
-          let lam_res' = rearrangeShape perm $ bodyResult $ lambdaBody lam
+          let lam_res' =
+                rearrangeShape (rearrangeInverse perm) $
+                  bodyResult $ lambdaBody lam
               lam' = lam {lambdaBody = (lambdaBody lam) {bodyResult = lam_res'}}
               map_nesting = MapNesting pat aux w $ zip (lambdaParams lam) arrs
               nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest
