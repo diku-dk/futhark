@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Multicore backend crashed on `reduce_by_index` with nonempty target
     and empty input.
 
+  * Fixed a flattening issue for certain complex `map` nestings
+    (#1168).
+
 ## [0.18.1]
 
 ### Added
