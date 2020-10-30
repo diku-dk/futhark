@@ -87,7 +87,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
         Nothing -> return $ errorMsg ["Function return value does not match shape of declared return type."]
 
       ((rettype', body_res), body_stms) <- collectStms $ do
-        body_res <- internaliseExp "res" body
+        body_res <- internaliseExp (baseString fname <> "_res") body
         rettype_bad <- internaliseReturnType rettype
         let rettype' = zeroExts rettype_bad
         return (rettype', body_res)
@@ -319,8 +319,9 @@ internaliseIdent (E.Ident name (Info tp) loc) =
           ++ locStr loc
           ++ "."
 
-internaliseBody :: E.Exp -> InternaliseM Body
-internaliseBody e = insertStmsM $ resultBody <$> internaliseExp "res" e
+internaliseBody :: String -> E.Exp -> InternaliseM Body
+internaliseBody desc e =
+  insertStmsM $ resultBody <$> internaliseExp (desc <> "_res") e
 
 bodyFromStms ::
   InternaliseM (Result, a) ->
@@ -888,7 +889,7 @@ internaliseExp desc (E.Match e cs (Info ret, Info retext) _) = do
         let CasePat pLast eLast _ = NE.last cs'
         bFalse <- do
           (_, pertinent) <- generateCond pLast ses
-          eLast' <- internalisePat' pLast pertinent eLast internaliseBody
+          eLast' <- internalisePat' pLast pertinent eLast (internaliseBody desc)
           foldM (\bf c' -> eBody $ return $ generateCaseIf ses c' bf) eLast' $
             reverse $ NE.init cs'
         letTupExp' desc =<< generateCaseIf ses c bFalse
@@ -918,8 +919,8 @@ internaliseExp desc (E.If ce te fe (Info ret, Info retext) _) = do
     letTupExp' desc
       =<< eIf
         (BasicOp . SubExp <$> internaliseExp1 "cond" ce)
-        (internaliseBody te)
-        (internaliseBody fe)
+        (internaliseBody (desc <> "_t") te)
+        (internaliseBody (desc <> "_f") fe)
   bindExtSizes (E.toStruct ret) retext ses
   return ses
 
@@ -1038,7 +1039,7 @@ generateCond orig_p orig_ses = do
 generateCaseIf :: [I.SubExp] -> Case -> I.Body -> InternaliseM I.Exp
 generateCaseIf ses (CasePat p eCase _) bFail = do
   (cond, pertinent) <- generateCond p ses
-  eCase' <- internalisePat' p pertinent eCase internaliseBody
+  eCase' <- internalisePat' p pertinent eCase (internaliseBody "case")
   eIf (eSubExp cond) (return eCase') (return bFail)
 
 internalisePat ::
@@ -1626,7 +1627,7 @@ internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
 internaliseLambda (E.Lambda params body _ (Info (_, rettype)) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
-    body' <- internaliseBody body
+    body' <- internaliseBody "lam" body
     rettype' <- internaliseLambdaReturnType rettype
     return (params', body', rettype')
 internaliseLambda e _ = error $ "internaliseLambda: unexpected expression:\n" ++ pretty e
