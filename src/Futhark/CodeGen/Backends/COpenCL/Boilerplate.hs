@@ -440,9 +440,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                }|])
 
   GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
-    ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+    ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         lock_lock(&ctx->lock);
                          ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
+                         lock_unlock(&ctx->lock);
                          return ctx->error != NULL;
                        }|])
 

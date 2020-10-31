@@ -410,8 +410,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
 
 
   GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
-    ([C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-     [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+    ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
+      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         lock_lock(&ctx->lock);
                          CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+                         lock_unlock(&ctx->lock);
                          return 0;
                        }|])
