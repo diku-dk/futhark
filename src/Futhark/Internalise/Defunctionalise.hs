@@ -1123,9 +1123,11 @@ freeVars expr = case expr of
       <> ( (names (patternDimNames pat) <> freeVars e2)
              `without` patternVars pat
          )
-  LetFun vn (_, pats, _, _, e1) e2 _ _ ->
+  LetFun vn (tparams, pats, _, _, e1) e2 _ _ ->
     ( (freeVars e1 <> names (foldMap patternDimNames pats))
-        `without` foldMap patternVars pats
+        `without` ( foldMap patternVars pats
+                      <> foldMap (oneName . typeParamName) tparams
+                  )
     )
       <> (freeVars e2 `without` oneName vn)
   If e1 e2 e3 _ _ -> freeVars e1 <> freeVars e2 <> freeVars e3
