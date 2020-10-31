@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed a flattening issue for certain complex `map` nestings
     (#1168).
 
+  * Made API function `futhark_context_clear_caches()` thread safe
+    (#1169).
+
 ## [0.18.1]
 
 ### Added
