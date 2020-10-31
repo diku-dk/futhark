@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Made API function `futhark_context_clear_caches()` thread safe
     (#1169).
 
+  * API functions for freeing opaque objects are now thread-safe
+    (#1169).
+
 ## [0.16.4]
 
 ### Added
