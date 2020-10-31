@@ -692,12 +692,14 @@ consumeAfterConsume name loc1 loc2 =
     "Variable" <+> pprName name <+> "previously consumed at"
       <+> text (locStrRel loc2 loc1) <> "."
 
-badLetWithValue :: SrcLoc -> TermTypeM a
-badLetWithValue loc =
-  typeError
-    loc
-    mempty
-    "New value for elements in let-with shares data with source array.  This is illegal, as it prevents in-place modification."
+badLetWithValue :: (Pretty arr, Pretty src) => arr -> src -> SrcLoc -> TermTypeM a
+badLetWithValue arre vale loc =
+  typeError loc mempty $
+    "Source array for in-place update"
+      </> indent 2 (ppr arre)
+      </> "might alias update value"
+      </> indent 2 (ppr vale)
+      </> "Hint: use" <+> pquote "copy" <+> "to remove aliases from the value."
 
 returnAliased :: Name -> Name -> SrcLoc -> TermTypeM ()
 returnAliased fname name loc =
@@ -1518,7 +1520,7 @@ checkExp (LetWith dest src idxes ve body NoInfo loc) =
     sequentially (unifies "type of target array" (toStruct elemt) =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expTypeFully ve'
       when (AliasBound (identName src') `S.member` aliases ve_t) $
-        badLetWithValue loc
+        badLetWithValue src ve loc
 
       bindingIdent dest (src_t `setAliases` S.empty) $ \dest' -> do
         body' <- consuming src' $ checkExp body
@@ -1542,7 +1544,7 @@ checkExp (Update src idxes ve loc) = do
 
       let src_als = aliases src_t
       ve_t <- expTypeFully ve'
-      unless (S.null $ src_als `S.intersection` aliases ve_t) $ badLetWithValue loc
+      unless (S.null $ src_als `S.intersection` aliases ve_t) $ badLetWithValue src ve loc
 
       consume loc src_als
       return $ Update src' idxes' ve' loc
