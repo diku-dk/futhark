@@ -329,7 +329,7 @@ transformExp (LetPat pat e1 e2 (Info t, retext) loc) = do
     <*> pure (Info t', retext)
     <*> pure loc
 transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e e_t loc)
-  | any isTypeParam tparams = do
+  | not $ null tparams = do
     -- Retrieve the lifted monomorphic function bindings that are produced,
     -- filter those that are monomorphic versions of the current let-bound
     -- function and insert them at this point, and propagate the rest.
