@@ -32,6 +32,7 @@ import Futhark.Error
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
 import GHC.IO.Encoding (setLocaleEncoding)
+import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import System.Environment
 import System.Exit
 import System.IO
@@ -78,7 +79,14 @@ msg =
 -- | Catch all IO exceptions and print a better error message if they
 -- happen.
 reportingIOErrors :: IO () -> IO ()
-reportingIOErrors = flip catches [Handler onExit, Handler onICE, Handler onError]
+reportingIOErrors =
+  flip
+    catches
+    [ Handler onExit,
+      Handler onICE,
+      Handler onIOException,
+      Handler onError
+    ]
   where
     onExit :: ExitCode -> IO ()
     onExit = throwIO
@@ -104,6 +112,12 @@ reportingIOErrors = flip catches [Handler onExit, Handler onICE, Handler onError
         T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
         T.hPutStrLn stderr $ T.pack $ show e
         exitWith $ ExitFailure 1
+
+    onIOException :: IOException -> IO ()
+    onIOException e
+      | ioe_type e == ResourceVanished =
+        exitWith $ ExitFailure 1
+      | otherwise = throw e
 
 main :: IO ()
 main = reportingIOErrors $ do
