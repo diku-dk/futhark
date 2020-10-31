@@ -1053,11 +1053,13 @@ opaqueLibraryFunctions desc vds = do
     (OpaqueDecl desc)
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
 
+  ops <- asks envOperations
+
   return
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
             int ret = 0, tmp;
-            $items:free_body
+            $items:(criticalSection ops free_body)
             free(obj);
             return ret;
           }
