@@ -342,7 +342,7 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
 }
 
 // Returns 0 on success.
-static int list_devices(struct opencl_config *cfg) {
+static int list_devices(void) {
   struct opencl_device_option *devices;
   size_t num_devices;
 
