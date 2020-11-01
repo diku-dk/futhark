@@ -66,6 +66,70 @@ askEnv = asks snd
 isGlobal :: VName -> DefM a -> DefM a
 isGlobal v = local $ Arrow.first (S.insert v)
 
+replaceStaticValSizes :: M.Map VName VName -> StaticVal -> StaticVal
+replaceStaticValSizes substs sv =
+  case sv of
+    LambdaSV sizes param t e closure_env ->
+      LambdaSV
+        sizes
+        (onAST param)
+        (onType t)
+        (onExtExp e)
+        (onEnv closure_env)
+    Dynamic t ->
+      Dynamic $ onType t
+    RecordSV fs ->
+      RecordSV $ map (fmap (replaceStaticValSizes substs)) fs
+    SumSV c svs ts ->
+      SumSV c (map (replaceStaticValSizes substs) svs) $
+        map (fmap (map onType)) ts
+    DynamicFun (e, sv1) sv2 ->
+      DynamicFun (onAST e, replaceStaticValSizes substs sv1) $
+        replaceStaticValSizes substs sv2
+    IntrinsicSV ->
+      IntrinsicSV
+  where
+    onName v = fromMaybe v $ M.lookup v substs
+    onQualName v = maybe v qualName $ M.lookup (qualLeaf v) substs
+
+    tv =
+      identityMapper
+        { mapOnPatternType = pure . onType,
+          mapOnStructType = pure . onType,
+          mapOnQualName = pure . onQualName,
+          mapOnExp = pure . onAST
+        }
+
+    onExtExp (ExtExp e) =
+      ExtExp $ onAST e
+    onExtExp (ExtLambda dims params e (als, t) loc) =
+      ExtLambda dims (map onAST params) (onAST e) (als, onType t) loc
+
+    onEnv =
+      M.fromList
+        . map (bimap onName $ replaceStaticValSizes substs)
+        . M.toList
+
+    onAST :: ASTMappable x => x -> x
+    onAST = runIdentity . astMap tv
+
+    onType = first onDim
+      where
+        onDim (NamedDim v) =
+          NamedDim $ maybe v qualName $ M.lookup (qualLeaf v) substs
+        onDim d = d
+
+-- | Construct new sizes for a LambdaSV (if that is what it is).  This
+-- is needed because sizes must be unique when we substitute the
+-- closure for the LambdaSV into another function, because sizes float
+-- to the top (see issue #1147).
+newSizesForLambda :: StaticVal -> DefM StaticVal
+newSizesForLambda (LambdaSV sizes param t e closure_env) = do
+  sizes' <- mapM newName sizes
+  let substs = M.fromList $ zip sizes sizes'
+  pure $ replaceStaticValSizes substs $ LambdaSV sizes' param t e closure_env
+newSizesForLambda sv = pure sv
+
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
 restrictEnvTo :: NameSet -> DefM Env
@@ -517,7 +581,8 @@ defuncExp' = fmap fst . defuncExp
 defuncExtExp :: ExtExp -> DefM (Exp, StaticVal)
 defuncExtExp (ExtExp e) = defuncExp e
 defuncExtExp (ExtLambda tparams pats e0 (closure, ret) loc) =
-  defuncFun tparams pats e0 (closure, ret) loc
+  traverse newSizesForLambda
+    =<< defuncFun tparams pats e0 (closure, ret) loc
 
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
 defuncCase sv (CasePat p e loc) = do
@@ -731,7 +796,7 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
     -- If e1 is a dynamic function, we just leave the application in place,
     -- but we update the types since it may be partially applied or return
     -- a higher-order term.
-    DynamicFun _ sv ->
+    DynamicFun _ sv -> do
       let (argtypes', rettype) = dynamicFunType sv argtypes
           restype = foldFunType argtypes' rettype `setAliases` aliases ret
           -- FIXME: what if this application returns both a function
@@ -740,7 +805,8 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
             | orderZero ret = (Info ret, Info ext)
             | otherwise = (Info restype, Info ext)
           apply_e = Apply e1' e2' d callret loc
-       in return (apply_e, sv)
+      sv' <- newSizesForLambda sv
+      return (apply_e, sv')
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
     IntrinsicSV
