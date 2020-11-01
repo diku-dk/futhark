@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     error if writing to a broken pipe (but they will return a nonzero
     exit code).
 
+  * Defunctionalisation had a name shadowing issue that would crop up
+    for programs making very advanced use of functional
+    representations (#1174).
+
 ## [0.18.1]
 
 ### Added
