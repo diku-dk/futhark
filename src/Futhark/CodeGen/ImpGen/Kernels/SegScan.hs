@@ -193,7 +193,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
              forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, (Var src)) -> do
                copyDWIMFix dest [i] (Var src) []
 
-    sComment "Transpose scan inputs" $
+    sComment "Transpose scan inputs" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
         sOp localBarrier
         sFor "i" tM $ \i -> do
@@ -203,6 +203,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
         sFor "i" tM $ \i -> do
           sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) * tM + i
           copyDWIMFix priv [i] (Var trans) [tvExp sharedIdx]
+      sOp localBarrier
 
     sComment "Per thread scan" $ do
       sFor "i" tM $ \i -> do
