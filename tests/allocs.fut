@@ -2,14 +2,14 @@
 -- without leaking, then we're doing well.
 -- ==
 -- input { [0, 1000, 42, 1001, 50000] }
--- output { 1300103225i32 }
+-- output { 1300103225i64 }
 
-let main [n] (a: [n]i32): i32 =
+let main [n] (a: [n]i32): i64 =
   let b = loop b = iota(10) for i < n do
-    (let m = a[i]
+    (let m = i64.i32 a[i]
      in if m < length b
         then b
-        else map (\(j: i32): i32  ->
+        else map (\j  ->
                    j + b[j % length b]) (
                  iota(m)))
   in reduce (+) 0 b

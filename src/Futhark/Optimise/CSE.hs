@@ -47,6 +47,7 @@ import Futhark.IR.Aliases
     removeStmAliases,
   )
 import qualified Futhark.IR.Kernels.Kernel as Kernel
+import qualified Futhark.IR.MC as MC
 import qualified Futhark.IR.Mem as Memory
 import Futhark.IR.Prop.Aliases
 import qualified Futhark.IR.SOACS.SOAC as SOAC
@@ -281,6 +282,19 @@ instance
   cseInOp (Kernel.SegOp op) = Kernel.SegOp <$> cseInOp op
   cseInOp (Kernel.OtherOp op) = Kernel.OtherOp <$> cseInOp op
   cseInOp x = return x
+
+instance
+  ( ASTLore lore,
+    Aliased lore,
+    CSEInOp (Op lore),
+    CSEInOp op
+  ) =>
+  CSEInOp (MC.MCOp lore op)
+  where
+  cseInOp (MC.ParOp par_op op) =
+    MC.ParOp <$> traverse cseInOp par_op <*> cseInOp op
+  cseInOp (MC.OtherOp op) =
+    MC.OtherOp <$> cseInOp op
 
 instance
   (ASTLore lore, Aliased lore, CSEInOp (Op lore)) =>

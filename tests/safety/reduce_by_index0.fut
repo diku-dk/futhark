@@ -1,5 +1,5 @@
 -- ==
--- compiled random input { [20000]f32 } error: Index \[-1\]
+-- random input { [20000]f32 } error: Index \[-1\]
 
 let main [n] (xs: [n]f32) =
   reduce_by_index (replicate 3 0) (+) 0

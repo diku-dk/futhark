@@ -15,6 +15,7 @@ module Futhark.IR.Prop.Aliases
   ( subExpAliases,
     expAliases,
     patternAliases,
+    lookupAliases,
     Aliased (..),
     AliasesOf (..),
 
@@ -31,7 +32,8 @@ where
 
 import Control.Arrow (first)
 import qualified Data.Kind
-import Futhark.IR.Prop (IsOp)
+import qualified Data.Map as M
+import Futhark.IR.Prop (IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
 import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Types
@@ -168,6 +170,13 @@ instance AliasesOf Names where
 
 instance AliasesOf dec => AliasesOf (PatElemT dec) where
   aliasesOf = aliasesOf . patElemDec
+
+-- | Also includes the name itself.
+lookupAliases :: AliasesOf (LetDec lore) => VName -> Scope lore -> Names
+lookupAliases v scope =
+  case M.lookup v scope of
+    Just (LetName dec) -> oneName v <> aliasesOf dec
+    _ -> oneName v
 
 -- | The class of operations that can produce aliasing and consumption
 -- information.

@@ -26,12 +26,13 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Futhark.Error
 import Futhark.FreshNames
-import Futhark.Util.Pretty (ppr)
+import Futhark.Util.Pretty (line, ppr, (</>))
 import qualified Language.Futhark as E
 import Language.Futhark.Parser
 import Language.Futhark.Prelude
 import Language.Futhark.Semantic
 import qualified Language.Futhark.TypeChecker as E
+import Language.Futhark.Warnings
 import qualified System.FilePath.Posix as Posix
 import System.IO.Error
 
@@ -104,9 +105,14 @@ handleFile steps include file_contents file_name = do
   roots <- ask
 
   case E.checkProg imports src include $ prependRoots roots prog of
-    Left err ->
-      externalError $ ppr err
-    Right (m, ws, src') ->
+    (prog_ws, Left err) -> do
+      prev_ws <- gets warnings
+      let ws = prev_ws <> prog_ws
+      externalError $
+        if anyWarnings ws
+          then ppr (prev_ws <> ws) </> line <> ppr err
+          else ppr err
+    (ws, Right (m, src')) ->
       modify $ \s ->
         s
           { alreadyImported = (includeToString include, m) : imports,

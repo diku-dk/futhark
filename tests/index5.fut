@@ -7,4 +7,4 @@
 -- input { [0,1,2,3,4,5,6,7] 7 9 2 } output { [7] }
 
 let main (as: []i32) (i: i32) (j: i32) (s: i32): []i32 =
-  as[i:j:s]
+  as[i64.i32 i:i64.i32 j:i64.i32 s]

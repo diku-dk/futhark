@@ -2,6 +2,9 @@
 //
 // Various helper functions that are useful in all generated C code.
 
+#include <errno.h>
+#include <string.h>
+
 static const char *fut_progname = "(embedded Futhark)";
 
 static void futhark_panic(int eval, const char *fmt, ...) {
@@ -24,6 +27,28 @@ static char* msgprintf(const char *s, ...) {
   vsnprintf(buffer, needed, s, vl);
   return buffer;
 }
+
+
+static inline void check_err(int errval, int sets_errno, const char *fun, int line,
+                            const char *msg, ...) {
+  if (errval) {
+    char str[256];
+    char errnum[10];
+
+    va_list vl;
+    va_start(vl, msg);
+
+    fprintf(stderr, "ERROR: ");
+    vfprintf(stderr, msg, vl);
+    fprintf(stderr, " in %s() at line %d with error code %s\n",
+            fun, line,
+            sets_errno ? strerror(errno) : errnum);
+    exit(errval);
+  }
+}
+
+#define CHECK_ERR(err, msg...) check_err(err, 0, __func__, __LINE__, msg)
+#define CHECK_ERRNO(err, msg...) check_err(err, 1, __func__, __LINE__, msg)
 
 // Read a file into a NUL-terminated string; returns NULL on error.
 static void* slurp_file(const char *filename, size_t *size) {

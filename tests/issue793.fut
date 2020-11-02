@@ -2,7 +2,7 @@
 
 -- types
 type Sphere = {pos: [3]f32, radius: f32, color: [4]u8}
-type Intersection = {t: f32, index: i32, prim: u8}
+type Intersection = {t: f32, index: i64, prim: u8}
 
 -- constants
 let DROP_OFF = 100f32
@@ -28,14 +28,14 @@ let sphereIntersect (rayO: [3]f32) (rayD: [3]f32) (s: Sphere): f32 =
 
 -- render function
 let render [nspheres] [nlights]
-           (dim: [2]i32)
+           (dim: [2]i64)
            (spheres: [nspheres]Sphere)
            (lights: [nlights]Sphere)
            : [][4]u8 = -- return a color for each pixel
     let pixIndices = iota (dim[0] * dim[1])
     in map (\i -> -- for each pixel
             let coord = [i %% dim[0], i // dim[0]]
-            let rayD: [3]f32 = [r32 dim[0], r32 (coord[0] - dim[0] / 2), r32 (dim[1] / 2 - coord[1])]
+            let rayD: [3]f32 = [f32.i64 dim[0], f32.i64 (coord[0] - dim[0] / 2), f32.i64 (dim[1] / 2 - coord[1])]
             let rayO: [3]f32 = [0, 0, 0]
 
             -- sphere intersections
@@ -57,7 +57,7 @@ let render [nspheres] [nlights]
             -- closest intersection and corresponding primitive index
             let min: Intersection = reduce (\min x->
                     if x.t < min.t then x else min
-                ) {t = DROP_OFF, index = 0i32, prim = P_NONE} (concat sInts lInts)
+                ) {t = DROP_OFF, index = 0i64, prim = P_NONE} (concat sInts lInts)
 
             -- return color
             in if (min.prim == P_SPHERE)
@@ -68,11 +68,11 @@ let render [nspheres] [nlights]
         ) pixIndices
 
 -- entry point
-let main [s] (width: i32)
-             (height: i32)
+let main [s] (width: i64)
+             (height: i64)
              -- spheres and lights
-             (numS: i32)
-             (numL: i32)
+             (numS: i64)
+             (numL: i64)
              (sPositions: [s][3]f32)
              (sRadii: [s]f32)
              (sColors: [s][4]u8)

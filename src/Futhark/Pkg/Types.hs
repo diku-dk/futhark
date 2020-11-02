@@ -41,12 +41,13 @@ import Control.Monad
 import Data.Either
 import Data.Foldable
 import Data.List (sortOn)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Traversable
-import Data.Versions (SemVer (..), VUnit (..), prettySemVer, semver)
+import Data.Versions (SemVer (..), VUnit (..), prettySemVer)
 import Data.Void
 import System.FilePath
 import qualified System.FilePath.Posix as Posix
@@ -69,13 +70,13 @@ pkgPathFilePath = joinPath . Posix.splitPath . T.unpack
 -- @hash@ (typically the Git commit ID).  This function detects such
 -- versions.
 isCommitVersion :: SemVer -> Maybe T.Text
-isCommitVersion (SemVer 0 0 0 [_] [[Str s]]) = Just s
+isCommitVersion (SemVer 0 0 0 [_] [Str s NE.:| []]) = Just s
 isCommitVersion _ = Nothing
 
 -- | @commitVersion timestamp commit@ constructs a commit version.
 commitVersion :: T.Text -> T.Text -> SemVer
 commitVersion time commit =
-  SemVer 0 0 0 [[Str time]] [[Str commit]]
+  SemVer 0 0 0 [Str time NE.:| []] [Str commit NE.:| []]
 
 -- | Unfortunately, Data.Versions has a buggy semver parser that
 -- collapses consecutive zeroes in the metadata field.  So, we define

@@ -112,7 +112,8 @@ callKernelRules =
     <> ruleBook
       [ RuleBasicOp copyCopyToCopy,
         RuleBasicOp removeIdentityCopy,
-        RuleIf unExistentialiseMemory
+        RuleIf unExistentialiseMemory,
+        RuleOp decertifySafeAlloc
       ]
       []
 
@@ -183,7 +184,7 @@ unExistentialiseMemory vtable pat _ (cond, tbranch, fbranch, ifdec)
         not $ freeIn ixfun `namesIntersect` namesFromList (patternNames pat),
         fse /= tse =
         let mem_size =
-              sExt Int64 $ untyped $ product $ primByteSize pt : IxFun.base ixfun
+              untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
          in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
         fixable
@@ -230,3 +231,14 @@ removeIdentityCopy vtable pat@(Pattern [] [pe]) _ (Copy v)
     dest_ixfun == src_ixfun =
     Simplify $ letBind pat $ BasicOp $ SubExp $ Var v
 removeIdentityCopy _ _ _ _ = Skip
+
+-- If an allocation is statically known to be safe, then we can remove
+-- the certificates on it.  This can help hoist things that would
+-- otherwise be stuck inside loops or branches.
+decertifySafeAlloc :: SimplifyMemory lore => TopDownRuleOp (Wise lore)
+decertifySafeAlloc _ pat (StmAux cs attrs _) op
+  | cs /= mempty,
+    [Mem _] <- patternTypes pat,
+    safeOp op =
+    Simplify $ attributing attrs $ letBind pat $ Op op
+decertifySafeAlloc _ _ _ _ = Skip

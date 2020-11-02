@@ -49,6 +49,7 @@ module Futhark.TypeCheck
     consume,
     consumeOnlyParams,
     binding,
+    alternative,
   )
 where
 
@@ -60,7 +61,7 @@ import Data.Maybe
 import qualified Data.Set as S
 import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
-import Futhark.IR.Aliases
+import Futhark.IR.Aliases hiding (lookupAliases)
 import Futhark.Util
 import Futhark.Util.Pretty (Pretty, align, indent, ppr, prettyDoc, text, (<+>))
 
@@ -810,17 +811,17 @@ checkBasicOp (Update src idxes se) = do
   require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
   consume =<< lookupAliases src
 checkBasicOp (Iota e x s et) = do
-  require [Prim int32] e
+  require [Prim int64] e
   require [Prim $ IntType et] x
   require [Prim $ IntType et] s
 checkBasicOp (Replicate (Shape dims) valexp) = do
-  mapM_ (require [Prim int32]) dims
+  mapM_ (require [Prim int64]) dims
   void $ checkSubExp valexp
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 checkBasicOp (Reshape newshape arrexp) = do
   rank <- arrayRank <$> checkArrIdent arrexp
-  mapM_ (require [Prim int32] . newDim) newshape
+  mapM_ (require [Prim int64] . newDim) newshape
   zipWithM_ (checkDimChange rank) newshape [0 ..]
   where
     checkDimChange _ (DimNew _) _ =
@@ -845,7 +846,7 @@ checkBasicOp (Rearrange perm arr) = do
 checkBasicOp (Rotate rots arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
-  mapM_ (require [Prim int32]) rots
+  mapM_ (require [Prim int64]) rots
   when (length rots /= rank) $
     bad $
       TypeError $
@@ -870,7 +871,7 @@ checkBasicOp (Concat i arr1exp arr2exps ressize) = do
           ++ pretty arr1t
           ++ " and "
           ++ intercalate ", " (map pretty arr2ts)
-  require [Prim int32] ressize
+  require [Prim int64] ressize
 checkBasicOp (Copy e) =
   void $ checkArrIdent e
 checkBasicOp (Manifest perm arr) =
@@ -913,7 +914,9 @@ checkExp ::
 checkExp (BasicOp op) = checkBasicOp op
 checkExp (If e1 e2 e3 info) = do
   require [Prim Bool] e1
-  _ <- checkBody e2 `alternative` checkBody e3
+  _ <-
+    context "in true branch" (checkBody e2)
+      `alternative` context "in false branch" (checkBody e3)
   context "in true branch" $ matchBranchType (ifReturns info) e2
   context "in false branch" $ matchBranchType (ifReturns info) e3
 checkExp (Apply fname args rettype_annot _) = do
@@ -1052,7 +1055,7 @@ checkType ::
   Checkable lore =>
   TypeBase Shape u ->
   TypeM lore ()
-checkType (Mem (ScalarSpace d _)) = mapM_ (require [Prim int32]) d
+checkType (Mem (ScalarSpace d _)) = mapM_ (require [Prim int64]) d
 checkType t = mapM_ checkSubExp $ arrayDims t
 
 checkExtType ::
@@ -1104,8 +1107,8 @@ checkDimIndex ::
   Checkable lore =>
   DimIndex SubExp ->
   TypeM lore ()
-checkDimIndex (DimFix i) = require [Prim int32] i
-checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int32]) [i, n, s]
+checkDimIndex (DimFix i) = require [Prim int64] i
+checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int64]) [i, n, s]
 
 checkStm ::
   Checkable lore =>
@@ -1197,7 +1200,7 @@ matchExtReturns rettype res ts = do
 
   let ctx_vals = zip ctx_res ctx_ts
       instantiateExt i = case maybeNth i ctx_vals of
-        Just (se, Prim (IntType Int32)) -> return se
+        Just (se, Prim (IntType Int64)) -> return se
         _ -> problem
 
   rettype' <- instantiateShapes instantiateExt rettype

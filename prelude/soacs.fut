@@ -118,7 +118,7 @@ let reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 --
 -- In practice, the *O(n)* behaviour only occurs if *m* is also very
 -- large.
-let reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i32) (as : [n]a) : *[m]a =
+let reduce_by_index 'a [m] [n] (dest : *[m]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[m]a =
   intrinsics.hist (1, dest, f, ne, is, as) :> *[m]a
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
@@ -163,7 +163,7 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
 
 -- | `reduce_stream op f as` splits `as` into chunks, applies `f` to each
 -- of these in parallel, and uses `op` (which must be associative) to
--- combine the per-chunk results into a final result.  The `i32`
+-- combine the per-chunk results into a final result.  The `i64`
 -- passed to `f` is the size of the chunk.  This SOAC is useful when
 -- `f` can be given a particularly work-efficient sequential
 -- implementation.  Operationally, we can imagine that `as` is divided
@@ -176,7 +176,7 @@ let partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i32) -> [k]a -> b) (as: [n]a): b =
+let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream (op, f, as)
 
 -- | As `reduce_stream`@term, but the chunks do not necessarily
@@ -186,7 +186,7 @@ let reduce_stream [n] 'a 'b (op: b -> b -> b) (f: (k: i32) -> [k]a -> b) (as: [n
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(log(n))*
-let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i32) -> [k]a -> b) (as: [n]a): b =
+let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i64) -> [k]a -> b) (as: [n]a): b =
   intrinsics.reduce_stream_per (op, f, as)
 
 -- | Similar to `reduce_stream`@term, except that each chunk must produce
@@ -196,7 +196,7 @@ let reduce_stream_per [n] 'a 'b (op: b -> b -> b) (f: (k: i32) -> [k]a -> b) (as
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let map_stream [n] 'a 'b (f: (k: i32) -> [k]a -> [k]b) (as: [n]a): *[n]b =
+let map_stream [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
   intrinsics.map_stream (f, as) :> *[n]b
 
 -- | Similar to `map_stream`@term, but the chunks do not necessarily
@@ -206,7 +206,7 @@ let map_stream [n] 'a 'b (f: (k: i32) -> [k]a -> [k]b) (as: [n]a): *[n]b =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let map_stream_per [n] 'a 'b (f: (k: i32) -> [k]a -> [k]b) (as: [n]a): *[n]b =
+let map_stream_per [n] 'a 'b (f: (k: i64) -> [k]a -> [k]b) (as: [n]a): *[n]b =
   intrinsics.map_stream_per (f, as) :> *[n]b
 
 -- | Return `true` if the given function returns `true` for all
@@ -252,5 +252,5 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Work:** *O(n)*
 --
 -- **Span:** *O(1)*
-let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
+let scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs) :> *[m]t

@@ -1,13 +1,13 @@
 -- ==
 -- input {
---   10
+--   10i64
 -- }
 -- output {
---   -1
+--   -1i64
 -- }
-let neg(x: i32): i32 = -x
+let neg(x: i64): i64 = -x
 
-let main(a: i32): i32 =
+let main(a: i64): i64 =
   let b = a + 100
   let x = iota(a)
   let c = b + 200

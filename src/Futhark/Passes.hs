@@ -7,12 +7,16 @@ module Futhark.Passes
     kernelsPipeline,
     sequentialCpuPipeline,
     gpuPipeline,
+    mcPipeline,
+    multicorePipeline,
   )
 where
 
 import Control.Category ((>>>))
 import Futhark.IR.Kernels (Kernels)
 import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.MC (MC)
+import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
@@ -26,8 +30,10 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
+import qualified Futhark.Pass.ExplicitAllocations.MC as MC
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Pass.ExtractKernels
+import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
@@ -59,10 +65,10 @@ kernelsPipeline =
       [ simplifyKernels,
         babysitKernels,
         tileLoops,
-        unstream,
+        unstreamKernels,
         performCSE True,
         simplifyKernels,
-        sink,
+        sinkKernels,
         inPlaceLoweringKernels
       ]
 
@@ -93,8 +99,33 @@ gpuPipeline =
       [ simplifyKernelsMem,
         performCSE False,
         simplifyKernelsMem,
-        doubleBuffer,
+        doubleBufferKernels,
         simplifyKernelsMem,
         expandAllocations,
         simplifyKernelsMem
+      ]
+
+mcPipeline :: Pipeline SOACS MC
+mcPipeline =
+  standardPipeline
+    >>> onePass extractMulticore
+    >>> passes
+      [ simplifyMC,
+        unstreamMC,
+        performCSE True,
+        simplifyMC,
+        sinkMC,
+        inPlaceLoweringMC
+      ]
+
+multicorePipeline :: Pipeline SOACS MCMem
+multicorePipeline =
+  mcPipeline
+    >>> onePass MC.explicitAllocations
+    >>> passes
+      [ simplifyMCMem,
+        performCSE False,
+        simplifyMCMem,
+        doubleBufferMC,
+        simplifyMCMem
       ]

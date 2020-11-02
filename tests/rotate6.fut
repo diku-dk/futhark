@@ -2,7 +2,7 @@
 -- rearranges.
 --
 -- ==
--- input { 1
+-- input { 1i64
 --   [[[4i32, 4i32, 4i32], [9i32, 1i32, 8i32]], [[2i32, 2i32, 2i32],
 --   [7i32, 4i32, 1i32]], [[3i32, 1i32, 5i32], [6i32, 1i32, 2i32]],
 --   [[6i32, 3i32, 3i32], [7i32, 1i32, 6i32]]]
@@ -14,5 +14,5 @@
 -- structure { Rearrange 1 Rotate 1 }
 
 
-let main (i: i32) (arr: [][][]i32): [][][]i32 =
+let main (i: i64) (arr: [][][]i32): [][][]i32 =
   map (map (rotate i)) (rotate i arr |> transpose |> map transpose |> transpose)

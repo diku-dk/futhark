@@ -1,7 +1,7 @@
 -- ==
 -- error: Causality check
 
-let f [n] (_: [n]i32 -> i32) : [n]i32 -> i32 =
+let f [n] (_: [n]i32 -> i32) : [n]i32 -> i64 =
   let m = n + 1
   in \_ -> m
 

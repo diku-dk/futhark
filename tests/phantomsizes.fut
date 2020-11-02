@@ -6,7 +6,7 @@ type size [n] = [n]()
 let size n = replicate n ()
 
 let iota' [n] (_: size [n]) : [n]i32 =
-  iota n
+  0..1..<i32.i64 n :> [n]i32
 
 let length' [n] 'a (_: [n]a) : size [n] =
   size n

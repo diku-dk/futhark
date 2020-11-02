@@ -27,6 +27,8 @@ standard input, and printed to standard output in the indicated
 format.  The input format (whether textual or binary) is automatically
 detected.
 
+Returns a nonzero exit code if it fails to write the full output.
+
 OPTIONS
 =======
 

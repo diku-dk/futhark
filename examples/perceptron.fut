@@ -64,7 +64,7 @@ let train [d] (w: [d]f32) (x: [d]f32) (y: f32) (eta: f32): [d]f32 =
 let main [d][m] (w: [d]f32) (xd: [m][d]f32) (yd: [m]f32) (limit: i32) (eta: f32): (i32, [d]f32, f32) =
   let (w,i) = loop (w, i) = (w, 0) while i < limit && !(checkList w xd yd) do
     -- Find data for this iteration.
-    let x = xd[i%m]
-    let y = yd[i%m]
+    let x = xd[i%i32.i64 m]
+    let y = yd[i%i32.i64 m]
     in (train w x y eta, i+1)
-  in (i, w, accuracy w xd yd / r32(m))
+  in (i, w, accuracy w xd yd / f32.i64(m))

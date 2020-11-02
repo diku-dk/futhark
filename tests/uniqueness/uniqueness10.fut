@@ -3,10 +3,10 @@
 -- input {
 -- }
 -- output {
---   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+--   [0i64, 1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64, 9i64]
 -- }
 
-let main: []i32 =
+let main: []i64 =
   let n = 10
   let a = iota(n)
   let c = let (a, b) = (iota(n), a) let a[0] = 42 in a

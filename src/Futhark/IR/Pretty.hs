@@ -237,6 +237,7 @@ instance Pretty a => Pretty (ErrorMsg a) where
     where
       p (ErrorString s) = text $ show s
       p (ErrorInt32 x) = ppr x
+      p (ErrorInt64 x) = ppr x
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f (IfDec _ ifsort)) =

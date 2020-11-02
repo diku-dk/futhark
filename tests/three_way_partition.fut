@@ -2,10 +2,10 @@
 --
 -- ==
 -- input { [1f32, 2f32, 3f32, 4f32, 5f32, 6f32, 7f32, 8f32, 9f32]
---         [0, 1, 2, 3, 0, 1, 2, 3, 0] }
--- output { 3 2 2 [1f32, 5f32, 9f32, 2f32, 6f32, 3f32, 7f32] }
+--         [0i64, 1i64, 2i64, 3i64, 0i64, 1i64, 2i64, 3i64, 0i64] }
+-- output { 3i64 2i64 2i64 [1f32, 5f32, 9f32, 2f32, 6f32, 3f32, 7f32] }
 
-let main [n] (vs: [n]f32) (classes: [n]i32): (i32, i32, i32, []f32) =
+let main [n] (vs: [n]f32) (classes: [n]i64): (i64, i64, i64, []f32) =
   let flags = map (\c  ->
                      if      c == 0 then (1, 0, 0)
                      else if c == 1 then (0, 1, 0)

@@ -41,7 +41,8 @@ failureSwitch failures =
             escapeChar c = [c]
          in concatMap escapeChar
       onPart (ErrorString s) = printfEscape s
-      onPart ErrorInt32 {} = "%d"
+      onPart ErrorInt32 {} = "%lld"
+      onPart ErrorInt64 {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
             msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg -1]]
@@ -204,6 +205,14 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg) {
                          select_device_interactively(&cfg->opencl);
+                       }|]
+    )
+
+  GC.publicDef_ "context_config_list_devices" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg) {
+                         (void)cfg;
+                         list_devices();
                        }|]
     )
 
@@ -374,7 +383,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->global_failure_args =
                        clCreateBuffer(ctx->opencl.ctx,
                                       CL_MEM_READ_WRITE,
-                                      sizeof(cl_int)*($int:max_failure_args+1), NULL, &error);
+                                      sizeof(int64_t)*($int:max_failure_args+1), NULL, &error);
                      OPENCL_SUCCEED_OR_RETURN(error);
 
                      // Load all the kernels.
@@ -471,7 +480,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                                          0, sizeof(cl_int), &no_failure,
                                          0, NULL, NULL));
 
-                   typename cl_int args[$int:max_failure_args+1];
+                   typename int64_t args[$int:max_failure_args+1];
                    OPENCL_SUCCEED_OR_RETURN(
                      clEnqueueReadBuffer(ctx->opencl.queue,
                                          ctx->global_failure_args,
@@ -490,7 +499,9 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         lock_lock(&ctx->lock);
                          ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
+                         lock_unlock(&ctx->lock);
                          return ctx->error != NULL;
                        }|]
     )
@@ -659,13 +670,14 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
       m <- get
       case M.lookup s m of
         Nothing ->
-          -- Cheating with the type here; works for the infos we
-          -- currently use, but should be made more size-aware in
-          -- the future.
+          -- XXX: Cheating with the type here; works for the infos we
+          -- currently use because we zero-initialise and assume a
+          -- little-endian platform, but should be made more
+          -- size-aware in the future.
           modify $
             M.insert
               s'
-              [C.citems|size_t $id:v;
+              [C.citems|size_t $id:v = 0;
                         clGetDeviceInfo(ctx->device, $id:s',
                                         sizeof($id:v), &$id:v,
                                         NULL);|]
@@ -680,41 +692,48 @@ commonOptions =
       { optionLongName = "device",
         optionShortName = Just 'd',
         optionArgument = RequiredArgument "NAME",
+        optionDescription = "Use the first OpenCL device whose name contains the given string.",
         optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
       },
     Option
       { optionLongName = "default-group-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default size of OpenCL workgroups that are launched.",
         optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-num-groups",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default number of OpenCL workgroups that are launched.",
         optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-tile-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default tile size used when performing two-dimensional tiling.",
         optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
       },
    Option { optionLongName = "default-reg-tile-size"
           , optionShortName = Nothing
           , optionArgument = RequiredArgument "INT"
+          , optionDescription = "The default register tile size used when performing two-dimensional tiling."
           , optionAction = [C.cstm|futhark_context_config_set_default_reg_tile_size(cfg, atoi(optarg));|]
           },
     Option
       { optionLongName = "default-threshold",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
+        optionDescription = "The default parallelism threshold.",
         optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "print-sizes",
         optionShortName = Nothing,
         optionArgument = NoArgument,
+        optionDescription = "Print all sizes that can be set with -size or --tuning.",
         optionAction =
           [C.cstm|{
                 int n = futhark_get_num_sizes();
@@ -728,7 +747,8 @@ commonOptions =
     Option
       { optionLongName = "size",
         optionShortName = Nothing,
-        optionArgument = RequiredArgument "NAME=INT",
+        optionArgument = RequiredArgument "ASSIGNMENT",
+        optionDescription = "Set a configurable run-time parameter to the given value.",
         optionAction =
           [C.cstm|{
                 char *name = optarg;
@@ -748,6 +768,7 @@ commonOptions =
       { optionLongName = "tuning",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "FILE",
+        optionDescription = "Read size=value assignments from the given file.",
         optionAction =
           [C.cstm|{
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))

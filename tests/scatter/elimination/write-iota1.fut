@@ -1,13 +1,13 @@
 -- Test that multiple iotas can be eliminated in a write.
 -- ==
 -- input {
---   4
---   [5, 10, 15, 20, 25, 30]
+--   4i64
+--   [5i64, 10i64, 15i64, 20i64, 25i64, 30i64]
 -- }
 -- output {
---   [0, 1, 2, 3, 25, 30]
+--   [0i64, 1i64, 2i64, 3i64, 25i64, 30i64]
 -- }
 -- structure { Scatter 1 }
 
-let main [n] (k: i32) (array: *[n]i32): [n]i32 =
+let main [n] (k: i64) (array: *[n]i64): [n]i64 =
   scatter array (iota k) (iota k)

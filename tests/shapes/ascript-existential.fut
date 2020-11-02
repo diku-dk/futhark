@@ -1,6 +1,6 @@
 -- ==
--- input { 0 } output { 1 }
--- input { 1 } output { 2 }
+-- input { 0i64 } output { 1i64 }
+-- input { 1i64 } output { 2i64 }
 
-let main (n: i32) =
-  length (iota (n+1): []i32)
+let main (n: i64) =
+  length (iota (n+1): []i64)

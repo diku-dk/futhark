@@ -1,7 +1,7 @@
 -- No space is needed before the size argument.
 -- ==
--- input { 2 } output { [0,1] }
+-- input { 2i64 } output { [0i64,1i64] }
 
-type ints[n] = [n]i32
+type ints[n] = [n]i64
 
-let main (n:i32): ints[n] = iota n
+let main (n:i64): ints[n] = iota n

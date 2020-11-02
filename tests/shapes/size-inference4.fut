@@ -4,4 +4,4 @@
 -- ==
 -- error: refers to size "n"
 
-let f : i32 = const 2 ((\xs n -> (zip xs (iota n) : [](i32, i32))))
+let f : i32 = const 2 ((\xs n -> (zip xs (iota n) : [](i64, i64))))

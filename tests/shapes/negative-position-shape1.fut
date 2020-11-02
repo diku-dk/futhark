@@ -4,6 +4,6 @@
 -- ==
 -- error: ambiguous
 
-let f [n] (g: [n]i32 -> i32) : i32 = n
+let f [n] (g: [n]i64 -> i64) : i64 = n
 
 let main = f (\xs -> xs[0])

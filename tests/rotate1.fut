@@ -1,7 +1,7 @@
 -- ==
--- input { 8 }
--- output { [1, 2, 3, 4, 5, 6, 7, 0] }
+-- input { 8i64 }
+-- output { [1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 0i64] }
 
-let main(i: i32): []i32 =
+let main(i: i64): []i64 =
   let a = iota(i)
   in rotate 1 a

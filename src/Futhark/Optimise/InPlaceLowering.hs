@@ -13,10 +13,9 @@
 -- @
 --   let r =
 --     loop (r1 = r0) = for i < n do
---       let a = r1[i] in
---       let r1[i] = a * i in
---       r1
---       in
+--       let a = r1[i]
+--       let r1[i] = a * i
+--       in r1
 --   ...
 --   let x = y with [k] <- r in
 --   ...
@@ -27,11 +26,10 @@
 -- @
 --   let x0 = y with [k] <- r0
 --   loop (x = x0) = for i < n do
---     let a = a[k,i] in
---     let x[k,i] = a * i in
---     x
---     in
---   let r = x[y] in
+--     let a = a[k,i]
+--     let x[k,i] = a * i
+--     in x
+--   let r = x[k] in
 --   ...
 -- @
 --
@@ -66,6 +64,7 @@
 module Futhark.Optimise.InPlaceLowering
   ( inPlaceLoweringKernels,
     inPlaceLoweringSeq,
+    inPlaceLoweringMC,
   )
 where
 
@@ -75,6 +74,7 @@ import Futhark.Analysis.Alias
 import Futhark.Binder
 import Futhark.IR.Aliases
 import Futhark.IR.Kernels
+import Futhark.IR.MC
 import Futhark.IR.Seq (Seq)
 import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.Pass
@@ -86,6 +86,10 @@ inPlaceLoweringKernels = inPlaceLowering onKernelOp lowerUpdateKernels
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLoweringSeq :: Pass Seq Seq
 inPlaceLoweringSeq = inPlaceLowering pure lowerUpdate
+
+-- | Apply the in-place lowering optimisation to the given program.
+inPlaceLoweringMC :: Pass MC MC
+inPlaceLoweringMC = inPlaceLowering onMCOp lowerUpdate
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLowering ::
@@ -194,8 +198,11 @@ optimiseExp e = mapExpM optimise e
         { mapOnBody = const optimiseBody
         }
 
-onKernelOp :: OnOp Kernels
-onKernelOp (SegOp op) =
+onSegOp ::
+  (Bindable lore, CanBeAliased (Op lore)) =>
+  SegOp lvl (Aliases lore) ->
+  ForwardingM lore (SegOp lvl (Aliases lore))
+onSegOp op =
   bindingScope (scopeOfSegSpace (segSpace op)) $ do
     let mapper = identitySegOpMapper {mapOnSegOpBody = onKernelBody}
         onKernelBody kbody = do
@@ -204,7 +211,14 @@ onKernelOp (SegOp op) =
               optimiseStms (stmsToList (kernelBodyStms kbody)) $
                 mapM_ seenVar $ namesToList $ freeIn $ kernelBodyResult kbody
           return kbody {kernelBodyStms = stmsFromList stms}
-    SegOp <$> mapSegOpM mapper op
+    mapSegOpM mapper op
+
+onMCOp :: OnOp MC
+onMCOp (ParOp par_op op) = ParOp <$> traverse onSegOp par_op <*> onSegOp op
+onMCOp op = return op
+
+onKernelOp :: OnOp Kernels
+onKernelOp (SegOp op) = SegOp <$> onSegOp op
 onKernelOp op = return op
 
 data Entry lore = Entry

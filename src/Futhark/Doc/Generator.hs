@@ -86,7 +86,7 @@ data IndexWhat = IndexValue | IxFun | IndexModule | IndexModuleType | IndexType
 -- can generate an index.
 type Documented = M.Map VName IndexWhat
 
-warn :: SrcLoc -> String -> DocM ()
+warn :: SrcLoc -> Doc -> DocM ()
 warn loc s = lift $ lift $ tell $ singleWarning loc s
 
 document :: VName -> IndexWhat -> DocM ()
@@ -724,17 +724,17 @@ identifierLinks loc s
         case maybe_v of
           Nothing -> do
             warn loc $
-              "Identifier '" <> name <> "' not found in namespace '"
-                <> namespace
+              "Identifier '" <> fromString name <> "' not found in namespace '"
+                <> fromString namespace
                 <> "'"
-                <> maybe "" (" in file " <>) file
+                <> fromString (maybe "" (" in file " <>) file)
                 <> "."
             unknown
           Just v' -> do
             link <- vnameLink v'
             proceed $ "[`" <> name <> "`](" <> link <> ")"
       _ -> do
-        warn loc $ "Unknown namespace '" <> namespace <> "'."
+        warn loc $ "Unknown namespace '" <> fromString namespace <> "'."
         unknown
   where
     knownNamespace "term" = Just Term

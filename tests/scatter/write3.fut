@@ -2,13 +2,13 @@
 -- ==
 --
 -- input {
---   9337
+--   9337i64
 -- }
 -- output {
 --   true
 -- }
 
-let main(n: i32): bool =
+let main(n: i64): bool =
   let indexes = iota(n)
   let values = map (+2) indexes
   let array = map (+5) indexes

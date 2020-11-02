@@ -67,15 +67,15 @@ let main
       filter (triangle_in_rect rect) triangles_projected
     in map (each_pixel rect_triangles_projected) pixel_indices
 
-  let rect_pixel_indices (totallen: i32) (({x=x0, y=y0}, {x=x1, y=y1}): rectangle) =
-    let (xlen, ylen) = (x1 - x0, y1 - y0)
-    let xs = map (+ x0) (iota xlen)
-    let ys = map (+ y0) (iota ylen)
+  let rect_pixel_indices (totallen: i64) (({x=x0, y=y0}, {x=x1, y=y1}): rectangle) =
+    let (xlen, ylen) = (i64.i32 (x1 - x0), i64.i32 (y1 - y0))
+    let xs = map (+ x0) (map i32.i64 (iota xlen))
+    let ys = map (+ y0) (map i32.i64 (iota ylen))
     in flatten (map (\x -> map (\y -> x * h + y) ys) xs) :> [totallen]i32
 
   let x_size = w / n_rects_x + i32.bool (w % n_rects_x > 0)
   let y_size = h / n_rects_y + i32.bool (h % n_rects_y > 0)
 
-  let pixel_indicess = map (rect_pixel_indices (x_size * y_size)) rects
+  let pixel_indicess = map (rect_pixel_indices (i64.i32 (x_size * y_size))) rects
   let pixelss = map2 each_rect rects pixel_indicess
   in pixelss

@@ -4,12 +4,12 @@
 
 type sometype 't = #someval t
 
-let geni32 (maxsize : i32) : sometype i32 = #someval maxsize
+let geni64 (maxsize : i64) : sometype i64 = #someval maxsize
 
 let genarr 'elm
-           (genelm: i32 -> sometype elm)
-           (ownsize : i32)
+           (genelm: i64 -> sometype elm)
+           (ownsize : i64)
            : sometype ([ownsize](sometype elm)) =
   #someval (tabulate ownsize genelm)
 
-let main = genarr (genarr geni32) 1
+let main = genarr (genarr geni64) 1

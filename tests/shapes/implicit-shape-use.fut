@@ -3,7 +3,7 @@
 --
 -- ==
 -- input {
---   3
+--   3i64
 --   [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]]
 --   [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0]
 -- }
@@ -52,8 +52,7 @@ let brownianBridgeDates [num_dates]
             in  bbrow
 
 let brownianBridge [num_dates]
-               (num_und:
-                i32,
+               (num_und: i64,
                 bb_inds: [3][num_dates]i32,
                 bb_data: [3][num_dates]f64,
                  gaussian_arr: []f64
@@ -64,13 +63,13 @@ let brownianBridge [num_dates]
         map (brownianBridgeDates bb_inds bb_data) gauss2dT
       )
 
-let main [num_dates] (num_und: i32)
+let main [num_dates] (num_und: i64)
                      (bb_inds: [3][num_dates]i32)
                      (arr_usz: []f64): [][]f64 =
   let n = num_dates*num_und
   let arr    = arr_usz :> [n]f64
   let bb_data= map (\(row: []i32)  ->
-                        map r64 row
+                        map f64.i32 row
                   ) (bb_inds )
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
   in  bb_mat

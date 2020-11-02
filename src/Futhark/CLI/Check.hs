@@ -5,6 +5,8 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Futhark.Compiler
 import Futhark.Util.Options
+import Futhark.Util.Pretty (pretty)
+import Language.Futhark.Warnings
 import System.Console.GetOpt
 import System.IO
 
@@ -28,6 +30,6 @@ main = mainWithOptions newCheckConfig options "program" $ \args cfg ->
   case args of
     [file] -> Just $ do
       (warnings, _, _) <- readProgramOrDie file
-      when (checkWarn cfg) $
-        liftIO $ hPutStr stderr $ show warnings
+      when (checkWarn cfg && anyWarnings warnings) $
+        liftIO $ hPutStrLn stderr $ pretty warnings
     _ -> Nothing

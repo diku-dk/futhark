@@ -180,7 +180,7 @@ checkTypeExp (TEArray t d loc) = do
 checkTypeExp (TEUnique t loc) = do
   (t', st, l) <- checkTypeExp t
   unless (mayContainArray st) $
-    warn loc $ "Declaring " <> quote (pretty st) <> " as unique has no effect."
+    warn loc $ "Declaring" <+> pquote (ppr st) <+> "as unique has no effect."
   return (TEUnique t' loc, st `setUniqueness` Unique, l)
   where
     mayContainArray (Scalar Prim {}) = False

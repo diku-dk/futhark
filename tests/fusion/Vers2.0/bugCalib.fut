@@ -7,8 +7,6 @@
 -- }
 let main [m] (result:  [m]f64 ): []f64 =
   -- 0 <= i < m AND 0 <= j < n
-  map  (\(j: i32): f64  ->
-            if j < (m-1)
-            then result[j+1]
-            else 0.0
-      ) (iota(m) )
+  tabulate m (\j -> if j < m-1
+                    then result[j+1]
+                    else 0.0)

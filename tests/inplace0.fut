@@ -1,7 +1,7 @@
 -- Test lowering of an in-place update.
 -- ==
 -- input {
---   3
+--   3i64
 --   1
 --   2
 --   42
@@ -10,7 +10,7 @@
 --   [[0,0,0], [0,0,0], [0,42,0]]
 -- }
 
-let main (n: i32) (i: i32) (j: i32) (x: i32): [][]i32 =
+let main (n: i64) (i: i32) (j: i32) (x: i32): [][]i32 =
   let a = replicate n (replicate n 0)
   let b = replicate n 0
   let b[i] = x

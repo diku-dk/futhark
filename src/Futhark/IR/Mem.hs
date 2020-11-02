@@ -161,10 +161,8 @@ type Mem lore =
     LetDec lore ~ LetDecMem,
     RetType lore ~ RetTypeMem,
     BranchType lore ~ BranchTypeMem,
-    CanBeAliased (Op lore),
     ASTLore lore,
     Decorations lore,
-    TC.Checkable lore,
     OpReturns lore
   )
 
@@ -234,6 +232,7 @@ instance OpMetrics inner => OpMetrics (MemOp inner) where
   opMetrics (Inner k) = opMetrics k
 
 instance IsOp inner => IsOp (MemOp inner) where
+  safeOp (Alloc (Constant (IntValue (Int64Value k))) _) = k >= 0
   safeOp Alloc {} = False
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
@@ -249,10 +248,10 @@ instance ST.IndexOp inner => ST.IndexOp (MemOp inner) where
   indexOp _ _ _ _ = Nothing
 
 -- | The index function representation used for memory annotations.
-type IxFun = IxFun.IxFun (TPrimExp Int32 VName)
+type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
 
 -- | An index function that may contain existential variables.
-type ExtIxFun = IxFun.IxFun (TPrimExp Int32 (Ext VName))
+type ExtIxFun = IxFun.IxFun (TPrimExp Int64 (Ext VName))
 
 -- | A summary of the memory information for every let-bound
 -- identifier, function parameter, and return value.  Parameterisered
@@ -262,12 +261,11 @@ data MemInfo d u ret
     MemPrim PrimType
   | -- | A memory block.
     MemMem Space
-  | -- | The array is stored in the named memory block,
-    -- and with the given index function.  The index
-    -- function maps indices in the array to /element/
-    -- offset, /not/ byte offsets!  To translate to byte
-    -- offsets, multiply the offset with the size of the
-    -- array element type.
+  | -- | The array is stored in the named memory block, and with the
+    -- given index function.  The index function maps indices in the
+    -- array to /element/ offset, /not/ byte offsets!  To translate to
+    -- byte offsets, multiply the offset with the size of the array
+    -- element type.
     MemArray PrimType (ShapeBase d) u ret
   deriving (Eq, Show, Ord, Generic) --- XXX Ord?
 
@@ -335,13 +333,13 @@ simplifyIxFun ::
   Engine.SimplifiableLore lore =>
   IxFun ->
   Engine.SimpleM lore IxFun
-simplifyIxFun = traverse $ fmap isInt32 . simplifyPrimExp . untyped
+simplifyIxFun = traverse $ fmap isInt64 . simplifyPrimExp . untyped
 
 simplifyExtIxFun ::
   Engine.SimplifiableLore lore =>
   ExtIxFun ->
   Engine.SimpleM lore ExtIxFun
-simplifyExtIxFun = traverse $ fmap isInt32 . simplifyExtPrimExp . untyped
+simplifyExtIxFun = traverse $ fmap isInt64 . simplifyExtPrimExp . untyped
 
 isStaticIxFun :: ExtIxFun -> Maybe IxFun
 isStaticIxFun = traverse $ traverse inst
@@ -469,22 +467,22 @@ instance FixExt MemReturn where
       ReturnsInBlock v $
         fixExtIxFun
           i
-          (primExpFromSubExp int32 (Var v))
+          (primExpFromSubExp int64 (Var v))
           ixfun
   fixExt i se (ReturnsNewBlock space j ixfun) =
     ReturnsNewBlock
       space
       j'
-      (fixExtIxFun i (primExpFromSubExp int32 se) ixfun)
+      (fixExtIxFun i (primExpFromSubExp int64 se) ixfun)
     where
       j'
         | i < j = j -1
         | otherwise = j
   fixExt i se (ReturnsInBlock mem ixfun) =
-    ReturnsInBlock mem (fixExtIxFun i (primExpFromSubExp int32 se) ixfun)
+    ReturnsInBlock mem (fixExtIxFun i (primExpFromSubExp int64 se) ixfun)
 
 fixExtIxFun :: Int -> PrimExp VName -> ExtIxFun -> ExtIxFun
-fixExtIxFun i e = fmap $ isInt32 . replaceInPrimExp update . untyped
+fixExtIxFun i e = fmap $ isInt64 . replaceInPrimExp update . untyped
   where
     update (Ext j) t
       | j > i = LeafExp (Ext $ j - 1) t
@@ -492,8 +490,8 @@ fixExtIxFun i e = fmap $ isInt32 . replaceInPrimExp update . untyped
       | otherwise = LeafExp (Ext j) t
     update (Free x) t = LeafExp (Free x) t
 
-leafExp :: Int -> TPrimExp Int32 (Ext a)
-leafExp i = isInt32 $ LeafExp (Ext i) int32
+leafExp :: Int -> TPrimExp Int64 (Ext a)
+leafExp i = isInt64 $ LeafExp (Ext i) int64
 
 existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
 existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
@@ -568,7 +566,7 @@ bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 matchRetTypeToResult ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [FunReturns] ->
   Result ->
   TC.TypeM lore ()
@@ -578,7 +576,7 @@ matchRetTypeToResult rettype result = do
   matchReturnType rettype result result_ts
 
 matchFunctionReturnType ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [FunReturns] ->
   Result ->
   TC.TypeM lore ()
@@ -604,7 +602,7 @@ matchFunctionReturnType rettype result = do
                   ++ pretty ixfun
 
 matchLoopResultMem ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [FParam (Aliases lore)] ->
   [FParam (Aliases lore)] ->
   [SubExp] ->
@@ -639,7 +637,7 @@ matchLoopResultMem ctx val = matchRetTypeToResult rettype
         ixfun' = existentialiseIxFun ctx_names ixfun
 
 matchBranchReturnType ::
-  Mem lore =>
+  (Mem lore, TC.Checkable lore) =>
   [BodyReturns] ->
   Body (Aliases lore) ->
   TC.TypeM lore ()
@@ -659,15 +657,15 @@ matchBranchReturnType rettype (Body _ stms res) = do
 -- occurs.
 getExtMaps ::
   [(VName, Int)] ->
-  ( M.Map (Ext VName) (TPrimExp Int32 (Ext VName)),
-    M.Map (Ext VName) (TPrimExp Int32 (Ext VName))
+  ( M.Map (Ext VName) (TPrimExp Int64 (Ext VName)),
+    M.Map (Ext VName) (TPrimExp Int64 (Ext VName))
   )
 getExtMaps ctx_lst_ids =
   ( M.map leafExp $ M.mapKeys Free $ M.fromListWith (flip const) ctx_lst_ids,
     M.fromList $
       mapMaybe
         ( traverse
-            ( fmap (\i -> isInt32 $ LeafExp (Ext i) int32)
+            ( fmap (\i -> isInt64 $ LeafExp (Ext i) int64)
                 . (`lookup` ctx_lst_ids)
             )
             . uncurry (flip (,))
@@ -710,7 +708,7 @@ matchReturnType rettype res ts = do
             zipWithM_ checkDim (shapeDims x_shape) (shapeDims y_shape)
             checkMemReturn x_ret y_ret
       checkReturn x y =
-        throwError $ unwords ["Expected ", pretty x, " but got ", pretty y]
+        throwError $ unwords ["Expected", pretty x, "but got", pretty y]
 
       checkDim (Free x) y
         | x == y = return ()
@@ -822,7 +820,7 @@ matchReturnType rettype res ts = do
   either bad return =<< runExceptT (zipWithM_ checkReturn rettype val_ts)
 
 matchPatternToExp ::
-  (Mem lore) =>
+  (Mem lore, TC.Checkable lore) =>
   Pattern (Aliases lore) ->
   Exp (Aliases lore) ->
   TC.TypeM lore ()
@@ -930,7 +928,7 @@ subExpMemInfo (Constant v) = return $ MemPrim $ primValueType v
 lookupArraySummary ::
   (Mem lore, HasScope lore m, Monad m) =>
   VName ->
-  m (VName, IxFun.IxFun (TPrimExp Int32 VName))
+  m (VName, IxFun.IxFun (TPrimExp Int64 VName))
 lookupArraySummary name = do
   summary <- lookupMemInfo name
   case summary of
@@ -945,7 +943,7 @@ checkMemInfo ::
   MemInfo SubExp u MemBind ->
   TC.TypeM lore ()
 checkMemInfo _ (MemPrim _) = return ()
-checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int32]) d
+checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int64]) d
 checkMemInfo _ (MemMem _) = return ()
 checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
   t <- lookupType v
@@ -961,7 +959,7 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
             ++ "."
 
   TC.context ("in index function " ++ pretty ixfun) $ do
-    traverse_ (TC.requirePrimExp int32 . untyped) ixfun
+    traverse_ (TC.requirePrimExp int64 . untyped) ixfun
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
     unless (ixfun_rank == ident_rank) $
@@ -1046,8 +1044,8 @@ extReturns ts =
                 IxFun.iota $ map convert $ shapeDims shape
       | otherwise =
         return $ MemArray bt shape u Nothing
-    convert (Ext i) = isInt32 $ LeafExp (Ext i) int32
-    convert (Free v) = isInt32 $ Free <$> primExpFromSubExp int32 v
+    convert (Ext i) = le64 (Ext i)
+    convert (Free v) = Free <$> pe64 v
 
 arrayVarReturns ::
   (HasScope lore m, Monad m, Mem lore) =>
@@ -1097,7 +1095,7 @@ expReturns (BasicOp (Reshape newshape v)) = do
         Just $
           ReturnsInBlock mem $
             existentialiseIxFun [] $
-              IxFun.reshape ixfun $ map (fmap $ isInt32 . primExpFromSubExp int32) newshape
+              IxFun.reshape ixfun $ map (fmap pe64) newshape
     ]
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
@@ -1109,7 +1107,7 @@ expReturns (BasicOp (Rearrange perm v)) = do
     ]
 expReturns (BasicOp (Rotate offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let offsets' = map (isInt32 . primExpFromSubExp int32) offsets
+  let offsets' = map pe64 offsets
       ixfun' = IxFun.rotate ixfun offsets'
   return
     [ MemArray et (Shape $ map Free dims) NoUniqueness $
@@ -1135,17 +1133,19 @@ expReturns e@(DoLoop ctx val _ _) = do
   where
     typeWithDec t p =
       case (t, paramDec p) of
-        (Array bt shape u, MemArray _ _ _ (ArrayIn mem ixfun))
-          | Just (i, mem_p) <- isMergeVar mem,
-            Mem space <- paramType mem_p ->
-            return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ixfun'
-          | otherwise ->
-            return
-              ( MemArray bt shape u $
-                  Just $ ReturnsInBlock mem ixfun'
-              )
-          where
-            ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
+        ( Array bt shape u,
+          MemArray _ _ _ (ArrayIn mem ixfun)
+          )
+            | Just (i, mem_p) <- isMergeVar mem,
+              Mem space <- paramType mem_p ->
+              return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ixfun'
+            | otherwise ->
+              return
+                ( MemArray bt shape u $
+                    Just $ ReturnsInBlock mem ixfun'
+                )
+            where
+              ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
         (Array {}, _) ->
           error "expReturns: Array return type but not array merge variable."
         (Prim bt, _) ->
@@ -1176,7 +1176,7 @@ sliceInfo v slice = do
           ArrayIn mem $
             IxFun.slice
               ixfun
-              (map (fmap (isInt32 . primExpFromSubExp int32)) slice)
+              (map (fmap (isInt64 . primExpFromSubExp int64)) slice)
 
 class TypedOp (Op lore) => OpReturns lore where
   opReturns ::

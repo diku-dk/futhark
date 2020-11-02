@@ -1,8 +1,8 @@
 -- ==
--- input  { true 20 }
--- output { [11, 12, 13, 14, 15, 16, 17, 18, 19] }
+-- input  { true 20i64 }
+-- output { [11i64, 12i64, 13i64, 14i64, 15i64, 16i64, 17i64, 18i64, 19i64] }
 --
--- input  { false 20 }
--- output { empty([0]i32) }
-let main (b: bool) (n: i32) =
+-- input  { false 20i64 }
+-- output { empty([0]i64) }
+let main (b: bool) (n: i64) =
     if b then filter (>10) (iota n) else []
