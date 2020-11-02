@@ -3,7 +3,7 @@
 -- input { }
 -- output { [2, 2, 1, 1] } 
 
-let swap_inplace (n : i32) : *[]#foo | #bar =
+let swap_inplace (n : i64) : *[]#foo | #bar =
   let x = replicate n #foo ++ replicate n #bar
   in loop x for i < 2*n do
       x with [i] = match x[i]

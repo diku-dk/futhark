@@ -99,9 +99,9 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
   fname <- askFunction
-  max_num_groups <- dPrim "max_num_groups" int32
+  max_num_groups :: TV Int32 <- dPrim "max_num_groups" int32
   sOp $
-    Imp.GetSize max_num_groups (keyWithEntryPoint fname max_num_groups_key) $
+    Imp.GetSize (tvVar max_num_groups) (keyWithEntryPoint fname max_num_groups_key) $
       sizeClassWithEntryPoint fname SizeNumGroups
 
   -- If 'w' is small, we launch fewer groups than we normally would.
@@ -110,14 +110,11 @@ opCompiler (Pattern _ [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_groups_maybe_zero =
-        sMin64
-          ( toInt64Exp w64
-              `divUp` sExt64 (toInt32Exp group_size)
-          )
-          $ sExt64 (Imp.vi32 max_num_groups)
+        sMin64 (toInt64Exp w64 `divUp` toInt64Exp group_size) $
+          sExt64 (tvExp max_num_groups)
   -- We also don't want zero groups.
   let num_groups = sMax64 1 num_groups_maybe_zero
-  patElemName pe <-- sExt32 num_groups
+  mkTV (patElemName pe) int32 <-- sExt32 num_groups
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler pat e =
@@ -165,11 +162,11 @@ checkLocalMemoryReqs code = do
   if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
     then return Nothing
     else do
-      local_memory_capacity <- dPrim "local_memory_capacity" int32
-      sOp $ Imp.GetSizeMax local_memory_capacity SizeLocalMemory
+      local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
+      sOp $ Imp.GetSizeMax (tvVar local_memory_capacity) SizeLocalMemory
 
       let local_memory_capacity_64 =
-            sExt64 $ Imp.vi32 local_memory_capacity
+            sExt64 $ tvExp local_memory_capacity
           fits size =
             unCount size .<=. local_memory_capacity_64
       return $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
@@ -188,7 +185,7 @@ expCompiler (Pattern _ [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
 
-  sIota (patElemName pe) (toInt32Exp n) x' s' et
+  sIota (patElemName pe) (toInt64Exp n) x' s' et
 expCompiler (Pattern _ [pe]) (BasicOp (Replicate _ se)) =
   sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
@@ -224,7 +221,7 @@ callKernelCopy
           size_x,
           size_y
           ) <-
-        isMapTransposeKernel bt destloc destslice srcloc srcslice = do
+        isMapTransposeCopy bt destloc destslice srcloc srcslice = do
       fname <- mapTransposeForType bt
       emit $
         Imp.Call
@@ -243,7 +240,7 @@ callKernelCopy
         IxFun.linearWithOffset (IxFun.slice destIxFun destslice) bt_size,
       Just srcoffset <-
         IxFun.linearWithOffset (IxFun.slice srcIxFun srcslice) bt_size = do
-      let num_elems = Imp.elements $ product $ map toInt32Exp srcshape
+      let num_elems = Imp.elements $ product $ map toInt64Exp srcshape
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $
@@ -267,7 +264,7 @@ mapTransposeForType bt = do
   return fname
 
 mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ pretty bt
+mapTransposeName bt = "gpu_map_transpose_" ++ pretty bt
 
 mapTransposeFunction :: PrimType -> Imp.Function
 mapTransposeFunction bt =
@@ -387,56 +384,3 @@ mapTransposeFunction bt =
             block
           )
           bt
-
-isMapTransposeKernel ::
-  PrimType ->
-  MemLocation ->
-  Slice (Imp.TExp Int32) ->
-  MemLocation ->
-  Slice (Imp.TExp Int32) ->
-  Maybe
-    ( Imp.TExp Int32,
-      Imp.TExp Int32,
-      Imp.TExp Int32,
-      Imp.TExp Int32,
-      Imp.TExp Int32
-    )
-isMapTransposeKernel
-  bt
-  (MemLocation _ _ destIxFun)
-  destslice
-  (MemLocation _ _ srcIxFun)
-  srcslice
-    | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun' bt_size,
-      (perm, destshape) <- unzip perm_and_destshape,
-      Just src_offset <- IxFun.linearWithOffset srcIxFun' bt_size,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk destshape swap r1 r2 dest_offset src_offset
-    | Just dest_offset <- IxFun.linearWithOffset destIxFun' bt_size,
-      Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun' bt_size,
-      (perm, srcshape) <- unzip perm_and_srcshape,
-      Just (r1, r2, _) <- isMapTranspose perm =
-      isOk srcshape id r1 r2 dest_offset src_offset
-    | otherwise =
-      Nothing
-    where
-      bt_size = primByteSize bt
-      swap (x, y) = (y, x)
-
-      destIxFun' = IxFun.slice destIxFun destslice
-      srcIxFun' = IxFun.slice srcIxFun srcslice
-
-      isOk shape f r1 r2 dest_offset src_offset = do
-        let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-        return
-          ( dest_offset,
-            src_offset,
-            num_arrays,
-            size_x,
-            size_y
-          )
-
-      getSizes shape f r1 r2 =
-        let (mapped, notmapped) = splitAt r1 shape
-            (pretrans, posttrans) = f $ splitAt r2 notmapped
-         in (product mapped, product pretrans, product posttrans)

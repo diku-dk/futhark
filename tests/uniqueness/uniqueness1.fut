@@ -6,7 +6,7 @@
 --   0
 -- }
 
-let f(a: *[]i32): i32 = a[0]
+let f(a: *[]i64): i64 = a[0]
 
 let main: i32 =
     let n = 10

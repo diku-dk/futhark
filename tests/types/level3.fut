@@ -4,5 +4,5 @@
 -- error: "n".*scope violation
 
 let main (ys: []i32) =
-  let f (n: i32) (xs: [n]i32) = zip xs ys
+  let f (n: i64) (xs: [n]i32) = zip xs ys
   in f

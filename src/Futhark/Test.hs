@@ -11,6 +11,7 @@ module Futhark.Test
     testSpecsFromPaths,
     testSpecsFromPathsOrDie,
     valuesFromByteString,
+    FutharkExe (..),
     getValues,
     getValuesBS,
     compareValues,
@@ -592,14 +593,21 @@ valuesFromByteString :: String -> BS.ByteString -> Either String [Value]
 valuesFromByteString srcname =
   maybe (Left $ "Cannot parse values from '" ++ srcname ++ "'") Right . readValues
 
+-- | The @futhark@ executable we are using.  This is merely a wrapper
+-- around the underlying file path, because we will be using a lot of
+-- different file paths here, and it is easy to mix them up.
+newtype FutharkExe = FutharkExe FilePath
+  deriving (Eq, Ord, Show)
+
 -- | Get the actual core Futhark values corresponding to a 'Values'
--- specification.  The 'FilePath' is the directory which file paths
--- are read relative to.
-getValues :: (MonadFail m, MonadIO m) => FilePath -> Values -> m [Value]
-getValues _ (Values vs) =
+-- specification.  The first 'FilePath' is the path of the @futhark@
+-- executable, and the second is the directory which file paths are
+-- read relative to.
+getValues :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m [Value]
+getValues _ _ (Values vs) =
   return vs
-getValues dir v = do
-  s <- getValuesBS dir v
+getValues futhark dir v = do
+  s <- getValuesBS futhark dir v
   case valuesFromByteString file s of
     Left e -> fail e
     Right vs -> return vs
@@ -612,10 +620,10 @@ getValues dir v = do
 -- | Extract a pretty representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
 -- guarantee that the resulting byte string yields a readable value.
-getValuesBS :: MonadIO m => FilePath -> Values -> m BS.ByteString
-getValuesBS _ (Values vs) =
+getValuesBS :: MonadIO m => FutharkExe -> FilePath -> Values -> m BS.ByteString
+getValuesBS _ _ (Values vs) =
   return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map prettyText vs
-getValuesBS dir (InFile file) =
+getValuesBS _ dir (InFile file) =
   case takeExtension file of
     ".gz" -> liftIO $ do
       s <- E.try readAndDecompress
@@ -628,8 +636,8 @@ getValuesBS dir (InFile file) =
     readAndDecompress = do
       s <- BS.readFile file'
       E.evaluate $ decompress s
-getValuesBS dir (GenValues gens) =
-  mconcat <$> mapM (getGenBS dir) gens
+getValuesBS futhark dir (GenValues gens) =
+  mconcat <$> mapM (getGenBS futhark dir) gens
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
@@ -641,8 +649,8 @@ getValuesBS dir (GenValues gens) =
 -- approach here seems robust enough for now, but certainly it could
 -- be made even better.  The race condition that remains should mostly
 -- result in duplicate work, not crashes or data corruption.
-getGenBS :: MonadIO m => FilePath -> GenValue -> m BS.ByteString
-getGenBS dir gen = do
+getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
+getGenBS futhark dir gen = do
   liftIO $ createDirectoryIfMissing True $ dir </> "data"
   exists_and_proper_size <-
     liftIO $
@@ -653,18 +661,18 @@ getGenBS dir gen = do
             else E.throw ex
   unless exists_and_proper_size $
     liftIO $ do
-      s <- genValues [gen]
+      s <- genValues futhark [gen]
       withTempFile (dir </> "data") (genFileName gen) $ \tmpfile h -> do
         hClose h -- We will be writing and reading this ourselves.
         SBS.writeFile tmpfile s
         renameFile tmpfile $ dir </> file
-  getValuesBS dir $ InFile file
+  getValuesBS futhark dir $ InFile file
   where
     file = "data" </> genFileName gen
 
-genValues :: [GenValue] -> IO SBS.ByteString
-genValues gens = do
-  (code, stdout, stderr) <- readProcessWithExitCode "futhark" ("dataset" : args) mempty
+genValues :: FutharkExe -> [GenValue] -> IO SBS.ByteString
+genValues (FutharkExe futhark) gens = do
+  (code, stdout, stderr) <- readProcessWithExitCode futhark ("dataset" : args) mempty
   case code of
     ExitSuccess ->
       return stdout
@@ -715,16 +723,18 @@ testRunReferenceOutput prog entry tr =
 -- | Get the values corresponding to an expected result, if any.
 getExpectedResult ::
   (MonadFail m, MonadIO m) =>
+  FutharkExe ->
   FilePath ->
   T.Text ->
   TestRun ->
   m (ExpectedResult [Value])
-getExpectedResult prog entry tr =
+getExpectedResult futhark prog entry tr =
   case runExpectedResult tr of
     (Succeeds (Just (SuccessValues vals))) ->
-      Succeeds . Just <$> getValues (takeDirectory prog) vals
+      Succeeds . Just <$> getValues futhark (takeDirectory prog) vals
     Succeeds (Just SuccessGenerateValues) ->
       getExpectedResult
+        futhark
         prog
         entry
         tr
@@ -751,11 +761,11 @@ binaryName = dropExtension
 compileProgram ::
   (MonadIO m, MonadError [T.Text] m) =>
   [String] ->
-  FilePath ->
+  FutharkExe ->
   String ->
   FilePath ->
   m (SBS.ByteString, SBS.ByteString)
-compileProgram extra_options futhark backend program = do
+compileProgram extra_options (FutharkExe futhark) backend program = do
   (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode futhark (backend : options) ""
   case futcode of
     ExitFailure 127 -> throwError [progNotFound $ T.pack futhark]
@@ -767,7 +777,7 @@ compileProgram extra_options futhark backend program = do
     options = [program, "-o", binOutputf] ++ extra_options
     progNotFound s = s <> ": command not found"
 
--- | @runProgram runner extra_options prog entry input@ runs the
+-- | @runProgram futhark runner extra_options prog entry input@ runs the
 -- Futhark program @prog@ (which must have the @.fut@ suffix),
 -- executing the @entry@ entry point and providing @input@ on stdin.
 -- The program must have been compiled in advance with
@@ -777,13 +787,14 @@ compileProgram extra_options futhark backend program = do
 -- program.
 runProgram ::
   MonadIO m =>
-  String ->
+  FutharkExe ->
+  FilePath ->
   [String] ->
   String ->
   T.Text ->
   Values ->
   m (ExitCode, SBS.ByteString, SBS.ByteString)
-runProgram runner extra_options prog entry input = do
+runProgram futhark runner extra_options prog entry input = do
   let progbin = binaryName prog
       dir = takeDirectory prog
       binpath = "." </> progbin
@@ -793,7 +804,7 @@ runProgram runner extra_options prog entry input = do
         | null runner = (binpath, entry_options ++ extra_options)
         | otherwise = (runner, binpath : entry_options ++ extra_options)
 
-  input' <- getValuesBS dir input
+  input' <- getValuesBS futhark dir input
   liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
 
 -- | Ensure that any reference output files exist, or create them (by
@@ -802,7 +813,7 @@ runProgram runner extra_options prog entry input = do
 ensureReferenceOutput ::
   (MonadIO m, MonadError [T.Text] m) =>
   Maybe Int ->
-  FilePath ->
+  FutharkExe ->
   String ->
   FilePath ->
   [InputOutputs] ->
@@ -815,7 +826,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 
     res <- liftIO $
       flip (pmapIO concurrency) missing $ \(entry, tr) -> do
-        (code, stdout, stderr) <- runProgram "" ["-b"] prog entry $ runInput tr
+        (code, stdout, stderr) <- runProgram futhark "" ["-b"] prog entry $ runInput tr
         case code of
           ExitFailure e ->
             return $

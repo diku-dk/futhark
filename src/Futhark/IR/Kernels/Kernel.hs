@@ -205,11 +205,11 @@ instance IsOp SizeOp where
   cheapOp _ = True
 
 instance TypedOp SizeOp where
-  opType SplitSpace {} = pure [Prim int32]
-  opType (GetSize _ _) = pure [Prim int32]
-  opType (GetSizeMax _) = pure [Prim int32]
+  opType SplitSpace {} = pure [Prim int64]
+  opType (GetSize _ _) = pure [Prim int64]
+  opType (GetSizeMax _) = pure [Prim int64]
   opType CmpSizeLe {} = pure [Prim Bool]
-  opType CalcNumGroups {} = pure [Prim int32]
+  opType CalcNumGroups {} = pure [Prim int64]
 
 instance AliasedOp SizeOp where
   opAliases _ = [mempty]
@@ -252,14 +252,14 @@ typeCheckSizeOp :: TC.Checkable lore => SizeOp -> TC.TypeM lore ()
 typeCheckSizeOp (SplitSpace o w i elems_per_thread) = do
   case o of
     SplitContiguous -> return ()
-    SplitStrided stride -> TC.require [Prim int32] stride
-  mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
+    SplitStrided stride -> TC.require [Prim int64] stride
+  mapM_ (TC.require [Prim int64]) [w, i, elems_per_thread]
 typeCheckSizeOp GetSize {} = return ()
 typeCheckSizeOp GetSizeMax {} = return ()
-typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int32] x
+typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int64] x
 typeCheckSizeOp (CalcNumGroups w _ group_size) = do
   TC.require [Prim int64] w
-  TC.require [Prim int32] group_size
+  TC.require [Prim int64] group_size
 
 -- | A host-level operation; parameterised by what else it can do.
 data HostOp lore op
@@ -358,8 +358,8 @@ checkSegLevel ::
   SegLevel ->
   TC.TypeM lore ()
 checkSegLevel Nothing lvl = do
-  TC.require [Prim int32] $ unCount $ segNumGroups lvl
-  TC.require [Prim int32] $ unCount $ segGroupSize lvl
+  TC.require [Prim int64] $ unCount $ segNumGroups lvl
+  TC.require [Prim int64] $ unCount $ segGroupSize lvl
 checkSegLevel (Just SegThread {}) _ =
   TC.bad $ TC.TypeError "SegOps cannot occur when already at thread level."
 checkSegLevel (Just x) y

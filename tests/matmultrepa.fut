@@ -19,7 +19,7 @@ let redplus2 [n][m] (a: [n][m]i32): [n]i32 = map redplus1 a
 let mul1 [m]    (a: [m]i32, b: [m]i32): [m]i32 = map2 (*) a b
 let mul2 [n][m] (a: [n][m]i32, b: [n][m]i32): [n][m]i32 = map mul1 (zip a b)
 
-let replin [m] (n: i32) (a: [m]i32): [n][m]i32 = replicate n a
+let replin [m] (n: i64) (a: [m]i32): [n][m]i32 = replicate n a
 
 let matmultFun [n][m] (a: [n][m]i32, b: [m][n]i32 ): [n][n]i32 =
     let br  = replicate n (transpose b)

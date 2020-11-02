@@ -2,14 +2,14 @@
 -- input {
 -- }
 -- output {
---   70
+--   70i64
 -- }
-let getInt(): i32 = 10
+let getInt(): i64 = 10
 
-let myfun(x:  (i32,i32,(i32,i32)) ): i32 =
+let myfun(x:  (i64,i64,(i64,i64)) ): i64 =
     let (a,b,(c,d)) = x in a + b + c + d
 
-let main: i32 =
+let main: i64 =
     let n  = getInt()
     let a  = (n, n, (n*0+5,n))
 

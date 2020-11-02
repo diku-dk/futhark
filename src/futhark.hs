@@ -19,6 +19,7 @@ import qualified Futhark.CLI.Dataset as Dataset
 import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.Doc as Doc
 import qualified Futhark.CLI.Misc as Misc
+import qualified Futhark.CLI.Multicore as Multicore
 import qualified Futhark.CLI.OpenCL as OpenCL
 import qualified Futhark.CLI.Pkg as Pkg
 import qualified Futhark.CLI.PyOpenCL as PyOpenCL
@@ -31,6 +32,7 @@ import Futhark.Error
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
 import GHC.IO.Encoding (setLocaleEncoding)
+import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import System.Environment
 import System.Exit
 import System.IO
@@ -48,6 +50,7 @@ commands =
       ("c", (C.main, "Compile to sequential C.")),
       ("opencl", (OpenCL.main, "Compile to C calling OpenCL.")),
       ("cuda", (CCUDA.main, "Compile to C calling CUDA.")),
+      ("multicore", (Multicore.main, "Compile to multicore C.")),
       ("python", (Python.main, "Compile to sequential Python.")),
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),
       ("test", (Test.main, "Test Futhark programs.")),
@@ -76,7 +79,14 @@ msg =
 -- | Catch all IO exceptions and print a better error message if they
 -- happen.
 reportingIOErrors :: IO () -> IO ()
-reportingIOErrors = flip catches [Handler onExit, Handler onICE, Handler onError]
+reportingIOErrors =
+  flip
+    catches
+    [ Handler onExit,
+      Handler onICE,
+      Handler onIOException,
+      Handler onError
+    ]
   where
     onExit :: ExitCode -> IO ()
     onExit = throwIO
@@ -86,10 +96,12 @@ reportingIOErrors = flip catches [Handler onExit, Handler onICE, Handler onError
       T.hPutStrLn stderr "Known compiler limitation encountered.  Sorry."
       T.hPutStrLn stderr "Revise your program or try a different Futhark compiler."
       T.hPutStrLn stderr s
+      exitWith $ ExitFailure 1
     onICE (Error CompilerBug s) = do
       T.hPutStrLn stderr "Internal compiler error."
       T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues."
       T.hPutStrLn stderr s
+      exitWith $ ExitFailure 1
 
     onError :: SomeException -> IO ()
     onError e
@@ -100,6 +112,12 @@ reportingIOErrors = flip catches [Handler onExit, Handler onICE, Handler onError
         T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues"
         T.hPutStrLn stderr $ T.pack $ show e
         exitWith $ ExitFailure 1
+
+    onIOException :: IOException -> IO ()
+    onIOException e
+      | ioe_type e == ResourceVanished =
+        exitWith $ ExitFailure 1
+      | otherwise = throw e
 
 main :: IO ()
 main = reportingIOErrors $ do

@@ -1,7 +1,7 @@
 -- Looking at the size of an existential pattern match.
 -- ==
--- input {  true 1 2 } output { 1 }
--- input { false 1 2 } output { 2 }
+-- input {  true 1i64 2i64 } output { 1i64 }
+-- input { false 1i64 2i64 } output { 2i64 }
 
 let main b n m =
   let arr = match b

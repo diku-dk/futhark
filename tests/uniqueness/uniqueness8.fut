@@ -2,12 +2,12 @@
 -- input {
 -- }
 -- output {
---   0
+--   0i64
 -- }
-let f(a: *[]i32): i32 = a[0]
-let g(a: []i32): i32 = a[0]
+let f(a: *[]i64) = a[0]
+let g(a: []i64) = a[0]
 
-let main: i32 =
+let main: i64 =
     let n = 10
     let a = iota(n)
     let b = a in

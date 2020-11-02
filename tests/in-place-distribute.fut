@@ -14,7 +14,7 @@
 --   815730721.000000, 665416609183179904.000000]]
 -- }
 
-let seqloop (num_dates: i32) (gauss: f64): [num_dates]f64 =
+let seqloop (num_dates: i64) (gauss: f64): [num_dates]f64 =
   let bbrow = replicate num_dates 0.0f64
   let bbrow[ 0 ] = gauss in
 

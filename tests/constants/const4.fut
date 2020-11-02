@@ -3,7 +3,7 @@
 -- ==
 -- input { } output { [0,0,0] }
 
-let n: i32 = 3
+let n: i64 = 3
 
 let x: [n]i32 = replicate n 0
 

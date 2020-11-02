@@ -80,7 +80,7 @@ instance Functor ExtOp where
 
 type Stack = [StackFrame]
 
-type Sizes = M.Map VName Int32
+type Sizes = M.Map VName Int64
 
 -- | The monad in which evaluation takes place.
 newtype EvalM a
@@ -119,14 +119,14 @@ stacktrace = asks $ map stackFrameLoc . fst
 lookupImport :: FilePath -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
-putExtSize :: VName -> Int32 -> EvalM ()
+putExtSize :: VName -> Int64 -> EvalM ()
 putExtSize v x = modify $ M.insert v x
 
 getSizes :: EvalM Sizes
 getSizes = get
 
 extSizeEnv :: EvalM Env
-extSizeEnv = i32Env <$> getSizes
+extSizeEnv = i64Env <$> getSizes
 
 prettyRecord :: Pretty a => M.Map Name a -> Doc
 prettyRecord m
@@ -149,7 +149,7 @@ data Shape d
   | ShapeSum (M.Map Name [Shape d])
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
-type ValueShape = Shape Int32
+type ValueShape = Shape Int64
 
 instance Pretty d => Pretty (Shape d) where
   ppr ShapeLeaf = mempty
@@ -180,7 +180,7 @@ typeShape shapes = go
     go _ =
       ShapeLeaf
 
-structTypeShape :: M.Map VName ValueShape -> StructType -> Shape (Maybe Int32)
+structTypeShape :: M.Map VName ValueShape -> StructType -> Shape (Maybe Int64)
 structTypeShape shapes = fmap dim . typeShape shapes'
   where
     dim (ConstDim d) = Just $ fromIntegral d
@@ -212,10 +212,10 @@ resolveTypeParams names = match
 
     matchDims (NamedDim (QualName _ d1)) (ConstDim d2)
       | d1 `elem` names =
-        i32Env $ M.singleton d1 $ fromIntegral d2
+        i64Env $ M.singleton d1 $ fromIntegral d2
     matchDims _ _ = mempty
 
-resolveExistentials :: [VName] -> StructType -> ValueShape -> M.Map VName Int32
+resolveExistentials :: [VName] -> StructType -> ValueShape -> M.Map VName Int64
 resolveExistentials names = match
   where
     match (Scalar (Record poly_fields)) (ShapeRecord fields) =
@@ -248,7 +248,14 @@ data Value
 -- Stores the full shape.
 
 instance Eq Value where
-  ValuePrim x == ValuePrim y = x == y
+  ValuePrim (SignedValue x) == ValuePrim (SignedValue y) =
+    P.doCmpEq (P.IntValue x) (P.IntValue y)
+  ValuePrim (UnsignedValue x) == ValuePrim (UnsignedValue y) =
+    P.doCmpEq (P.IntValue x) (P.IntValue y)
+  ValuePrim (FloatValue x) == ValuePrim (FloatValue y) =
+    P.doCmpEq (P.FloatValue x) (P.FloatValue y)
+  ValuePrim (BoolValue x) == ValuePrim (BoolValue y) =
+    P.doCmpEq (P.BoolValue x) (P.BoolValue y)
   ValueArray _ x == ValueArray _ y = x == y
   ValueRecord x == ValueRecord y = x == y
   ValueSum _ n1 vs1 == ValueSum _ n2 vs2 = n1 == n2 && vs1 == vs2
@@ -273,7 +280,7 @@ valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
 valueShape (ValueSum shape _ _) = shape
 valueShape _ = ShapeLeaf
 
-checkShape :: Shape (Maybe Int32) -> ValueShape -> Maybe ValueShape
+checkShape :: Shape (Maybe Int64) -> ValueShape -> Maybe ValueShape
 checkShape (ShapeDim Nothing shape1) (ShapeDim d2 shape2) =
   ShapeDim d2 <$> checkShape shape1 shape2
 checkShape (ShapeDim (Just d1) shape1) (ShapeDim d2 shape2) = do
@@ -312,7 +319,7 @@ prettyEmptyArray t v =
 
 -- | Create an array value; failing if that would result in an
 -- irregular array.
-mkArray :: TypeBase Int32 () -> [Value] -> Maybe Value
+mkArray :: TypeBase Int64 () -> [Value] -> Maybe Value
 mkArray t [] =
   return $ toArray (typeShape mempty t) []
 mkArray _ (v : vs) = do
@@ -343,8 +350,8 @@ asSigned :: Value -> IntValue
 asSigned (ValuePrim (SignedValue v)) = v
 asSigned v = error $ "Unexpected not a signed integer: " ++ pretty v
 
-asInt32 :: Value -> Int32
-asInt32 = fromIntegral . asInteger
+asInt64 :: Value -> Int64
+asInt64 = fromIntegral . asInteger
 
 asBool :: Value -> Bool
 asBool (ValuePrim (BoolValue x)) = x
@@ -427,12 +434,12 @@ typeEnv m =
   where
     tbind = T.TypeAbbr Unlifted []
 
-i32Env :: M.Map VName Int32 -> Env
-i32Env = valEnv . M.map f
+i64Env :: M.Map VName Int64 -> Env
+i64Env = valEnv . M.map f
   where
     f x =
-      ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int32,
-        ValuePrim $ SignedValue $ Int32Value x
+      ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int64,
+        ValuePrim $ SignedValue $ Int64Value x
       )
 
 instance Show InterpreterError where
@@ -531,8 +538,8 @@ patternMatch env (PatternConstr n _ ps _) (ValueSum _ n' vs)
 patternMatch _ _ _ = mzero
 
 data Indexing
-  = IndexingFix Int32
-  | IndexingSlice (Maybe Int32) (Maybe Int32) (Maybe Int32)
+  = IndexingFix Int64
+  | IndexingSlice (Maybe Int64) (Maybe Int64) (Maybe Int64)
 
 instance Pretty Indexing where
   ppr (IndexingFix i) = ppr i
@@ -549,10 +556,10 @@ instance Pretty Indexing where
     maybe mempty ppr i <> text ":"
 
 indexesFor ::
-  Maybe Int32 ->
-  Maybe Int32 ->
-  Maybe Int32 ->
-  Int32 ->
+  Maybe Int64 ->
+  Maybe Int64 ->
+  Maybe Int64 ->
+  Int64 ->
   Maybe [Int]
 indexesFor start end stride n
   | (start', end', stride') <- slice,
@@ -633,11 +640,11 @@ updateArray _ _ v = Just v
 
 evalDimIndex :: Env -> DimIndex -> EvalM Indexing
 evalDimIndex env (DimFix x) =
-  IndexingFix . asInt32 <$> eval env x
+  IndexingFix . asInt64 <$> eval env x
 evalDimIndex env (DimSlice start end stride) =
-  IndexingSlice <$> traverse (fmap asInt32 . eval env) start
-    <*> traverse (fmap asInt32 . eval env) end
-    <*> traverse (fmap asInt32 . eval env) stride
+  IndexingSlice <$> traverse (fmap asInt64 . eval env) start
+    <*> traverse (fmap asInt64 . eval env) end
+    <*> traverse (fmap asInt64 . eval env) stride
 
 evalIndex :: SrcLoc -> Env -> [Indexing] -> Value -> EvalM Value
 evalIndex loc env is arr = do
@@ -663,7 +670,7 @@ evalType env t@(Array _ u _ shape) =
    in arrayOf et' shape' u
   where
     evalDim (NamedDim qn)
-      | Just (TermValue _ (ValuePrim (SignedValue (Int32Value x)))) <-
+      | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
           lookupVar qn env =
         ConstDim $ fromIntegral x
     evalDim d = d
@@ -735,7 +742,7 @@ evalFunction env missing_sizes (p : ps) body rettype =
             | null missing_sizes = env'
             | otherwise =
               env'
-                <> i32Env
+                <> i64Env
                   ( resolveExistentials
                       missing_sizes
                       (patternStructType p)
@@ -779,7 +786,7 @@ evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
   v <- eval env e
   case ext of
-    Just ext' -> putExtSize ext' $ asInt32 v
+    Just ext' -> putExtSize ext' $ asInt64 v
     Nothing -> return ()
   return v
 
@@ -1030,7 +1037,7 @@ eval env (DoLoop sparams pat init_e form body (Info (ret, retext)) _) = do
               sparams
               (patternStructType pat)
               (valueShape v)
-       in matchPattern (i32Env sparams' <> env) pat v
+       in matchPattern (i64Env sparams' <> env) pat v
 
     inc = (`P.doAdd` Int64Value 1)
     zero = (`P.doMul` Int64Value 0)
@@ -1044,7 +1051,7 @@ eval env (DoLoop sparams pat init_e form body (Info (ret, retext)) _) = do
             ( valEnv
                 ( M.singleton
                     iv
-                    ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int32,
+                    ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int64,
                       ValuePrim (SignedValue i)
                     )
                 )
@@ -1572,7 +1579,7 @@ initialCtx =
               toTuple
                 [ toArray' rowshape $ concat parts,
                   toArray' rowshape $
-                    map (ValuePrim . SignedValue . Int32Value . genericLength) parts
+                    map (ValuePrim . SignedValue . Int64Value . genericLength) parts
                 ]
 
         pack . map reverse
@@ -1628,8 +1635,8 @@ initialCtx =
     def "unflatten" = Just $
       fun3t $ \n m xs -> do
         let (ShapeDim _ innershape, xs') = fromArray xs
-            rowshape = ShapeDim (asInt32 m) innershape
-            shape = ShapeDim (asInt32 n) rowshape
+            rowshape = ShapeDim (asInt64 m) innershape
+            shape = ShapeDim (asInt64 n) rowshape
         return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "opaque" = Just $ fun1 return
     def "trace" = Just $ fun1 $ \v -> trace v >> return v
@@ -1645,7 +1652,7 @@ initialCtx =
       return $ T.TypeAbbr Unlifted [] $ Scalar $ Prim t
 
     stream f arg@(ValueArray _ xs) =
-      let n = ValuePrim $ SignedValue $ Int32Value $ arrayLength xs
+      let n = ValuePrim $ SignedValue $ Int64Value $ arrayLength xs
        in apply2 noLoc mempty f n arg
     stream _ arg = error $ "Cannot stream: " ++ pretty arg
 

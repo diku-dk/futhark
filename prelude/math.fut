@@ -2,8 +2,6 @@
 
 import "soacs"
 
-local let const 'a 'b (x: a) (_: b): a = x
-
 -- | Describes types of values that can be created from the primitive
 -- numeric types (and bool).
 module type from_prim = {
@@ -118,22 +116,11 @@ module type integral = {
   val ctz: t -> i32
 }
 
--- | An extension of `size`@mtype that further includes facilities for
--- constructing arrays where the size is provided as a value of the
--- given integral type.
-module type size = {
-  include integral
-
-  val iota: t -> *[]t
-  val replicate 'v: t -> v -> *[]v
-}
-
 -- | Numbers that model real numbers to some degree.
 module type real = {
   include numeric
 
-  val from_fraction: i32 -> i32 -> t
-  val to_i32: t -> i32
+  val from_fraction: i64 -> i64 -> t
   val to_i64: t -> i64
   val to_f64: t -> f64
 
@@ -239,7 +226,7 @@ module bool: from_prim with t = bool = {
   let bool (x: bool) = x
 }
 
-module i8: (size with t = i8) = {
+module i8: (integral with t = i8) = {
   type t = i8
 
   let (x: i8) + (y: i8) = intrinsics.add8 (x, y)
@@ -305,16 +292,13 @@ module i8: (size with t = i8) = {
   let clz = intrinsics.clz8
   let ctz = intrinsics.ctz8
 
-  let iota (n: i8) = 0i8..1i8..<n
-  let replicate 'v (n: i8) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
   let minimum = reduce min highest
 }
 
-module i16: (size with t = i16) = {
+module i16: (integral with t = i16) = {
   type t = i16
 
   let (x: i16) + (y: i16) = intrinsics.add16 (x, y)
@@ -380,16 +364,13 @@ module i16: (size with t = i16) = {
   let clz = intrinsics.clz16
   let ctz = intrinsics.ctz16
 
-  let iota (n: i16) = 0i16..1i16..<n
-  let replicate 'v (n: i16) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
   let minimum = reduce min highest
 }
 
-module i32: (size with t = i32) = {
+module i32: (integral with t = i32) = {
   type t = i32
 
   let sign (x: u32) = intrinsics.sign_i32 x
@@ -458,16 +439,13 @@ module i32: (size with t = i32) = {
   let clz = intrinsics.clz32
   let ctz = intrinsics.ctz32
 
-  let iota (n: i32) = 0..1..<n
-  let replicate 'v (n: i32) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
   let minimum = reduce min highest
 }
 
-module i64: (size with t = i64) = {
+module i64: (integral with t = i64) = {
   type t = i64
 
   let sign (x: u64) = intrinsics.sign_i64 x
@@ -536,16 +514,13 @@ module i64: (size with t = i64) = {
   let clz = intrinsics.clz64
   let ctz = intrinsics.ctz64
 
-  let iota (n: i64) = 0i64..1i64..<n
-  let replicate 'v (n: i64) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
   let minimum = reduce min highest
 }
 
-module u8: (size with t = u8) = {
+module u8: (integral with t = u8) = {
   type t = u8
 
   let sign (x: u8) = intrinsics.sign_i8 x
@@ -614,16 +589,13 @@ module u8: (size with t = u8) = {
   let clz x = intrinsics.clz8 (sign x)
   let ctz x = intrinsics.ctz8 (sign x)
 
-  let iota (n: u8) = 0u8..1u8..<n
-  let replicate 'v (n: u8) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
   let minimum = reduce min highest
 }
 
-module u16: (size with t = u16) = {
+module u16: (integral with t = u16) = {
   type t = u16
 
   let sign (x: u16) = intrinsics.sign_i16 x
@@ -692,16 +664,13 @@ module u16: (size with t = u16) = {
   let clz x = intrinsics.clz16 (sign x)
   let ctz x = intrinsics.ctz16 (sign x)
 
-  let iota (n: u16) = 0u16..1u16..<n
-  let replicate 'v (n: u16) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
   let minimum = reduce min highest
 }
 
-module u32: (size with t = u32) = {
+module u32: (integral with t = u32) = {
   type t = u32
 
   let sign (x: u32) = intrinsics.sign_i32 x
@@ -770,16 +739,13 @@ module u32: (size with t = u32) = {
   let clz x = intrinsics.clz32 (sign x)
   let ctz x = intrinsics.ctz32 (sign x)
 
-  let iota (n: u32) = 0u32..1u32..<n
-  let replicate 'v (n: u32) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
   let minimum = reduce min highest
 }
 
-module u64: (size with t = u64) = {
+module u64: (integral with t = u64) = {
   type t = u64
 
   let sign (x: u64) = intrinsics.sign_i64 x
@@ -848,9 +814,6 @@ module u64: (size with t = u64) = {
   let clz x = intrinsics.clz64 (sign x)
   let ctz x = intrinsics.ctz64 (sign x)
 
-  let iota (n: u64) = 0u64..1u64..<n
-  let replicate 'v (n: u64) (x: v) = map (const x) (iota n)
-
   let sum = reduce (+) (i32 0)
   let product = reduce (*) (i32 1)
   let maximum = reduce max lowest
@@ -886,8 +849,7 @@ module f64: (float with t = f64 with int_t = u64) = {
 
   let bool (x: bool) = if x then 1f64 else 0f64
 
-  let from_fraction (x: i32) (y: i32) = i32 x / i32 y
-  let to_i32 (x: f64) = intrinsics.fptosi_f64_i32 x
+  let from_fraction (x: i64) (y: i64) = i64 x / i64 y
   let to_i64 (x: f64) = intrinsics.fptosi_f64_i64 x
   let to_f64 (x: f64) = x
 
@@ -994,8 +956,7 @@ module f32: (float with t = f32 with int_t = u32) = {
 
   let bool (x: bool) = if x then 1f32 else 0f32
 
-  let from_fraction (x: i32) (y: i32) = i32 x / i32 y
-  let to_i32 (x: f32) = intrinsics.fptosi_f32_i32 x
+  let from_fraction (x: i64) (y: i64) = i64 x / i64 y
   let to_i64 (x: f32) = intrinsics.fptosi_f32_i64 x
   let to_f64 (x: f32) = intrinsics.fpconv_f32_f64 x
 

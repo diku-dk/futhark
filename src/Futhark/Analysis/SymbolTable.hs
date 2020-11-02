@@ -111,7 +111,7 @@ data Indexed
     Indexed Certificates (PrimExp VName)
   | -- | The indexing corresponds to another (perhaps more
     -- advantageous) array.
-    IndexedArray Certificates VName [TPrimExp Int32 VName]
+    IndexedArray Certificates VName [TPrimExp Int64 VName]
 
 indexedAddCerts :: Certificates -> Indexed -> Indexed
 indexedAddCerts cs1 (Indexed cs2 v) = Indexed (cs1 <> cs2) v
@@ -122,7 +122,7 @@ instance FreeIn Indexed where
   freeIn' (IndexedArray cs arr v) = freeIn' cs <> freeIn' arr <> freeIn' v
 
 -- | Indexing a delayed array if possible.
-type IndexArray = [TPrimExp Int32 VName] -> Maybe Indexed
+type IndexArray = [TPrimExp Int64 VName] -> Maybe Indexed
 
 data Entry lore = Entry
   { -- | True if consumed.
@@ -265,7 +265,7 @@ index name is table = do
 
 index' ::
   VName ->
-  [TPrimExp Int32 VName] ->
+  [TPrimExp Int64 VName] ->
   SymbolTable lore ->
   Maybe Indexed
 index' name is vtable = do
@@ -288,7 +288,7 @@ class IndexOp op where
     SymbolTable lore ->
     Int ->
     op ->
-    [TPrimExp Int32 VName] ->
+    [TPrimExp Int64 VName] ->
     Maybe Indexed
   indexOp _ _ _ _ = Nothing
 
@@ -322,18 +322,18 @@ indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
     let is' =
           reshapeIndex
-            (map pe32 oldshape)
-            (map pe32 $ newDims newshape)
+            (map pe64 oldshape)
+            (map pe64 $ newDims newshape)
             is
      in index' v is' table
 indexExp table (BasicOp (Index v slice)) _ is =
   index' v (adjust slice is) table
   where
     adjust (DimFix j : js') is' =
-      pe32 j : adjust js' is'
+      pe64 j : adjust js' is'
     adjust (DimSlice j _ s : js') (i : is') =
-      let i_t_s = i * pe32 s
-          j_p_i_t_s = pe32 j + i_t_s
+      let i_t_s = i * pe64 s
+          j_p_i_t_s = pe64 j + i_t_s
        in j_p_i_t_s : adjust js' is'
     adjust _ _ = []
 indexExp _ _ _ _ = Nothing

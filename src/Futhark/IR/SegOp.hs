@@ -273,12 +273,13 @@ data KernelResult
       -- The TileReturns must not expect more than one
       -- result to be written per physical thread.
   | RegTileReturns
-               -- For each dim of result:
-    [(SubExp,  -- size of this dim.
-      SubExp,  -- block tile size for this dim.
-      SubExp)] -- reg tile size for this dim.
-
-    VName      -- Tile returned by this worker/group.
+      -- For each dim of result:
+      [ ( SubExp, -- size of this dim.
+          SubExp, -- block tile size for this dim.
+          SubExp -- reg tile size for this dim.
+        )
+      ]
+      VName -- Tile returned by this worker/group.
   deriving (Eq, Show, Ord, Generic)
 
 instance SexpIso KernelResult where
@@ -288,8 +289,9 @@ instance SexpIso KernelResult where
         With (. Sexp.list (Sexp.el (Sexp.sym "write-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
           With (. Sexp.list (Sexp.el (Sexp.sym "concat-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
             With (. Sexp.list (Sexp.el (Sexp.sym "tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "reg-tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+              With
+                (. Sexp.list (Sexp.el (Sexp.sym "reg-tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+                End
 
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
@@ -339,8 +341,9 @@ instance Substitute KernelResult where
   substituteNames subst (TileReturns dims v) =
     TileReturns (substituteNames subst dims) (substituteNames subst v)
   substituteNames subst (RegTileReturns dims_n_tiles v) =
-    RegTileReturns (substituteNames subst dims_n_tiles)
-                   (substituteNames subst v)
+    RegTileReturns
+      (substituteNames subst dims_n_tiles)
+      (substituteNames subst v)
 
 instance ASTLore lore => Rename (KernelBody lore) where
   rename (KernelBody dec stms res) = do
@@ -408,10 +411,10 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
     checkKernelResult (Returns _ what) t =
       TC.require [t] what
     checkKernelResult (WriteReturns rws arr res) t = do
-      mapM_ (TC.require [Prim int32]) rws
+      mapM_ (TC.require [Prim int64]) rws
       arr_t <- lookupType arr
       forM_ res $ \(slice, e) -> do
-        mapM_ (traverse $ TC.require [Prim int32]) slice
+        mapM_ (traverse $ TC.require [Prim int64]) slice
         TC.require [t] e
         unless (arr_t == t `arrayOfShape` Shape rws) $
           TC.bad $
@@ -428,31 +431,34 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
     checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
       case o of
         SplitContiguous -> return ()
-        SplitStrided stride -> TC.require [Prim int32] stride
-      TC.require [Prim int32] w
-      TC.require [Prim int32] per_thread_elems
+        SplitStrided stride -> TC.require [Prim int64] stride
+      TC.require [Prim int64] w
+      TC.require [Prim int64] per_thread_elems
       vt <- lookupType v
       unless (vt == t `arrayOfRow` arraySize 0 vt) $
         TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
     checkKernelResult (TileReturns dims v) t = do
       forM_ dims $ \(dim, tile) -> do
-        TC.require [Prim int32] dim
-        TC.require [Prim int32] tile
+        TC.require [Prim int64] dim
+        TC.require [Prim int64] tile
       vt <- lookupType v
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
-
     checkKernelResult (RegTileReturns dims_n_tiles arr) t = do
       -- assert that dimension and tile sizes have type int32
-      forM_ dims      $ TC.require [Prim int32]
-      forM_ blk_tiles $ TC.require [Prim int32]
-      forM_ reg_tiles $ TC.require [Prim int32]
+      forM_ dims $ TC.require [Prim int64]
+      forM_ blk_tiles $ TC.require [Prim int64]
+      forM_ reg_tiles $ TC.require [Prim int64]
 
       -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
       arr_t <- lookupType arr
-      unless (arr_t == expected)
-        $ TC.bad $ TC.TypeError $ "Invalid type for TileReturns. Expected:\n  " ++
-          pretty expected ++ ",\ngot:\n  " ++ pretty arr_t
+      unless (arr_t == expected) $
+        TC.bad $
+          TC.TypeError $
+            "Invalid type for TileReturns. Expected:\n  "
+              ++ pretty expected
+              ++ ",\ngot:\n  "
+              ++ pretty arr_t
       where
         (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
         expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles) -- TODO: different solution?
@@ -490,13 +496,17 @@ instance Pretty KernelResult where
       <> parens (commasep $ map onDim dims) <+> ppr v
     where
       onDim (dim, tile) = ppr dim <+> text "/" <+> ppr tile
-
-  ppr (RegTileReturns dims_n_tiles  v) =
+  ppr (RegTileReturns dims_n_tiles v) =
     -- TODO: finish this!!! but for now, just pretty print like TileReturns.
-    text "blkreg_tile" <>
-    parens (commasep $ map onDim dims_n_tiles) <+> ppr v
-    where onDim (dim, blk_tile, reg_tile) = ppr dim <+> text "/ (" <+>
-            ppr blk_tile <+> text "*" <+> ppr reg_tile <+> text ")"
+    text "blkreg_tile"
+      <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v
+    where
+      onDim (dim, blk_tile, reg_tile) =
+        ppr dim <+> text "/ ("
+          <+> ppr blk_tile
+          <+> text "*"
+          <+> ppr reg_tile
+          <+> text ")"
 
 -- | Do we need group-virtualisation when generating code for the
 -- segmented operation?  In most cases, we do, but for some simple
@@ -549,11 +559,11 @@ segSpaceDims (SegSpace _ space) = map snd space
 -- this 'SegSpace'.
 scopeOfSegSpace :: SegSpace -> Scope lore
 scopeOfSegSpace (SegSpace phys space) =
-  M.fromList $ zip (phys : map fst space) $ repeat $ IndexName Int32
+  M.fromList $ zip (phys : map fst space) $ repeat $ IndexName Int64
 
 checkSegSpace :: TC.Checkable lore => SegSpace -> TC.TypeM lore ()
 checkSegSpace (SegSpace _ dims) =
-  mapM_ (TC.require [Prim int32] . snd) dims
+  mapM_ (TC.require [Prim int64] . snd) dims
 
 -- | A 'SegOp' is semantically a perfectly nested stack of maps, on
 -- top of some bottommost computation (scalar computation, reduction,
@@ -699,10 +709,10 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
 
   TC.binding (scopeOfSegSpace space) $ do
     nes_ts <- forM ops $ \(HistOp dest_w rf dests nes shape op) -> do
-      TC.require [Prim int32] dest_w
-      TC.require [Prim int32] rf
+      TC.require [Prim int64] dest_w
+      TC.require [Prim int64] rf
       nes' <- mapM TC.checkArg nes
-      mapM_ (TC.require [Prim int32]) $ shapeDims shape
+      mapM_ (TC.require [Prim int64]) $ shapeDims shape
 
       -- Operator type must match the type of neutral elements.
       let stripVecDims = stripArray $ shapeRank shape
@@ -728,7 +738,7 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
 
     -- Return type of bucket function must be an index for each
     -- operation followed by the values to write.
-    let bucket_ret_t = replicate (length ops) (Prim int32) ++ concat nes_ts
+    let bucket_ret_t = replicate (length ops) (Prim int64) ++ concat nes_ts
     unless (bucket_ret_t == ts) $
       TC.bad $
         TC.TypeError $
@@ -752,7 +762,7 @@ checkScanRed space ops ts kbody = do
 
   TC.binding (scopeOfSegSpace space) $ do
     ne_ts <- forM ops $ \(lam, nes, shape) -> do
-      mapM_ (TC.require [Prim int32]) $ shapeDims shape
+      mapM_ (TC.require [Prim int64]) $ shapeDims shape
       nes' <- mapM TC.checkArg nes
 
       -- Operator type must match the type of neutral elements.
@@ -1055,7 +1065,7 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
                 ST.IndexedArray
                   (stmCerts stm <> cs)
                   arr
-                  (fixSlice (map (fmap isInt32) slice') excess_is)
+                  (fixSlice (map (fmap isInt64) slice') excess_is)
            in M.insert v idx table
         | otherwise =
           table
@@ -1104,8 +1114,8 @@ instance Engine.Simplifiable KernelResult where
     TileReturns <$> Engine.simplify dims <*> Engine.simplify what
   simplify (RegTileReturns dims_n_tiles what) =
     RegTileReturns
-    <$> Engine.simplify dims_n_tiles
-    <*> Engine.simplify what
+      <$> Engine.simplify dims_n_tiles
+      <*> Engine.simplify what
 
 mkWiseKernelBody ::
   (ASTLore lore, CanBeWise (Op lore)) =>
@@ -1160,9 +1170,9 @@ simplifyKernelBody space (KernelBody _ stms res) = do
 
 segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
-  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int32) gtids_and_dims
+  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
   where
-    f vtable (gtid, dim) = ST.insertLoopVar gtid Int32 dim vtable
+    f vtable (gtid, dim) = ST.insertLoopVar gtid Int64 dim vtable
 
 simplifySegBinOp ::
   Engine.SimplifiableLore lore =>
@@ -1426,9 +1436,9 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (Kernel
               map
                 ( \d ->
                     DimSlice
-                      (constant (0 :: Int32))
+                      (constant (0 :: Int64))
                       d
-                      (constant (1 :: Int32))
+                      (constant (1 :: Int64))
                 )
                 $ segSpaceDims space
             index kpe' =

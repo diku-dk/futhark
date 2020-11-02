@@ -59,7 +59,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
     lift $
       runBinder $
         letSubExp "intra_num_groups"
-          =<< foldBinOp (Mul Int32 OverflowUndef) (intConst Int32 1) (map snd ispace)
+          =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (map snd ispace)
 
   let body = lambdaBody lam
 
@@ -82,18 +82,18 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $
     runBinder $ do
-      let foldBinOp' _ [] = eSubExp $ intConst Int32 0
+      let foldBinOp' _ [] = eSubExp $ intConst Int64 0
           foldBinOp' bop (x : xs) = foldBinOp bop x xs
       ws_min <-
-        mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int32 OverflowUndef)) $
+        mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
           filter (not . null) wss_min
       ws_avail <-
-        mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int32 OverflowUndef)) $
+        mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
           filter (not . null) wss_avail
 
       -- The amount of parallelism available *in the worst case* is
       -- equal to the smallest parallel loop.
-      intra_avail_par <- letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int32) ws_avail
+      intra_avail_par <- letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
 
       -- The group size is either the maximum of the minimum parallelism
       -- exploited, or the desired parallelism (bounded by the max group
@@ -102,10 +102,10 @@ intraGroupParallelise knest lam = runMaybeT $ do
         =<< if null ws_min
           then
             eBinOp
-              (SMin Int32)
+              (SMin Int64)
               (eSubExp =<< letSubExp "max_group_size" (Op $ SizeOp $ Out.GetSizeMax Out.SizeGroup))
               (eSubExp intra_avail_par)
-          else foldBinOp' (SMax Int32) ws_min
+          else foldBinOp' (SMax Int64) ws_min
 
       let inputIsUsed input = kernelInputName input `nameIn` freeIn body
           used_inps = filter inputIsUsed inps

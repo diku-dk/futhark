@@ -576,9 +576,9 @@ instance MonadTypeChecker TermTypeM where
 
   checkNamedDim loc v = do
     (v', t) <- lookupVar loc v
-    onFailure (CheckingRequired [Scalar $ Prim $ Signed Int32] (toStruct t)) $
+    onFailure (CheckingRequired [Scalar $ Prim $ Signed Int64] (toStruct t)) $
       unify (mkUsage loc "use as array size") (toStruct t) $
-        Scalar $ Prim $ Signed Int32
+        Scalar $ Prim $ Signed Int64
     return v'
 
   typeError loc notes s = do
@@ -635,7 +635,7 @@ checkTypeDecl tdecl = do
   return tdecl'
   where
     observeDim (NamedDim v) =
-      observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int32) mempty
+      observe $ Ident (qualLeaf v) (Info $ Scalar $ Prim $ Signed Int64) mempty
     observeDim _ = return ()
 
 -- | Instantiate a type scheme with fresh type variables for its type
@@ -692,12 +692,14 @@ consumeAfterConsume name loc1 loc2 =
     "Variable" <+> pprName name <+> "previously consumed at"
       <+> text (locStrRel loc2 loc1) <> "."
 
-badLetWithValue :: SrcLoc -> TermTypeM a
-badLetWithValue loc =
-  typeError
-    loc
-    mempty
-    "New value for elements in let-with shares data with source array.  This is illegal, as it prevents in-place modification."
+badLetWithValue :: (Pretty arr, Pretty src) => arr -> src -> SrcLoc -> TermTypeM a
+badLetWithValue arre vale loc =
+  typeError loc mempty $
+    "Source array for in-place update"
+      </> indent 2 (ppr arre)
+      </> "might alias update value"
+      </> indent 2 (ppr vale)
+      </> "Hint: use" <+> pquote "copy" <+> "to remove aliases from the value."
 
 returnAliased :: Name -> Name -> SrcLoc -> TermTypeM ()
 returnAliased fname name loc =
@@ -983,7 +985,7 @@ bindingTypeParams tparams =
 
 typeParamIdent :: TypeParam -> Maybe Ident
 typeParamIdent (TypeParamDim v loc) =
-  Just $ Ident v (Info $ Scalar $ Prim $ Signed Int32) loc
+  Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
 typeParamIdent _ = Nothing
 
 bindingIdent ::
@@ -1086,13 +1088,13 @@ sliceShape r slice t@(Array als u et (ShapeDecl orig_dims)) =
     -- Pattern match some known slices to be non-existential.
     adjustDims (DimSlice i j stride : idxes') (_ : dims)
       | refine_sizes,
-        maybe True ((== Just 0) . isInt32) i,
+        maybe True ((== Just 0) . isInt64) i,
         Just j' <- maybeDimFromExp =<< j,
-        maybe True ((== Just 1) . isInt32) stride =
+        maybe True ((== Just 1) . isInt64) stride =
         (j' :) <$> adjustDims idxes' dims
     adjustDims (DimSlice Nothing Nothing stride : idxes') (d : dims)
       | refine_sizes,
-        maybe True (maybe False ((== 1) . abs) . isInt32) stride =
+        maybe True (maybe False ((== 1) . abs) . isInt64) stride =
         (d :) <$> adjustDims idxes' dims
     adjustDims (DimSlice i j stride : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
@@ -1277,7 +1279,7 @@ checkExp (ArrayLit all_es _ loc) =
       t <- arrayOfM loc et' (ShapeDecl [ConstDim $ length all_es]) Unique
       return $ ArrayLit (e' : es') (Info t) loc
 checkExp (Range start maybe_step end _ loc) = do
-  start' <- require "use in range expression" anyIntType =<< checkExp start
+  start' <- require "use in range expression" anySignedType =<< checkExp start
   start_t <- toStruct <$> expTypeFully start'
   maybe_step' <- case maybe_step of
     Nothing -> return Nothing
@@ -1290,21 +1292,26 @@ checkExp (Range start maybe_step end _ loc) = do
       Just <$> (unifies "use in range expression" start_t =<< checkExp step)
 
   let unifyRange e = unifies "use in range expression" start_t =<< checkExp e
-  end' <- case end of
-    DownToExclusive e -> DownToExclusive <$> unifyRange e
-    UpToExclusive e -> UpToExclusive <$> unifyRange e
-    ToInclusive e -> ToInclusive <$> unifyRange e
+  end' <- traverse unifyRange end
+
+  end_t <- case end' of
+    DownToExclusive e -> expType e
+    ToInclusive e -> expType e
+    UpToExclusive e -> expType e
 
   -- Special case some ranges to give them a known size.
   let dimFromBound = dimFromExp (SourceBound . bareExp)
   (dim, retext) <-
-    case (isInt32 start', isInt32 <$> maybe_step', end') of
-      (Just 0, Just (Just 1), UpToExclusive end'') ->
-        dimFromBound end''
-      (Just 0, Nothing, UpToExclusive end'') ->
-        dimFromBound end''
-      (Just 1, Just (Just 2), ToInclusive end'') ->
-        dimFromBound end''
+    case (isInt64 start', isInt64 <$> maybe_step', end') of
+      (Just 0, Just (Just 1), UpToExclusive end'')
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+          dimFromBound end''
+      (Just 0, Nothing, UpToExclusive end'')
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+          dimFromBound end''
+      (Just 1, Just (Just 2), ToInclusive end'')
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+          dimFromBound end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
         return (NamedDim $ qualName d, Just d)
@@ -1513,7 +1520,7 @@ checkExp (LetWith dest src idxes ve body NoInfo loc) =
     sequentially (unifies "type of target array" (toStruct elemt) =<< checkExp ve) $ \ve' _ -> do
       ve_t <- expTypeFully ve'
       when (AliasBound (identName src') `S.member` aliases ve_t) $
-        badLetWithValue loc
+        badLetWithValue src ve loc
 
       bindingIdent dest (src_t `setAliases` S.empty) $ \dest' -> do
         body' <- consuming src' $ checkExp body
@@ -1537,7 +1544,7 @@ checkExp (Update src idxes ve loc) = do
 
       let src_als = aliases src_t
       ve_t <- expTypeFully ve'
-      unless (S.null $ src_als `S.intersection` aliases ve_t) $ badLetWithValue loc
+      unless (S.null $ src_als `S.intersection` aliases ve_t) $ badLetWithValue src ve loc
 
       consume loc src_als
       return $ Update src' idxes' ve' loc
@@ -2276,13 +2283,13 @@ checkIdent (Ident name _ loc) = do
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
 checkDimIndex (DimFix i) =
-  DimFix <$> (unifies "use as index" (Scalar $ Prim $ Signed Int32) =<< checkExp i)
+  DimFix <$> (require "use as index" anySignedType =<< checkExp i)
 checkDimIndex (DimSlice i j s) =
   DimSlice <$> check i <*> check j <*> check s
   where
     check =
       maybe (return Nothing) $
-        fmap Just . unifies "use as index" (Scalar $ Prim $ Signed Int32) <=< checkExp
+        fmap Just . unifies "use as index" (Scalar $ Prim $ Signed Int64) <=< checkExp
 
 sequentially :: TermTypeM a -> (a -> Occurences -> TermTypeM b) -> TermTypeM b
 sequentially m1 m2 = do
@@ -2386,7 +2393,7 @@ checkApply
 
       return (tp1', tp2'', argext, ext)
     where
-      sizeSubst (Scalar (Prim (Signed Int32))) e = dimFromArg fname e
+      sizeSubst (Scalar (Prim (Signed Int64))) e = dimFromArg fname e
       sizeSubst _ _ = return (AnyDim, Nothing)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
@@ -2415,17 +2422,17 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
       | prev_applied == 1 = "argument"
       | otherwise = "arguments"
 
-isInt32 :: Exp -> Maybe Int32
-isInt32 (Literal (SignedValue (Int32Value k')) _) = Just $ fromIntegral k'
-isInt32 (IntLit k' _ _) = Just $ fromInteger k'
-isInt32 (Negate x _) = negate <$> isInt32 x
-isInt32 _ = Nothing
+isInt64 :: Exp -> Maybe Int64
+isInt64 (Literal (SignedValue (Int64Value k')) _) = Just $ fromIntegral k'
+isInt64 (IntLit k' _ _) = Just $ fromInteger k'
+isInt64 (Negate x _) = negate <$> isInt64 x
+isInt64 _ = Nothing
 
 maybeDimFromExp :: Exp -> Maybe (DimDecl VName)
 maybeDimFromExp (Var v _ _) = Just $ NamedDim v
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstDim . fromIntegral <$> isInt32 e
+maybeDimFromExp e = ConstDim . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (DimDecl VName, Maybe VName)
 dimFromExp rf (Parens e _) = dimFromExp rf e
@@ -2520,7 +2527,7 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   let t = toStruct $ typeOf e'
   (tparams, _, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] t
-  fixOverloadedTypes
+  fixOverloadedTypes $ typeVars t
   e'' <- updateTypes e'
   checkUnmatched e''
   causalityCheck e''
@@ -2708,7 +2715,8 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 
       -- Since this is a top-level function, we also resolve overloaded
       -- types, using either defaults or complaining about ambiguities.
-      fixOverloadedTypes
+      fixOverloadedTypes $
+        typeVars rettype' <> foldMap (typeVars . patternType) params'
 
       -- Then replace all inferred types in the body and parameters.
       body'' <- updateTypes body'
@@ -2735,18 +2743,21 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 
 -- | This is "fixing" as in "setting them", not "correcting them".  We
 -- only make very conservative fixing.
-fixOverloadedTypes :: TermTypeM ()
-fixOverloadedTypes = getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
+fixOverloadedTypes :: Names -> TermTypeM ()
+fixOverloadedTypes tyvars_at_toplevel =
+  getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
   where
     fixOverloaded (v, Overloaded ots usage)
       | Signed Int32 `elem` ots = do
         unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
           Scalar $ Prim $ Signed Int32
-        warn usage "Defaulting ambiguous type to i32."
+        when (v `S.member` tyvars_at_toplevel) $
+          warn usage "Defaulting ambiguous type to i32."
       | FloatType Float64 `elem` ots = do
         unify usage (Scalar (TypeVar () Nonunique (typeName v) [])) $
           Scalar $ Prim $ FloatType Float64
-        warn usage "Defaulting ambiguous type to f64."
+        when (v `S.member` tyvars_at_toplevel) $
+          warn usage "Defaulting ambiguous type to f64."
       | otherwise =
         typeError usage mempty $
           "Type is ambiguous (could be one of" <+> commasep (map ppr ots) <> ")."
@@ -3246,7 +3257,7 @@ checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
   | not $ identName v `S.member` allOccuring occs,
     not $ "_" `isPrefixOf` prettyName (identName v) =
-    warn (srclocOf v) $ "Unused variable " ++ quote (pretty $ baseName $ identName v) ++ "."
+    warn (srclocOf v) $ "Unused variable" <+> pquote (pprName $ identName v) <+> "."
   | otherwise =
     return ()
 

@@ -15,7 +15,7 @@ let argmax (arr: []f32) =
               (zip arr (indices arr))
 
 let f [m] [n] (A:[m][n]f32) =
-  loop A for i < i32.min m n do
+  loop A for i < i64.min m n do
   let j = A[i:,i] |> map f32.abs |> argmax |> (.1) |> (+i)
   in map (map (*A[j,j])) A
 

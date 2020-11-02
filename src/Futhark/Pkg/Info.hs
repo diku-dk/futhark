@@ -284,7 +284,7 @@ ghglPkgInfo repo_url mk_archive_url mk_manifest_url mk_zip_dir owner repo versio
       | [hash, ref] <- T.words l,
         ["refs", "tags", t] <- T.splitOn "/" ref,
         "v" `T.isPrefixOf` t,
-        Right v <- semver $ T.drop 1 t,
+        Right v <- parseVersion $ T.drop 1 t,
         _svMajor v `elem` versions = do
         pinfo <-
           ghglLookupCommit
@@ -359,7 +359,7 @@ glPkgInfo owner repo versions =
         <> "/"
         <> T.pack futharkPkg
     mk_zip_dir r
-      | Right _ <- semver r = repo <> "-v" <> r
+      | Right _ <- parseVersion r = repo <> "-v" <> r
       | otherwise = repo <> "-" <> r
 
 -- | A package registry is a mapping from package paths to information

@@ -6,7 +6,7 @@
 
 -- Some useful (for mc2) Futhark extensions.
 let sum(xs: []f32): f32 = reduce (+) (0.0) xs
-let mean [n] (xs: [n]f32): f32 = sum(map (/r32(n)) xs)
+let mean [n] (xs: [n]f32): f32 = sum(map (/f32.i64(n)) xs)
 
 
 -- Vasicek model parameters.
