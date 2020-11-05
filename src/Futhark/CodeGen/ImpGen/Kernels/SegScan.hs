@@ -198,14 +198,16 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
         -- The map's input index
         dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) + i * (kernelGroupSize constants)
         -- Perform the map
-        compileStms mempty (kernelBodyStms kbody) $
-          do let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
-             forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) -> do
-               -- Write map results to their global memory destinations
-               copyDWIMFix (patElemName dest) [Imp.vi32 mapIdx] (kernelResultSubExp src) []
+        -- TODO: Write neutral elements to private arrays
+        sWhen ((Imp.vi32 mapIdx) .<. n) $ do
+          compileStms mempty (kernelBodyStms kbody) $
+            do let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
+               forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) -> do
+                 -- Write map results to their global memory destinations
+                 copyDWIMFix (patElemName dest) [Imp.vi32 mapIdx] (kernelResultSubExp src) []
 
-             forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, (Var src)) -> do
-               copyDWIMFix dest [i] (Var src) []
+               forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, (Var src)) -> do
+                 copyDWIMFix dest [i] (Var src) []
 
     sComment "Transpose scan inputs" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
