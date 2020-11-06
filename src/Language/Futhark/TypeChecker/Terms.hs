@@ -27,7 +27,8 @@ import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.Either
-import Data.List (find, foldl', group, isPrefixOf, nub, sort, transpose, (\\))
+import Data.Function (on)
+import Data.List (find, foldl', groupBy, isPrefixOf, nub, sort, sortBy, transpose, (\\))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -2158,14 +2159,6 @@ data ConstrPat = ConstrPat
     constrSrcLoc :: SrcLoc
   }
 
--- Be aware of these fishy equality instances!
-
-instance Eq ConstrPat where
-  ConstrPat c1 _ _ _ == ConstrPat c2 _ _ _ = c1 == c2
-
-instance Ord ConstrPat where
-  ConstrPat c1 _ _ _ `compare` ConstrPat c2 _ _ _ = c1 `compare` c2
-
 unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched Pattern]
 unmatched hole orig_ps
   | p : _ <- orig_ps,
@@ -2196,7 +2189,9 @@ unmatched hole orig_ps
                   constrs \\ map constrName matched
            in case unmatched' of
                 [] ->
-                  let constrGroups = group (sort matched)
+                  let constrGroups =
+                        groupBy ((==) `on` constrName) $
+                          sortBy (compare `on` constrName) matched
                       removedConstrs = mapMaybe stripConstrs constrGroups
                       transposed = (fmap . fmap) transpose removedConstrs
                       findUnmatched (pc, trans) = do
