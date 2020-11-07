@@ -1,6 +1,10 @@
 -- Missing pattern error.
+--
+-- Note that there are multiple ways this error can be reported, so if
+-- you are fiddling with the match checker, feel free to change the
+-- expected error here.
 -- ==
--- error: Unmatched cases.*\(#foo \(#moo _ #none \)\)
+-- error: Unmatched cases.*#foo \(#moo _ #none\)
 
 type some 't    = #none | #some t
 type^ mooboo '^t = #moo t (some i32) | #boo
