@@ -991,8 +991,11 @@ generateCond orig_p orig_ses = do
   return (cmp, pertinent)
   where
     -- Literals are always primitive values.
-    compares (E.PatternLit e _ _) (se : ses) = do
-      e' <- internaliseExp1 "constant" e
+    compares (E.PatternLit l t _) (se : ses) = do
+      e' <- case l of
+        PatLitPrim v -> pure $ constant $ internalisePrimValue v
+        PatLitInt x -> internaliseExp1 "constant" $ E.IntLit x t mempty
+        PatLitFloat x -> internaliseExp1 "constant" $ E.FloatLit x t mempty
       t' <- elemType <$> subExpType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)

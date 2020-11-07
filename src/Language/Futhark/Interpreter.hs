@@ -527,9 +527,12 @@ patternMatch env (RecordPattern ps _) (ValueRecord vs) =
 patternMatch env (PatternParens p _) v = patternMatch env p v
 patternMatch env (PatternAscription p _ _) v =
   patternMatch env p v
-patternMatch env (PatternLit e _ _) v = do
-  v' <- lift $ eval env e
-  if v == v'
+patternMatch env (PatternLit l t _) v = do
+  l' <- case l of
+    PatLitInt x -> lift $ eval env $ IntLit x t mempty
+    PatLitFloat x -> lift $ eval env $ FloatLit x t mempty
+    PatLitPrim lv -> pure $ ValuePrim lv
+  if v == l'
     then pure env
     else mzero
 patternMatch env (PatternConstr n _ ps _) (ValueSum _ n' vs)
