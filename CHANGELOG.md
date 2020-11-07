@@ -64,6 +64,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     However, it may not provide quite as nice counter-examples
     (#1134).
 
+  * Fix rare internalisation error (#1177).
+
 ## [0.18.1]
 
 ### Added
