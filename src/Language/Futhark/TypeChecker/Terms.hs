@@ -27,8 +27,7 @@ import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.Either
-import Data.Function (on)
-import Data.List (find, foldl', groupBy, isPrefixOf, nub, sort, sortBy, transpose, (\\))
+import Data.List (find, foldl', isPrefixOf, nub, sort)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -38,6 +37,7 @@ import Futhark.Util.Pretty hiding (bool, group, space)
 import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
 import Language.Futhark.Traversals
+import Language.Futhark.TypeChecker.Match
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
 import Language.Futhark.TypeChecker.Types hiding (checkTypeDecl)
@@ -2108,43 +2108,12 @@ instance Pretty (Unmatched (PatternBase Info VName)) where
       ppr' (PatternLit e _ _) = ppr e
       ppr' (PatternConstr n _ ps _) = "#" <> ppr n <+> sep (map ppr' ps)
 
-unpackPat :: Pattern -> [Maybe Pattern]
-unpackPat Wildcard {} = [Nothing]
-unpackPat (PatternParens p _) = unpackPat p
-unpackPat Id {} = [Nothing]
-unpackPat (TuplePattern ps _) = Just <$> ps
-unpackPat (RecordPattern fs _) = Just . snd <$> sortFields (M.fromList fs)
-unpackPat (PatternAscription p _ _) = unpackPat p
-unpackPat p@PatternLit {} = [Just p]
-unpackPat p@PatternConstr {} = [Just p]
-
-wildPattern :: Pattern -> Int -> Unmatched Pattern -> Unmatched Pattern
-wildPattern (TuplePattern ps loc) pos um = wildTuple <$> um
-  where
-    wildTuple p = TuplePattern (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
-    ps' = map wildOut ps
-    wildOut p = Wildcard (Info (patternType p)) (srclocOf p)
-wildPattern (RecordPattern fs loc) pos um = wildRecord <$> um
-  where
-    wildRecord p =
-      RecordPattern (take (pos - 1) fs' ++ [(fst (fs !! (pos - 1)), p)] ++ drop pos fs') loc
-    fs' = map wildOut fs
-    wildOut (f, p) = (f, Wildcard (Info (patternType p)) (srclocOf p))
-wildPattern (PatternAscription p _ _) pos um = wildPattern p pos um
-wildPattern (PatternParens p _) pos um = wildPattern p pos um
-wildPattern (PatternConstr n t ps loc) pos um = wildConstr <$> um
-  where
-    wildConstr p = PatternConstr n t (take (pos - 1) ps' ++ [p] ++ drop pos ps') loc
-    ps' = map wildOut ps
-    wildOut p = Wildcard (Info (patternType p)) (srclocOf p)
-wildPattern _ _ um = um
-
 checkUnmatched :: Exp -> TermTypeM ()
 checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
   where
     checkUnmatched' (Match _ cs _ loc) =
       let ps = fmap (\(CasePat p _ _) -> p) cs
-       in case unmatched id $ NE.toList ps of
+       in case unmatched $ NE.toList ps of
             [] -> return ()
             ps' ->
               typeError loc mempty $
@@ -2160,128 +2129,6 @@ checkUnmatched e = void $ checkUnmatched' e >> astMap tv e
           mapOnStructType = pure,
           mapOnPatternType = pure
         }
-
--- | A data type for constructor patterns.  This is used to make the
--- code for detecting unmatched constructors cleaner, by separating
--- the constructor-pattern cases from other cases.
-data ConstrPat = ConstrPat
-  { constrName :: Name,
-    constrType :: PatternType,
-    constrPayload :: [Pattern],
-    constrSrcLoc :: SrcLoc
-  }
-
-unmatched :: (Unmatched Pattern -> Unmatched Pattern) -> [Pattern] -> [Unmatched Pattern]
-unmatched hole orig_ps
-  | p : _ <- orig_ps,
-    sameStructure labeledCols = do
-    (i, cols) <- labeledCols
-    let hole' = if isConstr p then hole else hole . wildPattern p i
-    case sequence cols of
-      Nothing -> []
-      Just cs
-        | all isPatternLit cs -> map hole' $ localUnmatched cs
-        | otherwise -> unmatched hole' cs
-  | otherwise = []
-  where
-    labeledCols = zip [1 ..] $ transpose $ map unpackPat orig_ps
-
-    localUnmatched :: [Pattern] -> [Unmatched Pattern]
-    localUnmatched [] = []
-    localUnmatched ps'@(p' : _) =
-      case patternType p' of
-        Scalar (Sum cs'') ->
-          -- We now know that we are matching a sum type, and thus
-          -- that all patterns ps' are constructors (checked by
-          -- 'all isPatternLit' before this function is called).
-          let constrs = M.keys cs''
-              matched = mapMaybe constr ps'
-              unmatched' =
-                map (UnmatchedConstr . buildConstr cs'') $
-                  constrs \\ map constrName matched
-           in case unmatched' of
-                [] ->
-                  let constrGroups =
-                        groupBy ((==) `on` constrName) $
-                          sortBy (compare `on` constrName) matched
-                      removedConstrs = mapMaybe stripConstrs constrGroups
-                      transposed = (fmap . fmap) transpose removedConstrs
-                      findUnmatched (pc, trans) = do
-                        col <- trans
-                        case col of
-                          [] -> []
-                          ((i, _) : _) -> unmatched (wilder i pc) (map snd col)
-                      wilder i pc s = (`PatternParens` mempty) <$> wildPattern pc i s
-                   in concatMap findUnmatched transposed
-                _ -> unmatched'
-        Scalar (Prim t) | not (any idOrWild ps') ->
-          -- We now know that we are matching a sum type, and thus
-          -- that all patterns ps' are literals (checked by 'all
-          -- isPatternLit' before this function is called).
-          case t of
-            Bool ->
-              let matched = nub $ mapMaybe (pExp >=> bool) $ filter isPatternLit ps'
-               in map (UnmatchedBool . buildBool (Scalar (Prim t))) $ [True, False] \\ matched
-            _ ->
-              let matched = mapMaybe pExp $ filter isPatternLit ps'
-               in [UnmatchedNum (buildId (Info $ Scalar $ Prim t) "p") matched]
-        _ -> []
-
-    isConstr PatternConstr {} = True
-    isConstr (PatternParens p _) = isConstr p
-    isConstr _ = False
-
-    stripConstrs :: [ConstrPat] -> Maybe (Pattern, [[(Int, Pattern)]])
-    stripConstrs (pc@ConstrPat {} : cs') = Just (unConstr pc, stripConstr pc : map stripConstr cs')
-    stripConstrs [] = Nothing
-
-    stripConstr :: ConstrPat -> [(Int, Pattern)]
-    stripConstr (ConstrPat _ _ ps' _) = zip [1 ..] ps'
-
-    sameStructure [] = True
-    sameStructure (x : xs) = all (\y -> length y == length x') xs'
-      where
-        (x' : xs') = map snd (x : xs)
-
-    pExp (PatternLit e' _ _) = Just e'
-    pExp _ = Nothing
-
-    constr (PatternConstr c (Info t) ps loc) = Just $ ConstrPat c t ps loc
-    constr (PatternParens p _) = constr p
-    constr (PatternAscription p' _ _) = constr p'
-    constr _ = Nothing
-
-    unConstr p =
-      PatternConstr (constrName p) (Info $ constrType p) (constrPayload p) (constrSrcLoc p)
-
-    isPatternLit PatternLit {} = True
-    isPatternLit (PatternAscription p' _ _) = isPatternLit p'
-    isPatternLit (PatternParens p' _) = isPatternLit p'
-    isPatternLit PatternConstr {} = True
-    isPatternLit _ = False
-
-    idOrWild Id {} = True
-    idOrWild Wildcard {} = True
-    idOrWild (PatternAscription p' _ _) = idOrWild p'
-    idOrWild (PatternParens p' _) = idOrWild p'
-    idOrWild _ = False
-
-    bool (PatLitPrim (BoolValue b)) = Just b
-    bool _ = Nothing
-
-    buildConstr m c =
-      let t = Scalar $ Sum m
-          cs = m M.! c
-          wildCS = map (\ct -> Wildcard (Info ct) mempty) cs
-       in if null wildCS
-            then PatternConstr c (Info t) [] mempty
-            else PatternParens (PatternConstr c (Info t) wildCS mempty) mempty
-    buildBool t b =
-      PatternLit (PatLitPrim (BoolValue b)) (Info (addSizes t)) mempty
-    buildId t n =
-      -- The VName tag here will never be used since the value
-      -- exists exclusively for printing warnings.
-      Id (VName (nameFromString n) (-1)) t mempty
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
 checkIdent (Ident name _ loc) = do

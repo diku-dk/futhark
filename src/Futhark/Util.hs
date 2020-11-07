@@ -9,7 +9,8 @@
 -- note where you got it from (and make sure that the license is
 -- compatible).
 module Futhark.Util
-  ( mapAccumLM,
+  ( nubOrd,
+    mapAccumLM,
     maxinum,
     chunk,
     chunks,
@@ -53,7 +54,8 @@ import Control.Monad
 import qualified Data.ByteString as BS
 import Data.Char
 import Data.Either
-import Data.List (foldl', genericDrop, genericSplitAt)
+import Data.List (foldl', genericDrop, genericSplitAt, sort)
+import qualified Data.List.NonEmpty as NE
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -67,6 +69,10 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Unsafe
 import System.Process.ByteString
+
+-- | Like 'nub', but without the quadratic runtime.
+nubOrd :: Ord a => [a] -> [a]
+nubOrd = map NE.head . NE.group . sort
 
 -- | Like 'Data.Traversable.mapAccumL', but monadic.
 mapAccumLM ::

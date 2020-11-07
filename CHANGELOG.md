@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Type checker erroneously permitted pattern-matching on string
     literals (this would fail later in the compiler).
 
+  * New coverage checker for pattern matching, which is more correct.
+    However, it may not provide quite as nice counter-examples
+    (#1134).
+
 ## [0.18.1]
 
 ### Added
