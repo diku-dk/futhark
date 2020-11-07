@@ -753,6 +753,20 @@ data InferredType
   = NoneInferred
   | Ascribed PatternType
 
+-- All this complexity is just so we can handle un-suffixed numeric
+-- literals in patterns.
+patLitMkType :: PatLit -> SrcLoc -> TermTypeM StructType
+patLitMkType (PatLitInt _) loc = do
+  t <- newTypeVar loc "t"
+  mustBeOneOf anyNumberType (mkUsage loc "integer literal") t
+  return t
+patLitMkType (PatLitFloat _) loc = do
+  t <- newTypeVar loc "t"
+  mustBeOneOf anyFloatType (mkUsage loc "float literal") t
+  return t
+patLitMkType (PatLitPrim v) _ =
+  pure $ Scalar $ Prim $ primValueType v
+
 checkPattern' ::
   UncheckedPattern ->
   InferredType ->
@@ -841,15 +855,13 @@ checkPattern' (PatternAscription p (TypeDecl t NoInfo) loc) maybe_outer_t = do
         <*> pure loc
   where
     unifyUniqueness u1 u2 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
-checkPattern' (PatternLit e NoInfo loc) (Ascribed t) = do
-  e' <- checkExp e
-  t' <- expTypeFully e'
-  unify (mkUsage loc "matching against literal") (toStruct t') (toStruct t)
-  return $ PatternLit e' (Info t') loc
-checkPattern' (PatternLit e NoInfo loc) NoneInferred = do
-  e' <- checkExp e
-  t' <- expTypeFully e'
-  return $ PatternLit e' (Info t') loc
+checkPattern' (PatternLit l NoInfo loc) (Ascribed t) = do
+  t' <- patLitMkType l loc
+  unify (mkUsage loc "matching against literal") t' (toStruct t)
+  return $ PatternLit l (Info (fromStruct t')) loc
+checkPattern' (PatternLit l NoInfo loc) NoneInferred = do
+  t' <- patLitMkType l loc
+  return $ PatternLit l (Info (fromStruct t')) loc
 checkPattern' (PatternConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
   | Just ts <- M.lookup n cs = do
     ps' <- zipWithM checkPattern' ps $ map Ascribed ts
@@ -2072,7 +2084,7 @@ checkCase mt (CasePat p e loc) =
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
 data Unmatched p
-  = UnmatchedNum p [ExpBase Info VName]
+  = UnmatchedNum p [PatLit]
   | UnmatchedBool p
   | UnmatchedConstr p
   | Unmatched p
@@ -2254,7 +2266,7 @@ unmatched hole orig_ps
     idOrWild (PatternParens p' _) = idOrWild p'
     idOrWild _ = False
 
-    bool (Literal (BoolValue b) _) = Just b
+    bool (PatLitPrim (BoolValue b)) = Just b
     bool _ = Nothing
 
     buildConstr m c =
@@ -2265,7 +2277,7 @@ unmatched hole orig_ps
             then PatternConstr c (Info t) [] mempty
             else PatternParens (PatternConstr c (Info t) wildCS mempty) mempty
     buildBool t b =
-      PatternLit (Literal (BoolValue b) mempty) (Info (addSizes t)) mempty
+      PatternLit (PatLitPrim (BoolValue b)) (Info (addSizes t)) mempty
     buildId t n =
       -- The VName tag here will never be used since the value
       -- exists exclusively for printing warnings.

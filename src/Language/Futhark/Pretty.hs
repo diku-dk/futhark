@@ -373,6 +373,11 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   ppr (While cond) =
     text "while" <+> ppr cond
 
+instance Pretty PatLit where
+  ppr (PatLitInt x) = ppr x
+  ppr (PatLitFloat f) = ppr f
+  ppr (PatLitPrim v) = ppr v
+
 instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
   ppr (PatternAscription p t _) = ppr p <> colon <+> align (ppr t)
   ppr (PatternParens p _) = parens $ ppr p
