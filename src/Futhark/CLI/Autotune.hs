@@ -14,7 +14,6 @@ import qualified Data.Text as T
 import Data.Tree
 import Futhark.Bench
 import Futhark.Test
-import Futhark.Util (maxinum)
 import Futhark.Util.Options
 import System.Console.GetOpt
 import System.Environment (getExecutablePath)
@@ -34,6 +33,9 @@ data AutotuneOptions = AutotuneOptions
     optTimeout :: Int,
     optDefaultThreshold :: Int
   }
+
+maxinum :: (Num a, Ord a, Foldable f) => f a -> a
+maxinum = foldl' max 0
 
 initialAutotuneOptions :: AutotuneOptions
 initialAutotuneOptions =
