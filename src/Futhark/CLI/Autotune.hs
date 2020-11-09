@@ -90,8 +90,8 @@ type RunDataset = Int -> Path -> IO (Either String ([(String, Int)], Int))
 
 type DatasetName = String
 
-prepare :: AutotuneOptions -> FutharkExe -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
-prepare opts futhark prog = do
+prepare :: AutotuneOptions -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
+prepare opts prog = do
   spec <- testSpecFromFileOrDie prog
   copts <- compileOptions opts
 
@@ -145,7 +145,6 @@ prepare opts futhark prog = do
       either (Left . T.unpack) (Right . bestRuntime)
         <$> benchmarkDataset
           ropts
-          futhark
           prog
           entry_point
           (runInput trun)
@@ -347,10 +346,8 @@ tuneThreshold opts datasets already_tuned (v, _v_path) = do
 
 tune :: AutotuneOptions -> FilePath -> IO Path
 tune opts prog = do
-  futhark <- fmap FutharkExe $ maybe getExecutablePath return $ optFuthark opts
-
   putStrLn $ "Compiling " ++ prog ++ "..."
-  datasets <- prepare opts futhark prog
+  datasets <- prepare opts prog
 
   forest <- thresholdForest prog
   when (optVerbose opts > 0) $
