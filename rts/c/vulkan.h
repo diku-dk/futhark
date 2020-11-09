@@ -543,10 +543,10 @@ void vulkan_create_pipeline(struct vulkan_context *ctx,
   compute_pipeline_create_info.stage.pSpecializationInfo = &spec_info;
 
   VULKAN_SUCCEED(vkCreateComputePipelines(ctx->device,
-                                          0,
+                                          VK_NULL_HANDLE,
                                           1,
                                           &compute_pipeline_create_info,
-                                          0,
+                                          NULL,
                                           pipeline));
 }
 
