@@ -7,7 +7,7 @@ module Futhark.CLI.Autotune (main) where
 import Control.Monad
 import qualified Data.ByteString.Char8 as SBS
 import Data.Function (on)
-import Data.List (elemIndex, intersect, isPrefixOf, minimumBy, sort, sortOn)
+import Data.List (elemIndex, foldl', intersect, isPrefixOf, minimumBy, sort, sortOn)
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Text as T
@@ -63,8 +63,7 @@ runOptions path timeout_s opts =
         map opt path
           ++ optExtraOptions opts,
       runTimeout = timeout_s,
-      runVerbose = optVerbose opts,
-      runResultAction = Nothing
+      runVerbose = optVerbose opts
     }
   where
     opt (name, val) = "--size=" ++ name ++ "=" ++ show val
