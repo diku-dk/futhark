@@ -35,8 +35,8 @@ module DotProd(T: NUMERIC) = {
 module IntDotProd = DotProd(Int)
 module Float32DotProd = DotProd(Float32)
 
-let main [n][m]
+let main [n]
         (xs: [n]i32) (ys: [n]i32)
-        (as: [m]f32) (bs: [n]f32): (i32, f32) =
+        (as: [n]f32) (bs: [n]f32): (i32, f32) =
   (IntDotProd.dotprod xs ys,
    Float32DotProd.dotprod as bs)

@@ -31,16 +31,16 @@ let xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
     let reldv_vals = map (\(dv: i32, i: i32): i32  ->
                             if testBit(grayCode(n),i)
                             then dv else 0
-                        ) (zip (dir_vs) (iota(num_bits)) ) in
+                        ) (zip (dir_vs) (map i32.i64 (iota num_bits))) in
     reduce (^) 0 (reldv_vals )
 
-let sobolIndI (dir_vs:  [][]i32, n: i32 ): []i32 =
+let sobolIndI [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32 ): [len]i32 =
     map (xorInds(n)) (dir_vs )
 
-let sobolIndR [num_bits] (dir_vs:  [][num_bits]i32, n: i32 ): []f32 =
-    let divisor = 2.0 ** r32(num_bits)
+let sobolIndR [k][num_bits] (dir_vs: [k][num_bits]i32, n: i32 ): []f32 =
+    let divisor = 2.0 ** f32.i64(num_bits)
     let arri    = sobolIndI( dir_vs, n )     in
-        map (\x -> r32(x) / divisor) arri
+        map (\x -> f32.i32(x) / divisor) arri
 
 --------------------------------/
 ---- STRENGTH-REDUCED FORMULA
@@ -53,36 +53,34 @@ let index_of_least_significant_0(num_bits: i32, n: i32): i32 =
      then if (n & 1) == 1
           then (true, k+1, n>>1)
           else (false,k,   n   )
-     else      (false,k,   n   )).2
+     else      (false,k,   n   )).1
 
 let recM [len][num_bits] (sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
-  let bit= index_of_least_significant_0(num_bits,i) in
-  map (\(row: []i32): i32 -> unsafe row[bit]) (sob_dirs )
+  let bit= index_of_least_significant_0(i32.i64 num_bits,i) in
+  map (\(row: []i32): i32 -> row[bit]) (sob_dirs )
 
-let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32, sobvctsz: i32): [chunk][sobvctsz]f32 =
-  let sob_fact= 1.0 / r32(1 << num_bits)
+let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32) (n: i32) (chunk: i64) (sobvctsz: i64): [chunk][len]f32 =
+  let sob_fact= 1.0 / f32.i64(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
   let contrbs = map (\(k: i32): [len]i32  ->
                         let sob = k + n in
                         if(k==0) then sobolIndI(dir_vs, n+1)
                         else recM(dir_vs, k+n)
-                   ) (iota(chunk) )
-  let vct_ints= scan (\(x: []i32) (y: []i32): []i32  ->
-                        map2 (^) x y
-                    ) (replicate len 0) contrbs in
-  map (\(xs: []i32): [len]f32  ->
+                   ) (map i32.i64 (iota chunk))
+  let vct_ints= scan (\x y -> map2 (^) x y) (replicate len 0) contrbs in
+  map (\xs: [len]f32  ->
              map  (\(x: i32): f32  ->
-                     r32(x) * sob_fact
+                     f32.i32(x) * sob_fact
                  ) xs
-         ) (vct_ints)
+         ) vct_ints
 
-let main [num_bits]
+let main [k][num_bits]
          (num_dates:  i32) (num_und: i32) (num_mc_it: i32)
-         (dir_vs_nosz: [][num_bits]i32): f32 =
-  let sobvctsz  = num_dates*num_und
-  let dir_vs    = dir_vs_nosz : [sobvctsz][num_bits]i32
---  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = stream_map (\[chunk] (ns: [chunk]i32): [][sobvctsz]f32 ->
-                                sobolChunk(dir_vs, unsafe ns[0], chunk, sobvctsz)
-                           ) (iota(num_mc_it) ) in
+         (dir_vs_nosz: [k][num_bits]i32): f32 =
+  let sobvctsz  = i64.i32 (num_dates*num_und)
+  let dir_vs    = dir_vs_nosz :> [sobvctsz][num_bits]i32
+  let sobol_mat = #[sequential_inner]
+                  map_stream (\chunk (ns: [chunk]i32): [chunk][sobvctsz]f32 ->
+                                sobolChunk dir_vs (if chunk > 0 then ns[0] else 0) chunk sobvctsz
+                           ) (map i32.i64 (iota (i64.i32 num_mc_it))) in
   reduce  (+) (0.0) (map  (\(row: []f32): f32  -> reduce (+) (0.0) row) (sobol_mat ) )

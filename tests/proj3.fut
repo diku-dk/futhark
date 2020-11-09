@@ -1,4 +1,4 @@
--- Can we map a deeper tuple projection?
+-- Can we map a deeper record projection?
 -- ==
 -- input { [1,2] [3,4] }
 -- output { [1,2] }

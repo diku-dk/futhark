@@ -1,15 +1,37 @@
-module Futhark.Pass.FirstOrderTransform
-  ( firstOrderTransform
-  )
-  where
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 
-import Futhark.Transform.FirstOrderTransform (transformFunDef)
-import Futhark.Representation.SOACS (SOACS)
-import Futhark.Representation.Kernels (Kernels)
+-- | Transform any SOACs to @for@-loops.
+--
+-- Example:
+--
+-- @
+-- let ys = map (\x -> x + 2) xs
+-- @
+--
+-- becomes something like:
+--
+-- @
+-- let out = scratch n i32
+-- let ys =
+--   loop (ys' = out) for i < n do
+--     let x = xs[i]
+--     let y = x + 2
+--     let ys'[i] = y
+--     in ys'
+-- @
+module Futhark.Pass.FirstOrderTransform (firstOrderTransform) where
+
+import Futhark.IR.SOACS (SOACS, scopeOf)
 import Futhark.Pass
+import Futhark.Transform.FirstOrderTransform (FirstOrderLore, transformConsts, transformFunDef)
 
-firstOrderTransform :: Pass SOACS Kernels
-firstOrderTransform = Pass
-                      "first order transform"
-                      "Transform all second-order array combinators to for-loops." $
-                      intraproceduralTransformation transformFunDef
+-- | The first-order transformation pass.
+firstOrderTransform :: FirstOrderLore lore => Pass SOACS lore
+firstOrderTransform =
+  Pass
+    "first order transform"
+    "Transform all SOACs to for-loops."
+    $ intraproceduralTransformationWithConsts
+      transformConsts
+      (transformFunDef . scopeOf)

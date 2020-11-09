@@ -7,15 +7,15 @@
 --   ]
 -- }
 -- output {
---   [ [6i32, 15i32], [6i32, 15i32] ]
+--   [ [6i64, 15i64], [6i64, 15i64] ]
 --   [ [ [-1.000000f64, -2.000000f64, -3.000000f64], [-4.000000f64, -5.000000f64, -6.000000f64] ]
 --   , [ [-1.000000f64, -2.000000f64, -3.000000f64], [-4.000000f64, -5.000000f64, -6.000000f64] ]
 --   ]
 -- }
-let main [l][m][n] (xsss : [l][m][n]f32): ([l][m]i32, [l][m][n]f64) =
+let main [l][m][n] (xsss : [l][m][n]f32): ([l][m]i64, [l][m][n]f64) =
   unzip (map (\xss ->
-         unzip (map(\[n] (xs : [n]f32) : (i32, [n]f64) ->
-                       let (xs_int, xs_neg) = unzip (map(\x -> (t32 x, f64.f32(-x))) xs)
+         unzip (map(\(xs : [n]f32) : (i64, [n]f64) ->
+                       let (xs_int, xs_neg) = unzip (map(\x -> (i64.f32 x, f64.f32(-x))) xs)
                        in (reduce (+) 0 xs_int, xs_neg)
                    ) xss)
        ) xsss)

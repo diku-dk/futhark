@@ -3,23 +3,23 @@
 Futhark Compared to Other Functional Languages
 ==============================================
 
-This guide is intended to quickly get programmers who are familiar
-with other functional languages acquainted with Futhark.
+This guide is intended for programmers who are familiar with other functional
+languages and want to start working with Futhark.
 
 Futhark is a simple language with a complex compiler.
 Functional programming is fundamentally well suited to
 data-parallelism, so Futhark's syntax and underlying concepts are taken directly
 from established functional languages; mostly from Haskell and the
-members of the ML familiy.  While Futhark does add a few small
+members of the ML family.  While Futhark does add a few small
 conveniences (built-in array types) and one complicated and unusual
 feature (in-place updates via uniqueness types, see
 :ref:`in-place-updates`), a programmer familiar with a common
-functional language should be able to easily understand the meaning of a
-Futhark program, and quickly start writing their own programs.  To
-speed up this process, we describe, in the following, some of the various
-quirks and unexpected limitations imposed by Futhark.  It is
-recommended to read some of the `example programs`_ along with this guide.
-This guide does *not* cover all Futhark features worth knowing, so do also
+functional language should be able to understand the meaning of a
+Futhark program, and quickly begin writing their own programs.  To
+speed up this process, we describe here some of the various
+quirks and unexpected limitations imposed by Futhark. We also
+recommended reading some of the `example programs`_ along with this guide.
+The guide does *not* cover all Futhark features worth knowing, so do also
 skim :ref:`language-reference`.
 
 .. _`example programs`: https://github.com/diku-dk/futhark/tree/master/examples
@@ -49,7 +49,7 @@ ML).
 User-defined operators are possible, but the fixity of the operator
 depends on its name.  Specifically, the fixity of a user-defined
 operator *op* is equal to the fixity of the built-in operator that is
-the longest prefix of *op*.  So, for example, ``<<=`` would have the
+the longest prefix of *op*.  For example, ``<<=`` would have the
 same fixity as ``<<``, and ``=<<`` the same as ``=``.  This rule is the
 same as the rule found in OCaml and F#.
 
@@ -73,23 +73,20 @@ Futhark program.
 
 The evaluation semantics are entirely sequential, with parallelism
 being solely an operational detail.  Hence, race conditions are
-impossible.  However, the Futhark compiler does not automatically go
+impossible. The Futhark compiler does not automatically go
 looking for parallelism.  Only certain special constructs and built-in
 library functions (in particular ``map``, ``reduce``, ``scan``, and
 ``filter``) may be executed in parallel.
 
-Currying and partial application works as usual (although functions
+Currying and partial application work as usual (although functions
 are not fully first class; see `Types`_).  Some Futhark language
-constructs look like functions, but are not (yet).  This means they
-cannot be partially applied, and may not interact well with type
-inference.  These include ``unzip`` and ``zip``.  Usually there are
-more well-behaved wrappers to be found in `the basis library
-<https://futhark-lang.org/docs/>`_.
+constructs look like functions, but are not.  This means they cannot
+be partially applied.  These include ``unsafe`` and ``assert``.
 
 Lambda terms are written as ``\x -> x + 2``, as in Haskell.
 
 A Futhark program is read top-down, and all functions must be declared
-in the order they are used, similarly to Standard ML.  Unlike just
+in the order they are used, like Standard ML.  Unlike just
 about all functional languages, recursive functions are *not*
 supported.  Most of the time, you will use bulk array operations
 instead, but there is also a dedicated ``loop`` language construct,
@@ -104,17 +101,6 @@ with its desired type, such as ``1i8`` for an eight-bit signed
 integer.  Un-adorned numerals have their type inferred based on use.
 This only works for built-in numeric types.
 
-All types can be combined in tuples as usual, as well as in
-*structurally typed records*, as in Standard ML.  There are not yet
-any sum types.  Abstract types are possible via the module system; see
-:ref:`module-system`.
-
-If a variable ``foo`` is a record of type ``{a: i32, b: bool}``, then
-we access field ``a`` with dot notation: ``foo.a``.  Tuples are a
-special case of records, where all the fields have a 1-indexed numeric
-label.  For example, ``(i32, bool)`` is the same as ``{1: i32, 2:
-bool}``, and can be indexed as ``foo.1``.
-
 Arrays are a built-in type.  The type of an array containing elements
 of type ``t`` is written ``[]t`` (not ``[t]`` as in Haskell), and we
 may optionally annotate it with a size as ``[n]t`` (see `Shape
@@ -122,6 +108,27 @@ Declarations`).  Array values are written as ``[1,2,3]``.  Array
 indexing is written ``a[i]`` with *no* space allowed between the array
 name and the brace.  Indexing of multi-dimensional arrays is written
 ``a[i,j]``.  Arrays are 0-indexed.
+
+All types can be combined in tuples as usual, as well as in
+*structurally typed records*, as in Standard ML.  Non-recursive sum
+types are supported, and are also structurally typed.  Abstract types
+are possible via the module system; see :ref:`module-system`.
+
+If a variable ``foo`` is a record of type ``{a: i32, b: bool}``, then
+we access field ``a`` with dot notation: ``foo.a``.  Tuples are a
+special case of records, where all the fields have a 0-indexed numeric
+label.  For example, ``(i32, bool)`` is the same as ``{0: i32, 1:
+bool}``, and can be indexed as ``foo.1``.
+
+Sum types are defined as constructors separated by a vertical bar
+(``|``).  Constructor names always start with a ``#``.  For example,
+``#red | #blue i32`` is a sum type with the constructors ``#red`` and
+``#blue``, where the latter has an ``i32`` as payload.  The terms
+``#red`` and ``#blue 2`` produce values of this type.  Constructor
+applications must always be fully saturated.  Due to the structural
+typing, type annotations are usually necessary to resolve ambiguities.
+For example, the term ``#blue 2`` can produce a value of *any type*
+that has an appropriate constructor.
 
 Function types are supported with the usual ``a -> b``, and functions can be
 passed as arguments to other functions.  However, there are some
@@ -138,12 +145,13 @@ Function types interact with type parameters in a subtle way::
 
   let id 't (x: t) = x
 
-This declaration defines a function ``id`` that has a type parameter ``t``.
-Here, ``t`` is an *unlifted* type parameter, which is guaranteed never to
-be a function type, and so in the body of the function we could choose to put parameter values of type ``t``
-in an array.  However, it means that this identity
-function cannot be called on a functional value.  Instead, we probably
-want a *lifted* type parameter::
+This declaration defines a function ``id`` that has a type parameter
+``t``.  Here, ``t`` is an *unlifted* type parameter, which is
+guaranteed never to be a function type, and so in the body of the
+function we could choose to put parameter values of type ``t`` in an
+array.  However, it means that this identity function cannot be called
+on a functional value.  Instead, we probably want a *lifted* type
+parameter::
 
   let id '^t (x: t) = x
 
@@ -157,7 +165,7 @@ restrictions), so we could also just write it as::
 
   let id x = x
 
-Type appreviations are possible::
+Type abbreviations are possible::
 
   type foo = (i32, i32)
 
@@ -167,6 +175,15 @@ Type parameters are supported as well::
 
 As with everything else, they are structurally typed, so the types
 ``pair i32 bool`` and ``(i32, bool)`` are entirely interchangeable.
+Most unusually, this is also the case for sum types.  The following
+two types are entirely interchangeable::
+
+  type maybe 'a = #just a | #nothing
+
+  type option 'a = #nothing | #just a
+
+Only for abstract types, where the definition has been hidden via the
+module system, do type names have any significance.
 
 Size parameters can also be passed::
 

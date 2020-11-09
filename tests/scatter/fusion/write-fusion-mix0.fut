@@ -1,8 +1,8 @@
 -- Test that map-scatter fusion and scatter-scatter fusion work together.
 -- ==
 -- input {
---   [2, 0]
---   [1, 0]
+--   [2i64, 0i64]
+--   [1i64, 0i64]
 --   [100, 80]
 --   [90, 80]
 --   [0, 2, 4, 6, 9]
@@ -14,8 +14,8 @@
 -- }
 -- structure { Scatter 1 }
 
-let main [k][n] (indexes0: [k]i32)
-                (indexes1: [k]i32)
+let main [k][n] (indexes0: [k]i64)
+                (indexes1: [k]i64)
                 (values0: [k]i32)
                 (values1: [k]i32)
                 (array0: *[n]i32)

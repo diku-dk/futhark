@@ -24,6 +24,30 @@
 -- output {
 --   [1, 4, 3, 4, 17]
 -- }
+--
+-- input {
+--   [0, 0, 0, 0, 0]
+--   [10000000]
+-- }
+-- output {
+--   [0, 0, 0, 0, 0]
+-- }
+--
+-- input {
+--   [0, 0, 0, 0, 0]
+--   empty([0]i32)
+-- }
+-- output {
+--   [0, 0, 0, 0, 0]
+-- }
+--
+-- input {
+--   empty([0]i32)
+--   empty([0]i32)
+-- }
+-- output {
+--   empty([0]i32)
+-- }
 
 let main [m][n] (hist : *[n]i32) (image : [m]i32) : [n]i32 =
-  reduce_by_index hist (+) 0 image image
+  reduce_by_index hist (+) 0 (map i64.i32 image) image

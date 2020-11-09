@@ -1,6 +1,7 @@
 {
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -w #-}
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
@@ -13,20 +14,23 @@ module Language.Futhark.Parser.Lexer
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Data.Char (ord, toLower)
-import Data.Loc hiding (L)
+import qualified Data.Text.Read as T
+import Data.Char (ord, toLower, digitToInt)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Bits
 import Data.Function (fix)
 import Data.List
 import Data.Monoid
+import Data.Either
+import Numeric
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
                               Name, nameFromText, nameToText)
-import Language.Futhark.Attributes (leadingOperator)
+import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
+import Futhark.Util.Loc hiding (L)
 
 }
 
@@ -40,22 +44,22 @@ import Language.Futhark.Syntax (BinOp(..))
 @romlit = 0[rR][IVXLCDM][IVXLCDM_]*
 @intlit = @hexlit|@binlit|@declit|@romlit
 @reallit = (([0-9][0-9_]*("."[0-9][0-9_]*)?))([eE][\+\-]?[0-9]+)?
-@hexreallit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*"."[0-9a-fA-F][0-9a-fA-F_]*([pP][\+\-]?[0-9]+)
+@hexreallit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*"."[0-9a-fA-F][0-9a-fA-F_]*([pP][\+\-]?[0-9_]+)
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 @qualidentifier = (@identifier ".")+ @identifier
 
-@unop = ("!"|"~")
+@unop = "!"
 @qualunop = (@identifier ".")+ @unop
 
-@opchar = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
-@binop = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^") @opchar*
+$opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
+@binop = ($opchar # \.) $opchar*
 @qualbinop = (@identifier ".")+ @binop
 
 @space = [\ \t\f\v]
-@doc = "-- |"[^\n]*(\n@space*"--"[^\n]*)*
+@doc = "-- |".*(\n@space*"--".*)*
 
 tokens :-
 
@@ -64,7 +68,7 @@ tokens :-
                                       map (T.drop 3 . T.stripStart) .
                                            T.split (== '\n') . ("--"<>) .
                                            T.drop 4 }
-  "--"[^\n]*                            ;
+  "--".*                            ;
   "="                      { tokenC EQU }
   "("                      { tokenC LPAR }
   ")"                      { tokenC RPAR }
@@ -77,11 +81,14 @@ tokens :-
   "_"                      { tokenC UNDERSCORE }
   "->"                     { tokenC RIGHT_ARROW }
   ":"                      { tokenC COLON }
-  "."                      { tokenC DOT }
+  ":>"                     { tokenC COLON_GT }
   "\"                      { tokenC BACKSLASH }
+  "~"                      { tokenC TILDE }
   "'"                      { tokenC APOSTROPHE }
   "'^"                     { tokenC APOSTROPHE_THEN_HAT }
+  "'~"                     { tokenC APOSTROPHE_THEN_TILDE }
   "`"                      { tokenC BACKTICK }
+  "#["                     { tokenC HASH_LBRACKET }
   "..<"                    { tokenC TWO_DOTS_LT }
   "..>"                    { tokenC TWO_DOTS_GT }
   "..."                    { tokenC THREE_DOTS }
@@ -100,9 +107,9 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
-  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit "f32" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f32") }
-  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
-  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
+  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit . T.filter (/= '_') }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 
@@ -118,6 +125,9 @@ tokens :-
 
   @binop                   { tokenM $ return . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
+
+  "." (@identifier|[0-9]+) { tokenM $ return . PROJ_FIELD . nameFromText . T.drop 1 }
+  "." "["                  { tokenC PROJ_INDEX }
 {
 
 keyword :: T.Text -> Token
@@ -143,7 +153,6 @@ keyword s =
     "entry"        -> ENTRY
     "module"       -> MODULE
     "while"        -> WHILE
-    "unsafe"       -> UNSAFE
     "assert"       -> ASSERT
     "match"        -> MATCH
     "case"         -> CASE
@@ -153,11 +162,11 @@ keyword s =
 indexing :: T.Text -> Alex Name
 indexing s = case keyword s of
   ID v -> return v
-  _    -> fail $ "Cannot index keyword '" ++ T.unpack s ++ "'."
+  _    -> alexError $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
-  []   -> fail "mkQualId: no components"
+  []   -> error "mkQualId: no components"
   k:qs -> return (map nameFromText (reverse qs), nameFromText k)
 
 -- | Suffix a zero if the last character is dot.
@@ -167,25 +176,16 @@ suffZero s = if T.last s == '.' then s <> "0" else s
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
   [(x, "")] -> return x
-  _         -> fail $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
+  _         -> error $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
   where s' = T.unpack s
 
 readIntegral :: Integral a => T.Text -> a
 readIntegral s
-  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s =
-      T.foldl (another hex_digits) 0 (T.drop 2 s)
-  | "0b" `T.isPrefixOf` s || "0b" `T.isPrefixOf` s =
-      T.foldl (another binary_digits) 0 (T.drop 2 s)
-  | "0r" `T.isPrefixOf` s =
-       fromRoman (T.drop 2 s)
-  | otherwise =
-      T.foldl (another decimal_digits) 0 s
-      where another digits acc c = acc * base + maybe 0 fromIntegral (elemIndex (toLower c) digits)
-              where base = fromIntegral $ length digits
-
-            binary_digits = ['0', '1']
-            decimal_digits = ['0'..'9']
-            hex_digits = decimal_digits ++ ['a'..'f']
+  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s = parseBase 16 (T.drop 2 s)
+  | "0b" `T.isPrefixOf` s || "0B" `T.isPrefixOf` s = parseBase 2 (T.drop 2 s)
+  | "0r" `T.isPrefixOf` s || "0R" `T.isPrefixOf` s = fromRoman (T.drop 2 s)
+  | otherwise = parseBase 10 s
+      where parseBase base = T.foldl (\acc c -> acc * base + fromIntegral (digitToInt c)) 0
 
 tokenC v  = tokenS $ const v
 
@@ -244,30 +244,23 @@ fromRoman s =
     Nothing -> 0
     Just (d,n) -> n+fromRoman (T.drop (T.length d) s)
 
-fromHexRealLit :: RealFloat a => T.Text -> Maybe a
-fromHexRealLit s =
+readHexRealLit :: RealFloat a => T.Text -> Alex a
+readHexRealLit s =
   let num =  (T.drop 2 s) in
   -- extract number into integer, fractional and (optional) exponent
-  let comps = (T.split (\x -> x == '.' || x == 'p' || x == 'P') num) in
+  let comps = T.split (`elem` ['.','p','P']) num in
   case comps of
     [i, f, p] ->
-        let int_part = readIntegral (T.pack ("0x" ++ (T.unpack i)))
-            frac_part = readIntegral (T.pack ("0x" ++ (T.unpack f)))
-            exponent = if ((T.pack "-") `T.isPrefixOf` p)
-                       then -1 * (readIntegral p)
-                       else readIntegral p
+        let runTextReader r = fromIntegral . fst . fromRight (error "internal error") . r
+            intPart = runTextReader T.hexadecimal i
+            fracPart = runTextReader T.hexadecimal f
+            exponent = runTextReader (T.signed T.decimal) p
 
-            frac_len = T.length f
-            frac_val = (fromIntegral frac_part) / (16.0 ** (fromIntegral frac_len))
-            total_val = ((fromIntegral int_part) + frac_val) * (2.0 ** (fromIntegral exponent)) in
-        Just (total_val)
-    _ -> Nothing
-
-readHexRealLit :: RealFloat a => String -> T.Text -> Alex a
-readHexRealLit desc s =
-  case fromHexRealLit s of
-    Just (n) -> return n
-    Nothing -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
+            fracLen = fromIntegral $ T.length f
+            fracVal = fracPart / (16.0 ** fracLen)
+            totalVal = (intPart + fracVal) * (2.0 ** exponent) in
+        return totalVal
+    _ -> error "bad hex real literal"
 
 alexGetPosn :: Alex (Int, Int, Int)
 alexGetPosn = Alex $ \s ->
@@ -298,6 +291,8 @@ data Token = ID Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
            | CONSTRUCTOR Name
+           | PROJ_FIELD Name
+           | PROJ_INDEX
 
            | INTLIT Integer
            | STRINGLIT String
@@ -315,11 +310,13 @@ data Token = ID Name
            | CHARLIT Char
 
            | COLON
+           | COLON_GT
            | BACKSLASH
            | APOSTROPHE
            | APOSTROPHE_THEN_HAT
+           | APOSTROPHE_THEN_TILDE
            | BACKTICK
-           | DOT
+           | HASH_LBRACKET
            | TWO_DOTS
            | TWO_DOTS_LT
            | TWO_DOTS_GT
@@ -340,6 +337,7 @@ data Token = ID Name
            | NEGATE
            | LTH
            | HAT
+           | TILDE
            | PIPE
 
            | IF
@@ -351,7 +349,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | UNSAFE
            | ASSERT
            | TRUE
            | FALSE
@@ -382,6 +379,8 @@ runAlex' start_pos input__ (Alex f) =
                     , alex_scd = 0}) of Left msg -> Left msg
                                         Right ( _, a ) -> Right a
 
+-- | Given a starting position, produce tokens from the given text (or
+-- a lexer error).  Returns the final position.
 scanTokensText :: Pos -> T.Text -> Either String ([L Token], Pos)
 scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
 

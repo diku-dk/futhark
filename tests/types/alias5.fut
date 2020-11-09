@@ -1,6 +1,6 @@
 -- Uniqueness goes outside-in.
 
-type uniqlist = *[]i32
+type uniqlist [n] = *[n]i32
 
-let main(p: [][]i32): []uniqlist =
+let main(p: [][]i32): [](uniqlist []) =
   p

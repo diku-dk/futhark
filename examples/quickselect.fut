@@ -6,10 +6,11 @@
 -- Oh, and it cannot handle non-meaningful inputs.
 --
 -- ==
--- input { [1] 0 } output { 1 }
--- input { [4, -8, 2, 2, 0, 0, 5, 9, -6, 2] 7 } output { 4 }
+-- tags { no_csharp }
+-- input { [1] 0i64 } output { 1 }
+-- input { [4, -8, 2, 2, 0, 0, 5, 9, -6, 2] 7i64 } output { 4 }
 
-let quickselect [n] (s: [n]i32) (k:i32): i32 =
+let quickselect [n] (s: [n]i32) (k:i64): i32 =
   let (_, s) =
     loop (k, s) while length s > 1 do
       let pivot = s[length s/2]
@@ -19,4 +20,4 @@ let quickselect [n] (s: [n]i32) (k:i32): i32 =
          else (0,[pivot])
   in s[0]
 
-let main (s:[]i32) (k:i32) : i32 = quickselect s k
+let main (s:[]i32) (k:i64) : i32 = quickselect s k

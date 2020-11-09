@@ -1,58 +1,103 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
+
 -- | A primitive expression is an expression where the non-leaves are
 -- primitive operators.  Our representation does not guarantee that
 -- the expression is type-correct.
 module Futhark.Analysis.PrimExp
-  ( PrimExp (..)
-  , evalPrimExp
-  , primExpType
-  , coerceIntPrimExp
-  , true
-  , false
+  ( PrimExp (..),
+    TPrimExp (..),
+    isInt8,
+    isInt16,
+    isInt32,
+    isInt64,
+    isBool,
+    isF32,
+    isF64,
+    evalPrimExp,
+    primExpType,
+    primExpSizeAtLeast,
+    coerceIntPrimExp,
+    leafExpTypes,
+    true,
+    false,
+    constFoldPrimExp,
 
-  , module Futhark.Representation.Primitive
-  , (.&&.), (.||.), (.<.), (.<=.), (.>.), (.>=.), (.==.), (.&.), (.|.), (.^.)
-  ) where
+    -- * Construction
+    module Futhark.IR.Primitive,
+    NumExp (..),
+    IntExp,
+    FloatExp (..),
+    sExt,
+    zExt,
+    (.&&.),
+    (.||.),
+    (.<.),
+    (.<=.),
+    (.>.),
+    (.>=.),
+    (.==.),
+    (.&.),
+    (.|.),
+    (.^.),
+    bNot,
+    sMax32,
+    sMin32,
+    sMax64,
+    sMin64,
+    sExt32,
+    sExt64,
+    zExt32,
+    zExt64,
+    fMin64,
+    fMax64,
+  )
+where
 
-import           Data.Foldable
-import           Data.Traversable
+import Control.Category
+import Control.Monad
 import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Data.Text as T
+import Data.Traversable
+import Futhark.IR.Primitive
+import Futhark.IR.Prop.Names
+import Futhark.Util.IntegralExp
+import Futhark.Util.Pretty
+import GHC.Generics (Generic)
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Prelude hiding (id, (.))
 
-import           Futhark.Representation.AST.Attributes.Names
-import           Futhark.Representation.Primitive
-import           Futhark.Util.IntegralExp
-import           Futhark.Util.Pretty
+-- | A primitive expression parametrised over the representation of
+-- free variables.  Note that the 'Functor', 'Traversable', and 'Num'
+-- instances perform automatic (but simple) constant folding.
+--
+-- Note also that the 'Num' instance assumes 'OverflowUndef'
+-- semantics!
+data PrimExp v
+  = LeafExp v PrimType
+  | ValueExp PrimValue
+  | BinOpExp BinOp (PrimExp v) (PrimExp v)
+  | CmpOpExp CmpOp (PrimExp v) (PrimExp v)
+  | UnOpExp UnOp (PrimExp v)
+  | ConvOpExp ConvOp (PrimExp v)
+  | FunExp String [PrimExp v] PrimType
+  deriving (Eq, Ord, Show, Generic)
 
--- | A primitive expression parametrised over the representation of free variables.
-data PrimExp v = LeafExp v PrimType
-               | ValueExp PrimValue
-               | BinOpExp BinOp (PrimExp v) (PrimExp v)
-               | CmpOpExp CmpOp (PrimExp v) (PrimExp v)
-               | UnOpExp UnOp (PrimExp v)
-               | ConvOpExp ConvOp (PrimExp v)
-               | FunExp String [PrimExp v] PrimType
-               deriving (Ord, Show)
-
--- The Eq instance upcoerces all integer constants to their largest
--- type before comparing for equality.  This is technically not a good
--- idea, but solves annoying problems related to the Num instance
--- always producing Int64s.
-instance Eq v => Eq (PrimExp v) where
-  LeafExp x xt == LeafExp y yt = x == y && xt == yt
-  ValueExp (IntValue x) == ValueExp (IntValue y) =
-    intToInt64 x == intToInt64 y
-  ValueExp x == ValueExp y =
-    x == y
-  BinOpExp xop x1 x2 == BinOpExp yop y1 y2 =
-    xop == yop && x1 == y1 && x2 == y2
-  CmpOpExp xop x1 x2 == CmpOpExp yop y1 y2 =
-    xop == yop && x1 == y1 && x2 == y2
-  UnOpExp xop x == UnOpExp yop y =
-    xop == yop && x == y
-  ConvOpExp xop x == ConvOpExp yop y =
-    xop == yop && x == y
-  FunExp xf xargs _ == FunExp yf yargs _ =
-    xf == yf && xargs == yargs
-  _ == _ = False
+instance SexpIso v => SexpIso (PrimExp v) where
+  sexpIso =
+    match $
+      With (. Sexp.list (Sexp.el (Sexp.sym "leaf") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+        With (. Sexp.list (Sexp.el (Sexp.sym "value") >>> Sexp.el sexpIso)) $
+          With (. Sexp.list (Sexp.el (Sexp.sym "bin-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+            With (. Sexp.list (Sexp.el (Sexp.sym "cmp-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+              With (. Sexp.list (Sexp.el (Sexp.sym "un-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                With (. Sexp.list (Sexp.el (Sexp.sym "conv-op") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                  With
+                    (. Sexp.list (Sexp.el (Sexp.sym "fun") >>> Sexp.el (iso T.unpack T.pack . sexpIso) >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+                    End
 
 instance Functor PrimExp where
   fmap = fmapDefault
@@ -66,7 +111,7 @@ instance Traversable PrimExp where
   traverse _ (ValueExp v) =
     pure $ ValueExp v
   traverse f (BinOpExp op x y) =
-    BinOpExp op <$> traverse f x <*> traverse f y
+    constFoldPrimExp <$> (BinOpExp op <$> traverse f x <*> traverse f y)
   traverse f (CmpOpExp op x y) =
     CmpOpExp op <$> traverse f x <*> traverse f y
   traverse f (ConvOpExp op x) =
@@ -77,155 +122,326 @@ instance Traversable PrimExp where
     FunExp h <$> traverse (traverse f) args <*> pure t
 
 instance FreeIn v => FreeIn (PrimExp v) where
-  freeIn = foldMap freeIn
+  freeIn' = foldMap freeIn'
 
--- The Num instance performs a little bit of magic: whenever an
--- expression and a constant is combined with a binary operator, the
--- type of the constant may be changed to be the type of the
--- expression, if they are not already the same.  This permits us to
--- write e.g. @x * 4@, where @x@ is an arbitrary PrimExp, and have the
--- @4@ converted to the proper primitive type.  We also support
--- converting integers to floating point values, but not the other way
--- around.  All numeric instances assume unsigned integers for such
--- conversions.
---
--- We also perform simple constant folding, in particular to reduce
--- expressions to constants so that the above works.  However, it is
--- still a bit of a hack.
-instance Pretty v => Num (PrimExp v) where
-  x + y | zeroIshExp x = y
-        | zeroIshExp y = x
-        | IntType t <- primExpType x,
-          Just z <- constFold (doBinOp $ Add t) x y = z
-        | FloatType t <- primExpType x,
-          Just z <- constFold (doBinOp $ FAdd t) x y = z
-        | Just z <- msum [asIntOp Add x y, asFloatOp FAdd x y] = z
-        | otherwise = numBad "+" (x,y)
+-- | A 'PrimExp' tagged with a phantom type used to provide type-safe
+-- construction.  Does not guarantee that the underlying expression is
+-- actually type correct.
+newtype TPrimExp t v = TPrimExp {untyped :: PrimExp v}
+  deriving (Eq, Ord, Show, Generic)
 
-  x - y | zeroIshExp y = x
-        | IntType t <- primExpType x,
-          Just z <- constFold (doBinOp $ Sub t) x y = z
-        | FloatType t <- primExpType x,
-          Just z <- constFold (doBinOp $ FSub t) x y = z
-        | Just z <- msum [asIntOp Sub x y, asFloatOp FSub x y] = z
-        | otherwise = numBad "-" (x,y)
+instance SexpIso v => SexpIso (TPrimExp t v) where
+  sexpIso = with $ \e -> sexpIso >>> e
 
-  x * y | zeroIshExp x = x
-        | zeroIshExp y = y
-        | oneIshExp x = y
-        | oneIshExp y = x
-        | IntType t <- primExpType x,
-          Just z <- constFold (doBinOp $ Mul t) x y = z
-        | FloatType t <- primExpType x,
-          Just z <- constFold (doBinOp $ FMul t) x y = z
-        | Just z <- msum [asIntOp Mul x y, asFloatOp FMul x y] = z
-        | otherwise = numBad "*" (x,y)
+instance Functor (TPrimExp t) where
+  fmap = fmapDefault
 
-  abs x | IntType t <- primExpType x = UnOpExp (Abs t) x
-        | FloatType t <- primExpType x = UnOpExp (FAbs t) x
-        | otherwise = numBad "abs" x
+instance Foldable (TPrimExp t) where
+  foldMap = foldMapDefault
 
-  signum x | IntType t <- primExpType x = UnOpExp (SSignum t) x
-           | otherwise = numBad "signum" x
+instance Traversable (TPrimExp t) where
+  traverse f (TPrimExp e) = TPrimExp <$> traverse f e
 
-  fromInteger = fromInt32 . fromInteger
+instance FreeIn v => FreeIn (TPrimExp t v) where
+  freeIn' = freeIn' . untyped
 
-instance Pretty v => IntegralExp (PrimExp v) where
-  x `div` y | oneIshExp y = x
-            | Just z <- msum [asIntOp SDiv x y, asFloatOp FDiv x y] = z
-            | otherwise = numBad "div" (x,y)
+-- | This expression is of type 'Int8'.
+isInt8 :: PrimExp v -> TPrimExp Int8 v
+isInt8 = TPrimExp
 
-  x `mod` y | Just z <- msum [asIntOp SMod x y] = z
-            | otherwise = numBad "mod" (x,y)
+-- | This expression is of type 'Int16'.
+isInt16 :: PrimExp v -> TPrimExp Int16 v
+isInt16 = TPrimExp
 
-  x `quot` y | oneIshExp y = x
-             | Just z <- msum [asIntOp SQuot x y] = z
-             | otherwise = numBad "quot" (x,y)
+-- | This expression is of type 'Int32'.
+isInt32 :: PrimExp v -> TPrimExp Int32 v
+isInt32 = TPrimExp
 
-  x `rem` y | Just z <- msum [asIntOp SRem x y] = z
-            | otherwise = numBad "rem" (x,y)
+-- | This expression is of type 'Int64'.
+isInt64 :: PrimExp v -> TPrimExp Int64 v
+isInt64 = TPrimExp
 
-  sgn (ValueExp (IntValue i)) = Just $ signum $ valueIntegral i
+-- | This is a boolean expression.
+isBool :: PrimExp v -> TPrimExp Bool v
+isBool = TPrimExp
+
+-- | This expression is of type 'Float'.
+isF32 :: PrimExp v -> TPrimExp Float v
+isF32 = TPrimExp
+
+-- | This expression is of type 'Double'.
+isF64 :: PrimExp v -> TPrimExp Double v
+isF64 = TPrimExp
+
+-- | True if the 'PrimExp' has at least this many nodes.  This can be
+-- much more efficient than comparing with 'length' for large
+-- 'PrimExp's, as this function is lazy.
+primExpSizeAtLeast :: Int -> PrimExp v -> Bool
+primExpSizeAtLeast k = maybe True (>= k) . descend 0
+  where
+    descend i _
+      | i >= k = Nothing
+    descend i LeafExp {} = Just (i + 1)
+    descend i ValueExp {} = Just (i + 1)
+    descend i (BinOpExp _ x y) = do
+      x' <- descend (i + 1) x
+      descend x' y
+    descend i (CmpOpExp _ x y) = do
+      x' <- descend (i + 1) x
+      descend x' y
+    descend i (ConvOpExp _ x) = descend (i + 1) x
+    descend i (UnOpExp _ x) = descend (i + 1) x
+    descend i (FunExp _ args _) = foldM descend (i + 1) args
+
+-- | Perform quick and dirty constant folding on the top level of a
+-- PrimExp.  This is necessary because we want to consider
+-- e.g. equality modulo constant folding.
+constFoldPrimExp :: PrimExp v -> PrimExp v
+constFoldPrimExp (BinOpExp Add {} x y)
+  | zeroIshExp x = y
+  | zeroIshExp y = x
+constFoldPrimExp (BinOpExp Sub {} x y)
+  | zeroIshExp y = x
+constFoldPrimExp (BinOpExp Mul {} x y)
+  | oneIshExp x = y
+  | oneIshExp y = x
+  | zeroIshExp x,
+    IntType it <- primExpType y =
+    ValueExp $ IntValue $ intValue it (0 :: Int)
+  | zeroIshExp y,
+    IntType it <- primExpType x =
+    ValueExp $ IntValue $ intValue it (0 :: Int)
+constFoldPrimExp (BinOpExp SDiv {} x y)
+  | oneIshExp y = x
+constFoldPrimExp (BinOpExp SQuot {} x y)
+  | oneIshExp y = x
+constFoldPrimExp (BinOpExp UDiv {} x y)
+  | oneIshExp y = x
+constFoldPrimExp (BinOpExp bop (ValueExp x) (ValueExp y))
+  | Just z <- doBinOp bop x y =
+    ValueExp z
+constFoldPrimExp (BinOpExp LogAnd x y)
+  | oneIshExp x = y
+  | oneIshExp y = x
+  | zeroIshExp x = x
+  | zeroIshExp y = y
+constFoldPrimExp (BinOpExp LogOr x y)
+  | oneIshExp x = x
+  | oneIshExp y = y
+  | zeroIshExp x = y
+  | zeroIshExp y = x
+constFoldPrimExp e = e
+
+-- | The class of numeric types that can be used for constructing
+-- 'TPrimExp's.
+class NumExp t where
+  -- | Construct a typed expression from an integer.
+  fromInteger' :: Integer -> TPrimExp t v
+
+-- | The class of integer types that can be used for constructing
+-- 'TPrimExp's.
+class NumExp t => IntExp t
+
+instance NumExp Int8 where
+  fromInteger' = isInt8 . ValueExp . IntValue . Int8Value . fromInteger
+
+instance IntExp Int8
+
+instance NumExp Int16 where
+  fromInteger' = isInt16 . ValueExp . IntValue . Int16Value . fromInteger
+
+instance IntExp Int16
+
+instance NumExp Int32 where
+  fromInteger' = isInt32 . ValueExp . IntValue . Int32Value . fromInteger
+
+instance IntExp Int32
+
+instance NumExp Int64 where
+  fromInteger' = isInt64 . ValueExp . IntValue . Int64Value . fromInteger
+
+instance IntExp Int64
+
+-- | The class of floating-point types that can be used for
+-- constructing 'TPrimExp's.
+class NumExp t => FloatExp t where
+  -- | Construct a typed expression from a rational.
+  fromRational' :: Rational -> TPrimExp t v
+
+instance NumExp Float where
+  fromInteger' = TPrimExp . ValueExp . FloatValue . Float32Value . fromInteger
+
+instance NumExp Double where
+  fromInteger' = TPrimExp . ValueExp . FloatValue . Float64Value . fromInteger
+
+instance FloatExp Float where
+  fromRational' = TPrimExp . ValueExp . FloatValue . Float32Value . fromRational
+
+instance FloatExp Double where
+  fromRational' = TPrimExp . ValueExp . FloatValue . Float64Value . fromRational
+
+instance (NumExp t, Pretty v) => Num (TPrimExp t v) where
+  TPrimExp x + TPrimExp y
+    | Just z <-
+        msum
+          [ asIntOp (`Add` OverflowUndef) x y,
+            asFloatOp FAdd x y
+          ] =
+      TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "+" (x, y)
+
+  TPrimExp x - TPrimExp y
+    | Just z <-
+        msum
+          [ asIntOp (`Sub` OverflowUndef) x y,
+            asFloatOp FSub x y
+          ] =
+      TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "-" (x, y)
+
+  TPrimExp x * TPrimExp y
+    | Just z <-
+        msum
+          [ asIntOp (`Mul` OverflowUndef) x y,
+            asFloatOp FMul x y
+          ] =
+      TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "*" (x, y)
+
+  abs (TPrimExp x)
+    | IntType t <- primExpType x = TPrimExp $ UnOpExp (Abs t) x
+    | FloatType t <- primExpType x = TPrimExp $ UnOpExp (FAbs t) x
+    | otherwise = numBad "abs" x
+
+  signum (TPrimExp x)
+    | IntType t <- primExpType x = TPrimExp $ UnOpExp (SSignum t) x
+    | otherwise = numBad "signum" x
+
+  fromInteger = fromInteger'
+
+instance (FloatExp t, Pretty v) => Fractional (TPrimExp t v) where
+  TPrimExp x / TPrimExp y
+    | Just z <- msum [asFloatOp FDiv x y] = TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "/" (x, y)
+
+  fromRational = fromRational'
+
+instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
+  TPrimExp x `div` TPrimExp y
+    | Just z <-
+        msum
+          [ asIntOp (`SDiv` Unsafe) x y,
+            asFloatOp FDiv x y
+          ] =
+      TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "div" (x, y)
+
+  TPrimExp x `mod` TPrimExp y
+    | Just z <- msum [asIntOp (`SMod` Unsafe) x y] =
+      TPrimExp z
+    | otherwise = numBad "mod" (x, y)
+
+  TPrimExp x `quot` TPrimExp y
+    | oneIshExp y = TPrimExp x
+    | Just z <- msum [asIntOp (`SQuot` Unsafe) x y] =
+      TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "quot" (x, y)
+
+  TPrimExp x `rem` TPrimExp y
+    | Just z <- msum [asIntOp (`SRem` Unsafe) x y] =
+      TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "rem" (x, y)
+
+  TPrimExp x `divUp` TPrimExp y
+    | Just z <- msum [asIntOp (`SDivUp` Unsafe) x y] =
+      TPrimExp $ constFoldPrimExp z
+    | otherwise = numBad "divRoundingUp" (x, y)
+
+  sgn (TPrimExp (ValueExp (IntValue i))) = Just $ signum $ valueIntegral i
   sgn _ = Nothing
 
-  fromInt8  = ValueExp . IntValue . Int8Value
-  fromInt16 = ValueExp . IntValue . Int16Value
-  fromInt32 = ValueExp . IntValue . Int32Value
-  fromInt64 = ValueExp . IntValue . Int64Value
+-- | Lifted logical conjunction.
+(.&&.) :: TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
+TPrimExp x .&&. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogAnd x y
 
 -- | Lifted logical conjunction.
-(.&&.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .&&. y = BinOpExp LogAnd x y
-
--- | Lifted logical conjunction.
-(.||.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .||. y = BinOpExp LogOr x y
+(.||.) :: TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
+TPrimExp x .||. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogOr x y
 
 -- | Lifted relational operators; assuming signed numbers in case of
 -- integers.
-(.<.), (.>.), (.<=.), (.>=.), (.==.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .<. y = CmpOpExp cmp x y where cmp = case primExpType x of
-                                         IntType t -> CmpSlt $ t `min` primExpIntType y
-                                         FloatType t -> FCmpLt t
-                                         _ -> CmpLlt
-x .<=. y = CmpOpExp cmp x y where cmp = case primExpType x of
-                                          IntType t -> CmpSle $ t `min` primExpIntType y
-                                          FloatType t -> FCmpLe t
-                                          _ -> CmpLle
-x .==. y = CmpOpExp (CmpEq $ primExpType x `min` primExpType y) x y
+(.<.), (.>.), (.<=.), (.>=.), (.==.) :: TPrimExp t v -> TPrimExp t v -> TPrimExp Bool v
+TPrimExp x .<. TPrimExp y =
+  TPrimExp $
+    constFoldPrimExp $
+      CmpOpExp cmp x y
+  where
+    cmp = case primExpType x of
+      IntType t -> CmpSlt t
+      FloatType t -> FCmpLt t
+      _ -> CmpLlt
+TPrimExp x .<=. TPrimExp y =
+  TPrimExp $
+    constFoldPrimExp $
+      CmpOpExp cmp x y
+  where
+    cmp = case primExpType x of
+      IntType t -> CmpSle t
+      FloatType t -> FCmpLe t
+      _ -> CmpLle
+TPrimExp x .==. TPrimExp y =
+  TPrimExp $
+    constFoldPrimExp $
+      CmpOpExp (CmpEq $ primExpType x `min` primExpType y) x y
 x .>. y = y .<. x
 x .>=. y = y .<=. x
 
 -- | Lifted bitwise operators.
-(.&.), (.|.), (.^.) :: PrimExp v -> PrimExp v -> PrimExp v
-x .&. y = BinOpExp (And $ primExpIntType x `min` primExpIntType y) x y
-x .|. y = BinOpExp (Or $ primExpIntType x `min` primExpIntType y) x y
-x .^. y = BinOpExp (Xor $ primExpIntType x `min` primExpIntType y) x y
+(.&.), (.|.), (.^.) :: TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+TPrimExp x .&. TPrimExp y =
+  TPrimExp $
+    constFoldPrimExp $
+      BinOpExp (And $ primExpIntType x) x y
+TPrimExp x .|. TPrimExp y =
+  TPrimExp $
+    constFoldPrimExp $
+      BinOpExp (Or $ primExpIntType x) x y
+TPrimExp x .^. TPrimExp y =
+  TPrimExp $
+    constFoldPrimExp $
+      BinOpExp (Xor $ primExpIntType x) x y
 
 infix 4 .==., .<., .>., .<=., .>=.
+
 infixr 3 .&&.
+
 infixr 2 .||.
+
+-- | Untyped smart constructor for sign extension that does a bit of
+-- constant folding.
+sExt :: IntType -> PrimExp v -> PrimExp v
+sExt it (ValueExp (IntValue v)) = ValueExp $ IntValue $ doSExt v it
+sExt it e
+  | primExpIntType e == it = e
+  | otherwise = ConvOpExp (SExt (primExpIntType e) it) e
+
+-- | Untyped smart constructor for zero extension that does a bit of
+-- constant folding.
+zExt :: IntType -> PrimExp v -> PrimExp v
+zExt it (ValueExp (IntValue v)) = ValueExp $ IntValue $ doZExt v it
+zExt it e
+  | primExpIntType e == it = e
+  | otherwise = ConvOpExp (ZExt (primExpIntType e) it) e
 
 asIntOp :: (IntType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asIntOp f x y
-  | IntType t <- primExpType x,
-    Just y' <- asIntExp t y = Just $ BinOpExp (f t) x y'
-  | IntType t <- primExpType y,
-    Just x' <- asIntExp t x = Just $ BinOpExp (f t) x' y
+  | IntType x_t <- primExpType x = Just $ BinOpExp (f x_t) x y
   | otherwise = Nothing
-
-asIntExp :: IntType -> PrimExp v -> Maybe (PrimExp v)
-asIntExp t e
-  | primExpType e == IntType t = Just e
-asIntExp t (ValueExp (IntValue v)) =
-  Just $ ValueExp $ IntValue $ doSExt v t
-asIntExp _ _ =
-  Nothing
 
 asFloatOp :: (FloatType -> BinOp) -> PrimExp v -> PrimExp v -> Maybe (PrimExp v)
 asFloatOp f x y
-  | FloatType t <- primExpType x,
-    Just y' <- asFloatExp t y = Just $ BinOpExp (f t) x y'
-  | FloatType t <- primExpType y,
-    Just x' <- asFloatExp t x = Just $ BinOpExp (f t) x' y
+  | FloatType t <- primExpType x = Just $ BinOpExp (f t) x y
   | otherwise = Nothing
-
-asFloatExp :: FloatType -> PrimExp v -> Maybe (PrimExp v)
-asFloatExp t e
-  | primExpType e == FloatType t = Just e
-asFloatExp t (ValueExp (FloatValue v)) =
-  Just $ ValueExp $ FloatValue $ doFPConv v t
-asFloatExp t (ValueExp (IntValue v)) =
-  Just $ ValueExp $ FloatValue $ doSIToFP v t
-asFloatExp _ _ =
-  Nothing
-
-constFold :: (PrimValue -> PrimValue -> Maybe PrimValue)
-            -> PrimExp v -> PrimExp v
-            -> Maybe (PrimExp v)
-constFold f x y = do x' <- valueExp x
-                     y' <- valueExp y
-                     ValueExp <$> f x' y'
 
 numBad :: Pretty a => String -> a -> b
 numBad s x =
@@ -233,17 +449,17 @@ numBad s x =
 
 -- | Evaluate a 'PrimExp' in the given monad.  Invokes 'fail' on type
 -- errors.
-evalPrimExp :: (Pretty v, Monad m) => (v -> m PrimValue) -> PrimExp v -> m PrimValue
+evalPrimExp :: (Pretty v, MonadFail m) => (v -> m PrimValue) -> PrimExp v -> m PrimValue
 evalPrimExp f (LeafExp v _) = f v
 evalPrimExp _ (ValueExp v) = return v
 evalPrimExp f (BinOpExp op x y) = do
   x' <- evalPrimExp f x
   y' <- evalPrimExp f y
-  maybe (evalBad op (x,y)) return $ doBinOp op x' y'
+  maybe (evalBad op (x, y)) return $ doBinOp op x' y'
 evalPrimExp f (CmpOpExp op x y) = do
   x' <- evalPrimExp f x
   y' <- evalPrimExp f y
-  maybe (evalBad op (x,y)) (return . BoolValue) $ doCmpOp op x' y'
+  maybe (evalBad op (x, y)) (return . BoolValue) $ doCmpOp op x' y'
 evalPrimExp f (UnOpExp op x) = do
   x' <- evalPrimExp f x
   maybe (evalBad op x) return $ doUnOp op x'
@@ -252,62 +468,124 @@ evalPrimExp f (ConvOpExp op x) = do
   maybe (evalBad op x) return $ doConvOp op x'
 evalPrimExp f (FunExp h args _) = do
   args' <- mapM (evalPrimExp f) args
-  maybe (evalBad h args) return $ do (_, _, fun) <- M.lookup h primFuns
-                                     fun args'
+  maybe (evalBad h args) return $ do
+    (_, _, fun) <- M.lookup h primFuns
+    fun args'
 
-evalBad :: (Pretty a, Pretty b, Monad m) => a -> b -> m c
-evalBad op arg = fail $ "evalPrimExp: Type error when applying " ++
-                 pretty op ++ " to " ++ pretty arg
+evalBad :: (Pretty a, Pretty b, MonadFail m) => a -> b -> m c
+evalBad op arg =
+  fail $
+    "evalPrimExp: Type error when applying "
+      ++ pretty op
+      ++ " to "
+      ++ pretty arg
 
 -- | The type of values returned by a 'PrimExp'.  This function
 -- returning does not imply that the 'PrimExp' is type-correct.
 primExpType :: PrimExp v -> PrimType
-primExpType (LeafExp _ t)     = t
-primExpType (ValueExp v)      = primValueType v
+primExpType (LeafExp _ t) = t
+primExpType (ValueExp v) = primValueType v
 primExpType (BinOpExp op _ _) = binOpType op
-primExpType CmpOpExp{}        = Bool
-primExpType (UnOpExp op _)    = unOpType op
-primExpType (ConvOpExp op _)  = snd $ convOpType op
-primExpType (FunExp _ _ t)    = t
+primExpType CmpOpExp {} = Bool
+primExpType (UnOpExp op _) = unOpType op
+primExpType (ConvOpExp op _) = snd $ convOpType op
+primExpType (FunExp _ _ t) = t
 
 -- | Is the expression a constant zero of some sort?
 zeroIshExp :: PrimExp v -> Bool
 zeroIshExp (ValueExp v) = zeroIsh v
-zeroIshExp _            = False
+zeroIshExp _ = False
 
 -- | Is the expression a constant one of some sort?
 oneIshExp :: PrimExp v -> Bool
 oneIshExp (ValueExp v) = oneIsh v
-oneIshExp _            = False
-
--- | Is the expression a constant value?
-valueExp :: PrimExp v -> Maybe PrimValue
-valueExp (ValueExp v) = Just v
-valueExp _            = Nothing
+oneIshExp _ = False
 
 -- | If the given 'PrimExp' is a constant of the wrong integer type,
 -- coerce it to the given integer type.  This is a workaround for an
 -- issue in the 'Num' instance.
 coerceIntPrimExp :: IntType -> PrimExp v -> PrimExp v
 coerceIntPrimExp t (ValueExp (IntValue v)) = ValueExp $ IntValue $ doSExt v t
-coerceIntPrimExp _ e                       = e
+coerceIntPrimExp _ e = e
 
 primExpIntType :: PrimExp v -> IntType
-primExpIntType e = case primExpType e of IntType t -> t
-                                         _         -> Int64
+primExpIntType e = case primExpType e of
+  IntType t -> t
+  _ -> Int64
 
 -- | Boolean-valued PrimExps.
-true, false :: PrimExp v
-true = ValueExp $ BoolValue True
-false = ValueExp $ BoolValue False
+true, false :: TPrimExp Bool v
+true = TPrimExp $ ValueExp $ BoolValue True
+false = TPrimExp $ ValueExp $ BoolValue False
+
+-- | Boolean negation smart constructor.
+bNot :: TPrimExp Bool v -> TPrimExp Bool v
+bNot = TPrimExp . UnOpExp Not . untyped
+
+-- | SMax on 32-bit integers.
+sMax32 :: TPrimExp Int32 v -> TPrimExp Int32 v -> TPrimExp Int32 v
+sMax32 x y = TPrimExp $ BinOpExp (SMax Int32) (untyped x) (untyped y)
+
+-- | SMin on 32-bit integers.
+sMin32 :: TPrimExp Int32 v -> TPrimExp Int32 v -> TPrimExp Int32 v
+sMin32 x y = TPrimExp $ BinOpExp (SMin Int32) (untyped x) (untyped y)
+
+-- | SMax on 64-bit integers.
+sMax64 :: TPrimExp Int64 v -> TPrimExp Int64 v -> TPrimExp Int64 v
+sMax64 x y = TPrimExp $ BinOpExp (SMax Int64) (untyped x) (untyped y)
+
+-- | SMin on 64-bit integers.
+sMin64 :: TPrimExp Int64 v -> TPrimExp Int64 v -> TPrimExp Int64 v
+sMin64 x y = TPrimExp $ BinOpExp (SMin Int64) (untyped x) (untyped y)
+
+-- | Sign-extend to 32 bit integer.
+sExt32 :: IntExp t => TPrimExp t v -> TPrimExp Int32 v
+sExt32 = isInt32 . sExt Int32 . untyped
+
+-- | Sign-extend to 64 bit integer.
+sExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
+sExt64 = isInt64 . sExt Int64 . untyped
+
+-- | Zero-extend to 32 bit integer.
+zExt32 :: IntExp t => TPrimExp t v -> TPrimExp Int32 v
+zExt32 = isInt32 . zExt Int32 . untyped
+
+-- | Zero-extend to 64 bit integer.
+zExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
+zExt64 = isInt64 . zExt Int64 . untyped
+
+-- | 64-bit float minimum.
+fMin64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
+fMin64 x y = TPrimExp $ BinOpExp (FMin Float64) (untyped x) (untyped y)
+
+-- | 64-bit float maximum.
+fMax64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
+fMax64 x y = TPrimExp $ BinOpExp (FMax Float64) (untyped x) (untyped y)
 
 -- Prettyprinting instances
 
 instance Pretty v => Pretty (PrimExp v) where
-  ppr (LeafExp v _)     = ppr v
-  ppr (ValueExp v)      = ppr v
+  ppr (LeafExp v _) = ppr v
+  ppr (ValueExp v) = ppr v
   ppr (BinOpExp op x y) = ppr op <+> parens (ppr x) <+> parens (ppr y)
   ppr (CmpOpExp op x y) = ppr op <+> parens (ppr x) <+> parens (ppr y)
-  ppr (ConvOpExp op x)  = ppr op <+> parens (ppr x)
-  ppr (UnOpExp op x)    = ppr op <+> parens (ppr x)
+  ppr (ConvOpExp op x) = ppr op <+> parens (ppr x)
+  ppr (UnOpExp op x) = ppr op <+> parens (ppr x)
   ppr (FunExp h args _) = text h <+> parens (commasep $ map ppr args)
+
+instance Pretty v => Pretty (TPrimExp t v) where
+  ppr = ppr . untyped
+
+-- | Produce a mapping from the leaves of the 'PrimExp' to their
+-- designated types.
+leafExpTypes :: Ord a => PrimExp a -> S.Set (a, PrimType)
+leafExpTypes (LeafExp x ptp) = S.singleton (x, ptp)
+leafExpTypes (ValueExp _) = S.empty
+leafExpTypes (UnOpExp _ e) = leafExpTypes e
+leafExpTypes (ConvOpExp _ e) = leafExpTypes e
+leafExpTypes (BinOpExp _ e1 e2) =
+  S.union (leafExpTypes e1) (leafExpTypes e2)
+leafExpTypes (CmpOpExp _ e1 e2) =
+  S.union (leafExpTypes e1) (leafExpTypes e2)
+leafExpTypes (FunExp _ pes _) =
+  S.unions $ map leafExpTypes pes

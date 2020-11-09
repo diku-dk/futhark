@@ -2,8 +2,8 @@
 -- determined until runtime.
 --
 -- ==
--- input { 2 2 } output { [[0,1], [3, 3]] }
--- input { 2 3 } error: Error
+-- input { 2i64 2i64 } output { [[0i64,1i64], [3i64, 3i64]] }
+-- input { 2i64 3i64 } error: Error
 
-let main (n: i32) (m: i32): [][]i32 =
-  [iota n, replicate m 3]
+let main (n: i64) (m: i64): [][]i64 =
+  [iota n, replicate m 3i64 :> [n]i64]

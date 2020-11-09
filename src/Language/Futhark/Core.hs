@@ -1,80 +1,114 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
+
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
 module Language.Futhark.Core
-  ( Uniqueness(..)
-  , StreamOrd(..)
-  , Commutativity(..)
+  ( Uniqueness (..),
+    Commutativity (..),
 
-  -- * Location utilities
-  , locStr
+    -- * Location utilities
+    SrcLoc,
+    Loc,
+    Located (..),
+    srclocOf,
+    locStr,
+    locStrRel,
+    prettyStacktrace,
 
-  -- * Name handling
-  , Name
-  , nameToString
-  , nameFromString
-  , nameToText
-  , nameFromText
-  , VName(..)
-  , baseTag
-  , baseName
-  , baseString
-  , pretty
-  -- * Special identifiers
-  , defaultEntryPoint
+    -- * Name handling
+    Name,
+    nameToString,
+    nameFromString,
+    nameToText,
+    nameFromText,
+    VName (..),
+    baseTag,
+    baseName,
+    baseString,
+    pretty,
+    quote,
+    pquote,
+
+    -- * Special identifiers
+    defaultEntryPoint,
 
     -- * Integer re-export
-  , Int8, Int16, Int32, Int64
-  , Word8, Word16, Word32, Word64
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Word8,
+    Word16,
+    Word32,
+    Word64,
   )
-
 where
 
-import Data.Int (Int8, Int16, Int32, Int64)
+import Control.Category
+import Data.Int (Int16, Int32, Int64, Int8)
 import Data.String
-import Data.Word (Word8, Word16, Word32, Word64)
-import Data.Loc
-import qualified Data.Semigroup as Sem
 import qualified Data.Text as T
-
+import Data.Word (Word16, Word32, Word64, Word8)
+import Futhark.Util.Loc
 import Futhark.Util.Pretty
+import GHC.Generics
+import Language.SexpGrammar as Sexp
+import Language.SexpGrammar.Generic
+import Text.Read
+import Prelude hiding (id, (.))
 
 -- | The uniqueness attribute of a type.  This essentially indicates
 -- whether or not in-place modifications are acceptable.  With respect
 -- to ordering, 'Unique' is greater than 'Nonunique'.
-data Uniqueness = Nonunique -- ^ May have references outside current function.
-                | Unique    -- ^ No references outside current function.
-                  deriving (Eq, Ord, Show)
+data Uniqueness
+  = -- | May have references outside current function.
+    Nonunique
+  | -- | No references outside current function.
+    Unique
+  deriving (Eq, Ord, Show, Generic)
 
-instance Sem.Semigroup Uniqueness where
+instance SexpIso Uniqueness where
+  sexpIso =
+    match $
+      With (. Sexp.sym "nonunique") $
+        With
+          (. Sexp.sym "unique")
+          End
+
+instance Semigroup Uniqueness where
   (<>) = min
 
 instance Monoid Uniqueness where
   mempty = Unique
-  mappend = (Sem.<>)
 
 instance Pretty Uniqueness where
   ppr Unique = star
   ppr Nonunique = empty
 
-data StreamOrd  = InOrder
-                | Disorder
-                    deriving (Eq, Ord, Show)
-
 -- | Whether some operator is commutative or not.  The 'Monoid'
 -- instance returns the least commutative of its arguments.
-data Commutativity = Noncommutative
-                   | Commutative
-                     deriving (Eq, Ord, Show)
+data Commutativity
+  = Noncommutative
+  | Commutative
+  deriving (Eq, Ord, Show, Generic)
 
-instance Sem.Semigroup Commutativity where
+instance SexpIso Commutativity where
+  sexpIso =
+    match $
+      With (. Sexp.sym "noncommutative") $
+        With
+          (. Sexp.sym "commutative")
+          End
+
+instance Semigroup Commutativity where
   (<>) = min
 
 instance Monoid Commutativity where
   mempty = Commutative
-  mappend = (Sem.<>)
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name
@@ -84,7 +118,10 @@ defaultEntryPoint = nameFromString "main"
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
 newtype Name = Name T.Text
-  deriving (Show, Eq, Ord, IsString, Sem.Semigroup)
+  deriving (Show, Eq, Ord, IsString, Semigroup, Generic)
+
+instance SexpIso Name where
+  sexpIso = with (. symbol)
 
 instance Pretty Name where
   ppr = text . nameToString
@@ -106,19 +143,82 @@ nameFromText :: T.Text -> Name
 nameFromText = Name
 
 -- | A human-readable location string, of the form
--- @filename:lineno:columnno@.
-locStr :: SrcLoc -> String
-locStr (SrcLoc NoLoc) = "unknown location"
-locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
-  -- Assume that both positions are in the same file (what would the
-  -- alternative mean?)
-  file ++ ":" ++ show line1 ++ ":" ++ show col1
-       ++ "-" ++ show line2 ++ ":" ++ show col2
+-- @filename:lineno:columnno@.  This follows the GNU coding standards
+-- for error messages:
+-- https://www.gnu.org/prep/standards/html_node/Errors.html
+--
+-- This function assumes that both start and end position is in the
+-- same file (it is not clear what the alternative would even mean).
+locStr :: Located a => a -> String
+locStr a =
+  case locOf a of
+    NoLoc -> "unknown location"
+    Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)
+      -- Do not show line2 if it is identical to line1.
+      | line1 == line2 ->
+        first_part ++ "-" ++ show col2
+      | otherwise ->
+        first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+      where
+        first_part = file ++ ":" ++ show line1 ++ ":" ++ show col1
+
+-- | Like 'locStr', but @locStrRel prev now@ prints the location @now@
+-- with the file name left out if the same as @prev@.  This is useful
+-- when printing messages that are all in the context of some
+-- initially printed location (e.g. the first mention contains the
+-- file name; the rest just line and column name).
+locStrRel :: (Located a, Located b) => a -> b -> String
+locStrRel a b =
+  case (locOf a, locOf b) of
+    (Loc (Pos a_file _ _ _) _, Loc (Pos b_file line1 col1 _) (Pos _ line2 col2 _))
+      | a_file == b_file,
+        line1 == line2 ->
+        first_part ++ "-" ++ show col2
+      | a_file == b_file ->
+        first_part ++ "-" ++ show line2 ++ ":" ++ show col2
+      where
+        first_part = show line1 ++ ":" ++ show col1
+    _ -> locStr b
+
+-- | Given a list of strings representing entries in the stack trace
+-- and the index of the frame to highlight, produce a final
+-- newline-terminated string for showing to the user.  This string
+-- should also be preceded by a newline.  The most recent stack frame
+-- must come first in the list.
+prettyStacktrace :: Int -> [String] -> String
+prettyStacktrace cur = unlines . zipWith f [(0 :: Int) ..]
+  where
+    -- Formatting hack: assume no stack is deeper than 100
+    -- elements.  Since Futhark does not support recursion, going
+    -- beyond that would require a truly perverse program.
+    f i x =
+      (if cur == i then "-> " else "   ")
+        ++ '#' :
+      show i
+        ++ (if i > 9 then "" else " ")
+        ++ " "
+        ++ x
 
 -- | A name tagged with some integer.  Only the integer is used in
 -- comparisons, no matter the type of @vn@.
 data VName = VName !Name !Int
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance SexpIso VName where
+  sexpIso = with $ \vname ->
+    Sexp.symbol
+      >>> flipped
+        ( pair
+            >>> partialIso
+              (\(nm, i) -> T.pack $ nameToString nm ++ "_" ++ show i)
+              ( \s ->
+                  let (nm, i) = T.breakOnEnd "_" s
+                   in case readMaybe $ T.unpack i of
+                        Just i' -> Right (nameFromString $ T.unpack $ T.init nm, i')
+                        Nothing -> Left $ expected "Couldn't parse int of vname"
+              )
+        )
+      >>> vname
 
 -- | Return the tag contained in the 'VName'.
 baseTag :: VName -> Int
@@ -137,3 +237,13 @@ instance Eq VName where
 
 instance Ord VName where
   VName _ x `compare` VName _ y = x `compare` y
+
+-- | Enclose a string in the prefered quotes used in error messages.
+-- These are picked to not collide with characters permitted in
+-- identifiers.
+quote :: String -> String
+quote s = "\"" ++ s ++ "\""
+
+-- | As 'quote', but works on prettyprinted representation.
+pquote :: Doc -> Doc
+pquote = dquotes

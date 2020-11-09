@@ -15,8 +15,8 @@ want to take a look at :ref:`usage`.  This User's Guide contains a
 better served by reading `Parallel Programming in Futhark
 <https://futhark-book.readthedocs.io>`_ first.
 
-Documentation for the included basis library is also `available online
-<https://futhark-lang.org/docs/>`_.
+Documentation for the built-in prelude is also `available online
+<https://futhark-lang.org/docs/prelude/>`_.
 
 The particularly interested reader may also want to peruse the
 `publications <https://futhark-lang.org/docs.html#publications>`_, or
@@ -30,6 +30,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    installation.rst
    usage.rst
    language-reference.rst
+   c-api.rst
    package-management.rst
    c-porting-guide.rst
    versus-other-languages.rst
@@ -41,15 +42,17 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    :maxdepth: 1
 
    man/futhark.rst
-   man/futhark-c.rst
-   man/futhark-opencl.rst
-   man/futhark-py.rst
-   man/futhark-pyopencl.rst
-   man/futhark-cs.rst
-   man/futhark-csopencl.rst
-   man/futharki.rst
-   man/futhark-test.rst
+   man/futhark-autotune.rst
    man/futhark-bench.rst
-   man/futhark-doc.rst
+   man/futhark-c.rst
+   man/futhark-multicore.rst
+   man/futhark-cuda.rst
    man/futhark-dataset.rst
+   man/futhark-doc.rst
+   man/futhark-opencl.rst
    man/futhark-pkg.rst
+   man/futhark-pyopencl.rst
+   man/futhark-python.rst
+   man/futhark-repl.rst
+   man/futhark-run.rst
+   man/futhark-test.rst

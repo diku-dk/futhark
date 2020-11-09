@@ -6,7 +6,7 @@
 -- output {
 --   [[4,4,4],[7,9,11]]
 -- }
-let addRows (xs: []i32, ys: []i32): []i32 =
+let addRows [n] (xs: [n]i32, ys: [n]i32): [n]i32 =
   map2 (+) xs ys
 
 let addMatricies (a: [][]i32, b: [][]i32): [][]i32 =

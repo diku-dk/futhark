@@ -15,4 +15,4 @@ let main(xs: []i32): i32 =
     , max x 0
     , max x 0
     , x)
-  in (reduce redOp (0,0,0,0) (map mapOp xs)).1
+  in (reduce redOp (0,0,0,0) (map mapOp xs)).0

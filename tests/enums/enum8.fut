@@ -1,5 +1,5 @@
 -- Invalid constructor format.
 -- ==
--- error:
+-- error: Parse error
 
 type foo = #foo | bar

@@ -1,64 +1,65 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
--- | Converting back and forth between 'PrimExp's.
+
+-- | Converting back and forth between 'PrimExp's.  Use the 'ToExp'
+-- instance to convert to Futhark expressions.
 module Futhark.Analysis.PrimExp.Convert
-  (
-    primExpToExp
-  , primExpFromExp
-  , primExpFromSubExp
-  , primExpFromSubExpM
-  , replaceInPrimExp
-  , substituteInPrimExp
+  ( primExpFromExp,
+    primExpFromSubExp,
+    pe32,
+    le32,
+    pe64,
+    le64,
+    primExpFromSubExpM,
+    replaceInPrimExp,
+    replaceInPrimExpM,
+    substituteInPrimExp,
+    primExpSlice,
+    subExpSlice,
 
     -- * Module reexport
-    , module Futhark.Analysis.PrimExp
-  ) where
+    module Futhark.Analysis.PrimExp,
+  )
+where
 
 import qualified Control.Monad.Fail as Fail
-import           Data.Loc
+import Control.Monad.Identity
 import qualified Data.Map.Strict as M
-import           Data.Maybe
-
-import           Futhark.Analysis.PrimExp
-import           Futhark.Construct
-import           Futhark.Representation.AST
-
--- | Convert a 'PrimExp' to a Futhark expression.  The provided
--- function converts the leaves.
-primExpToExp :: MonadBinder m =>
-                (v -> m (Exp (Lore m))) -> PrimExp v -> m (Exp (Lore m))
-primExpToExp f (BinOpExp op x y) =
-  BasicOp <$> (BinOp op
-               <$> primExpToSubExp "binop_x" f x
-               <*> primExpToSubExp "binop_y" f y)
-primExpToExp f (CmpOpExp op x y) =
-  BasicOp <$> (CmpOp op
-               <$> primExpToSubExp "cmpop_x" f x
-               <*> primExpToSubExp "cmpop_y" f y)
-primExpToExp f (UnOpExp op x) =
-  BasicOp <$> (UnOp op <$> primExpToSubExp "unop_x" f x)
-primExpToExp f (ConvOpExp op x) =
-  BasicOp <$> (ConvOp op <$> primExpToSubExp "convop_x" f x)
-primExpToExp _ (ValueExp v) =
-  return $ BasicOp $ SubExp $ Constant v
-primExpToExp f (FunExp h args t) =
-  Apply (nameFromString h) <$> args' <*> pure [primRetType t] <*> pure (Safe, noLoc, [])
-  where args' = zip <$> mapM (primExpToSubExp "apply_arg" f) args <*> pure (repeat Observe)
-primExpToExp f (LeafExp v _) =
-  f v
+import Data.Maybe
+import Futhark.Analysis.PrimExp
+import Futhark.Construct
+import Futhark.IR
 
 instance ToExp v => ToExp (PrimExp v) where
-  toExp = primExpToExp toExp
+  toExp (BinOpExp op x y) =
+    BasicOp <$> (BinOp op <$> toSubExp "binop_x" x <*> toSubExp "binop_y" y)
+  toExp (CmpOpExp op x y) =
+    BasicOp <$> (CmpOp op <$> toSubExp "cmpop_x" x <*> toSubExp "cmpop_y" y)
+  toExp (UnOpExp op x) =
+    BasicOp <$> (UnOp op <$> toSubExp "unop_x" x)
+  toExp (ConvOpExp op x) =
+    BasicOp <$> (ConvOp op <$> toSubExp "convop_x" x)
+  toExp (ValueExp v) =
+    return $ BasicOp $ SubExp $ Constant v
+  toExp (FunExp h args t) =
+    Apply (nameFromString h) <$> args' <*> pure [primRetType t]
+      <*> pure (Safe, mempty, [])
+    where
+      args' = zip <$> mapM (toSubExp "apply_arg") args <*> pure (repeat Observe)
+  toExp (LeafExp v _) =
+    toExp v
 
-primExpToSubExp :: MonadBinder m =>
-                   String -> (v -> m (Exp (Lore m))) -> PrimExp v -> m SubExp
-primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
+instance ToExp v => ToExp (TPrimExp t v) where
+  toExp = toExp . untyped
 
 -- | Convert an expression to a 'PrimExp'.  The provided function is
 -- used to convert expressions that are not trivially 'PrimExp's.
 -- This includes constants and variable names, which are passed as
--- 'SubExp's.
-primExpFromExp :: (Fail.MonadFail m, Annotations lore) =>
-                  (VName -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
+-- t'SubExp's.
+primExpFromExp ::
+  (Fail.MonadFail m, Decorations lore) =>
+  (VName -> m (PrimExp v)) ->
+  Exp lore ->
+  m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
   BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y
 primExpFromExp f (BasicOp (CmpOp op x y)) =
@@ -67,43 +68,84 @@ primExpFromExp f (BasicOp (UnOp op x)) =
   UnOpExp op <$> primExpFromSubExpM f x
 primExpFromExp f (BasicOp (ConvOp op x)) =
   ConvOpExp op <$> primExpFromSubExpM f x
-primExpFromExp _ (BasicOp (SubExp (Constant v))) =
-  return $ ValueExp v
+primExpFromExp f (BasicOp (SubExp se)) =
+  primExpFromSubExpM f se
 primExpFromExp f (Apply fname args ts _)
-  | isBuiltInFunction fname, [Prim t] <- retTypeValues ts =
-      FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
+  | isBuiltInFunction fname,
+    [Prim t] <- map declExtTypeOf ts =
+    FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
-primExpFromSubExpM :: Fail.MonadFail m =>
-                      (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
+-- | Like 'primExpFromExp', but for a t'SubExp'.
+primExpFromSubExpM :: Applicative m => (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
 primExpFromSubExpM f (Var v) = f v
-primExpFromSubExpM _ (Constant v) = return $ ValueExp v
+primExpFromSubExpM _ (Constant v) = pure $ ValueExp v
 
--- | Convert 'SubExp's of a given type.
+-- | Convert t'SubExp's of a given type.
 primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
-primExpFromSubExp t (Var v)      = LeafExp v t
+primExpFromSubExp t (Var v) = LeafExp v t
 primExpFromSubExp _ (Constant v) = ValueExp v
 
--- | Applying a transformation to the leaves in a 'PrimExp'.
-replaceInPrimExp :: (v -> PrimType -> PrimExp v) ->
-                    PrimExp v -> PrimExp v
-replaceInPrimExp f (LeafExp v pt) =
+-- | Shorthand for constructing a 'TPrimExp' of type 'Int32'.
+pe32 :: SubExp -> TPrimExp Int32 VName
+pe32 = isInt32 . primExpFromSubExp int32
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Int32', from a leaf.
+le32 :: a -> TPrimExp Int32 a
+le32 = isInt32 . flip LeafExp int32
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Int64'.
+pe64 :: SubExp -> TPrimExp Int64 VName
+pe64 = isInt64 . primExpFromSubExp int64
+
+-- | Shorthand for constructing a 'TPrimExp' of type 'Int64', from a leaf.
+le64 :: a -> TPrimExp Int64 a
+le64 = isInt64 . flip LeafExp int64
+
+-- | Applying a monadic transformation to the leaves in a 'PrimExp'.
+replaceInPrimExpM ::
+  Monad m =>
+  (a -> PrimType -> m (PrimExp b)) ->
+  PrimExp a ->
+  m (PrimExp b)
+replaceInPrimExpM f (LeafExp v pt) =
   f v pt
-replaceInPrimExp _ (ValueExp v) =
-  ValueExp v
-replaceInPrimExp f (BinOpExp bop pe1 pe2) =
-  BinOpExp bop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
-replaceInPrimExp f (CmpOpExp cop pe1 pe2) =
-  CmpOpExp cop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
-replaceInPrimExp f (UnOpExp uop pe) =
-  UnOpExp uop $ replaceInPrimExp f pe
-replaceInPrimExp f (ConvOpExp cop pe) =
-  ConvOpExp cop $ replaceInPrimExp f pe
-replaceInPrimExp f (FunExp h args t) =
-  FunExp h (map (replaceInPrimExp f) args) t
+replaceInPrimExpM _ (ValueExp v) =
+  return $ ValueExp v
+replaceInPrimExpM f (BinOpExp bop pe1 pe2) =
+  constFoldPrimExp
+    <$> (BinOpExp bop <$> replaceInPrimExpM f pe1 <*> replaceInPrimExpM f pe2)
+replaceInPrimExpM f (CmpOpExp cop pe1 pe2) =
+  CmpOpExp cop <$> replaceInPrimExpM f pe1 <*> replaceInPrimExpM f pe2
+replaceInPrimExpM f (UnOpExp uop pe) =
+  UnOpExp uop <$> replaceInPrimExpM f pe
+replaceInPrimExpM f (ConvOpExp cop pe) =
+  ConvOpExp cop <$> replaceInPrimExpM f pe
+replaceInPrimExpM f (FunExp h args t) =
+  FunExp h <$> mapM (replaceInPrimExpM f) args <*> pure t
+
+-- | As 'replaceInPrimExpM', but in the identity monad.
+replaceInPrimExp ::
+  (a -> PrimType -> PrimExp b) ->
+  PrimExp a ->
+  PrimExp b
+replaceInPrimExp f e = runIdentity $ replaceInPrimExpM f' e
+  where
+    f' x y = return $ f x y
 
 -- | Substituting names in a PrimExp with other PrimExps
-substituteInPrimExp :: Ord v => M.Map v (PrimExp v)
-                    -> PrimExp v -> PrimExp v
+substituteInPrimExp ::
+  Ord v =>
+  M.Map v (PrimExp v) ->
+  PrimExp v ->
+  PrimExp v
 substituteInPrimExp tab = replaceInPrimExp $ \v t ->
   fromMaybe (LeafExp v t) $ M.lookup v tab
+
+-- | Convert a 'SubExp' slice to a 'PrimExp' slice.
+primExpSlice :: Slice SubExp -> Slice (TPrimExp Int64 VName)
+primExpSlice = map $ fmap pe64
+
+-- | Convert a 'PrimExp' slice to a 'SubExp' slice.
+subExpSlice :: MonadBinder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
+subExpSlice = mapM $ traverse $ toSubExp "slice"

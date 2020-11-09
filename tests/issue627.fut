@@ -1,5 +1,5 @@
 -- ==
--- error: Value `f`
+-- error: val f
 
 module type m = {
     type t

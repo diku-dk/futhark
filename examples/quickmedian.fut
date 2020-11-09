@@ -11,6 +11,7 @@
 -- Oh, and it cannot handle empty inputs.
 --
 -- ==
+-- tags { no_csharp }
 -- input { [1] }
 -- output { 1 }
 -- input { [4, -8, 2, 2, 0, 0, 5, 9, -6, 2] }
@@ -18,7 +19,7 @@
 
 let quickmedian [n] (xs: [n]i32): i32 =
   let (_, ys) =
-    loop (i, ys) = (0, xs) while length ys > 1 do
+    loop (i, ys : []i32) = (0, xs) while length ys > 1 do
       let pivot = ys[length ys/2]
       let (lt, gte) = partition (<pivot) ys
       in if null lt then (i + 1, tail gte)

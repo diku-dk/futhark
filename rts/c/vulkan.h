@@ -151,7 +151,7 @@ static void vulkan_succeed(unsigned int ret,
                            const char *file,
                            int line) {
   if (ret != VK_SUCCESS) {
-    panic(-1, "%s:%d: Vulkan call\n  %s\nfailed with error code %d (%s)\n",
+    futhark_panic(-1, "%s:%d: Vulkan call\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, vulkan_error_string(ret));
   }
 }
@@ -183,18 +183,18 @@ static VkPhysicalDevice get_preferred_physical_device(const struct vulkan_config
   VkPhysicalDevice device;
   if (cfg->preferred_device_index >= 0) {
     if(cfg->preferred_device_index >= device_count)
-      panic(1, "Specified device index not found.\n");
+      futhark_panic(1, "Specified device index not found.\n");
 
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(devices[cfg->preferred_device_index], &properties);
 
     if (properties.apiVersion < cfg->api_version)
-      panic(1, "Device at specified index does not support required Vulkan API.");
-    
+      futhark_panic(1, "Device at specified index does not support required Vulkan API.");
+
     device = devices[cfg->preferred_device_index];
   }
   else if(!get_suitable_physical_device(cfg, devices, device_count, &device)) {
-    panic(1, "Could not find acceptable Vulkan device.\n");
+    futhark_panic(1, "Could not find acceptable Vulkan device.\n");
   }
 
   free(devices);
@@ -213,7 +213,7 @@ static uint32_t get_suitable_queue_family(const struct vulkan_config *cfg,
           return 1;
       }
   }
-  
+
   return 0;
 }
 
@@ -228,17 +228,17 @@ static uint32_t get_preferred_queue_family(const struct vulkan_config *cfg, VkPh
   uint32_t queue_family_index;
   if (cfg->preferred_device_queue_index >= 0) {
     if(cfg->preferred_device_queue_index >= queue_family_props_count)
-      panic(1, "Specified queue family index not found.\n");
+      futhark_panic(1, "Specified queue family index not found.\n");
 
     if (!(VK_QUEUE_COMPUTE_BIT & queue_family_props[cfg->preferred_device_queue_index].queueFlags))
-      panic(1, "Queue family does not support compute shaders.");
-    
+      futhark_panic(1, "Queue family does not support compute shaders.");
+
     queue_family_index = cfg->preferred_device_queue_index;
   }
   else if(!get_suitable_queue_family(cfg, queue_family_props, queue_family_props_count, &queue_family_index)) {
-    panic(1, "Could not find acceptable device queue.\n");
+    futhark_panic(1, "Could not find acceptable device queue.\n");
   }
-  
+
   free(queue_family_props);
   return queue_family_index;
 }
@@ -291,7 +291,7 @@ static void init_sizes(struct vulkan_context *ctx) {
       max_value = 0; // No limit.
       default_value = ctx->cfg.default_threshold;
     } else {
-      panic(1, "Unknown size class for size '%s': %s\n", size_name, size_class);
+      futhark_panic(1, "Unknown size class for size '%s': %s\n", size_name, size_class);
     }
     if (*size_value == 0) {
       *size_value = default_value;
@@ -331,7 +331,7 @@ static VkResult vulkan_allocate_command_buffers(struct vulkan_context *ctx,
     ctx->command_buffers[i].active_descriptor_set = 0;
     ctx->command_buffers[i].owns = 0;
     ctx->command_buffers[i].scalar_count = 0;
-    ctx->command_buffers[i].command_buffer = tmp_buffers[i-offset]; 
+    ctx->command_buffers[i].command_buffer = tmp_buffers[i-offset];
 
     error = vkCreateFence(ctx->device,
                           &fence_create_info,
@@ -404,7 +404,7 @@ static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
   device_queue_create_info.queueFamilyIndex = ctx->queue_family_index;
   device_queue_create_info.queueCount       = 1;
   device_queue_create_info.pQueuePriorities = &queue_prio;
-  
+
   const char *device_extension_names[] = { "VK_KHR_8bit_storage" };
 
   VkPhysicalDevice8BitStorageFeaturesKHR storage_8bit_features;
@@ -459,7 +459,7 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
                          uint32_t descriptor_count,
                          const uint32_t shader[],
                          uint32_t shader_size) {
-  
+
   if (ctx->cfg.dump_program_to != NULL) {
     char *fname = malloc((strlen(ctx->cfg.dump_program_to) + strlen(entry_point) + 5) * sizeof(char));
     sprintf(fname, "%s.%s.spv", ctx->cfg.dump_program_to, entry_point);
@@ -486,7 +486,7 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
 
   VkDescriptorSetLayoutBinding *desc_set_layout_bindings =
     malloc(sizeof(VkDescriptorSetLayoutBinding) * descriptor_count);
-  
+
   for (int i = 0; i < descriptor_count; ++i) {
     desc_set_layout_bindings[i].binding = i;
     desc_set_layout_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -594,7 +594,7 @@ VkResult vulkan_sync_mem(struct vulkan_context *ctx, struct vk_buffer_mem_pair *
 
   if (error != VK_SUCCESS)
     return error;
-  
+
   // The corresponding command buffer no longer references the memory
   ctx->command_buffers[mem->owner_index].owns--;
 
@@ -640,7 +640,7 @@ VkResult vulkan_alloc(struct vulkan_context *ctx,
   if (error != VK_SUCCESS) {
     return error;
   }
-  
+
   VkMemoryRequirements mem_req;
   vkGetBufferMemoryRequirements(ctx->device, mem_out->buffer, &mem_req);
 
@@ -648,7 +648,7 @@ VkResult vulkan_alloc(struct vulkan_context *ctx,
 
   size_t size;
   struct vk_buffer_mem_pair mem;
-  if (free_list_find(&ctx->free_list, tag, &size, &mem) == 0) {
+  if (free_list_find(&ctx->free_list, mem_req.size, &size, &mem) == 0) {
     // Successfully found a free block.  Is it big enough?
     // FIXME: See opencl_alloc in opencl.h
     if (size >= mem_req.size) {
@@ -662,7 +662,7 @@ VkResult vulkan_alloc(struct vulkan_context *ctx,
   }
 
   // Find suitable heap
-  
+
   VkPhysicalDeviceMemoryProperties properties;
   vkGetPhysicalDeviceMemoryProperties(ctx->physical_device, &properties);
 
@@ -688,7 +688,7 @@ VkResult vulkan_alloc(struct vulkan_context *ctx,
 
   mem_out->owned = 0;
   mem_out->owner_index = 0;
-  
+
   VkMemoryAllocateInfo mem_alloc_info;
   mem_alloc_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   mem_alloc_info.pNext           = 0;
@@ -712,7 +712,7 @@ void vulkan_free(struct vulkan_context *ctx, struct vk_buffer_mem_pair mem, cons
 
   // If there is already a block with this tag, then remove it.
   size_t size;
-  if (free_list_find(&ctx->free_list, tag, &size, &existing_mem) == 0)
+  if (free_list_find(&ctx->free_list, 0, &size, &existing_mem) == 0)
     vulkan_free_mem_sync(ctx, &existing_mem);
 
   free_list_insert(&ctx->free_list, mem.size, mem, tag);
@@ -751,7 +751,7 @@ void vulkan_free_scalars(struct vulkan_context *ctx, uint32_t command_buffer_ind
 
   if (command_buffer_ctx->scalar_count > 0)
     free(command_buffer_ctx->scalars);
-  
+
   command_buffer_ctx->scalar_count = 0;
 }
 
@@ -772,7 +772,7 @@ void vulkan_transfer_ownership(struct vulkan_context *ctx,
 
 VkResult vulkan_available_command_buffer(struct vulkan_context *ctx,
                                          uint32_t *command_buffer_index) {
-                                           
+
   for (int i = 0; i < ctx->command_buffer_count; ++i) {
     struct vulkan_command_buffer_context *command_buffer_ctx = ctx->command_buffers + i;
 
@@ -806,7 +806,7 @@ VkResult vulkan_available_command_buffer(struct vulkan_context *ctx,
   ctx->descriptor_pools = realloc(ctx->descriptor_pools,
                                   ctx->command_buffer_count / ALLOC_STEP * sizeof(VkDescriptorPool));
   error = vulkan_create_descriptor_pool(ctx, ctx->descriptor_pools + old_command_buffer_count / ALLOC_STEP);
-  
+
   if (error != VK_SUCCESS)
     return error;
 
@@ -896,7 +896,7 @@ VkResult vulkan_end_recording_and_submit(struct vulkan_context *ctx,
   submit_info.pCommandBuffers      = &command_buffer_ctx.command_buffer;
   submit_info.signalSemaphoreCount = 0;
   submit_info.pSignalSemaphores    = 0;
-  
+
   return vkQueueSubmit(ctx->queue, 1, &submit_info, command_buffer_ctx.fence);
 }
 

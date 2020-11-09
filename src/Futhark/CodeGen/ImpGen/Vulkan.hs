@@ -1,13 +1,15 @@
 module Futhark.CodeGen.ImpGen.Vulkan
-  ( compileProg
-  ) where
+  ( compileProg,
+    Warnings,
+  )
+where
 
-import Futhark.Error
-import Futhark.Representation.ExplicitMemory
+import Data.Bifunctor (second)
 import qualified Futhark.CodeGen.ImpCode.Vulkan as Vulkan
-import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
+import Futhark.CodeGen.ImpGen.Kernels
 import Futhark.CodeGen.ImpGen.Kernels.ToVulkan
+import Futhark.IR.KernelsMem
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Vulkan.Program)
-compileProg prog = either Left kernelsToVulkan <$> ImpGenKernels.compileProg prog
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (Warnings, Vulkan.Program)
+compileProg prog = second kernelsToVulkan <$> compileProgOpenCL prog

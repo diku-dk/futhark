@@ -1,13 +1,15 @@
 module Futhark.CodeGen.ImpGen.OpenCL
-  ( compileProg
-  ) where
+  ( compileProg,
+    Warnings,
+  )
+where
 
-import Futhark.Error
-import Futhark.Representation.ExplicitMemory
+import Data.Bifunctor (second)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as OpenCL
-import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
+import Futhark.CodeGen.ImpGen.Kernels
 import Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
+import Futhark.IR.KernelsMem
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError OpenCL.Program)
-compileProg prog = either Left kernelsToOpenCL <$> ImpGenKernels.compileProg prog
+compileProg :: MonadFreshNames m => Prog KernelsMem -> m (Warnings, OpenCL.Program)
+compileProg prog = second kernelsToOpenCL <$> compileProgOpenCL prog

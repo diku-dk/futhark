@@ -3,22 +3,45 @@
 Installation
 ============
 
-There are two ways to install the Futhark compiler: using a
+There are two main ways to install the Futhark compiler: using a
 precompiled tarball or compiling from source.  Both methods are
 discussed below.  If you are using Linux, see
 :ref:`linux-installation`.  If you are using Windows, make sure to
 read :ref:`windows-installation`.  If you are using macOS, read
 :ref:`macos-installation`.
 
+Futhark is also available via `Nix <https://nixos.org/nix/>`_.  If you
+are using Nix, simply install the ``futhark`` derivation from Nixpkgs.
+
+Dependencies
+------------
+
+The Linux binaries we distribute are statically linked and should not
+require any special libraries installed system-wide.
+
+When building from source on Linux and macOS, you will need to have
+the ``gmp`` and ``tinfo`` libraries installed.  These are pretty
+common, so you may already have them.  On Debian-like systems
+(e.g. Ubuntu), use::
+
+  sudo apt install libtinfo-dev libgmp-dev
+
+If you install Futhark via a package manager (e.g. Homebrew, Nix, or
+AUR), you shouldn't need to worry about any of this.
+
+Actually *running* the output of the Futhark compiler may require
+additional dependencies, for example an OpenCL library and GPU driver.
+See the documentation for the respective compiler backends.
+
 Compiling from source
 ---------------------
 
-We use the the `Haskell Tool Stack`_ to handle dependencies and
-compilation of the Futhark compiler, so you will need to install the
-``stack`` tool.  Fortunately, the ``stack`` developers provide ample
-documentation about `installing Stack`_ on a multitude of operating
-systems.  If you're lucky, it may even be in your local package
-repository.
+The recommended way to compile Futhark is with the `Haskell Tool
+Stack`_, which handles dependencies and compilation of the Futhark
+compiler.  You will therefore need to install the ``stack`` tool.
+Fortunately, the ``stack`` developers provide ample documentation
+about `installing Stack`_ on a multitude of operating systems.  If
+you're lucky, it may even be in your local package repository.
 
 You can either retrieve a `source release tarball
 <https://github.com/diku-dk/futhark/releases>`_ or perform a checkout
@@ -43,12 +66,35 @@ dependencies::
 
   $ stack build
 
-The Futhark compiler and its tools will now be built. You can copy
-them to your ``$HOME/.local/bin`` directory by running::
+The Futhark compiler and its tools will now be built.  This step
+typically requires at least 8GiB of memory.  You may be able to build
+it on a smaller machine by adding the ``--fast`` option, although the
+resulting Futhark compiler binary will run slower.
+
+After building, you can copy the binaries to your ``$HOME/.local/bin``
+directory by running::
 
   $ stack install
 
 Note that this does not install the Futhark manual pages.
+
+Compiling with ``cabal``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can also compile Futhark with ``cabal``.  If so, you must install
+an appropriate version of GHC (usually the newest) and ``cabal``
+yourself, for example through your favourite package manager.  On
+Linux, you can always use `ghcup
+<https://gitlab.haskell.org/haskell/ghcup>`_.  Then clone the
+repository as listed above and run::
+
+  $ cabal update
+  $ cabal build
+
+To install the Futhark binaries to a specific location, for example
+``$HOME/.local/bin``, run::
+
+  $ cabal install --install-method=copy  --overwrite-policy=always --installdir=$HOME/.local/bin/
 
 Installing from a precompiled snapshot
 --------------------------------------
@@ -56,6 +102,7 @@ Installing from a precompiled snapshot
 Tarballs of binary releases can be `found online
 <https://futhark-lang.org/releases/>`_, but are available only for
 very few platforms (as of this writing, only GNU/Linux on x86_64).
+See the enclosed ``README.md`` for installation instructions.
 
 Furthermore, every day a program automatically clones the Git
 repository, builds the compiler, and packages a simple tarball
@@ -66,14 +113,15 @@ particular moment in time.  They are provided for users who wish to
 use the most recent code, but are unable to compile Futhark
 themselves.
 
-At the moment, we build such snapshots only for a single operating
-system:
+We build such binary snapshots for the following operating systems:
 
-Linux (x86_64)
+**Linux (x86_64)**
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
-In time, we hope to make snapshots available for more platforms, but
-we are limited by system availability.
+**Windows (x86_64)**
+  `futhark-nightly-windows-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-windows-x86_64.zip>`_
+
+  You will still likely need to make a C compiler (such as GCC) available on your own.
 
 .. _`Haskell tool stack`: http://docs.haskellstack.org/
 .. _`installing Stack`: http://docs.haskellstack.org/#how-to-install
@@ -94,7 +142,11 @@ Installing Futhark on Linux
   be a bit behind.
 
 * Arch Linux users can use a `futhark-nightly package
-  <https://aur.archlinux.org/packages/futhark-nightly/>`_.
+  <https://aur.archlinux.org/packages/futhark-nightly/>`_ or a
+  `regular futhark package
+  <https://aur.archlinux.org/packages/futhark>`_.
+
+* NixOS users can install the ``futhark`` derivation.
 
 Otherwise (or if the version in the package system is too old), your
 best bet is to install from source or use a tarball, as described
@@ -103,6 +155,23 @@ above.
 .. _`Linuxbrew`: http://linuxbrew.sh/
 
 .. _macos-installation:
+
+Using OpenCL or CUDA
+~~~~~~~~~~~~~~~~~~~~
+
+If you wish to use ``futhark opencl`` or ``futhark cuda``, you must
+have the OpenCL or CUDA libraries installed, respectively.  Consult
+your favourite search engine for instructions on how to do this on
+your distribution.  It is usually not terribly difficult if you
+already have working GPU drivers.
+
+For OpenCL, note that there is a distinction between the general
+OpenCL host library (``OpenCL.so``) that Futhark links against, and
+the *Installable Client Driver* (ICD) that OpenCL uses to actually
+talk to the hardware.  You will need both.  Working display drivers
+for the GPU does not imply that an ICD has been installed - they are
+usually in a separate package.  Consult your favourite search engine
+for details.
 
 Installing Futhark on macOS
 ---------------------------
@@ -135,25 +204,29 @@ generated Futhark executable.
 
 .. _windows-installation:
 
-Installing Futhark on Windows
+Setting up Futhark on Windows
 -----------------------------
 
-While the Futhark compiler itself is easily installed on Windows via
-``stack`` (see above), it takes a little more work to make the OpenCL
-and PyOpenCL backends functional.  This guide was last updated on the
-5th of May 2016, and is for computers using 64-bit Windows along with
-`CUDA 7.5`_ and Python 2.7 (`Anaconda`_ preferred).
+The Futhark compiler itself is easily installed on Windows via
+``stack`` (see above).  If you are using the default Windows console,
+you may need to run ``chcp 65001`` to make Unicode characters show up
+correctly.
+
+It takes a little more work to make the OpenCL and PyOpenCL backends
+functional.  This guide was last updated on the 5th of May 2016, and
+is for computers using 64-bit Windows along with `CUDA 7.5`_ and
+Python 2.7 (`Anaconda`_ preferred).
 
 Also `Git for Windows`_ is required for its Linux command line tools.
 If you have not marked the option to add them to path, there are
 instructions below how to do so. The GUI alternative to ``git``,
-`Github Desktop`_ is optional and does not come with the required
+`GitHub Desktop`_ is optional and does not come with the required
 tools.
 
 .. _`CUDA 7.5`: https://developer.nvidia.com/cuda-downloads
 .. _`Anaconda`: https://www.continuum.io/downloads#_windows
 .. _`Git for Windows`: https://git-scm.com/download/win
-.. _`Github Desktop`: https://desktop.github.com/
+.. _`GitHub Desktop`: https://desktop.github.com/
 
 Setting up Futhark and OpenCL
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -205,11 +278,11 @@ Setting up Futhark and OpenCL
 
    The CUDA distribution also comes with the static ``OpenCL.lib``, but
    trying to use that one instead of the ``OpenCL64.dll`` will cause
-   programs compiled with ``futhark-opencl`` to crash, so ignore it
+   programs compiled with ``futhark opencl`` to crash, so ignore it
    completely.
 
-Now you should be able to compile ``futhark-opencl`` and run Futhark
-programs on the GPU.
+Now you should be able to compile with ``futhark opencl`` and run
+Futhark programs on the GPU.
 
 Congratulations!
 

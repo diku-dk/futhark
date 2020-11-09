@@ -21,19 +21,23 @@
 --    [662i32, 1090i32, 1728i32]]
 -- }
 -- structure distributed {
---   DoLoop/Kernel 1
---   Kernel 7
+--   DoLoop/SegMap 1
+--   SegMap 2
+--   SegRed 1
 -- }
 
 let main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
   let (asss, bss) =
+    #[incremental_flattening(only_inner)]
     unzip(map (\(ps: []i32): ([m][m]i32, [m]i32)  ->
+                #[incremental_flattening(only_inner)]
                 let ass = map (\(p: i32): [m]i32  ->
                                 let cs = scan (+) 0 (0..1..<p)
                                 let f = reduce (+) 0 cs
                                 let as = map (+f) ps
                                 in as) ps
                 let bs' = loop bs=ps for i < n do
+                  #[incremental_flattening(only_inner)]
                   let bs' = map (\(as: []i32, b: i32): i32  ->
                                   let d = reduce (+) 0 as
                                   let e = d + b

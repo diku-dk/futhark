@@ -52,7 +52,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'Futhark'
-copyright = '2013-2018, DIKU, University of Copenhagen'
+copyright = '2013-2020, DIKU, University of Copenhagen'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -60,13 +60,12 @@ copyright = '2013-2018, DIKU, University of Copenhagen'
 #
 # The short X.Y version.
 
-# No reason for a full YAML parser; let's just hack it.
+# No reason for a cabal file parser; let's just hack it.
 def get_version():
-    # Get lines
-    lines = open('../package.yaml', 'r').read().split('\n')
-    # Find version line.
-    version_line = lines[1]
-    return re.search('version: "(.*)"', version_line).group(1)
+    # Get cabal file
+    cabal_file = open('../futhark.cabal', 'r').read()
+    # Extract version
+    return re.search(r'^version:[ ]*([^ ]*)$', cabal_file, flags=re.MULTILINE).group(1)
 
 version = get_version()
 # The full version, including alpha/beta/rc tags.
@@ -109,14 +108,17 @@ class FutharkLexer(RegexLexer):
 
     tokens = {
         'root': [
-            (r'if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|empty|while|unsafe|module', token.Keyword),
+            (r'(if|then|else|let|loop|in|val|for|do|with|local|open|include|import|type|entry|module|while|module)\b', token.Keyword),
             (r"[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
+            (r"-- .*", token.Comment),
             (r'.', token.Text)
         ]
     }
 
 
 lexers['futhark'] = FutharkLexer()
+
+highlight_language = 'futhark'
 
 # A list of ignored prefixes for module index sorting.
 #modindex_common_prefix = []
@@ -129,12 +131,13 @@ lexers['futhark'] = FutharkLexer()
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = 'default'
+html_theme = 'futhark'
+html_theme_path = ['_theme']
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-#html_theme_options = {}
+html_theme_options = {}
 
 # Add any paths that contain custom themes here, relative to this directory.
 #html_theme_path = []
@@ -158,7 +161,7 @@ html_theme = 'default'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+# html_static_path = ['_static']
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
@@ -174,7 +177,7 @@ html_static_path = ['_static']
 #html_use_smartypants = True
 
 # Custom sidebar templates, maps document names to template names.
-#html_sidebars = {}
+html_sidebars = { '**': ['globaltoc.html', 'relations.html', 'sourcelink.html', 'searchbox.html'] }
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.
@@ -257,28 +260,20 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('man/futhark', 'futhark', 'Futhark development tool',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-c', 'futhark-c', 'Compile Futhark to sequential C',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-opencl', 'futhark-opencl', 'Compile Futhark to OpenCL',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-py', 'futhark-py', 'Compile Futhark to sequential Python',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-pyopencl', 'futhark-pyopencl', 'Compile Futhark to Python and OpenCL',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futharki', 'futharki', 'Futhark interpreter',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-test', 'futhark-test', 'Futhark testing tool',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-bench', 'futhark-bench', 'Futhark benchmarking tool',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-doc', 'futhark-doc', 'Futhark documentation generator',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-dataset', 'futhark-dataset', 'Generate random data sets',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1),
-    ('man/futhark-pkg', 'futhark-pkg', 'Futhark package tool',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1)
+    ('man/futhark', 'futhark', 'a parallel functional array language', [], 1),
+    ('man/futhark-c', 'futhark-c', 'compile Futhark to sequential C', [], 1),
+    ('man/futhark-multicore', 'futhark-multicore', 'compile Futhark to multithreaded C', [], 1),
+    ('man/futhark-opencl', 'futhark-opencl', 'compile Futhark to OpenCL', [], 1),
+    ('man/futhark-cuda', 'futhark-cuda', 'compile Futhark to CUDA', [], 1),
+    ('man/futhark-python', 'futhark-python', 'compile Futhark to sequential Python', [], 1),
+    ('man/futhark-pyopencl', 'futhark-pyopencl', 'compile Futhark to Python and OpenCL', [], 1),
+    ('man/futhark-run', 'futhark-run', 'interpret Futhark program', [], 1),
+    ('man/futhark-repl', 'futhark-repl', 'interactive Futhark read-eval-print-loop', [], 1),
+    ('man/futhark-test', 'futhark-test', 'test Futhark programs', [], 1),
+    ('man/futhark-bench', 'futhark-bench', 'benchmark Futhark programs', [], 1),
+    ('man/futhark-doc', 'futhark-doc', 'generate documentation for Futhark code', [], 1),
+    ('man/futhark-dataset', 'futhark-dataset', 'generate random data sets', [], 1),
+    ('man/futhark-pkg', 'futhark-pkg', 'manage Futhark packages', [], 1)
 ]
 
 # If true, show URL addresses after external links.

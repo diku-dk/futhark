@@ -1,54 +1,38 @@
 <img src="assets/logo.svg" height="50px"/> The Futhark Programming Language
 ==========
 
-[![Join the chat at https://gitter.im/futhark-lang/Lobby](https://badges.gitter.im/futhark-lang/Lobby.svg)](https://gitter.im/futhark-lang/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)[![Build Status](https://travis-ci.org/diku-dk/futhark.svg?branch=master)](https://travis-ci.org/diku-dk/futhark)[![Windows build status](https://ci.appveyor.com/api/projects/status/aah5k01h3o1pe053?svg=true)](https://ci.appveyor.com/project/Athas/futhark)[![Project Stats](https://www.openhub.net/p/futharkcompiler/widgets/project_thin_badge.gif)](https://www.openhub.net/p/futharkcompiler)
+[![Join the chat at https://gitter.im/futhark-lang/Lobby](https://badges.gitter.im/futhark-lang/Lobby.svg)](https://gitter.im/futhark-lang/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)[![CI](https://github.com/diku-dk/futhark/workflows/CI/badge.svg)](https://github.com/diku-dk/futhark/actions)
 
-Futhark is a purely functional data-parallel programming language.
-Its optimising compiler is able to compile it to typically very
-performant GPU code.  The language and compiler is developed at
-[DIKU](http://diku.dk) at the University of Copenhagen, originally as
-part of the [HIPERFIT centre](http://hiperfit.dk).  Although still
-under heavy development, Futhark is already useful for practical
-high-performance programming.
+Futhark is a purely functional data-parallel programming language in
+the ML family.  It can be compiled to typically very efficient
+parallel code, running on either a CPU or GPU.  The language and
+compiler are developed at [DIKU](http://diku.dk) at the University of
+Copenhagen, originally as part of the [HIPERFIT
+centre](http://hiperfit.dk).  The language and compiler are quite
+stable and suitable for practical programming.
 
-For more information, see [the website](http://futhark-lang.org).
+For more information, see:
 
-Also see the [compiler and language
-documentation](http://futhark.readthedocs.io) and the [basis library
-documentation](https://futhark-lang.org/docs).
+* [Installation instructions](http://futhark.readthedocs.io/en/latest/installation.html)
 
-[Installation instructions here.](http://futhark.readthedocs.io/en/latest/installation.html)
+* [The main website](http://futhark-lang.org)
 
-Usage
-=====
+* [Parallel Programming in
+  Futhark](https://futhark-book.readthedocs.io/en/latest/), an
+  extensive introduction and guide
 
-To compile a Futhark program to sequential C:
+* [The Futhark User's Guide](http://futhark.readthedocs.io)
 
-    futhark-c prog.fut -o prog
+* [Documentation for the built-in prelude](https://futhark-lang.org/docs/prelude)
 
-Or maybe OpenCL:
+* [Futhark libraries](https://futhark-lang.org/pkgs/)
 
-    futhark-opencl prog.fut -o prog
-
-And then run it:
-
-    ./prog < prog.input
-
-To interpret a Futhark program:
-
-    futharki prog.fut < prog.input
+[![Packaging status](https://repology.org/badge/vertical-allrepos/futhark.svg)](https://repology.org/project/futhark/versions)
 
 Hacking
 =======
 
-We try to make use of Github issues for organising our work.  Issues
+We try to make use of GitHub issues for organising our work.  Issues
 tagged with
 [good first issue](https://github.com/diku-dk/futhark/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 do not require deep knowledge of the code base.
-
-Testing
-=======
-
-Run the `futhark-test tests` to check how well we're doing.  Use
-`futhark-test -t` if you're in a hurry and only want to check that all
-the tests type-check.

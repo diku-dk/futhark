@@ -9,55 +9,94 @@ futhark-bench
 SYNOPSIS
 ========
 
-futhark-bench [--runs=count | --compiler=program | --json | --no-validate] programs...
+futhark bench [options...] programs...
 
 DESCRIPTION
 ===========
 
 This tool is the recommended way to benchmark Futhark programs.
-Programs are compiled using the specified compiler (``futhark-c`` by
+Programs are compiled using the specified backend (``futhark c`` by
 default), then run a number of times for each test case, and the
-average runtime printed on standard output.  Test data is indicated as
-with ``futhark-test``.  A program will be ignored if it contains no
-data sets - it will not even be compiled.
+average runtime printed on standard output.  Refer to
+:ref:`futhark-test(1)` for information on how to format test data.  A
+program will be ignored if it contains no data sets - it will not even
+be compiled.
 
-If compilation or running fails, an error message will be printed and
-benchmarking will continue (and ``--json`` will write the file), but a
-non-zero exit code will be returned at the end.
+If compilation of a program fails, then ``futhark bench`` will abort
+immediately.  If execution of a test set fails, an error message will
+be printed and benchmarking will continue (and ``--json`` will write
+the file), but a non-zero exit code will be returned at the end.
 
 OPTIONS
 =======
 
---runs=count
+--backend=name
 
-  The number of runs per data set.
+  The backend used when compiling Futhark programs (without leading
+  ``futhark``, e.g. just ``opencl``).
 
---compiler=program
+--concurrency=NUM
 
-  The program used to compile Futhark programs.  This option can be
-  passed multiple times, resulting in multiple compilers being used
-  for each test case.  The specified program must support the same
-  interface as ``futhark-c``.
+  The number of benchmark programs to prepare concurrently.  Defaults
+  to the number of cores available.  *Prepare* means to compile the
+  benchmark, as well as generate any needed datasets.  In some cases,
+  this generation can take too much memory, in which case lowering
+  ``--concurrency`` may help.
 
---runner=program
+--entry-point=name
 
-  If this is set to the non-empty string, compiled programs are not
-  run directly, but instead the indicated program is run, with the
-  path to the compiled Futhark program passed as the first
-  command-line argument.  This is useful for compilation targets that
-  cannot be executed directly (like `futhark-cs(1)`), or when you wish
-  to run the program on a remote machine.
+  Only run entry points with this name.
+
+--exclude-case=TAG
+
+  Do not run test cases that contain the given tag.  Cases marked with
+  "nobench" or "disable" are ignored by default.
+
+--futhark=program
+
+  The program used to perform operations (eg. compilation).  Defaults
+  to the binary running ``futhark bench`` itself.
+
+--ignore-files=REGEX
+
+  Ignore files whose path match the given regular expression.
 
 --json=file
 
   Write raw results in JSON format to the specified file.
+
+--no-tuning
+
+  Do not look for tuning files.
 
 --pass-option=opt
 
   Pass an option to benchmark programs that are being run.  For
   example, we might want to run OpenCL programs on a specific device::
 
-    futhark-bench prog.fut --compiler=futhark-opencl --pass-option=-dHawaii
+    futhark bench prog.fut --backend=opencl --pass-option=-dHawaii
+
+--pass-compiler-option=opt
+
+  Pass an extra option to the compiler when compiling the programs.
+
+--runner=program
+
+  If set to a non-empty string, compiled programs are not run
+  directly, but instead the indicated *program* is run with its first
+  argument being the path to the compiled Futhark program.  This is
+  useful for compilation targets that cannot be executed directly (as
+  with :ref:`futhark-pyopencl(1)` on some platforms), or when you wish
+  to run the program on a remote machine.
+
+--runs=count
+
+  The number of runs per data set.
+
+--skip-compilation
+
+  Do not run the compiler, and instead assume that each benchmark
+  program has already been compiled.  Use with caution.
 
 --timeout=seconds
 
@@ -69,19 +108,25 @@ OPTIONS
 
   A negative timeout means to wait indefinitely.
 
---skip-compilation
+-v, --verbose
 
-  Do not run the compiler, and instead assume that each benchmark
-  program has already been compiled.  Use with caution.
+  Print verbose information about what the benchmark is doing.  Pass
+  multiple times to increase the amount of information printed.
 
---exclude-case=TAG
+--tuning=EXTENSION
 
-  Do not run test cases that contain the given tag.  Cases marked with
-  "nobench" or "disable" are ignored by default.
+  For each program being run, look for a tuning file with this
+  extension, which is suffixed to the name of the program.  For
+  example, given ``--tuning=tuning`` (the default), the program
+  ``foo.fut`` will be passed the tuning file ``foo.fut.tuning`` if it
+  exists.
 
---ignore=files=REGEX
+WHAT FUTHARK BENCH MEASURES
+===========================
 
-  Ignore files whose path match the given regular expression.
+``futhark bench`` measures the time it takes to run the given Futhark
+program by passing the ``-t FILE`` option to the generated program. See
+the man page for the specific compiler to see exactly what is measured.
 
 EXAMPLES
 ========
@@ -107,4 +152,4 @@ different sizes::
 SEE ALSO
 ========
 
-futhark-c(1), futhark-test(1)
+:ref:`futhark-c(1)`, :ref:`futhark-test(1)`

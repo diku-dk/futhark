@@ -9,6 +9,7 @@
 --  [[[0.000000]], [[0.674490]]]
 -- }
 -- output { [[[0.000000]], [[0.674490]]] }
+-- structure cpu { Update 2 }
 
 let doInPlaceUpdate [num_dates]
                    (bb_inds: [3][num_dates]i32)
@@ -21,15 +22,15 @@ let doInPlaceUpdate [num_dates]
 let mapInPlaceUpdate [num_dates][num_und]
                     (bb_inds: [3][num_dates]i32)
                     (bb_data: [3][num_dates]f64)
-                    (gauss2dT: [num_und][num_dates]f64): [][]f64 =
+                    (gauss2dT: [num_und][num_dates]f64): [num_und][num_dates]f64 =
   map (doInPlaceUpdate bb_inds bb_data) gauss2dT
 
 ----------------------------------------
 -- MAIN
 ----------------------------------------
 
-let main [num_dates][num_und]
+let main [n][num_dates][num_und]
         (bb_inds: [3][num_dates]i32)
         (bb_data: [3][num_dates]f64)
-        (gauss_mat: [][num_und][num_dates]f64): [][][]f64 =
+        (gauss_mat: [n][num_und][num_dates]f64): [][][]f64 =
   map  (mapInPlaceUpdate bb_inds bb_data) (gauss_mat )

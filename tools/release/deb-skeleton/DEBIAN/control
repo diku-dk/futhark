@@ -1,0 +1,17 @@
+Package: futhark
+Version: VERSION
+Section: devel
+Maintainer: Troels Henriksen <athas@sigkill.dk>
+Architecture: amd64
+Priority: optional
+Depends: libgmp10, zlib1g, libtinfo5
+Homepage: https://futhark-lang.org
+Description: Purely functional parallel array language
+ Futhark is a small programming language designed to be compiled to
+ efficient parallel code. It is a statically typed, data-parallel, and
+ purely functional array language in the ML family.  The compiler
+ generates GPU code via OpenCL, although the language itself is
+ hardware-agnostic.
+ .
+ This package contains various Futhark compilers, as well as some
+ Futhark development tools.

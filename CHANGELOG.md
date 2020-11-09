@@ -5,7 +5,963 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.8.0]
+## [0.19.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+  * Python backend now disables spurious NumPy overflow warnings for
+    both library and binary code (#1180).
+
+## [0.18.2]
+
+### Added
+
+  * The GPU loop tiler can now handle loops where only a subset of the
+    input arrays are tiled.  Matrix-vector multiplication is one
+    important program where this helps (#1145).
+
+  * The number of threads used by the `multicore` backend is now
+    configurable (`--num-threads` and
+    `futhark_context_config_set_num_threads()`). (#1162)
+
+### Fixed
+
+  * PyOpenCL backend would mistakenly still streat entry point
+    argument sizes as 32 bit.
+
+  * Warnings are now reported even for programs with type errors.
+
+  * Multicore backend now works properly for very large iteration
+    spaces.
+
+  * A few internal generated functions (`init_constants()`,
+    `free_constants()`) were mistakenly declared non-static.
+
+  * Process exit code is now nonzero when compiler bugs and
+    limitations are encountered.
+
+  * Multicore backend crashed on `reduce_by_index` with nonempty target
+    and empty input.
+
+  * Fixed a flattening issue for certain complex `map` nestings
+    (#1168).
+
+  * Made API function `futhark_context_clear_caches()` thread safe
+    (#1169).
+
+  * API functions for freeing opaque objects are now thread-safe
+    (#1169).
+
+  * Tools such as `futhark dataset` no longer crash with an internal
+    error if writing to a broken pipe (but they will return a nonzero
+    exit code).
+
+  * Defunctionalisation had a name shadowing issue that would crop up
+    for programs making very advanced use of functional
+    representations (#1174).
+
+  * Type checker erroneously permitted pattern-matching on string
+    literals (this would fail later in the compiler).
+
+  * New coverage checker for pattern matching, which is more correct.
+    However, it may not provide quite as nice counter-examples
+    (#1134).
+
+  * Fix rare internalisation error (#1177).
+
+## [0.18.1]
+
+### Added
+
+  * Experimental multi-threaded CPU backend, `multicore`.
+
+### Changed
+
+  * All sizes are now of type `i64`.  This has wide-ranging
+    implications and most programs will need to be updated (#134).
+
+## [0.17.3]
+
+### Added
+
+  * Improved parallelisation of `futhark bench` compilation.
+
+### Fixed
+
+  * Dataset generation for test programs now use the right `futhark`
+    executable (#1133).
+
+  * Really fix NaN comparisons in interpreter (#1070, again).
+
+  * Fix entry points with a parameter that is a sum type where
+    multiple constructors contain arrays of the same statically known
+    size.
+
+  * Fix in monomorphisation of types with constant sizes.
+
+  * Fix in in-place lowering (#1142).
+
+  * Fix tiling inside multiple nested loops (#1143).
+
+## [0.17.2]
+
+### Added
+
+  * Obscure loop optimisation (#1110).
+
+  * Faster matrix transposition in C backend.
+
+  * Library code generated with CUDA backend can now be called from
+    multiple threads.
+
+  * Better optimisation of concatenations of array literals and
+    replicates.
+
+  * Array creation C API functions now accept `const` pointers.
+
+  * Arrays can now be indexed (but not sliced) with any signed integer
+    type (#1122).
+
+  * Added --list-devices command to OpenCL binaries (#1131)
+
+  * Added --help command to C, CUDA and OpenCL binaries (#1131)
+
+### Removed
+
+  * The integer modules no longer contain `iota` and `replicate`
+    functions.  The top-level ones still exist.
+
+  * The `size` module type has been removed from the prelude.
+
+### Changed
+
+  * Range literals may no longer be produced from unsigned integers.
+
+### Fixed
+
+  * Entry points with names that are not valid C (or Python)
+    identifiers are now pointed out as problematic, rather than
+    generating invalid C code.
+
+  * Exotic tiling bug (#1112).
+
+  * Missing synchronisation for in-place updates at group level.
+
+  * Fixed (in a hacky way) an issue where `reduce_by_index` would use
+    too much local memory on AMD GPUs when using the OpenCL backend.
+
+## [0.16.4]
+
+### Added
+
+  * `#[unroll]` attribute.
+
+  * Better error message when writing `a[i][j]` (#1095).
+
+  * Better error message when missing "in" (#1091).
+
+### Fixed
+
+  * Fixed compiler crash on certain patterns of nested parallelism
+    (#1068, #1069).
+
+  * NaN comparisons are now done properly in interpreter (#1070).
+
+  * Fix incorrect movement of array indexing into branches `if`s
+    (#1073).
+
+  * Fix defunctorisation bug (#1088).
+
+  * Fix issue where loop tiling might generate out-of-bounds reads
+    (#1094).
+
+  * Scans of empty arrays no longer result in out-of-bounds memory
+    reads.
+
+  * Fix yet another defunctionalisation bug due to missing
+    eta-expansion (#1100).
+
+## [0.16.3]
+
+### Added
+
+  * `random` input blocks for `futhark test` and `futhark bench` now
+    support floating-point literals, which must always have either an
+    `f32` or `f64` suffix.
+
+  * The `cuda` backend now supports the `-d` option for executables.
+
+  * The integer modules now contain a `ctz` function for counting
+    trailing zeroes.
+
+### Fixed
+
+  * The `pyopencl` backend now works with OpenCL devices that have
+    multiple types (most importantly, oclgrind).
+
+  * Fix barrier divergence when generating code for group-level
+    colletive copies in GPU backend.
+
+  * Intra-group flattening now looks properly inside of branches.
+
+  * Intra-group flattened code versions are no longer used when the
+    resulting workgroups would have less than 32 threads (with default
+    thresholds anyway) (#1064).
+
+## [0.16.2]
+
+### Added
+
+  * `futhark autotune`: added `--pass-option`.
+
+### Fixed
+
+  * `futhark bench`: progress bar now correct when number of runs is
+    less than 10 (#1050).
+
+  * Aliases of arguments passed for consuming parameters are now
+    properly checked (#1053).
+
+  * When using a GPU backend, errors are now properly cleared.
+    Previously, once e.g. an out-of-bounds error had occurred, all
+    future operations would fail with the same error.
+
+  * Size-coercing a transposed array no longer leads to invalid code
+    generation (#1054).
+
+## [0.16.1]
+
+### Added
+
+  * Incremental flattening is now performed by default.  Use
+    attributes to constrain and direct the flattening if you have
+    exotic needs.  This will likely need further iteration and
+    refinement.
+
+  * Better code generation for `reverse` (and the equivalent explicit
+    slice).
+
+  * `futhark bench` now prints progress bars.
+
+  * The `cuda` backend now supports similar profiling as the `opencl`
+    option, although it is likely slightly less accurate in the
+    presence of concurrent operations.
+
+  * A preprocessor macro `FUTHARK_BACKEND_foo` is now defined in
+    generated header files, where *foo* is the name of the backend
+    used.
+
+  * Non-inlined functions (via `#[noinline]`) are now supported in GPU
+    code, but only for functions that *exclusively* operate on
+    scalars.
+
+  * `futhark repl` now accepts a command line argument to load a
+    program initially.
+
+  * Attributes are now also permitted on declarations and specs.
+
+  * `futhark repl` now has a `:nanbreak` command (#839).
+
+### Removed
+
+  * The C# backend has been removed (#984).
+
+  * The `unsafe` keyword has been removed.  Use `#[unsafe]` instead.
+
+### Changed
+
+  * Out-of-bounds literals are now an error rather than a warning.
+
+  * Type ascriptions on entry points now always result in opaque types
+    when the underlying concrete type is a tuple (#1048).
+
+### Fixed
+
+  * Fix bug in slice simplification (#992).
+
+  * Fixed a typer checker bug for tracking the aliases of closures
+    (#995).
+
+  * Fixed handling of dumb terminals in futhark test (#1000).
+
+  * Fixed exotic monomorphisation case involving lifted type
+    parameters instantiated with functions that take named parameters
+    (#1026).
+
+  * Further tightening of the causality restriction (#1042).
+
+  * Fixed alias tracking for right-operand operator sections (#1043).
+
+## [0.15.8]
+
+### Added
+
+
+  * Warnings for overflowing literals, such as `1000 : u8`.
+
+  * Futhark now supports an attribute system, whereby expressions can
+    be tagged with attributes that provide hints or directions to the
+    compiler.  This is an expert-level feature, but it is sometimes
+    useful.
+
+## [0.15.7]
+
+### Added
+
+  * Faster index calculations for very tight GPU kernels (such as the
+    ones corresponding to 2D tiling).
+
+  * `scan` with vectorised operators (e.g. `map2 (+)`) is now faster
+    in some cases.
+
+  * The C API has now been documented and stabilized, including
+    obtaining profiling information (although this is still
+    unstructured).
+
+### Fixed
+
+  * Fixed some cases of missing fusion (#953).
+
+  * Context deinitialisation is now more complete, and should not leak
+    memory (or at least not nearly as much, if any).  This makes it
+    viable to repeatedly create and free Futhark contexts in the same
+    process (although this can still be quite slow).
+
+## [0.15.6]
+
+### Added
+
+  * Binary operators now act as left-to-right sequence points with
+    respect to size types.
+
+  * `futhark bench` now has more colourful and hopefully readable
+    output.
+
+  * The compiler is now about 30% faster for most nontrivial programs.
+    This is due to parallelising the inlining stage, and tweaking the
+    default configuration of the Haskell RTS.
+
+  * `futhark dataset` is now about 8-10x faster.
+
+### Fixed
+
+  * Fixed some errors regarding constants (#941).
+
+  * Fixed a few missing type checker cases for sum types (#938).
+
+  * Fix OOB write in CUDA backend runtime code (#950).
+
+## [0.15.5]
+
+### Added
+
+  * `reduce_by_index` with `f32`-addition is now approximately 2x
+    faster in the CUDA backend.
+
+### Fixed
+
+  * Fixed kernel extractor bug in `if`-interchange (#921).
+
+  * Fixed some cases of malformed kernel code generation (#922).
+
+  * Fixed rare memory corruption bug involving branches returning
+    arrays (#923).
+
+  * Fixed spurious warning about entry points involving opaque return
+    types, where the type annotations are put on a higher-order return
+    type.
+
+  * Fixed incorrect size type checking for sum types in negative
+    position with unknown constructors (#927).
+
+  * Fixed loop interchange for permuted sequential loops with more
+    than one outer parallel loop (#928).
+
+  * Fixed a type checking bug for branches returning incomplete sum
+    types (#931).
+
+## [0.15.4]
+
+### Added
+
+  * `futhark pkg` now shells out to `curl` for HTTP requests.
+
+  * `futhark doc` now supports proper GitHub-flavored Markdown, as it
+    uses the `cmark-gfm` library internally.
+
+  * Top-level constants are now executed only once per program
+    instance.  This matters when Futhark is used to generate library
+    code.
+
+  * `futhark autotune` is better at handling degrees of parallelism
+    that assume multiple magnitudes during a single run.
+
+  * `futhark pkg` now uses `curl` to retrieve packages.
+
+  * Type errors are now printed in red for better legibility (thanks
+    to @mxxo!).
+
+### Fixed
+
+  * Fixed incorrect handling of opaques in entry point return types.
+
+  * `futhark pkg` now works properly with GitLab (#899).
+
+## [0.15.3]
+
+### Added
+
+  * `scan` now supports operators whose operands are arrays.  They are
+    significantly slower than primitive-typed scans, so avoid them if
+    at all possible.
+
+  * Precomputed constants are now handled much more efficiently.
+
+  * Certain large programs that rely heavily on inlining now compile
+    orders of magnitude faster.
+
+### Fixed
+
+  * Some fixes to complicated module expressions.
+
+  * `futhark pkg` should no longer crash uncontrollably on network
+    errors (#894).
+
+  * Fixed local open in interpreter (#887).
+
+  * Fix error regarding entry points that called other entry points
+    which contained local functions (#895).
+
+  * Fix loading OpenCL kernels from a binary.
+
+## [0.15.2]
+
+### Fixed
+
+  * Fix a REPL regression that made it unable to handle overloaded
+    types (such as numeric literals, oops).
+
+  * The uniqueness of a record is now the minimum of the uniqueness of
+    any of its elements (#870).
+
+  * Bug in causality checking has been fixed (#872).
+
+  * Invariant memory allocations in scan/reduce operators are now supported.
+
+  * `futhark run` now performs more type checking on entry point input (#876).
+
+  * Compiled Futhark programs now check for EOF after the last input
+    argument has been read (#877).
+
+  * Fixed a bug in `loop` type checking that prevented the result from
+    ever aliasing the initial parameter values (#879).
+
+## [0.15.1]
+
+### Added
+
+  * Futhark now type-checks size annotations using a size-dependent
+    type system.
+
+  * The parallel code generators can now handle bounds checking and
+    other safety checks.
+
+  * Integer division by zero is now properly safety-checked and
+    produces an error message.
+
+  * Integer exponentiation with negative exponent is now properly
+    safety-checked and produces an error message.
+
+  * Serious effort has been put into improving type errors.
+
+  * `reduce_by_index` may be somewhat faster for complex operators on
+    histograms that barely fit in local memory.
+
+  * Improved handling of in-place updates of multidimensional arrays
+    nested in `map`.  These are now properly parallelised.
+
+  * Added `concat_to` and `flatten_to` functions to prelude.
+
+  * Added `indices` function to the prelude.
+
+  * `futhark check` and all compilers now take a `-w` option for
+    disabling warnings.
+
+  * `futhark bench` now accepts `--pass-compiler-option`.
+
+  * The integer modules now have `mad_hi` and `mul_hi` functions for
+    getting the upper part of multiplications.  Thanks to @porcuquine
+    for the contribution!
+
+  * The `f32` and `f64` modules now also define `sinh`, `cosh`,
+    `tanh`, `asinh`, `acosh`, and `atanh` functions.
+
+  * The `f32` and `f64` modules now also define `fma` and `mad`
+    functions.
+
+### Removed
+
+  * Removed `update`, `split2`, `intersperse`, `intercalate`, `pick`,
+    `steps`, and `range` from the prelude.
+
+### Changed
+
+  * `"futlib"` is now called `"prelude"`, and it is now an error to
+    import it explicitly.
+
+### Fixed
+
+  * Corrected address calculations in `csharp` backend.
+
+  * The C backends are now more careful about generating overflowing
+    integer operations (since this is undefined behaviour in C, but
+    defined in Futhark).
+
+  * `futhark dataset` no longer crashes uncontrollably when used
+    incorrectly (#849).
+
+## [0.14.1]
+
+### Added
+
+  * The optimiser is now somewhat better at removing unnecessary
+    copies of array slices.
+
+  * `futhark bench` and `futhark test` now take a `--concurrency`
+    option for limiting how many threads are used for housekeeping
+    tasks.  Set this to a low value if you run out of memory.
+
+  * `random` test blocks are now allowed to contain integer literals
+    with type suffixes.
+
+  * `:frame <n>` command for `futhark repl` for inspecting the stack.
+
+  * `e :> t` notation, which means the same as `e : t` for now, but
+    will have looser constraints in the future.
+
+  * Size-lifted type abbreviations can be declared with `type~` and
+    size-lifted type parameters with `'~`.  These currently have no
+    significant difference from fully lifted types.
+
+### Changed
+
+  * Tuples are now 0-indexed (#821, which also includes a conversion
+    script).
+
+  * Invalid ranges like `1..<0` now produce a run-time error instead
+    of an empty array.
+
+  * Record updates (`r with f = e`) now require `r` to have a
+    completely known type up to `f`.  This is a restriction that will
+    hopefully be lifted in the future.
+
+  * The backtrace format has changed to be innermost-first, like
+    pretty much all other languages.
+
+  * Value specs must now explicitly quantify all sizes of function
+    parameters.  Instead of
+
+        val sum: []t -> t
+
+    you must write
+
+        val sum [n]: [n]t -> t
+
+  * `futhark test` now once again numbers un-named data sets from 0
+    rather than from 1.  This fits a new general principle of always
+    numbering from 0 in Futhark.
+
+  * Type abbreviations declared with `type` may no longer contain
+    functions or anonymous sizes in their definition.  Use `type^` for
+    these cases.  Just a warning for now, but will be an error in the
+    future.
+
+### Fixed
+
+  * Work around (probable) AMD OpenCL compiler bug for
+    `reduce_by_index` operations with complex operators that require
+    locking.
+
+  * Properly handle another ICE on parse errors in test stanzas (#819).
+
+  * `futhark_context_new_with_command_queue()` now actually works.  Oops.
+
+  * Different scopes are now properly addressed during type inference
+    (#838).  Realistically, there will still be some missing cases.
+
+## [0.13.2]
+
+### Added
+
+  * New subcommand, `futhark query`, for looking up information about
+    the name at some position in a file.  Intended for editor
+    integration.
+
+  * (Finally) automatic support for compute model 7.5 in the CUDA backend.
+
+  * Somewhat better performance for very large target arrays for
+    `reduce_by_index.`.
+
+### Fixed
+
+  * Fixed a slice-iota simplification bug (#813).
+
+  * Fixed defunctionalisation crash involving intrinsics (#814).
+
+## [0.13.1]
+
+### Added
+
+  * Stack traces are now multiline for better legibility.
+
+### Changed
+
+  * The `empty(t)` notation now specifies the type of the *entire
+    value* (not just the element type), and requires dimension sizes
+    when `t` is an array (e.g. `empty(i32)` is no longer allowed, you
+    need for example `empty([0]i32)`).
+
+  * All input files are now assumed to be in UTF-8.
+
+### Fixed
+
+  * Fixed exponential-time behaviour for certain kernels with large
+    arithmetic expressions (#805).
+
+  * `futhark test` and friends no longer crash when reporting some
+    errors (#808).
+
+  * Fix uniqueness of loop results (#810).
+
+## [0.12.3]
+
+### Added
+
+  * Character literals can now be any integer type.
+
+  * The integer modules now have `popc` and `clz` functions.
+
+  * Tweaked inlining so that larger programs may now compile faster
+    (observed about 20%).
+
+  * Pattern-matching on large sum typed-values taken from arrays may
+    be a bit faster.
+
+### Fixed
+
+  * Various small fixes to type errors.
+
+  * All internal functions used in generated C code are now properly
+    declared `static`.
+
+  * Fixed bugs when handling dimensions and aliases in type ascriptions.
+
+## [0.12.2]
+
+### Added
+
+  * New tool: `futhark autotune`, for tuning the threshold parameters
+    used by incremental flattening.  Based on work by Svend Lund
+    Breddam, Simon Rotendahl, and Carl Mathias Graae Larsen.
+
+  * New tool: `futhark dataget`, for extracting test input data.  Most
+    will probably never use this.
+
+  * Programs compiled with the `cuda` backend now take options
+    `--default-group-size`, `--default-num-groups`, and
+    `--default-tile-size`.
+
+  * Segmented `reduce_by_index` are now substantially fasted for small
+    histograms.
+
+  * New functions: `f32.lerp` and `f64.lerp`, for linear interpolation.
+
+### Fixed
+
+  * Fixes to aliasing of record updates.
+
+  * Fixed unnecessary array duplicates after coalescing optimisations.
+
+  * `reduce_by_index` nested in `map`s will no longer sometimes
+    require huge amounts of memory.
+
+  * Source location now correct for unknown infix operators.
+
+  * Function parameters are no longer in scope of themselves (#798).
+
+  * Fixed a nasty out-of-bounds error in handling of irregular allocations.
+
+  * The `floor`/`ceil` functions in `f32`/`f64` now handle infinities
+    correctly (and are also faster).
+
+  * Using `%` on floats now computes fmod instead of crashing the compiler.
+
+## [0.12.1]
+
+### Added
+
+  * The internal representation of parallel constructs has been
+    overhauled and many optimisations rewritten.  The overall
+    performance impact should be neutral on aggregate, but there may
+    be changes for some programs (please report if so).
+
+  * Futhark now supports structurally typed sum types and pattern
+    matching!  This work was done by Robert Schenck.  There remain
+    some problems with arrays of sum types that themselves contain
+    arrays.
+
+  * Significant reduction in compile time for some large programs.
+
+  * Manually specified type parameters need no longer be exhaustive.
+
+  * Mapped `rotate` is now simplified better.  This can be
+    particularly helpful for stencils with wraparound.
+
+### Removed
+
+  * The `~` prefix operator has been removed.  `!` has been extended
+    to perform bitwise negation when applied to integers.
+
+### Changed
+
+  * The `--futhark` option for `futhark bench` and `futhark test` now
+    defaults to the binary being used for the subcommands themselves.
+
+  * The legacy `futhark -t` option (which did the same as `futhark
+    check`) has been removed.
+
+  * Lambdas now bind less tightly than type ascription.
+
+  * `stream_map` is now `map_stream` and `stream_red` is now
+    `reduce_stream`.
+
+### Fixed
+
+  * `futhark test` now understands `--no-tuning` as it was always
+    supposed to.
+
+  * `futhark bench` and `futhark test` now interpret `--exclude` in
+    the same way.
+
+  * The Python and C# backends can now properly read binary boolean
+    input.
+
+## [0.11.2]
+
+### Fixed
+
+  * Entry points whose types are opaque due to module ascription, yet
+    whose representation is simple (scalars or arrays of scalars) were
+    mistakely made non-opaque when compiled with ``--library``.  This
+    has been fixed.
+
+  * The CUDA backend now supports default sizes in `.tuning` files.
+
+  * Loop interchange across multiple dimensions was broken in some cases (#767).
+
+  * The sequential C# backend now generates code that compiles (#772).
+
+  * The sequential Python backend now generates code that runs (#765).
+
+## [0.11.1]
+
+### Added
+
+  * Segmented scans are a good bit faster.
+
+  * `reduce_by_index` has received a new implementation that uses
+    local memory, and is now often a good bit faster when the target
+    array is not too large.
+
+  * The `f32` and `f64` modules now contain `gamma` and `lgamma`
+    functions.  At present these do not work in the C# backend.
+
+  * Some instances of `reduce` with vectorised operators (e.g. `map2
+    (+)`) are orders of magnitude faster than before.
+
+  * Memory usage is now lower on some programs (specifically the ones
+    that have large `map`s with internal intermediate arrays).
+
+### Removed
+
+  * Size *parameters* (not *annotations*) are no longer permitted
+    directly in `let` and `loop` bindings, nor in lambdas.  You are
+    likely not affected (except for the `stream` constructs; see
+    below).  Few people used this.
+
+### Changed
+
+  * The array creation functions exported by generated C code now take
+    `int64_t` arguments for the shape, rather than `int`.  This is in
+    line with what the shape functions return.
+
+  * The types for `stream_map`, `stream_map_per`, `stream_red`, and
+    `stream_red_per` have been changed, such that the chunk function
+    now takes the chunk size as the first argument.
+
+### Fixed
+
+  * Fixes to reading values under Python 3.
+
+  * The type of a variable can now be deduced from its use as a size
+    annotation.
+
+  * The code generated by the C-based backends is now also compilable
+    as C++.
+
+  * Fix memory corruption bug that would occur on very large segmented
+    reductions (large segments, and many of them).
+
+## [0.10.2]
+
+### Added
+
+  * `reduce_by_index` is now a good bit faster on operators whose
+    arguments are two 32-bit values.
+
+  * The type checker warns on size annotations for function parameters
+    and return types that will not be visible from the outside,
+    because they refer to names nested inside tuples or records.  For
+    example, the function
+
+        let f (n: i32, m: i32): [n][m]i32 = ...
+
+    will cause such a warning.  It should instead be written
+
+        let f (n: i32) (m: i32): [n][m]i32 = ...
+
+  * A new library function
+    `futhark_context_config_select_device_interactively()` has been
+    added.
+
+### Fixed
+
+  * Fix reading and writing of binary files for C-compiled executables
+    on Windows.
+
+  * Fixed a couple of overly strict internal sanity checks related to
+    in-place updates (#735, #736).
+
+  * Fixed a couple of convoluted defunctorisation bugs (#739).
+
+## [0.10.1]
+
+### Added
+
+  * Using definitions from the `intrinsic` module outside the prelude
+    now results in a warning.
+
+  * `reduce_by_index` with vectorised operators (e.g. `map2 (+)`) is
+    orders of magnitude faster than before.
+
+  * Executables generated with the `pyopencl` backend now support the
+    options `--default-tile-size`, `--default-group-size`,
+    `--default-num-groups`, `--default-threshold`, and `--size`.
+
+  * Executables generated with `c` and `opencl` now print a help text
+    if run with invalid options.  The `py` and `pyopencl` backends
+    already did this.
+
+  * Generated executables now support a `--tuning` flag for passing
+    many tuned sizes in a file.
+
+  * Executables generated with the `cuda` backend now take an
+    `--nvrtc-option` option.
+
+  * Executables generated with the `opencl` backend now take a
+    `--build-option` option.
+
+### Removed
+
+  * The old `futhark-*` executables have been removed.
+
+### Changed
+
+  * If an array is passed for a function parameter of a polymorphic
+    type, all arrays passed for parameters of that type must have the
+    same shape.  For example, given a function
+
+        let pair 't (x: t) (y: t) = (x, y)
+
+    The application `pair [1] [2,3]` will now fail at run-time.
+
+  * `futhark test` now numbers un-named data sets from 1 rather than
+    0.  This only affects the text output and the generated JSON
+    files, and fits the tuple element ordering in Futhark.
+
+  * String literals are now of type `[]u8` and contain UTF-8 encoded
+    bytes.
+
+### Fixed
+
+  * An significant problematic interaction between empty arrays and
+    inner size declarations has been closed (#714).  This follows a
+    range of lesser empty-array fixes from 0.9.1.
+
+  * `futhark datacmp` now prints to stdout, not stderr.
+
+  * Fixed a major potential out-of-bounds access when sequentialising
+    `reduce_by_index` (in most cases the bug was hidden by subsequent
+    C compiler optimisations).
+
+  * The result of an anonymous function is now also forbidden from
+    aliasing a global variable, just as with named functions.
+
+  * Parallel scans now work correctly when using a CPU OpenCL
+    implementation.
+
+  * `reduce_by_index` was broken on newer NVIDIA GPUs when using fancy
+    operators.  This has been fixed.
+
+## [0.9.1]
+
+### Added
+
+  * `futhark cuda`: a new CUDA backend by Jakob Stokholm Bertelsen.
+
+  * New command for comparing data files: `futhark datacmp`.
+
+  * An `:mtype` command for `futhark repl` that shows the type of a
+    module expression.
+
+  * `futhark run` takes a `-w` option for disabling warnings.
+
+### Changed
+
+  * Major command reorganisation: all Futhark programs have been
+    combined into a single all-powerful `futhark` program.  Instead of
+    e.g. `futhark-foo`, use `futhark foo`.  Wrappers will be kept
+    around under the old names for a little while.  `futharki` has
+    been split into two commands: `futhark repl` and `futhark run`.
+    Also, `py` has become `python` and `cs` has become `csharp`, but
+    `pyopencl` and `csopencl` have remained as they were.
+
+  * The result of a function is now forbidden from aliasing a global
+    variable.  Surprisingly little code is affected by this.
+
+  * A global definition may not be ascribed a unique type.  This never
+    had any effect in the first place, but now the compiler will
+    explicitly complain.
+
+  * Source spans are now printed in a slightly different format, with
+    ending the line number omitted when it is the same as the start
+    line number.
+
+### Fixed
+
+  * `futharki` now reports source locations of `trace` expressions
+    properly.
+
+  * The type checker now properly complains if you try to define a
+    type abbreviation that has unused size parameters.
+
+## [0.8.1]
 
 ### Added
 
@@ -28,6 +984,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     opaque values.
 
   * The parser now permits empty programs.
+
+  * Most transpositions are now a good bit faster, especially on
+    NVIDIA GPUs.
 
 ### Removed
 

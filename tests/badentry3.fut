@@ -2,6 +2,6 @@
 -- ==
 -- warning: ^$
 
-type opaque = [](i32, i32)
+type opaque [n] = [n](i32, i32)
 
-let main (x: i32): (opaque, i32) = ([(x,x)],x)
+let main (x: i32): (opaque [], i32) = ([(x,x)],x)

@@ -1,26 +1,29 @@
--- | A re-export of the prettyprinting library, along with a convenience function.
-module Futhark.Util.Pretty
-       ( module Text.PrettyPrint.Mainland
-       , module Text.PrettyPrint.Mainland.Class
-       , pretty
-       , prettyDoc
-       , prettyTuple
-       , prettyText
-       , prettyOneLine
+{-# LANGUAGE Trustworthy #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
-       , apply
-       , oneLine
-       , annot
-       , nestedBlock
-       )
-       where
+-- | A re-export of the prettyprinting library, along with some convenience functions.
+module Futhark.Util.Pretty
+  ( module Text.PrettyPrint.Mainland,
+    module Text.PrettyPrint.Mainland.Class,
+    pretty,
+    prettyDoc,
+    prettyTuple,
+    prettyText,
+    prettyOneLine,
+    apply,
+    oneLine,
+    annot,
+    nestedBlock,
+    textwrap,
+    shorten,
+  )
+where
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as LT
-
 import Text.PrettyPrint.Mainland hiding (pretty)
-import Text.PrettyPrint.Mainland.Class
 import qualified Text.PrettyPrint.Mainland as PP
+import Text.PrettyPrint.Mainland.Class
 
 -- | Prettyprint a value, wrapped to 80 characters.
 pretty :: Pretty a => a -> String
@@ -32,7 +35,7 @@ prettyText = LT.toStrict . PP.prettyLazyText 80 . ppr
 
 -- | Prettyprint a value without any width restriction.
 prettyOneLine :: Pretty a => a -> String
-prettyOneLine = ($"") . displayS . renderCompact . oneLine . ppr
+prettyOneLine = ($ "") . displayS . renderCompact . oneLine . ppr
 
 -- | Re-export of 'PP.pretty'.
 prettyDoc :: Int -> Doc -> String
@@ -54,6 +57,10 @@ apply = parens . commasep . map align
 oneLine :: PP.Doc -> PP.Doc
 oneLine s = PP.text $ PP.displayS (PP.renderCompact s) ""
 
+-- | Like 'text', but splits the string into words and permits line breaks between all of them.
+textwrap :: String -> Doc
+textwrap = folddoc (<+/>) . map text . words
+
 -- | Stack and prepend a list of 'Doc's to another 'Doc', separated by
 -- a linebreak.  If the list is empty, the second 'Doc' will be
 -- returned without a preceding linebreak.
@@ -64,6 +71,17 @@ annot l s = stack l </> s
 -- | Surround the given document with enclosers and add linebreaks and
 -- indents.
 nestedBlock :: String -> String -> Doc -> Doc
-nestedBlock pre post body = text pre </>
-                            PP.indent 2 body </>
-                            text post
+nestedBlock pre post body =
+  text pre
+    </> PP.indent 2 body
+    </> text post
+
+-- | Prettyprint on a single line up to at most some appropriate
+-- number of characters, with trailing ... if necessary.  Used for
+-- error messages.
+shorten :: Pretty a => a -> Doc
+shorten a
+  | length s > 70 = text (take 70 s) <> text "..."
+  | otherwise = text s
+  where
+    s = pretty a

@@ -7,37 +7,49 @@
 -- The imperative code has been augmented with a 'LaunchKernel'
 -- operation that allows one to execute an OpenCL kernel.
 module Futhark.CodeGen.ImpCode.OpenCL
-       ( Program (..)
-       , Function
-       , FunctionT (Function)
-       , Code
-       , KernelName
-       , KernelArg (..)
-       , OpenCL (..)
-       , module Futhark.CodeGen.ImpCode
-       , module Futhark.Representation.Kernels.Sizes
-       )
-       where
+  ( Program (..),
+    Function,
+    FunctionT (Function),
+    Code,
+    KernelName,
+    KernelArg (..),
+    OpenCL (..),
+    KernelSafety (..),
+    numFailureParams,
+    KernelTarget (..),
+    FailureMsg (..),
+    module Futhark.CodeGen.ImpCode,
+    module Futhark.IR.Kernels.Sizes,
+  )
+where
 
 import qualified Data.Map as M
-
-import Futhark.CodeGen.ImpCode hiding (Function, Code)
-import Futhark.Representation.Kernels.Sizes
+import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
-
+import Futhark.IR.Kernels.Sizes
 import Futhark.Util.Pretty
 
 -- | An program calling OpenCL kernels.
-data Program = Program { openClProgram :: String
-                       , openClPrelude :: String
-                         -- ^ Must be prepended to the program.
-                       , openClKernelNames :: [KernelName]
-                       , openClUsedTypes :: [PrimType]
-                         -- ^ So we can detect whether the device is capable.
-                       , openClSizes :: M.Map VName (SizeClass, Name)
-                         -- ^ Runtime-configurable constants.
-                       , hostFunctions :: Functions OpenCL
-                       }
+data Program = Program
+  { openClProgram :: String,
+    -- | Must be prepended to the program.
+    openClPrelude :: String,
+    openClKernelNames :: M.Map KernelName KernelSafety,
+    -- | So we can detect whether the device is capable.
+    openClUsedTypes :: [PrimType],
+    -- | Runtime-configurable constants.
+    openClSizes :: M.Map Name SizeClass,
+    -- | Assertion failure error messages.
+    openClFailures :: [FailureMsg],
+    hostDefinitions :: Definitions OpenCL
+  }
+
+-- | Something that can go wrong in a kernel.  Part of the machinery
+-- for reporting error messages from within kernels.
+data FailureMsg = FailureMsg
+  { failureError :: ErrorMsg Exp,
+    failureBacktrace :: String
+  }
 
 -- | A function calling OpenCL kernels.
 type Function = Imp.Function OpenCL
@@ -46,24 +58,56 @@ type Function = Imp.Function OpenCL
 type Code = Imp.Code OpenCL
 
 -- | The name of a kernel.
-type KernelName = String
+type KernelName = Name
 
 -- | An argument to be passed to a kernel.
-data KernelArg = ValueKArg Exp PrimType
-                 -- ^ Pass the value of this scalar expression as argument.
-               | MemKArg VName
-                 -- ^ Pass this pointer as argument.
-               | SharedMemoryKArg (Count Bytes)
-                 -- ^ Create this much local memory per workgroup.
-               deriving (Show)
+data KernelArg
+  = -- | Pass the value of this scalar expression as argument.
+    ValueKArg Exp PrimType
+  | -- | Pass this pointer as argument.
+    MemKArg VName
+  | -- | Create this much local memory per workgroup.
+    SharedMemoryKArg (Count Bytes Exp)
+  deriving (Show)
+
+-- | Whether a kernel can potentially fail (because it contains bounds
+-- checks and such).
+data MayFail = MayFail | CannotFail
+  deriving (Show)
+
+-- | Information about bounds checks and how sensitive it is to
+-- errors.  Ordered by least demanding to most.
+data KernelSafety
+  = -- | Does not need to know if we are in a failing state, and also
+    -- cannot fail.
+    SafetyNone
+  | -- | Needs to be told if there's a global failure, and that's it,
+    -- and cannot fail.
+    SafetyCheap
+  | -- | Needs all parameters, may fail itself.
+    SafetyFull
+  deriving (Eq, Ord, Show)
+
+-- | How many leading failure arguments we must pass when launching a
+-- kernel with these safety characteristics.
+numFailureParams :: KernelSafety -> Int
+numFailureParams SafetyNone = 0
+numFailureParams SafetyCheap = 1
+numFailureParams SafetyFull = 3
 
 -- | Host-level OpenCL operation.
-data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
-            | HostCode Code
-            | GetSize VName VName
-            | CmpSizeLe VName VName Exp
-            | GetSizeMax VName SizeClass
-            deriving (Show)
+data OpenCL
+  = LaunchKernel KernelSafety KernelName [KernelArg] [Exp] [Exp]
+  | GetSize VName Name
+  | CmpSizeLe VName Name Exp
+  | GetSizeMax VName SizeClass
+  deriving (Show)
+
+-- | The target platform when compiling imperative code to a 'Program'
+data KernelTarget
+  = TargetOpenCL
+  | TargetCUDA
+  deriving (Eq)
 
 instance Pretty OpenCL where
   ppr = text . show

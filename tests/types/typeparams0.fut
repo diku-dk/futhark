@@ -1,7 +1,7 @@
 -- A simple case of a parametric type.
 -- ==
--- input { 2 } output { [0,1] }
+-- input { 2i64 } output { [0i64,1i64] }
 
-type vector 't = []t
+type~ vector 't = []t
 
-let main(n: i32): vector i32 = iota n
+let main(n: i64): vector i64 = iota n

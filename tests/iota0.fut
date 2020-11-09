@@ -1,8 +1,8 @@
 -- Does iota work at all?
 -- ==
--- input { 0 }
--- output { empty(i32) }
--- input { 2 }
--- output { [0,1] }
+-- input { 0i64 }
+-- output { empty([0]i64) }
+-- input { 2i64 }
+-- output { [0i64,1i64] }
 
-let main(n: i32): []i32 = iota(n)
+let main(n: i64): []i64 = iota(n)

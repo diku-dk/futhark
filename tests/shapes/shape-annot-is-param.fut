@@ -1,9 +1,9 @@
 -- ==
--- input { 2 [1,2] }
+-- input { 2i64 [1,2] }
 -- output { [1,2] }
--- input { 1 [1,2] }
+-- compiled input { 1i64 [1,2] }
 -- error:
 
-let f (n: i32) (xs: [n]i32): [n]i32 = xs
+let f (n: i64) (xs: [n]i32): [n]i32 = xs
 
-let main (n: i32) (xs: []i32) = f n xs
+let main (n: i64) (xs: []i32) = f n xs

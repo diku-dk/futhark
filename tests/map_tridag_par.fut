@@ -3,27 +3,26 @@
 -- this is LocVolCalib.
 --
 -- ==
--- compiled input { 1000 256 }
+-- compiled input { 1000i64 256i64 }
 --
 -- output { [0.010000f32, 0.790000f32, 2.660000f32,
 -- 21474836.000000f32, 21474836.000000f32, 21474836.000000f32,
 -- 21474836.000000f32, 21474836.000000f32, 21474836.000000f32,
 -- 5625167.000000f32] }
 --
--- compiled input { 100 2560 }
+-- no_python compiled input { 100i64 2560i64 }
 --
 -- output { [0.000000f32, 0.120000f32, 0.260000f32, 0.430000f32,
 -- 0.620000f32, 0.840000f32, 1.110000f32, 1.440000f32, 1.840000f32,
 -- 2.360000f32] }
 --
--- compiled input { 10 25600 }
+-- no_python compiled input { 10i64 25600i64 }
 --
 -- output { [0.000000f32, 0.110000f32, 0.250000f32, 0.410000f32,
 -- 0.590000f32, 0.800000f32, 1.040000f32, 1.340000f32, 1.710000f32,
 -- 2.170000f32] }
 
-let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[]f32 =
-  unsafe
+let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[n]f32 =
 ----------------------------------------------------
   -- Recurrence 1: b[i] = b[i] - a[i]*c[i-1]/b[i-1] --
   --   solved by scan with 2x2 matrix mult operator --
@@ -33,7 +32,7 @@ let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[]f32 =
                      if 0 < i
                      then (b[i], 0.0-a[i]*c[i-1], 1.0, 0.0)
                      else (1.0,  0.0,             0.0, 1.0)
-                  ) (iota n)
+                  ) (map i32.i64 (iota n))
   let scmt = scan (\(a:  (f32,f32,f32,f32))
                    (b: (f32,f32,f32,f32)): (f32,f32,f32,f32)  ->
                      let (a0,a1,a2,a3) = a
@@ -58,7 +57,7 @@ let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[]f32 =
                      if 0 < i
                      then (y[i], 0.0-a[i]/b[i-1])
                      else (0.0,  1.0            )
-                  ) (iota n)
+                  ) (map i32.i64 (iota n))
   let cfuns= scan (\(a: (f32,f32)) (b: (f32,f32)): (f32,f32)  ->
                      let (a0,a1) = a
                      let (b0,b1) = b
@@ -74,11 +73,11 @@ let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[]f32 =
   ------------------------------------------------------
   let yn   = y[n-1]/b[n-1]
   let lfuns= map  (\(k: i32): (f32,f32)  ->
-                     let i = n-k-1
+                     let i = i32.i64 n-k-1
                      in  if   0 < k
                          then (y[i]/b[i], 0.0-c[i]/b[i])
                          else (0.0,       1.0          )
-                  ) (iota n)
+                  ) (map i32.i64 (iota n))
   let cfuns= scan (\(a: (f32,f32)) (b: (f32,f32)): (f32,f32)  ->
                      let (a0,a1) = a
                      let (b0,b1) = b
@@ -88,7 +87,7 @@ let tridagPar [n] (a:  [n]f32, b: []f32, c: []f32, y: []f32 ): *[]f32 =
                      let (a,b) = tup
                      in a + b*yn
                   ) cfuns
-  let y    = map  (\(i: i32): f32  -> y[n-i-1]) (iota n)
+  let y    = map  (\i: f32  -> y[n-i-1]) (iota n)
   in y
 
 let map_tridag_par
@@ -108,18 +107,18 @@ let map_tridag_par
 
 -- To avoid floating-point jitter.
 let trunc2dec (x: f32) =
-  f32.abs (r32 (t32 (x*100.0))/100.0)
+  f32.abs (f32.i32 (i32.f32 (x*100.0))/100.0)
 
-let main (outer: i32) (inner: i32) =
+let main (outer: i64) (inner: i64) =
   let myD = replicate inner [0.10, 0.20, 0.30]
   let myDD = replicate inner [0.20, 0.30, 0.40]
-  let scale (s: i32) (x: i32) =
-        r32 (s+x) / r32 inner
-  let scale_row (s: i32) (i: i32) (row: [inner]i32) =
+  let scale (s: i64) (x: i64) =
+        f32.i64 (s+x) / f32.i64 inner
+  let scale_row (s: i64) (i: i64) (row: [inner]i64) =
         map (scale (s+i)) row
   let myMu = map2 (scale_row 1) (iota outer) (replicate outer (iota inner))
   let myVar = map2 (scale_row 2) (iota outer) (replicate outer (iota inner))
   let u = map2 (scale_row 3) (iota outer) (replicate outer (iota inner))
   let dtInv = 0.8874528f32
   let res = map_tridag_par (myD, myDD, myMu, myVar, u, dtInv)
-  in map (\i -> unsafe trunc2dec (res[i*(outer/10), i*(inner/10)])) (iota 10)
+  in map (\i -> trunc2dec (res[i*(outer/10), i*(inner/10)])) (iota 10)

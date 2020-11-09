@@ -4,7 +4,7 @@
 -- group-level stream.
 --
 -- ==
--- structure distributed { Kernel 2 Kernel/DoLoop 1 }
+-- structure distributed { SegMap 2 SegMap/DoLoop 1 }
 
 let indexOfMax8 ((x,i): (u8,i32)) ((y,j): (u8,i32)): (u8,i32) =
   if x < y then (y,j) else (x,i)
@@ -15,7 +15,7 @@ let max8 (max_v: u8) (v: u8): u8 =
 let main [h][w] (frame : [h][w]i32) : [h][w]u8 =
   map (\row: [w]u8 ->
          let rs = map u8.i32 row
-         let m = reduce max8 0u8 rs
+         let m = #[sequential] reduce max8 0u8 rs
          let rs' = map (max8 m) rs
          in rs')
    frame

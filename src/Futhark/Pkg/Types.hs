@@ -1,59 +1,58 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 -- | Types (and a few other simple definitions) for futhark-pkg.
 module Futhark.Pkg.Types
-  ( PkgPath
-  , pkgPathFilePath
-  , PkgRevDeps(..)
-  , module Data.Versions
+  ( PkgPath,
+    pkgPathFilePath,
+    PkgRevDeps (..),
+    module Data.Versions,
 
-  -- * Versions
-  , commitVersion
-  , isCommitVersion
-  , parseVersion
+    -- * Versions
+    commitVersion,
+    isCommitVersion,
+    parseVersion,
 
-  -- * Package manifests
-  , PkgManifest(..)
-  , newPkgManifest
-  , pkgRevDeps
-  , pkgDir
-  , addRequiredToManifest
-  , removeRequiredFromManifest
-  , prettyPkgManifest
-  , Comment
-  , Commented(..)
-  , Required(..)
-  , futharkPkg
+    -- * Package manifests
+    PkgManifest (..),
+    newPkgManifest,
+    pkgRevDeps,
+    pkgDir,
+    addRequiredToManifest,
+    removeRequiredFromManifest,
+    prettyPkgManifest,
+    Comment,
+    Commented (..),
+    Required (..),
+    futharkPkg,
 
-  -- * Parsing package manifests
-  , parsePkgManifest
-  , parsePkgManifestFromFile
-  , errorBundlePretty
+    -- * Parsing package manifests
+    parsePkgManifest,
+    parsePkgManifestFromFile,
+    errorBundlePretty,
 
-  -- * Build list
-  , BuildList(..)
-  , prettyBuildList
-  ) where
+    -- * Build list
+    BuildList (..),
+    prettyBuildList,
+  )
+where
 
 import Control.Applicative
 import Control.Monad
 import Data.Either
 import Data.Foldable
-import Data.List
+import Data.List (sortOn)
+import qualified Data.List.NonEmpty as NE
+import qualified Data.Map as M
 import Data.Maybe
-import Data.Traversable
-import Data.Void
-import Data.Semigroup ((<>))
-import qualified Data.Semigroup as Sem
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import qualified Data.Map as M
+import Data.Traversable
+import Data.Versions (SemVer (..), VUnit (..), prettySemVer)
+import Data.Void
 import System.FilePath
 import qualified System.FilePath.Posix as Posix
-
-import Data.Versions (SemVer(..), VUnit(..), prettySemVer)
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
-
 import Prelude
 
 -- | A package path is a unique identifier for a package, for example
@@ -68,16 +67,16 @@ pkgPathFilePath = joinPath . Posix.splitPath . T.unpack
 
 -- | Versions of the form (0,0,0)-timestamp+hash are treated
 -- specially, as a reference to the commit identified uniquely with
--- 'hash' (typically the Git commit ID).  This function detects such
+-- @hash@ (typically the Git commit ID).  This function detects such
 -- versions.
 isCommitVersion :: SemVer -> Maybe T.Text
-isCommitVersion (SemVer 0 0 0 [_] [[Str s]]) = Just s
+isCommitVersion (SemVer 0 0 0 [_] [Str s NE.:| []]) = Just s
 isCommitVersion _ = Nothing
 
 -- | @commitVersion timestamp commit@ constructs a commit version.
 commitVersion :: T.Text -> T.Text -> SemVer
 commitVersion time commit =
-  SemVer 0 0 0 [[Str time]] [[Str commit]]
+  SemVer 0 0 0 [Str time NE.:| []] [Str commit NE.:| []]
 
 -- | Unfortunately, Data.Versions has a buggy semver parser that
 -- collapses consecutive zeroes in the metadata field.  So, we define
@@ -88,26 +87,26 @@ parseVersion = parse (semver' <* eof) "Semantic Version"
 
 semver' :: Parsec Void T.Text SemVer
 semver' = SemVer <$> majorP <*> minorP <*> patchP <*> preRel <*> metaData
-  where majorP = digitsP <* char '.'
-        minorP = majorP
-        patchP = digitsP
-        digitsP = read <$> ((T.unpack <$> string "0") <|> some digitChar)
-        preRel = maybe [] pure <$> optional preRel'
-        preRel' = char '-' *> (pure . Str . T.pack <$> some digitChar)
-        metaData = maybe [] pure <$> optional metaData'
-        metaData' = char '+' *> (pure . Str . T.pack <$> some alphaNumChar)
+  where
+    majorP = digitsP <* char '.'
+    minorP = majorP
+    patchP = digitsP
+    digitsP = read <$> ((T.unpack <$> string "0") <|> some digitChar)
+    preRel = maybe [] pure <$> optional preRel'
+    preRel' = char '-' *> (pure . Str . T.pack <$> some digitChar)
+    metaData = maybe [] pure <$> optional metaData'
+    metaData' = char '+' *> (pure . Str . T.pack <$> some alphaNumChar)
 
 -- | The dependencies of a (revision of a) package is a mapping from
 -- package paths to minimum versions (and an optional hash pinning).
 newtype PkgRevDeps = PkgRevDeps (M.Map PkgPath (SemVer, Maybe T.Text))
   deriving (Show)
 
-instance Sem.Semigroup PkgRevDeps where
+instance Semigroup PkgRevDeps where
   PkgRevDeps x <> PkgRevDeps y = PkgRevDeps $ x <> y
 
 instance Monoid PkgRevDeps where
   mempty = PkgRevDeps mempty
-  mappend = (Sem.<>)
 
 --- Package manifest
 
@@ -117,10 +116,11 @@ type Comment = T.Text
 -- | Wraps a value with an annotation of preceding line comments.
 -- This is important to our goal of being able to programmatically
 -- modify the @futhark.pkg@ file while keeping comments intact.
-data Commented a = Commented { comments :: [Comment]
-                             , commented :: a
-                             }
-                   deriving (Show, Eq)
+data Commented a = Commented
+  { comments :: [Comment],
+    commented :: a
+  }
+  deriving (Show, Eq)
 
 instance Functor Commented where
   fmap = fmapDefault
@@ -133,17 +133,17 @@ instance Traversable Commented where
 
 -- | An entry in the @required@ section of a @futhark.pkg@ file.
 data Required = Required
-                { requiredPkg :: PkgPath
-                  -- ^ Name of the required package.
-                , requiredPkgRev :: SemVer
-                  -- ^ The minimum revision.
-                , requiredHash :: Maybe T.Text
-                  -- ^ An optional hash indicating what
-                  -- this revision looked like the last
-                  -- time we saw it.  Used for integrity
-                  -- checking.
-                }
-                deriving (Show, Eq)
+  { -- | Name of the required package.
+    requiredPkg :: PkgPath,
+    -- | The minimum revision.
+    requiredPkgRev :: SemVer,
+    -- | An optional hash indicating what
+    -- this revision looked like the last
+    -- time we saw it.  Used for integrity
+    -- checking.
+    requiredHash :: Maybe T.Text
+  }
+  deriving (Show, Eq)
 
 -- | The name of the file containing the futhark-pkg manifest.
 futharkPkg :: FilePath
@@ -152,12 +152,13 @@ futharkPkg = "futhark.pkg"
 -- | A structure corresponding to a @futhark.pkg@ file, including
 -- comments.  It is an invariant that duplicate required packages do
 -- not occcur (the parser will verify this).
-data PkgManifest = PkgManifest { manifestPkgPath :: Commented (Maybe PkgPath)
-                               -- ^ The name of the package.
-                               , manifestRequire :: Commented [Either Comment Required]
-                               , manifestEndComments :: [Comment]
-                               }
-                   deriving (Show, Eq)
+data PkgManifest = PkgManifest
+  { -- | The name of the package.
+    manifestPkgPath :: Commented (Maybe PkgPath),
+    manifestRequire :: Commented [Either Comment Required],
+    manifestEndComments :: [Comment]
+  }
+  deriving (Show, Eq)
 
 -- | Possibly given a package path, construct an otherwise-empty manifest file.
 newPkgManifest :: Maybe PkgPath -> PkgManifest
@@ -168,54 +169,70 @@ newPkgManifest p =
 -- @futhark.pkg@ file.
 prettyPkgManifest :: PkgManifest -> T.Text
 prettyPkgManifest (PkgManifest name required endcs) =
-  T.unlines $ concat [ prettyComments name
-                     , maybe [] (pure . ("package "<>) . (<>"\n")) $ commented name
-                     , prettyComments required
-                     , ["require {"]
-                     , map (("  "<>) . prettyRequired) $ commented required
-                     , ["}"]
-                     , map prettyComment endcs
-                     ]
-  where prettyComments = map prettyComment . comments
-        prettyComment = ("--"<>)
-        prettyRequired (Left c) = prettyComment c
-        prettyRequired (Right (Required p r h)) =
-          T.unwords $ catMaybes [Just p,
-                                 Just $ prettySemVer r,
-                                 ("#"<>) <$> h]
+  T.unlines $
+    concat
+      [ prettyComments name,
+        maybe [] (pure . ("package " <>) . (<> "\n")) $ commented name,
+        prettyComments required,
+        ["require {"],
+        map (("  " <>) . prettyRequired) $ commented required,
+        ["}"],
+        map prettyComment endcs
+      ]
+  where
+    prettyComments = map prettyComment . comments
+    prettyComment = ("--" <>)
+    prettyRequired (Left c) = prettyComment c
+    prettyRequired (Right (Required p r h)) =
+      T.unwords $
+        catMaybes
+          [ Just p,
+            Just $ prettySemVer r,
+            ("#" <>) <$> h
+          ]
 
 -- | The required packages listed in a package manifest.
 pkgRevDeps :: PkgManifest -> PkgRevDeps
-pkgRevDeps = PkgRevDeps . M.fromList . mapMaybe onR .
-             commented .  manifestRequire
-  where onR (Right r) = Just (requiredPkg r, (requiredPkgRev r, requiredHash r))
-        onR (Left _) = Nothing
+pkgRevDeps =
+  PkgRevDeps . M.fromList . mapMaybe onR
+    . commented
+    . manifestRequire
+  where
+    onR (Right r) = Just (requiredPkg r, (requiredPkgRev r, requiredHash r))
+    onR (Left _) = Nothing
 
 -- | Where in the corresponding repository archive we can expect to
 -- find the package files.
 pkgDir :: PkgManifest -> Maybe Posix.FilePath
-pkgDir = fmap (Posix.addTrailingPathSeparator . ("lib" Posix.</>) .
-               T.unpack) . commented . manifestPkgPath
+pkgDir =
+  fmap
+    ( Posix.addTrailingPathSeparator . ("lib" Posix.</>)
+        . T.unpack
+    )
+    . commented
+    . manifestPkgPath
 
 -- | Add new required package to the package manifest.  If the package
 -- was already present, return the old version.
 addRequiredToManifest :: Required -> PkgManifest -> (PkgManifest, Maybe Required)
 addRequiredToManifest new_r pm =
   let (old, requires') = mapAccumL add Nothing $ commented $ manifestRequire pm
-  in (if isJust old
-      then pm { manifestRequire = const requires' <$> manifestRequire pm }
-      else pm { manifestRequire = (++[Right new_r]) <$> manifestRequire pm },
-      old)
-  where add acc (Left c) = (acc, Left c)
-        add acc (Right r)
-          | requiredPkg r == requiredPkg new_r = (Just r, Right new_r)
-          | otherwise                          = (acc, Right r)
+   in ( if isJust old
+          then pm {manifestRequire = requires' <$ manifestRequire pm}
+          else pm {manifestRequire = (++ [Right new_r]) <$> manifestRequire pm},
+        old
+      )
+  where
+    add acc (Left c) = (acc, Left c)
+    add acc (Right r)
+      | requiredPkg r == requiredPkg new_r = (Just r, Right new_r)
+      | otherwise = (acc, Right r)
 
 -- | Check if the manifest specifies a required package with the given
 -- package path.
 requiredInManifest :: PkgPath -> PkgManifest -> Maybe Required
 requiredInManifest p =
-  find ((==p) . requiredPkg) . rights . commented . manifestRequire
+  find ((== p) . requiredPkg) . rights . commented . manifestRequire
 
 -- | Remove a required package from the manifest.  Returns 'Nothing'
 -- if the package was not found in the manifest, and otherwise the new
@@ -223,9 +240,12 @@ requiredInManifest p =
 removeRequiredFromManifest :: PkgPath -> PkgManifest -> Maybe (PkgManifest, Required)
 removeRequiredFromManifest p pm = do
   r <- requiredInManifest p pm
-  return (pm { manifestRequire = filter (not . matches) <$> manifestRequire pm },
-          r)
-  where matches = either (const False) ((==p) . requiredPkg)
+  return
+    ( pm {manifestRequire = filter (not . matches) <$> manifestRequire pm},
+      r
+    )
+  where
+    matches = either (const False) ((== p) . requiredPkg)
 
 --- Parsing futhark.pkg.
 
@@ -237,46 +257,56 @@ pPkgManifest = do
   p <- optional $ lexstr "package" *> pPkgPath
   space
   c2 <- pComments
-  required <- (lexstr "require" *>
-               braces (many $ (Left <$> pComment) <|> (Right <$> pRequired)))
-              <|> pure []
+  required <-
+    ( lexstr "require"
+        *> braces (many $ (Left <$> pComment) <|> (Right <$> pRequired))
+      )
+      <|> pure []
   c3 <- pComments
   eof
   return $ PkgManifest (Commented c1 p) (Commented c2 required) c3
-  where lexeme :: Parser a -> Parser a
-        lexeme p = p <* space
+  where
+    lexeme :: Parser a -> Parser a
+    lexeme p = p <* space
 
-        lexeme' p = p <* spaceNoEol
+    lexeme' p = p <* spaceNoEol
 
-        lexstr :: T.Text -> Parser ()
-        lexstr = void . try . lexeme . string
+    lexstr :: T.Text -> Parser ()
+    lexstr = void . try . lexeme . string
 
-        braces :: Parser a -> Parser a
-        braces p = lexstr "{" *> p <* lexstr "}"
+    braces :: Parser a -> Parser a
+    braces p = lexstr "{" *> p <* lexstr "}"
 
-        spaceNoEol = many $ oneOf (" \t" :: String)
+    spaceNoEol = many $ oneOf (" \t" :: String)
 
-        pPkgPath = T.pack <$> some (alphaNumChar <|> oneOf ("@-/.:" :: String))
-                   <?> "package path"
+    pPkgPath =
+      T.pack <$> some (alphaNumChar <|> oneOf ("@-/.:" :: String))
+        <?> "package path"
 
-        pRequired = space *> (Required <$> lexeme' pPkgPath
-                                       <*> lexeme' semver'
-                                       <*> optional (lexeme' pHash)) <* space
-                    <?> "package requirement"
+    pRequired =
+      space
+        *> ( Required <$> lexeme' pPkgPath
+               <*> lexeme' semver'
+               <*> optional (lexeme' pHash)
+           )
+        <* space
+        <?> "package requirement"
 
-        pHash = char '#' *> (T.pack <$> some alphaNumChar)
+    pHash = char '#' *> (T.pack <$> some alphaNumChar)
 
-        pComment = lexeme $ T.pack <$> (string "--" >> anySingle `manyTill` (void eol <|> eof))
+    pComment = lexeme $ T.pack <$> (string "--" >> anySingle `manyTill` (void eol <|> eof))
 
-        pComments :: Parser [Comment]
-        pComments = catMaybes <$> many (comment <|> blankLine)
-          where comment = Just <$> pComment
-                blankLine = some spaceChar >> pure Nothing
+    pComments :: Parser [Comment]
+    pComments = catMaybes <$> many (comment <|> blankLine)
+      where
+        comment = Just <$> pComment
+        blankLine = some spaceChar >> pure Nothing
 
-
+-- | Parse a text as a 'PkgManifest'.  The 'FilePath' is used for any error messages.
 parsePkgManifest :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text Void) PkgManifest
 parsePkgManifest = parse pPkgManifest
 
+-- | Read contents of file and pass it to 'parsePkgManifest'.
 parsePkgManifestFromFile :: FilePath -> IO PkgManifest
 parsePkgManifestFromFile f = do
   s <- T.readFile f
@@ -286,11 +316,12 @@ parsePkgManifestFromFile f = do
 
 -- | A mapping from package paths to their chosen revisions.  This is
 -- the result of the version solver.
-newtype BuildList = BuildList { unBuildList :: M.Map PkgPath SemVer }
-                  deriving (Eq, Show)
+newtype BuildList = BuildList {unBuildList :: M.Map PkgPath SemVer}
+  deriving (Eq, Show)
 
 -- | Prettyprint a build list; one package per line and
 -- newline-terminated.
 prettyBuildList :: BuildList -> T.Text
 prettyBuildList (BuildList m) = T.unlines $ map f $ sortOn fst $ M.toList m
-  where f (p, v) = T.unwords [p, "=>", prettySemVer v]
+  where
+    f (p, v) = T.unwords [p, "=>", prettySemVer v]

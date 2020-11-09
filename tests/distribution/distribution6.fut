@@ -1,9 +1,9 @@
 -- ==
--- structure distributed { Kernel 1 }
+-- structure distributed { SegMap 1 }
 --
 
-let main(outer_loop_count: i32, a: []i32): [][]i32 =
-  map (\(i: i32): []i32  ->
-        let x = 10 * i in
-        map (*x) a) (
-      iota(outer_loop_count))
+let main(outer_loop_count: i64, a: []i64): [][]i64 =
+  map (\(i: i64) ->
+         let x = 10 * i
+         in map (*x) a)
+      (iota(outer_loop_count))

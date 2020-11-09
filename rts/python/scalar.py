@@ -1,7 +1,18 @@
-# Scalar functions.
+# Start of scalar.py.
 
 import numpy as np
+import math
 import struct
+
+def intlit(t, x):
+  if t == np.int8:
+    return np.int8(x)
+  elif t == np.int16:
+    return np.int16(x)
+  elif t == np.int32:
+    return np.int32(x)
+  else:
+    return np.int64(x)
 
 def signed(x):
   if type(x) == np.uint8:
@@ -29,23 +40,56 @@ def shlN(x,y):
 def ashrN(x,y):
   return x >> y
 
+# Python is so slow that we just make all the unsafe operations safe,
+# always.
+
 def sdivN(x,y):
-  return x // y
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return x // y
+
+def sdiv_upN(x,y):
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return (x+y-intlit(type(x), 1)) // y
 
 def smodN(x,y):
-  return x % y
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return x % y
 
 def udivN(x,y):
-  return signed(unsigned(x) // unsigned(y))
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return signed(unsigned(x) // unsigned(y))
+
+def udiv_upN(x,y):
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return signed((unsigned(x)+unsigned(y)-unsigned(intlit(type(x),1))) // unsigned(y))
 
 def umodN(x,y):
-  return signed(unsigned(x) % unsigned(y))
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return signed(unsigned(x) % unsigned(y))
 
 def squotN(x,y):
-  return np.floor_divide(np.abs(x), np.abs(y)) * np.sign(x) * np.sign(y)
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return np.floor_divide(np.abs(x), np.abs(y)) * np.sign(x) * np.sign(y)
 
 def sremN(x,y):
-  return np.remainder(np.abs(x), np.abs(y)) * np.sign(x)
+  if y == 0:
+    return intlit(type(x), 0)
+  else:
+    return np.remainder(np.abs(x), np.abs(y)) * np.sign(x)
 
 def sminN(x,y):
   return min(x,y)
@@ -170,14 +214,25 @@ def zext_i64_i32(x):
 def zext_i64_i64(x):
   return np.int64(np.uint64(x))
 
+sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
+sdiv_up8 = sdiv1_up6 = sdiv_up32 = sdiv_up64 = sdiv_upN
+sdiv_safe8 = sdiv1_safe6 = sdiv_safe32 = sdiv_safe64 = sdivN
+sdiv_up_safe8 = sdiv_up1_safe6 = sdiv_up_safe32 = sdiv_up_safe64 = sdiv_upN
+smod8 = smod16 = smod32 = smod64 = smodN
+smod_safe8 = smod_safe16 = smod_safe32 = smod_safe64 = smodN
+udiv8 = udiv16 = udiv32 = udiv64 = udivN
+udiv_up8 = udiv_up16 = udiv_up32 = udiv_up64 = udivN
+udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = udiv_upN
+udiv_up_safe8 = udiv_up_safe16 = udiv_up_safe32 = udiv_up_safe64 = udiv_upN
+umod8 = umod16 = umod32 = umod64 = umodN
+umod_safe8 = umod_safe16 = umod_safe32 = umod_safe64 = umodN
+squot8 = squot16 = squot32 = squot64 = squotN
+squot_safe8 = squot_safe16 = squot_safe32 = squot_safe64 = squotN
+srem8 = srem16 = srem32 = srem64 = sremN
+srem_safe8 = srem_safe16 = srem_safe32 = srem_safe64 = sremN
+
 shl8 = shl16 = shl32 = shl64 = shlN
 ashr8 = ashr16 = ashr32 = ashr64 = ashrN
-sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
-smod8 = smod16 = smod32 = smod64 = smodN
-udiv8 = udiv16 = udiv32 = udiv64 = udivN
-umod8 = umod16 = umod32 = umod64 = umodN
-squot8 = squot16 = squot32 = squot64 = squotN
-srem8 = srem16 = srem32 = srem64 = sremN
 smax8 = smax16 = smax32 = smax64 = smaxN
 smin8 = smin16 = smin32 = smin64 = sminN
 umax8 = umax16 = umax32 = umax64 = umaxN
@@ -195,6 +250,37 @@ sext_i8_i16 = sext_i16_i16 = sext_i32_i16 = sext_i64_i16 = sext_T_i16
 sext_i8_i32 = sext_i16_i32 = sext_i32_i32 = sext_i64_i32 = sext_T_i32
 sext_i8_i64 = sext_i16_i64 = sext_i32_i64 = sext_i64_i64 = sext_T_i64
 itob_i8_bool = itob_i16_bool = itob_i32_bool = itob_i64_bool = itob_T_bool
+
+def clz_T(x):
+  n = np.int32(0)
+  bits = x.itemsize * 8
+  for i in range(bits):
+    if x < 0:
+      break
+    n += 1
+    x <<= np.int8(1)
+  return n
+
+def ctz_T(x):
+  n = np.int32(0)
+  bits = x.itemsize * 8
+  for i in range(bits):
+    if (x & 1) == 1:
+      break
+    n += 1
+    x >>= np.int8(1)
+  return n
+
+def popc_T(x):
+  c = np.int32(0)
+  while x != 0:
+    x &= x - np.int8(1)
+    c += np.int8(1)
+  return c
+
+futhark_popc8 = futhark_popc16 = futhark_popc32 = futhark_popc64 = popc_T
+futhark_clzz8 = futhark_clzz16 = futhark_clzz32 = futhark_clzz64 = clz_T
+futhark_ctzz8 = futhark_ctzz16 = futhark_ctzz32 = futhark_ctzz64 = ctz_T
 
 def ssignum(x):
   return np.sign(x)
@@ -259,6 +345,39 @@ def fpconv_f32_f64(x):
 def fpconv_f64_f32(x):
   return np.float32(x)
 
+def futhark_mul_hi8(a, b):
+  a = np.uint64(np.uint8(a))
+  b = np.uint64(np.uint8(b))
+  return np.int8((a*b) >> np.uint64(8))
+
+def futhark_mul_hi16(a, b):
+  a = np.uint64(np.uint16(a))
+  b = np.uint64(np.uint16(b))
+  return np.int16((a*b) >> np.uint64(16))
+
+def futhark_mul_hi32(a, b):
+  a = np.uint64(np.uint32(a))
+  b = np.uint64(np.uint32(b))
+  return np.int32((a*b) >> np.uint64(32))
+
+# This one is done with arbitrary-precision integers.
+def futhark_mul_hi64(a, b):
+  a = int(np.uint64(a))
+  b = int(np.uint64(b))
+  return np.int64(np.uint64(a*b >> 64))
+
+def futhark_mad_hi8(a, b, c):
+  return futhark_mul_hi8(a,b) + c
+
+def futhark_mad_hi16(a, b, c):
+  return futhark_mul_hi16(a,b) + c
+
+def futhark_mad_hi32(a, b, c):
+  return futhark_mul_hi32(a,b) + c
+
+def futhark_mad_hi64(a, b, c):
+  return futhark_mul_hi64(a,b) + c
+
 def futhark_log64(x):
   return np.float64(np.log(x))
 
@@ -292,11 +411,41 @@ def futhark_asin64(x):
 def futhark_atan64(x):
   return np.arctan(x)
 
+def futhark_cosh64(x):
+  return np.cosh(x)
+
+def futhark_sinh64(x):
+  return np.sinh(x)
+
+def futhark_tanh64(x):
+  return np.tanh(x)
+
+def futhark_acosh64(x):
+  return np.arccosh(x)
+
+def futhark_asinh64(x):
+  return np.arcsinh(x)
+
+def futhark_atanh64(x):
+  return np.arctanh(x)
+
 def futhark_atan2_64(x, y):
   return np.arctan2(x, y)
 
+def futhark_gamma64(x):
+  return np.float64(math.gamma(x))
+
+def futhark_lgamma64(x):
+  return np.float64(math.lgamma(x))
+
 def futhark_round64(x):
   return np.round(x)
+
+def futhark_ceil64(x):
+  return np.ceil(x)
+
+def futhark_floor64(x):
+  return np.floor(x)
 
 def futhark_isnan64(x):
   return np.isnan(x)
@@ -345,11 +494,41 @@ def futhark_asin32(x):
 def futhark_atan32(x):
   return np.arctan(x)
 
+def futhark_cosh32(x):
+  return np.cosh(x)
+
+def futhark_sinh32(x):
+  return np.sinh(x)
+
+def futhark_tanh32(x):
+  return np.tanh(x)
+
+def futhark_acosh32(x):
+  return np.arccosh(x)
+
+def futhark_asinh32(x):
+  return np.arcsinh(x)
+
+def futhark_atanh32(x):
+  return np.arctanh(x)
+
 def futhark_atan2_32(x, y):
   return np.arctan2(x, y)
 
+def futhark_gamma32(x):
+  return np.float32(math.gamma(x))
+
+def futhark_lgamma32(x):
+  return np.float32(math.lgamma(x))
+
 def futhark_round32(x):
   return np.round(x)
+
+def futhark_ceil32(x):
+  return np.ceil(x)
+
+def futhark_floor32(x):
+  return np.floor(x)
 
 def futhark_isnan32(x):
   return np.isnan(x)
@@ -364,3 +543,23 @@ def futhark_to_bits32(x):
 def futhark_from_bits32(x):
   s = struct.pack('>l', x)
   return np.float32(struct.unpack('>f', s)[0])
+
+def futhark_lerp32(v0, v1, t):
+  return v0 + (v1-v0)*t
+
+def futhark_lerp64(v0, v1, t):
+  return v0 + (v1-v0)*t
+
+def futhark_mad32(a, b, c):
+  return a * b + c
+
+def futhark_mad64(a, b, c):
+  return a * b + c
+
+def futhark_fma32(a, b, c):
+  return a * b + c
+
+def futhark_fma64(a, b, c):
+  return a * b + c
+
+# End of scalar.py.

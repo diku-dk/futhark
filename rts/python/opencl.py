@@ -55,20 +55,21 @@ def get_prefered_context(interactive=False, platform_pref=None, device_pref=None
                 device_matches += 1
     raise Exception('No OpenCL platform and device matching constraints found.')
 
+def size_assignment(s):
+    name, value = s.split('=')
+    return (name, int(value))
+
 def check_types(self, required_types):
     if 'f64' in required_types:
         if self.device.get_info(cl.device_info.PREFERRED_VECTOR_WIDTH_DOUBLE) == 0:
             raise Exception('Program uses double-precision floats, but this is not supported on chosen device: %s' % self.device.name)
 
 def apply_size_heuristics(self, size_heuristics, sizes):
-    for (platform_name, device_type, size, value) in size_heuristics:
+    for (platform_name, device_type, size, valuef) in size_heuristics:
         if sizes[size] == None \
            and self.platform.name.find(platform_name) >= 0 \
-           and self.device.type == device_type:
-               if type(value) == str:
-                   sizes[size] = self.device.get_info(getattr(cl.device_info,value))
-               else:
-                   sizes[size] = value
+           and (self.device.type & device_type) == device_type:
+               sizes[size] = valuef(self.device)
     return sizes
 
 def initialise_opencl_object(self,
@@ -105,7 +106,41 @@ def initialise_opencl_object(self,
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
     self.max_num_groups = 0
+
+    self.max_local_memory = int(self.device.local_mem_size)
+
+    # Futhark reserves 4 bytes of local memory for its own purposes.
+    self.max_local_memory -= 4
+
+    # See comment in rts/c/opencl.h.
+    if self.platform.name.find('NVIDIA CUDA') >= 0:
+        self.max_local_memory -= 12
+    elif self.platform.name.find('AMD') >= 0:
+        self.max_local_memory -= 16
+
     self.free_list = {}
+
+    self.global_failure = self.pool.allocate(np.int32().itemsize)
+    cl.enqueue_fill_buffer(self.queue, self.global_failure, np.int32(-1), 0, np.int32().itemsize)
+    self.global_failure_args = self.pool.allocate(np.int64().itemsize *
+                                                  (self.global_failure_args_max+1))
+    self.failure_is_an_option = np.int32(0)
+
+    if 'default_group_size' in sizes:
+        default_group_size = sizes['default_group_size']
+        del sizes['default_group_size']
+
+    if 'default_num_groups' in sizes:
+        default_num_groups = sizes['default_num_groups']
+        del sizes['default_num_groups']
+
+    if 'default_tile_size' in sizes:
+        default_tile_size = sizes['default_tile_size']
+        del sizes['default_tile_size']
+
+    if 'default_threshold' in sizes:
+        default_threshold = sizes['default_threshold']
+        del sizes['default_threshold']
 
     default_group_size_set = default_group_size != None
     default_tile_size_set = default_tile_size != None
@@ -137,7 +172,7 @@ def initialise_opencl_object(self,
         if k in all_sizes:
             all_sizes[k]['value'] = v
         else:
-            raise Exception('Unknown size: {}'.format(k))
+            raise Exception('Unknown size: {}\nKnown sizes: {}'.format(k, ' '.join(all_sizes.keys())))
 
     self.sizes = {}
     for (k,v) in all_sizes.items():
@@ -154,7 +189,8 @@ def initialise_opencl_object(self,
             max_value = None
             default_value = default_threshold
         else:
-            raise Exception('Unknown size class for size \'{}\': {}'.format(k, v['class']))
+            # Bespoke sizes have no limit or default.
+            max_value = None
         if v['value'] == None:
             self.sizes[k] = default_value
         elif max_value != None and v['value'] > max_value:
@@ -164,10 +200,13 @@ def initialise_opencl_object(self,
         else:
             self.sizes[k] = v['value']
 
+    # XXX: we perform only a subset of z-encoding here.  Really, the
+    # compiler should provide us with the variables to which
+    # parameters are mapped.
     if (len(program_src) >= 0):
         return cl.Program(self.ctx, program_src).build(
             ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
-            + ["-D{}={}".format(s,v) for (s,v) in self.sizes.items()])
+            + ["-D{}={}".format(s.replace('z', 'zz').replace('.', 'zi').replace('#', 'zh'),v) for (s,v) in self.sizes.items()])
 
 def opencl_alloc(self, min_size, tag):
     min_size = 1 if min_size == 0 else min_size
@@ -176,3 +215,17 @@ def opencl_alloc(self, min_size, tag):
 
 def opencl_free_all(self):
     self.pool.free_held()
+
+def sync(self):
+    failure = np.empty(1, dtype=np.int32)
+    cl.enqueue_copy(self.queue, failure, self.global_failure, is_blocking=True)
+    self.failure_is_an_option = np.int32(0)
+    if failure[0] >= 0:
+        # Reset failure information.
+        cl.enqueue_fill_buffer(self.queue, self.global_failure, np.int32(-1), 0, np.int32().itemsize)
+
+        # Read failure args.
+        failure_args = np.empty(self.global_failure_args_max+1, dtype=np.int64)
+        cl.enqueue_copy(self.queue, failure_args, self.global_failure_args, is_blocking=True)
+
+        raise Exception(self.failure_msgs[failure[0]].format(*failure_args))

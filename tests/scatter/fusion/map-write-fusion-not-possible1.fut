@@ -5,9 +5,9 @@
 -- ==
 -- structure { Screma 1 Scatter 1 }
 
-let main [k][n] (indexes: [k]i32,
-                 values: [k]i32,
-                 array: *[n]i32): [n]i32 =
-  let indexes' = map (\(i: i32): i32 -> unsafe array[i]) indexes
+let main [k][n] (indexes: [k]i64,
+                 values: [k]i64,
+                 array: *[n]i64): [n]i64 =
+  let indexes' = map (\i -> array[i]) indexes
   let array' = scatter array indexes' values
   in array'

@@ -1,178 +1,180 @@
-module Futhark.CodeGen.Backends.SPIRV.Operations 
-  ( GLSLInstr
-  , glslRound
-  , glslFAbs
-  , glslSAbs
-  , glslFSign
-  , glslSSign
-  , glslSin
-  , glslCos
-  , glslTan
-  , glslASin
-  , glslACos
-  , glslATan
-  , glslATan2
-  , glslPow
-  , glslLog
-  , glslExp
-  , glslLog2
-  , glslSqrt
-  , glslFMin
-  , glslUMin
-  , glslSMin
-  , glslFMax
-  , glslUMax
-  , glslSMax
-  , cMemoryAccessNone
-  , cMemoryAccessVolatile
-  , cSimpleMemoryModel
-  , cGLSLMemoryModel
-  , cShaderCapability
-  , cAddressesCapability
-  , cFloat64Capability
-  , cInt64Capability
-  , cInt64AtomicsCapability
-  , cInt16Capability
-  , cInt8Capability
-  , cVariablePointersStorageBufferCapability
-  , cStorageBuffer8BitAccessCapability
-  , cScopeDevice
-  , cScopeWorkgroup
-  , cStorageClassStorageBuffer
-  , cStorageClassUniform
-  , cStorageClassWorkgroup
-  , cStorageClassCrossWorkgroup
-  , cStorageClassPrivate
-  , cStorageClassUniformConstant
-  , cStorageClassFunction
-  , cStorageClassInput
-  , cMemorySemanticsAcquireRelease
-  , cMemorySemanticsSequentiallyConsistent
-  , cMemorySemanticsUniformMemory
-  , cMemorySemanticsWorkgroupMemory
-  , cFunctionControlNone
-  , cNoSignedness
-  , cExecutionModelGLCompute
-  , cExecutionModeLocalSize
-  , cDecorationSpecId
-  , cDecorationBlock
-  , cDecorationBufferBlock
-  , cDecorationArrayStride
-  , cDecorationBuiltin
-  , cDecorationBinding
-  , cDecorationDescriptorSet
-  , cDecorationOffset
-  , cBuiltinNumWorkgroups
-  , cBuiltinWorkgroupSize
-  , cBuiltinWorkgroupId
-  , cBuiltinLocalInvocationId
-  , cBuiltinGlobalInvocationId
-  , genHeader
-  , opcUDiv
-  , opExtension
-  , opExtInstImport
-  , opExtInst
-  , opMemoryModel
-  , opEntryPoint
-  , opExecutionMode
-  , opCapability
-  , opTypeVoid
-  , opTypeBool
-  , opTypeInt
-  , opTypeFloat
-  , opTypeVector
-  , opTypeArray
-  , opTypeRuntimeArray
-  , opTypeStruct
-  , opTypePointer
-  , opTypeFunction
-  , opConstantTrue
-  , opConstantFalse
-  , opConstant
-  , opSpecConstantFalse
-  , opSpecConstant
-  , opSpecConstantComposite
-  , opSpecConstantOp
-  , opFunction
-  , opFunctionEnd
-  , opVariable
-  , opLoad
-  , opStore
-  , opAccessChain
-  , opDecorate
-  , opMemberDecorate
-  , opCompositeExtract
-  , opConvertFToU
-  , opConvertFToS
-  , opConvertSToF
-  , opConvertUToF
-  , opUConvert
-  , opSConvert
-  , opFConvert
-  , opConvertPtrToU
-  , opConvertUToPtr
-  , opBitcast
-  , opIAdd
-  , opFAdd
-  , opISub
-  , opFSub
-  , opIMul
-  , opFMul
-  , opUDiv
-  , opSDiv
-  , opFDiv
-  , opUMod
-  , opSRem
-  , opSMod
-  , opIsNan
-  , opIsInf
-  , opLogicalEqual
-  , opLogicalNotEqual
-  , opLogicalOr
-  , opSelect
-  , opIEqual
-  , opINotEqual
-  , opFOrdEqual
-  , opLogicalAnd
-  , opLogicalNot
-  , opULessThan
-  , opSLessThan
-  , opFOrdLessThan
-  , opULessThanEqual
-  , opSLessThanEqual
-  , opFOrdLessThanEqual
-  , opShiftRightLogical
-  , opShiftRightArithmetic
-  , opShiftLeftLogical
-  , opBitwiseOr
-  , opBitwiseXor
-  , opBitwiseAnd
-  , opNot
-  , opControlBarrier
-  , opMemoryBarrier
-  , opAtomicExchange
-  , opAtomicCompareExchange
-  , opAtomicIAdd
-  , opAtomicSMin
-  , opAtomicUMin
-  , opAtomicSMax
-  , opAtomicUMax
-  , opAtomicAnd
-  , opAtomicOr
-  , opAtomicXor
-  , opPhi
-  , opLoopMerge
-  , opSelectionMerge
-  , opLabel
-  , opBranch
-  , opBranchConditional
-  , opReturn
-  ) where
+module Futhark.CodeGen.Backends.SPIRV.Operations
+  ( GLSLInstr,
+    glslRound,
+    glslFAbs,
+    glslSAbs,
+    glslFSign,
+    glslSSign,
+    glslSin,
+    glslCos,
+    glslTan,
+    glslASin,
+    glslACos,
+    glslATan,
+    glslATan2,
+    glslPow,
+    glslLog,
+    glslExp,
+    glslLog2,
+    glslSqrt,
+    glslFMin,
+    glslUMin,
+    glslSMin,
+    glslFMax,
+    glslUMax,
+    glslSMax,
+    cMemoryAccessNone,
+    cMemoryAccessVolatile,
+    cSimpleMemoryModel,
+    cGLSLMemoryModel,
+    cShaderCapability,
+    cAddressesCapability,
+    cFloat64Capability,
+    cInt64Capability,
+    cInt64AtomicsCapability,
+    cInt16Capability,
+    cInt8Capability,
+    cVariablePointersStorageBufferCapability,
+    cStorageBuffer8BitAccessCapability,
+    cScopeDevice,
+    cScopeWorkgroup,
+    cStorageClassStorageBuffer,
+    cStorageClassUniform,
+    cStorageClassWorkgroup,
+    cStorageClassCrossWorkgroup,
+    cStorageClassPrivate,
+    cStorageClassUniformConstant,
+    cStorageClassFunction,
+    cStorageClassInput,
+    cMemorySemanticsAcquireRelease,
+    cMemorySemanticsSequentiallyConsistent,
+    cMemorySemanticsUniformMemory,
+    cMemorySemanticsWorkgroupMemory,
+    cFunctionControlNone,
+    cNoSignedness,
+    cExecutionModelGLCompute,
+    cExecutionModeLocalSize,
+    cDecorationSpecId,
+    cDecorationBlock,
+    cDecorationBufferBlock,
+    cDecorationArrayStride,
+    cDecorationBuiltin,
+    cDecorationBinding,
+    cDecorationDescriptorSet,
+    cDecorationOffset,
+    cBuiltinNumWorkgroups,
+    cBuiltinWorkgroupSize,
+    cBuiltinWorkgroupId,
+    cBuiltinLocalInvocationId,
+    cBuiltinGlobalInvocationId,
+    genHeader,
+    opcUDiv,
+    opExtension,
+    opExtInstImport,
+    opExtInst,
+    opMemoryModel,
+    opEntryPoint,
+    opExecutionMode,
+    opCapability,
+    opTypeVoid,
+    opTypeBool,
+    opTypeInt,
+    opTypeFloat,
+    opTypeVector,
+    opTypeArray,
+    opTypeRuntimeArray,
+    opTypeStruct,
+    opTypePointer,
+    opTypeFunction,
+    opConstantTrue,
+    opConstantFalse,
+    opConstant,
+    opSpecConstantFalse,
+    opSpecConstant,
+    opSpecConstantComposite,
+    opSpecConstantOp,
+    opFunction,
+    opFunctionEnd,
+    opVariable,
+    opLoad,
+    opStore,
+    opAccessChain,
+    opDecorate,
+    opMemberDecorate,
+    opCompositeExtract,
+    opConvertFToU,
+    opConvertFToS,
+    opConvertSToF,
+    opConvertUToF,
+    opUConvert,
+    opSConvert,
+    opFConvert,
+    opConvertPtrToU,
+    opConvertUToPtr,
+    opBitcast,
+    opIAdd,
+    opFAdd,
+    opISub,
+    opFSub,
+    opIMul,
+    opFMul,
+    opUDiv,
+    opSDiv,
+    opFDiv,
+    opUMod,
+    opSRem,
+    opSMod,
+    opIsNan,
+    opIsInf,
+    opLogicalEqual,
+    opLogicalNotEqual,
+    opLogicalOr,
+    opSelect,
+    opIEqual,
+    opINotEqual,
+    opFOrdEqual,
+    opLogicalAnd,
+    opLogicalNot,
+    opULessThan,
+    opSLessThan,
+    opFOrdLessThan,
+    opULessThanEqual,
+    opSLessThanEqual,
+    opFOrdLessThanEqual,
+    opShiftRightLogical,
+    opShiftRightArithmetic,
+    opShiftLeftLogical,
+    opBitwiseOr,
+    opBitwiseXor,
+    opBitwiseAnd,
+    opNot,
+    opControlBarrier,
+    opMemoryBarrier,
+    opAtomicExchange,
+    opAtomicCompareExchange,
+    opAtomicIAdd,
+    opAtomicSMin,
+    opAtomicUMin,
+    opAtomicSMax,
+    opAtomicUMax,
+    opAtomicAnd,
+    opAtomicOr,
+    opAtomicXor,
+    opPhi,
+    opLoopMerge,
+    opSelectionMerge,
+    opLabel,
+    opBranch,
+    opBranchConditional,
+    opReturn,
+  )
+where
 
-import Data.Word
 import Data.Bits
+import Data.Word
 
 type GLSLInstr = Word32
+
 type SPIRVInstr = Word32
 
 -- | SPIR-V constants
@@ -324,7 +326,6 @@ cBuiltinGlobalInvocationId :: Word32
 cBuiltinGlobalInvocationId = 28
 
 -- | GLSL instructions
-
 glslRound :: GLSLInstr
 glslRound = 1
 
@@ -395,19 +396,16 @@ glslSMax :: GLSLInstr
 glslSMax = 42
 
 -- | SPIR-V header
-
 genHeader :: Word32 -> [Word32]
 genHeader max_id =
-  [ cMagicNumber
-  , cVersion
-  , cGenerator
-  , max_id + 1 -- Bound
-  , cSchema
+  [ cMagicNumber,
+    cVersion,
+    cGenerator,
+    max_id + 1, -- Bound
+    cSchema
   ]
-  
 
 -- | SPIR-V opcodes
-
 opcExtension :: SPIRVInstr
 opcExtension = 10
 
@@ -703,12 +701,11 @@ opcReturn :: SPIRVInstr
 opcReturn = 253
 
 -- | SPIR-V operations
-
 makeOperation :: SPIRVInstr -> [Word32] -> [Word32]
 makeOperation opcode args =
   let opLen = fromIntegral $ length args + 1
       opcodeAndFlag = shift opLen 16 .|. opcode
-  in opcodeAndFlag : args
+   in opcodeAndFlag : args
 
 opExtension :: [Word32] -> [Word32]
 opExtension = makeOperation opcExtension
@@ -721,7 +718,7 @@ opExtInst instr ops ext t_id r_id = makeOperation opcExtInst $ [t_id, r_id, ext,
 
 opExecutionMode :: Word32 -> Word32 -> [Word32] -> [Word32]
 opExecutionMode entry mode lits = makeOperation opcExecutionMode $ [entry, mode] ++ lits
-  
+
 opCapability :: Word32 -> [Word32]
 opCapability cap = makeOperation opcCapability [cap]
 
@@ -970,7 +967,7 @@ opAtomicSMin ptr_id scope_id sem_id val_id t_id r_id =
   makeOperation opcAtomicSMin [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
 
 opAtomicUMin :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
-opAtomicUMin  ptr_id scope_id sem_id val_id t_id r_id =
+opAtomicUMin ptr_id scope_id sem_id val_id t_id r_id =
   makeOperation opcAtomicUMin [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
 
 opAtomicSMax :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
@@ -992,7 +989,7 @@ opAtomicOr ptr_id scope_id sem_id val_id t_id r_id =
 opAtomicXor :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Word32]
 opAtomicXor ptr_id scope_id sem_id val_id t_id r_id =
   makeOperation opcAtomicXor [t_id, r_id, ptr_id, scope_id, sem_id, val_id]
-  
+
 opPhi :: [Word32] -> Word32 -> Word32 -> [Word32]
 opPhi vars t_id r_id = makeOperation opcPhi $ [t_id, r_id] ++ vars
 

@@ -6,21 +6,21 @@
 
 let eqb (x: bool) (y: bool): bool =
   (! ((x || y)) || (x && y))
-let reshape_int (l: i32) (x: []i32): []i32 =
+let reshape_int (l: i64) (x: []i32): []i32 =
   let roundUp = ((l + (length x - 1)) / length x) in
   let extend = flatten (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in
   v1
 entry main (nucleotides: []i32): bool =
   let t_v2 = unflatten 8 6 (reshape_int (8*6) nucleotides) in
-  let t_v8 = transpose (map transpose (unflatten_3d 8 6 4 (reshape_int (8*6*4) "ABCD"))) in
+  let t_v8 = transpose (map transpose (unflatten_3d 8 6 4 (reshape_int (8*6*4) (map i32.u8 "ABCD")))) in
   let t_v9 = unflatten_3d 4 8 6 (reshape_int (4*8*6) (flatten t_v2)) in
   let t_v12 = let x = t_v8 in
               let y = t_v9 in
-              map2 (\(x: [][]i32) (y: [][]i32): [][]bool ->
-                       map2 (\(x: []i32) (y: []i32): []bool ->
+              map2 (\(x: [][]i32) (y: [][]i32) ->
+                       map2 (\(x: []i32) (y: []i32) ->
                                 map2 (==) (x) (y)) (x) (y)) (x) (y) in
-  let t_v18 = map (\(x: [][]bool): []bool ->
+  let t_v18 = map (\(x: [][]bool) ->
                    map (\(x: []bool): bool ->
                         reduce (||) (false) (x)) (x)) (t_v12) in
   let t_v21 = (map (\(x: []bool): bool ->

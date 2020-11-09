@@ -7,7 +7,7 @@ module type SIG = {
   type t = (i32, i32)
 
   val x: t
-  val f: []t -> t
+  val f [n]: [n]t -> t
 }
 
 module Struct: SIG = {
@@ -18,4 +18,4 @@ module Struct: SIG = {
   let f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }
 
-let main(xs: []i32) (ys: []i32): Struct.t = Struct.f (zip xs ys)
+let main(xs: []i32) (ys: []i32) = Struct.f (zip xs ys) : Struct.t

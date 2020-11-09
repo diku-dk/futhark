@@ -1,8 +1,8 @@
 -- A size parameter can be a constant type.
 -- ==
--- input { 0 } error: Error
--- input { 3 } output { [0,1,2] }
+-- input { 0i64 } error: Error
+-- input { 3i64 } output { [0i64,1i64,2i64] }
 
-type ints [n] = [n]i32
+type ints [n] = [n]i64
 
-let main(n: i32): ints [3] = iota n
+let main (n: i64) = iota n :> ints [3]

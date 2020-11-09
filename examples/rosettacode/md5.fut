@@ -3,7 +3,7 @@
 -- Easy to get wrong if you forget that MD5 is little-endian.
 --
 -- ==
--- input { empty(u8) }
+-- input { empty([0]u8) }
 -- output { [0xd4u8,0x1du8,0x8cu8,0xd9u8,0x8fu8,0x00u8,0xb2u8,0x04u8,0xe9u8,0x80u8,0x09u8,0x98u8,0xecu8,0xf8u8,0x42u8,0x7eu8] }
 -- input { [0u8] }
 -- output { [0x93u8, 0xb8u8, 0x85u8, 0xadu8, 0xfeu8, 0x0du8, 0xa0u8, 0x89u8, 0xcdu8, 0xf6u8, 0x34u8, 0x90u8, 0x4fu8, 0xd5u8, 0x9fu8, 0x71u8] }
@@ -20,7 +20,6 @@ let rs: [64]u32 =
     6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21 ]
 
 let ks: [64]u32 =
-  map us32
   [ 0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee ,
     0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501 ,
     0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be ,
@@ -58,13 +57,13 @@ let unbytes_block(block: [64]u8): [16]u32 =
 let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
   loop (a,b,c,d) = (a0,b0,c0,d0) for i < 64 do
     let (f,g) =
-      if      i < 16 then ((b & c) | ((~b) & d),
+      if      i < 16 then ((b & c) | (!b & d),
                            u32.i32 i)
-      else if i < 32 then ((d & b) | ((~d) & c),
+      else if i < 32 then ((d & b) | (!d & c),
                            (5u32*u32.i32 i + 1u32) % 16u32)
       else if i < 48 then (b ^ c ^ d,
                            (3u32*u32.i32 i + 5u32) % 16u32)
-      else                (c ^ (b | (~d)),
+      else                (c ^ (b | !d),
                            (7u32*u32.i32 i)        % 16u32)
     in (d, b + rotate_left(a + f + ks[i] + m[i32.u32 g], rs[i]), b, c)
 
@@ -83,7 +82,7 @@ let main [n] (ms: [n]u8): [16]u8 =
   let ms_padded = ms ++
                   bytes 0x80u32 ++
                   replicate (padding-12) 0x0u8 ++
-                  bytes (u32.i32(n*8)) ++
+                  bytes (u32.i64(n*8)) ++
                   [0u8,0u8,0u8,0u8]
   let (a,b,c,d) = md5 (map unbytes_block (unflatten (n_padded / 64) 64 ms_padded))
-  in flatten (map bytes [a,b,c,d])
+  in flatten (map bytes [a,b,c,d]) :> [16]u8

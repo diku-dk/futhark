@@ -1,10 +1,5 @@
--- A shape parameter can be used in negative position in the same
--- parameter as where the shape is first given.
+-- Entry points may not be return-polymorphic.
 -- ==
--- input { [3,5,2,1] } output { [0,1,2,3] 4 }
+-- error: Entry point
 
-let f [n] (g: i32 -> [n]i32, xs: [n]i32) =
-  let g' (x: i32) = g x : [n]i32
-  in (g' (length xs), n)
-
-let main xs = f (iota, xs)
+let main [n] (x: i32) : [n]i32 = replicate n x

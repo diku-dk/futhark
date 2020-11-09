@@ -42,8 +42,9 @@ let correlateDeltas [num_und][num_dates]
                    (md_c: [num_und][num_und]f32,
                     zds: [num_dates][num_und]f32): [num_dates][num_und]f32 =
   map (\(zi: [num_und]f32): [num_und]f32  ->
-         map (\(j: i32): f32  ->
-                let x = map2 (*) (unsafe take (j+1) zi) (unsafe take (j+1) md_c[j])
+         map (\j: f32  ->
+                let j' = j + 1
+                let x = map2 (*) (take j' zi) (take j' md_c[j])
                 in  reduce (+) (0.0) x
             ) (iota(num_und) )
      ) zds
@@ -62,8 +63,7 @@ let mkPrices [num_dates][num_und]
   let e_rows = map (\(x: []f32): [num_und]f32  -> map f32.exp x
                   ) (c_rows
                   )
-  in  scan (\(x: []f32) (y: []f32): []f32  -> map2 (*) x y
-          ) (replicate num_und 1.0) (e_rows )
+  in  scan (\x y -> map2 (*) x y) (replicate num_und 1.0) (e_rows )
 
   -- Formerly blackScholes.
 let main [num_dates][num_und]

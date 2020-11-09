@@ -12,8 +12,6 @@
 -- compiled input { 1000000 } output { 3.141696f32 }
 -- compiled input { 10000000 } output { 3.141595f32 }
 
-import "/futlib/math"
-
 let dirvcts(): [2][30]i32 =
     [
             [
@@ -35,21 +33,21 @@ let testBit(n: i32, ind: i32): bool =
 
 let xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
     let reldv_vals = map2 (\ dv i  ->
-                                if testBit(grayCode n,i)
+                                if testBit(grayCode n,i32.i64 i)
                                 then dv else 0)
                              dir_vs (iota num_bits)
     in reduce (^) 0 reldv_vals
 
-let sobolIndI [m] [num_bits] (dir_vs: [m][num_bits]i32, n: i32): [m]i32 =
-    map (xorInds n) dir_vs
+let sobolIndI [m] [num_bits] (dir_vs: [m][num_bits]i32, n: i64): [m]i32 =
+    map (xorInds (i32.i64 n)) dir_vs
 
-let sobolIndR [m] [num_bits] (dir_vs:  [m][num_bits]i32) (n: i32 ): [m]f32 =
-    let divisor = 2.0 ** r32(num_bits)
+let sobolIndR [m] [num_bits] (dir_vs:  [m][num_bits]i32) (n: i64): [m]f32 =
+    let divisor = 2.0 ** f32.i64(num_bits)
     let arri    = sobolIndI( dir_vs, n )
-    in map (\x -> r32(x) / divisor) arri
+    in map (\x -> f32.i32 x / divisor) arri
 
 let main(n: i32): f32 =
-    let rand_nums = map (sobolIndR (dirvcts())) (iota n)
+    let rand_nums = map (sobolIndR (dirvcts())) (iota (i64.i32 n))
     let dists     = map (\xy ->
                            let (x,y) = (xy[0],xy[1]) in f32.sqrt(x*x + y*y))
                         rand_nums
@@ -57,4 +55,4 @@ let main(n: i32): f32 =
     let bs        = map (\d -> if d <= 1.0f32 then 1 else 0) dists
 
     let inside    = reduce (+) 0 bs
-    in 4.0f32*r32(inside)/r32(n)
+    in 4.0f32*f32.i64(inside)/f32.i32(n)

@@ -1,21 +1,35 @@
+{-# LANGUAGE Safe #-}
+
 -- | Re-export the external Futhark modules for convenience.
 module Language.Futhark
-  ( module Language.Futhark.Syntax
-  , module Language.Futhark.Attributes
-  , module Language.Futhark.Pretty
-
-  , Ident, DimIndex, Exp, Pattern
-  , ModExp, ModParam, SigExp, ModBind, SigBind
-  , ValBind, Dec, Spec, Prog
-  , TypeBind, TypeDecl
-  , StructTypeArg, ArrayElemType
-  , TypeParam, Case
+  ( module Language.Futhark.Syntax,
+    module Language.Futhark.Prop,
+    module Language.Futhark.Pretty,
+    Ident,
+    DimIndex,
+    Exp,
+    Pattern,
+    ModExp,
+    ModParam,
+    SigExp,
+    ModBind,
+    SigBind,
+    ValBind,
+    Dec,
+    Spec,
+    Prog,
+    TypeBind,
+    TypeDecl,
+    StructTypeArg,
+    ScalarType,
+    TypeParam,
+    Case,
   )
-  where
+where
 
-import Language.Futhark.Syntax
-import Language.Futhark.Attributes
 import Language.Futhark.Pretty
+import Language.Futhark.Prop
+import Language.Futhark.Syntax
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName
@@ -62,15 +76,14 @@ type Spec = SpecBase Info VName
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName
 
--- | A known type arg with shape annotations but no aliasing information.
-type StructTypeArg = TypeArg (DimDecl VName) ()
+-- | A known type arg with shape annotations.
+type StructTypeArg = TypeArg (DimDecl VName)
 
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName
 
--- | A known array element type with no shape annotations, but aliasing
--- information.
-type ArrayElemType = ArrayElemTypeBase () Names
+-- | A known scalar type with no shape annotations.
+type ScalarType = ScalarTypeBase ()
 
 -- | A type-checked case (of a match expression).
 type Case = CaseBase Info VName

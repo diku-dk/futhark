@@ -1,154 +1,183 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Trustworthy #-}
+
+-- | Definition of the core compiler driver building blocks.  The
+-- spine of the compiler is the 'FutharkM' monad, although note that
+-- individual passes are pure functions, and do not use the 'FutharkM'
+-- monad (see "Futhark.Pass").
+--
+-- Running the compiler involves producing an initial IR program (see
+-- "Futhark.Compiler.Program"), running a 'Pipeline' to produce a
+-- final program (still in IR), then running an 'Action', which is
+-- usually a code generator.
 module Futhark.Pipeline
-       ( Pipeline
-       , PipelineConfig (..)
-       , Action (..)
-
-       , FutharkM
-       , runFutharkM
-       , Verbosity(..)
-
-       , internalErrorS
-
-       , module Futhark.Error
-
-       , onePass
-       , passes
-       , runPasses
-       , runPipeline
-       )
-       where
+  ( Pipeline,
+    PipelineConfig (..),
+    Action (..),
+    FutharkM,
+    runFutharkM,
+    Verbosity (..),
+    module Futhark.Error,
+    onePass,
+    passes,
+    runPipeline,
+  )
+where
 
 import Control.Category
 import Control.Monad
-import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
-import Control.Monad.State
 import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad.Writer.Strict hiding (pass)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock
+import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Error
+import Futhark.IR (PrettyLore, Prog)
+import Futhark.MonadFreshNames
+import Futhark.Pass
+import Futhark.TypeCheck
+import Futhark.Util.Log
+import Futhark.Util.Pretty (prettyText)
 import System.IO
 import Text.Printf
-
 import Prelude hiding (id, (.))
 
-import Futhark.Error
-import Futhark.Representation.AST (Prog, PrettyLore)
-import Futhark.TypeCheck
-import Futhark.Pass
-import Futhark.Util.Log
-import Futhark.Util.Pretty (Pretty, prettyText)
-import Futhark.MonadFreshNames
+-- | How much information to print to stderr while the compiler is running.
+data Verbosity
+  = -- | Silence is golden.
+    NotVerbose
+  | -- | Print messages about which pass is running.
+    Verbose
+  | -- | Also print logs from individual passes.
+    VeryVerbose
+  deriving (Eq, Ord)
 
--- | If Verbose, print log messages to standard error.  If
--- VeryVerbose, also print logs from individual passes.
-data Verbosity = NotVerbose | Verbose | VeryVerbose deriving (Eq, Ord)
+newtype FutharkEnv = FutharkEnv {futharkVerbose :: Verbosity}
 
-newtype FutharkEnv = FutharkEnv { futharkVerbose :: Verbosity }
+data FutharkState = FutharkState
+  { futharkPrevLog :: UTCTime,
+    futharkNameSource :: VNameSource
+  }
 
-data FutharkState = FutharkState { futharkPrevLog :: UTCTime
-                                 , futharkNameSource :: VNameSource }
-
+-- | The main Futhark compiler driver monad - basically some state
+-- tracking on top if 'IO'.
 newtype FutharkM a = FutharkM (ExceptT CompilerError (StateT FutharkState (ReaderT FutharkEnv IO)) a)
-                     deriving (Applicative, Functor, Monad,
-                               MonadError CompilerError,
-                               MonadState FutharkState,
-                               MonadReader FutharkEnv,
-                               MonadIO)
+  deriving
+    ( Applicative,
+      Functor,
+      Monad,
+      MonadError CompilerError,
+      MonadState FutharkState,
+      MonadReader FutharkEnv,
+      MonadIO
+    )
 
 instance MonadFreshNames FutharkM where
   getNameSource = gets futharkNameSource
-  putNameSource src = modify $ \s -> s { futharkNameSource = src }
+  putNameSource src = modify $ \s -> s {futharkNameSource = src}
 
 instance MonadLogger FutharkM where
   addLog = mapM_ perLine . T.lines . toText
-    where perLine msg = do
-            verb <- asks $ (>=Verbose) . futharkVerbose
-            prev <- gets futharkPrevLog
-            now <- liftIO getCurrentTime
-            let delta :: Double
-                delta = fromRational $ toRational (now `diffUTCTime` prev)
-                prefix = printf "[  +%.6f] " delta
-            modify $ \s -> s { futharkPrevLog = now }
-            when verb $ liftIO $ T.hPutStrLn stderr $ T.pack prefix <> msg
+    where
+      perLine msg = do
+        verb <- asks $ (>= Verbose) . futharkVerbose
+        prev <- gets futharkPrevLog
+        now <- liftIO getCurrentTime
+        let delta :: Double
+            delta = fromRational $ toRational (now `diffUTCTime` prev)
+            prefix = printf "[  +%.6f] " delta
+        modify $ \s -> s {futharkPrevLog = now}
+        when verb $ liftIO $ T.hPutStrLn stderr $ T.pack prefix <> msg
 
+-- | Run a 'FutharkM' action.
 runFutharkM :: FutharkM a -> Verbosity -> IO (Either CompilerError a)
 runFutharkM (FutharkM m) verbose = do
   s <- FutharkState <$> getCurrentTime <*> pure blankNameSource
   runReaderT (evalStateT (runExceptT m) s) newEnv
-  where newEnv = FutharkEnv verbose
+  where
+    newEnv = FutharkEnv verbose
 
-internalErrorS :: Pretty t => String -> t -> FutharkM a
-internalErrorS s p = throwError $ InternalError (T.pack s) (prettyText p) CompilerBug
+-- | A compilation always ends with some kind of action.
+data Action lore = Action
+  { actionName :: String,
+    actionDescription :: String,
+    actionProcedure :: Prog lore -> FutharkM ()
+  }
 
-data Action lore =
-  Action { actionName :: String
-         , actionDescription :: String
-         , actionProcedure :: Prog lore -> FutharkM ()
-         }
+-- | Configuration object for running a compiler pipeline.
+data PipelineConfig = PipelineConfig
+  { pipelineVerbose :: Bool,
+    pipelineValidate :: Bool
+  }
 
-data PipelineConfig =
-  PipelineConfig { pipelineVerbose :: Bool
-                 , pipelineValidate :: Bool
-                 }
-
-newtype Pipeline fromlore tolore =
-  Pipeline { unPipeline :: PipelineConfig -> Prog fromlore -> FutharkM (Prog tolore) }
+-- | A compiler pipeline is conceptually a function from programs to
+-- programs, where the actual representation may change.  Pipelines
+-- can be composed using their 'Category' instance.
+newtype Pipeline fromlore tolore = Pipeline {unPipeline :: PipelineConfig -> Prog fromlore -> FutharkM (Prog tolore)}
 
 instance Category Pipeline where
   id = Pipeline $ const return
   p2 . p1 = Pipeline perform
-    where perform cfg prog =
-            runPasses p2 cfg =<< runPasses p1 cfg prog
+    where
+      perform cfg prog =
+        runPipeline p2 cfg =<< runPipeline p1 cfg prog
 
-runPasses :: Pipeline fromlore tolore
-          -> PipelineConfig
-          -> Prog fromlore
-          -> FutharkM (Prog tolore)
-runPasses = unPipeline
+-- | Run the pipeline on the given program.
+runPipeline ::
+  Pipeline fromlore tolore ->
+  PipelineConfig ->
+  Prog fromlore ->
+  FutharkM (Prog tolore)
+runPipeline = unPipeline
 
-runPipeline :: Pipeline fromlore tolore
-            -> PipelineConfig
-            -> Prog fromlore
-            -> Action tolore
-            -> FutharkM ()
-runPipeline p cfg prog a = do
-  prog' <- runPasses p cfg prog
-  when (pipelineVerbose cfg) $ logMsg $
-    "Running action " <> T.pack (actionName a)
-  actionProcedure a prog'
-
-onePass :: (Checkable fromlore, Checkable tolore) =>
-           Pass fromlore tolore -> Pipeline fromlore tolore
+-- | Construct a pipeline from a single compiler pass.
+onePass ::
+  Checkable tolore =>
+  Pass fromlore tolore ->
+  Pipeline fromlore tolore
 onePass pass = Pipeline perform
-  where perform cfg prog = do
-          when (pipelineVerbose cfg) $ logMsg $
-            "Running pass " <> T.pack (passName pass)
-          prog' <- runPass pass prog
-          when (pipelineValidate cfg) $
-            case checkProg prog' of
-              Left err -> validationError pass prog' $ show err
-              Right () -> return ()
-          return prog'
+  where
+    perform cfg prog = do
+      when (pipelineVerbose cfg) $
+        logMsg $
+          "Running pass " <> T.pack (passName pass)
+      prog' <- runPass pass prog
+      let prog'' = Alias.aliasAnalysis prog'
+      when (pipelineValidate cfg) $
+        case checkProg prog'' of
+          Left err -> validationError pass prog'' $ show err
+          Right () -> return ()
+      return prog'
 
-passes :: Checkable lore =>
-          [Pass lore lore] -> Pipeline lore lore
+-- | Create a pipeline from a list of passes.
+passes ::
+  Checkable lore =>
+  [Pass lore lore] ->
+  Pipeline lore lore
 passes = foldl (>>>) id . map onePass
 
-validationError :: PrettyLore tolore =>
-                   Pass fromlore tolore -> Prog tolore -> String -> FutharkM a
+validationError ::
+  PrettyLore lore =>
+  Pass fromlore tolore ->
+  Prog lore ->
+  String ->
+  FutharkM a
 validationError pass prog err =
   throwError $ InternalError msg (prettyText prog) CompilerBug
-  where msg = "Type error after pass '" <> T.pack (passName pass) <> "':\n" <> T.pack err
+  where
+    msg = "Type error after pass '" <> T.pack (passName pass) <> "':\n" <> T.pack err
 
-runPass :: PrettyLore fromlore =>
-           Pass fromlore tolore
-        -> Prog fromlore
-        -> FutharkM (Prog tolore)
+runPass ::
+  Pass fromlore tolore ->
+  Prog fromlore ->
+  FutharkM (Prog tolore)
 runPass pass prog = do
-  (res, logged) <- runPassM (passFunction pass prog)
-  verb <- asks $ (>=VeryVerbose) . futharkVerbose
+  (prog', logged) <- runPassM (passFunction pass prog)
+  verb <- asks $ (>= VeryVerbose) . futharkVerbose
   when verb $ addLog logged
-  case res of Left err -> internalError err $ prettyText prog
-              Right x  -> return x
+  return prog'

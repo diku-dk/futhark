@@ -4,14 +4,14 @@
 -- let res = map(\arr' -> reduce(op(+), 0, arr')) arr's
 -- ==
 -- input {
---   [ 1, 2, 3, 4]
+--   [ 1i64, 2i64, 3i64, 4i64]
 -- }
 -- output {
---   [1, 6, 15, 28]
+--   [1i64, 6i64, 15i64, 28i64]
 -- }
-let main (xs: []i32): []i32 =
-  map (\(x: i32): i32  ->
-        let arr = 0..<(2 * x)
-        let arr' = unsafe unflatten 2 x arr in
+let main (xs: []i64): []i64 =
+  map (\(x: i64)  ->
+        let arr = #[unsafe] 0..<(2 * x)
+        let arr' = #[unsafe] unflatten 2 x arr in
             reduce (+) 0 (arr'[0]) + reduce (+) 0 (arr'[1])
      ) xs
