@@ -179,9 +179,10 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
     let globalBarrier = Imp.Barrier Imp.FenceGlobal
     let localFence = Imp.MemFence Imp.FenceLocal
     let globalFence = Imp.MemFence Imp.FenceGlobal
-    sOp localBarrier
 
+    sOp localBarrier
     copyDWIMFix (tvVar dynamicId) [] (Var sharedId) [0]
+    sOp localBarrier
 
     blockOff   <- dPrimV "blockOff" $ (tvExp dynamicId) * tM * (kernelGroupSize constants)
 
