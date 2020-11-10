@@ -454,5 +454,10 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) * (tM) + i
           sWhen ((Imp.vi32 mapIdx) .<. n) $ do
             copyDWIMFix dest [Imp.vi32 mapIdx] (Var src) [i]
+
+    sComment "If this is the last block, reset the dynamicId" $
+      sWhen ((tvExp dynamicId) .==. (unCount num_groups - 1)) $ do
+        copyDWIMFix globalId [0] (constant (0 :: Int32)) []
+
   where
     n = product $ map toInt32Exp $ segSpaceDims space
