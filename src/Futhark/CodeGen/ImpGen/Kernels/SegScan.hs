@@ -145,18 +145,6 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                 (\ty -> (,) <$> (sAllocArray "aggregates" ty (Shape [tvSize numGroups]) (Space "device"))
                             <*> (sAllocArray "incprefixes" ty (Shape [tvSize numGroups]) (Space "device")))
 
-  -- Set all status flags to statusX and set the dynamic id to zero before starting the scan
-  sKernelThread "memset" num_memset_groups group_size (segFlat space) $ do
-    constants <- kernelConstants <$> askEnv
-
-    forM_ [0..m] $ \i -> do
-      dst <- dPrimV "dst" ((kernelGlobalThreadId constants) + (kernelNumThreads constants * (TPrimExp $ toExp' int32 $ constant i)))
-      sWhen ((tvExp dst) .<. unCount num_groups) $
-        copyDWIMFix statusFlags [tvExp dst] sStatusX []
-
-    sWhen ((kernelGlobalThreadId constants) .==. 0) $
-      copyDWIMFix globalId [0] (constant (0 :: Int32)) []
-
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants  <- kernelConstants <$> askEnv
 
