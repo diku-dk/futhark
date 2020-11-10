@@ -448,10 +448,22 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                copyDWIMFix dest [i] res [])
             $ zip privateArrays $ bodyResult $ lambdaBody scanOp'''''
 
+    sComment "Transpose scan output" $ do
+      forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
+        sOp localBarrier
+        sFor "i" tM $ \i -> do
+          sharedIdx <- dPrimV "sharedIdx" $ ((kernelLocalThreadId constants) * tM) + i
+          copyDWIMFix trans [tvExp sharedIdx] (Var priv) [i]
+        sOp localBarrier
+        sFor "i" tM $ \i -> do
+          sharedIdx <- dPrimV "sharedIdx" $ (kernelLocalThreadId constants) + ((kernelGroupSize constants) * i)
+          copyDWIMFix priv [i] (Var trans) [tvExp sharedIdx]
+      sOp localBarrier
+
     sComment "Write block scan results to global memory" $
       forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) -> do
         sFor "i" tM $ \i -> do
-          dPrimV_ mapIdx $ (tvExp blockOff) + (kernelLocalThreadId constants) * (tM) + i
+          dPrimV_ mapIdx $ (tvExp blockOff) + ((kernelGroupSize constants) * i) + (kernelLocalThreadId constants)
           sWhen ((Imp.vi32 mapIdx) .<. n) $ do
             copyDWIMFix dest [Imp.vi32 mapIdx] (Var src) [i]
 
