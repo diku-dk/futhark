@@ -260,6 +260,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
         scanOp'
         prefixArrays
 
+      sOp localBarrier
+
       forM_ (zip accs prefixArrays)
         (\(acc, prefixes) ->
            sIf ((kernelLocalThreadId constants) .==. 0)
