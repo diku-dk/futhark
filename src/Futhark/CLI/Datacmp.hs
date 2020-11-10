@@ -8,17 +8,13 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import Futhark.Test.Values
 import Futhark.Util.Options
 import System.Exit
-import System.IO.Error
+import System.IO
 
-readFileSafely :: String -> IO (Maybe (Either String BS.ByteString))
+readFileSafely :: String -> IO (Either String BS.ByteString)
 readFileSafely filepath =
-  (Just . Right <$> BS.readFile filepath) `catch` couldNotRead
+  (Right <$> BS.readFile filepath) `catch` couldNotRead
   where
-    couldNotRead e
-      | isDoesNotExistError e =
-        return Nothing
-      | otherwise =
-        return $ Just $ Left $ show e
+    couldNotRead e = return $ Left $ show (e :: IOError)
 
 -- | Run @futhark datacmp@
 main :: String -> [String] -> IO ()
@@ -28,22 +24,22 @@ main = mainWithOptions () [] "<file> <file>" f
       file_contents_a_maybe <- readFileSafely file_a
       file_contents_b_maybe <- readFileSafely file_b
       case (file_contents_a_maybe, file_contents_b_maybe) of
-        (Nothing, _) ->
-          putStrLn $ "No such file : " ++ file_a
-        (_, Nothing) ->
-          putStrLn $ "No such file : " ++ file_b
-        (Just (Left err_msg), _) ->
-          error $ err_msg ++ " when reading " ++ file_a
-        (_, Just (Left err_msg)) ->
-          error $ err_msg ++ " when reading " ++ file_b
-        (Just (Right contents_a), Just (Right contents_b)) -> do
+        (Left err_msg, _) -> do
+          hPutStrLn stderr err_msg
+          exitFailure
+        (_, Left err_msg) -> do
+          hPutStrLn stderr err_msg
+          exitFailure
+        (Right contents_a, Right contents_b) -> do
           let vs_a_maybe = readValues contents_a
           let vs_b_maybe = readValues contents_b
           case (vs_a_maybe, vs_b_maybe) of
-            (Nothing, _) ->
-              error $ "Error reading values from " ++ file_a
-            (_, Nothing) ->
-              error $ "Error reading values from " ++ file_b
+            (Nothing, _) -> do
+              hPutStrLn stderr $ "Error reading values from " ++ file_a
+              exitFailure
+            (_, Nothing) -> do
+              hPutStrLn stderr $ "Error reading values from " ++ file_b
+              exitFailure
             (Just vs_a, Just vs_b) ->
               case compareValues vs_a vs_b of
                 [] -> return ()
