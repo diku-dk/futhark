@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Python backend now disables spurious NumPy overflow warnings for
     both library and binary code (#1180).
 
+  * Undid deadlocking over-synchronisation for freeing opaque objects.
+
 ## [0.18.2]
 
 ### Added
