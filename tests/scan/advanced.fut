@@ -1,7 +1,7 @@
 -- ==
 -- entry: main
 --
--- compiled random input { [10000000]f32 } auto output
+-- compiled random input { [26214400]i32 } auto output
 
 let main [n] (as: [n]i32): ([n]i32, [n]i32, [n]i32, [n]i32, [n]i32) =
   let (bs, cs) = unzip <| map (\a -> (a - 1, a + 1)) as
