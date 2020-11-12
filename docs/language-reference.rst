@@ -34,12 +34,11 @@ Identifiers and Keywords
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
 a module, we use a qualified name (`qualid`).  The constructor names
-of a sum type (:ref:`compounds`) are identifiers prefixed with ``#``,
-with no space afterwards.  The fields of a record are named with
-`fieldid`.  Note that a `fieldid` can be a decimal number.  Futhark
-has three distinct name spaces: terms, module types, and types.
-Modules (including parametric modules) and values both share the term
-namespace.
+of a sum type are identifiers prefixed with ``#``, with no space
+afterwards.  The fields of a record are named with `fieldid`.  Note
+that a `fieldid` can be a decimal number.  Futhark has three distinct
+name spaces: terms, module types, and types.  Modules (including
+parametric modules) and values both share the term namespace.
 
 .. _primitives:
 
@@ -93,8 +92,6 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    decdigit: "0"..."9"
    hexdigit: `decdigit` | "a"..."f" | "A"..."F"
    bindigit: "0" | "1"
-
-.. _compounds:
 
 Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -328,6 +325,9 @@ executable to select the entry point you wish to run.
 
 Any top-level function named ``main`` will always be considered an
 entry point, whether it is declared with ``entry`` or not.
+
+The name of an entry point must not contain an apostrophe (``'``),
+even though that is normally permitted in Futhark identifiers.
 
 Value Declarations
 ~~~~~~~~~~~~~~~~~~
@@ -594,7 +594,7 @@ Each field may only be defined once.
 Return the element at the given position in the array.  The index may
 be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
-array is returned.
+array is returned.  The index may be of any unsigned integer type.
 
 The array ``a`` must be a variable name or a parenthesised expression.
 Furthermore, there *may not* be a space between ``a`` and the opening
@@ -610,7 +610,8 @@ Return a slice of the array ``a`` from index ``i`` to ``j``, the
 former inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
-(not inclusive).
+(not inclusive).  Slicing can be done only with expressions of type
+``i32``.
 
 It is generally a bad idea for ``s`` to be non-constant.
 Slicing of multiple dimensions can be done by separating with commas,
@@ -647,9 +648,9 @@ have the same type and shape.
 ``x..y...z``
 ............
 
-Construct an integer array whose first element is ``x`` and which
-proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
-``..y`` part can be elided in which case a stride of 1 is used.  A
+Construct a signed integer array whose first element is ``x`` and
+which proceeds stride of ``y-x`` until reaching ``z`` (inclusive).
+The ``..y`` part can be elided in which case a stride of 1 is used.  A
 run-time error occurs if ``z`` is lesser than ``x`` or ``y``, or if
 ``x`` and ``y`` are the same value.
 
@@ -666,8 +667,8 @@ This holds only if ``n`` is a variable or constant.
 ``x..y..<z``
 ............
 
-Construct an integer array whose first elements is ``x``, and which
-proceeds upwards with a stride of ``y`` until reaching ``z``
+Construct a signed integer array whose first elements is ``x``, and
+which proceeds upwards with a stride of ``y`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 1 is used.  A run-time error occurs if ``z`` is lesser than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
@@ -681,8 +682,8 @@ This holds only if ``n`` is a variable or constant.
 ``x..y..>z``
 ...............
 
-Construct an integer array whose first elements is ``x``, and which
-proceeds downwards with a stride of ``y`` until reaching ``z``
+Construct a signed integer array whose first elements is ``x``, and
+which proceeds downwards with a stride of ``y`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 -1 is used.  A run-time error occurs if ``z`` is greater than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
@@ -989,6 +990,12 @@ where their inputs are bound.  The same goes when constructing sum
 types, as Futhark cannot assume that a given constructor only belongs
 to a single type.  Further, unique types (see `In-place updates`_)
 must be explicitly annotated.
+
+Type inference processes top-level declared in top-down order, and the
+type of a top-level function must be completely inferred at its
+definition site.  Specifically, if a top-level function uses
+overloaded arithmetic operators, the resolution of those overloads
+cannot be influenced by later uses of the function.
 
 .. _size-types:
 

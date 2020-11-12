@@ -2,7 +2,7 @@
 -- really do alias once we replace the polymorphic type t with []i32.
 -- Required extra conservatism in the type checker.
 -- ==
--- error: in-place modification
+-- error: in-place
 
 let swap 't (i: i32) (j: i32) (xs: *[]t) =
   let xs_i = xs[i]

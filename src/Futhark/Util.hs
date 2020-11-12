@@ -9,7 +9,8 @@
 -- note where you got it from (and make sure that the license is
 -- compatible).
 module Futhark.Util
-  ( mapAccumLM,
+  ( nubOrd,
+    mapAccumLM,
     maxinum,
     chunk,
     chunks,
@@ -53,7 +54,8 @@ import Control.Monad
 import qualified Data.ByteString as BS
 import Data.Char
 import Data.Either
-import Data.List (foldl', genericDrop, genericSplitAt)
+import Data.List (foldl', genericDrop, genericSplitAt, sort)
+import qualified Data.List.NonEmpty as NE
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -67,6 +69,10 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Unsafe
 import System.Process.ByteString
+
+-- | Like 'nub', but without the quadratic runtime.
+nubOrd :: Ord a => [a] -> [a]
+nubOrd = map NE.head . NE.group . sort
 
 -- | Like 'Data.Traversable.mapAccumL', but monadic.
 mapAccumLM ::
@@ -276,31 +282,36 @@ fromPOSIX = Native.joinPath . Posix.splitDirectories
 trim :: String -> String
 trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
-fork :: (a -> IO b) -> a -> IO (MVar b)
-fork f x = do
-  cell <- newEmptyMVar
-  void $
-    forkIO $ do
-      result <- f x
-      putMVar cell result
-  return cell
-
 -- | Run various 'IO' actions concurrently, possibly with a bound on
--- the number of threads.
+-- the number of threads.  The list must be finite.  The ordering of
+-- the result list is not deterministic - add your own sorting if
+-- needed.  If any of the actions throw an exception, then that
+-- exception is propagated to this function.
 pmapIO :: Maybe Int -> (a -> IO b) -> [a] -> IO [b]
-pmapIO concurrency f elems = go elems []
+pmapIO concurrency f elems = do
+  tasks <- newMVar elems
+  results <- newEmptyMVar
+  num_threads <- maybe getNumCapabilities pure concurrency
+  replicateM_ num_threads $ forkIO $ worker tasks results
+  replicateM (length elems) $ getResult results
   where
-    go [] res = return res
-    go xs res = do
-      numThreads <- maybe getNumCapabilities pure concurrency
-      let (e, es) = splitAt numThreads xs
-      mvars <- mapM (fork f') e
-      result <- mapM takeMVar mvars
-      case sequence result of
-        Left err -> throw (err :: SomeException)
-        Right result' -> go es (result' ++ res)
+    worker tasks results = do
+      task <- modifyMVar tasks getTask
+      case task of
+        Nothing -> pure ()
+        Just x -> do
+          y <- (Right <$> f x) `catch` (pure . Left)
+          putMVar results y
+          worker tasks results
 
-    f' x = (Right <$> f x) `catch` (pure . Left)
+    getTask [] = pure ([], Nothing)
+    getTask (task : tasks) = pure (tasks, Just task)
+
+    getResult results = do
+      res <- takeMVar results
+      case res of
+        Left err -> throw (err :: SomeException)
+        Right v -> pure v
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

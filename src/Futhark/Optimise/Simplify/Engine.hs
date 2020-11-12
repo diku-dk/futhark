@@ -239,6 +239,13 @@ bindArrayLParams ::
 bindArrayLParams params =
   localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
 
+bindMerge ::
+  SimplifiableLore lore =>
+  [(FParam (Wise lore), SubExp, SubExp)] ->
+  SimpleM lore a ->
+  SimpleM lore a
+bindMerge = localVtable . ST.insertLoopMerge
+
 bindLoopVar :: SimplifiableLore lore => VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
@@ -625,6 +632,8 @@ hoistCommon cond ifsort ((res1, usages1), stms1) ((res2, usages2), stms2) = do
       isNotHoistableBnd _ usages (Let pat _ _)
         | any (`UT.isSize` usages) $ patternNames pat =
           False
+      isNotHoistableBnd _ _ stm
+        | is_alloc_fun stm = False
       isNotHoistableBnd _ _ _ =
         -- Hoist aggressively out of versioning branches.
         ifsort /= IfEquiv
@@ -800,7 +809,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
   ((loopstms, loopres), hoisted) <-
     enterLoop $
       consumeMerge $
-        bindFParams (ctxparams' ++ valparams') $
+        bindMerge (zipWith withRes (ctx' ++ val') (bodyResult loopbody)) $
           wrapbody $
             blockIf
               ( hasFree boundnames `orIf` isConsumed
@@ -819,6 +828,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       localVtable $ flip (foldl' (flip ST.consume)) $ namesToList consumed_by_merge
     consumed_by_merge =
       freeIn $ map snd $ filter (unique . paramDeclType . fst) val
+    withRes (p, x) y = (p, x, y)
 simplifyExp (Op op) = do
   (op', stms) <- simplifyOp op
   return (Op op', stms)

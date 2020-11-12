@@ -41,6 +41,7 @@ module Futhark.CodeGen.ImpCode
     ErrorMsgPart (..),
     errorMsgArgTypes,
     ArrayContents (..),
+    declaredIn,
     lexicalMemoryUsage,
     calledFuncs,
 
@@ -302,7 +303,8 @@ lexicalMemoryUsage func =
     go f (Comment _ x) = f x
     go _ _ = mempty
 
-    declared (DeclareMem mem space) = M.singleton mem space
+    declared (DeclareMem mem space) =
+      M.singleton mem space
     declared x = go declared x
 
     set (SetMem x y _) = namesFromList [x, y]
@@ -364,9 +366,9 @@ bytes = Count
 
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
-withElemType :: Count Elements (TExp Int32) -> PrimType -> Count Bytes (TExp Int64)
+withElemType :: Count Elements (TExp Int64) -> PrimType -> Count Bytes (TExp Int64)
 withElemType (Count e) t =
-  bytes $ isInt64 (sExt Int64 (untyped e)) * isInt64 (LeafExp (SizeOf t) (IntType Int64))
+  bytes $ sExt64 e * isInt64 (LeafExp (SizeOf t) (IntType Int64))
 
 -- | Turn a 'VName' into a 'Imp.ScalarVar'.
 var :: VName -> PrimType -> Exp

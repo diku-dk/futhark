@@ -3,7 +3,7 @@
 -- which refers to the outer shape parameter in its parameter type
 -- and in its body.
 -- ==
--- input { [2,3,5,1] [6,5,2,6] } output { [8,8,7,7] 4 }
+-- input { [2,3,5,1] [6,5,2,6] } output { [8,8,7,7] 4i64 }
 
 let map2 [n] (f: i32 -> i32 -> i32) (xs: [n]i32) =
   let g (ys: [n]i32) = (map (\(x,y) -> f x y) (zip xs ys), n)

@@ -1,10 +1,10 @@
 -- Map returning an array predicated on the index variable.
 --
 -- ==
--- input { 2 }
+-- input { 2i64 }
 -- output { [[0], [1]] }
 
-let main(chunk: i32): [][]i32 =
+let main(chunk: i64): [][]i32 =
   map (\(k: i32): [1]i32  ->
          if k==0 then [0] else [1]
-     ) (iota(chunk))
+     ) (map i32.i64 (iota(chunk)))

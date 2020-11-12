@@ -3,12 +3,12 @@
 -- but code generators sometimes do this.
 --
 -- ==
--- input { 0 [1] } output { 1 }
--- input { 1 [1] } output { 2 }
--- input { 2 [1] } output { 4 }
--- input { 3 [1] } output { 8 }
+-- input { 0 [1] } output { 1i64 }
+-- input { 1 [1] } output { 2i64 }
+-- input { 2 [1] } output { 4i64 }
+-- input { 3 [1] } output { 8i64 }
 
-let main (n: i32) (as: []i32): i32 =
+let main (n: i32) (as: []i32): i64 =
   let as = loop (as) for _i < n do
     concat as as
   in length as

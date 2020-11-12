@@ -23,7 +23,7 @@
 
 let main(arr: []i32): ([]i32,[][][]i32) =
   let vs = map (\(a: i32) ->
-                  map (\(x: i32): i32  -> 2*x*a
+                  map (\x: i32  -> 2*i32.i64 x*a
                      ) (iota(3) )
               ) arr
   in (reduce (\a b -> map2 (+) a b) (

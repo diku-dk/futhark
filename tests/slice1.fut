@@ -11,4 +11,4 @@
 -- error: Index \[0:2, 1:0\] out of bounds for array of shape \[2\]\[3\].
 
 let main [n][m] (as: [n][m]i32) (i: i32) (j: i32): [n][]i32 =
-  as[0:n,i:j]
+  as[0:n,i64.i32 i:i64.i32 j]

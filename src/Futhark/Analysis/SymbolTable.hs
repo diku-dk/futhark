@@ -26,6 +26,7 @@ module Futhark.Analysis.SymbolTable
     lookupSubExp,
     lookupAliases,
     lookupLoopVar,
+    lookupLoopParam,
     available,
     consume,
     index,
@@ -40,6 +41,7 @@ module Futhark.Analysis.SymbolTable
     insertFParams,
     insertLParam,
     insertLoopVar,
+    insertLoopMerge,
 
     -- * Misc
     hideCertified,
@@ -109,7 +111,7 @@ data Indexed
     Indexed Certificates (PrimExp VName)
   | -- | The indexing corresponds to another (perhaps more
     -- advantageous) array.
-    IndexedArray Certificates VName [TPrimExp Int32 VName]
+    IndexedArray Certificates VName [TPrimExp Int64 VName]
 
 indexedAddCerts :: Certificates -> Indexed -> Indexed
 indexedAddCerts cs1 (Indexed cs2 v) = Indexed (cs1 <> cs2) v
@@ -120,7 +122,7 @@ instance FreeIn Indexed where
   freeIn' (IndexedArray cs arr v) = freeIn' cs <> freeIn' arr <> freeIn' v
 
 -- | Indexing a delayed array if possible.
-type IndexArray = [TPrimExp Int32 VName] -> Maybe Indexed
+type IndexArray = [TPrimExp Int64 VName] -> Maybe Indexed
 
 data Entry lore = Entry
   { -- | True if consumed.
@@ -154,7 +156,10 @@ data LetBoundEntry lore = LetBoundEntry
 
 data FParamEntry lore = FParamEntry
   { fparamDec :: FParamInfo lore,
-    fparamAliases :: Names
+    fparamAliases :: Names,
+    -- | If a loop parameter, the initial value and the eventual
+    -- result.  The result need not be in scope in the symbol table.
+    fparamMerge :: Maybe (SubExp, SubExp)
   }
 
 data LParamEntry lore = LParamEntry
@@ -235,6 +240,11 @@ lookupLoopVar name vtable = do
   LoopVar e <- entryType <$> M.lookup name (bindings vtable)
   return $ loopVarBound e
 
+lookupLoopParam :: VName -> SymbolTable lore -> Maybe (SubExp, SubExp)
+lookupLoopParam name vtable = do
+  FParam e <- entryType <$> M.lookup name (bindings vtable)
+  fparamMerge e
+
 -- | In symbol table and not consumed.
 available :: VName -> SymbolTable lore -> Bool
 available name = maybe False (not . entryConsumed) . M.lookup name . bindings
@@ -255,7 +265,7 @@ index name is table = do
 
 index' ::
   VName ->
-  [TPrimExp Int32 VName] ->
+  [TPrimExp Int64 VName] ->
   SymbolTable lore ->
   Maybe Indexed
 index' name is vtable = do
@@ -278,7 +288,7 @@ class IndexOp op where
     SymbolTable lore ->
     Int ->
     op ->
-    [TPrimExp Int32 VName] ->
+    [TPrimExp Int64 VName] ->
     Maybe Indexed
   indexOp _ _ _ _ = Nothing
 
@@ -312,18 +322,18 @@ indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
     let is' =
           reshapeIndex
-            (map pe32 oldshape)
-            (map pe32 $ newDims newshape)
+            (map pe64 oldshape)
+            (map pe64 $ newDims newshape)
             is
      in index' v is' table
 indexExp table (BasicOp (Index v slice)) _ is =
   index' v (adjust slice is) table
   where
     adjust (DimFix j : js') is' =
-      pe32 j : adjust js' is'
+      pe64 j : adjust js' is'
     adjust (DimSlice j _ s : js') (i : is') =
-      let i_t_s = i * pe32 s
-          j_p_i_t_s = pe32 j + i_t_s
+      let i_t_s = i * pe64 s
+          j_p_i_t_s = pe64 j + i_t_s
        in j_p_i_t_s : adjust js' is'
     adjust _ _ = []
 indexExp _ _ _ _ = Nothing
@@ -443,7 +453,8 @@ insertFParam fparam = insertEntry name entry
       FParam
         FParamEntry
           { fparamDec = AST.paramDec fparam,
-            fparamAliases = mempty
+            fparamAliases = mempty,
+            fparamMerge = Nothing
           }
 
 insertFParams ::
@@ -463,6 +474,29 @@ insertLParam param = insertEntry name bind
             lparamIndex = const Nothing
           }
     name = AST.paramName param
+
+-- | Insert entries corresponding to the parameters of a loop (not
+-- distinguishing contect and value part).  Apart from the parameter
+-- itself, we also insert the initial value and the subexpression
+-- providing the final value.  Note that the latter is likely not in
+-- scope in the symbol at this point.  This is OK, and can still be
+-- used to help some loop optimisations detect invariant loop
+-- parameters.
+insertLoopMerge ::
+  ASTLore lore =>
+  [(AST.FParam lore, SubExp, SubExp)] ->
+  SymbolTable lore ->
+  SymbolTable lore
+insertLoopMerge = flip $ foldl' $ flip bind
+  where
+    bind (p, initial, res) =
+      insertEntry (paramName p) $
+        FParam
+          FParamEntry
+            { fparamDec = AST.paramDec p,
+              fparamAliases = mempty,
+              fparamMerge = Just (initial, res)
+            }
 
 insertLoopVar :: ASTLore lore => VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name it bound = insertEntry name bind
