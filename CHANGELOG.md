@@ -5,13 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.19.0]
-
-### Added
-
-### Removed
-
-### Changed
+## [0.18.3]
 
 ### Fixed
 
@@ -19,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     both library and binary code (#1180).
 
   * Undid deadlocking over-synchronisation for freeing opaque objects.
+
+  * `futhark datacmp` now handles bad input files better (#1181).
 
 ## [0.18.2]
 
