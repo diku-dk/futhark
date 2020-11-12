@@ -708,6 +708,33 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
       SegOp $
         SegMap lvl segspace ts $ KernelBody () stms' $ map (Returns manifest) res'
 
+segMap3D ::
+  String -> -- desc
+  SegLevel -> -- lvl
+  ResultManifest -> -- manifest
+  (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
+  ( (VName, VName, VName) -> -- f
+    Binder Kernels [SubExp]
+  ) ->
+  Binder Kernels [VName]
+segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
+  ltid_x <- newVName "ltid_x"
+  ltid_flat <- newVName "ltid_flat"
+  ltid_y <- newVName "ltid_y"
+  ltid_z <- newVName "ltid_z"
+  let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
+
+  ((ts, res), stms) <- runBinder $ do
+    res <- f (ltid_z, ltid_y, ltid_x)
+    ts <- mapM subExpType res
+    return (ts, res)
+  Body _ stms' res' <- renameBody $ mkBody stms res
+
+  letTupExp desc $
+    Op $
+      SegOp $
+        SegMap lvl segspace ts $ KernelBody () stms' $ map (Returns manifest) res'
+
 segScatter2D ::
   String -> -- desc
   SubExp -> -- arr_size
@@ -774,6 +801,9 @@ processIndirections _ res_red_var acc stm'@(Let patt _ _)
     all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
     Just (ss Seq.|> stm', tab)
   | otherwise = Nothing
+
+se0 :: SubExp
+se0 = Constant $ IntValue $ Int64Value 0
 
 se1 :: SubExp
 se1 = Constant $ IntValue $ Int64Value 1
@@ -1139,7 +1169,15 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           if length redomap_orig_res == length ker_res_nms
             && ker_res_nms == (map patElemName redomap_orig_res)
             then -- all (\ (a,b) -> patElemName a == b ) $ zip redomap_orig_res ker_res_nms
-              return redomap_res
+              segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
+                forM (zip kertp redomap_res) $ \(res_tp, res) -> do
+                  rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
+                  fmap Var $ forLoop rz [rss_init] $ \i [rss] -> do
+                    let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
+                    thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
+                    rss' <- letSubExp "rss" $ BasicOp $ Update rss slice $ Var thread_res
+                    resultBodyM [rss']
+
             else segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
               letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
               letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
@@ -1178,19 +1216,16 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
               map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims
                 ++ [(d_M, se1, rz), (d_Ky, ty, se1), (d_Kx, tx, se1)]
 
-        epilogue_res' <- forM epilogue_res $ \res -> do
-          res_tp <- lookupType res
-          let shape_res = map DimNew $ [se1] ++ arrayDims res_tp ++ [se1, se1]
-          res_rshp <- letExp "res_reshaped" $ BasicOp $ Reshape shape_res res
+        epilogue_res' <- forM epilogue_res $ \res ->
           if null rem_outer_dims
-            then return res_rshp
+            then return res
             else do
               -- Add dummy dimensions to tile to reflect the outer dimensions
-              res_tp' <- lookupType res_rshp
+              res_tp' <- lookupType res
               let (block_dims, rest_dims) = splitAt 2 $ arrayDims res_tp'
                   ones = map (const se1) rem_outer_dims
                   new_shape = concat [ones, block_dims, ones, rest_dims]
-              letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res_rshp
+              letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
 
         -- TODO: RegTileReturns is still incorrect, please Fix It
         return $ map (\x -> RegTileReturns regtile_ret_dims x) epilogue_res'
