@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * When compiling to binaries in the C-based backends, the compiler
+    now respects the ``CFLAGS`` and ``CC`` environment variables.
+
 ### Removed
 
 ### Changed
