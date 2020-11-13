@@ -15,10 +15,10 @@ DESCRIPTION
 ===========
 
 ``futhark multicore`` translates a Futhark program to multithreaded C
-code, and either compiles that C code with gcc(1) to an executable
-binary program, or produces a ``.h`` and ``.c`` file that can be
-linked with other code..  The standard Futhark optimisation pipeline
-is used, and GCC is invoked with ``-O3 -lm -std=c11 -pthread``.
+code, and either compiles that C code with a C compiler to an
+executable binary program, or produces a ``.h`` and ``.c`` file that
+can be linked with other code.  The standard Futhark optimisation
+pipeline is used.
 
 The resulting program will read the arguments to the entry point
 (``main`` by default) from standard input and print its return value
@@ -56,6 +56,20 @@ OPTIONS
 
 --Werror
   Treat warnings as errors.
+
+
+ENVIRONMENT VARIABLES
+=====================
+
+``CC``
+
+  The C compiler used to compile the program.  Defaults to ``cc`` if
+  unset.
+
+``CFLAGS``
+
+  Space-separated list of options passed to the C compiler.  Defaults
+  to ``-O3 -std=c99 -pthread`` if unset.
 
 EXECUTABLE OPTIONS
 ==================

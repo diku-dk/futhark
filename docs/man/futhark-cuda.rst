@@ -16,12 +16,10 @@ DESCRIPTION
 
 
 ``futhark cuda`` translates a Futhark program to C code invoking CUDA
-kernels, and either compiles that C code with gcc(1) to an executable
-binary program, or produces a ``.h`` and ``.c`` file that can be
-linked with other code. The standard Futhark optimisation pipeline is
-used, and GCC is invoked with ``-O``, ``-lm``, and ``-std=c99``. The
-resulting program will otherwise behave exactly as one compiled with
-``futhark c``.
+kernels, and either compiles that C code with a C compiler to an
+executable binary program, or produces a ``.h`` and ``.c`` file that
+can be linked with other code. The standard Futhark optimisation
+pipeline is used.
 
 ``futhark cuda`` uses ``-lcuda -lcudart -lnvrtc`` to link.  If using
 ``--library``, you will need to do the same when linking the final
@@ -62,6 +60,19 @@ OPTIONS
 
 --Werror
   Treat warnings as errors.
+
+ENVIRONMENT VARIABLES
+=====================
+
+``CC``
+
+  The C compiler used to compile the program.  Defaults to ``cc`` if
+  unset.
+
+``CFLAGS``
+
+  Space-separated list of options passed to the C compiler.  Defaults
+  to ``-O -std=c99`` if unset.
 
 EXECUTABLE OPTIONS
 ==================
@@ -140,12 +151,13 @@ The following additional options are accepted.
 ENVIRONMENT
 ===========
 
-If run without ``--library``, ``futhark cuda`` will invoke ``gcc(1)``
-to compile the generated C program into a binary.  This only works if
-``gcc`` can find the necessary CUDA libraries.  On most systems, CUDA
-is installed in ``/usr/local/cuda``, which is not part of the default
-``gcc`` search path.  You may need to set the following environment
-variables before running ``futhark cuda``::
+If run without ``--library``, ``futhark cuda`` will invoke a C
+compiler to compile the generated C program into a binary.  This only
+works if the C compiler can find the necessary CUDA libraries.  On
+most systems, CUDA is installed in ``/usr/local/cuda``, which is
+usually not part of the default compiler search path.  You may need to
+set the following environment variables before running ``futhark
+cuda``::
 
   LIBRARY_PATH=/usr/local/cuda/lib64
   LD_LIBRARY_PATH=/usr/local/cuda/lib64/
