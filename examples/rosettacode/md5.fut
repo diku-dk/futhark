@@ -82,7 +82,7 @@ let main [n] (ms: [n]u8): [16]u8 =
   let ms_padded = ms ++
                   bytes 0x80u32 ++
                   replicate (padding-12) 0x0u8 ++
-                  bytes (u32.i32(n*8)) ++
+                  bytes (u32.i64(n*8)) ++
                   [0u8,0u8,0u8,0u8]
   let (a,b,c,d) = md5 (map unbytes_block (unflatten (n_padded / 64) 64 ms_padded))
   in flatten (map bytes [a,b,c,d]) :> [16]u8

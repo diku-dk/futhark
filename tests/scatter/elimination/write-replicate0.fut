@@ -1,7 +1,7 @@
 -- Test that a replicate can be eliminated in a write.
 -- ==
 -- input {
---   [0, 3, 1]
+--   [0i64, 3i64, 1i64]
 --   [9, 8, -3, 90, 41]
 -- }
 -- output {
@@ -9,5 +9,5 @@
 -- }
 -- structure { Scatter 1 }
 
-let main [k][n] (indexes: [k]i32) (array: *[n]i32): [n]i32 =
+let main [k][n] (indexes: [k]i64) (array: *[n]i32): [n]i32 =
   scatter array indexes (replicate k 5)

@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Futhark.Pass.ExplicitAllocations.SegOp
   ( allocInKernelBody,
@@ -11,6 +12,9 @@ where
 import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Pass.ExplicitAllocations
+
+instance SizeSubst (SegOp lvl lore) where
+  opSizeSubst _ _ = mempty
 
 allocInKernelBody ::
   Allocable fromlore tolore =>
@@ -34,8 +38,8 @@ allocInLambda params body rettype = do
 allocInBinOpParams ::
   Allocable fromlore tolore =>
   SubExp ->
-  TPrimExp Int32 VName ->
-  TPrimExp Int32 VName ->
+  TPrimExp Int64 VName ->
+  TPrimExp Int64 VName ->
   [LParam fromlore] ->
   [LParam fromlore] ->
   AllocM fromlore tolore ([LParam tolore], [LParam tolore])
@@ -46,12 +50,12 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
         Array (ElemPrim pt) shape u -> do
           twice_num_threads <-
             letSubExp "twice_num_threads" $
-              BasicOp $ BinOp (Mul Int32 OverflowUndef) num_threads $ intConst Int32 2
+              BasicOp $ BinOp (Mul Int64 OverflowUndef) num_threads $ intConst Int64 2
           let t = paramType x `arrayOfRow` twice_num_threads
           mem <- allocForArray t DefaultSpace
           -- XXX: this iota ixfun is a bit inefficient; leading to
           -- uncoalesced access.
-          let base_dims = map pe32 $ arrayDims t
+          let base_dims = map pe64 $ arrayDims t
               ixfun_base = IxFun.iota base_dims
               ixfun_x =
                 IxFun.slice ixfun_base $
@@ -95,8 +99,8 @@ allocInBinOpLambda ::
 allocInBinOpLambda num_threads (SegSpace flat _) lam = do
   let (acc_params, arr_params) =
         splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
-      index_x = TPrimExp $ LeafExp flat int32
-      index_y = index_x + pe32 num_threads
+      index_x = TPrimExp $ LeafExp flat int64
+      index_y = index_x + pe64 num_threads
   (acc_params', arr_params') <-
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 

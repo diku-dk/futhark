@@ -142,7 +142,7 @@ transformSOAC pat (Screma w form@(ScremaForm scans reds map_lam) arrs) = do
             zip mapout_params $ map Var map_arrs
           ]
   i <- newVName "i"
-  let loopform = ForLoop i Int32 w []
+  let loopform = ForLoop i Int64 w []
 
   loop_body <- runBodyBinder $
     localScope (scopeOfFParams $ map fst merge) $
@@ -220,10 +220,10 @@ transformSOAC pat (Stream w stream_form lam arrs) = do
 
   i <- newVName "i"
 
-  let loop_form = ForLoop i Int32 w []
+  let loop_form = ForLoop i Int64 w []
 
   letBindNames [paramName chunk_size_param] $
-    BasicOp $ SubExp $ intConst Int32 1
+    BasicOp $ SubExp $ intConst Int64 1
 
   loop_body <- runBodyBinder $
     localScope
@@ -232,7 +232,7 @@ transformSOAC pat (Stream w stream_form lam arrs) = do
       )
       $ do
         let slice =
-              [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int32 1)]
+              [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
         forM_ (zip chunk_params arrs) $ \(p, arr) ->
           letBindNames [paramName p] $
             BasicOp $
@@ -265,7 +265,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
   let merge = loopMerge asOuts $ map Var as_vs
   loopBody <- runBodyBinder $
     localScope
-      ( M.insert iter (IndexName Int32) $
+      ( M.insert iter (IndexName Int64) $
           scopeOfFParams $ map fst merge
       )
       $ do
@@ -283,7 +283,7 @@ transformSOAC pat (Scatter len lam ivs as) = do
 
           foldM saveInArray arr $ zip indexes' values'
         return $ resultBody (map Var ress)
-  letBind pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
+  letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len ops bucket_fun imgs) = do
   iter <- newVName "iter"
 
@@ -295,7 +295,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
   -- Bind lambda-bodies for operators.
   loopBody <- runBodyBinder $
     localScope
-      ( M.insert iter (IndexName Int32) $
+      ( M.insert iter (IndexName Int64) $
           scopeOfFParams $ map fst merge
       )
       $ do
@@ -345,7 +345,7 @@ transformSOAC pat (Hist len ops bucket_fun imgs) = do
         return $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
-  letBind pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
+  letBind pat $ DoLoop [] merge (ForLoop iter Int64 len []) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::

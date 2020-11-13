@@ -6,14 +6,14 @@
 --
 -- ==
 -- tags { no_python }
--- input { 3 100 5 }
+-- input { 3i64 100i64 5i64 }
 -- output { [[0.8051474f32, -7.109213e-2f32, -2.8099937f32],
 --          [2.1506262f32, 2.51387f32, -1.8687513f32],
 --          [1.5188317f32, -0.13410425f32, 4.0366645f32],
 --          [-0.5093703f32, -0.5954051f32, -4.6837516f32],
 --          [-2.0692608f32, 0.18270588f32, 7.2218027f32]]
 -- }
--- compiled input { 30 100000 5 }
+-- compiled input { 30i64 100000i64 5i64 }
 -- output {
 --   [[-0.006780f32, 0.000599f32, 0.023664f32, -0.002089f32, 0.002644f32,
 --   -0.003372f32, -0.009227f32, 0.011768f32, 0.012901f32, 0.016603f32,
@@ -46,7 +46,7 @@
 --   0.005085f32, 0.005086f32, -0.006324f32, -0.008027f32, -0.014370f32,
 --   0.030229f32, 0.007785f32, 0.000765f32, 0.012684f32, -0.043612f32]]
 -- }
--- compiled input { 30 1000000 10 }
+-- compiled input { 30i64 1000000i64 10i64 }
 -- output { [[0.000166f32, 0.000160f32, -0.000578f32, -0.000557f32,
 -- -0.000190f32, -0.000183f32, 0.000662f32, 0.000638f32, 0.000600f32,
 -- -0.000729f32, -0.000008f32, 0.000185f32, -0.000686f32, 0.000834f32,
@@ -114,17 +114,17 @@
 -- structure distributed { SegRed 1 SegMap 4 }
 
 
-let main (nfeatures: i32) (npoints: i32) (nclusters: i32): [nclusters][nfeatures]f32 =
+let main (nfeatures: i64) (npoints: i64) (nclusters: i64): [nclusters][nfeatures]f32 =
   let membership = map (%nclusters) (iota(npoints))
   let features_in_cluster = replicate nclusters (npoints / nclusters)
   -- Just generate some random-seeming points.
-  let points = map (\(i: i32): [nfeatures]f32  ->
-                     map (*100f32) (map f32.sin (map r32 (map (^i) (iota(nfeatures)))))
+  let points = map (\i: [nfeatures]f32  ->
+                     map (*100f32) (map f32.sin (map f32.i64 (map (^i) (iota(nfeatures)))))
                    ) (iota(npoints)) in
   #[sequential_inner]
   reduce_stream (\acc elem -> map2 (\x y -> map2 (+) x y) acc elem)
-             (\chunk (inp: [chunk]([nfeatures]f32,i32)) ->
+             (\chunk (inp: [chunk]([nfeatures]f32,i64)) ->
                  loop acc = replicate nclusters (replicate nfeatures 0.0f32) for i < chunk do
                    let (point, c) = inp[i] in
-                   let acc[c] = map2 (+) (acc[c]) (map (/r32(features_in_cluster[c])) point) in
+                   let acc[c] = map2 (+) (acc[c]) (map (/f32.i64(features_in_cluster[c])) point) in
                    acc) (zip points membership)

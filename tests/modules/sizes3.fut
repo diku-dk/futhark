@@ -1,6 +1,6 @@
 module type mod_b = {
   type t
-  val n : i32
+  val n : i64
   val f: [n]t -> t
 }
 

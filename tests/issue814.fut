@@ -1,1 +1,1 @@
-let main (n: i32) = map ((-) n) (iota n)
+let main (n: i64) = map ((-) n) (iota n)

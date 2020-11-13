@@ -19,4 +19,4 @@
 let main [k][t][m][n] (indexes: [k]i32)
                       (values: [k][t][m]i32)
                       (array: *[n][t][m]i32): [n][t][m]i32 =
-  scatter array indexes values
+  scatter array (map i64.i32 indexes) values

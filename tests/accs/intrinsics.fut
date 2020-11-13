@@ -19,5 +19,5 @@ let reduce_by_index_stream [k] 'a 'b
                  : *[k]a =
   intrinsics.hist_stream (dest, op, ne, f, bs) :> [k]a
 
-let write [n] 't (acc : *acc ([n]t)) (i: i32) (v: t) : *acc ([n]t) =
+let write [n] 't (acc : *acc ([n]t)) (i: i64) (v: t) : *acc ([n]t) =
   intrinsics.acc_write (acc, i, v)

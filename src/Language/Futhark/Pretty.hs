@@ -115,7 +115,7 @@ instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
 instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty (ShapeDecl Int32) where
+instance Pretty (ShapeDecl Int64) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
 
 instance Pretty (ShapeDecl Bool) where
@@ -372,6 +372,11 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
     text "for" <+> ppr x <+> text "in" <+> ppr e
   ppr (While cond) =
     text "while" <+> ppr cond
+
+instance Pretty PatLit where
+  ppr (PatLitInt x) = ppr x
+  ppr (PatLitFloat f) = ppr f
+  ppr (PatLitPrim v) = ppr v
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
   ppr (PatternAscription p t _) = ppr p <> colon <+> align (ppr t)

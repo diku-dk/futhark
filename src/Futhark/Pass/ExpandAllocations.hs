@@ -9,7 +9,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (foldl')
+import Data.List (find, foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Analysis.Rephrase
@@ -157,10 +157,18 @@ transformScanRed lvl space ops kbody = do
   let (kbody', kbody_allocs) =
         extractKernelBodyAllocations lvl bound_outside bound_in_kernel kbody
       (ops', ops_allocs) = unzip $ map (extractLambdaAllocations lvl bound_outside mempty) ops
-      variantAlloc (_, Var v, _) = v `nameIn` bound_in_kernel
+      variantAlloc (_, Var v, _) = not $ v `nameIn` bound_outside
       variantAlloc _ = False
       allocs = kbody_allocs <> mconcat ops_allocs
       (variant_allocs, invariant_allocs) = M.partition variantAlloc allocs
+      badVariant (_, Var v, _) = not $ v `nameIn` bound_in_kernel
+      badVariant _ = False
+
+  case find badVariant $ M.elems variant_allocs of
+    Just v ->
+      throwError $ "Cannot handle un-sliceable allocation size: " ++ pretty v
+    Nothing ->
+      return ()
 
   case lvl of
     SegGroup {}
@@ -175,10 +183,11 @@ transformScanRed lvl space ops kbody = do
     return (alloc_stms, (ops'', kbody''))
   where
     bound_in_kernel =
-      namesFromList $
-        M.keys $
-          scopeOfSegSpace space
-            <> scopeOf (kernelBodyStms kbody)
+      namesFromList (M.keys $ scopeOfSegSpace space)
+        <> boundInKernelBody kbody
+
+boundInKernelBody :: KernelBody KernelsMem -> Names
+boundInKernelBody = namesFromList . M.keys . scopeOf . kernelBodyStms
 
 allocsForBody ::
   Extraction ->
@@ -212,24 +221,19 @@ memoryRequirements ::
   Extraction ->
   ExpandM (RebaseMap, Stms KernelsMem)
 memoryRequirements lvl space kstms variant_allocs invariant_allocs = do
-  ((num_threads, num_groups64, num_threads64), num_threads_stms) <- runBinder $ do
-    num_threads <-
+  (num_threads, num_threads_stms) <-
+    runBinder $
       letSubExp "num_threads" $
         BasicOp $
           BinOp
-            (Mul Int32 OverflowUndef)
+            (Mul Int64 OverflowUndef)
             (unCount $ segNumGroups lvl)
             (unCount $ segGroupSize lvl)
-    num_groups64 <-
-      letSubExp "num_groups64" $
-        BasicOp $ ConvOp (SExt Int32 Int64) (unCount $ segNumGroups lvl)
-    num_threads64 <- letSubExp "num_threads64" $ BasicOp $ ConvOp (SExt Int32 Int64) num_threads
-    return (num_threads, num_groups64, num_threads64)
 
   (invariant_alloc_stms, invariant_alloc_offsets) <-
     inScopeOf num_threads_stms $
       expandedInvariantAllocations
-        (num_threads64, num_groups64, segNumGroups lvl, segGroupSize lvl)
+        (num_threads, segNumGroups lvl, segGroupSize lvl)
         space
         invariant_allocs
 
@@ -293,10 +297,11 @@ extractGenericBodyAllocations ::
     Extraction
   )
 extractGenericBodyAllocations lvl bound_outside bound_kernel get_stms set_stms body =
-  let (stms, allocs) =
+  let bound_kernel' = bound_kernel <> boundByStms (get_stms body)
+      (stms, allocs) =
         runWriter $
           fmap catMaybes $
-            mapM (extractStmAllocations lvl bound_outside bound_kernel) $
+            mapM (extractStmAllocations lvl bound_outside bound_kernel') $
               stmsToList $ get_stms body
    in (set_stms (stmsFromList stms) body, allocs)
 
@@ -356,7 +361,6 @@ extractStmAllocations lvl bound_outside bound_kernel stm = do
 
 expandedInvariantAllocations ::
   ( SubExp,
-    SubExp,
     Count NumGroups SubExp,
     Count GroupSize SubExp
   ) ->
@@ -364,8 +368,7 @@ expandedInvariantAllocations ::
   Extraction ->
   ExpandM (Stms KernelsMem, RebaseMap)
 expandedInvariantAllocations
-  ( num_threads64,
-    num_groups64,
+  ( num_threads,
     Count num_groups,
     Count group_size
     )
@@ -382,8 +385,8 @@ expandedInvariantAllocations
         let sizepat = Pattern [] [PatElem total_size $ MemPrim int64]
             allocpat = Pattern [] [PatElem mem $ MemMem space]
             num_users = case lvl of
-              SegThread {} -> num_threads64
-              SegGroup {} -> num_groups64
+              SegThread {} -> num_threads
+              SegGroup {} -> num_groups
         return
           ( stmsFromList
               [ Let sizepat (defAux ()) $
@@ -402,21 +405,20 @@ expandedInvariantAllocations
             root_ixfun =
               IxFun.iota
                 ( old_shape
-                    ++ [ pe32 num_groups
-                           * pe32 group_size
+                    ++ [ pe64 num_groups * pe64 group_size
                        ]
                 )
             permuted_ixfun = IxFun.permute root_ixfun perm
             offset_ixfun =
               IxFun.slice permuted_ixfun $
-                DimFix (le32 (segFlat segspace)) :
+                DimFix (le64 (segFlat segspace)) :
                 map untouched old_shape
          in offset_ixfun
       newBase SegGroup {} (old_shape, _) =
-        let root_ixfun = IxFun.iota (pe32 num_groups : old_shape)
+        let root_ixfun = IxFun.iota (pe64 num_groups : old_shape)
             offset_ixfun =
               IxFun.slice root_ixfun $
-                DimFix (le32 (segFlat segspace)) :
+                DimFix (le64 (segFlat segspace)) :
                 map untouched old_shape
          in offset_ixfun
 
@@ -463,15 +465,14 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
           M.singleton mem $ newBase offset
         )
 
-    num_threads' = pe32 num_threads
-    gtid = isInt32 $ LeafExp (segFlat kspace) int32
+    num_threads' = pe64 num_threads
+    gtid = le64 $ segFlat kspace
 
     -- For the variant allocations, we add an inner dimension,
     -- which is then offset by a thread-specific amount.
     newBase size_per_thread (old_shape, pt) =
       let elems_per_thread =
-            isInt32 (sExt Int32 (primExpFromSubExp int64 size_per_thread))
-              `quot` primByteSize pt
+            pe64 size_per_thread `quot` primByteSize pt
           root_ixfun = IxFun.iota [elems_per_thread, num_threads']
           offset_ixfun =
             IxFun.slice
@@ -486,7 +487,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
        in IxFun.reshape offset_ixfun shapechange
 
 -- | A map from memory block names to new index function bases.
-type RebaseMap = M.Map VName (([TPrimExp Int32 VName], PrimType) -> IxFun)
+type RebaseMap = M.Map VName (([TPrimExp Int64 VName], PrimType) -> IxFun)
 
 newtype OffsetM a
   = OffsetM
@@ -511,7 +512,7 @@ runOffsetM scope offsets (OffsetM m) =
 askRebaseMap :: OffsetM RebaseMap
 askRebaseMap = OffsetM $ lift ask
 
-lookupNewBase :: VName -> ([TPrimExp Int32 VName], PrimType) -> OffsetM (Maybe IxFun)
+lookupNewBase :: VName -> ([TPrimExp Int64 VName], PrimType) -> OffsetM (Maybe IxFun)
 lookupNewBase name x = do
   offsets <- askRebaseMap
   return $ ($ x) <$> M.lookup name offsets
@@ -760,7 +761,7 @@ sliceKernelSizes num_threads sizes space kstms = do
           letSubExp "z" $ BasicOp $ BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
     return $ Lambda (xs ++ ys) (mkBody stms zs) i64s
 
-  flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int32))
+  flat_gtid_lparam <- Param <$> newVName "flat_gtid" <*> pure (Prim (IntType Int64))
 
   (size_lam', _) <- flip runBinderT kernels_scope $ do
     params <- replicateM num_sizes $ newParam "x" (Prim int64)
@@ -775,8 +776,8 @@ sliceKernelSizes num_threads sizes space kstms = do
         let (kspace_gtids, kspace_dims) = unzip $ unSegSpace space
             new_inds =
               unflattenIndex
-                (map pe32 kspace_dims)
-                (pe32 $ Var $ paramName flat_gtid_lparam)
+                (map pe64 kspace_dims)
+                (pe64 $ Var $ paramName flat_gtid_lparam)
         zipWithM_ letBindNames (map pure kspace_gtids) =<< mapM toExp new_inds
 
         mapM_ addStm kstms'
@@ -786,10 +787,6 @@ sliceKernelSizes num_threads sizes space kstms = do
       Kernels.simplifyLambda (Lambda [flat_gtid_lparam] (Body () stms zs) i64s)
 
   ((maxes_per_thread, size_sums), slice_stms) <- flip runBinderT kernels_scope $ do
-    num_threads_64 <-
-      letSubExp "num_threads" $
-        BasicOp $ ConvOp (SExt Int32 Int64) num_threads
-
     pat <-
       basicPattern []
         <$> replicateM
@@ -798,12 +795,12 @@ sliceKernelSizes num_threads sizes space kstms = do
 
     w <-
       letSubExp "size_slice_w"
-        =<< foldBinOp (Mul Int32 OverflowUndef) (intConst Int32 1) (segSpaceDims space)
+        =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (segSpaceDims space)
 
     thread_space_iota <-
       letExp "thread_space_iota" $
         BasicOp $
-          Iota w (intConst Int32 0) (intConst Int32 1) Int32
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
     let red_op =
           SegBinOp
             Commutative
@@ -817,7 +814,7 @@ sliceKernelSizes num_threads sizes space kstms = do
 
     size_sums <- forM (patternNames pat) $ \threads_max ->
       letExp "size_sum" $
-        BasicOp $ BinOp (Mul Int64 OverflowUndef) (Var threads_max) num_threads_64
+        BasicOp $ BinOp (Mul Int64 OverflowUndef) (Var threads_max) num_threads
 
     return (patternNames pat, size_sums)
 

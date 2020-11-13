@@ -54,9 +54,9 @@ let redmin2 [n][m] (a: [n][m]i32): [n]i32 = map redmin1 a
 let plus1 [n] (a:  [n]i32,  b: [n]i32): [n]i32 = map2 (+) a b
 let plus2 [n][m] (a: [n][m]i32, b: [n][m]i32): [n][m]i32 = map plus1 (zip a b)
 
-let replin [k] (len: i32) (a: [k]i32): [len][k]i32 = replicate len a
+let replin [k] (len: i64) (a: [k]i32): [len][k]i32 = replicate len a
 
-let floydSbsFun (n: i32) (d: [n][n]i32 ): [][]i32 =
+let floydSbsFun (n: i64) (d: [n][n]i32 ): [][]i32 =
     let d3  = replicate n <| transpose d
     let d2  = map        (replin(n)) d
     let abr = map plus2 (zip d3 d2)

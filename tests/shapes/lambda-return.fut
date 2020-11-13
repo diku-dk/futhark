@@ -7,7 +7,7 @@
 --   [[1,2,3],
 --    [4,5,6],
 --    [7,8,9]]
---   3
+--   3i64
 -- }
 -- output {
 --   [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3],
@@ -15,10 +15,10 @@
 --    [7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9]]
 -- }
 
-let multiply (a: []i32) (x: i32) (n: i32): [n]i32 =
+let multiply (a: []i32) (x: i64) (n: i64): [n]i32 =
   (loop (a) for i < x-1 do concat a a) :> [n]i32
 
-let main [m] (a: [m][]i32) (x: i32): [][]i32 =
+let main [m] (a: [m][]i32) (x: i64): [][]i32 =
   let n = m * (2 ** (x-1))
   in map (\(r: []i32): [n]i32  ->
            multiply r x n) a

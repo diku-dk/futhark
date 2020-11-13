@@ -316,7 +316,7 @@ cmpSizeLe desc size_class to_what = do
   runBinder $ do
     to_what' <-
       letSubExp "comparatee"
-        =<< foldBinOp (Mul Int32 OverflowUndef) (intConst Int32 1) to_what
+        =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) to_what
     cmp_res <- letSubExp desc $ Op $ SizeOp $ CmpSizeLe size_key size_class to_what'
     return (cmp_res, size_key)
 
@@ -595,7 +595,7 @@ sufficientParallelism ::
   String ->
   [SubExp] ->
   KernelPath ->
-  Maybe Int32 ->
+  Maybe Int64 ->
   DistribM ((SubExp, Name), Out.Stms Out.Kernels)
 sufficientParallelism desc ws path def =
   cmpSizeLe desc (Out.SizeThreshold path def) ws
@@ -734,7 +734,7 @@ mayExploitIntra attrs =
 -- The minimum amount of inner parallelism we require (by default) in
 -- intra-group versions.  Less than this is usually pointless on a GPU
 -- (but we allow tuning to change it).
-intraMinInnerPar :: Int32
+intraMinInnerPar :: Int64
 intraMinInnerPar = 32 -- One NVIDIA warp
 
 onMap' ::
@@ -797,7 +797,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
           fits <-
             letSubExp "fits" $
               BasicOp $
-                CmpOp (CmpSle Int32) group_size max_group_size
+                CmpOp (CmpSle Int64) group_size max_group_size
 
           addStms check_suff_stms
 
@@ -871,7 +871,9 @@ onInnerMap path maploop@(MapLoop pat aux w lam arrs) acc
           -- Normally the permutation is for the output pattern, but
           -- we can't really change that, so we change the result
           -- order instead.
-          let lam_res' = rearrangeShape perm $ bodyResult $ lambdaBody lam
+          let lam_res' =
+                rearrangeShape (rearrangeInverse perm) $
+                  bodyResult $ lambdaBody lam
               lam' = lam {lambdaBody = (lambdaBody lam) {bodyResult = lam_res'}}
               map_nesting = MapNesting pat aux w $ zip (lambdaParams lam) arrs
               nest' = pushInnerKernelNesting (pat, lam_res') map_nesting nest

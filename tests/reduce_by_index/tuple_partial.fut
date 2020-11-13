@@ -2,7 +2,7 @@
 -- recomputed.
 -- ==
 -- input {
---   5
+--   5i64
 --   [1, 3, 1]
 --   [4, 1, 3]
 --   [5, 6, 7]
@@ -18,8 +18,8 @@ let operator ((x0, y0): (i32, i32)) ((x1, y1): (i32, i32)): (i32, i32) =
   then (x0, y0)
   else (x1, y1)
 
-let main [n] (m: i32) (is: [n]i32) (vs0: [n]i32) (vs1: [n]i32): ([m]i32, [m]i32) =
+let main [n] (m: i64) (is: [n]i32) (vs0: [n]i32) (vs1: [n]i32): ([m]i32, [m]i32) =
   let ne = (-1, -1)
   let dest = replicate m ne
   let vs = zip vs0 vs1
-  in unzip (reduce_by_index dest operator ne is vs)
+  in unzip (reduce_by_index dest operator ne (map i64.i32 is) vs)

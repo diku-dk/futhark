@@ -33,12 +33,13 @@ module Futhark.CodeGen.Backends.GenericC
 
     -- * Monadic compiler interface
     CompilerM,
-    CompilerState (compUserState),
+    CompilerState (compUserState, compNameSrc),
     getUserState,
     modifyUserState,
     contextContents,
     contextFinalInits,
     runCompilerM,
+    inNewFunction,
     cachingMemory,
     blockScope,
     compileFun,
@@ -64,9 +65,16 @@ module Futhark.CodeGen.Backends.GenericC
     publicName,
     contextType,
     contextField,
+    memToCType,
+    cacheMem,
+    fatMemory,
+    rawMemCType,
+    cproduct,
+    fatMemType,
 
     -- * Building Blocks
     primTypeToCType,
+    intTypeToCType,
     copyMemoryDefaultSpace,
   )
 where
@@ -209,6 +217,7 @@ defError (ErrorMsg parts) stacktrace = do
   free_all_mem <- collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
   let onPart (ErrorString s) = return ("%s", [C.cexp|$string:s|])
       onPart (ErrorInt32 x) = ("%d",) <$> compileExp x
+      onPart (ErrorInt64 x) = ("%lld",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   let formatstr = "Error: " ++ concat formatstrs ++ "\n\nBacktrace:\n%s"
   items
@@ -402,6 +411,22 @@ collect' m = pass $ do
     ( (x, DL.toList $ accItems w),
       const w {accItems = mempty}
     )
+
+-- | Used when we, inside an existing 'CompilerM' action, want to
+-- generate code for a new function.  Use this so that the compiler
+-- understands that previously declared memory doesn't need to be
+-- freed inside this action.
+inNewFunction :: Bool -> CompilerM op s a -> CompilerM op s a
+inNewFunction keep_cached m = do
+  old_mem <- gets compDeclaredMem
+  modify $ \s -> s {compDeclaredMem = mempty}
+  x <- local noCached m
+  modify $ \s -> s {compDeclaredMem = old_mem}
+  return x
+  where
+    noCached env
+      | keep_cached = env
+      | otherwise = env {envCachedMem = mempty}
 
 item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty {accItems = DL.singleton x}
@@ -675,7 +700,9 @@ defineMemorySpace space = do
   let setdef =
         [C.cedecl|static int $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
   int ret = $id:(fatMemUnRef space)(ctx, lhs, lhs_desc);
-  (*(rhs->references))++;
+  if (rhs->references != NULL) {
+    (*(rhs->references))++;
+  }
   *lhs = *rhs;
   return ret;
 }
@@ -936,10 +963,10 @@ arrayLibraryFunctions space pt signed shape = do
     [C.cedecl|struct $id:arr_name;|]
   headerDecl
     (ArrayDecl name)
-    [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params);|]
   headerDecl
     (ArrayDecl name)
-    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset, $params:shape_params);|]
   headerDecl
     (ArrayDecl name)
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
@@ -955,7 +982,7 @@ arrayLibraryFunctions space pt signed shape = do
 
   return
     [C.cunit|
-          $ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params) {
+          $ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params) {
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
@@ -965,7 +992,7 @@ arrayLibraryFunctions space pt signed shape = do
             return arr;
           }
 
-          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, int offset,
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, int offset,
                                             $params:shape_params) {
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
@@ -1026,6 +1053,9 @@ opaqueLibraryFunctions desc vds = do
     (OpaqueDecl desc)
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
 
+  -- We do not need to enclose the body in a critical section, because
+  -- when we free the components of the opaque, we are calling public
+  -- API functions that do their own locking.
   return
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
@@ -1472,43 +1502,61 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                       .fun = $id:cli_entry_point_function_name }|]
     )
 
-benchmarkOptions :: [Option]
-benchmarkOptions =
+genericOptions :: [Option]
+genericOptions =
   [ Option
       { optionLongName = "write-runtime-to",
         optionShortName = Just 't',
         optionArgument = RequiredArgument "FILE",
+        optionDescription = "Print the time taken to execute the program to the indicated file, an integral number of microseconds.",
         optionAction = set_runtime_file
       },
     Option
       { optionLongName = "runs",
         optionShortName = Just 'r',
         optionArgument = RequiredArgument "INT",
+        optionDescription = "Perform NUM runs of the program.",
         optionAction = set_num_runs
       },
     Option
       { optionLongName = "debugging",
         optionShortName = Just 'D',
         optionArgument = NoArgument,
+        optionDescription = "Perform possibly expensive internal correctness checks and verbose logging.",
         optionAction = [C.cstm|futhark_context_config_set_debugging(cfg, 1);|]
       },
     Option
       { optionLongName = "log",
         optionShortName = Just 'L',
         optionArgument = NoArgument,
+        optionDescription = "Print various low-overhead logging information to stderr while running.",
         optionAction = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
       },
     Option
       { optionLongName = "entry-point",
         optionShortName = Just 'e',
         optionArgument = RequiredArgument "NAME",
+        optionDescription = "The entry point to run. Defaults to main.",
         optionAction = [C.cstm|if (entry_point != NULL) entry_point = optarg;|]
       },
     Option
       { optionLongName = "binary-output",
         optionShortName = Just 'b',
         optionArgument = NoArgument,
+        optionDescription = "Print the program result in the binary output format.",
         optionAction = [C.cstm|binary_output = 1;|]
+      },
+    Option
+      { optionLongName = "help",
+        optionShortName = Just 'h',
+        optionArgument = NoArgument,
+        optionDescription = "Print help information and exit.",
+        optionAction =
+          [C.cstm|{
+                   printf("Usage: %s [OPTION]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n",
+                          fut_progname, option_descriptions);
+                   exit(0);
+                  }|]
       }
   ]
   where
@@ -1594,14 +1642,20 @@ compileProg backend ops extra header_extra spaces options prog = do
         runCompilerM ops src () compileProg'
       (entry_point_decls, cli_entry_point_decls, entry_point_inits) =
         unzip3 entry_points
-      option_parser = generateOptionParser "parse_options" $ benchmarkOptions ++ options
+      option_parser = generateOptionParser "parse_options" $ genericOptions ++ options
 
   let headerdefs =
         [C.cunit|
 $esc:("// Headers\n")
+/* We need to define _GNU_SOURCE before
+   _any_ headers files are imported to get
+   the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
+   https://manpages.courier-mta.org/htmlman2/getrusage.2.html */
+$esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
+$esc:("#include <float.h>")
 $esc:(header_extra)
 
 $esc:("\n// Initialisation\n")
@@ -1862,8 +1916,8 @@ compileConstants (Constants ps init_consts) = do
         | null const_fields = [[C.csdecl|int dummy;|]]
         | otherwise = const_fields
   contextField "constants" [C.cty|struct { $sdecls:const_fields' }|] Nothing
-  earlyDecl [C.cedecl|int init_constants($ty:ctx_ty*);|]
-  earlyDecl [C.cedecl|int free_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|static int init_constants($ty:ctx_ty*);|]
+  earlyDecl [C.cedecl|static int free_constants($ty:ctx_ty*);|]
 
   -- We locally define macros for the constants, so that when we
   -- generate assignments to local variables, we actually assign into
@@ -1874,7 +1928,7 @@ compileConstants (Constants ps init_consts) = do
     mapM_ resetMemConst ps
     compileCode init_consts
   libDecl
-    [C.cedecl|int init_constants($ty:ctx_ty *ctx) {
+    [C.cedecl|static int init_constants($ty:ctx_ty *ctx) {
       (void)ctx;
       int err = 0;
       $items:defs
@@ -1886,7 +1940,7 @@ compileConstants (Constants ps init_consts) = do
 
   free_consts <- collect $ mapM_ freeConst ps
   libDecl
-    [C.cedecl|int free_constants($ty:ctx_ty *ctx) {
+    [C.cedecl|static int free_constants($ty:ctx_ty *ctx) {
       (void)ctx;
       $items:free_consts
       return 0;
@@ -1964,6 +2018,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
     return
       ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
         [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
+               $stms:ignores
                int err = 0;
                $items:decl_cached
                $items:get_constants
@@ -1975,6 +2030,10 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
   }|]
       )
   where
+    -- Ignore all the boilerplate parameters, just in case we don't
+    -- actually need to use them.
+    ignores = [[C.cstm|(void)$id:p;|] | C.Param (Just p) _ _ _ <- extra]
+
     compileInput (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
       return [C.cparam|$ty:ctp $id:name|]

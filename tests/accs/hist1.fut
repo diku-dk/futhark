@@ -9,8 +9,8 @@
 import "intrinsics"
 
 let f (acc: *acc ([]f32)) i =
-  let acc = write acc (i*2) (r32 i)
-  let acc = write acc (i*2+1) (r32 i)
+  let acc = write acc (i*2) (f32.i64 i)
+  let acc = write acc (i*2+1) (f32.i64 i)
   in acc
 
 let main (xs: *[]f32) =

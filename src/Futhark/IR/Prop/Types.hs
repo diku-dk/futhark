@@ -260,7 +260,7 @@ stripArray _ t = t
 shapeSize :: Int -> Shape -> SubExp
 shapeSize i shape = case drop i $ shapeDims shape of
   e : _ -> e
-  [] -> constant (0 :: Int32)
+  [] -> constant (0 :: Int64)
 
 -- | Return the dimensions of a type - for non-arrays, this is the
 -- empty list.
@@ -281,7 +281,7 @@ arraySize i = shapeSize i . arrayShape
 -- the given type list.  If the dimension does not exist, or no types
 -- are given, the zero constant is returned.
 arraysSize :: Int -> [TypeBase Shape u] -> SubExp
-arraysSize _ [] = constant (0 :: Int32)
+arraysSize _ [] = constant (0 :: Int64)
 arraysSize i (t : _) = arraySize i t
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this

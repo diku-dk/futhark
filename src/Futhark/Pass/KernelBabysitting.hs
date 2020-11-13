@@ -118,7 +118,7 @@ transformKernelBody expmap lvl space kbody = do
     letSubExp "num_threads" $
       BasicOp $
         BinOp
-          (Mul Int32 OverflowUndef)
+          (Mul Int64 OverflowUndef)
           (unCount $ segNumGroups lvl)
           (unCount $ segGroupSize lvl)
   evalStateT
@@ -312,11 +312,10 @@ ensureCoalescedAccess
                 if null is
                   then untyped $ pe32 num_threads
                   else
-                    coerceIntPrimExp Int32 $
-                      untyped $
-                        product $
-                          map pe32 $
-                            drop (length is) thread_gdims
+                    untyped $
+                      product $
+                        map pe64 $
+                          drop (length is) thread_gdims
           replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
 
         -- Everything is fine... assuming that the array is in row-major
@@ -458,7 +457,7 @@ rearrangeSlice d w num_chunks arr = do
 
   per_chunk <-
     letSubExp "per_chunk" $
-      BasicOp $ BinOp (SQuot Int32 Unsafe) w_padded num_chunks'
+      BasicOp $ BinOp (SQuot Int64 Unsafe) w_padded num_chunks'
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
   rearrange num_chunks' w_padded per_chunk (baseString arr) arr_padded arr_t
@@ -491,7 +490,7 @@ rearrangeSlice d w num_chunks arr = do
               (map DimCoercion pre_dims ++ map DimNew (w_padded : post_dims))
               arr_extradim_tr
       letExp (arr_name <> "_inv_tr_init")
-        =<< eSliceArray d arr_inv_tr (eSubExp $ constant (0 :: Int32)) (eSubExp w)
+        =<< eSliceArray d arr_inv_tr (eSubExp $ constant (0 :: Int64)) (eSubExp w)
 
 paddedScanReduceInput ::
   MonadBinder m =>
@@ -501,8 +500,8 @@ paddedScanReduceInput ::
 paddedScanReduceInput w stride = do
   w_padded <-
     letSubExp "padded_size"
-      =<< eRoundToMultipleOf Int32 (eSubExp w) (eSubExp stride)
-  padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int32 OverflowUndef) w_padded w
+      =<< eRoundToMultipleOf Int64 (eSubExp w) (eSubExp stride)
+  padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int64 OverflowUndef) w_padded w
   return (w_padded, padding)
 
 --- Computing variance.

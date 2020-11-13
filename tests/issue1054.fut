@@ -3,7 +3,7 @@
 -- auto output
 
 let blk_transpose (block: [4]u32) : [4]u32 = #[sequential] map (\i ->
-    let offset = u32.i32 (3-i)<<3
+    let offset = u32.i64 (3-i)<<3
     in    (((block[0] >> offset) & 0xFF) << 24)
         | (((block[1] >> offset) & 0xFF) << 16)
         | (((block[2] >> offset) & 0xFF) << 8)

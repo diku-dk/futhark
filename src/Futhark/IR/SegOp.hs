@@ -395,10 +395,10 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
     checkKernelResult (Returns _ what) t =
       TC.require [t] what
     checkKernelResult (WriteReturns rws arr res) t = do
-      mapM_ (TC.require [Prim int32]) rws
+      mapM_ (TC.require [Prim int64]) rws
       arr_t <- lookupType arr
       forM_ res $ \(slice, e) -> do
-        mapM_ (traverse $ TC.require [Prim int32]) slice
+        mapM_ (traverse $ TC.require [Prim int64]) slice
         TC.require [t] e
         unless (arr_t == t `arrayOfShape` Shape rws) $
           TC.bad $
@@ -415,16 +415,16 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
     checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
       case o of
         SplitContiguous -> return ()
-        SplitStrided stride -> TC.require [Prim int32] stride
-      TC.require [Prim int32] w
-      TC.require [Prim int32] per_thread_elems
+        SplitStrided stride -> TC.require [Prim int64] stride
+      TC.require [Prim int64] w
+      TC.require [Prim int64] per_thread_elems
       vt <- lookupType v
       unless (vt == t `arrayOfRow` arraySize 0 vt) $
         TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
     checkKernelResult (TileReturns dims v) t = do
       forM_ dims $ \(dim, tile) -> do
-        TC.require [Prim int32] dim
-        TC.require [Prim int32] tile
+        TC.require [Prim int64] dim
+        TC.require [Prim int64] tile
       vt <- lookupType v
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
@@ -514,11 +514,11 @@ segSpaceDims (SegSpace _ space) = map snd space
 -- this 'SegSpace'.
 scopeOfSegSpace :: SegSpace -> Scope lore
 scopeOfSegSpace (SegSpace phys space) =
-  M.fromList $ zip (phys : map fst space) $ repeat $ IndexName Int32
+  M.fromList $ zip (phys : map fst space) $ repeat $ IndexName Int64
 
 checkSegSpace :: TC.Checkable lore => SegSpace -> TC.TypeM lore ()
 checkSegSpace (SegSpace _ dims) =
-  mapM_ (TC.require [Prim int32] . snd) dims
+  mapM_ (TC.require [Prim int64] . snd) dims
 
 -- | A 'SegOp' is semantically a perfectly nested stack of maps, on
 -- top of some bottommost computation (scalar computation, reduction,
@@ -662,10 +662,10 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
 
   TC.binding (scopeOfSegSpace space) $ do
     nes_ts <- forM ops $ \(HistOp dest_w rf dests nes shape op) -> do
-      TC.require [Prim int32] dest_w
-      TC.require [Prim int32] rf
+      TC.require [Prim int64] dest_w
+      TC.require [Prim int64] rf
       nes' <- mapM TC.checkArg nes
-      mapM_ (TC.require [Prim int32]) $ shapeDims shape
+      mapM_ (TC.require [Prim int64]) $ shapeDims shape
 
       -- Operator type must match the type of neutral elements.
       let stripVecDims = stripArray $ shapeRank shape
@@ -691,7 +691,7 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
 
     -- Return type of bucket function must be an index for each
     -- operation followed by the values to write.
-    let bucket_ret_t = replicate (length ops) (Prim int32) ++ concat nes_ts
+    let bucket_ret_t = replicate (length ops) (Prim int64) ++ concat nes_ts
     unless (bucket_ret_t == ts) $
       TC.bad $
         TC.TypeError $
@@ -715,7 +715,7 @@ checkScanRed space ops ts kbody = do
 
   TC.binding (scopeOfSegSpace space) $ do
     ne_ts <- forM ops $ \(lam, nes, shape) -> do
-      mapM_ (TC.require [Prim int32]) $ shapeDims shape
+      mapM_ (TC.require [Prim int64]) $ shapeDims shape
       nes' <- mapM TC.checkArg nes
 
       -- Operator type must match the type of neutral elements.
@@ -1019,7 +1019,7 @@ instance ASTLore lore => ST.IndexOp (SegOp lvl lore) where
                 ST.IndexedArray
                   (stmCerts stm <> cs)
                   arr
-                  (fixSlice (map (fmap isInt32) slice') excess_is)
+                  (fixSlice (map (fmap isInt64) slice') excess_is)
            in M.insert v idx table
         | otherwise =
           table
@@ -1120,9 +1120,9 @@ simplifyKernelBody space (KernelBody _ stms res) = do
 
 segSpaceSymbolTable :: ASTLore lore => SegSpace -> ST.SymbolTable lore
 segSpaceSymbolTable (SegSpace flat gtids_and_dims) =
-  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int32) gtids_and_dims
+  foldl' f (ST.fromScope $ M.singleton flat $ IndexName Int64) gtids_and_dims
   where
-    f vtable (gtid, dim) = ST.insertLoopVar gtid Int32 dim vtable
+    f vtable (gtid, dim) = ST.insertLoopVar gtid Int64 dim vtable
 
 simplifySegBinOp ::
   Engine.SimplifiableLore lore =>
@@ -1386,9 +1386,9 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (Kernel
               map
                 ( \d ->
                     DimSlice
-                      (constant (0 :: Int32))
+                      (constant (0 :: Int64))
                       d
-                      (constant (1 :: Int32))
+                      (constant (1 :: Int64))
                 )
                 $ segSpaceDims space
             index kpe' =

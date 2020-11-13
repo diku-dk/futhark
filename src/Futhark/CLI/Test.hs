@@ -198,10 +198,10 @@ runTestCase (TestCase mode program testcase progs) = do
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
           -- so force just one data set at a time here.
-          ensureReferenceOutput (Just 1) futhark "c" program ios
+          ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
       unless (mode == Interpreted) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
-          compileTestProgram extra_options futhark backend program warnings
+          compileTestProgram extra_options (FutharkExe futhark) backend program warnings
           mapM_ (testMetrics progs program) structures
           unless (mode == Compile) $ do
             (tuning_opts, _) <-
@@ -212,13 +212,13 @@ runTestCase (TestCase mode program testcase progs) = do
                         tuning_opts ++ configExtraOptions progs
                     }
             context "Running compiled program" $
-              accErrors_ $ map (runCompiledEntry program progs') ios
+              accErrors_ $ map (runCompiledEntry (FutharkExe futhark) program progs') ios
       unless (mode == Compile || mode == Compiled) $
         context "Interpreting" $
-          accErrors_ $ map (runInterpretedEntry futhark program) ios
+          accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
 
-runInterpretedEntry :: String -> FilePath -> InputOutputs -> TestM ()
-runInterpretedEntry futhark program (InputOutputs entry run_cases) =
+runInterpretedEntry :: FutharkExe -> FilePath -> InputOutputs -> TestM ()
+runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) =
   let dir = takeDirectory program
       runInterpretedCase run@(TestRun _ inputValues _ index _) =
         unless ("compiled" `elem` runTags run) $
@@ -228,8 +228,8 @@ runInterpretedEntry futhark program (InputOutputs entry run_cases) =
                 <> T.pack (runDescription run)
             )
             $ do
-              input <- T.unlines . map prettyText <$> getValues dir inputValues
-              expectedResult' <- getExpectedResult program entry run
+              input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
+              expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
               (code, output, err) <-
                 io $
                   readProcessWithExitCode futhark ["run", "-e", T.unpack entry, program] $
@@ -241,8 +241,8 @@ runInterpretedEntry futhark program (InputOutputs entry run_cases) =
                     =<< runResult program code output err
    in accErrors_ $ map runInterpretedCase run_cases
 
-runCompiledEntry :: FilePath -> ProgConfig -> InputOutputs -> TestM ()
-runCompiledEntry program progs (InputOutputs entry run_cases) =
+runCompiledEntry :: FutharkExe -> FilePath -> ProgConfig -> InputOutputs -> TestM ()
+runCompiledEntry futhark program progs (InputOutputs entry run_cases) =
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no path component.
@@ -260,9 +260,9 @@ runCompiledEntry program progs (InputOutputs entry run_cases) =
               <> T.pack (runDescription run)
           )
           $ do
-            expected <- getExpectedResult program entry run
+            expected <- getExpectedResult futhark program entry run
             (progCode, output, progerr) <-
-              runProgram runner extra_options program entry inputValues
+              runProgram futhark runner extra_options program entry inputValues
             compareResult entry index program expected
               =<< runResult program progCode output progerr
    in context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $
@@ -289,7 +289,7 @@ runResult program ExitSuccess stdout_s _ =
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
-compileTestProgram :: [String] -> FilePath -> String -> FilePath -> [WarningTest] -> TestM ()
+compileTestProgram :: [String] -> FutharkExe -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futhark backend program warnings = do
   (_, futerr) <- compileProgram extra_options futhark backend program
   testWarnings warnings futerr
@@ -579,7 +579,7 @@ defaultConfig =
           { configBackend = "c",
             configFuthark = Nothing,
             configRunner = "",
-            configExtraOptions = [],
+            configExtraOptions = ["-b"],
             configExtraCompilerOptions = [],
             configTuning = Just "tuning"
           },

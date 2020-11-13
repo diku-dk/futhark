@@ -124,7 +124,7 @@ internaliseDim ::
 internaliseDim d =
   case d of
     E.AnyDim -> Ext <$> newId
-    E.ConstDim n -> return $ Free $ intConst I.Int32 $ toInteger n
+    E.ConstDim n -> return $ Free $ intConst I.Int64 $ toInteger n
     E.NamedDim name -> namedDim name
   where
     namedDim (E.QualName _ name) = do

@@ -1,6 +1,6 @@
 -- Permit inference of a type with non-constructive size parameters.
 -- ==
--- input { 0 2 } output { empty([0]i32) [1i32,0i32] }
+-- input { 0i64 2i64 } output { empty([0]i64) [1i64,0i64] }
 
 let r =
   let f = reverse

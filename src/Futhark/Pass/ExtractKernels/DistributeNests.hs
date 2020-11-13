@@ -323,6 +323,7 @@ bodyContainsParallelism = any isParallelStm . bodyStms
       isMap (stmExp stm)
         && not ("sequential" `inAttrs` stmAuxAttrs (stmAux stm))
     isMap Op {} = True
+    isMap (DoLoop _ _ ForLoop {} body) = bodyContainsParallelism body
     isMap _ = False
 
 lambdaContainsParallelism :: Lambda SOACS -> Bool
@@ -580,7 +581,7 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
     return $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
 maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots _))) acc =
   distributeSingleUnaryStm acc stm $ \nest outerpat arr -> do
-    let rots' = map (const $ intConst Int32 0) (kernelNestWidths nest) ++ rots
+    let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots
     return $ oneStm $ Let outerpat aux $ BasicOp $ Rotate rots' arr
 maybeDistributeStm stm@(Let pat aux (BasicOp (Update arr slice (Var v)))) acc
   | not $ null $ sliceDims slice =
@@ -614,10 +615,10 @@ maybeDistributeStm (Let pat aux (BasicOp (Update arr [DimFix i] v))) acc
         lam =
           Lambda
             { lambdaParams = [],
-              lambdaReturnType = [Prim int32, et],
+              lambdaReturnType = [Prim int64, et],
               lambdaBody = mkBody mempty [i, v]
             }
-    maybeDistributeStm (Let pat aux $ Op $ Scatter (intConst Int32 1) lam [] [(w, 1, arr)]) acc
+    maybeDistributeStm (Let pat aux $ Op $ Scatter (intConst Int64 1) lam [] [(w, 1, arr)]) acc
   where
     amortises DoLoop {} = True
     amortises Op {} = True
@@ -839,7 +840,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
         letSubExp "v" $ BasicOp $ Index v $ map (DimFix . Var) slice_gtids
     slice_is <-
       traverse (toSubExp "index") $
-        fixSlice (map (fmap pe32) slice) $ map (pe32 . Var) slice_gtids
+        fixSlice (map (fmap pe64) slice) $ map (pe64 . Var) slice_gtids
 
     let write_is = map (Var . fst) base_ispace ++ slice_is
         arr' =
@@ -991,7 +992,7 @@ determineReduceOp lam nes =
           BasicOp $
             Index ne_v $
               fullSlice ne_v_t $
-                replicate (shapeRank shape) $ DimFix $ intConst Int32 0
+                replicate (shapeRank shape) $ DimFix $ intConst Int64 0
       return (lam', nes', shape)
     Nothing ->
       return (lam, nes, mempty)

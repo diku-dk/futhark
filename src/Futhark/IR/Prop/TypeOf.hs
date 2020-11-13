@@ -66,7 +66,7 @@ primOpType (Opaque se) =
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where
-    n = Constant (value (length es))
+    n = intConst Int64 $ toInteger $ length es
 primOpType (BinOp bop _ _) =
   pure [Prim $ binOpType bop]
 primOpType (UnOp _ x) =
@@ -153,7 +153,7 @@ instance Applicative (FeelBad lore) where
   f <*> x = FeelBad $ feelBad f $ feelBad x
 
 instance Decorations lore => HasScope lore (FeelBad lore) where
-  lookupType = const $ pure $ Prim $ IntType Int32
+  lookupType = const $ pure $ Prim $ IntType Int64
   askScope = pure mempty
 
 -- | Given the context and value merge parameters of a Futhark @loop@,

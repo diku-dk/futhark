@@ -392,7 +392,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure, sizeof(no_error)));
                  CUDA_SUCCEED(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
                  // The +1 is to avoid zero-byte allocations.
-                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure_args, sizeof(int32_t)*($int:max_failure_args+1)));
+                 CUDA_SUCCEED(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*($int:max_failure_args+1)));
 
                  $stms:init_kernel_fields
 
@@ -442,7 +442,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                                     &no_failure,
                                     sizeof(int32_t)));
 
-                     typename int32_t args[$int:max_failure_args+1];
+                     typename int64_t args[$int:max_failure_args+1];
                      CUDA_SUCCEED(
                        cuMemcpyDtoH(&args,
                                     ctx->global_failure_args,
@@ -461,7 +461,9 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
   GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
     ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|int $id:s(struct $id:ctx* ctx) {
+                         lock_lock(&ctx->lock);
                          CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+                         lock_unlock(&ctx->lock);
                          return 0;
                        }|]
     )

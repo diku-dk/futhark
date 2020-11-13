@@ -17,6 +17,7 @@ import qualified Data.Map.Strict as M
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
+import Futhark.Transform.Substitute
 import Futhark.Util
 
 type IndexSubstitution dec = (Certificates, VName, dec, Slice SubExp)
@@ -87,6 +88,15 @@ substituteIndicesInExp ::
   IndexSubstitutions (LetDec (Lore m)) ->
   Exp (Lore m) ->
   m (Exp (Lore m))
+substituteIndicesInExp substs (Op op) = do
+  let used_in_op = filter ((`nameIn` freeIn op) . fst) substs
+  var_substs <- fmap mconcat $
+    forM used_in_op $ \(v, (cs, src, src_dec, is)) -> do
+      v' <-
+        certifying cs $
+          letExp "idx" $ BasicOp $ Index src $ fullSlice (typeOf src_dec) is
+      pure $ M.singleton v v'
+  pure $ Op $ substituteNames var_substs op
 substituteIndicesInExp substs e = do
   substs' <- copyAnyConsumed e
   let substitute =

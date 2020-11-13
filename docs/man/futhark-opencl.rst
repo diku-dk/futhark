@@ -16,12 +16,10 @@ DESCRIPTION
 
 
 ``futhark opencl`` translates a Futhark program to C code invoking
-OpenCL kernels, and either compiles that C code with gcc(1) to an
-executable binary program, or produces a ``.h`` and ``.c`` file that
-can be linked with other code. The standard Futhark optimisation
-pipeline is used, and GCC is invoked with ``-O``, ``-lm``, and
-``-std=c99``. The resulting program will otherwise behave exactly as
-one compiled with ``futhark c``.
+OpenCL kernels, and either compiles that C code with a C compiler to
+an executable binary program, or produces a ``.h`` and ``.c`` file
+that can be linked with other code. The standard Futhark optimisation
+pipeline is used.
 
 ``futhark opencl`` uses ``-lOpenCL`` to link (``-framework OpenCL`` on
 macOS).  If using ``--library``, you will need to do the same when
@@ -59,6 +57,19 @@ OPTIONS
 --Werror
   Treat warnings as errors.
 
+ENVIRONMENT VARIABLES
+=====================
+
+``CC``
+
+  The C compiler used to compile the program.  Defaults to ``cc`` if
+  unset.
+
+``CFLAGS``
+
+  Space-separated list of options passed to the C compiler.  Defaults
+  to ``-O -std=c99`` if unset.
+
 EXECUTABLE OPTIONS
 ==================
 
@@ -72,6 +83,10 @@ arguments. Timing stops after the kernels are done running, but before
 data has been read from the buffers or the buffers have been released.
 
 The following additional options are accepted.
+
+-h, --help
+
+  Print help text to standard output and exit.
 
 --build-option=OPT
 
@@ -154,6 +169,10 @@ The following additional options are accepted.
 --tuning=FILE
 
   Read size=value assignments from the given file.
+
+--list-devices
+
+  List all OpenCL devices and platforms available on the system.
 
 SEE ALSO
 ========

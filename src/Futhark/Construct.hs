@@ -108,6 +108,7 @@ where
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Bifunctor (second)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as M
 import Futhark.Binder
@@ -330,12 +331,12 @@ eSliceArray ::
   m (Exp (Lore m))
 eSliceArray d arr i n = do
   arr_t <- lookupType arr
-  let skips = map (slice (constant (0 :: Int32))) $ take d $ arrayDims arr_t
+  let skips = map (slice (constant (0 :: Int64))) $ take d $ arrayDims arr_t
   i' <- letSubExp "slice_i" =<< i
   n' <- letSubExp "slice_n" =<< n
   return $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
   where
-    slice j m = DimSlice j m (constant (1 :: Int32))
+    slice j m = DimSlice j m (constant (1 :: Int64))
 
 -- | Are these indexes out-of-bounds for the array?
 eOutOfBounds ::
@@ -350,10 +351,10 @@ eOutOfBounds arr is = do
   let checkDim w i = do
         less_than_zero <-
           letSubExp "less_than_zero" $
-            BasicOp $ CmpOp (CmpSlt Int32) i (constant (0 :: Int32))
+            BasicOp $ CmpOp (CmpSlt Int64) i (constant (0 :: Int64))
         greater_than_size <-
           letSubExp "greater_than_size" $
-            BasicOp $ CmpOp (CmpSle Int32) w i
+            BasicOp $ CmpOp (CmpSle Int64) w i
         letSubExp "outside_bounds_dim" $
           BasicOp $ BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
@@ -480,7 +481,7 @@ binLambda bop arg_t ret_t = do
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp
-sliceDim d = DimSlice (constant (0 :: Int32)) d (constant (1 :: Int32))
+sliceDim d = DimSlice (constant (0 :: Int64)) d (constant (1 :: Int64))
 
 -- | @fullSlice t slice@ returns @slice@, but with 'DimSlice's of
 -- entire dimensions appended to the full dimensionality of @t@.  This
@@ -577,11 +578,14 @@ instantiateShapes' ::
   [TypeBase ExtShape u] ->
   m ([TypeBase Shape u], [Ident])
 instantiateShapes' ts =
-  runWriterT $ instantiateShapes instantiate ts
+  -- Carefully ensure that the order of idents we produce corresponds
+  -- to their existential index.
+  second (map snd . sortOn fst)
+    <$> runWriterT (instantiateShapes instantiate ts)
   where
-    instantiate _ = do
-      v <- lift $ newIdent "size" $ Prim int32
-      tell [v]
+    instantiate x = do
+      v <- lift $ newIdent "size" $ Prim int64
+      tell [(x, v)]
       return $ Var $ identName v
 
 removeExistentials :: ExtType -> Type -> Type

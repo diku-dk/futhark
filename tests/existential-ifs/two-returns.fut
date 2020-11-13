@@ -1,4 +1,4 @@
-let main [n] (xs: [n]i32): ([][]i32, [][]i32) =
+let main [n] (xs: [n]i64): ([][]i64, [][]i64) =
   if n == 2
   then (map (\_ -> xs) (iota n),
         map (\_ -> xs) (iota xs[0]))

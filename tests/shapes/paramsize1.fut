@@ -1,7 +1,7 @@
 -- ==
 -- error: "k"
 
-type^ f = (k: i32) -> [k]i32 -> i32
+type^ f = (k: i64) -> [k]i32 -> i64
 
 let f : f = \_ xs -> length xs
 

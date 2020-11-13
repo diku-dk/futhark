@@ -8,13 +8,13 @@
 -- }
 
 
-let fftmp (num_paths: i32) (md_c: [][]f64) (zi: []f64): [num_paths]f64 =
-    map (\(j: i32): f64  ->
+let fftmp (num_paths: i64) (md_c: [][]f64) (zi: []f64): [num_paths]f64 =
+    map (\(j: i64): f64  ->
             let x = map2 (*) (take (j+1) zi) (take (j+1) md_c[j])
             in  reduce (+) (0.0) x
          ) (iota num_paths)
 
-let correlateDeltas [n] (num_paths: i32) (md_c: [][]f64) (zds: [n][]f64): [n][num_paths]f64 =
+let correlateDeltas [n] (num_paths: i64) (md_c: [][]f64) (zds: [n][]f64): [n][num_paths]f64 =
     map (fftmp num_paths md_c) zds
 
 let combineVs [n] (n_row: [n]f64, vol_row: [n]f64, dr_row: [n]f64): [n]f64 =
@@ -30,7 +30,7 @@ let mkPrices [num_und][num_dates]
               md_starts) (e_rows )
 
 --[num_dates, num_paths]
-let main(num_paths: i32)
+let main(num_paths: i64)
         (md_c: [][]f64)
         (md_vols: [][]f64)
         (md_drifts: [][]f64)

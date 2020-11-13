@@ -5,7 +5,122 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.17.0]
+## [0.19.0]
+
+### Added
+
+  * When compiling to binaries in the C-based backends, the compiler
+    now respects the ``CFLAGS`` and ``CC`` environment variables.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.18.3]
+
+### Fixed
+
+  * Python backend now disables spurious NumPy overflow warnings for
+    both library and binary code (#1180).
+
+  * Undid deadlocking over-synchronisation for freeing opaque objects.
+
+  * `futhark datacmp` now handles bad input files better (#1181).
+
+## [0.18.2]
+
+### Added
+
+  * The GPU loop tiler can now handle loops where only a subset of the
+    input arrays are tiled.  Matrix-vector multiplication is one
+    important program where this helps (#1145).
+
+  * The number of threads used by the `multicore` backend is now
+    configurable (`--num-threads` and
+    `futhark_context_config_set_num_threads()`). (#1162)
+
+### Fixed
+
+  * PyOpenCL backend would mistakenly still streat entry point
+    argument sizes as 32 bit.
+
+  * Warnings are now reported even for programs with type errors.
+
+  * Multicore backend now works properly for very large iteration
+    spaces.
+
+  * A few internal generated functions (`init_constants()`,
+    `free_constants()`) were mistakenly declared non-static.
+
+  * Process exit code is now nonzero when compiler bugs and
+    limitations are encountered.
+
+  * Multicore backend crashed on `reduce_by_index` with nonempty target
+    and empty input.
+
+  * Fixed a flattening issue for certain complex `map` nestings
+    (#1168).
+
+  * Made API function `futhark_context_clear_caches()` thread safe
+    (#1169).
+
+  * API functions for freeing opaque objects are now thread-safe
+    (#1169).
+
+  * Tools such as `futhark dataset` no longer crash with an internal
+    error if writing to a broken pipe (but they will return a nonzero
+    exit code).
+
+  * Defunctionalisation had a name shadowing issue that would crop up
+    for programs making very advanced use of functional
+    representations (#1174).
+
+  * Type checker erroneously permitted pattern-matching on string
+    literals (this would fail later in the compiler).
+
+  * New coverage checker for pattern matching, which is more correct.
+    However, it may not provide quite as nice counter-examples
+    (#1134).
+
+  * Fix rare internalisation error (#1177).
+
+## [0.18.1]
+
+### Added
+
+  * Experimental multi-threaded CPU backend, `multicore`.
+
+### Changed
+
+  * All sizes are now of type `i64`.  This has wide-ranging
+    implications and most programs will need to be updated (#134).
+
+## [0.17.3]
+
+### Added
+
+  * Improved parallelisation of `futhark bench` compilation.
+
+### Fixed
+
+  * Dataset generation for test programs now use the right `futhark`
+    executable (#1133).
+
+  * Really fix NaN comparisons in interpreter (#1070, again).
+
+  * Fix entry points with a parameter that is a sum type where
+    multiple constructors contain arrays of the same statically known
+    size.
+
+  * Fix in monomorphisation of types with constant sizes.
+
+  * Fix in in-place lowering (#1142).
+
+  * Fix tiling inside multiple nested loops (#1143).
+
+## [0.17.2]
 
 ### Added
 
@@ -16,9 +131,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Library code generated with CUDA backend can now be called from
     multiple threads.
 
+  * Better optimisation of concatenations of array literals and
+    replicates.
+
+  * Array creation C API functions now accept `const` pointers.
+
+  * Arrays can now be indexed (but not sliced) with any signed integer
+    type (#1122).
+
+  * Added --list-devices command to OpenCL binaries (#1131)
+
+  * Added --help command to C, CUDA and OpenCL binaries (#1131)
+
 ### Removed
 
+  * The integer modules no longer contain `iota` and `replicate`
+    functions.  The top-level ones still exist.
+
+  * The `size` module type has been removed from the prelude.
+
 ### Changed
+
+  * Range literals may no longer be produced from unsigned integers.
 
 ### Fixed
 
@@ -27,6 +161,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     generating invalid C code.
 
   * Exotic tiling bug (#1112).
+
+  * Missing synchronisation for in-place updates at group level.
+
+  * Fixed (in a hacky way) an issue where `reduce_by_index` would use
+    too much local memory on AMD GPUs when using the OpenCL backend.
 
 ## [0.16.4]
 

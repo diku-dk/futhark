@@ -5,8 +5,8 @@
 import "intrinsics"
 
 let f (acc: *acc ([]i32)) i =
-  let acc = write acc (i*2) i
-  let acc = write acc (i*2+1) i
+  let acc = write acc (i*2) (i32.i64 i)
+  let acc = write acc (i*2+1) (i32.i64 i)
   in acc
 
 let main (xs: *[]i32) =
