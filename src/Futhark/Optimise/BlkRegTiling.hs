@@ -836,15 +836,16 @@ getParTiles (t_str, r_str) (t_name, r_name) len_dim =
 getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Binder Kernels SubExp
 getSeqTile tk_str tk_name len_dim ty tx =
   case (tx, ty) of
-    (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) -> do
-      let min_val = case len_dim of
-            Constant (IntValue (Int64Value v_d)) -> min v_d $ min v_x v_y
-            _ -> min v_x v_y
-      tk <- letSubExp tk_str $ BasicOp $ SubExp $ Constant $ IntValue $ Int64Value min_val
-      return tk
-    _ -> do
-      tk <- letSubExp tk_str $ Op $ SizeOp $ GetSize tk_name SizeTile
-      return tk
+    (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
+      letSubExp tk_str $
+        BasicOp $
+          SubExp $
+            constant $
+              case len_dim of
+                Constant (IntValue (Int64Value v_d)) -> min v_d $ min v_x v_y
+                _ -> min v_x v_y
+    _ ->
+      letSubExp tk_str $ Op $ SizeOp $ GetSize tk_name SizeTile
 
 ----------------------------------------------------------------------------------------------
 --- 3D Tiling (RegTiling for the outermost dimension & Block tiling for the innermost two) ---
@@ -858,7 +859,7 @@ mkRegTileSe = constant
 
 variantToDim :: VarianceTable -> VName -> VName -> Bool
 variantToDim variance gid_outer nm =
-  gid_outer == nm || (nameIn gid_outer $ M.findWithDefault mempty nm variance)
+  gid_outer == nm || nameIn gid_outer (M.findWithDefault mempty nm variance)
 
 -- | Checks that all streamed arrays are variant to exacly one of
 --   the two innermost parallel dimensions, and conversely, for
@@ -921,7 +922,7 @@ isInvarTo2of3InnerDims branch_variant kspace variance arrs =
 -- mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
 doRegTiling3D :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
 doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
-  | SegMap (SegThread {}) space kertp (KernelBody () kstms kres) <- old_kernel,
+  | SegMap SegThread {} space kertp (KernelBody () kstms kres) <- old_kernel,
     -- build the variance table, that records, for
     -- each variable name, the variables it depends on
     initial_variance <- M.map mempty $ scopeOfSegSpace space,
@@ -942,9 +943,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     reg_tile <- maxRegTile `quot` fromIntegral (length red_nes),
     reg_tile_se <- mkRegTileSe reg_tile,
     -- check that the element-type of the map and reduce are scalars:
-    foldl (&&) True $ map primType $ map paramDec $ lambdaParams map_lam,
+    all (primType . paramDec) $ lambdaParams map_lam,
     red_res_tps <- map paramDec $ take (length red_nes) $ lambdaParams red_lam,
-    foldl (&&) True $ map primType red_res_tps,
+    all primType red_res_tps,
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
     Just _ <- isInvarTo2of3InnerDims mempty space variance inp_soac_arrs,
@@ -958,7 +959,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         )
         mempty
         $ map patElemName redomap_orig_res,
-    not $ mempty == res_red_var,
+    mempty /= res_red_var,
     -- we furthermore check that code1 is only formed by
     -- 1. statements that slice some globally-declared arrays
     --    to produce the input for the redomap, and
@@ -994,7 +995,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           ++ " type: "
           ++ pretty kertp
       )
-      $ True = do
+      True = do
     -- HERE STARTS THE IMPLEMENTATION:
     (new_kernel, host_stms) <- runBinder $ do
       -- host code
@@ -1094,8 +1095,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                       let ret = WriteReturns [rz] loc_Y_nm [([DimFix res_i], res_v)]
                       let body = KernelBody () stms [ret]
 
-                      res_nms <- letTupExp "Y_glb2loc" <=< renameExp $
-                                 Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
+                      res_nms <-
+                        letTupExp "Y_glb2loc" <=< renameExp $
+                          Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
                       let res_nm : _ = res_nms
                       return res_nm
                   resultBodyM $ map Var loc_arr_merge2_nms'
@@ -1162,17 +1164,17 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         let redomap_res = take (length red_nes) prologue_res_list
         epilogue_res <-
           if length redomap_orig_res == length ker_res_nms
-            && ker_res_nms == (map patElemName redomap_orig_res)
+            && ker_res_nms == map patElemName redomap_orig_res
             then -- all (\ (a,b) -> patElemName a == b ) $ zip redomap_orig_res ker_res_nms
-              segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
-                forM (zip kertp redomap_res) $ \(res_tp, res) -> do
-                  rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
-                  fmap Var $ forLoop rz [rss_init] $ \i [rss] -> do
+            segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
+              forM (zip kertp redomap_res) $ \(res_tp, res) -> do
+                rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
+                fmap Var $
+                  forLoop rz [rss_init] $ \i [rss] -> do
                     let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
                     thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
                     rss' <- letSubExp "rss" $ BasicOp $ Update rss slice $ Var thread_res
                     resultBodyM [rss']
-
             else segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
               letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
               letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
@@ -1223,7 +1225,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
 
         -- TODO: RegTileReturns is still incorrect, please Fix It
-        return $ map (\x -> RegTileReturns regtile_ret_dims x) epilogue_res'
+        return $ map (RegTileReturns regtile_ret_dims) epilogue_res'
       -- END (ret_seggroup, stms_seggroup) <- runBinder $ do
       let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
           space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
@@ -1250,7 +1252,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p = do
         case findIndices (variantSliceDim variance gidz) slc of
-          [] -> return $ (M.insert p_nm stm tab_inn, tab_out)
+          [] -> return (M.insert p_nm stm tab_inn, tab_out)
           i : _ -> do
             arr_tp <- lookupType arr_nm
             let perm = [i + 1 .. arrayRank arr_tp -1] ++ [0 .. i]
