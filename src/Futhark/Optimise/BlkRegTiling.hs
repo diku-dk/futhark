@@ -701,12 +701,11 @@ segMap2D desc lvl manifest (dim_y, dim_x) f = do
     res <- f (ltid_y, ltid_x)
     ts <- mapM subExpType res
     return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
 
-  letTupExp desc $
+  letTupExp desc <=< renameExp $
     Op $
       SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms' $ map (Returns manifest) res'
+        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
 
 segMap3D ::
   String -> -- desc
@@ -728,12 +727,11 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
     res <- f (ltid_z, ltid_y, ltid_x)
     ts <- mapM subExpType res
     return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
 
-  letTupExp desc $
+  letTupExp desc <=< renameExp $
     Op $
       SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms' $ map (Returns manifest) res'
+        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
 
 segScatter2D ::
   String -> -- desc
@@ -754,12 +752,10 @@ segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
     t_v <- subExpType res_v
     return (t_v, res_v, res_i)
 
-  Body _ stms' res' <- renameBody $ mkBody stms [res_i, res_v]
-  let [res_i', res_v'] = res'
-  let ret = WriteReturns [arr_size] updt_arr [([DimFix res_i'], res_v')]
-  let body = KernelBody () stms' [ret]
+  let ret = WriteReturns [arr_size] updt_arr [([DimFix res_i], res_v)]
+  let body = KernelBody () stms [ret]
 
-  letTupExp desc $ Op $ SegOp $ SegMap lvl segspace [t_v] body
+  letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
 
 {--
 processIndirections :: Names   -- input arrays to redomap
@@ -1095,12 +1091,11 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                         --y_tp  <- subExpType y_elm
                         return (y_elm, y_ind)
 
-                      Body _ stms' res' <- renameBody $ mkBody stms [res_i, res_v]
-                      let [res_i', res_v'] = res'
-                      let ret = WriteReturns [rz] loc_Y_nm [([DimFix res_i'], res_v')]
-                      let body = KernelBody () stms' [ret]
+                      let ret = WriteReturns [rz] loc_Y_nm [([DimFix res_i], res_v)]
+                      let body = KernelBody () stms [ret]
 
-                      res_nms <- letTupExp "Y_glb2loc" $ Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
+                      res_nms <- letTupExp "Y_glb2loc" <=< renameExp $
+                                 Op $ SegOp $ SegMap segthd_lvl segspace [Prim ptp_Y] body
                       let res_nm : _ = res_nms
                       return res_nm
                   resultBodyM $ map Var loc_arr_merge2_nms'
