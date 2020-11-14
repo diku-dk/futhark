@@ -25,6 +25,7 @@ module Futhark.Util
     focusNth,
     unixEnvironment,
     isEnvVarSet,
+    isEnvVarAtLeast,
     fancyTerminal,
     runProgramWithExitCode,
     directoryContents,
@@ -69,6 +70,7 @@ import qualified System.FilePath.Posix as Posix
 import System.IO (hIsTerminalDevice, stdout)
 import System.IO.Unsafe
 import System.Process.ByteString
+import Text.Read (readMaybe)
 
 -- | Like 'nub', but without the quadratic runtime.
 nubOrd :: Ord a => [a] -> [a]
@@ -161,7 +163,7 @@ unixEnvironment :: [(String, String)]
 unixEnvironment = unsafePerformIO getEnvironment
 
 -- | Is an environment variable set to 0 or 1?  If 0, return False; if
--- 1, True; otherwise the default value.
+-- 1, True; otherwise default.
 isEnvVarSet :: String -> Bool -> Bool
 isEnvVarSet name default_val = fromMaybe default_val $ do
   val <- lookup name unixEnvironment
@@ -169,6 +171,15 @@ isEnvVarSet name default_val = fromMaybe default_val $ do
     "0" -> return False
     "1" -> return True
     _ -> Nothing
+
+-- | True if the environment variable, viewed as an integer, has at
+-- least this numeric value.  Returns False if variable is unset or
+-- not numeric.
+isEnvVarAtLeast :: String -> Int -> Bool
+isEnvVarAtLeast s x =
+  case readMaybe =<< lookup s unixEnvironment of
+    Just y -> y >= x
+    _ -> False
 
 {-# NOINLINE fancyTerminal #-}
 

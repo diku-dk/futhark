@@ -51,7 +51,7 @@ class IsName v where
 -- the base name.
 instance IsName VName where
   pprName
-    | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False =
+    | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
       \(VName vn i) -> ppr vn <> text "_" <> text (show i)
     | otherwise = ppr . baseName
 
@@ -222,7 +222,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where
       inst = case unAnnot t of
         Just t'
-          | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False ->
+          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
             text "@" <> parens (align $ ppr t')
         _ -> mempty
   pprPrec _ (Parens e _) = align $ parens $ ppr e
@@ -248,7 +248,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where
       info' = case unAnnot info of
         Just t
-          | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False ->
+          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
             text "@" <> parens (align $ ppr t)
         _ -> mempty
   pprPrec _ (StringLit s _) =
