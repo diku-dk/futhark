@@ -62,7 +62,6 @@ data PolyBinding
       ( VName,
         [TypeParam],
         [Pattern],
-        Maybe (TypeExp VName),
         StructType,
         [VName],
         Exp,
@@ -334,7 +333,7 @@ transformExp (LetFun fname (tparams, params, retdecl, Info ret, body) e e_t loc)
     -- filter those that are monomorphic versions of the current let-bound
     -- function and insert them at this point, and propagate the rest.
     rr <- asks envRecordReplacements
-    let funbind = PolyBinding rr (fname, tparams, params, retdecl, ret, [], body, mempty, loc)
+    let funbind = PolyBinding rr (fname, tparams, params, ret, [], body, mempty, loc)
     pass $ do
       (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
       -- Do not remember this one for next time we monomorphise this
@@ -714,7 +713,7 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, rettype, retext, body, attrs, loc)) t =
+monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, retext, body, attrs, loc)) t =
   replaceRecordReplacements rr $ do
     let bind_t = foldFunType (map patternStructType params) rettype
     (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams t
@@ -774,8 +773,8 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, retdecl, retty
       ValBind
         { valBindEntryPoint = Nothing,
           valBindName = name',
-          valBindRetDecl = retdecl,
           valBindRetType = Info rettype',
+          valBindRetDecl = Nothing,
           valBindTypeParams = tparams',
           valBindParams = params'',
           valBindBody = body'',
@@ -851,8 +850,8 @@ substPattern entry f pat = case pat of
   PatternConstr n (Info tp) ps loc -> PatternConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ attrs loc) =
-  PolyBinding mempty (name, tparams, params, retdecl, rettype, retext, body, attrs, loc)
+toPolyBinding (ValBind _ name _ (Info (rettype, retext)) tparams params body _ attrs loc) =
+  PolyBinding mempty (name, tparams, params, rettype, retext, body, attrs, loc)
 
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
