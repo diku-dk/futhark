@@ -961,11 +961,12 @@ buildEnvPattern env = RecordPattern (map buildField $ M.toList env) mempty
 buildRetType :: Env -> [Pattern] -> StructType -> PatternType -> PatternType
 buildRetType env pats = comb
   where
-    bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
+    bound =
+      S.fromList (M.keys env) <> S.map identName (foldMap patternIdents pats)
     boundAsUnique v =
       maybe False (unique . unInfo . identType) $
         find ((== v) . identName) $ S.toList $ foldMap patternIdents pats
-    problematic v = (v `member` bound) && not (boundAsUnique v)
+    problematic v = (v `S.member` bound) && not (boundAsUnique v)
     comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
       Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
     comb (Scalar (Sum cs_annot)) (Scalar (Sum cs_got)) =
@@ -1148,9 +1149,6 @@ instance Monoid NameSet where
 
 without :: NameSet -> NameSet -> NameSet
 without (NameSet x) (NameSet y) = NameSet $ x `M.difference` y
-
-member :: VName -> NameSet -> Bool
-member v (NameSet m) = v `M.member` m
 
 ident :: Ident -> NameSet
 ident v = NameSet $ M.singleton (identName v) (uniqueness $ unInfo $ identType v)
