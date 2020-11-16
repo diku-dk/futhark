@@ -53,8 +53,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     Just (common_dim, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
     -- check that exactly two 1D arrays are streamed thorugh redomap,
     -- and the result of redomap is one scalar
+    -- !!!I need to rearrange this whole thing!!! including inp_A and inp_B
     length arrs == 2 && length red_nes == 1,
-    [inp_A, inp_B] <- arrs,
     [map_t1t, map_t2t] <- map paramDec $ lambdaParams map_lam,
     [red_t1, _] <- map paramDec $ lambdaParams red_lam,
     primType map_t1t && primType map_t2t && primType red_t1,
@@ -64,7 +64,9 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
 
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
-    Just _ <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
+    Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
+    -- trace ("!!!! var_dims: "++pretty var_dims) $ var_dims == [0,1] || var_dims == [1,0],
+    var_dims == [0,1],
     -- get the variables on which the first result of redomap depends on
     [redomap_orig_res] <- patternValueElements pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
@@ -82,13 +84,17 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
     length tmp_stms == length arrs,
-    [load_A, load_B] <- tmp_stms,
+    -- [inp_A, inp_B] <- arrs,
+    zip_AB <- zip tmp_stms arrs,
+    [(load_A, inp_A), (load_B, inp_B)] <- if var_dims == [0,1] then zip_AB else reverse zip_AB,
     code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
     trace
       ( "Cosmin debug: code1':\n" ++ pretty code1' ++ "\ncode 2:\n" ++ pretty code2
           ++ "\ncode2': \n"
           ++ pretty code2'
+          ++ "\n Orig SegSpace: "
+          ++ pretty seg_space
           ++ "\n load_A: "
           ++ pretty load_A
           ++ "\n load_B: "
@@ -99,6 +105,9 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           ++ pretty res_nm
           ++ " type: "
           ++ pretty ts
+          ++ "\n Old Kernel Body: \n"
+          ++ pretty old_kbody
+          ++ "\n END MAT-MAT Kernel!"
       )
       True,
     -- TODO: remove the need for these assumptions !
@@ -453,8 +462,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           kbody' = KernelBody () stms_seggroup ret_seggroup
       return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
 
-    --trace ("COSMIN kernel: "++pretty new_kernel) $
-    return $ Just (host_stms, new_kernel)
+    trace ("COSMIN kernel: "++pretty new_kernel) $
+      return $ Just (host_stms, new_kernel)
 mmBlkRegTiling _ = return Nothing
 
 ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
@@ -1201,8 +1210,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
 
       return $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
     -- END (new_kernel, host_stms) <- runBinder $ do
-    trace ("Cosmin3D end\nhost_stms: " ++ pretty host_stms ++ "\nnew kernel: " ++ pretty new_kernel ++ "\n") $
-      return $ Just (host_stms, new_kernel)
+    --trace ("Cosmin3D end\nhost_stms: " ++ pretty host_stms ++ "\nnew kernel: " ++ pretty new_kernel ++ "\n") $
+    return $ Just (host_stms, new_kernel)
   where
     getResNm (Returns ResultMaySimplify (Var res_nm)) = Just res_nm
     getResNm _ = Nothing
