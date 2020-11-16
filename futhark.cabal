@@ -178,7 +178,9 @@ library
       Futhark.Internalise.Bindings
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise
+      Futhark.Internalise.FreeVars
       Futhark.Internalise.Lambdas
+      Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.TypesValues
