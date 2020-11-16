@@ -23,6 +23,8 @@
 --
 -- * Turns implicit record fields into explicit record fields.
 --
+-- * Rewrite BinOp nodes to Apply nodes.
+--
 -- Note that these changes are unfortunately not visible in the AST
 -- representation.
 module Futhark.Internalise.Monomorphise (transformProg) where
@@ -419,16 +421,14 @@ transformExp (DoLoop sparams pat e1 form e3 ret loc) = do
   -- sizes for them.
   (pat_sizes, pat') <- sizesForPat pat
   return $ DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' ret loc
-transformExp (BinOp (fname, oploc) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
+transformExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) tp ext loc) = do
   fname' <- transformFName loc fname $ toStruct t
   e1' <- transformExp e1
   e2' <- transformExp e2
-  case fname' of
-    Var fname'' _ _
-      | orderZero (typeOf e1'),
-        orderZero (typeOf e2') ->
-        return $ BinOp (fname'', oploc) (Info t) (e1', d1) (e2', d2) tp ext loc
-    _ -> do
+  if orderZero (typeOf e1')
+    && orderZero (typeOf e2')
+    then return $ applyOp fname' e1' e2'
+    else do
       -- We have to flip the arguments to the function, because
       -- operator application is left-to-right, while function
       -- application is outside-in.  This matters when the arguments

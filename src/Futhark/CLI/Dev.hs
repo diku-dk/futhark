@@ -26,6 +26,7 @@ import qualified Futhark.IR.Seq as Seq
 import qualified Futhark.IR.SeqMem as SeqMem
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
+import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -69,7 +70,9 @@ data FutharkPipeline
     Defunctorise
   | -- | Defunctorise and monomorphise.
     Monomorphise
-  | -- | Defunctorise, monomorphise, and defunctionalise.
+  | -- | Defunctorise, monomorphise, and lambda-lift.
+    LiftLambdas
+  | -- | Defunctorise, monomorphise, lambda-lift, and defunctionalise.
     Defunctionalise
 
 data Config = Config
@@ -453,6 +456,11 @@ commandLineOptions =
       "Monomorphise the program.",
     Option
       []
+      ["lift-lambdas"]
+      (NoArg $ Right $ \opts -> opts {futharkPipeline = LiftLambdas})
+      "Lambda-lift the program.",
+    Option
+      []
       ["defunctionalise"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Defunctionalise})
       "Defunctionalise the program.",
@@ -579,6 +587,14 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               flip evalState src $
                 Defunctorise.transformProg imports
                   >>= Monomorphise.transformProg
+        LiftLambdas -> do
+          (_, imports, src) <- readProgram file
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= Monomorphise.transformProg
+                  >>= LiftLambdas.transformProg
         Defunctionalise -> do
           (_, imports, src) <- readProgram file
           liftIO $
@@ -586,6 +602,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               flip evalState src $
                 Defunctorise.transformProg imports
                   >>= Monomorphise.transformProg
+                  >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} ->
           case splitExtensions file of
