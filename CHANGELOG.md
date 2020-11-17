@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * When compiling to binaries in the C-based backends, the compiler
     now respects the ``CFLAGS`` and ``CC`` environment variables.
 
+  * GPU backends: avoid some bounds-checks for parallel sections
+    inside intra-kernel loops.
+
 ### Removed
 
 ### Changed
