@@ -301,7 +301,13 @@ prepareIntraGroupSegHist group_size =
 whenActive :: SegLevel -> SegSpace -> InKernelGen () -> InKernelGen ()
 whenActive lvl space m
   | SegNoVirtFull <- segVirt lvl = m
-  | otherwise = sWhen (isActive $ unSegSpace space) m
+  | otherwise = do
+    group_size <- kernelGroupSize . kernelConstants <$> askEnv
+    -- XXX: the following check is too naive - we should also handle
+    -- the multi-dimensional case.
+    if [group_size] == map (toInt64Exp . snd) (unSegSpace space)
+      then m
+      else sWhen (isActive $ unSegSpace space) m
 
 compileGroupOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
