@@ -1053,13 +1053,14 @@ opaqueLibraryFunctions desc vds = do
     (OpaqueDecl desc)
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
 
-  ops <- asks envOperations
-
+  -- We do not need to enclose the body in a critical section, because
+  -- when we free the components of the opaque, we are calling public
+  -- API functions that do their own locking.
   return
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
             int ret = 0, tmp;
-            $items:(criticalSection ops free_body)
+            $items:free_body
             free(obj);
             return ret;
           }

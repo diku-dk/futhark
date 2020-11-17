@@ -50,12 +50,15 @@ module type numeric = {
 
   val abs: t -> t
 
+  -- | Sign function.  Produces -1, 0, or 1 if the argument is
+  -- respectively less than, equal to, or greater than zero.
   val sgn: t -> t
 
-  -- | The highest representable number.
+  -- | The most positive representable number.
   val highest: t
 
-  -- | The lowest representable number.
+  -- | The least positive representable number (most negative for
+  -- signed types).
   val lowest: t
 
   -- | Returns zero on empty input.

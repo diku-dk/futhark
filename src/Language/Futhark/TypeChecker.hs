@@ -626,16 +626,15 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
             </> "\nwill have an opaque type, so the result will likely not be usable."
     _ -> return ()
 
-  let arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
+  let vb = ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs loc
   return
     ( mempty
         { envVtable =
-            M.singleton fname' $
-              BoundV tparams' $ foldr (arrow . patternParam) rettype params',
+            M.singleton fname' $ uncurry BoundV $ valBindTypeScheme vb,
           envNameMap =
             M.singleton (Term, fname) $ qualName fname'
         },
-      ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs loc
+      vb
     )
 
 nastyType :: Monoid als => TypeBase dim als -> Bool

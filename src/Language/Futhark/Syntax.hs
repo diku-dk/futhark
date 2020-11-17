@@ -56,6 +56,7 @@ module Language.Futhark.Syntax
     FieldBase (..),
     CaseBase (..),
     LoopFormBase (..),
+    PatLit (..),
     PatternBase (..),
 
     -- * Module language
@@ -894,6 +895,13 @@ deriving instance Eq (LoopFormBase NoInfo VName)
 
 deriving instance Ord (LoopFormBase NoInfo VName)
 
+-- | A literal in a pattern.
+data PatLit
+  = PatLitInt Integer
+  | PatLitFloat Double
+  | PatLitPrim PrimValue
+  deriving (Eq, Ord, Show)
+
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).
 data PatternBase f vn
@@ -903,7 +911,7 @@ data PatternBase f vn
   | Id vn (f PatternType) SrcLoc
   | Wildcard (f PatternType) SrcLoc -- Nothing, i.e. underscore.
   | PatternAscription (PatternBase f vn) (TypeDeclBase f vn) SrcLoc
-  | PatternLit (ExpBase f vn) (f PatternType) SrcLoc
+  | PatternLit PatLit (f PatternType) SrcLoc
   | PatternConstr Name (f PatternType) [PatternBase f vn] SrcLoc
 
 deriving instance Showable f vn => Show (PatternBase f vn)

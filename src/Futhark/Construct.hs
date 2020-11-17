@@ -108,6 +108,7 @@ where
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Bifunctor (second)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as M
 import Futhark.Binder
@@ -576,11 +577,14 @@ instantiateShapes' ::
   [TypeBase ExtShape u] ->
   m ([TypeBase Shape u], [Ident])
 instantiateShapes' ts =
-  runWriterT $ instantiateShapes instantiate ts
+  -- Carefully ensure that the order of idents we produce corresponds
+  -- to their existential index.
+  second (map snd . sortOn fst)
+    <$> runWriterT (instantiateShapes instantiate ts)
   where
-    instantiate _ = do
+    instantiate x = do
       v <- lift $ newIdent "size" $ Prim int64
-      tell [v]
+      tell [(x, v)]
       return $ Var $ identName v
 
 removeExistentials :: ExtType -> Type -> Type
