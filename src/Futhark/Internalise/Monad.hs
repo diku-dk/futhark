@@ -11,7 +11,6 @@ module Futhark.Internalise.Monad
     throwError,
     VarSubstitutions,
     InternaliseEnv (..),
-    Closure,
     FunInfo,
     substitutingVars,
     lookupSubst,
@@ -38,13 +37,8 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util (takeLast)
 
--- | Extra parameters to pass when calling this function.  This
--- corresponds to the closure of a locally defined function.
-type Closure = [VName]
-
 type FunInfo =
   ( Name,
-    Closure,
     [VName],
     [DeclType],
     [FParam],

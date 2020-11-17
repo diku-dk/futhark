@@ -19,6 +19,7 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import qualified Data.ByteString.Lazy.Char8 as ByteString
+import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
@@ -34,7 +35,7 @@ import Futhark.IR.KernelsMem (KernelsMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
-import Futhark.Util (runProgramWithExitCode)
+import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Language.SexpGrammar as Sexp
 import System.Exit
 import System.FilePath
@@ -106,6 +107,37 @@ sexpAction =
         Left s ->
           error $ "Couldn't encode program: " ++ s
 
+cmdCC :: String
+cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
+
+cmdCFLAGS :: [String] -> [String]
+cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
+
+runCC :: String -> String -> [String] -> [String] -> FutharkM ()
+runCC cpath outpath cflags_def ldflags = do
+  ret <-
+    liftIO $
+      runProgramWithExitCode
+        cmdCC
+        ( [cpath, "-o", outpath]
+            ++ cmdCFLAGS cflags_def
+            ++
+            -- The default LDFLAGS are always added.
+            ldflags
+        )
+        mempty
+  case ret of
+    Left err ->
+      externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
+    Right (ExitFailure code, _, gccerr) ->
+      externalErrorS $
+        cmdCC ++ " failed with code "
+          ++ show code
+          ++ ":\n"
+          ++ gccerr
+    Right (ExitSuccess, _, _) ->
+      return ()
+
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCAction fcfg mode outpath =
@@ -127,23 +159,7 @@ compileCAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          ret <-
-            liftIO $
-              runProgramWithExitCode
-                "gcc"
-                [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
-                mempty
-          case ret of
-            Left err ->
-              externalErrorS $ "Failed to run gcc: " ++ show err
-            Right (ExitFailure code, _, gccerr) ->
-              externalErrorS $
-                "gcc failed with code "
-                  ++ show code
-                  ++ ":\n"
-                  ++ gccerr
-            Right (ExitSuccess, _, _) ->
-              return ()
+          runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -173,23 +189,7 @@ compileOpenCLAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ COpenCL.asExecutable cprog
-          ret <-
-            liftIO $
-              runProgramWithExitCode
-                "gcc"
-                ([cpath, "-O", "-std=c99", "-lm", "-o", outpath] ++ extra_options)
-                mempty
-          case ret of
-            Left err ->
-              externalErrorS $ "Failed to run gcc: " ++ show err
-            Right (ExitFailure code, _, gccerr) ->
-              externalErrorS $
-                "gcc failed with code "
-                  ++ show code
-                  ++ ":\n"
-                  ++ gccerr
-            Right (ExitSuccess, _, _) ->
-              return ()
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -216,21 +216,7 @@ compileCUDAAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ CCUDA.asExecutable cprog
-          let args =
-                [cpath, "-O", "-std=c99", "-lm", "-o", outpath]
-                  ++ extra_options
-          ret <- liftIO $ runProgramWithExitCode "gcc" args mempty
-          case ret of
-            Left err ->
-              externalErrorS $ "Failed to run gcc: " ++ show err
-            Right (ExitFailure code, _, gccerr) ->
-              externalErrorS $
-                "gcc failed with code "
-                  ++ show code
-                  ++ ":\n"
-                  ++ gccerr
-            Right (ExitSuccess, _, _) ->
-              return ()
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark multicore@ action.
 compileMulticoreAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
@@ -253,21 +239,4 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
-          -- let debug_flags = ["-g", "-fno-omit-frame-pointer", "-fsanitize=address", "-fsanitize=integer", "-fsanitize=undefined", "-fno-sanitize-recover=null"]
-          ret <-
-            liftIO $
-              runProgramWithExitCode
-                "gcc"
-                [cpath, "-O3", "-pthread", "-std=c11", "-lm", "-o", outpath]
-                mempty
-          case ret of
-            Left err ->
-              externalErrorS $ "Failed to run gcc: " ++ show err
-            Right (ExitFailure code, _, gccerr) ->
-              externalErrorS $
-                "gcc failed with code "
-                  ++ show code
-                  ++ ":\n"
-                  ++ gccerr
-            Right (ExitSuccess, _, _) ->
-              return ()
+          runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]

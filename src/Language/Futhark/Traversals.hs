@@ -212,7 +212,7 @@ instance ASTMappable (ExpBase Info VName) where
     Attr attr <$> mapOnExp tv e <*> pure loc
 
 instance ASTMappable (LoopFormBase Info VName) where
-  astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
+  astMap tv (For i bound) = For <$> astMap tv i <*> mapOnExp tv bound
   astMap tv (ForIn pat e) = ForIn <$> astMap tv pat <*> mapOnExp tv e
   astMap tv (While e) = While <$> mapOnExp tv e
 
@@ -252,12 +252,12 @@ instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName
 
 instance ASTMappable (DimIndexBase Info VName) where
-  astMap tv (DimFix j) = DimFix <$> astMap tv j
+  astMap tv (DimFix j) = DimFix <$> mapOnExp tv j
   astMap tv (DimSlice i j stride) =
     DimSlice
-      <$> maybe (return Nothing) (fmap Just . astMap tv) i
-      <*> maybe (return Nothing) (fmap Just . astMap tv) j
-      <*> maybe (return Nothing) (fmap Just . astMap tv) stride
+      <$> maybe (return Nothing) (fmap Just . mapOnExp tv) i
+      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) j
+      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) stride
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v
@@ -337,8 +337,8 @@ instance ASTMappable (PatternBase Info VName) where
     PatternAscription <$> astMap tv pat <*> astMap tv t <*> pure loc
   astMap tv (Wildcard (Info t) loc) =
     Wildcard <$> (Info <$> mapOnPatternType tv t) <*> pure loc
-  astMap tv (PatternLit e (Info t) loc) =
-    PatternLit <$> astMap tv e <*> (Info <$> mapOnPatternType tv t) <*> pure loc
+  astMap tv (PatternLit v (Info t) loc) =
+    PatternLit v <$> (Info <$> mapOnPatternType tv t) <*> pure loc
   astMap tv (PatternConstr n (Info t) ps loc) =
     PatternConstr n <$> (Info <$> mapOnPatternType tv t) <*> mapM (astMap tv) ps <*> pure loc
 
@@ -393,7 +393,7 @@ barePat (Id v _ loc) = Id v NoInfo loc
 barePat (Wildcard _ loc) = Wildcard NoInfo loc
 barePat (PatternAscription pat (TypeDecl t _) loc) =
   PatternAscription (barePat pat) (TypeDecl t NoInfo) loc
-barePat (PatternLit e _ loc) = PatternLit (bareExp e) NoInfo loc
+barePat (PatternLit v _ loc) = PatternLit v NoInfo loc
 barePat (PatternConstr c _ ps loc) = PatternConstr c NoInfo (map barePat ps) loc
 
 bareDimIndex :: DimIndexBase Info VName -> DimIndexBase NoInfo VName

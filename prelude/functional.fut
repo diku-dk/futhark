@@ -9,13 +9,40 @@
 let (|>) '^a '^b (x: a) (f: a -> b): b = f x
 
 -- | Right to left application.
+--
+-- Due to the causality restriction (see the language reference) this
+-- is less useful than `|>`@term.  For example, the following is
+-- a type error:
+--
+-- ```
+-- length <| filter (>0) [-1,0,1]
+-- ```
+--
+-- But this works:
+--
+-- ```
+-- filter (>0) [-1,0,1] |> length
+-- ```
+
 let (<|) '^a '^b (f: a -> b) (x: a) = f x
 
 -- | Function composition, with values flowing from left to right.
+--
+-- Note that functions with anonymous return sizes cannot be composed.
+-- For example, the following is a type error:
+--
+-- ```
+-- filter (>0) >-> length
+-- ```
+--
+-- In such cases you can use the pipe operator `|>`@term instead.
 let (>->) '^a '^b '^c (f: a -> b) (g: b -> c) (x: a): c = g (f x)
 
 -- | Function composition, with values flowing from right to left.
 -- This is the same as the `∘` operator known from mathematics.
+--
+-- Has the same restrictions with respect to anonymous sizes as
+-- `>->`@term.
 let (<-<) '^a '^b '^c (g: b -> c) (f: a -> b) (x: a): c = g (f x)
 
 -- | Flip the arguments passed to a function.

@@ -30,7 +30,7 @@ can be compiled to an executable program as follows::
   $ futhark c prog.fut
 
 This makes use of the ``futhark c`` compiler, but any other will work
-as well.  The compiler will automatically invoke ``gcc`` to produce an
+as well.  The compiler will automatically invoke ``cc`` to produce an
 executable binary called ``prog``.  If we had used ``futhark py``
 instead of ``futhark c``, the ``prog`` file would instead have
 contained Python code, along with a `shebang`_ for easy execution.  In
@@ -66,7 +66,6 @@ Instead of compiling, there is also an interpreter, accessible as
 ``futhark run`` and ``futhark repl``.  The latter is an interactive
 prompt, useful for experimenting with Futhark expressions.  Be aware
 that the interpreter runs code very slowly.
-
 
 .. _executable-options:
 

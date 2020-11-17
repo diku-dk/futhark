@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * When compiling to binaries in the C-based backends, the compiler
+    now respects the ``CFLAGS`` and ``CC`` environment variables.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.18.3]
+
+### Fixed
+
+  * Python backend now disables spurious NumPy overflow warnings for
+    both library and binary code (#1180).
+
+  * Undid deadlocking over-synchronisation for freeing opaque objects.
+
+  * `futhark datacmp` now handles bad input files better (#1181).
+
+## [0.18.2]
+
+### Added
+
   * The GPU loop tiler can now handle loops where only a subset of the
     input arrays are tiled.  Matrix-vector multiplication is one
     important program where this helps (#1145).
@@ -16,10 +40,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The number of threads used by the `multicore` backend is now
     configurable (`--num-threads` and
     `futhark_context_config_set_num_threads()`). (#1162)
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -56,6 +76,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Defunctionalisation had a name shadowing issue that would crop up
     for programs making very advanced use of functional
     representations (#1174).
+
+  * Type checker erroneously permitted pattern-matching on string
+    literals (this would fail later in the compiler).
+
+  * New coverage checker for pattern matching, which is more correct.
+    However, it may not provide quite as nice counter-examples
+    (#1134).
+
+  * Fix rare internalisation error (#1177).
 
 ## [0.18.1]
 

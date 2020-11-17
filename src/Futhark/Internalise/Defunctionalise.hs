@@ -19,6 +19,7 @@ import Data.Maybe
 import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import Futhark.IR.Pretty ()
+import qualified Futhark.Internalise.FreeVars as FV
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -132,14 +133,14 @@ newSizesForLambda sv = pure sv
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
-restrictEnvTo :: NameSet -> DefM Env
-restrictEnvTo (NameSet m) = restrict <$> ask
+restrictEnvTo :: FV.NameSet -> DefM Env
+restrictEnvTo (FV.NameSet m) = restrict <$> ask
   where
     restrict (globals, env) = M.mapMaybeWithKey keep env
       where
         keep k sv = do
           guard $ not $ k `S.member` globals
-          u <- M.lookup k m
+          u <- uniqueness <$> M.lookup k m
           Just $ restrict' u sv
     restrict' Nonunique (Dynamic t) =
       Dynamic $ t `setUniqueness` Nonunique
@@ -265,8 +266,8 @@ defuncFun tparams pats e0 (closure, ret) loc = do
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   let used =
-        freeVars (Lambda pats e0 Nothing (Info (closure, ret)) loc)
-          `without` mconcat (map oneName dims)
+        FV.freeVars (Lambda pats e0 Nothing (Info (closure, ret)) loc)
+          `FV.without` S.fromList dims
   used_env <- restrictEnvTo used
 
   -- The closure parts that are sizes are proactively turned into size
@@ -399,22 +400,8 @@ defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
       subst v = fromMaybe v $ M.lookup v mapping
       t' = first (fmap subst) $ typeOf e2'
   return (LetPat pat' e1' e2' (Info t', retext) loc, sv2)
-
--- Local functions are handled by rewriting them to lambdas, so that
--- the same machinery can be re-used.  But we may have to eta-expand
--- first.
-defuncExp (LetFun vn (dims, pats, _, Info ret, e1) e2 let_t loc)
-  | Scalar Arrow {} <- ret = do
-    (body_pats, e1', ret') <- etaExpand (fromStruct ret) e1
-    let f = (dims, pats <> body_pats, Nothing, Info ret', e1')
-    defuncExp $ LetFun vn f e2 let_t loc
-  | otherwise = do
-    (e1', sv1) <- defuncFun dims pats e1 (mempty, ret) loc
-    (e2', sv2) <- localEnv (M.singleton vn sv1) $ defuncExp e2
-    return
-      ( LetPat (Id vn (Info (typeOf e1')) loc) e1' e2' (Info $ typeOf e2', Info []) loc,
-        sv2
-      )
+defuncExp (LetFun vn _ _ _ _) =
+  error $ "defuncExp: Unexpected LetFun: " ++ prettyName vn
 defuncExp (If e1 e2 e3 tp loc) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2
@@ -460,31 +447,8 @@ defuncExp (DoLoop sparams pat e1 form e3 ret loc) = do
   where
     envFromIdent (Ident vn (Info tp) _) =
       M.singleton vn $ Dynamic tp
-
--- We handle BinOps by turning them into ordinary function applications.
-defuncExp
-  ( BinOp
-      (qn, qnloc)
-      (Info t)
-      (e1, Info (pt1, ext1))
-      (e2, Info (pt2, ext2))
-      (Info ret)
-      (Info retext)
-      loc
-    ) =
-    defuncExp $
-      Apply
-        ( Apply
-            (Var qn (Info t) qnloc)
-            e1
-            (Info (diet pt1, ext1))
-            (Info (Scalar $ Arrow mempty Unnamed (fromStruct pt2) ret), Info [])
-            loc
-        )
-        e2
-        (Info (diet pt2, ext2))
-        (Info ret, Info retext)
-        loc
+defuncExp e@BinOp {} =
+  error $ "defuncExp: unexpected binary operator: " ++ pretty e
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
   case sv0 of
@@ -734,10 +698,10 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
           -- into the name of the lifted function, to make the
           -- result slightly more human-readable.
           liftedName i (Var f _ _) =
-            "lifted_" ++ show i ++ "_" ++ baseString (qualLeaf f)
+            "defunc_" ++ show i ++ "_" ++ baseString (qualLeaf f)
           liftedName i (Apply f _ _ _ _) =
             liftedName (i + 1) f
-          liftedName _ _ = "lifted"
+          liftedName _ _ = "defunc"
 
       -- Ensure that no parameter sizes are AnyDim.  The internaliser
       -- expects this.  This is easy, because they are all
@@ -844,7 +808,13 @@ defuncApply depth e@(Var qn (Info t) loc) = do
             notInPats = (`S.notMember` pats_names)
             dims' = filter notInPats dims
             (argtypes', rettype) = dynamicFunType sv' argtypes
-        liftValDec fname (fromStruct rettype) dims' pats e0
+
+        -- Ensure that no parameter sizes are AnyDim.  The internaliser
+        -- expects this.  This is easy, because they are all
+        -- first-order.
+        (missing_dims, pats') <- sizesForAll pats
+
+        liftValDec fname (fromStruct rettype) (dims' ++ missing_dims) pats' e0
         return
           ( Var
               (qualName fname)
@@ -961,11 +931,12 @@ buildEnvPattern env = RecordPattern (map buildField $ M.toList env) mempty
 buildRetType :: Env -> [Pattern] -> StructType -> PatternType -> PatternType
 buildRetType env pats = comb
   where
-    bound = foldMap oneName (M.keys env) <> foldMap patternVars pats
+    bound =
+      S.fromList (M.keys env) <> S.map identName (foldMap patternIdents pats)
     boundAsUnique v =
       maybe False (unique . unInfo . identType) $
         find ((== v) . identName) $ S.toList $ foldMap patternIdents pats
-    problematic v = (v `member` bound) && not (boundAsUnique v)
+    problematic v = (v `S.member` bound) && not (boundAsUnique v)
     comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
       Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
     comb (Scalar (Sum cs_annot)) (Scalar (Sum cs_got)) =
@@ -1137,115 +1108,6 @@ svFromType :: PatternType -> StaticVal
 svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t = Dynamic t
 
--- A set of names where we also track uniqueness.
-newtype NameSet = NameSet (M.Map VName Uniqueness) deriving (Show)
-
-instance Semigroup NameSet where
-  NameSet x <> NameSet y = NameSet $ M.unionWith max x y
-
-instance Monoid NameSet where
-  mempty = NameSet mempty
-
-without :: NameSet -> NameSet -> NameSet
-without (NameSet x) (NameSet y) = NameSet $ x `M.difference` y
-
-member :: VName -> NameSet -> Bool
-member v (NameSet m) = v `M.member` m
-
-ident :: Ident -> NameSet
-ident v = NameSet $ M.singleton (identName v) (uniqueness $ unInfo $ identType v)
-
-oneName :: VName -> NameSet
-oneName v = NameSet $ M.singleton v Nonunique
-
-names :: S.Set VName -> NameSet
-names = foldMap oneName
-
--- | Compute the set of free variables of an expression.
-freeVars :: Exp -> NameSet
-freeVars expr = case expr of
-  Literal {} -> mempty
-  IntLit {} -> mempty
-  FloatLit {} -> mempty
-  StringLit {} -> mempty
-  Parens e _ -> freeVars e
-  QualParens _ e _ -> freeVars e
-  TupLit es _ -> foldMap freeVars es
-  RecordLit fs _ -> foldMap freeVarsField fs
-    where
-      freeVarsField (RecordFieldExplicit _ e _) = freeVars e
-      freeVarsField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
-  ArrayLit es t _ ->
-    foldMap freeVars es
-      <> names (typeDimNames $ unInfo t)
-  Range e me incl _ _ ->
-    freeVars e <> foldMap freeVars me
-      <> foldMap freeVars incl
-  Var qn (Info t) _ -> NameSet $ M.singleton (qualLeaf qn) $ uniqueness t
-  Ascript e t _ -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
-  Coerce e t _ _ -> freeVars e <> names (typeDimNames $ unInfo $ expandedType t)
-  LetPat pat e1 e2 _ _ ->
-    freeVars e1
-      <> ( (names (patternDimNames pat) <> freeVars e2)
-             `without` patternVars pat
-         )
-  LetFun vn (tparams, pats, _, _, e1) e2 _ _ ->
-    ( (freeVars e1 <> names (foldMap patternDimNames pats))
-        `without` ( foldMap patternVars pats
-                      <> foldMap (oneName . typeParamName) tparams
-                  )
-    )
-      <> (freeVars e2 `without` oneName vn)
-  If e1 e2 e3 _ _ -> freeVars e1 <> freeVars e2 <> freeVars e3
-  Apply e1 e2 _ _ _ -> freeVars e1 <> freeVars e2
-  Negate e _ -> freeVars e
-  Lambda pats e0 _ _ _ ->
-    (names (foldMap patternDimNames pats) <> freeVars e0)
-      `without` foldMap patternVars pats
-  OpSection {} -> mempty
-  OpSectionLeft _ _ e _ _ _ -> freeVars e
-  OpSectionRight _ _ e _ _ _ -> freeVars e
-  ProjectSection {} -> mempty
-  IndexSection idxs _ _ -> foldMap freeDimIndex idxs
-  DoLoop sparams pat e1 form e3 _ _ ->
-    let (e2fv, e2ident) = formVars form
-     in freeVars e1 <> e2fv
-          <> ( freeVars e3
-                 `without` (names (S.fromList sparams) <> patternVars pat <> e2ident)
-             )
-    where
-      formVars (For v e2) = (freeVars e2, ident v)
-      formVars (ForIn p e2) = (freeVars e2, patternVars p)
-      formVars (While e2) = (freeVars e2, mempty)
-  BinOp (qn, _) _ (e1, _) (e2, _) _ _ _ ->
-    oneName (qualLeaf qn)
-      <> freeVars e1
-      <> freeVars e2
-  Project _ e _ _ -> freeVars e
-  LetWith id1 id2 idxs e1 e2 _ _ ->
-    ident id2 <> foldMap freeDimIndex idxs <> freeVars e1
-      <> (freeVars e2 `without` ident id1)
-  Index e idxs _ _ -> freeVars e <> foldMap freeDimIndex idxs
-  Update e1 idxs e2 _ -> freeVars e1 <> foldMap freeDimIndex idxs <> freeVars e2
-  RecordUpdate e1 _ e2 _ _ -> freeVars e1 <> freeVars e2
-  Assert e1 e2 _ _ -> freeVars e1 <> freeVars e2
-  Constr _ es _ _ -> foldMap freeVars es
-  Attr _ e _ -> freeVars e
-  Match e cs _ _ -> freeVars e <> foldMap caseFV cs
-    where
-      caseFV (CasePat p eCase _) =
-        (names (patternDimNames p) <> freeVars eCase)
-          `without` patternVars p
-
-freeDimIndex :: DimIndexBase Info VName -> NameSet
-freeDimIndex (DimFix e) = freeVars e
-freeDimIndex (DimSlice me1 me2 me3) =
-  foldMap (foldMap freeVars) [me1, me2, me3]
-
--- | Extract all the variable names bound in a pattern.
-patternVars :: Pattern -> NameSet
-patternVars = mconcat . map ident . S.toList . patternIdents
-
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of
 -- the value binding to the static value of the transformed body.  The
@@ -1305,6 +1167,8 @@ defuncVals (valbind : ds) = do
         then isGlobal (valBindName valbind') $ defuncVals ds
         else defuncVals ds
   return $ defs <> Seq.singleton valbind' <> ds'
+
+{-# NOINLINE transformProg #-}
 
 -- | Transform a list of top-level value bindings. May produce new
 -- lifted function definitions, which are placed in front of the

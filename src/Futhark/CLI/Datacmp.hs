@@ -3,28 +3,48 @@
 -- | @futhark datacmp@
 module Futhark.CLI.Datacmp (main) where
 
+import Control.Exception
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Futhark.Test.Values
 import Futhark.Util.Options
 import System.Exit
+import System.IO
+
+readFileSafely :: String -> IO (Either String BS.ByteString)
+readFileSafely filepath =
+  (Right <$> BS.readFile filepath) `catch` couldNotRead
+  where
+    couldNotRead e = return $ Left $ show (e :: IOError)
 
 -- | Run @futhark datacmp@
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "<file> <file>" f
   where
     f [file_a, file_b] () = Just $ do
-      vs_a_maybe <- readValues <$> BS.readFile file_a
-      vs_b_maybe <- readValues <$> BS.readFile file_b
-      case (vs_a_maybe, vs_b_maybe) of
-        (Nothing, _) ->
-          error $ "Error reading values from " ++ file_a
-        (_, Nothing) ->
-          error $ "Error reading values from " ++ file_b
-        (Just vs_a, Just vs_b) ->
-          case compareValues vs_a vs_b of
-            [] -> return ()
-            es -> do
-              mapM_ print es
-              exitWith $ ExitFailure 2
+      file_contents_a_maybe <- readFileSafely file_a
+      file_contents_b_maybe <- readFileSafely file_b
+      case (file_contents_a_maybe, file_contents_b_maybe) of
+        (Left err_msg, _) -> do
+          hPutStrLn stderr err_msg
+          exitFailure
+        (_, Left err_msg) -> do
+          hPutStrLn stderr err_msg
+          exitFailure
+        (Right contents_a, Right contents_b) -> do
+          let vs_a_maybe = readValues contents_a
+          let vs_b_maybe = readValues contents_b
+          case (vs_a_maybe, vs_b_maybe) of
+            (Nothing, _) -> do
+              hPutStrLn stderr $ "Error reading values from " ++ file_a
+              exitFailure
+            (_, Nothing) -> do
+              hPutStrLn stderr $ "Error reading values from " ++ file_b
+              exitFailure
+            (Just vs_a, Just vs_b) ->
+              case compareValues vs_a vs_b of
+                [] -> return ()
+                es -> do
+                  mapM_ print es
+                  exitWith $ ExitFailure 2
     f _ _ =
       Nothing

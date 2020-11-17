@@ -796,14 +796,12 @@ CFieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
                  : CFieldPattern ',' CFieldPatterns1 { $1 : $3 }
                  | CFieldPattern                    { [$1] }
 
-CaseLiteral :: { (UncheckedExp, SrcLoc) }
-             : PrimLit        { (Literal (fst $1) (snd $1), snd $1) }
-             | charlit        { let L loc (CHARLIT x) = $1
-                                in (IntLit (toInteger (ord x)) NoInfo loc, loc) }
-             | intlit         { let L loc (INTLIT x) = $1 in (IntLit x NoInfo loc, loc) }
-             | floatlit       { let L loc (FLOATLIT x) = $1 in (FloatLit x NoInfo loc, loc) }
-             | stringlit      { let L loc (STRINGLIT s) = $1 in
-                              (StringLit (encode s) loc, loc) }
+CaseLiteral :: { (PatLit, SrcLoc) }
+             : PrimLit  { (PatLitPrim (fst $1), snd $1) }
+             | charlit  { let L loc (CHARLIT x) = $1
+                          in (PatLitInt (toInteger (ord x)), loc) }
+             | intlit   { let L loc (INTLIT x) = $1 in (PatLitInt x, loc) }
+             | floatlit { let L loc (FLOATLIT x) = $1 in (PatLitFloat x, loc) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp

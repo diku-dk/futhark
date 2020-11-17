@@ -12,3 +12,4 @@ let main : i32 =
   case (#bar 5)                -> 3
   case (#foo ((3,(_, 10)), _)) -> 4
   case (#bar _)                -> 5
+  case (#foo _)                -> 6
