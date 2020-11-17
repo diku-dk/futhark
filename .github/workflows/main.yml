@@ -16,6 +16,8 @@ jobs:
 
     - name: Install Nix
       uses: cachix/install-nix-action@v11
+      env:
+        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
     - uses: cachix/cachix-action@v8
       with:
@@ -133,6 +135,8 @@ jobs:
       run: |
         choco install -y msys2
         choco install -y ghc --version=8.8.2 --allow-downgrade
+      env:
+        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -167,7 +171,9 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v8
+      uses: cachix/install-nix-action@v11
+      env:
+        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
