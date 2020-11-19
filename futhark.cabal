@@ -88,6 +88,7 @@ library
       Futhark.CLI.REPL
       Futhark.CLI.Run
       Futhark.CLI.Test
+      Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
       Futhark.CodeGen.Backends.CCUDA.Boilerplate
       Futhark.CodeGen.Backends.COpenCL
