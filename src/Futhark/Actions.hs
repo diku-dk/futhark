@@ -138,6 +138,34 @@ runCC cpath outpath cflags_def ldflags = do
     Right (ExitSuccess, _, _) ->
       return ()
 
+cmdEMCC :: String
+cmdEMCC = fromMaybe "emcc" $ lookup "emcc" unixEnvironment
+
+runEMCC :: String -> String -> [String] -> [String] -> FutharkM ()
+runEMCC cpath outpath clags_def ldflags = do
+  ret <-
+    liftIO $
+      runProgramWithExitCode
+        cmdEMCC
+        [cpath, "-o", outpath] -- Add flags here if important later
+            -- ++ cmdCFLAGS cflags_def
+            -- ++
+            -- The default LDFLAGS are always added.
+            -- ldflags
+        mempty
+  case ret of
+    Left err ->
+      externalErrorS $ "Failed to run " ++ cmdEMCC ++ ": " ++ show err
+    Right (ExitFailure code, _, gccerr) ->
+      externalErrorS $
+        cmdEMCC ++ " failed with code "
+          ++ show code
+          ++ ":\n"
+          ++ gccerr -- possibly need to change this to emccerr
+    Right (ExitSuccess, _, _) ->
+      return ()
+
+
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCAction fcfg mode outpath =
@@ -160,6 +188,28 @@ compileCAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
+
+compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
+compileCtoWASMAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to to sequential C",
+      actionDescription = "Compile to sequential C",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      cprog <- handleWarnings fcfg $ SequentialC.compileProg prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+
+      case mode of
+        ToLibrary -> do
+          let (header, impl) = SequentialC.asLibrary cprog
+          liftIO $ writeFile hpath header
+          liftIO $ writeFile cpath impl
+        ToExecutable -> do
+          liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
+          runEMCC cpath outpath [] []
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
