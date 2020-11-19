@@ -68,53 +68,70 @@ isGlobal :: VName -> DefM a -> DefM a
 isGlobal v = local $ Arrow.first (S.insert v)
 
 replaceStaticValSizes :: M.Map VName VName -> StaticVal -> StaticVal
-replaceStaticValSizes substs sv =
+replaceStaticValSizes orig_substs sv =
   case sv of
+    _ | M.null orig_substs -> sv
     LambdaSV sizes param t e closure_env ->
-      LambdaSV
-        sizes
-        (onAST param)
-        (onType t)
-        (onExtExp e)
-        (onEnv closure_env)
+      -- We ignore substitutions that we shadow.
+      let substs =
+            foldl' (flip M.delete) orig_substs $
+              patternNames param <> S.fromList sizes
+       in LambdaSV
+            sizes
+            (onAST orig_substs param) -- intentional
+            (onType substs t)
+            (onExtExp substs e)
+            (onEnv orig_substs closure_env)
     Dynamic t ->
-      Dynamic $ onType t
+      Dynamic $ onType orig_substs t
     RecordSV fs ->
-      RecordSV $ map (fmap (replaceStaticValSizes substs)) fs
+      RecordSV $ map (fmap (replaceStaticValSizes orig_substs)) fs
     SumSV c svs ts ->
-      SumSV c (map (replaceStaticValSizes substs) svs) $
-        map (fmap (map onType)) ts
+      SumSV c (map (replaceStaticValSizes orig_substs) svs) $
+        map (fmap (map (onType orig_substs))) ts
     DynamicFun (e, sv1) sv2 ->
-      DynamicFun (onAST e, replaceStaticValSizes substs sv1) $
-        replaceStaticValSizes substs sv2
+      DynamicFun (onAST orig_substs e, replaceStaticValSizes orig_substs sv1) $
+        replaceStaticValSizes orig_substs sv2
     IntrinsicSV ->
       IntrinsicSV
   where
-    onName v = fromMaybe v $ M.lookup v substs
-    onQualName v = maybe v qualName $ M.lookup (qualLeaf v) substs
+    onName substs v = fromMaybe v $ M.lookup v substs
+    onQualName substs v = maybe v qualName $ M.lookup (qualLeaf v) substs
 
-    tv =
+    tv substs =
       identityMapper
-        { mapOnPatternType = pure . onType,
-          mapOnStructType = pure . onType,
-          mapOnQualName = pure . onQualName,
-          mapOnExp = pure . onAST
+        { mapOnPatternType = pure . onType substs,
+          mapOnStructType = pure . onType substs,
+          mapOnQualName = pure . onQualName substs,
+          mapOnExp = pure . onAST substs
         }
 
-    onExtExp (ExtExp e) =
-      ExtExp $ onAST e
-    onExtExp (ExtLambda dims params e (als, t) loc) =
-      ExtLambda dims (map onAST params) (onAST e) (als, onType t) loc
+    onExtExp substs (ExtExp e) =
+      ExtExp $ onAST substs e
+    onExtExp substs (ExtLambda dims params e (als, t) loc) =
+      let substs' = foldl' (flip M.delete) substs $ map typeParamName dims
+          (params', e', t') = onExtLambda substs' params e t
+       in ExtLambda dims params' e' (als, t') loc
 
-    onEnv =
+    onExtLambda substs (p : ps) e t =
+      -- We ignore substitutions that we shadow.
+      let substs' = foldl' (flip M.delete) substs (patternNames p)
+          (ps', e', t') = onExtLambda substs' ps e t
+       in (onAST substs p : ps', e', t')
+    onExtLambda substs [] e t =
+      ([], onAST substs e, onType substs t)
+
+    onEnv substs =
       M.fromList
-        . map (bimap onName $ replaceStaticValSizes substs)
+        . map (bimap (onName substs) (replaceStaticValSizes substs))
         . M.toList
 
-    onAST :: ASTMappable x => x -> x
-    onAST = runIdentity . astMap tv
+    onAST :: ASTMappable x => M.Map VName VName -> x -> x
+    onAST substs x
+      | M.null substs = x
+      | otherwise = runIdentity $ astMap (tv substs) x
 
-    onType = first onDim
+    onType substs = first onDim
       where
         onDim (NamedDim v) =
           NamedDim $ maybe v qualName $ M.lookup (qualLeaf v) substs
