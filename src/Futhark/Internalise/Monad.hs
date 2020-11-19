@@ -38,8 +38,7 @@ import Futhark.Tools
 import Futhark.Util (takeLast)
 
 type FunInfo =
-  ( Name,
-    [VName],
+  ( [VName],
     [DeclType],
     [FParam],
     [(SubExp, Type)] -> Maybe [DeclExtType]
