@@ -117,6 +117,8 @@ library
       Futhark.CodeGen.ImpGen.Kernels.SegMap
       Futhark.CodeGen.ImpGen.Kernels.SegRed
       Futhark.CodeGen.ImpGen.Kernels.SegScan
+      Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass
+      Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
       Futhark.CodeGen.ImpGen.Multicore
