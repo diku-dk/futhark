@@ -59,25 +59,14 @@ internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
-internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
-internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
-internaliseFunName ofname _ = do
-  info <- lookupFunction' ofname
-  -- In some rare cases involving local functions, the same function
-  -- name may be re-used in multiple places.  We check whether the
-  -- function name has already been used, and generate a new one if
-  -- so.
-  case info of
-    Just _ -> nameFromString . pretty <$> newNameFromString (baseString ofname)
-    Nothing -> return $ nameFromString $ pretty ofname
+internaliseFunName :: VName -> Name
+internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
     bindingParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
-
-      fname' <- internaliseFunName fname params
 
       msg <- case retdecl of
         Just dt ->
@@ -101,7 +90,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
             I.FunDef
               Nothing
               (internaliseAttrs attrs)
-              fname'
+              (internaliseFunName fname)
               rettype'
               all_params
               body'
@@ -112,8 +101,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           bindFunction
             fname
             fd
-            ( fname',
-              shapenames,
+            ( shapenames,
               map declTypeOf $ concat params',
               all_params,
               applyRetType rettype' all_params
@@ -1945,7 +1933,7 @@ funcall ::
   SrcLoc ->
   InternaliseM ([SubExp], [I.ExtType])
 funcall desc (QualName _ fname) args loc = do
-  (fname', shapes, value_paramts, fun_params, rettype_fun) <-
+  (shapes, value_paramts, fun_params, rettype_fun) <-
     lookupFunction fname
   argts <- mapM subExpType args
 
@@ -1984,7 +1972,7 @@ funcall desc (QualName _ fname) args loc = do
       ses <-
         attributing attrs $
           letTupExp' desc $
-            I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
+            I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
 -- Bind existential names defined by an expression, based on the
