@@ -18,7 +18,6 @@ module Futhark.Internalise.Monad
     lookupFunction,
     lookupFunction',
     lookupConst,
-    allConsts,
     bindFunction,
     bindConstant,
     localConstsScope,
@@ -61,8 +60,7 @@ data InternaliseState = InternaliseState
   { stateNameSource :: VNameSource,
     stateFunTable :: FunTable,
     stateConstSubsts :: VarSubstitutions,
-    stateConstScope :: Scope SOACS,
-    stateConsts :: Names
+    stateConstScope :: Scope SOACS
   }
 
 data InternaliseResult = InternaliseResult (Stms SOACS) [FunDef SOACS]
@@ -132,7 +130,6 @@ runInternaliseM safe (InternaliseM m) =
         { stateNameSource = src,
           stateFunTable = mempty,
           stateConstSubsts = mempty,
-          stateConsts = mempty,
           stateConstScope = mempty
         }
 
@@ -161,9 +158,6 @@ lookupFunction fname = maybe bad return =<< lookupFunction' fname
 lookupConst :: VName -> InternaliseM (Maybe [SubExp])
 lookupConst fname = gets $ M.lookup fname . stateConstSubsts
 
-allConsts :: InternaliseM Names
-allConsts = gets stateConsts
-
 bindFunction :: VName -> FunDef SOACS -> FunInfo -> InternaliseM ()
 bindFunction fname fd info = do
   addFunDef fd
@@ -175,13 +169,11 @@ bindConstant cname fd = do
       substs =
         takeLast (length (funDefRetType fd)) $
           bodyResult $ funDefBody fd
-      const_names = namesFromList $ M.keys $ scopeOf stms
   addStms stms
   modify $ \s ->
     s
       { stateConstSubsts = M.insert cname substs $ stateConstSubsts s,
-        stateConstScope = scopeOf stms <> stateConstScope s,
-        stateConsts = const_names <> stateConsts s
+        stateConstScope = scopeOf stms <> stateConstScope s
       }
 
 localConstsScope :: InternaliseM a -> InternaliseM a
