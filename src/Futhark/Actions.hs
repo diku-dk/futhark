@@ -10,6 +10,7 @@ module Futhark.Actions
     multicoreImpCodeGenAction,
     metricsAction,
     compileCAction,
+    compileCtoWASMAction,
     compileOpenCLAction,
     compileCUDAAction,
     compileMulticoreAction,
