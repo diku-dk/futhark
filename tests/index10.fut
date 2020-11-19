@@ -1,10 +1,10 @@
 -- Complex indexing into reshape, replicate and iota should be simplified away.
 -- ==
--- input { 2 } output { 1 }
--- input { 10 } output { 3 }
+-- input { 2i64 } output { 1i64 }
+-- input { 10i64 } output { 3i64 }
 -- structure { Iota 0 Replicate 0 Reshape 0 }
 
-let main(x: i32) =
+let main(x: i64) =
   let a = iota x
   let b = replicate x a
   let c = flatten b

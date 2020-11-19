@@ -1,19 +1,19 @@
 -- Test that map-scatter fusion and scatter-scatter fusion work together.
 -- ==
 -- input {
---   [0, 1, 3]
---   [3, 2, 4, 6, 9, 14]
---   [13, 12, 14, 16, 19, 114]
+--   [0i64, 1i64, 3i64]
+--   [3i64, 2i64, 4i64, 6i64, 9i64, 14i64]
+--   [13i64, 12i64, 14i64, 16i64, 19i64, 114i64]
 -- }
 -- output {
---   [3, 3, 4, 6, 6, 14]
---   [13, 12, 4, 5, 19, 7]
+--   [3i64, 3i64, 4i64, 6i64, 6i64, 14i64]
+--   [13i64, 12i64, 4i64, 5i64, 19i64, 7i64]
 -- }
 -- structure { Scatter 1 }
 
-let main [k][n] (numbers: [k]i32)
-                (array0: *[n]i32)
-                (array1: *[n]i32): ([n]i32, [n]i32) =
+let main [k][n] (numbers: [k]i64)
+                (array0: *[n]i64)
+                (array1: *[n]i64): ([n]i64, [n]i64) =
   let indexes0 = map (+1) numbers
   let indexes1 = map (+2) numbers
   let values0 = map (+3) numbers

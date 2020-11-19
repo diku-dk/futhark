@@ -1,7 +1,7 @@
 -- Test that write-write fusion works in a simple case.
 -- ==
 -- input {
---   [1, 0]
+--   [1i64, 0i64]
 --   [8, 2]
 --   [5, 3]
 --   [10, 20, 30, 40, 50]
@@ -13,7 +13,7 @@
 -- }
 -- structure { Scatter 1 }
 
-let main [n][k] (indexes: [k]i32)
+let main [n][k] (indexes: [k]i64)
                 (values1: [k]i32)
                 (values2: [k]i32)
                 (array1: *[n]i32)

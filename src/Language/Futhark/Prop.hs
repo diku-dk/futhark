@@ -26,6 +26,8 @@ module Language.Futhark.Prop
 
     -- * Queries on expressions
     typeOf,
+    valBindTypeScheme,
+    funType,
 
     -- * Queries on patterns and params
     patternIdents,
@@ -413,7 +415,18 @@ combineTypeShapes ::
   TypeBase dim as
 combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
   | M.keys ts1 == M.keys ts2 =
-    Scalar $ Record $ M.map (uncurry combineTypeShapes) (M.intersectionWith (,) ts1 ts2)
+    Scalar $
+      Record $
+        M.map
+          (uncurry combineTypeShapes)
+          (M.intersectionWith (,) ts1 ts2)
+combineTypeShapes (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | M.keys cs1 == M.keys cs2 =
+    Scalar $
+      Sum $
+        M.map
+          (uncurry $ zipWith combineTypeShapes)
+          (M.intersectionWith (,) cs1 cs2)
 combineTypeShapes (Scalar (Arrow als1 p1 a1 b1)) (Scalar (Arrow als2 _p2 a2 b2)) =
   Scalar $ Arrow (als1 <> als2) p1 (combineTypeShapes a1 a2) (combineTypeShapes b1 b2)
 combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
@@ -636,6 +649,20 @@ unfoldFunType (Scalar (Arrow _ _ t1 t2)) =
    in (t1 : ps, r)
 unfoldFunType t = ([], t)
 
+-- | The type scheme of a value binding, comprising the type
+-- parameters and the actual type.
+valBindTypeScheme :: ValBindBase Info VName -> ([TypeParamBase VName], StructType)
+valBindTypeScheme vb =
+  ( valBindTypeParams vb,
+    funType (valBindParams vb) (fst (unInfo (valBindRetType vb)))
+  )
+
+-- | The type of a function with the given parameters and return type.
+funType :: [PatternBase Info VName] -> StructType -> StructType
+funType params ret = foldr (arrow . patternParam) ret params
+  where
+    arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
+
 -- | The type names mentioned in a type.
 typeVars :: Monoid as => TypeBase dim as -> S.Set VName
 typeVars t =
@@ -821,8 +848,8 @@ intrinsics =
              ( "unflatten",
                IntrinsicPolyFun
                  [tp_a]
-                 [ Scalar $ Prim $ Signed Int32,
-                   Scalar $ Prim $ Signed Int32,
+                 [ Scalar $ Prim $ Signed Int64,
+                   Scalar $ Prim $ Signed Int64,
                    Array () Nonunique t_a (rank 1)
                  ]
                  $ Array () Nonunique t_a (rank 2)
@@ -836,7 +863,7 @@ intrinsics =
              ( "rotate",
                IntrinsicPolyFun
                  [tp_a]
-                 [Scalar $ Prim $ Signed Int32, arr_a]
+                 [Scalar $ Prim $ Signed Int64, arr_a]
                  arr_a
              ),
              ("transpose", IntrinsicPolyFun [tp_a] [arr_2d_a] arr_2d_a),
@@ -844,7 +871,7 @@ intrinsics =
                IntrinsicPolyFun
                  [tp_a]
                  [ Array () Unique t_a (rank 1),
-                   Array () Nonunique (Prim $ Signed Int32) (rank 1),
+                   Array () Nonunique (Prim $ Signed Int64) (rank 1),
                    Array () Nonunique t_a (rank 1)
                  ]
                  $ Array () Unique t_a (rank 1)
@@ -854,11 +881,11 @@ intrinsics =
              ( "hist",
                IntrinsicPolyFun
                  [tp_a]
-                 [ Scalar $ Prim $ Signed Int32,
+                 [ Scalar $ Prim $ Signed Int64,
                    uarr_a,
                    Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a),
                    Scalar t_a,
-                   Array () Nonunique (Prim $ Signed Int32) (rank 1),
+                   Array () Nonunique (Prim $ Signed Int64) (rank 1),
                    arr_a
                  ]
                  uarr_a
@@ -886,28 +913,28 @@ intrinsics =
                IntrinsicPolyFun
                  [tp_a]
                  [ Scalar (Prim $ Signed Int32),
-                   Scalar t_a `arr` Scalar (Prim $ Signed Int32),
+                   Scalar t_a `arr` Scalar (Prim $ Signed Int64),
                    arr_a
                  ]
-                 $ tupleRecord [uarr_a, Array () Unique (Prim $ Signed Int32) (rank 1)]
+                 $ tupleRecord [uarr_a, Array () Unique (Prim $ Signed Int64) (rank 1)]
              ),
              ( "map_stream",
                IntrinsicPolyFun
                  [tp_a, tp_b]
-                 [Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` arr_kb), arr_a]
+                 [Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb), arr_a]
                  uarr_b
              ),
              ( "map_stream_per",
                IntrinsicPolyFun
                  [tp_a, tp_b]
-                 [Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` arr_kb), arr_a]
+                 [Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` arr_kb), arr_a]
                  uarr_b
              ),
              ( "reduce_stream",
                IntrinsicPolyFun
                  [tp_a, tp_b]
                  [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                   Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` Scalar t_b),
+                   Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
                    arr_a
                  ]
                  $ Scalar t_b
@@ -916,7 +943,7 @@ intrinsics =
                IntrinsicPolyFun
                  [tp_a, tp_b]
                  [ Scalar t_b `arr` (Scalar t_b `arr` Scalar t_b),
-                   Scalar (Prim $ Signed Int32) `karr` (arr_ka `arr` Scalar t_b),
+                   Scalar (Prim $ Signed Int64) `karr` (arr_ka `arr` Scalar t_b),
                    arr_a
                  ]
                  $ Scalar t_b

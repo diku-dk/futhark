@@ -97,18 +97,20 @@ optimisedProgramMetrics :: ProgConfig -> StructurePipeline -> FilePath -> TestM 
 optimisedProgramMetrics programs pipeline program =
   case pipeline of
     SOACSPipeline ->
-      check "-s"
+      check ["-s"]
     KernelsPipeline ->
-      check "--kernels"
+      check ["--kernels"]
     SequentialCpuPipeline ->
-      check "--cpu"
+      check ["--cpu"]
     GpuPipeline ->
-      check "--gpu"
+      check ["--gpu"]
+    NoPipeline ->
+      check []
   where
     check opt = do
       futhark <- io $ maybe getExecutablePath return $ configFuthark programs
-      (code, output, err) <-
-        io $ readProcessWithExitCode futhark ["dev", opt, "--metrics", program] ""
+      let opts = ["dev"] ++ opt ++ ["--metrics", program]
+      (code, output, err) <- io $ readProcessWithExitCode futhark opts ""
       let output' = T.decodeUtf8 output
       case code of
         ExitSuccess
@@ -579,7 +581,7 @@ defaultConfig =
           { configBackend = "c",
             configFuthark = Nothing,
             configRunner = "",
-            configExtraOptions = [],
+            configExtraOptions = ["-b"],
             configExtraCompilerOptions = [],
             configTuning = Just "tuning"
           },

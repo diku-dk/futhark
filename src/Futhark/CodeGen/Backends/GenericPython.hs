@@ -475,7 +475,7 @@ unpackDim arr_name (Imp.Var var) i = do
   let shape_name = Field arr_name "shape"
       src = Index shape_name $ IdxExp $ Integer $ toInteger i
   var' <- compileVar var
-  stm $ Assign var' $ simpleCall "np.int32" [src]
+  stm $ Assign var' $ simpleCall "np.int64" [src]
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
 entryPointOutput (Imp.OpaqueValue desc vs) =
@@ -760,15 +760,24 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let argexps_lib = map (compileName . Imp.paramName) inputs
       argexps_bin = zipWith fromMaybe argexps_lib argexps_mem_copies
       fname' = "self." ++ futharkFun (nameToString fname)
-      call_lib = [Assign funTuple $ simpleCall fname' (fmap Var argexps_lib)]
-      call_bin = [Assign funTuple $ simpleCall fname' (fmap Var argexps_bin)]
+
+      -- We ignore overflow errors and the like for executable entry
+      -- points.  These are (somewhat) well-defined in Futhark.
+      ignore s = ArgKeyword s $ String "ignore"
+      errstate = Call (Var "np.errstate") $ map ignore ["divide", "over", "under", "invalid"]
+
+      call argexps =
+        [ With
+            errstate
+            [Assign funTuple $ simpleCall fname' (fmap Var argexps)]
+        ]
 
   return
     ( nameToString fname,
       map extValueDescName args,
       prepareIn,
-      call_lib,
-      call_bin,
+      call argexps_lib,
+      call argexps_bin,
       prepareOut,
       zip results res,
       prepare_run
@@ -832,11 +841,6 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
       do_run = body_bin ++ pre_timing
       (do_run_with_timing, close_runtime_file) = addTiming do_run
 
-      -- We ignore overflow errors and the like for executable entry
-      -- points.  These are (somewhat) well-defined in Futhark.
-      ignore s = ArgKeyword s $ String "ignore"
-      errstate = Call (Var "np.errstate") $ map ignore ["divide", "over", "under", "invalid"]
-
       do_warmup_run =
         If (Var "do_warmup_run") (prepare_run ++ do_run) []
 
@@ -853,7 +857,7 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
   return
     ( Def fname' [] $
         str_input ++ end_of_input ++ prepare_in
-          ++ [Try [With errstate [do_warmup_run, do_num_runs]] [except']]
+          ++ [Try [do_warmup_run, do_num_runs] [except']]
           ++ [close_runtime_file]
           ++ str_output,
       nameToString fname,
@@ -1132,6 +1136,7 @@ compileCode (Imp.Assert e (Imp.ErrorMsg parts) (loc, locs)) = do
   e' <- compileExp e
   let onPart (Imp.ErrorString s) = return ("%s", String s)
       onPart (Imp.ErrorInt32 x) = ("%d",) <$> compileExp x
+      onPart (Imp.ErrorInt64 x) = ("%d",) <$> compileExp x
   (formatstrs, formatargs) <- unzip <$> mapM onPart parts
   stm $
     Assert

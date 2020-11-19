@@ -135,10 +135,10 @@ dummyDim pat = do
   -- device afterwards, as this may save an expensive
   -- host-device copy (scalars are kept on the host, but arrays
   -- may be on the device).
-  let addDummyDim t = t `arrayOfRow` intConst Int32 1
+  let addDummyDim t = t `arrayOfRow` intConst Int64 1
   pat' <- fmap addDummyDim <$> renamePattern pat
   dummy <- newVName "dummy"
-  let ispace = [(dummy, intConst Int32 1)]
+  let ispace = [(dummy, intConst Int64 1)]
 
   return
     ( pat',
@@ -148,7 +148,7 @@ dummyDim pat = do
         letBindNames [to] $
           BasicOp $
             Index from $
-              fullSlice from_t [DimFix $ intConst Int32 0]
+              fullSlice from_t [DimFix $ intConst Int64 0]
     )
 
 nonSegRed ::

@@ -47,7 +47,7 @@ argShapes shapes all_params valargts = do
   let addShape name =
         case M.lookup name mapping of
           Just se -> se
-          _ -> intConst Int32 0 -- FIXME: we only need this because
+          _ -> intConst Int64 0 -- FIXME: we only need this because
           -- the defunctionaliser throws away
           -- sizes.
   return $ map addShape shapes
@@ -156,4 +156,4 @@ ensureShapeVar msg loc t name v
   | otherwise = return v
   where
     checkDim desired has =
-      letSubExp "dim_match" $ BasicOp $ CmpOp (CmpEq int32) desired has
+      letSubExp "dim_match" $ BasicOp $ CmpOp (CmpEq int64) desired has

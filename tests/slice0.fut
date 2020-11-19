@@ -13,4 +13,4 @@
 -- error: Index \[0:1\] out of bounds for array of shape \[0\]
 
 let main (as: []i32) (i: i32) (j: i32): []i32 =
-  as[i:j]
+  as[i64.i32 i:i64.i32 j]

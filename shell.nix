@@ -10,7 +10,7 @@ pkgs.stdenv.mkDerivation {
     pkgs.curl
     pkgs.file
     pkgs.git
-    pkgs.haskell.compiler.ghc8101
+    pkgs.haskell.compiler.ghc8102
     pkgs.hlint
     pkgs.ocl-icd
     pkgs.opencl-headers
@@ -20,5 +20,6 @@ pkgs.stdenv.mkDerivation {
     pkgs.cabal2nix
     pkgs.ghcid
     pkgs.ormolu
+    pkgs.niv
   ];
 }

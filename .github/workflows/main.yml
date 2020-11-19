@@ -15,9 +15,9 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v8
+      uses: cachix/install-nix-action@v12
 
-    - uses: cachix/cachix-action@v6
+    - uses: cachix/cachix-action@v8
       with:
         name: futhark
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
@@ -41,7 +41,7 @@ jobs:
         sudo add-apt-repository ppa:hvr/ghc
         sudo apt-get update
         sudo apt-get install ghc-8.8.4
-        echo "::add-path::/opt/ghc/bin"
+        echo "/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -91,7 +91,7 @@ jobs:
     - name: Install dependencies
       run: |
         brew install cabal-install ghc sphinx-doc
-        echo "::add-path::/usr/local/opt/sphinx-doc/bin"
+        echo "/usr/local/opt/sphinx-doc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -133,6 +133,8 @@ jobs:
       run: |
         choco install -y msys2
         choco install -y ghc --version=8.8.2 --allow-downgrade
+      env:
+        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -167,7 +169,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v8
+      uses: cachix/install-nix-action@v12
 
     - uses: actions/cache@v2
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -202,7 +204,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -i tests examples
@@ -222,11 +224,32 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -c --backend=c tests examples --no-tuning
         make -C libtests/c
+
+  test-multicore:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        futhark test -c --backend=multicore tests examples --no-tuning
+        make -C libtests/c FUTHARK_BACKEND=multicore
 
   test-python:
     runs-on: ubuntu-20.04
@@ -238,7 +261,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python-numpy
+        sudo apt-get install -y python-numpy python3-numpy
 
     - uses: actions/download-artifact@v2
       with:
@@ -248,7 +271,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python tests examples
@@ -273,10 +296,36 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -c --no-terminal --backend=opencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
+
+  test-pyopencl:
+    runs-on: ubuntu-20.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
+        sudo apt-get install -y python3-numpy python3-pyopencl
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        futhark test -c --no-terminal --backend=pyopencl --exclude=no_opencl --exclude=compiled --runner=tools/oclgrindrunner.sh tests examples
 
   test-cuda:
     runs-on: ubuntu-20.04
@@ -298,7 +347,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
@@ -318,7 +367,7 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         cd pkgtests && sh test.sh
@@ -354,14 +403,14 @@ jobs:
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "::add-path::$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
         futhark test -C --no-terminal --backend=opencl --exclude=no_opencl  --pass-compiler-option=--Werror futhark-benchmarks
 
   deploy-nightly:
     runs-on: ubuntu-20.04
-    needs: [build-windows, build-linux-nix, test-tools]
+    needs: [build-windows, build-linux-nix, build-mac-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:

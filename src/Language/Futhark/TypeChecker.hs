@@ -20,6 +20,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.Writer hiding (Sum)
+import Data.Bifunctor (second)
 import Data.Char (isAlpha, isAlphaNum)
 import Data.Either
 import Data.List (isPrefixOf)
@@ -49,7 +50,7 @@ checkProg ::
   VNameSource ->
   ImportName ->
   UncheckedProg ->
-  Either TypeError (FileModule, Warnings, VNameSource)
+  (Warnings, Either TypeError (FileModule, VNameSource))
 checkProg files src name prog =
   runTypeM initialEnv files' name src $ checkProgM prog
   where
@@ -65,10 +66,9 @@ checkExp ::
   VNameSource ->
   Env ->
   UncheckedExp ->
-  Either TypeError ([TypeParam], Exp)
-checkExp files src env e = do
-  (e', _, _) <- runTypeM env files' (mkInitialImport "") src $ checkOneExp e
-  return e'
+  (Warnings, Either TypeError ([TypeParam], Exp))
+checkExp files src env e =
+  second (fmap fst) $ runTypeM env files' (mkInitialImport "") src $ checkOneExp e
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -82,13 +82,15 @@ checkDec ::
   Env ->
   ImportName ->
   UncheckedDec ->
-  Either TypeError (Env, Dec, VNameSource)
-checkDec files src env name d = do
-  ((env', d'), _, src') <- runTypeM env files' name src $ do
-    (_, env', d') <- checkOneDec d
-    return (env' <> env, d')
-  return (env', d', src')
+  (Warnings, Either TypeError (Env, Dec, VNameSource))
+checkDec files src env name d =
+  second (fmap massage) $
+    runTypeM env files' name src $ do
+      (_, env', d') <- checkOneDec d
+      return (env' <> env, d')
   where
+    massage ((env', d'), src') =
+      (env', d', src')
     files' = M.map fileEnv $ M.fromList files
 
 -- | Type check a single module expression containing no type information,
@@ -100,10 +102,9 @@ checkModExp ::
   VNameSource ->
   Env ->
   ModExpBase NoInfo Name ->
-  Either TypeError (MTy, ModExpBase Info VName)
-checkModExp files src env me = do
-  (x, _, _) <- runTypeM env files' (mkInitialImport "") src $ checkOneModExp me
-  return x
+  (Warnings, Either TypeError (MTy, ModExpBase Info VName))
+checkModExp files src env me =
+  second (fmap fst) $ runTypeM env files' (mkInitialImport "") src $ checkOneModExp me
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -181,7 +182,7 @@ bindingTypeParams tparams = localEnv env
     typeParamEnv (TypeParamDim v _) =
       mempty
         { envVtable =
-            M.singleton v $ BoundV [] (Scalar $ Prim $ Signed Int32)
+            M.singleton v $ BoundV [] (Scalar $ Prim $ Signed Int64)
         }
     typeParamEnv (TypeParamType l v _) =
       mempty
@@ -298,7 +299,7 @@ checkSpecs (IncludeSpec e loc : specs) = do
       (lookupType loc qn >> warnAbout qn)
         `catchError` \_ -> return ()
     warnAbout qn =
-      warn loc $ "Inclusion shadows type " ++ quote (pretty qn) ++ "."
+      warn loc $ "Inclusion shadows type" <+> pquote (ppr qn) <+> "."
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
@@ -615,28 +616,25 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
         typeError loc mempty "Entry point functions must not be size-polymorphic in their return type."
       | p : _ <- filter nastyParameter params' ->
         warn loc $
-          pretty $
-            "Entry point parameter\n"
-              </> indent 2 (ppr p)
-              </> "\nwill have an opaque type, so the entry point will likely not be callable."
+          "Entry point parameter\n"
+            </> indent 2 (ppr p)
+            </> "\nwill have an opaque type, so the entry point will likely not be callable."
       | nastyReturnType maybe_tdecl' rettype ->
         warn loc $
-          pretty $
-            "Entry point return type\n"
-              </> indent 2 (ppr rettype)
-              </> "\nwill have an opaque type, so the result will likely not be usable."
+          "Entry point return type\n"
+            </> indent 2 (ppr rettype)
+            </> "\nwill have an opaque type, so the result will likely not be usable."
     _ -> return ()
 
-  let arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
+  let vb = ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs loc
   return
     ( mempty
         { envVtable =
-            M.singleton fname' $
-              BoundV tparams' $ foldr (arrow . patternParam) rettype params',
+            M.singleton fname' $ uncurry BoundV $ valBindTypeScheme vb,
           envNameMap =
             M.singleton (Term, fname) $ qualName fname'
         },
-      ValBind entry' fname' maybe_tdecl' (Info (rettype, retext)) tparams' params' body' doc attrs loc
+      vb
     )
 
 nastyType :: Monoid als => TypeBase dim als -> Bool

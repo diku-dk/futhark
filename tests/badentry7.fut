@@ -12,4 +12,4 @@ module m1 = {
 }
 
 entry g (p0: m0.state) (p1: m1.state) =
-  r32 p0.f + p1.f[0]
+  f32.i32 p0.f + p1.f[0]

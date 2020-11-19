@@ -11,5 +11,5 @@ let main [n] (xs:[n]i32) (is:[n]i32) =
   let offs  = reduce (+) 0 bits0
   let idxs1 = map2 (*) bits1 (map (+offs) idxs1)
   let idxs  = map (\x->x-1) (map2 (+) idxs0 idxs1)
-  in (scatter (copy xs) idxs xs,
-      scatter (copy is) idxs is)
+  in (scatter (copy xs) (map i64.i32 idxs) xs,
+      scatter (copy is) (map i64.i32 idxs) is)

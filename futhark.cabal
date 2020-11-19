@@ -1,7 +1,7 @@
 cabal-version: 2.4
 
 name:           futhark
-version:        0.18.0
+version:        0.19.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -79,6 +79,7 @@ library
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Misc
+      Futhark.CLI.Multicore
       Futhark.CLI.OpenCL
       Futhark.CLI.Pkg
       Futhark.CLI.PyOpenCL
@@ -97,6 +98,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
+      Futhark.CodeGen.Backends.MulticoreC
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
       Futhark.CodeGen.Backends.SequentialC
@@ -104,6 +106,7 @@ library
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.Kernels
+      Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential
       Futhark.CodeGen.ImpGen
@@ -116,6 +119,12 @@ library
       Futhark.CodeGen.ImpGen.Kernels.SegScan
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
+      Futhark.CodeGen.ImpGen.Multicore
+      Futhark.CodeGen.ImpGen.Multicore.Base
+      Futhark.CodeGen.ImpGen.Multicore.SegHist
+      Futhark.CodeGen.ImpGen.Multicore.SegMap
+      Futhark.CodeGen.ImpGen.Multicore.SegRed
+      Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
       Futhark.CodeGen.ImpGen.Transpose
@@ -136,6 +145,9 @@ library
       Futhark.IR.Kernels.Simplify
       Futhark.IR.Kernels.Sizes
       Futhark.IR.KernelsMem
+      Futhark.IR.MC
+      Futhark.IR.MC.Op
+      Futhark.IR.MCMem
       Futhark.IR.Mem
       Futhark.IR.Mem.IxFun
       Futhark.IR.Mem.Simplify
@@ -166,7 +178,9 @@ library
       Futhark.Internalise.Bindings
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise
+      Futhark.Internalise.FreeVars
       Futhark.Internalise.Lambdas
+      Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.TypesValues
@@ -195,6 +209,7 @@ library
       Futhark.Pass.ExplicitAllocations.Kernels
       Futhark.Pass.ExplicitAllocations.SegOp
       Futhark.Pass.ExplicitAllocations.Seq
+      Futhark.Pass.ExplicitAllocations.MC
       Futhark.Pass.ExtractKernels
       Futhark.Pass.ExtractKernels.BlockedKernel
       Futhark.Pass.ExtractKernels.DistributeNests
@@ -204,6 +219,7 @@ library
       Futhark.Pass.ExtractKernels.Intragroup
       Futhark.Pass.ExtractKernels.StreamKernel
       Futhark.Pass.ExtractKernels.ToKernels
+      Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
       Futhark.Pass.Simplify
@@ -241,6 +257,7 @@ library
       Language.Futhark.Syntax
       Language.Futhark.Traversals
       Language.Futhark.TypeChecker
+      Language.Futhark.TypeChecker.Match
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
       Language.Futhark.TypeChecker.Terms
@@ -299,7 +316,7 @@ library
     , utf8-string >=1
     , vector >=0.12
     , vector-binary-instances >=0.2.2.0
-    , versions >=3.3.1
+    , versions >=4.0.1
     , zip-archive >=0.3.1.1
     , zlib >=0.6.1.2
   default-language: Haskell2010

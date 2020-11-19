@@ -51,7 +51,7 @@ class IsName v where
 -- the base name.
 instance IsName VName where
   pprName
-    | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False =
+    | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 =
       \(VName vn i) -> ppr vn <> text "_" <> text (show i)
     | otherwise = ppr . baseName
 
@@ -115,7 +115,7 @@ instance IsName vn => Pretty (ShapeDecl (DimDecl vn)) where
 instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty (ShapeDecl Int32) where
+instance Pretty (ShapeDecl Int64) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
 
 instance Pretty (ShapeDecl Bool) where
@@ -222,7 +222,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where
       inst = case unAnnot t of
         Just t'
-          | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False ->
+          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
             text "@" <> parens (align $ ppr t')
         _ -> mempty
   pprPrec _ (Parens e _) = align $ parens $ ppr e
@@ -248,7 +248,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
     where
       info' = case unAnnot info of
         Just t
-          | isEnvVarSet "FUTHARK_COMPILER_DEBUGGING" False ->
+          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2 ->
             text "@" <> parens (align $ ppr t)
         _ -> mempty
   pprPrec _ (StringLit s _) =
@@ -372,6 +372,11 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
     text "for" <+> ppr x <+> text "in" <+> ppr e
   ppr (While cond) =
     text "while" <+> ppr cond
+
+instance Pretty PatLit where
+  ppr (PatLitInt x) = ppr x
+  ppr (PatLitFloat f) = ppr f
+  ppr (PatLitPrim v) = ppr v
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (PatternBase f vn) where
   ppr (PatternAscription p t _) = ppr p <> colon <+> align (ppr t)

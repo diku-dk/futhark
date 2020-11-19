@@ -18,12 +18,15 @@ import Futhark.Compiler.CLI
 import Futhark.IR (ASTLore, Op, Prog, pretty)
 import qualified Futhark.IR.Kernels as Kernels
 import qualified Futhark.IR.KernelsMem as KernelsMem
+import qualified Futhark.IR.MC as MC
+import qualified Futhark.IR.MCMem as MCMem
 import Futhark.IR.Prop.Aliases (CanBeAliased)
 import qualified Futhark.IR.SOACS as SOACS
 import qualified Futhark.IR.Seq as Seq
 import qualified Futhark.IR.SeqMem as SeqMem
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
+import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -38,6 +41,7 @@ import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
 import Futhark.Pass.ExtractKernels
+import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
@@ -66,7 +70,9 @@ data FutharkPipeline
     Defunctorise
   | -- | Defunctorise and monomorphise.
     Monomorphise
-  | -- | Defunctorise, monomorphise, and defunctionalise.
+  | -- | Defunctorise, monomorphise, and lambda-lift.
+    LiftLambdas
+  | -- | Defunctorise, monomorphise, lambda-lift, and defunctionalise.
     Defunctionalise
 
 data Config = Config
@@ -91,8 +97,10 @@ getFutharkPipeline = toPipeline . futharkPipeline
 data UntypedPassState
   = SOACS (Prog SOACS.SOACS)
   | Kernels (Prog Kernels.Kernels)
+  | MC (Prog MC.MC)
   | Seq (Prog Seq.Seq)
   | KernelsMem (Prog KernelsMem.KernelsMem)
+  | MCMem (Prog MCMem.MCMem)
   | SeqMem (Prog SeqMem.SeqMem)
 
 getSOACSProg :: UntypedPassState -> Maybe (Prog SOACS.SOACS)
@@ -107,15 +115,19 @@ class Representation s where
 instance Representation UntypedPassState where
   representation (SOACS _) = "SOACS"
   representation (Kernels _) = "Kernels"
+  representation (MC _) = "MC"
   representation (Seq _) = "Seq"
   representation (KernelsMem _) = "KernelsMem"
+  representation (MCMem _) = "MCMem"
   representation (SeqMem _) = "SeqMEm"
 
 instance PP.Pretty UntypedPassState where
   ppr (SOACS prog) = PP.ppr prog
   ppr (Kernels prog) = PP.ppr prog
+  ppr (MC prog) = PP.ppr prog
   ppr (Seq prog) = PP.ppr prog
   ppr (SeqMem prog) = PP.ppr prog
+  ppr (MCMem prog) = PP.ppr prog
   ppr (KernelsMem prog) = PP.ppr prog
 
 newtype UntypedPass
@@ -129,6 +141,7 @@ data UntypedAction
   = SOACSAction (Action SOACS.SOACS)
   | KernelsAction (Action Kernels.Kernels)
   | KernelsMemAction (FilePath -> Action KernelsMem.KernelsMem)
+  | MCMemAction (FilePath -> Action MCMem.MCMem)
   | SeqMemAction (FilePath -> Action SeqMem.SeqMem)
   | PolyAction
       ( forall lore.
@@ -144,12 +157,14 @@ untypedActionName (SOACSAction a) = actionName a
 untypedActionName (KernelsAction a) = actionName a
 untypedActionName (SeqMemAction a) = actionName $ a ""
 untypedActionName (KernelsMemAction a) = actionName $ a ""
+untypedActionName (MCMemAction a) = actionName $ a ""
 untypedActionName (PolyAction a) = actionName (a :: Action SOACS.SOACS)
 
 instance Representation UntypedAction where
   representation (SOACSAction _) = "SOACS"
   representation (KernelsAction _) = "Kernels"
   representation (KernelsMemAction _) = "KernelsMem"
+  representation (MCMemAction _) = "MCMem"
   representation (SeqMemAction _) = "SeqMem"
   representation PolyAction {} = "<any>"
 
@@ -247,12 +262,16 @@ simplifyOption short =
       SOACS <$> runPipeline (onePass simplifySOACS) config prog
     perform (Kernels prog) config =
       Kernels <$> runPipeline (onePass simplifyKernels) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass simplifyMC) config prog
     perform (Seq prog) config =
       Seq <$> runPipeline (onePass simplifySeq) config prog
     perform (SeqMem prog) config =
       SeqMem <$> runPipeline (onePass simplifySeqMem) config prog
     perform (KernelsMem prog) config =
       KernelsMem <$> runPipeline (onePass simplifyKernelsMem) config prog
+    perform (MCMem prog) config =
+      MCMem <$> runPipeline (onePass simplifyMCMem) config prog
 
     long = [passLongOption pass]
     pass = simplifySOACS
@@ -299,12 +318,16 @@ cseOption short =
       SOACS <$> runPipeline (onePass $ performCSE True) config prog
     perform (Kernels prog) config =
       Kernels <$> runPipeline (onePass $ performCSE True) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass $ performCSE True) config prog
     perform (Seq prog) config =
       Seq <$> runPipeline (onePass $ performCSE True) config prog
     perform (SeqMem prog) config =
       SeqMem <$> runPipeline (onePass $ performCSE False) config prog
     perform (KernelsMem prog) config =
       KernelsMem <$> runPipeline (onePass $ performCSE False) config prog
+    perform (MCMem prog) config =
+      MCMem <$> runPipeline (onePass $ performCSE False) config prog
 
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
@@ -384,6 +407,14 @@ commandLineOptions =
       "Translate program into the imperative IL with kernels and write it on standard output.",
     Option
       []
+      ["compile-imperative-multicore"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = MCMemAction $ const multicoreImpCodeGenAction}
+      )
+      "Translate program into the imperative IL with kernels and write it on standard output.",
+    Option
+      []
       ["compile-opencl"]
       ( NoArg $
           Right $ \opts ->
@@ -425,6 +456,11 @@ commandLineOptions =
       "Monomorphise the program.",
     Option
       []
+      ["lift-lambdas"]
+      (NoArg $ Right $ \opts -> opts {futharkPipeline = LiftLambdas})
+      "Lambda-lift the program.",
+    Option
+      []
       ["defunctionalise"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Defunctionalise})
       "Defunctionalise the program.",
@@ -443,12 +479,13 @@ commandLineOptions =
     soacsPassOption inlineFunctions [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
-    kernelsPassOption unstream [],
-    kernelsPassOption sink [],
+    kernelsPassOption unstreamKernels [],
+    kernelsPassOption sinkKernels [],
     typedPassOption soacsProg Kernels extractKernels [],
+    typedPassOption soacsProg MC extractMulticore [],
     iplOption [],
     allocateOption "a",
-    kernelsMemPassOption doubleBuffer [],
+    kernelsMemPassOption doubleBufferKernels [],
     kernelsMemPassOption expandAllocations [],
     cseOption [],
     simplifyOption "e",
@@ -480,7 +517,15 @@ commandLineOptions =
       "Run the sequential CPU compilation pipeline"
       sequentialCpuPipeline
       []
-      ["cpu"]
+      ["cpu"],
+    pipelineOption
+      getSOACSProg
+      "MCMem"
+      MCMem
+      "Run the multicore compilation pipeline"
+      multicorePipeline
+      []
+      ["multicore"]
   ]
 
 incVerbosity :: Maybe FilePath -> FutharkConfig -> FutharkConfig
@@ -542,6 +587,14 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               flip evalState src $
                 Defunctorise.transformProg imports
                   >>= Monomorphise.transformProg
+        LiftLambdas -> do
+          (_, imports, src) <- readProgram file
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= Monomorphise.transformProg
+                  >>= LiftLambdas.transformProg
         Defunctionalise -> do
           (_, imports, src) <- readProgram file
           liftIO $
@@ -549,6 +602,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               flip evalState src $
                 Defunctorise.transformProg imports
                   >>= Monomorphise.transformProg
+                  >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} ->
           case splitExtensions file of
@@ -593,15 +647,21 @@ runPolyPasses config base initial_prog = do
       actionProcedure (action base) prog
     (KernelsMem prog, KernelsMemAction action) ->
       actionProcedure (action base) prog
+    (MCMem prog, MCMemAction action) ->
+      actionProcedure (action base) prog
     (SOACS soacs_prog, PolyAction acs) ->
       actionProcedure acs soacs_prog
     (Kernels kernels_prog, PolyAction acs) ->
       actionProcedure acs kernels_prog
+    (MC mc_prog, PolyAction acs) ->
+      actionProcedure acs mc_prog
     (Seq seq_prog, PolyAction acs) ->
       actionProcedure acs seq_prog
     (KernelsMem mem_prog, PolyAction acs) ->
       actionProcedure acs mem_prog
     (SeqMem mem_prog, PolyAction acs) ->
+      actionProcedure acs mem_prog
+    (MCMem mem_prog, PolyAction acs) ->
       actionProcedure acs mem_prog
     (_, action) ->
       externalErrorS $

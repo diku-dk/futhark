@@ -6,10 +6,12 @@ module Futhark.Actions
   ( printAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
+    multicoreImpCodeGenAction,
     metricsAction,
     compileCAction,
     compileOpenCLAction,
     compileCUDAAction,
+    compileMulticoreAction,
     sexpAction,
   )
 where
@@ -17,19 +19,23 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import qualified Data.ByteString.Lazy.Char8 as ByteString
+import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
+import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
+import qualified Futhark.CodeGen.ImpGen.Multicore as ImpGenMulticore
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import Futhark.Compiler.CLI
 import Futhark.IR
 import Futhark.IR.KernelsMem (KernelsMem)
+import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SeqMem (SeqMem)
-import Futhark.Util (runProgramWithExitCode)
+import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Language.SexpGrammar as Sexp
 import System.Exit
 import System.FilePath
@@ -71,6 +77,14 @@ kernelImpCodeGenAction =
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
     }
 
+multicoreImpCodeGenAction :: Action MCMem
+multicoreImpCodeGenAction =
+  Action
+    { actionName = "Compile to imperative multicore",
+      actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
+      actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenMulticore.compileProg
+    }
+
 -- | Print metrics about AST node counts to stdout.
 sexpAction :: ASTLore lore => Action lore
 sexpAction =
@@ -93,12 +107,43 @@ sexpAction =
         Left s ->
           error $ "Couldn't encode program: " ++ s
 
+cmdCC :: String
+cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
+
+cmdCFLAGS :: [String] -> [String]
+cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
+
+runCC :: String -> String -> [String] -> [String] -> FutharkM ()
+runCC cpath outpath cflags_def ldflags = do
+  ret <-
+    liftIO $
+      runProgramWithExitCode
+        cmdCC
+        ( [cpath, "-o", outpath]
+            ++ cmdCFLAGS cflags_def
+            ++
+            -- The default LDFLAGS are always added.
+            ldflags
+        )
+        mempty
+  case ret of
+    Left err ->
+      externalErrorS $ "Failed to run " ++ cmdCC ++ ": " ++ show err
+    Right (ExitFailure code, _, gccerr) ->
+      externalErrorS $
+        cmdCC ++ " failed with code "
+          ++ show code
+          ++ ":\n"
+          ++ gccerr
+    Right (ExitSuccess, _, _) ->
+      return ()
+
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCAction fcfg mode outpath =
   Action
-    { actionName = "Compile to OpenCL",
-      actionDescription = "Compile to OpenCL",
+    { actionName = "Compile to to sequential C",
+      actionDescription = "Compile to sequential C",
       actionProcedure = helper
     }
   where
@@ -114,23 +159,7 @@ compileCAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          ret <-
-            liftIO $
-              runProgramWithExitCode
-                "gcc"
-                [cpath, "-O3", "-std=c99", "-lm", "-o", outpath]
-                mempty
-          case ret of
-            Left err ->
-              externalErrorS $ "Failed to run gcc: " ++ show err
-            Right (ExitFailure code, _, gccerr) ->
-              externalErrorS $
-                "gcc failed with code "
-                  ++ show code
-                  ++ ":\n"
-                  ++ gccerr
-            Right (ExitSuccess, _, _) ->
-              return ()
+          runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -160,23 +189,7 @@ compileOpenCLAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ COpenCL.asExecutable cprog
-          ret <-
-            liftIO $
-              runProgramWithExitCode
-                "gcc"
-                ([cpath, "-O", "-std=c99", "-lm", "-o", outpath] ++ extra_options)
-                mempty
-          case ret of
-            Left err ->
-              externalErrorS $ "Failed to run gcc: " ++ show err
-            Right (ExitFailure code, _, gccerr) ->
-              externalErrorS $
-                "gcc failed with code "
-                  ++ show code
-                  ++ ":\n"
-                  ++ gccerr
-            Right (ExitSuccess, _, _) ->
-              return ()
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -203,18 +216,27 @@ compileCUDAAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ CCUDA.asExecutable cprog
-          let args =
-                [cpath, "-O", "-std=c99", "-lm", "-o", outpath]
-                  ++ extra_options
-          ret <- liftIO $ runProgramWithExitCode "gcc" args mempty
-          case ret of
-            Left err ->
-              externalErrorS $ "Failed to run gcc: " ++ show err
-            Right (ExitFailure code, _, gccerr) ->
-              externalErrorS $
-                "gcc failed with code "
-                  ++ show code
-                  ++ ":\n"
-                  ++ gccerr
-            Right (ExitSuccess, _, _) ->
-              return ()
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+
+-- | The @futhark multicore@ action.
+compileMulticoreAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
+compileMulticoreAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to multicore",
+      actionDescription = "Compile to multicore",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      cprog <- handleWarnings fcfg $ MulticoreC.compileProg prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+
+      case mode of
+        ToLibrary -> do
+          let (header, impl) = MulticoreC.asLibrary cprog
+          liftIO $ writeFile hpath header
+          liftIO $ writeFile cpath impl
+        ToExecutable -> do
+          liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
+          runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]

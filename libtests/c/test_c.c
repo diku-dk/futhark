@@ -16,11 +16,11 @@ int main() {
 
     int err;
 
-    struct futhark_i32_1d *arr;
-    err = futhark_entry_main(ctx, &arr, alloc_per_run/4);
+    struct futhark_i64_1d *arr;
+    err = futhark_entry_main(ctx, &arr, alloc_per_run/8);
     assert(err == 0);
 
-    err = futhark_free_i32_1d(ctx, arr);
+    err = futhark_free_i64_1d(ctx, arr);
     assert(err == 0);
 
     futhark_context_free(ctx);

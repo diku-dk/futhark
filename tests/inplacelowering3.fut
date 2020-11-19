@@ -5,4 +5,4 @@
 
 let main [n] (xs: *[n][][]i32) =
   #[unsafe]
-  xs with [:,2,1] = map (+2) (iota n)
+  xs with [:,2,1] = map i32.i64 (map (+2) (iota n))

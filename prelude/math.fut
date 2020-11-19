@@ -2,8 +2,6 @@
 
 import "soacs"
 
-local let const 'a 'b (x: a) (_: b): a = x
-
 -- | Describes types of values that can be created from the primitive
 -- numeric types (and bool).
 module type from_prim = {
@@ -52,12 +50,15 @@ module type numeric = {
 
   val abs: t -> t
 
+  -- | Sign function.  Produces -1, 0, or 1 if the argument is
+  -- respectively less than, equal to, or greater than zero.
   val sgn: t -> t
 
-  -- | The highest representable number.
+  -- | The most positive representable number.
   val highest: t
 
-  -- | The lowest representable number.
+  -- | The least positive representable number (most negative for
+  -- signed types).
   val lowest: t
 
   -- | Returns zero on empty input.
@@ -122,8 +123,7 @@ module type integral = {
 module type real = {
   include numeric
 
-  val from_fraction: i32 -> i32 -> t
-  val to_i32: t -> i32
+  val from_fraction: i64 -> i64 -> t
   val to_i64: t -> i64
   val to_f64: t -> f64
 
@@ -852,8 +852,7 @@ module f64: (float with t = f64 with int_t = u64) = {
 
   let bool (x: bool) = if x then 1f64 else 0f64
 
-  let from_fraction (x: i32) (y: i32) = i32 x / i32 y
-  let to_i32 (x: f64) = intrinsics.fptosi_f64_i32 x
+  let from_fraction (x: i64) (y: i64) = i64 x / i64 y
   let to_i64 (x: f64) = intrinsics.fptosi_f64_i64 x
   let to_f64 (x: f64) = x
 
@@ -960,8 +959,7 @@ module f32: (float with t = f32 with int_t = u32) = {
 
   let bool (x: bool) = if x then 1f32 else 0f32
 
-  let from_fraction (x: i32) (y: i32) = i32 x / i32 y
-  let to_i32 (x: f32) = intrinsics.fptosi_f32_i32 x
+  let from_fraction (x: i64) (y: i64) = i64 x / i64 y
   let to_i64 (x: f32) = intrinsics.fptosi_f32_i64 x
   let to_f64 (x: f32) = intrinsics.fpconv_f32_f64 x
 
