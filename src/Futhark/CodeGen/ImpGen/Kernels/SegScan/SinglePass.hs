@@ -192,8 +192,8 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                 -- Write map results to their global memory destinations
                 copyDWIMFix (patElemName dest) [Imp.vi64 mapIdx] (kernelResultSubExp src) []
 
-              forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, Var src) ->
-                copyDWIMFix dest [sExt64 i] (Var src) []
+              forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
+                copyDWIMFix dest [sExt64 i] src []
 
     sComment "Transpose scan inputs" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
