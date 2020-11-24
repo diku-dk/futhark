@@ -31,9 +31,10 @@ combineScans ops =
               (concatMap (bodyResult . lambdaBody) lams)
         }
 
-canBeSinglePass :: [SegBinOp KernelsMem] -> Maybe (SegBinOp KernelsMem)
-canBeSinglePass ops
-  | all ok ops =
+canBeSinglePass :: SegSpace -> [SegBinOp KernelsMem] -> Maybe (SegBinOp KernelsMem)
+canBeSinglePass space ops
+  | [_] <- unSegSpace space,
+    all ok ops =
     Just $ combineScans ops
   | otherwise =
     Nothing
@@ -55,6 +56,6 @@ compileSegScan pat lvl space scans kbody = do
   target <- hostTarget <$> askEnv
   case target of
     CUDA
-      | Just scan' <- canBeSinglePass scans ->
+      | Just scan' <- canBeSinglePass space scans ->
         SinglePass.compileSegScan pat lvl space [scan'] kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
