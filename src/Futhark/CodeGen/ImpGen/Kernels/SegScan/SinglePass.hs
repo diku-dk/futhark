@@ -39,7 +39,7 @@ createLocalArrays (Count groupSize) m types = do
   let prefixArraysSize = foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $ map primByteSize types
   let byteOffsets = scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $ map primByteSize types
   let maxTransposedArraySize = foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
-  let warpSize = (32 :: Int32)
+  let warpSize = 32 :: Int32
   let warpSizeE = 32
   let warpSize64 = 32
   let maxWarpExchangeSize = foldl (\acc tySize -> alignTo acc tySize + tySize * warpSizeE) 0 $ map primByteSize types
@@ -188,7 +188,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
                 let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
 
                 -- Write map results to their global memory destinations
-                forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) -> do
+                forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) ->
                   copyDWIMFix (patElemName dest) [Imp.vi64 mapIdx] (kernelResultSubExp src) []
 
                 -- Write to-scan results to private memory.
@@ -216,7 +216,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
       sOp localBarrier
 
-    sComment "Per thread scan" $ do
+    sComment "Per thread scan" $
       sFor "i" tM $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
@@ -461,7 +461,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           dPrimV_ x' (tvExp acc)
           dPrimV_ y' (tvExp prefix)
 
-      compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $ do
+      compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
         forM_
           (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''')
           (\(x, ty, res) -> x <~~ toExp' ty res)
@@ -493,16 +493,16 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       sOp localBarrier
 
     sComment "Write block scan results to global memory" $
-      forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) -> do
+      forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
         sFor "i" (sExt64 tM) $ \i -> do
           dPrimV_ mapIdx $
             tvExp blockOff + kernelGroupSize constants * i
               + sExt64 (kernelLocalThreadId constants)
-          sWhen (Imp.vi64 mapIdx .<. n) $ do
+          sWhen (Imp.vi64 mapIdx .<. n) $
             copyDWIMFix dest [Imp.vi64 mapIdx] (Var src) [i]
 
     sComment "If this is the last block, reset the dynamicId" $
-      sWhen (tvExp dynamicId .==. unCount num_groups - 1) $ do
+      sWhen (tvExp dynamicId .==. unCount num_groups - 1) $
         copyDWIMFix globalId [0] (constant (0 :: Int32)) []
   where
     n = product $ map toInt64Exp $ segSpaceDims space
