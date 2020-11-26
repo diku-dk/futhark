@@ -39,12 +39,14 @@ createLocalArrays (Count groupSize) m types = do
   let prefixArraysSize = foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $ map primByteSize types
   let byteOffsets = scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $ map primByteSize types
   let maxTransposedArraySize = foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
-  let warpSize = 32 :: Int32
-  let warpSizeE = 32
-  let warpSize64 = 32
-  let maxWarpExchangeSize = foldl (\acc tySize -> alignTo acc tySize + tySize * warpSizeE) 0 $ map primByteSize types
-  let warpByteOffsets = scanl (\off tySize -> alignTo off tySize + warpSize64 * tySize) warpSize64 $ map primByteSize types
-  let maxLookbackSize = maxWarpExchangeSize + warpSizeE
+  let warpSize :: Num a => a
+      warpSize = 32
+  let maxWarpExchangeSize =
+        foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $ map primByteSize types
+  let warpByteOffsets =
+        scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
+          map primByteSize types
+  let maxLookbackSize = maxWarpExchangeSize + warpSize
   let size = Imp.bytes $ sMax64 maxLookbackSize $ sMax64 prefixArraysSize maxTransposedArraySize
 
   sComment "Allocate reused shared memeory" $ return ()
@@ -72,15 +74,15 @@ createLocalArrays (Count groupSize) m types = do
         (Shape [groupSize])
         $ ArrayIn localMem $ IxFun.iotaOffset off' [pe64 groupSize]
 
-  warpscan <- sArrayInMem "warpscan" int8 (Shape [constant warpSize]) localMem
+  warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warpSize :: Int64)]) localMem
   warpExchanges <-
     forM (zip warpByteOffsets types) $ \(off, ty) -> do
       let off' = off `Futhark.Util.IntegralExp.div` primByteSize ty
       sArray
         "warp_exchange"
         ty
-        (Shape [constant warpSize])
-        $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize64]
+        (Shape [constant (warpSize :: Int64)])
+        $ ArrayIn localMem $ IxFun.iotaOffset off' [warpSize]
 
   return (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, warpExchanges)
 
