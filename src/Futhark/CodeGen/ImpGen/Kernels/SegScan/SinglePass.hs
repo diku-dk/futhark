@@ -99,10 +99,10 @@ compileSegScan ::
   Pattern KernelsMem ->
   SegLevel ->
   SegSpace ->
-  [SegBinOp KernelsMem] ->
+  SegBinOp KernelsMem ->
   KernelBody KernelsMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody = do
+compileSegScan pat lvl space scanOp kbody = do
   let Pattern _ all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
@@ -113,7 +113,6 @@ compileSegScan pat lvl space scans kbody = do
       m = 9
       tM :: Imp.TExp Int32
       tM = 9
-      scanOp = head scans
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
       statusX, statusA, statusP :: Num a => a
@@ -188,7 +187,7 @@ compileSegScan pat lvl space scans kbody = do
         -- Perform the map
         let in_bounds =
               compileStms mempty (kernelBodyStms kbody) $ do
-                let (all_scan_res, map_res) = splitAt (segBinOpResults scans) $ kernelBodyResult kbody
+                let (all_scan_res, map_res) = splitAt (segBinOpResults [scanOp]) $ kernelBodyResult kbody
 
                 -- Write map results to their global memory destinations
                 forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(dest, src) ->

@@ -59,7 +59,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   case target of
     CUDA
       | Just scan' <- canBeSinglePass space scans ->
-        SinglePass.compileSegScan pat lvl space [scan'] kbody
+        SinglePass.compileSegScan pat lvl space scan' kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
   where
     n = product $ map toInt64Exp $ segSpaceDims space
