@@ -102,11 +102,10 @@ compileSegScan ::
   [SegBinOp KernelsMem] ->
   KernelBody KernelsMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
-  emit $ Imp.DebugPrint "\n# SegScan" Nothing
-
+compileSegScan pat lvl space scans kbody = do
   let Pattern _ all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
+      n = product $ map toInt64Exp $ segSpaceDims space
       num_groups = Count (n `divUp` (unCount group_size * sExt64 tM))
       num_threads = unCount num_groups * unCount group_size
       (mapIdx, _) = head $ unSegSpace space
@@ -515,5 +514,3 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. unCount num_groups - 1) $
         copyDWIMFix globalId [0] (constant (0 :: Int32)) []
-  where
-    n = product $ map toInt64Exp $ segSpaceDims space

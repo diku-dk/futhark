@@ -484,9 +484,7 @@ compileSegScan ::
   [SegBinOp KernelsMem] ->
   KernelBody KernelsMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
-  emit $ Imp.DebugPrint "\n# SegScan" Nothing
-
+compileSegScan pat lvl space scans kbody = do
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
@@ -506,5 +504,3 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
 
   scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
   scanStage3 pat (segNumGroups lvl) (segGroupSize lvl) elems_per_group crossesSegment space scans
-  where
-    n = product $ map toInt64Exp $ segSpaceDims space

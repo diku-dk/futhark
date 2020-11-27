@@ -1,5 +1,6 @@
 module Futhark.CodeGen.ImpGen.Kernels.SegScan (compileSegScan) where
 
+import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen.Kernels.Base
 import qualified Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass as SinglePass
@@ -52,10 +53,13 @@ compileSegScan ::
   [SegBinOp KernelsMem] ->
   KernelBody KernelsMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody = do
+compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
+  emit $ Imp.DebugPrint "\n# SegScan" Nothing
   target <- hostTarget <$> askEnv
   case target of
     CUDA
       | Just scan' <- canBeSinglePass space scans ->
         SinglePass.compileSegScan pat lvl space [scan'] kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
+  where
+    n = product $ map toInt64Exp $ segSpaceDims space
