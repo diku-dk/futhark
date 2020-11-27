@@ -1356,7 +1356,7 @@ readInput i (TransparentValue vd@(ArrayValue _ _ t ept dims)) = do
      }|]
 
   return
-    ( [C.cstm|assert(($exp:dest = $id:new_array(ctx, $id:arr, $args:dims_exps)) != 0);|],
+    ( [C.cstm|assert(($exp:dest = $id:new_array(ctx, $id:arr, $args:dims_exps)) != NULL);|],
       [C.cstm|assert($id:free_array(ctx, $exp:dest) == 0);|],
       [C.cstm|free($id:arr);|],
       [C.cexp|$id:dest|]
