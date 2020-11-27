@@ -106,13 +106,11 @@ compileSegScan pat lvl space scanOp kbody = do
   let Pattern _ all_pes = pat
       group_size = toInt64Exp <$> segGroupSize lvl
       n = product $ map toInt64Exp $ segSpaceDims space
-      num_groups = Count (n `divUp` (unCount group_size * sExt64 tM))
+      m :: Num a => a
+      m = 9
+      num_groups = Count (n `divUp` (unCount group_size * m))
       num_threads = unCount num_groups * unCount group_size
       (mapIdx, _) = head $ unSegSpace space
-      m :: Int32
-      m = 9
-      tM :: Imp.TExp Int32
-      tM = 9
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
       statusX, statusA, statusP :: Num a => a
@@ -142,7 +140,7 @@ compileSegScan pat lvl space scanOp kbody = do
     constants <- kernelConstants <$> askEnv
 
     (sharedId, transposedArrays, prefixArrays, sharedReadOffset, warpscan, exchanges) <-
-      createLocalArrays (segGroupSize lvl) (constant m) tys
+      createLocalArrays (segGroupSize lvl) (intConst Int64 m) tys
 
     dynamicId <- dPrim "dynamic_id" int32
     sWhen (kernelLocalThreadId constants .==. 0) $ do
@@ -168,18 +166,18 @@ compileSegScan pat lvl space scanOp kbody = do
 
     blockOff <-
       dPrimV "blockOff" $
-        sExt64 (tvExp dynamicId) * sExt64 tM * kernelGroupSize constants
+        sExt64 (tvExp dynamicId) * m * kernelGroupSize constants
 
     privateArrays <-
       forM tys $ \ty ->
         sAllocArray
           "private"
           ty
-          (Shape [constant m])
-          (ScalarSpace [constant m] ty)
+          (Shape [intConst Int64 m])
+          (ScalarSpace [intConst Int64 m] ty)
 
     sComment "Load and map" $
-      sFor "i" (sExt64 tM) $ \i -> do
+      sFor "i" m $ \i -> do
         -- The map's input index
         dPrimV_ mapIdx $
           tvExp blockOff + sExt64 (kernelLocalThreadId constants)
@@ -206,20 +204,20 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "Transpose scan inputs" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
         sOp localBarrier
-        sFor "i" (sExt64 tM) $ \i -> do
+        sFor "i" m $ \i -> do
           sharedIdx <-
             dPrimVE "sharedIdx" $
               sExt64 (kernelLocalThreadId constants)
                 + i * kernelGroupSize constants
           copyDWIMFix trans [sharedIdx] (Var priv) [i]
         sOp localBarrier
-        sFor "i" tM $ \i -> do
-          sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * tM + i
+        sFor "i" m $ \i -> do
+          sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * m + i
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
       sOp localBarrier
 
     sComment "Per thread scan" $
-      sFor "i" tM $ \i -> do
+      sFor "i" m $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
             nes = segBinOpNeutral scanOp
@@ -230,8 +228,8 @@ compileSegScan pat lvl space scanOp kbody = do
           sIf
             (i .==. 0)
             (copyDWIMFix x [] ne [])
-            (copyDWIMFix x [] (Var src) [sExt64 i - 1])
-          copyDWIMFix y [] (Var src) [sExt64 i]
+            (copyDWIMFix x [] (Var src) [i - 1])
+          copyDWIMFix y [] (Var src) [i]
 
         compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
           forM_ (zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) $ \(dest, res) ->
@@ -239,7 +237,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
     sComment "Publish results in shared memory" $ do
       forM_ (zip prefixArrays privateArrays) $ \(dest, src) ->
-        copyDWIMFix dest [sExt64 $ kernelLocalThreadId constants] (Var src) [sExt64 tM - 1]
+        copyDWIMFix dest [sExt64 $ kernelLocalThreadId constants] (Var src) [m - 1]
       sOp localBarrier
 
     scanOp' <- renameLambda $ segBinOpLambda scanOp
@@ -472,7 +470,7 @@ compileSegScan pat lvl space scanOp kbody = do
           (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''')
           (\(x, ty, res) -> x <~~ toExp' ty res)
 
-      sFor "i" (sExt64 tM) $ \i -> do
+      sFor "i" m $ \i -> do
         forM_ (zip privateArrays ys) $ \(src, y) ->
           copyDWIMFix y [] (Var src) [i]
 
@@ -484,13 +482,13 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "Transpose scan output" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
         sOp localBarrier
-        sFor "i" (sExt64 tM) $ \i -> do
+        sFor "i" m $ \i -> do
           sharedIdx <-
             dPrimV "sharedIdx" $
-              sExt64 (kernelLocalThreadId constants * tM) + i
+              sExt64 (kernelLocalThreadId constants * m) + i
           copyDWIMFix trans [tvExp sharedIdx] (Var priv) [i]
         sOp localBarrier
-        sFor "i" (sExt64 tM) $ \i -> do
+        sFor "i" m $ \i -> do
           sharedIdx <-
             dPrimV "sharedIdx" $
               kernelLocalThreadId constants
@@ -500,7 +498,7 @@ compileSegScan pat lvl space scanOp kbody = do
 
     sComment "Write block scan results to global memory" $
       forM_ (zip (map patElemName all_pes) privateArrays) $ \(dest, src) ->
-        sFor "i" (sExt64 tM) $ \i -> do
+        sFor "i" m $ \i -> do
           dPrimV_ mapIdx $
             tvExp blockOff + kernelGroupSize constants * i
               + sExt64 (kernelLocalThreadId constants)
