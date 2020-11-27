@@ -120,11 +120,11 @@ compileSegScan pat lvl space scans kbody = do
       statusX = 0
       statusA = 1
       statusP = 2
-      makeStatusUsed flag used = tvExp flag .|. TPrimExp (BinOpExp (Shl Int8) (untyped $ tvExp used) (ValueExp $ value (2 :: Int8)))
+      makeStatusUsed flag used = tvExp flag .|. (tvExp used .<<. 2)
       unmakeStatusUsed :: TV Int8 -> TV Int8 -> TV Int8 -> InKernelGen ()
       unmakeStatusUsed flagUsed flag used = do
-        used <-- TPrimExp (BinOpExp (LShr Int8) (untyped $ tvExp flagUsed) (ValueExp $ value (2 :: Int8)))
-        flag <-- tvExp flagUsed .&. (3 :: Imp.TExp Int8)
+        used <-- tvExp flagUsed .>>. 2
+        flag <-- tvExp flagUsed .&. 3
 
   -- Allocate the shared memory for output component
   numThreads <- dPrimV "numThreads" num_threads
@@ -134,13 +134,10 @@ compileSegScan pat lvl space scans kbody = do
   -- TODO: Should be zeroed.
   statusFlags <- sAllocArray "status_flags" int8 (Shape [tvSize numGroups]) (Space "device")
   (aggregateArrays, incprefixArrays) <-
-    unzip
-      <$> forM
-        tys
-        ( \ty ->
-            (,) <$> sAllocArray "aggregates" ty (Shape [tvSize numGroups]) (Space "device")
-              <*> sAllocArray "incprefixes" ty (Shape [tvSize numGroups]) (Space "device")
-        )
+    fmap unzip $
+      forM tys $ \ty ->
+        (,) <$> sAllocArray "aggregates" ty (Shape [tvSize numGroups]) (Space "device")
+          <*> sAllocArray "incprefixes" ty (Shape [tvSize numGroups]) (Space "device")
 
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
@@ -158,7 +155,7 @@ compileSegScan pat lvl space scans kbody = do
             (tvVar dynamicId)
             globalIdMem
             (Count $ unCount globalIdOff)
-            (toExp' int32 $ intConst Int32 1)
+            (untyped (1 :: Imp.TExp Int32))
       copyDWIMFix sharedId [0] (tvSize dynamicId) []
       everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusX) []
 
