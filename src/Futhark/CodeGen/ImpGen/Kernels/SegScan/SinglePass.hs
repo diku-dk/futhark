@@ -35,19 +35,26 @@ createLocalArrays ::
   InKernelGen (VName, [VName], [VName], VName, VName, [VName])
 createLocalArrays (Count groupSize) m types = do
   let groupSizeE = toInt64Exp groupSize
-  let workSize = toInt64Exp m * groupSizeE
-  let prefixArraysSize = foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $ map primByteSize types
-  let byteOffsets = scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $ map primByteSize types
-  let maxTransposedArraySize = foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
-  let warpSize :: Num a => a
+      workSize = toInt64Exp m * groupSizeE
+      prefixArraysSize =
+        foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $
+          map primByteSize types
+      byteOffsets =
+        scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $
+          map primByteSize types
+      maxTransposedArraySize =
+        foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
+
+      warpSize :: Num a => a
       warpSize = 32
-  let maxWarpExchangeSize =
-        foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $ map primByteSize types
-  let warpByteOffsets =
+      maxWarpExchangeSize =
+        foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $
+          map primByteSize types
+      warpByteOffsets =
         scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
           map primByteSize types
-  let maxLookbackSize = maxWarpExchangeSize + warpSize
-  let size = Imp.bytes $ sMax64 maxLookbackSize $ sMax64 prefixArraysSize maxTransposedArraySize
+      maxLookbackSize = maxWarpExchangeSize + warpSize
+      size = Imp.bytes $ maxLookbackSize `sMax64` prefixArraysSize `sMax64` maxTransposedArraySize
 
   sComment "Allocate reused shared memeory" $ return ()
 
@@ -110,12 +117,10 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       scanOp = head scans
       scanOpNe = segBinOpNeutral scanOp
       tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scanOp
-      statusX = 0 :: Imp.TExp Int8
-      statusA = 1 :: Imp.TExp Int8
-      statusP = 2 :: Imp.TExp Int8
-      sStatusX = constant (0 :: Int8)
-      sStatusA = constant (1 :: Int8)
-      sStatusP = constant (2 :: Int8)
+      statusX, statusA, statusP :: Num a => a
+      statusX = 0
+      statusA = 1
+      statusP = 2
       makeStatusUsed flag used = tvExp flag .|. TPrimExp (BinOpExp (Shl Int8) (untyped $ tvExp used) (ValueExp $ value (2 :: Int8)))
       unmakeStatusUsed :: TV Int8 -> TV Int8 -> TV Int8 -> InKernelGen ()
       unmakeStatusUsed flagUsed flag used = do
@@ -154,9 +159,9 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
             (tvVar dynamicId)
             globalIdMem
             (Count $ unCount globalIdOff)
-            (toExp' int32 $ constant (1 :: Int32))
+            (toExp' int32 $ intConst Int32 1)
       copyDWIMFix sharedId [0] (tvSize dynamicId) []
-      everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] sStatusX []
+      everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusX) []
 
     let localBarrier = Imp.Barrier Imp.FenceLocal
         localFence = Imp.MemFence Imp.FenceLocal
@@ -277,7 +282,7 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
             )
         sOp globalFence
         everythingVolatile $
-          copyDWIMFix statusFlags [tvExp dynamicId] sStatusP []
+          copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
         forM_
           (zip scanOpNe accs)
           ( \(ne, acc) ->
@@ -296,12 +301,12 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
               )
           sOp globalFence
           everythingVolatile $
-            copyDWIMFix statusFlags [tvExp dynamicId] sStatusA []
+            copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusA) []
           copyDWIMFix warpscan [0] (Var statusFlags) [tvExp dynamicId - 1]
         -- sWhen
         sOp localFence
 
-        status <- dPrim "status" int8
+        status <- dPrim "status" int8 :: InKernelGen (TV Int8)
         copyDWIMFix (tvVar status) [] (Var warpscan) [0]
 
         sIf
@@ -426,17 +431,21 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
           scanOp'''' <- renameLambda scanOp'
           let xs = map paramName $ take (length tys) $ lambdaParams scanOp''''
               ys = map paramName $ drop (length tys) $ lambdaParams scanOp''''
-          forM_ (zip xs accs) (\(x, acc) -> dPrimV_ x (tvExp acc))
-          forM_ (zip ys prefixes) (\(y, prefix) -> dPrimV_ y (tvExp prefix))
+          forM_ (zip xs accs) $ \(x, acc) ->
+            dPrimV_ x $ tvExp acc
+          forM_ (zip ys prefixes) $ \(y, prefix) ->
+            dPrimV_ y $ tvExp prefix
           compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
             everythingVolatile $
               forM_
                 (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''')
                 (\(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res [])
           sOp globalFence
-          everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] sStatusP []
-          forM_ (zip exchanges prefixes) (\(exchange, prefix) -> copyDWIMFix exchange [0] (tvSize prefix) [])
-          forM_ (zip3 accs tys scanOpNe) (\(acc, ty, ne) -> tvVar acc <~~ toExp' ty ne)
+          everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
+          forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
+            copyDWIMFix exchange [0] (tvSize prefix) []
+          forM_ (zip3 accs tys scanOpNe) $ \(acc, ty, ne) ->
+            tvVar acc <~~ toExp' ty ne
       -- end sWhen
       -- end sWhen
 
