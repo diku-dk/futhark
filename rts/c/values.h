@@ -611,7 +611,7 @@ static int read_bin_array(FILE *f,
 
   int64_t elem_count = 1;
   FILE * stream;
-#ifdef __Emscripten
+#ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #define CWD "/working/"
   EM_ASM(
@@ -621,6 +621,11 @@ static int read_bin_array(FILE *f,
     FS.mount(NODEFS, { root: '.' }, '/working');
   );
   stream = fopen(CWD"temp.bin", "r");
+  char buffer[7];
+  ret = fread(buffer, 7, 1, stream);
+  if (ret != 1) {
+    futhark_panic(1, "binary-input: Couldn't read 7 Leading characters\n");
+  }
 #else
   stream = stdin;
 #endif
