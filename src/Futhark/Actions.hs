@@ -148,7 +148,8 @@ runEMCC cpath outpath clags_def ldflags = do
     liftIO $
       runProgramWithExitCode
         cmdEMCC
-        [cpath, "-o", outpath] -- Add flags here if important later
+        ([cpath, "-o", outpath] ++ ["-lnodefs.js"])-- Add flags here if important later
+
             -- ++ cmdCFLAGS cflags_def
             -- ++
             -- The default LDFLAGS are always added.

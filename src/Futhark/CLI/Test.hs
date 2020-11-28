@@ -581,7 +581,7 @@ defaultConfig =
           { configBackend = "c",
             configFuthark = Nothing,
             configRunner = "",
-            configExtraOptions = [],
+            configExtraOptions = ["-b"],
             configExtraCompilerOptions = [],
             configTuning = Just "tuning"
           },
