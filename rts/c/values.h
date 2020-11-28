@@ -607,9 +607,23 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   }
 
   int64_t elem_count = 1;
+  FILE * stream;
+#ifdef __Emscripten
+#include <emscripten.h>
+#define CWD "/working/"
+  EM_ASM(
+    var fs = require('fs');
+    fs.copyFileSync("/dev/stdin", "temp.bin");
+    FS.mkdir('/working');
+    FS.mount(NODEFS, { root: '.' }, '/working');
+  );
+  stream = fopen(CWD"temp.bin", "r");
+#else
+  stream = stdin;
+#endif
   for (int i=0; i<dims; i++) {
     int64_t bin_shape;
-    ret = fread(&bin_shape, sizeof(bin_shape), 1, stdin);
+    ret = fread(&bin_shape, sizeof(bin_shape), 1, stream);
     if (ret != 1) {
       futhark_panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
     }
@@ -628,7 +642,7 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   }
   *data = tmp;
 
-  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, stdin);
+  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, stream);
   if (num_elems_read != elem_count) {
     futhark_panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
           elem_count, num_elems_read);
