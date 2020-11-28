@@ -610,6 +610,20 @@ static int read_bin_array(FILE *f,
   }
 
   int64_t elem_count = 1;
+  FILE * stream;
+#ifdef __Emscripten
+#include <emscripten.h>
+#define CWD "/working/"
+  EM_ASM(
+    var fs = require('fs');
+    fs.copyFileSync("/dev/stdin", "temp.bin");
+    FS.mkdir('/working');
+    FS.mount(NODEFS, { root: '.' }, '/working');
+  );
+  stream = fopen(CWD"temp.bin", "r");
+#else
+  stream = stdin;
+#endif
   for (int i=0; i<dims; i++) {
     int64_t bin_shape;
     ret = fread(&bin_shape, sizeof(bin_shape), 1, f);
