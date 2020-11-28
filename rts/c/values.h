@@ -621,6 +621,11 @@ static int read_bin_array(FILE *f,
     FS.mount(NODEFS, { root: '.' }, '/working');
   );
   stream = fopen(CWD"temp.bin", "r");
+  // 7 Bytes read for 
+  // 1 for b  binary
+  // 1 for bin version which was 2
+  // 1 for dimension which was 1
+  // 4 for the enum name " i32"
   char buffer[7];
   ret = fread(buffer, 7, 1, stream);
   if (ret != 1) {
