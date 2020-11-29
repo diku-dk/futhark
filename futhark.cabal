@@ -93,6 +93,7 @@ library
       Futhark.CodeGen.Backends.COpenCL
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
+      Futhark.CodeGen.Backends.GenericC.CLI
       Futhark.CodeGen.Backends.GenericC.Options
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
