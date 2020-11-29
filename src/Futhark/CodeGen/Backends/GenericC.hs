@@ -1705,8 +1705,6 @@ $esc:("#include <getopt.h>")
 
 $esc:values_h
 
-$esc:("#define __private")
-
 static int binary_output = 0;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
