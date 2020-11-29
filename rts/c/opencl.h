@@ -46,7 +46,7 @@ struct opencl_config {
   int num_sizes;
   const char **size_names;
   const char **size_vars;
-  size_t *size_values;
+  int64_t *size_values;
   const char **size_classes;
 };
 
@@ -54,7 +54,7 @@ static void opencl_config_init(struct opencl_config *cfg,
                                int num_sizes,
                                const char *size_names[],
                                const char *size_vars[],
-                               size_t *size_values,
+                               int64_t *size_values,
                                const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
@@ -598,9 +598,10 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
   // or set them to the default.
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
     const char *size_class = ctx->cfg.size_classes[i];
-    size_t *size_value = &ctx->cfg.size_values[i];
+    int64_t *size_value = &ctx->cfg.size_values[i];
     const char* size_name = ctx->cfg.size_names[i];
-    size_t max_value = 0, default_value = 0;
+    int64_t max_value = 0, default_value = 0;
+
     if (strstr(size_class, "group_size") == size_class) {
       max_value = max_group_size;
       default_value = ctx->cfg.default_group_size;
