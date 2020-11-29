@@ -47,7 +47,7 @@ struct cuda_config {
   int num_sizes;
   const char **size_names;
   const char **size_vars;
-  size_t *size_values;
+  int64_t *size_values;
   const char **size_classes;
 };
 
@@ -55,7 +55,7 @@ static void cuda_config_init(struct cuda_config *cfg,
                              int num_sizes,
                              const char *size_names[],
                              const char *size_vars[],
-                             size_t *size_values,
+                             int64_t *size_values,
                              const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->logging = 0;
@@ -388,12 +388,10 @@ static void cuda_size_setup(struct cuda_context *ctx)
   }
 
   for (int i = 0; i < ctx->cfg.num_sizes; i++) {
-    const char *size_class, *size_name;
-    size_t *size_value, max_value = 0, default_value = 0;
-
-    size_class = ctx->cfg.size_classes[i];
-    size_value = &ctx->cfg.size_values[i];
-    size_name = ctx->cfg.size_names[i];
+    const char *size_class = ctx->cfg.size_classes[i];
+    int64_t *size_value = &ctx->cfg.size_values[i];
+    const char* size_name = ctx->cfg.size_names[i];
+    int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "group_size") == size_class) {
       max_value = ctx->max_block_size;
