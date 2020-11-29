@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE Trustworthy #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Simple C runtime representation.
 module Futhark.CodeGen.Backends.SimpleRep
@@ -9,6 +10,9 @@ module Futhark.CodeGen.Backends.SimpleRep
     intTypeToCType,
     primTypeToCType,
     signedPrimTypeToCType,
+    arrayName,
+    opaqueName,
+    cproduct,
 
     -- * Primitive value operations
     cIntOps,
@@ -20,11 +24,14 @@ module Futhark.CodeGen.Backends.SimpleRep
   )
 where
 
+import Data.Bits (shiftR, xor)
+import Data.Char (isAlphaNum, isDigit, ord)
 import Futhark.CodeGen.ImpCode
 import Futhark.Util (zEncodeString)
 import Futhark.Util.Pretty (prettyOneLine)
 import qualified Language.C.Quote.C as C
 import qualified Language.C.Syntax as C
+import Text.Printf
 
 -- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
@@ -75,6 +82,78 @@ funName' = funName . nameFromString
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
 defaultMemBlockType = [C.cty|char*|]
+
+-- | The name of exposed array type structs.
+arrayName :: PrimType -> Signedness -> Int -> String
+arrayName pt signed rank =
+  prettySigned (signed == TypeUnsigned) pt ++ "_" ++ show rank ++ "d"
+
+-- | The name of exposed opaque types.
+opaqueName :: String -> [ValueDesc] -> String
+opaqueName s _
+  | valid = "opaque_" ++ s
+  where
+    valid =
+      head s /= '_'
+        && not (isDigit $ head s)
+        && all ok s
+    ok c = isAlphaNum c || c == '_'
+opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatMap p vds))
+  where
+    p (ScalarValue pt signed _) =
+      show (pt, signed)
+    p (ArrayValue _ space pt signed dims) =
+      show (space, pt, signed, length dims)
+
+    -- FIXME: a stupid hash algorithm; may have collisions.
+    hash =
+      printf "%x" . foldl xor 0
+        . map
+          ( iter . (* 0x45d9f3b)
+              . iter
+              . (* 0x45d9f3b)
+              . iter
+              . fromIntegral
+          )
+    iter x = ((x :: Word32) `shiftR` 16) `xor` x
+
+-- | Return an expression multiplying together the given expressions.
+-- If an empty list is given, the expression @1@ is returned.
+cproduct :: [C.Exp] -> C.Exp
+cproduct [] = [C.cexp|1|]
+cproduct (e : es) = foldl mult e es
+  where
+    mult x y = [C.cexp|$exp:x * $exp:y|]
+
+instance C.ToIdent Name where
+  toIdent = C.toIdent . zEncodeString . nameToString
+
+instance C.ToIdent VName where
+  toIdent = C.toIdent . zEncodeString . pretty
+
+instance C.ToExp VName where
+  toExp v _ = [C.cexp|$id:v|]
+
+instance C.ToExp IntValue where
+  toExp (Int8Value v) = C.toExp v
+  toExp (Int16Value v) = C.toExp v
+  toExp (Int32Value v) = C.toExp v
+  toExp (Int64Value v) = C.toExp v
+
+instance C.ToExp FloatValue where
+  toExp (Float32Value v) = C.toExp v
+  toExp (Float64Value v) = C.toExp v
+
+instance C.ToExp PrimValue where
+  toExp (IntValue v) = C.toExp v
+  toExp (FloatValue v) = C.toExp v
+  toExp (BoolValue True) = C.toExp (1 :: Int8)
+  toExp (BoolValue False) = C.toExp (0 :: Int8)
+  toExp Checked = C.toExp (1 :: Int8)
+
+instance C.ToExp SubExp where
+  toExp (Var v) = C.toExp v
+  toExp (Constant c) = C.toExp c
 
 cIntOps :: [C.Definition]
 cIntOps =
