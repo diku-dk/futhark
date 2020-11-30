@@ -217,23 +217,21 @@ compileSegScan pat lvl space scanOp kbody = do
       sOp localBarrier
 
     sComment "Per thread scan" $
-      sFor "i" m $ \i -> do
+      -- We don't need to touch the first element, so only m-1
+      -- iterations here.
+      sFor "i" (m -1) $ \i -> do
         let xs = map paramName $ xParams scanOp
             ys = map paramName $ yParams scanOp
-            nes = segBinOpNeutral scanOp
 
-        forM_ (zip privateArrays $ zip4 xs ys nes tys) $ \(src, (x, y, ne, ty)) -> do
+        forM_ (zip privateArrays $ zip3 xs ys tys) $ \(src, (x, y, ty)) -> do
           dPrim_ x ty
           dPrim_ y ty
-          sIf
-            (i .==. 0)
-            (copyDWIMFix x [] ne [])
-            (copyDWIMFix x [] (Var src) [i - 1])
-          copyDWIMFix y [] (Var src) [i]
+          copyDWIMFix x [] (Var src) [i]
+          copyDWIMFix y [] (Var src) [i + 1]
 
         compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scanOp) $
           forM_ (zip privateArrays $ bodyResult $ lambdaBody $ segBinOpLambda scanOp) $ \(dest, res) ->
-            copyDWIMFix dest [sExt64 i] res []
+            copyDWIMFix dest [i + 1] res []
 
     sComment "Publish results in shared memory" $ do
       forM_ (zip prefixArrays privateArrays) $ \(dest, src) ->
