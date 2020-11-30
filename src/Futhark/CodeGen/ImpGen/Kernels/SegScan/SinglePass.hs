@@ -258,14 +258,14 @@ compileSegScan pat lvl space scanOp kbody = do
 
       sOp localBarrier
 
-      forM_
-        (zip accs prefixArrays)
-        ( \(acc, prefixes) ->
-            sIf
-              (kernelLocalThreadId constants .==. 0)
-              (copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelGroupSize constants) - 1])
-              (copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelLocalThreadId constants) - 1])
-        )
+      let firstThread acc prefixes =
+            copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelGroupSize constants) - 1]
+          notFirstThread acc prefixes =
+            copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelLocalThreadId constants) - 1]
+      sIf
+        (kernelLocalThreadId constants .==. 0)
+        (zipWithM_ firstThread accs prefixArrays)
+        (zipWithM_ notFirstThread accs prefixArrays)
 
       sOp localBarrier
 
