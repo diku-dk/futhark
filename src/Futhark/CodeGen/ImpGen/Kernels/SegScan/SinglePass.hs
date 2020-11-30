@@ -39,9 +39,6 @@ createLocalArrays (Count groupSize) m types = do
       prefixArraysSize =
         foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $
           map primByteSize types
-      byteOffsets =
-        scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $
-          map primByteSize types
       maxTransposedArraySize =
         foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
 
@@ -50,11 +47,21 @@ createLocalArrays (Count groupSize) m types = do
       maxWarpExchangeSize =
         foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $
           map primByteSize types
-      warpByteOffsets =
-        scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
-          map primByteSize types
       maxLookbackSize = maxWarpExchangeSize + warpSize
       size = Imp.bytes $ maxLookbackSize `sMax64` prefixArraysSize `sMax64` maxTransposedArraySize
+
+      varTE :: TV Int64 -> TPrimExp Int64 VName
+      varTE = le64 . tvVar
+
+  byteOffsets <-
+    mapM (fmap varTE . dPrimV "byte_offsets") $
+      scanl (\off tySize -> alignTo off tySize + toInt64Exp groupSize * tySize) 0 $
+        map primByteSize types
+
+  warpByteOffsets <-
+    mapM (fmap varTE . dPrimV "warp_byte_offset") $
+      scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
+        map primByteSize types
 
   sComment "Allocate reused shared memeory" $ return ()
 
