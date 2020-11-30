@@ -128,13 +128,14 @@ compileSegScan pat lvl space scanOp kbody = do
   numGroups <- dPrimV "numGroups" $ unCount num_groups
 
   globalId <- sStaticArray "id_counter" (Space "device") int32 $ Imp.ArrayZeros 1
-  -- TODO: Should be zeroed.
   statusFlags <- sAllocArray "status_flags" int8 (Shape [tvSize numGroups]) (Space "device")
   (aggregateArrays, incprefixArrays) <-
     fmap unzip $
       forM tys $ \ty ->
         (,) <$> sAllocArray "aggregates" ty (Shape [tvSize numGroups]) (Space "device")
           <*> sAllocArray "incprefixes" ty (Shape [tvSize numGroups]) (Space "device")
+
+  sReplicate statusFlags $ intConst Int8 statusX
 
   sKernelThread "segscan" num_groups group_size (segFlat space) $ do
     constants <- kernelConstants <$> askEnv
@@ -154,7 +155,6 @@ compileSegScan pat lvl space scanOp kbody = do
             (Count $ unCount globalIdOff)
             (untyped (1 :: Imp.TExp Int32))
       copyDWIMFix sharedId [0] (tvSize dynamicId) []
-      everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusX) []
 
     let localBarrier = Imp.Barrier Imp.FenceLocal
         localFence = Imp.MemFence Imp.FenceLocal
