@@ -16,8 +16,8 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
-import Futhark.Util.IntegralExp (IntegralExp, div, divUp)
-import Prelude hiding (quot, rem)
+import Futhark.Util.IntegralExp (IntegralExp, divUp, quot)
+import Prelude hiding (quot)
 
 xParams, yParams :: SegBinOp KernelsMem -> [LParam KernelsMem]
 xParams scan =
@@ -81,7 +81,7 @@ createLocalArrays (Count groupSize) m types = do
 
   prefixArrays <-
     forM (zip byteOffsets types) $ \(off, ty) -> do
-      let off' = off `Futhark.Util.IntegralExp.div` primByteSize ty
+      let off' = off `quot` primByteSize ty
       sArray
         "local_prefix_arr"
         ty
@@ -91,7 +91,7 @@ createLocalArrays (Count groupSize) m types = do
   warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warpSize :: Int64)]) localMem
   warpExchanges <-
     forM (zip warpByteOffsets types) $ \(off, ty) -> do
-      let off' = off `Futhark.Util.IntegralExp.div` primByteSize ty
+      let off' = off `quot` primByteSize ty
       sArray
         "warp_exchange"
         ty
