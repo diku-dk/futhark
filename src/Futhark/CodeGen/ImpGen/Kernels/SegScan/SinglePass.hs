@@ -444,8 +444,8 @@ compileSegScan pat lvl space scanOp kbody = do
         \((prefix, acc), (x, x'), (y, y'), ty) -> do
           dPrim_ x ty
           dPrim_ y ty
-          dPrimV_ x' (tvExp acc)
-          dPrimV_ y' (tvExp prefix)
+          dPrimV_ x' $ tvExp prefix
+          dPrimV_ y' $ tvExp acc
 
       compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
         forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
