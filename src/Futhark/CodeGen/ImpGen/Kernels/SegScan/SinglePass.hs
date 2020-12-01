@@ -408,10 +408,8 @@ compileSegScan pat lvl space scanOp kbody = do
           scanOp'''' <- renameLambda scanOp'
           let xs = map paramName $ take (length tys) $ lambdaParams scanOp''''
               ys = map paramName $ drop (length tys) $ lambdaParams scanOp''''
-          forM_ (zip xs accs) $ \(x, acc) ->
-            dPrimV_ x $ tvExp acc
-          forM_ (zip ys prefixes) $ \(y, prefix) ->
-            dPrimV_ y $ tvExp prefix
+          forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
+          forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
           compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
             everythingVolatile $
               forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
