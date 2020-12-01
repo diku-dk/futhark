@@ -318,7 +318,7 @@ callKernel (CmpSizeLe v key x) = do
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
   GC.stm
     [C.cstm|if (ctx->logging) {
-    fprintf(stderr, "Compared %s <= %ld.\n", $string:(pretty key), (long)$exp:x');
+    fprintf(stderr, "Compared %s <= %ld: %s.\n", $string:(pretty key), (long)$exp:x', $id:v ? "true" : "false");
     }|]
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
