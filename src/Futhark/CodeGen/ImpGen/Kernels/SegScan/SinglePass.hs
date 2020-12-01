@@ -269,34 +269,26 @@ compileSegScan pat lvl space scanOp kbody = do
 
       sOp localBarrier
 
-    prefixes <- forM (zip scanOpNe tys) (\(ne, ty) -> dPrimV "prefix" $ TPrimExp $ toExp' ty ne)
+    prefixes <- forM (zip scanOpNe tys) $ \(ne, ty) ->
+      dPrimV "prefix" $ TPrimExp $ toExp' ty ne
     sComment "Perform lookback" $ do
       sWhen (tvExp dynamicId .==. 0 .&&. kernelLocalThreadId constants .==. 0) $ do
         everythingVolatile $
-          forM_
-            (zip incprefixArrays accs)
-            ( \(incprefixArray, acc) ->
-                copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
-            )
+          forM_ (zip incprefixArrays accs) $ \(incprefixArray, acc) ->
+            copyDWIMFix incprefixArray [tvExp dynamicId] (tvSize acc) []
         sOp globalFence
         everythingVolatile $
           copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
-        forM_
-          (zip scanOpNe accs)
-          ( \(ne, acc) ->
-              copyDWIMFix (tvVar acc) [] ne []
-          )
+        forM_ (zip scanOpNe accs) $ \(ne, acc) ->
+          copyDWIMFix (tvVar acc) [] ne []
       -- end sWhen
 
       let warpSize = kernelWaveSize constants
       sWhen (bNot (tvExp dynamicId .==. 0) .&&. kernelLocalThreadId constants .<. warpSize) $ do
         sWhen (kernelLocalThreadId constants .==. 0) $ do
           everythingVolatile $
-            forM_
-              (zip aggregateArrays accs)
-              ( \(aggregateArray, acc) ->
-                  copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) []
-              )
+            forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
+              copyDWIMFix aggregateArray [tvExp dynamicId] (tvSize acc) []
           sOp globalFence
           everythingVolatile $
             copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusA) []
@@ -357,11 +349,10 @@ compileSegScan pat lvl space scanOp kbody = do
                     (bNot $ tvExp flag .==. statusP)
                     ( do
                         scanOp'' <- renameLambda scanOp'
-                        let agg1s = map paramName $ take (length tys) $ lambdaParams scanOp''
-                            agg2s = map paramName $ drop (length tys) $ lambdaParams scanOp''
+                        let (agg1s, agg2s) = splitAt (length tys) $ map paramName $ lambdaParams scanOp''
 
-                        forM_ (zip3 agg1s scanOpNe tys) $
-                          \(agg1, ne, ty) -> dPrimV_ agg1 $ TPrimExp $ toExp' ty ne
+                        forM_ (zip3 agg1s scanOpNe tys) $ \(agg1, ne, ty) ->
+                          dPrimV_ agg1 $ TPrimExp $ toExp' ty ne
                         zipWithM_ dPrim_ agg2s tys
 
                         flag1 <- dPrimV "flag1" statusX
@@ -371,38 +362,30 @@ compileSegScan pat lvl space scanOp kbody = do
                         sFor "i" warpSize $ \i -> do
                           copyDWIMFix (tvVar flag2) [] (Var warpscan) [sExt64 i]
                           unmakeStatusUsed flag2 flag2 used2
-                          forM_ (zip agg2s exchanges) $
-                            \(agg2, exchange) ->
-                              copyDWIMFix agg2 [] (Var exchange) [sExt64 i]
+                          forM_ (zip agg2s exchanges) $ \(agg2, exchange) ->
+                            copyDWIMFix agg2 [] (Var exchange) [sExt64 i]
                           sIf
                             (bNot $ tvExp flag2 .==. statusA)
                             ( do
                                 flag1 <-- tvExp flag2
                                 used1 <-- tvExp used2
-                                forM_
-                                  (zip3 agg1s tys agg2s)
-                                  (\(agg1, ty, agg2) -> agg1 <~~ toExp' ty (Var agg2))
+                                forM_ (zip3 agg1s tys agg2s) $ \(agg1, ty, agg2) ->
+                                  agg1 <~~ toExp' ty (Var agg2)
                             )
                             ( do
                                 used1 <-- tvExp used1 + tvExp used2
                                 compileStms mempty (bodyStms $ lambdaBody scanOp'') $
-                                  forM_
-                                    (zip3 agg1s tys $ bodyResult $ lambdaBody scanOp'')
-                                    (\(agg1, ty, res) -> agg1 <~~ toExp' ty res)
+                                  forM_ (zip3 agg1s tys $ bodyResult $ lambdaBody scanOp'') $
+                                    \(agg1, ty, res) -> agg1 <~~ toExp' ty res
                             )
                         flag <-- tvExp flag1
                         used <-- tvExp used1
-                        forM_ (zip3 aggrs tys agg1s) (\(aggr, ty, agg1) -> tvVar aggr <~~ toExp' ty (Var agg1))
+                        forM_ (zip3 aggrs tys agg1s) $ \(aggr, ty, agg1) ->
+                          tvVar aggr <~~ toExp' ty (Var agg1)
                     )
                     -- else
-                    ( forM_
-                        (zip aggrs exchanges)
-                        $ \(aggr, exchange) ->
-                          copyDWIMFix
-                            (tvVar aggr)
-                            []
-                            (Var exchange)
-                            [sExt64 warpSize - 1]
+                    ( forM_ (zip aggrs exchanges) $ \(aggr, exchange) ->
+                        copyDWIMFix (tvVar aggr) [] (Var exchange) [sExt64 warpSize - 1]
                     )
                   -- end sIf
                   sIf
@@ -411,14 +394,12 @@ compileSegScan pat lvl space scanOp kbody = do
                     (readOffset <-- tvExp readOffset - zExt32 (tvExp used))
                   copyDWIMFix sharedReadOffset [0] (tvSize readOffset) []
                   scanOp''' <- renameLambda scanOp'
-                  let xs = map paramName $ take (length tys) $ lambdaParams scanOp'''
-                      ys = map paramName $ drop (length tys) $ lambdaParams scanOp'''
-                  forM_ (zip xs aggrs) (\(x, aggr) -> dPrimV_ x (tvExp aggr))
-                  forM_ (zip ys prefixes) (\(y, prefix) -> dPrimV_ y (tvExp prefix))
+                  let (xs, ys) = splitAt (length tys) $ map paramName $ lambdaParams scanOp'''
+                  forM_ (zip xs aggrs) $ \(x, aggr) -> dPrimV_ x (tvExp aggr)
+                  forM_ (zip ys prefixes) $ \(y, prefix) -> dPrimV_ y (tvExp prefix)
                   compileStms mempty (bodyStms $ lambdaBody scanOp''') $
-                    forM_
-                      (zip3 prefixes tys $ bodyResult $ lambdaBody scanOp''')
-                      (\(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res))
+                    forM_ (zip3 prefixes tys $ bodyResult $ lambdaBody scanOp''') $
+                      \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
                 -- end sWhen
                 sOp localFence
                 copyDWIMFix (tvVar readOffset) [] (Var sharedReadOffset) [0]
@@ -437,7 +418,7 @@ compileSegScan pat lvl space scanOp kbody = do
             everythingVolatile $
               forM_
                 (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''')
-                (\(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res [])
+                $ \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
           sOp globalFence
           everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
           forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
@@ -458,10 +439,8 @@ compileSegScan pat lvl space scanOp kbody = do
     scanOp'''''' <- renameLambda scanOp'
 
     sComment "Distribute results" $ do
-      let xs = map paramName $ take (length tys) $ lambdaParams scanOp'''''
-          ys = map paramName $ drop (length tys) $ lambdaParams scanOp'''''
-          xs' = map paramName $ take (length tys) $ lambdaParams scanOp''''''
-          ys' = map paramName $ drop (length tys) $ lambdaParams scanOp''''''
+      let (xs, ys) = splitAt (length tys) $ map paramName $ lambdaParams scanOp'''''
+          (xs', ys') = splitAt (length tys) $ map paramName $ lambdaParams scanOp''''''
 
       forM_ (zip4 (zip prefixes accs) (zip xs xs') (zip ys ys') tys) $
         \((prefix, acc), (x, x'), (y, y'), ty) -> do
@@ -471,9 +450,8 @@ compileSegScan pat lvl space scanOp kbody = do
           dPrimV_ y' (tvExp prefix)
 
       compileStms mempty (bodyStms $ lambdaBody scanOp'''''') $
-        forM_
-          (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''')
-          (\(x, ty, res) -> x <~~ toExp' ty res)
+        forM_ (zip3 xs tys $ bodyResult $ lambdaBody scanOp'''''') $
+          \(x, ty, res) -> x <~~ toExp' ty res
 
       sFor "i" m $ \i -> do
         forM_ (zip privateArrays ys) $ \(src, y) ->
