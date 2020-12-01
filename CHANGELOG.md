@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * `futhark dataset` now correctly detects trailing commas in textual
+    input (#1189).
+
 ## [0.18.3]
 
 ### Fixed

@@ -59,25 +59,14 @@ internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
-internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
-internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
-internaliseFunName ofname _ = do
-  info <- lookupFunction' ofname
-  -- In some rare cases involving local functions, the same function
-  -- name may be re-used in multiple places.  We check whether the
-  -- function name has already been used, and generate a new one if
-  -- so.
-  case info of
-    Just _ -> nameFromString . pretty <$> newNameFromString (baseString ofname)
-    Nothing -> return $ nameFromString $ pretty ofname
+internaliseFunName :: VName -> Name
+internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
     bindingParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
-
-      fname' <- internaliseFunName fname params
 
       msg <- case retdecl of
         Just dt ->
@@ -101,7 +90,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
             I.FunDef
               Nothing
               (internaliseAttrs attrs)
-              fname'
+              (internaliseFunName fname)
               rettype'
               all_params
               body'
@@ -112,8 +101,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           bindFunction
             fname
             fd
-            ( fname',
-              shapenames,
+            ( shapenames,
               map declTypeOf $ concat params',
               all_params,
               applyRetType rettype' all_params
@@ -290,20 +278,6 @@ entryPoint params (eret, crets) =
        in (d + 1, te')
     withoutDims te = (0 :: Int, te)
 
-internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) loc) =
-  case tp of
-    E.Scalar E.Prim {} -> return name
-    _ ->
-      error $
-        "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-          ++ pretty name
-          ++ " of type "
-          ++ pretty tp
-          ++ " at "
-          ++ locStr loc
-          ++ "."
-
 internaliseBody :: String -> E.Exp -> InternaliseM Body
 internaliseBody desc e =
   insertStmsM $ resultBody <$> internaliseExp (desc <> "_res") e
@@ -324,17 +298,11 @@ internaliseExp desc (E.StringLit vs _) =
   fmap pure $
     letSubExp desc $
       I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
-internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
+internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   subst <- lookupSubst name
   case subst of
     Just substs -> return substs
-    Nothing -> do
-      -- If this identifier is the name of a constant, we have to turn it
-      -- into a call to the corresponding function.
-      is_const <- lookupConst name
-      case is_const of
-        Just ses -> return ses
-        Nothing -> (: []) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
+    Nothing -> pure [I.Var name]
 internaliseExp desc (E.Index e idxs (Info ret, Info retext) loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
@@ -708,7 +676,6 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
               I.ForLoop i Int64 w loopvars
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
-      i' <- internaliseIdent i
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
         I.Prim (IntType it) -> return it
@@ -717,7 +684,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
       bindingLoopParams sparams' mergepat $
         \shapepat mergepat' ->
           forLoop mergepat' shapepat mergeinit $
-            I.ForLoop i' it num_iterations' []
+            I.ForLoop (E.identName i) it num_iterations' []
     handleForm mergeinit (E.While cond) =
       bindingLoopParams sparams' mergepat $ \shapepat mergepat' -> do
         mergeinit_ts <- mapM subExpType mergeinit
@@ -1945,7 +1912,7 @@ funcall ::
   SrcLoc ->
   InternaliseM ([SubExp], [I.ExtType])
 funcall desc (QualName _ fname) args loc = do
-  (fname', shapes, value_paramts, fun_params, rettype_fun) <-
+  (shapes, value_paramts, fun_params, rettype_fun) <-
     lookupFunction fname
   argts <- mapM subExpType args
 
@@ -1984,7 +1951,7 @@ funcall desc (QualName _ fname) args loc = do
       ses <-
         attributing attrs $
           letTupExp' desc $
-            I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
+            I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
 -- Bind existential names defined by an expression, based on the
