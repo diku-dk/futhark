@@ -303,8 +303,8 @@ compileSegScan pat lvl space scanOp kbody = do
           (tvExp status .==. statusP)
           ( sWhen (kernelLocalThreadId constants .==. 0) $
               everythingVolatile $
-                forM_ (zip prefixes incprefixArrays) $
-                  \(prefix, incprefixArray) -> copyDWIMFix (tvVar prefix) [] (Var incprefixArray) [tvExp dynamicId - 1]
+                forM_ (zip prefixes incprefixArrays) $ \(prefix, incprefixArray) ->
+                  copyDWIMFix (tvVar prefix) [] (Var incprefixArray) [tvExp dynamicId - 1]
           )
           ( do
               readOffset <-
@@ -313,8 +313,8 @@ compileSegScan pat lvl space scanOp kbody = do
               let loopStop = warpSize * (-1)
               sWhile (tvExp readOffset .>. loopStop) $ do
                 readI <- dPrimV "read_i" $ tvExp readOffset + kernelLocalThreadId constants
-                aggrs <- forM (zip scanOpNe tys) $
-                  \(ne, ty) -> dPrimV "aggr" $ TPrimExp $ toExp' ty ne
+                aggrs <- forM (zip scanOpNe tys) $ \(ne, ty) ->
+                  dPrimV "aggr" $ TPrimExp $ toExp' ty ne
                 flag <- dPrimV "flag" statusX
                 used <- dPrimV "used" (0 :: Imp.TExp Int8)
                 everythingVolatile $
