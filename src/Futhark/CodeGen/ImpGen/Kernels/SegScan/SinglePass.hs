@@ -322,15 +322,14 @@ compileSegScan pat lvl space scanOp kbody = do
                     copyDWIMFix (tvVar flag) [] (Var statusFlags) [sExt64 $ tvExp readI]
                     sIf
                       (tvExp flag .==. statusP)
-                      ( forM_
-                          (zip incprefixArrays aggrs)
-                          (\(incprefix, aggr) -> copyDWIMFix (tvVar aggr) [] (Var incprefix) [sExt64 $ tvExp readI])
+                      ( forM_ (zip incprefixArrays aggrs) $ \(incprefix, aggr) ->
+                          copyDWIMFix (tvVar aggr) [] (Var incprefix) [sExt64 $ tvExp readI]
                       )
-                      $ sWhen (tvExp flag .==. statusA) $ do
-                        forM_
-                          (zip aggrs aggregateArrays)
-                          (\(aggr, aggregate) -> copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI])
-                        used <-- (1 :: Imp.TExp Int8)
+                      ( sWhen (tvExp flag .==. statusA) $ do
+                          forM_ (zip aggrs aggregateArrays) $ \(aggr, aggregate) ->
+                            copyDWIMFix (tvVar aggr) [] (Var aggregate) [sExt64 $ tvExp readI]
+                          used <-- (1 :: Imp.TExp Int8)
+                      )
                 -- end sIf
                 -- end sWhen
                 forM_ (zip exchanges aggrs) $
@@ -416,9 +415,8 @@ compileSegScan pat lvl space scanOp kbody = do
             dPrimV_ y $ tvExp prefix
           compileStms mempty (bodyStms $ lambdaBody scanOp'''') $
             everythingVolatile $
-              forM_
-                (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''')
-                $ \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
+              forM_ (zip incprefixArrays $ bodyResult $ lambdaBody scanOp'''') $
+                \(incprefixArray, res) -> copyDWIMFix incprefixArray [tvExp dynamicId] res []
           sOp globalFence
           everythingVolatile $ copyDWIMFix statusFlags [tvExp dynamicId] (intConst Int8 statusP) []
           forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
@@ -430,7 +428,8 @@ compileSegScan pat lvl space scanOp kbody = do
 
       sWhen (bNot $ tvExp dynamicId .==. 0) $ do
         sOp localBarrier
-        forM_ (zip exchanges prefixes) (\(exchange, prefix) -> copyDWIMFix (tvVar prefix) [] (Var exchange) [0])
+        forM_ (zip exchanges prefixes) $ \(exchange, prefix) ->
+          copyDWIMFix (tvVar prefix) [] (Var exchange) [0]
         sOp localBarrier
     -- end sWhen
     -- end sComment
