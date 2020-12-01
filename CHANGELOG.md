@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * GPU backends: avoid some bounds-checks for parallel sections
     inside intra-kernel loops.
 
+  * The `cuda` backend now uses a much faster single-pass `scan`
+    implementation, although only for nonsegmented scans where the
+    operator operates on scalars.
+
 ### Removed
 
 ### Changed

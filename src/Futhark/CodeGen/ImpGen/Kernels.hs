@@ -76,8 +76,8 @@ compileProg env prog =
 compileProgOpenCL,
   compileProgCUDA ::
     MonadFreshNames m => Prog KernelsMem -> m (Warnings, Imp.Program)
-compileProgOpenCL = compileProg $ HostEnv openclAtomics
-compileProgCUDA = compileProg $ HostEnv cudaAtomics
+compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL
+compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA
 
 opCompiler ::
   Pattern KernelsMem ->
