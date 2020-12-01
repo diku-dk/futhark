@@ -248,8 +248,12 @@ readArrayElemsST j r rv s = do
   ms <- readRankedArrayOfST r rv s
   case ms of
     Just (i, shape, arr, t)
-      | Just t' <- symbol ',' t ->
-        readArrayElemsST (j + 1) r rv (i, shape, arr, t')
+      | Just t' <- symbol ',' t -> do
+        next <- readArrayElemsST (j + 1) r rv (i, shape, arr, t')
+        -- Not OK to have zero values after a comma.
+        case next of
+          Just (0, _) -> return Nothing
+          _ -> return next
       | otherwise -> return $ Just (j, (i, shape, arr, t))
     _ ->
       return $ Just (0, s)
