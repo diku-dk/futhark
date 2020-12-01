@@ -332,9 +332,8 @@ compileSegScan pat lvl space scanOp kbody = do
                       )
                 -- end sIf
                 -- end sWhen
-                forM_ (zip exchanges aggrs) $
-                  \(exchange, aggr) ->
-                    copyDWIMFix exchange [sExt64 $ kernelLocalThreadId constants] (tvSize aggr) []
+                forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
+                  copyDWIMFix exchange [sExt64 $ kernelLocalThreadId constants] (tvSize aggr) []
                 tmp <- dPrimV "tmp" $ makeStatusUsed flag used
                 copyDWIMFix warpscan [sExt64 $ kernelLocalThreadId constants] (tvSize tmp) []
                 sOp localFence
