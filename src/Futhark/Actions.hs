@@ -11,6 +11,7 @@ module Futhark.Actions
     compileCAction,
     compileOpenCLAction,
     compileCUDAAction,
+    compileMPIAction,
     compileMulticoreAction,
     sexpAction,
   )
@@ -24,6 +25,7 @@ import Futhark.Analysis.Alias
 import Futhark.Analysis.Metrics
 import qualified Futhark.CodeGen.Backends.CCUDA as CCUDA
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
+import qualified Futhark.CodeGen.Backends.MPIC as MPIC
 import qualified Futhark.CodeGen.Backends.MulticoreC as MulticoreC
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
@@ -239,4 +241,27 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
+          runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]
+
+-- | The @futhark mpi@ action.
+compileMPIAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
+compileMPIAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to MPI",
+      actionDescription = "Compile to MPI",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      cprog <- handleWarnings fcfg $ MPIC.compileProg prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+
+      case mode of
+        ToLibrary -> do
+          let (header, impl) = MPIC.asLibrary cprog
+          liftIO $ writeFile hpath header
+          liftIO $ writeFile cpath impl
+        ToExecutable -> do
+          liftIO $ writeFile cpath $ MPIC.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]

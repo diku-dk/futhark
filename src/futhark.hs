@@ -18,6 +18,7 @@ import qualified Futhark.CLI.Datacmp as Datacmp
 import qualified Futhark.CLI.Dataset as Dataset
 import qualified Futhark.CLI.Dev as Dev
 import qualified Futhark.CLI.Doc as Doc
+import qualified Futhark.CLI.MPI as MPI
 import qualified Futhark.CLI.Misc as Misc
 import qualified Futhark.CLI.Multicore as Multicore
 import qualified Futhark.CLI.OpenCL as OpenCL
@@ -50,6 +51,7 @@ commands =
       ("c", (C.main, "Compile to sequential C.")),
       ("opencl", (OpenCL.main, "Compile to C calling OpenCL.")),
       ("cuda", (CCUDA.main, "Compile to C calling CUDA.")),
+      ("mpi", (MPI.main, "Compile to MPI C.")),
       ("multicore", (Multicore.main, "Compile to multicore C.")),
       ("python", (Python.main, "Compile to sequential Python.")),
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),

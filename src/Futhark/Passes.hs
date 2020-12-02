@@ -9,6 +9,7 @@ module Futhark.Passes
     gpuPipeline,
     mcPipeline,
     multicorePipeline,
+    mpiPipeline,
   )
 where
 
@@ -120,6 +121,18 @@ mcPipeline =
 
 multicorePipeline :: Pipeline SOACS MCMem
 multicorePipeline =
+  mcPipeline
+    >>> onePass MC.explicitAllocations
+    >>> passes
+      [ simplifyMCMem,
+        performCSE False,
+        simplifyMCMem,
+        doubleBufferMC,
+        simplifyMCMem
+      ]
+
+mpiPipeline :: Pipeline SOACS MCMem
+mpiPipeline =
   mcPipeline
     >>> onePass MC.explicitAllocations
     >>> passes

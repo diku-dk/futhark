@@ -79,6 +79,7 @@ library
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Misc
+      Futhark.CLI.MPI
       Futhark.CLI.Multicore
       Futhark.CLI.OpenCL
       Futhark.CLI.Pkg
@@ -99,6 +100,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Definitions
       Futhark.CodeGen.Backends.GenericPython.Options
+      Futhark.CodeGen.Backends.MPIC
       Futhark.CodeGen.Backends.MulticoreC
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
@@ -107,6 +109,7 @@ library
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.Kernels
+      Futhark.CodeGen.ImpCode.MPI
       Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential
@@ -122,6 +125,7 @@ library
       Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
+      Futhark.CodeGen.ImpGen.MPI
       Futhark.CodeGen.ImpGen.Multicore
       Futhark.CodeGen.ImpGen.Multicore.Base
       Futhark.CodeGen.ImpGen.Multicore.SegHist
