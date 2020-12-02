@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed local memory capacity check for intra-group-parallel GPU kernels.
 
+  * Fixed compiler bug on segmented rotates where the rotation amount
+    is variant to the nest (#1192).
+
 ## [0.18.3]
 
 ### Fixed
