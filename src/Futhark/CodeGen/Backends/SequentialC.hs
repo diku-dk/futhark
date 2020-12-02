@@ -29,8 +29,7 @@ compileProg =
     operations :: GC.Operations Imp.Sequential ()
     operations =
       GC.defaultOperations
-        { GC.opsCompiler = const $ return (),
-          GC.opsCopy = copySequentialMemory
+        { GC.opsCompiler = const $ return ()
         }
 
     generateContext = do
@@ -130,9 +129,3 @@ compileProg =
                                  return 0;
                                }|]
         )
-
-copySequentialMemory :: GC.Copy Imp.Sequential ()
-copySequentialMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
-  GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-copySequentialMemory _ _ destspace _ _ srcspace _ =
-  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace

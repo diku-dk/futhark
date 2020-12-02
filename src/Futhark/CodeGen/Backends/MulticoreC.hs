@@ -207,7 +207,6 @@ operations :: GC.Operations Multicore ()
 operations =
   GC.defaultOperations
     { GC.opsCompiler = compileOp,
-      GC.opsCopy = copyMulticoreMemory,
       GC.opsCritical =
         -- The thread entering an API function is always considered
         -- the "first worker" - note that this might differ from the
@@ -218,12 +217,6 @@ operations =
           []
         )
     }
-
-copyMulticoreMemory :: GC.Copy Multicore ()
-copyMulticoreMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
-  GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-copyMulticoreMemory _ _ destspace _ _ srcspace _ =
-  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 closureFreeStructField :: VName -> Name
 closureFreeStructField v =
