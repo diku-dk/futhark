@@ -279,7 +279,7 @@ printStm :: ExternalValue -> C.Exp -> C.Stm
 printStm (OpaqueValue desc _) _ =
   [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
-  printPrimStm [C.cexp|stdout|] e bt ept
+  printPrimStm [C.cexp|OUTPUT|] e bt ept
 printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
   let values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
