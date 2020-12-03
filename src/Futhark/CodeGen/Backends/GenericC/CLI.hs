@@ -288,7 +288,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
         $ty:bt' *arr = calloc(sizeof($ty:bt'), $exp:num_elems);
         assert(arr != NULL);
         assert($id:values_array(ctx, $exp:e, arr) == 0);
-        write_array(stdout, binary_output, &$exp:(primTypeInfo bt ept), arr,
+        write_array(OUTPUT, binary_output, &$exp:(primTypeInfo bt ept), arr,
                     $id:shape_array(ctx, $exp:e), $int:rank);
         free(arr);
       }|]
@@ -300,7 +300,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
 printResult :: [(ExternalValue, C.Exp)] -> [C.Stm]
 printResult = concatMap f
   where
-    f (v, e) = [printStm v e, [C.cstm|printf("\n");|]]
+    f (v, e) = [printStm v e, [C.cstm|fprintf(OUTPUT, "\n");|]]
 
 cliEntryPoint ::
   Name ->
@@ -431,7 +431,6 @@ $esc:("#include <inttypes.h>")
 
 $esc:values_h
 
-static int binary_output = 0;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;
@@ -507,6 +506,7 @@ int main(int argc, char** argv) {
     free(report);
   }
 
+  stream_finish();
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
   return 0;
