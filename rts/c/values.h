@@ -546,6 +546,7 @@ static void stream_init() {
 #else
   STREAM = stdin;
 #endif
+}
 
 static int read_is_binary() {
   skipspaces();
