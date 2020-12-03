@@ -120,14 +120,14 @@ generateSizeFuns sizes = do
 
 generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
 generateConfigFuns sizes = do
-  let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
+  let size_decls = map (\k -> [C.csdecl|typename int64_t $id:k;|]) $ M.keys sizes
       num_sizes = M.size sizes
   GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s { struct cuda_config cu_cfg;
                               int profiling;
-                              size_t sizes[$int:num_sizes];
+                              typename int64_t sizes[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
                             };|]

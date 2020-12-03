@@ -12,11 +12,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * When compiling to binaries in the C-based backends, the compiler
     now respects the ``CFLAGS`` and ``CC`` environment variables.
 
+  * GPU backends: avoid some bounds-checks for parallel sections
+    inside intra-kernel loops.
+
+  * The `cuda` backend now uses a much faster single-pass `scan`
+    implementation, although only for nonsegmented scans where the
+    operator operates on scalars.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+  * `futhark dataset` now correctly detects trailing commas in textual
+    input (#1189).
+
+  * Fixed local memory capacity check for intra-group-parallel GPU kernels.
+
+  * Fixed compiler bug on segmented rotates where the rotation amount
+    is variant to the nest (#1192).
+
+  * `futhark repl` no longer crashes on type errors in given file (#1193).
+
+  * Fixed a simplification error for certain arithmetic expressions
+    (#1194).
 
 ## [0.18.3]
 

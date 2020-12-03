@@ -212,7 +212,7 @@ instance ASTMappable (ExpBase Info VName) where
     Attr attr <$> mapOnExp tv e <*> pure loc
 
 instance ASTMappable (LoopFormBase Info VName) where
-  astMap tv (For i bound) = For <$> astMap tv i <*> astMap tv bound
+  astMap tv (For i bound) = For <$> astMap tv i <*> mapOnExp tv bound
   astMap tv (ForIn pat e) = ForIn <$> astMap tv pat <*> mapOnExp tv e
   astMap tv (While e) = While <$> mapOnExp tv e
 
@@ -252,12 +252,12 @@ instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName
 
 instance ASTMappable (DimIndexBase Info VName) where
-  astMap tv (DimFix j) = DimFix <$> astMap tv j
+  astMap tv (DimFix j) = DimFix <$> mapOnExp tv j
   astMap tv (DimSlice i j stride) =
     DimSlice
-      <$> maybe (return Nothing) (fmap Just . astMap tv) i
-      <*> maybe (return Nothing) (fmap Just . astMap tv) j
-      <*> maybe (return Nothing) (fmap Just . astMap tv) stride
+      <$> maybe (return Nothing) (fmap Just . mapOnExp tv) i
+      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) j
+      <*> maybe (return Nothing) (fmap Just . mapOnExp tv) stride
 
 instance ASTMappable Alias where
   astMap tv (AliasBound v) = AliasBound <$> mapOnName tv v

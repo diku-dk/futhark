@@ -123,6 +123,7 @@ data StructurePipeline
   | SOACSPipeline
   | SequentialCpuPipeline
   | GpuPipeline
+  | NoPipeline
   deriving (Show)
 
 -- | A structure test specifies a compilation pipeline, as well as
@@ -441,6 +442,7 @@ optimisePipeline =
   lexstr "distributed" $> KernelsPipeline
     <|> lexstr "gpu" $> GpuPipeline
     <|> lexstr "cpu" $> SequentialCpuPipeline
+    <|> lexstr "internalised" $> NoPipeline
     <|> pure SOACSPipeline
 
 parseMetrics :: Parser AstMetrics

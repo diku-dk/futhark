@@ -27,6 +27,8 @@ module Language.Futhark.Prop
 
     -- * Queries on expressions
     typeOf,
+    valBindTypeScheme,
+    funType,
 
     -- * Queries on patterns and params
     patternIdents,
@@ -647,6 +649,20 @@ unfoldFunType (Scalar (Arrow _ _ t1 t2)) =
   let (ps, r) = unfoldFunType t2
    in (t1 : ps, r)
 unfoldFunType t = ([], t)
+
+-- | The type scheme of a value binding, comprising the type
+-- parameters and the actual type.
+valBindTypeScheme :: ValBindBase Info VName -> ([TypeParamBase VName], StructType)
+valBindTypeScheme vb =
+  ( valBindTypeParams vb,
+    funType (valBindParams vb) (fst (unInfo (valBindRetType vb)))
+  )
+
+-- | The type of a function with the given parameters and return type.
+funType :: [PatternBase Info VName] -> StructType -> StructType
+funType params ret = foldr (arrow . patternParam) ret params
+  where
+    arrow (xp, xt) yt = Scalar $ Arrow () xp xt yt
 
 -- | The type names mentioned in a type.
 typeVars :: Monoid as => TypeBase dim as -> S.Set VName

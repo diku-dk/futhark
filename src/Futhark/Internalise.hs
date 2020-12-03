@@ -14,7 +14,7 @@ module Futhark.Internalise (internaliseProg) where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable
-import Data.List (find, intercalate, intersperse, nub, transpose)
+import Data.List (find, intercalate, intersperse, transpose)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -24,6 +24,7 @@ import Futhark.Internalise.Bindings
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.Lambdas
+import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.TypesValues
@@ -42,9 +43,10 @@ internaliseProg ::
 internaliseProg always_safe prog = do
   prog_decs <- Defunctorise.transformProg prog
   prog_decs' <- Monomorphise.transformProg prog_decs
-  prog_decs'' <- Defunctionalise.transformProg prog_decs'
+  prog_decs'' <- LiftLambdas.transformProg prog_decs'
+  prog_decs''' <- Defunctionalise.transformProg prog_decs''
   (consts, funs) <-
-    runInternaliseM always_safe (internaliseValBinds prog_decs'')
+    runInternaliseM always_safe (internaliseValBinds prog_decs''')
   I.renameProg $ I.Prog consts funs
 
 internaliseAttr :: E.AttrInfo -> Attr
@@ -57,27 +59,14 @@ internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
-internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
-internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
-internaliseFunName ofname _ = do
-  info <- lookupFunction' ofname
-  -- In some rare cases involving local functions, the same function
-  -- name may be re-used in multiple places.  We check whether the
-  -- function name has already been used, and generate a new one if
-  -- so.
-  case info of
-    Just _ -> nameFromString . pretty <$> newNameFromString (baseString ofname)
-    Nothing -> return $ nameFromString $ pretty ofname
+internaliseFunName :: VName -> Name
+internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
     bindingParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
-          normal_params = shapenames ++ map I.paramName (concat params')
-          normal_param_names = namesFromList normal_params
-
-      fname' <- internaliseFunName fname params
 
       msg <- case retdecl of
         Just dt ->
@@ -97,27 +86,13 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
         ensureResultExtShape msg loc (map I.fromDecl rettype') $
           mkBody body_stms body_res
 
-      constants <- allConsts
-      let free_in_fun =
-            freeIn body'
-              `namesSubtract` normal_param_names
-              `namesSubtract` constants
-
-      used_free_params <- forM (namesToList free_in_fun) $ \v -> do
-        v_t <- lookupType v
-        return $ Param v $ toDecl v_t Nonunique
-
-      let free_shape_params =
-            map (`Param` I.Prim int64) $
-              concatMap (I.shapeVars . I.arrayShape . I.paramType) used_free_params
-          free_params = nub $ free_shape_params ++ used_free_params
-          all_params = free_params ++ shapeparams ++ concat params'
+      let all_params = shapeparams ++ concat params'
 
       let fd =
             I.FunDef
               Nothing
               (internaliseAttrs attrs)
-              fname'
+              (internaliseFunName fname)
               rettype'
               all_params
               body'
@@ -128,9 +103,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           bindFunction
             fname
             fd
-            ( fname',
-              map I.paramName free_params,
-              shapenames,
+            ( shapenames,
               map declTypeOf $ concat params',
               all_params,
               applyRetType rettype' all_params
@@ -307,20 +280,6 @@ entryPoint params (eret, crets) =
        in (d + 1, te')
     withoutDims te = (0 :: Int, te)
 
-internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) loc) =
-  case tp of
-    E.Scalar E.Prim {} -> return name
-    _ ->
-      error $
-        "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-          ++ pretty name
-          ++ " of type "
-          ++ pretty tp
-          ++ " at "
-          ++ locStr loc
-          ++ "."
-
 internaliseBody :: String -> E.Exp -> InternaliseM Body
 internaliseBody desc e =
   insertStmsM $ resultBody <$> internaliseExp (desc <> "_res") e
@@ -341,17 +300,11 @@ internaliseExp desc (E.StringLit vs _) =
   fmap pure $
     letSubExp desc $
       I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
-internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
+internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   subst <- lookupSubst name
   case subst of
     Just substs -> return substs
-    Nothing -> do
-      -- If this identifier is the name of a constant, we have to turn it
-      -- into a call to the corresponding function.
-      is_const <- lookupConst name
-      case is_const of
-        Just ses -> return ses
-        Nothing -> (: []) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
+    Nothing -> pure [I.Var name]
 internaliseExp desc (E.Index e idxs (Info ret, Info retext) loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
@@ -646,10 +599,8 @@ internaliseExp desc (E.LetPat pat e body (Info ret, Info retext) _) = do
   ses <- internalisePat desc pat e body (internaliseExp desc)
   bindExtSizes (E.toStruct ret) retext ses
   return ses
-internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody _ loc) = do
-  internaliseValBind $
-    E.ValBind Nothing ofname retdecl (Info (rettype, [])) tparams params body Nothing mempty loc
-  internaliseExp desc letbody
+internaliseExp _ (E.LetFun ofname _ _ _ _) =
+  error $ "Unexpected LetFun " ++ pretty ofname
 internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret, retext)) loc) = do
   ses <- internaliseExp "loop_init" mergeexp
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
@@ -728,7 +679,6 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
               I.ForLoop i Int64 w loopvars
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
-      i' <- internaliseIdent i
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
         I.Prim (IntType it) -> return it
@@ -738,7 +688,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
       bindingLoopParams sparams' mergepat ts $
         \shapepat mergepat' ->
           forLoop mergepat' shapepat mergeinit $
-            I.ForLoop i' it num_iterations' []
+            I.ForLoop (E.identName i) it num_iterations' []
     handleForm mergeinit (E.While cond) = do
       ts <- mapM subExpType mergeinit
       bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' -> do
@@ -931,34 +881,6 @@ internaliseExp desc (E.If ce te fe (Info ret, Info retext) _) = do
 
 -- Builtin operators are handled specially because they are
 -- overloaded.
-internaliseExp desc (E.BinOp (op, _) _ (xe, _) (ye, _) _ _ loc)
-  | Just internalise <- isOverloadedFunction op [xe, ye] loc =
-    internalise desc
--- User-defined operators are just the same as a function call.
-internaliseExp
-  desc
-  ( E.BinOp
-      (op, oploc)
-      (Info t)
-      (xarg, Info (xt, xext))
-      (yarg, Info (yt, yext))
-      _
-      (Info retext)
-      loc
-    ) =
-    internaliseExp desc $
-      E.Apply
-        ( E.Apply
-            (E.Var op (Info t) oploc)
-            xarg
-            (Info (E.diet xt, xext))
-            (Info $ foldFunType [E.fromStruct yt] t, Info [])
-            loc
-        )
-        yarg
-        (Info (E.diet yt, yext))
-        (Info t, Info retext)
-        loc
 internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- internalisedTypeSize $ rt `setAliases` ()
   i' <- fmap sum $
@@ -968,6 +890,8 @@ internaliseExp desc (E.Project k e (Info rt) _) = do
           map snd $ takeWhile ((/= k) . fst) $ sortFields fs
         t -> [t]
   take n . drop i' <$> internaliseExp desc e
+internaliseExp _ e@E.BinOp {} =
+  error $ "internaliseExp: Unexpected BinOp " ++ pretty e
 internaliseExp _ e@E.Lambda {} =
   error $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
 internaliseExp _ e@E.OpSection {} =
@@ -2059,13 +1983,13 @@ funcall ::
   SrcLoc ->
   InternaliseM ([SubExp], [I.ExtType])
 funcall desc (QualName _ fname) args loc = do
-  (fname', closure, shapes, value_paramts, fun_params, rettype_fun) <-
+  (shapes, value_paramts, fun_params, rettype_fun) <-
     lookupFunction fname
   argts <- mapM subExpType args
 
   shapeargs <- argShapes shapes fun_params argts
   let diets =
-        replicate (length closure + length shapeargs) I.ObservePrim
+        replicate (length shapeargs) I.ObservePrim
           ++ map I.diet value_paramts
   args' <-
     ensureArgShapes
@@ -2073,7 +1997,7 @@ funcall desc (QualName _ fname) args loc = do
       loc
       (map I.paramName fun_params)
       (map I.paramType fun_params)
-      (map I.Var closure ++ shapeargs ++ args)
+      (shapeargs ++ args)
   argts' <- mapM subExpType args'
   case rettype_fun $ zip args' argts' of
     Nothing ->
@@ -2098,7 +2022,7 @@ funcall desc (QualName _ fname) args loc = do
       ses <-
         attributing attrs $
           letTupExp' desc $
-            I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
+            I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
 -- Bind existential names defined by an expression, based on the

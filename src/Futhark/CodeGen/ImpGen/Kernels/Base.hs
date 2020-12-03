@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
     CallKernelGen,
     InKernelGen,
     HostEnv (..),
+    Target (..),
     KernelEnv (..),
     computeThreadChunkSize,
     groupReduce,
@@ -49,8 +50,16 @@ import Futhark.Util (chunks, dropLast, mapAccumLM, maybeNth, takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
-newtype HostEnv = HostEnv
-  {hostAtomics :: AtomicBinOp}
+-- | Which target are we ultimately generating code for?  While most
+-- of the kernels code is the same, there are some cases where we
+-- generate special code based on the ultimate low-level API we are
+-- targeting.
+data Target = CUDA | OpenCL
+
+data HostEnv = HostEnv
+  { hostAtomics :: AtomicBinOp,
+    hostTarget :: Target
+  }
 
 data KernelEnv = KernelEnv
   { kernelAtomics :: AtomicBinOp,
@@ -301,7 +310,13 @@ prepareIntraGroupSegHist group_size =
 whenActive :: SegLevel -> SegSpace -> InKernelGen () -> InKernelGen ()
 whenActive lvl space m
   | SegNoVirtFull <- segVirt lvl = m
-  | otherwise = sWhen (isActive $ unSegSpace space) m
+  | otherwise = do
+    group_size <- kernelGroupSize . kernelConstants <$> askEnv
+    -- XXX: the following check is too naive - we should also handle
+    -- the multi-dimensional case.
+    if [group_size] == map (toInt64Exp . snd) (unSegSpace space)
+      then m
+      else sWhen (isActive $ unSegSpace space) m
 
 compileGroupOp :: OpCompiler KernelsMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
@@ -1320,7 +1335,7 @@ sKernelFailureTolerant ::
   InKernelGen () ->
   CallKernelGen ()
 sKernelFailureTolerant tol ops constants name m = do
-  HostEnv atomics <- askEnv
+  HostEnv atomics _ <- askEnv
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants) ops m
   uses <- computeKernelUses body mempty
   emit $

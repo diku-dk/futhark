@@ -41,6 +41,8 @@ module Futhark.Analysis.PrimExp
     (.&.),
     (.|.),
     (.^.),
+    (.>>.),
+    (.<<.),
     bNot,
     sMax32,
     sMin32,
@@ -396,20 +398,18 @@ TPrimExp x .==. TPrimExp y =
 x .>. y = y .<. x
 x .>=. y = y .<=. x
 
--- | Lifted bitwise operators.
-(.&.), (.|.), (.^.) :: TPrimExp t v -> TPrimExp t v -> TPrimExp t v
-TPrimExp x .&. TPrimExp y =
+-- | Lifted bitwise operators.  The right-shift is logical, *not* arithmetic.
+(.&.), (.|.), (.^.), (.>>.), (.<<.) :: TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+bitPrimExp :: (IntType -> BinOp) -> TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+bitPrimExp op (TPrimExp x) (TPrimExp y) =
   TPrimExp $
     constFoldPrimExp $
-      BinOpExp (And $ primExpIntType x) x y
-TPrimExp x .|. TPrimExp y =
-  TPrimExp $
-    constFoldPrimExp $
-      BinOpExp (Or $ primExpIntType x) x y
-TPrimExp x .^. TPrimExp y =
-  TPrimExp $
-    constFoldPrimExp $
-      BinOpExp (Xor $ primExpIntType x) x y
+      BinOpExp (op $ primExpIntType x) x y
+(.&.) = bitPrimExp And
+(.|.) = bitPrimExp Or
+(.^.) = bitPrimExp Xor
+(.>>.) = bitPrimExp LShr
+(.<<.) = bitPrimExp Shl
 
 infix 4 .==., .<., .>., .<=., .>=.
 

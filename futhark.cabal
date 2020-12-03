@@ -93,6 +93,7 @@ library
       Futhark.CodeGen.Backends.COpenCL
       Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
+      Futhark.CodeGen.Backends.GenericC.CLI
       Futhark.CodeGen.Backends.GenericC.Options
       Futhark.CodeGen.Backends.GenericPython
       Futhark.CodeGen.Backends.GenericPython.AST
@@ -117,6 +118,8 @@ library
       Futhark.CodeGen.ImpGen.Kernels.SegMap
       Futhark.CodeGen.ImpGen.Kernels.SegRed
       Futhark.CodeGen.ImpGen.Kernels.SegScan
+      Futhark.CodeGen.ImpGen.Kernels.SegScan.SinglePass
+      Futhark.CodeGen.ImpGen.Kernels.SegScan.TwoPass
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
       Futhark.CodeGen.ImpGen.Multicore
@@ -178,7 +181,9 @@ library
       Futhark.Internalise.Bindings
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise
+      Futhark.Internalise.FreeVars
       Futhark.Internalise.Lambdas
+      Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
       Futhark.Internalise.Monomorphise
       Futhark.Internalise.TypesValues
