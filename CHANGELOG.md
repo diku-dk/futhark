@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed compiler bug on segmented rotates where the rotation amount
     is variant to the nest (#1192).
 
+  * `futhark repl` no longer crashes on type errors in given file (#1193).
+
 ## [0.18.3]
 
 ### Fixed

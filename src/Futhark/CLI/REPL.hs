@@ -87,9 +87,18 @@ repl maybe_prog = do
         if quit then return () else toploop s
 
   maybe_init_state <- liftIO $ newFutharkiState 0 maybe_prog
-  case maybe_init_state of
-    Left err -> error $ "Failed to initialise interpreter state: " ++ err
-    Right init_state -> Haskeline.runInputT Haskeline.defaultSettings $ toploop init_state
+  s <- case maybe_init_state of
+    Left prog_err -> do
+      noprog_init_state <- liftIO $ newFutharkiState 0 Nothing
+      case noprog_init_state of
+        Left err ->
+          error $ "Failed to initialise interpreter state: " ++ err
+        Right s -> do
+          liftIO $ putStrLn prog_err
+          return s {futharkiLoaded = maybe_prog}
+    Right s ->
+      return s
+  Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
 
