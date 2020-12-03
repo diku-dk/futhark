@@ -2,9 +2,12 @@
 
 //// Text I/O
 
+
 typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
 typedef int (*str_reader)(const char *, void*);
+
+FILE * STREAM;
 
 struct array_reader {
   char* elems;
@@ -610,30 +613,6 @@ static int read_bin_array(FILE *f,
   }
 
   int64_t elem_count = 1;
-  FILE * stream;
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#define CWD "/working/"
-  EM_ASM(
-    var fs = require('fs');
-    fs.copyFileSync("/dev/stdin", "temp.bin");
-    FS.mkdir('/working');
-    FS.mount(NODEFS, { root: '.' }, '/working');
-  );
-  stream = fopen(CWD"temp.bin", "r");
-  // 7 Bytes read for 
-  // 1 for b  binary
-  // 1 for bin version which was 2
-  // 1 for dimension which was 1
-  // 4 for the enum name " i32"
-  char buffer[7];
-  ret = fread(buffer, 7, 1, stream);
-  if (ret != 1) {
-    futhark_panic(1, "binary-input: Couldn't read 7 Leading characters\n");
-  }
-#else
-  stream = stdin;
-#endif
   for (int i=0; i<dims; i++) {
     int64_t bin_shape;
     ret = fread(&bin_shape, sizeof(bin_shape), 1, f);
