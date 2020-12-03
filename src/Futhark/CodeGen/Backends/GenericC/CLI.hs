@@ -319,6 +319,8 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
     // We do not want to profile all the initialisation.
     $id:pause_profiling(ctx);
 
+
+    stream_init(); 
     // Declare and read input.
     set_binary_mode(stdin);
     $items:(mconcat input_items)

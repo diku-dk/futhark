@@ -532,6 +532,21 @@ static const struct primtype_info_t* primtypes[] = {
 // General value interface.  All endian business taken care of at
 // lower layers.
 
+static void stream_init() {
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#define CWD "/working/"
+  EM_ASM(
+    var fs = require('fs');
+    fs.copyFileSync("/dev/stdin", "temp.bin");
+    FS.mkdir('/working');
+    FS.mount(NODEFS, { root: '.' }, '/working');
+  );
+  STREAM = fopen(CWD"temp.bin", "r");
+#else
+  STREAM = stdin;
+#endif
+
 static int read_is_binary() {
   skipspaces();
   int c = getc(STREAM);
@@ -647,19 +662,6 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
 }
 
 static int read_array(const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
-  #ifdef __EMSCRIPTEN__
-  #include <emscripten.h>
-  #define CWD "/working/"
-    EM_ASM(
-      var fs = require('fs');
-      fs.copyFileSync("/dev/stdin", "temp.bin");
-      FS.mkdir('/working');
-      FS.mount(NODEFS, { root: '.' }, '/working');
-    );
-    STREAM = fopen(CWD"temp.bin", "r");
-  #else
-    STREAM = stdin;
-  #endif
   if (!read_is_binary()) {
     return read_str_array(expected_type->size, (str_reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
   } else {
