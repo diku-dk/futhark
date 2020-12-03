@@ -7,7 +7,10 @@ typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
 typedef int (*str_reader)(const char *, void*);
 
+FILE * OUTPUT;
 FILE * STREAM;
+
+static int binary_output = 0;
 
 struct array_reader {
   char* elems;
@@ -532,21 +535,43 @@ static const struct primtype_info_t* primtypes[] = {
 // General value interface.  All endian business taken care of at
 // lower layers.
 
-static void stream_init() {
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #define CWD "/working/"
+static void stream_init() {
   EM_ASM(
     var fs = require('fs');
-    fs.copyFileSync("/dev/stdin", "temp.bin");
+    fs.writeFileSync("temp.bin", fs.readFileSync("/dev/stdin"));
     FS.mkdir('/working');
     FS.mount(NODEFS, { root: '.' }, '/working');
   );
   STREAM = fopen(CWD"temp.bin", "r");
-#else
-  STREAM = stdin;
-#endif
+  if (binary_output) {
+    OUTPUT = fopen(CWD"out.bin", "w");
+  } else {
+    OUTPUT = stdout;
+  }
 }
+
+static void stream_finish() {
+  if (binary_output) {
+  fclose(OUTPUT);
+  EM_ASM(
+    var fs = require('fs');
+    fs.writeFileSync("/dev/stdout", fs.readFileSync("out.bin"))
+  );
+  // TODO Delete temp.bin, out.bin
+  }
+}
+
+#else
+static void stream_init() {
+  STREAM = stdin;
+  OUTPUT = stdout;
+}
+
+static void stream_finish() {}
+#endif
 
 static int read_is_binary() {
   skipspaces();
@@ -740,7 +765,7 @@ static int write_bin_array(FILE *out,
   fputc('b', out);
   fputc((char)BINARY_FORMAT_VERSION, out);
   fwrite(&rank, sizeof(int8_t), 1, out);
-  fputs(elem_type->binname, out);
+  fwrite(elem_type->binname, 4, 1, out);
   if (shape != NULL) {
     fwrite(shape, sizeof(int64_t), (size_t)rank, out);
   }
