@@ -721,7 +721,7 @@ static int write_bin_array(FILE *out,
   fputc('b', out);
   fputc((char)BINARY_FORMAT_VERSION, out);
   fwrite(&rank, sizeof(int8_t), 1, out);
-  fputs(elem_type->binname, out);
+  fwrite(elem_type->binname, 4, 1, out);
   if (shape != NULL) {
     fwrite(shape, sizeof(int64_t), (size_t)rank, out);
   }
