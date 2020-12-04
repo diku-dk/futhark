@@ -230,6 +230,7 @@ printStm (OpaqueValue desc _) _ =
   [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
   printPrimStm [C.cexp|OUTPUT|] e bt ept
+
 printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
   let values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
@@ -319,8 +320,8 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
     // We do not want to profile all the initialisation.
     $id:pause_profiling(ctx);
 
-
     stream_init(binary_output); 
+
     // Declare and read input.
     set_binary_mode(stdin);
     $items:(mconcat input_items)
@@ -459,6 +460,7 @@ int main(int argc, char** argv) {
   }
 
   stream_finish(binary_output);
+
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
   return 0;
