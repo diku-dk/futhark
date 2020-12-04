@@ -901,8 +901,13 @@ checkBasicOp (Copy e) =
   void $ checkArrIdent e
 checkBasicOp (Manifest perm arr) =
   checkBasicOp $ Rearrange perm arr -- Basically same thing!
-checkBasicOp (Assert e _ _) =
+checkBasicOp (Assert e (ErrorMsg parts) _) = do
   require [Prim Bool] e
+  mapM_ checkPart parts
+  where
+    checkPart ErrorString {} = return ()
+    checkPart (ErrorInt32 x) = require [Prim int32] x
+    checkPart (ErrorInt64 x) = require [Prim int64] x
 checkBasicOp (UnAcc acc ts) = do
   expected <- checkIfAccArr =<< checkArrIdent acc
   unless (expected == ts) $
