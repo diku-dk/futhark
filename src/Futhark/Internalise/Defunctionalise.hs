@@ -78,8 +78,12 @@ askEnv = asks snd
 isGlobal :: VName -> DefM a -> DefM a
 isGlobal v = local $ Arrow.first (S.insert v)
 
-replaceStaticValSizes :: M.Map VName SizeSubst -> StaticVal -> StaticVal
-replaceStaticValSizes orig_substs sv =
+replaceStaticValSizes ::
+  S.Set VName ->
+  M.Map VName SizeSubst ->
+  StaticVal ->
+  StaticVal
+replaceStaticValSizes globals orig_substs sv =
   case sv of
     _ | M.null orig_substs -> sv
     LambdaSV sizes param t e closure_env ->
@@ -95,13 +99,13 @@ replaceStaticValSizes orig_substs sv =
     Dynamic t ->
       Dynamic $ onType orig_substs t
     RecordSV fs ->
-      RecordSV $ map (fmap (replaceStaticValSizes orig_substs)) fs
+      RecordSV $ map (fmap (replaceStaticValSizes globals orig_substs)) fs
     SumSV c svs ts ->
-      SumSV c (map (replaceStaticValSizes orig_substs) svs) $
+      SumSV c (map (replaceStaticValSizes globals orig_substs) svs) $
         map (fmap $ map $ onType orig_substs) ts
     DynamicFun (e, sv1) sv2 ->
-      DynamicFun (onExp orig_substs e, replaceStaticValSizes orig_substs sv1) $
-        replaceStaticValSizes orig_substs sv2
+      DynamicFun (onExp orig_substs e, replaceStaticValSizes globals orig_substs sv1) $
+        replaceStaticValSizes globals orig_substs sv2
     IntrinsicSV ->
       IntrinsicSV
   where
@@ -115,7 +119,9 @@ replaceStaticValSizes orig_substs sv =
     -- If a size is replaced by a constant, then we remove it entirely.
     onSizeParam substs d =
       case M.lookup d substs of
-        Just (SubstNamed d') -> Just $ qualLeaf d'
+        Just (SubstNamed d')
+          | qualLeaf d' `S.member` globals -> Nothing
+          | otherwise -> Just $ qualLeaf d'
         Just (SubstConst _) -> Nothing
         Nothing -> Just d
 
@@ -180,7 +186,9 @@ replaceStaticValSizes orig_substs sv =
         . M.toList
 
     onBinding substs (Binding t bsv) =
-      Binding (second (onType substs) <$> t) (replaceStaticValSizes substs bsv)
+      Binding
+        (second (onType substs) <$> t)
+        (replaceStaticValSizes globals substs bsv)
 
     onAST :: ASTMappable x => M.Map VName SizeSubst -> x -> x
     onAST substs = runIdentity . astMap (tv substs)
@@ -249,8 +257,9 @@ lookupVar :: StructType -> SrcLoc -> VName -> DefM StaticVal
 lookupVar t loc x = do
   env <- askEnv
   case M.lookup x env of
-    Just (Binding (Just (dims, sv_t)) sv) ->
-      pure $ instStaticVal dims t sv_t sv
+    Just (Binding (Just (dims, sv_t)) sv) -> do
+      globals <- asks fst
+      pure $ instStaticVal globals dims t sv_t sv
     Just (Binding Nothing sv) ->
       pure sv
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
@@ -318,11 +327,11 @@ dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
     f (SubstNamed d) = Just $ qualLeaf d
     f _ = Nothing
 
-instStaticVal :: [VName] -> StructType -> StructType -> StaticVal -> StaticVal
-instStaticVal dim t sv_t sv =
+instStaticVal :: S.Set VName -> [VName] -> StructType -> StructType -> StaticVal -> StaticVal
+instStaticVal globals dim t sv_t sv =
   let isDim k _ = k `elem` dim
       substs = M.filterWithKey isDim $ dimMapping sv_t t
-   in replaceStaticValSizes substs sv
+   in replaceStaticValSizes globals substs sv
 
 defuncFun ::
   [TypeParam] ->
