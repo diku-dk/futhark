@@ -10,8 +10,6 @@ typedef int (*str_reader)(const char *, void*);
 FILE * OUTPUT;
 FILE * STREAM;
 
-static int binary_output = 0;
-
 struct array_reader {
   char* elems;
   int64_t n_elems_space;
@@ -538,7 +536,7 @@ static const struct primtype_info_t* primtypes[] = {
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #define CWD "/working/"
-static void stream_init() {
+static void stream_init(int bin_output) {
   EM_ASM(
     var fs = require('fs');
     fs.writeFileSync("temp.bin", fs.readFileSync("/dev/stdin"));
@@ -546,15 +544,15 @@ static void stream_init() {
     FS.mount(NODEFS, { root: '.' }, '/working');
   );
   STREAM = fopen(CWD"temp.bin", "r");
-  if (binary_output) {
+  if (bin_output) {
     OUTPUT = fopen(CWD"out.bin", "w");
   } else {
     OUTPUT = stdout;
   }
 }
 
-static void stream_finish() {
-  if (binary_output) {
+static void stream_finish(int bin_output) {
+  if (bin_output) {
   fclose(OUTPUT);
   EM_ASM(
     var fs = require('fs');
