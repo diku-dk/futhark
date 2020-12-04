@@ -370,7 +370,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
     $id:pause_profiling(ctx);
 
 
-    stream_init(); 
+    stream_init(binary_output); 
     // Declare and read input.
     set_binary_mode(stdin);
     $items:(mconcat input_items)
@@ -431,6 +431,7 @@ $esc:("#include <inttypes.h>")
 
 $esc:values_h
 
+static int binary_output = 0;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;
@@ -506,7 +507,7 @@ int main(int argc, char** argv) {
     free(report);
   }
 
-  stream_finish();
+  stream_finish(binary_output);
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
   return 0;
