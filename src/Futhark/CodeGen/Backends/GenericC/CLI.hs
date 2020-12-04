@@ -229,7 +229,8 @@ printStm :: ExternalValue -> C.Exp -> C.Stm
 printStm (OpaqueValue desc _) _ =
   [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
-  printPrimStm [C.cexp|stdout|] e bt ept
+  printPrimStm [C.cexp|OUTPUT|] e bt ept
+
 printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
   let values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
@@ -238,7 +239,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
         $ty:bt' *arr = calloc(sizeof($ty:bt'), $exp:num_elems);
         assert(arr != NULL);
         assert($id:values_array(ctx, $exp:e, arr) == 0);
-        write_array(stdout, binary_output, &$exp:(primTypeInfo bt ept), arr,
+        write_array(OUTPUT, binary_output, &$exp:(primTypeInfo bt ept), arr,
                     $id:shape_array(ctx, $exp:e), $int:rank);
         free(arr);
       }|]
@@ -250,7 +251,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
 printResult :: [(ExternalValue, C.Exp)] -> [C.Stm]
 printResult = concatMap f
   where
-    f (v, e) = [printStm v e, [C.cstm|printf("\n");|]]
+    f (v, e) = [printStm v e, [C.cstm|fprintf(OUTPUT, "\n");|]]
 
 cliEntryPoint ::
   Name ->
@@ -318,6 +319,8 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
 
     // We do not want to profile all the initialisation.
     $id:pause_profiling(ctx);
+
+    stream_init(binary_output); 
 
     // Declare and read input.
     set_binary_mode(stdin);
@@ -455,6 +458,8 @@ int main(int argc, char** argv) {
     fputs(report, stderr);
     free(report);
   }
+
+  stream_finish(binary_output);
 
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
