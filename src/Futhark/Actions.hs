@@ -183,7 +183,7 @@ compileCAction fcfg mode outpath =
 compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCtoWASMAction fcfg mode outpath =
   Action
-    { actionName = "Compile to to sequential C",
+    { actionName = "Compile to sequential C",
       actionDescription = "Compile to sequential C",
       actionProcedure = helper
     }
