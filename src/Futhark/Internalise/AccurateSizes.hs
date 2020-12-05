@@ -11,8 +11,8 @@ module Futhark.Internalise.AccurateSizes
 where
 
 import Control.Monad
-import qualified Data.Map.Strict as M
 import Data.List (find)
+import qualified Data.Map.Strict as M
 import Data.Maybe
 import Futhark.Construct
 import Futhark.IR.SOACS

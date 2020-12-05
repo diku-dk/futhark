@@ -811,7 +811,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
   ((loopstms, loopres), hoisted) <-
     enterLoop $
       consumeMerge $
-      bindMerge (zipWith withRes (ctx' ++ val') (bodyResult loopbody)) $
+        bindMerge (zipWith withRes (ctx' ++ val') (bodyResult loopbody)) $
           wrapbody $
             blockIf
               ( hasFree boundnames `orIf` isConsumed
