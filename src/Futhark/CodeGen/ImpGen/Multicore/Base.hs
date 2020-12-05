@@ -1,6 +1,5 @@
 module Futhark.CodeGen.ImpGen.Multicore.Base
-  ( toParam,
-    compileKBody,
+  ( compileKBody,
     extractAllocations,
     compileThreadResult,
     HostEnv (..),
@@ -51,15 +50,19 @@ segOpString SegRed {} = return "segred"
 segOpString SegScan {} = return "segscan"
 segOpString SegHist {} = return "seghist"
 
-toParam :: VName -> TypeBase shape u -> MulticoreGen Imp.Param
-toParam name (Prim pt) = return $ Imp.ScalarParam name pt
-toParam name (Mem space) = return $ Imp.MemParam name space
-toParam name Array {} = do
-  name_entry <- lookupVar name
+arrParam :: VName -> MulticoreGen Imp.Param
+arrParam arr = do
+  name_entry <- lookupVar arr
   case name_entry of
     ArrayVar _ (ArrayEntry (MemLocation mem _ _) _) ->
       return $ Imp.MemParam mem DefaultSpace
-    _ -> error $ "[toParam] Could not handle array for " ++ show name
+    _ -> error $ "arrParam: could not handle array " ++ show arr
+
+toParam :: VName -> TypeBase shape u -> MulticoreGen [Imp.Param]
+toParam name (Prim pt) = return [Imp.ScalarParam name pt]
+toParam name (Mem space) = return [Imp.MemParam name space]
+toParam _ (Acc arrs) = mapM arrParam arrs
+toParam name Array {} = pure <$> arrParam name
 
 getSpace :: SegOp () MCMem -> SegSpace
 getSpace (SegHist _ space _ _ _) = space
@@ -88,7 +91,7 @@ getReturnParams :: Pattern MCMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} = do
   let retvals = map patElemName $ patternElements pat
   retvals_ts <- mapM lookupType retvals
-  zipWithM toParam retvals retvals_ts
+  concat <$> zipWithM toParam retvals retvals_ts
 getReturnParams _ _ = return mempty
 
 renameSegBinOp :: [SegBinOp MCMem] -> MulticoreGen [SegBinOp MCMem]
@@ -129,7 +132,7 @@ freeParams :: Imp.Code -> [VName] -> MulticoreGen [Imp.Param]
 freeParams code names = do
   let freeVars = freeVariables code names
   ts <- mapM lookupType freeVars
-  zipWithM toParam freeVars ts
+  concat <$> zipWithM toParam freeVars ts
 
 -- | Arrays for storing group results.
 resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
