@@ -9,7 +9,6 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     decideScheduling',
     groupResultArrays,
     renameSegBinOp,
-    resultArrays,
     freeParams,
     renameHistOpLambda,
     atomicUpdateLocking,
@@ -133,15 +132,6 @@ freeParams code names = do
   let freeVars = freeVariables code names
   ts <- mapM lookupType freeVars
   concat <$> zipWithM toParam freeVars ts
-
--- | Arrays for storing group results.
-resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
-resultArrays s segops =
-  forM segops $ \(SegBinOp _ lam _ shape) ->
-    forM (lambdaReturnType lam) $ \t -> do
-      let ElemPrim pt = elemType t
-          full_shape = shape <> arrayShape t
-      sAllocArray s pt full_shape DefaultSpace
 
 -- | Arrays for storing group results shared between threads
 groupResultArrays ::

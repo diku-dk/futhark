@@ -35,6 +35,15 @@ yParams scan =
 lamBody :: SegBinOp MCMem -> Body MCMem
 lamBody = lambdaBody . segBinOpLambda
 
+-- Arrays for storing worker results.
+resultArrays :: String -> [SegBinOp MCMem] -> MulticoreGen [[VName]]
+resultArrays s segops =
+  forM segops $ \(SegBinOp _ lam _ shape) ->
+    forM (lambdaReturnType lam) $ \t -> do
+      let ElemPrim pt = elemType t
+          full_shape = shape <> arrayShape t
+      sAllocArray s pt full_shape DefaultSpace
+
 nonsegmentedScan ::
   Pattern MCMem ->
   SegSpace ->
