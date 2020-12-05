@@ -537,62 +537,63 @@ static const struct primtype_info_t* primtypes[] = {
 #include <emscripten.h>
 #define CWD "/working/"
 
-// Returns outputfile name
-static char * stream_init(int bin_output) {
-  char inputFile[L_tmpnam];
-  char * outputFile = malloc(L_tmpnam);
-  tmpnam(inputFile);
-  tmpnam(outputFile);
-  char * inputFileName = inputFile + 5;
-  char * outputFileName = outputFile + 5;
+static char * IFILE;
+static char * OFILE;
+static char IPATH[100];
+static char OPATH[100];
+
+static void stream_init(int bin_output) {
+  IFILE = tempnam(".", "in");
   EM_ASM({
     var fs = require('fs');
     fs.writeFileSync(UTF8ToString($0), fs.readFileSync("/dev/stdin"));
     FS.mkdir('/working');
     FS.mount(NODEFS, { root: '.' }, '/working');
-    }, inputFileName);
+    }, IFILE);
   FILE * file;
-  char workingInputPath[100];
-  int ret = snprintf(workingInputPath, sizeof(workingInputPath), "/working/%s", inputFileName);
-  if (ret < 0 || ret >= sizeof(workingInputPath)) {
+  int iret = snprintf(IPATH, sizeof(IPATH), "/working/%s", IFILE);
+  if (iret < 0 || iret >= sizeof(IPATH)) {
     futhark_panic(1, "Could not generate working file input\n");
   }
-  STREAM = fopen(workingInputPath, "r");
+  STREAM = fopen(IPATH, "r");
+
   if (bin_output) {
-    char workingOutputPath[100];
-    int outret = snprintf(workingOutputPath, sizeof(workingOutputPath), "/working/%s", outputFileName);
-    if (outret < 0 || outret >= sizeof(workingOutputPath)) {
+    OFILE = tempnam(".", "out");
+    int oret = snprintf(OPATH, sizeof(OPATH), "/working/%s", OFILE);
+    if (oret < 0 || oret >= sizeof(OPATH)) {
       futhark_panic(1, "Could not generate working file for output\n");
     }
-    OUTPUT = fopen(workingOutputPath, "w");
+    OUTPUT = fopen(OPATH, "w");
   } else {
     OUTPUT = stdout;
   }
-  return outputFile;
 }
 
-static void stream_finish(int bin_output, char * outputFile) {
+static void stream_finish(int bin_output) {
+  fclose(STREAM);
+  free(IFILE);
+  remove(IPATH);
+
   if (bin_output) {
-  fclose(OUTPUT);
-  EM_ASM({
-    var fs = require('fs');
-    fs.writeFileSync("/dev/stdout", fs.readFileSync(outputFile));
-    }, outputFile);
+    fclose(OUTPUT);
+    EM_ASM({
+      var fs = require('fs');
+      fs.writeFileSync("/dev/stdout", fs.readFileSync(UTF8ToString($0)));
+      }, OFILE);
+    remove(OPATH);
   }
-  // TODO delete files
-  free(outputFile);
+  free(OFILE);
 }
-
-
 
 #else
-static char * stream_init(int bin_output) {
+
+static void stream_init(int bin_output) {
   STREAM = stdin;
   OUTPUT = stdout;
-  return NULL;
 }
 
-static void stream_finish(int bin_output, char * outputFile) {}
+static void stream_finish(int bin_output) {}
+
 #endif
 
 static int read_is_binary() {

@@ -320,7 +320,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
     // We do not want to profile all the initialisation.
     $id:pause_profiling(ctx);
 
-    char * output_file_name = stream_init(binary_output); 
+    stream_init(binary_output); 
 
     // Declare and read input.
     set_binary_mode(stdin);
@@ -356,7 +356,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
       set_binary_mode(stdout);
     }
     $stms:printstms
-    stream_finish(binary_output, output_file_name);
+    stream_finish(binary_output);
     $stms:free_outputs
   }|],
         [C.cinit|{ .name = $string:entry_point_name,
