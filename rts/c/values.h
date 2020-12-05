@@ -535,34 +535,27 @@ static const struct primtype_info_t* primtypes[] = {
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#define CWD "/working/"
+#define CWD "/working"
 
-static char * IFILE;
-static char * OFILE;
-static char IPATH[100];
-static char OPATH[100];
+static char * IPATH;
+static char * OPATH;
 
 static void stream_init(int bin_output) {
-  IFILE = tempnam(".", "in");
-  EM_ASM({
-    var fs = require('fs');
-    fs.writeFileSync(UTF8ToString($0), fs.readFileSync("/dev/stdin"));
+  EM_ASM(
     FS.mkdir('/working');
     FS.mount(NODEFS, { root: '.' }, '/working');
-    }, IFILE);
-  FILE * file;
-  int iret = snprintf(IPATH, sizeof(IPATH), "/working/%s", IFILE);
-  if (iret < 0 || iret >= sizeof(IPATH)) {
-    futhark_panic(1, "Could not generate working file input\n");
-  }
+  );
+    
+  IPATH = tempnam(CWD, "in");
+  EM_ASM({
+    var fs = require('fs');
+    var iname = UTF8ToString($0);
+    fs.writeFileSync(iname, fs.readFileSync("/dev/stdin"));
+    }, IPATH + strlen(CWD"/"));
   STREAM = fopen(IPATH, "r");
 
   if (bin_output) {
-    OFILE = tempnam(".", "out");
-    int oret = snprintf(OPATH, sizeof(OPATH), "/working/%s", OFILE);
-    if (oret < 0 || oret >= sizeof(OPATH)) {
-      futhark_panic(1, "Could not generate working file for output\n");
-    }
+    OPATH = tempnam("/working", "out");
     OUTPUT = fopen(OPATH, "w");
   } else {
     OUTPUT = stdout;
@@ -571,18 +564,19 @@ static void stream_init(int bin_output) {
 
 static void stream_finish(int bin_output) {
   fclose(STREAM);
-  free(IFILE);
   remove(IPATH);
+  free(IPATH);
 
   if (bin_output) {
     fclose(OUTPUT);
     EM_ASM({
       var fs = require('fs');
-      fs.writeFileSync("/dev/stdout", fs.readFileSync(UTF8ToString($0)));
-      }, OFILE);
+      var oname = UTF8ToString($0);
+      fs.writeFileSync("/dev/stdout", fs.readFileSync(oname));
+      }, OPATH + strlen(CWD"/"));
     remove(OPATH);
+    free(OPATH);
   }
-  free(OFILE);
 }
 
 #else
