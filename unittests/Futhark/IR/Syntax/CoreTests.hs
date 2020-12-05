@@ -50,6 +50,9 @@ subShapeTests =
 instance Arbitrary NoUniqueness where
   arbitrary = pure NoUniqueness
 
+instance Arbitrary ElemType where
+  arbitrary = ElemPrim <$> arbitrary
+
 instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
   arbitrary =
     oneof
