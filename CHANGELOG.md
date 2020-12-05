@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed a simplification error for certain arithmetic expressions
     (#1194).
 
+  * Fixed a small uniqueness-related bug in the compilation of
+    operator section.
+
 ## [0.18.3]
 
 ### Fixed
