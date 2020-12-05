@@ -536,39 +536,63 @@ static const struct primtype_info_t* primtypes[] = {
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #define CWD "/working/"
-static void stream_init(int bin_output) {
-  EM_ASM(
+
+// Returns outputfile name
+static char * stream_init(int bin_output) {
+  char inputFile[L_tmpnam];
+  char * outputFile = malloc(L_tmpnam);
+  tmpnam(inputFile);
+  tmpnam(outputFile);
+  char * inputFileName = inputFile + 5;
+  char * outputFileName = outputFile + 5;
+  EM_ASM({
     var fs = require('fs');
-    fs.writeFileSync("temp.bin", fs.readFileSync("/dev/stdin"));
+    fs.writeFileSync(UTF8ToString($0), fs.readFileSync("/dev/stdin"));
     FS.mkdir('/working');
     FS.mount(NODEFS, { root: '.' }, '/working');
-  );
-  STREAM = fopen(CWD"temp.bin", "r");
+    }, inputFileName);
+  FILE * file;
+  char workingInputPath[100];
+  int ret = snprintf(workingInputPath, sizeof(workingInputPath), "/working/%s", inputFileName);
+  if (ret < 0 || ret >= sizeof(workingInputPath)) {
+    futhark_panic(1, "Could not generate working file input\n");
+  }
+  STREAM = fopen(workingInputPath, "r");
   if (bin_output) {
-    OUTPUT = fopen(CWD"out.bin", "w");
+    char workingOutputPath[100];
+    int outret = snprintf(workingOutputPath, sizeof(workingOutputPath), "/working/%s", outputFileName);
+    if (outret < 0 || outret >= sizeof(workingOutputPath)) {
+      futhark_panic(1, "Could not generate working file for output\n");
+    }
+    OUTPUT = fopen(workingOutputPath, "w");
   } else {
     OUTPUT = stdout;
   }
+  return outputFile;
 }
 
-static void stream_finish(int bin_output) {
+static void stream_finish(int bin_output, char * outputFile) {
   if (bin_output) {
   fclose(OUTPUT);
-  EM_ASM(
+  EM_ASM({
     var fs = require('fs');
-    fs.writeFileSync("/dev/stdout", fs.readFileSync("out.bin"))
-  );
-  // TODO Delete temp.bin, out.bin
+    fs.writeFileSync("/dev/stdout", fs.readFileSync(outputFile));
+    }, outputFile);
   }
+  // TODO delete files
+  free(outputFile);
 }
+
+
 
 #else
-static void stream_init() {
+static char * stream_init(int bin_output) {
   STREAM = stdin;
   OUTPUT = stdout;
+  return NULL;
 }
 
-static void stream_finish() {}
+static void stream_finish(int bin_output, char * outputFile) {}
 #endif
 
 static int read_is_binary() {

@@ -320,7 +320,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
     // We do not want to profile all the initialisation.
     $id:pause_profiling(ctx);
 
-    stream_init(binary_output); 
+    char * output_file_name = stream_init(binary_output); 
 
     // Declare and read input.
     set_binary_mode(stdin);
@@ -356,7 +356,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
       set_binary_mode(stdout);
     }
     $stms:printstms
-
+    stream_finish(binary_output, output_file_name);
     $stms:free_outputs
   }|],
         [C.cinit|{ .name = $string:entry_point_name,
@@ -458,8 +458,6 @@ int main(int argc, char** argv) {
     fputs(report, stderr);
     free(report);
   }
-
-  stream_finish(binary_output);
 
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);
