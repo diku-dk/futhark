@@ -679,30 +679,30 @@ static int write_str_array(FILE *out,
     }
 
     if (len*slice_size == 0) {
-      printf("empty(");
+      fprintf(out, "empty(");
       for (int64_t i = 0; i < rank; i++) {
-        printf("[%"PRIi64"]", shape[i]);
+        fprintf(out, "[%"PRIi64"]", shape[i]);
       }
-      printf("%s", elem_type->type_name);
-      printf(")");
+      fprintf(out, "%s", elem_type->type_name);
+      fprintf(out, ")");
     } else if (rank==1) {
-      putchar('[');
+      fputc('[', out);
       for (int64_t i = 0; i < len; i++) {
         elem_type->write_str(out, (void*) (data + i * elem_size));
         if (i != len-1) {
-          printf(", ");
+          fprintf(out, ", ");
         }
       }
-      putchar(']');
+      fputc(']', out);
     } else {
-      putchar('[');
+      fputc('[', out);
       for (int64_t i = 0; i < len; i++) {
         write_str_array(out, elem_type, data + i * slice_size * elem_size, shape+1, rank-1);
         if (i != len-1) {
-          printf(", ");
+          fprintf(out, ", ");
         }
       }
-      putchar(']');
+      fputc(']', out);
     }
   }
   return 0;
@@ -721,7 +721,7 @@ static int write_bin_array(FILE *out,
   fputc('b', out);
   fputc((char)BINARY_FORMAT_VERSION, out);
   fwrite(&rank, sizeof(int8_t), 1, out);
-  fputs(elem_type->binname, out);
+  fwrite(elem_type->binname, 4, 1, out);
   if (shape != NULL) {
     fwrite(shape, sizeof(int64_t), (size_t)rank, out);
   }
