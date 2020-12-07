@@ -19,8 +19,9 @@ import Futhark.CodeGen.ImpCode.MPI
 import qualified Futhark.CodeGen.ImpGen.MPI as ImpGen
 import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
-import qualified Language.C.Quote.OpenCL as C
-import qualified Language.C.Syntax as C
+import qualified Language.C.Quote.C as C
+
+--import qualified Language.C.Syntax as C
 
 compileProg ::
   MonadFreshNames m =>
@@ -32,18 +33,20 @@ compileProg =
         "mpi"
         operations
         generateContext
-        ""
+        mpi_includes
         [DefaultSpace]
         cliOptions
     )
     <=< ImpGen.compileProg
   where
+    mpi_includes =
+      unlines
+        ["#include <mpi.h>"]
     generateContext = do
       cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
         ( [C.cedecl|struct $id:s;|],
           [C.cedecl|struct $id:s { int debugging;
                                    int profiling;
-                                   int num_threads;
                                  };|]
         )
 
@@ -56,7 +59,6 @@ compileProg =
                                  }
                                  cfg->debugging = 0;
                                  cfg->profiling = 0;
-                                 cfg->num_threads = 0;
                                  return cfg;
                                }|]
         )
@@ -102,6 +104,8 @@ compileProg =
                           char *error;
                           int profiling_paused;
                           $sdecls:fields
+                          int world_size;
+                          int rank;
                         };|]
         )
 
@@ -120,6 +124,11 @@ compileProg =
                  create_lock(&ctx->lock);
                  $stms:init_fields
                  init_constants(ctx);
+
+                 MPI_Init (NULL, NULL);
+                 MPI_Comm_size(MPI_COMM_WORLD, &(ctx->world_size));
+                 MPI_Comm_rank(MPI_COMM_WORLD, &(ctx->rank));
+
                  return ctx;
               }|]
         )
@@ -130,6 +139,7 @@ compileProg =
                  free_constants(ctx);
                  free_lock(&ctx->lock);
                  free(ctx);
+                 MPI_Finalize();
                }|]
         )
 
