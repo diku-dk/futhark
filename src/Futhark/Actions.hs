@@ -134,7 +134,7 @@ runEMCC cpath outpath clags_def ldflags = do
     liftIO $
       runProgramWithExitCode
         cmdEMCC
-        ([cpath, "-o", outpath] ++ ["-lnodefs.js"])-- Add flags here if important later
+        ([cpath, "-o", outpath] ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"])-- Add flags here if important later
 
             -- ++ cmdCFLAGS cflags_def
             -- ++
