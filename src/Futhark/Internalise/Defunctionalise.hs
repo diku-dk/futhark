@@ -489,7 +489,7 @@ defuncExp (Coerce e0 tydecl t loc)
 defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
   (e1', sv1) <- defuncExp e1
   let env = matchPatternSV pat sv1
-      pat' = updatePattern' pat sv1
+      pat' = updatePattern pat sv1
   (e2', sv2) <- localEnv env $ defuncExp e2
   -- To maintain any sizes going out of scope, we need to compute the
   -- old size substitution induced by retext and also apply it to the
@@ -650,7 +650,7 @@ defuncExtExp (ExtLambda tparams pats e0 (closure, ret) loc) =
 
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
 defuncCase sv (CasePat p e loc) = do
-  let p' = updatePattern' p sv
+  let p' = updatePattern p sv
       env = matchPatternSV p sv
   (e', sv') <- localEnv env $ defuncExp e
   return (CasePat p' e' loc, sv')
@@ -1192,20 +1192,6 @@ updatePattern pat sv =
     "Tried to update pattern " ++ pretty pat
       ++ "to reflect the static value "
       ++ show sv
-
--- Like updatePattern, but discard sizes.  This is used for
--- let-bindings, where we might otherwise introduce sizes that are
--- free.
-updatePattern' :: Pattern -> StaticVal -> Pattern
-updatePattern' pat sv =
-  let pat' = updatePattern pat sv
-      (sizes, _) = typeFromSV sv
-      tr =
-        identityMapper
-          { mapOnPatternType =
-              pure . unscopeType (S.fromList sizes)
-          }
-   in runIdentity $ astMap tr pat'
 
 -- | Convert a record (or tuple) type to a record static value. This is used for
 -- "unwrapping" tuples and records that are nested in 'Dynamic' static values.
