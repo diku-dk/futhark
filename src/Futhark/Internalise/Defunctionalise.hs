@@ -28,7 +28,7 @@ import Language.Futhark.Traversals
 -- | An expression or an extended 'Lambda' (with size parameters,
 -- which AST lambdas do not support).
 data ExtExp
-  = ExtLambda [TypeParam] [Pattern] Exp (Aliasing, StructType) SrcLoc
+  = ExtLambda [VName] [Pattern] Exp (Aliasing, StructType) SrcLoc
   | ExtExp Exp
   deriving (Show)
 
@@ -334,29 +334,25 @@ instStaticVal globals dim t sv_t sv =
    in replaceStaticValSizes globals substs sv
 
 defuncFun ::
-  [TypeParam] ->
+  [VName] ->
   [Pattern] ->
   Exp ->
   (Aliasing, StructType) ->
   SrcLoc ->
   DefM (Exp, StaticVal)
 defuncFun tparams pats e0 (closure, ret) loc = do
-  when (any isTypeParam tparams) $
-    error $
-      "Received a lambda with type parameters at " ++ locStr loc
-        ++ ", but the defunctionalizer expects a monomorphic input program."
   -- Extract the first parameter of the lambda and "push" the
   -- remaining ones (if there are any) into the body of the lambda.
   let (dims, pat, ret', e0') = case pats of
         [] -> error "Received a lambda with no parameters."
-        [pat'] -> (map typeParamName tparams, pat', ret, ExtExp e0)
+        [pat'] -> (tparams, pat', ret, ExtExp e0)
         (pat' : pats') ->
           -- Split shape parameters into those that are determined by
           -- the first pattern, and those that are determined by later
           -- patterns.
-          let bound_by_pat = (`S.member` patternArraySizes pat') . typeParamName
+          let bound_by_pat = (`S.member` patternArraySizes pat')
               (pat_dims, rest_dims) = partition bound_by_pat tparams
-           in ( map typeParamName pat_dims,
+           in ( pat_dims,
                 pat',
                 foldFunType (map (toStruct . patternType) pats') ret,
                 ExtLambda rest_dims pats' e0 (closure, ret) loc
@@ -493,7 +489,7 @@ defuncExp (Coerce e0 tydecl t loc)
 defuncExp (LetPat pat e1 e2 (Info t, retext) loc) = do
   (e1', sv1) <- defuncExp e1
   let env = matchPatternSV pat sv1
-      pat' = updatePattern' pat sv1
+      pat' = updatePattern pat sv1
   (e2', sv2) <- localEnv env $ defuncExp e2
   -- To maintain any sizes going out of scope, we need to compute the
   -- old size substitution induced by retext and also apply it to the
@@ -654,7 +650,7 @@ defuncExtExp (ExtLambda tparams pats e0 (closure, ret) loc) =
 
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
 defuncCase sv (CasePat p e loc) = do
-  let p' = updatePattern' p sv
+  let p' = updatePattern p sv
       env = matchPatternSV p sv
   (e', sv') <- localEnv env $ defuncExp e
   return (CasePat p' e' loc, sv')
@@ -720,17 +716,17 @@ defuncDimIndex (DimSlice me1 me2 me3) =
 -- | Defunctionalize a let-bound function, while preserving parameters
 -- that have order 0 types (i.e., non-functional).
 defuncLet ::
-  [TypeParam] ->
+  [VName] ->
   [Pattern] ->
   Exp ->
   StructType ->
-  DefM ([TypeParam], [Pattern], Exp, StaticVal)
+  DefM ([VName], [Pattern], Exp, StaticVal)
 defuncLet dims ps@(pat : pats) body rettype
   | patternOrderZero pat = do
-    let bound_by_pat = (`S.member` patternDimNames pat) . typeParamName
+    let bound_by_pat = (`S.member` patternDimNames pat)
         -- Take care to not include more size parameters than necessary.
         (pat_dims, rest_dims) = partition bound_by_pat dims
-        env = envFromPattern pat <> envFromShapeParams pat_dims
+        env = envFromPattern pat <> envFromDimNames pat_dims
     (rest_dims', pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body rettype
     closure <- defuncFun dims ps body (mempty, rettype) mempty
     return
@@ -978,20 +974,6 @@ envFromPattern pat = case pat of
   PatternLit {} -> mempty
   PatternConstr _ _ ps _ -> foldMap envFromPattern ps
 
--- | Create an environment that binds the shape parameters.
-envFromShapeParams :: [TypeParamBase VName] -> Env
-envFromShapeParams = envFromDimNames . map dim
-  where
-    dim (TypeParamDim vn _) = vn
-    dim tparam =
-      error $
-        "The defunctionalizer expects a monomorphic input program,\n"
-          ++ "but it received a type parameter "
-          ++ pretty tparam
-          ++ " at "
-          ++ locStr (srclocOf tparam)
-          ++ "."
-
 envFromDimNames :: [VName] -> Env
 envFromDimNames = M.fromList . flip zip (repeat d)
   where
@@ -1211,20 +1193,6 @@ updatePattern pat sv =
       ++ "to reflect the static value "
       ++ show sv
 
--- Like updatePattern, but discard sizes.  This is used for
--- let-bindings, where we might otherwise introduce sizes that are
--- free.
-updatePattern' :: Pattern -> StaticVal -> Pattern
-updatePattern' pat sv =
-  let pat' = updatePattern pat sv
-      (sizes, _) = typeFromSV sv
-      tr =
-        identityMapper
-          { mapOnPatternType =
-              pure . unscopeType (S.fromList sizes)
-          }
-   in runIdentity $ astMap tr pat'
-
 -- | Convert a record (or tuple) type to a record static value. This is used for
 -- "unwrapping" tuples and records that are nested in 'Dynamic' static values.
 svFromType :: PatternType -> StaticVal
@@ -1253,7 +1221,12 @@ defuncValBind (ValBind entry name _ (Info (rettype, retext)) tparams params body
         attrs
         loc
 defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams params body _ _ _) = do
-  (tparams', params', body', sv) <- defuncLet tparams params body rettype
+  when (any isTypeParam tparams) $
+    error $
+      prettyName name ++ " has type parameters, "
+        ++ "but the defunctionaliser expects a monomorphic input program."
+  (tparams', params', body', sv) <-
+    defuncLet (map typeParamName tparams) params body rettype
   let rettype' = combineTypeShapes rettype $ anySizes $ toStruct $ typeOf body'
   (missing_dims, params'') <- sizesForAll params'
   return
@@ -1267,8 +1240,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (rettype, retext)) tparams p
                 retext
               ),
           valBindTypeParams =
-            tparams'
-              ++ map (`TypeParamDim` mempty) missing_dims,
+            map (`TypeParamDim` mempty) $ tparams' ++ missing_dims,
           valBindParams = params'',
           valBindBody = body'
         },
