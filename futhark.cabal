@@ -126,6 +126,8 @@ library
       Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
       Futhark.CodeGen.ImpGen.Kernels.Transpose
       Futhark.CodeGen.ImpGen.MPI
+      Futhark.CodeGen.ImpGen.MPI.Base
+      Futhark.CodeGen.ImpGen.MPI.SegMap
       Futhark.CodeGen.ImpGen.Multicore
       Futhark.CodeGen.ImpGen.Multicore.Base
       Futhark.CodeGen.ImpGen.Multicore.SegHist
