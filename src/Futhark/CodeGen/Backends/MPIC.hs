@@ -170,3 +170,5 @@ compileOp :: GC.OpCompiler MPIOp ()
 compileOp (CrashWithThisMessage s) = do
   GC.stm [C.cstm|fprintf(stderr, "%s\n", $string:s);|]
   GC.stm [C.cstm|exit(1);|]
+compileOp (Segop name params seq_task retvals) = pure ()
+compileOp (DistributedLoop s' i prebody body postbody free tid) = pure ()
