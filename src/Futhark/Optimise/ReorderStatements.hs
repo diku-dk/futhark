@@ -26,7 +26,10 @@ reorderBody alreadyDefined body@Body {bodyResult = res, bodyStms = stms} =
               mempty
         }
 
-reorderKernelBody :: Names -> KernelBody (Aliases KernelsMem) -> KernelBody (Aliases KernelsMem)
+reorderKernelBody ::
+  Names ->
+  KernelBody (Aliases KernelsMem) ->
+  KernelBody (Aliases KernelsMem)
 reorderKernelBody alreadyDefined kbody =
   let m = statementMap $ kernelBodyStms kbody
    in kbody
@@ -41,10 +44,9 @@ reorderKernelBody alreadyDefined kbody =
 -- | Computes a map from VName to the statement that defines it.
 statementMap :: Stms lore -> Map VName (Stm lore)
 statementMap stms =
-  toList stms
-    & concatMap
-      (\stm -> [(vname, stm) | vname <- patternNames $ stmPattern stm])
-    & Map.fromList
+  Map.fromList $ concatMap helper $ toList stms
+  where
+    helper stm = [(vname, stm) | vname <- patternNames $ stmPattern stm]
 
 -- | Attemts to reorder statements by maintaining a stack of `VName` we need to
 -- compute.
@@ -80,7 +82,7 @@ reorderStatements (x : xs) vtable m acc =
 mapper :: Names -> Mapper (Aliases KernelsMem) (Aliases KernelsMem) Identity
 mapper vtable =
   identityMapper
-    { mapOnBody = \_ b -> return $ reorderBody vtable b,
+    { mapOnBody = const $ return . reorderBody vtable,
       mapOnOp = onOp
     }
   where
