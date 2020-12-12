@@ -2,7 +2,6 @@
 
 //// Text I/O
 
-
 typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
 typedef int (*str_reader)(const char *, void*);
