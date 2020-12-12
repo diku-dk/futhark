@@ -5,7 +5,7 @@ on:
     branches: [ master ]
 
   push:
-    branches: [ master, wasm ]
+    branches: [ master ]
 
 jobs:
   build-linux-nix:
@@ -352,7 +352,7 @@ jobs:
     - run: |
         futhark test -C --no-terminal --backend=cuda --exclude=no_opencl tests examples
 
-  test-c:
+  test-wasm:
     runs-on: ubuntu-20.04
     needs: [build-linux-nix]
 
