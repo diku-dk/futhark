@@ -113,13 +113,13 @@ import Data.Bifunctor
 import Data.Bitraversable (bitraverse)
 import Data.Char
 import Data.Foldable
-import Data.List (genericLength, isPrefixOf, nub, sortOn)
+import Data.List (genericLength, isPrefixOf, sortOn)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Set as S
 import qualified Futhark.IR.Primitive as Primitive
-import Futhark.Util (maxinum)
+import Futhark.Util (maxinum, nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark.Syntax
 
@@ -140,13 +140,13 @@ nestedDims :: TypeBase (DimDecl VName) as -> [DimDecl VName]
 nestedDims t =
   case t of
     Array _ _ a ds ->
-      nub $ nestedDims (Scalar a) <> shapeDims ds
+      nubOrd $ nestedDims (Scalar a) <> shapeDims ds
     Scalar (Record fs) ->
-      nub $ foldMap nestedDims fs
+      nubOrd $ foldMap nestedDims fs
     Scalar Prim {} ->
       mempty
     Scalar (Sum cs) ->
-      nub $ foldMap (foldMap nestedDims) cs
+      nubOrd $ foldMap (foldMap nestedDims) cs
     Scalar (Arrow _ v t1 t2) ->
       filter (notV v) $ nestedDims t1 <> nestedDims t2
     Scalar (TypeVar _ _ _ targs) ->
