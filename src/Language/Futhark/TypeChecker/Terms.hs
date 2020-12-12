@@ -27,12 +27,13 @@ import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.Either
-import Data.List (find, foldl', isPrefixOf, nub, sort)
+import Data.List (find, foldl', isPrefixOf, sort)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import Futhark.IR.Primitive (intByteSize)
+import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
 import Language.Futhark hiding (unscopeType)
 import Language.Futhark.Semantic (includeToString)
@@ -1806,7 +1807,7 @@ checkExp (DoLoop _ mergepat mergeexp form loopbody NoInfo loc) =
           mapM_ dimToInit $ M.toList init_substs'
 
           mergepat'' <- applySubst (`M.lookup` init_substs') <$> updateTypes mergepat'
-          return (nub sparams, mergepat'')
+          return (nubOrd sparams, mergepat'')
 
     -- First we do a basic check of the loop body to figure out which of
     -- the merge parameters are being consumed.  For this, we first need

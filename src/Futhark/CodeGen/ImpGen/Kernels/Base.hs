@@ -35,7 +35,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
 where
 
 import Control.Monad.Except
-import Data.List (elemIndex, find, nub, zip4)
+import Data.List (elemIndex, find, zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -46,7 +46,7 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Util (chunks, dropLast, mapAccumLM, maybeNth, takeLast)
+import Futhark.Util (chunks, dropLast, mapAccumLM, maybeNth, nubOrd, takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
@@ -749,7 +749,7 @@ computeKernelUses ::
 computeKernelUses kernel_body bound_in_kernel = do
   let actually_free = freeIn kernel_body `namesSubtract` namesFromList bound_in_kernel
   -- Compute the variables that we need to pass to the kernel.
-  nub <$> readsFromSet actually_free
+  nubOrd <$> readsFromSet actually_free
 
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
 readsFromSet free =
