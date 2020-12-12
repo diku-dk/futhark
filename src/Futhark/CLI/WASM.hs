@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 
--- | @futhark c@
+-- | @futhark wasm@
 module Futhark.CLI.WASM (main) where
 
 import Futhark.Actions (compileCtoWASMAction)
