@@ -3,6 +3,9 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | This module implements an optimization that tries to statically reuse
+-- kernel-level allocations. The goal is to lower the static memory usage, which
+-- might allow more programs to run using intra-group parallelism.
 module Futhark.Optimise.ReuseAllocations (optimise) where
 
 import Control.Arrow (first)
@@ -24,9 +27,8 @@ import qualified Futhark.Optimise.ReuseAllocations.GreedyColoring as GreedyColor
 import Futhark.Pass (Pass (..), PassM)
 import qualified Futhark.Pass as Pass
 
+-- | A mapping from allocation names to their size and space.
 type Allocs = Map VName (SubExp, Space)
-
-type ReuseAllocsM = Binder KernelsMem
 
 getAllocsStm :: Stm KernelsMem -> Allocs
 getAllocsStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc se sp))) =
@@ -100,7 +102,7 @@ invertMap m =
     & fmap (swap . first Set.singleton)
     & foldr (uncurry $ Map.insertWith (<>)) mempty
 
-maxSubExp :: Set SubExp -> ReuseAllocsM SubExp
+maxSubExp :: MonadBinder m => Set SubExp -> m SubExp
 maxSubExp = helper . Set.toList
   where
     helper (s1 : s2 : sexps) = do
@@ -143,10 +145,14 @@ isKernelInvariant segop (Var vname, _) =
   not $ vname `Set.member` definedInSegOp segop
 isKernelInvariant _ _ = True
 
+-- | This is the actual optimiser. Given an interference graph and a `SegOp`,
+-- replace allocations and references to memory blocks inside with a (hopefully)
+-- reduced number of allocations.
 optimiseKernel ::
+  (MonadBinder m, Lore m ~ KernelsMem) =>
   Interference.Graph VName ->
   SegOp lvl KernelsMem ->
-  ReuseAllocsM (SegOp lvl KernelsMem)
+  m (SegOp lvl KernelsMem)
 optimiseKernel graph segop = do
   let allocs = Map.filter (isKernelInvariant segop) $ getAllocsSegOp segop
       (colorspaces, coloring) =
@@ -178,10 +184,12 @@ optimiseKernel graph segop = do
       SegHist lvl sp binops tps $
         body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
 
+-- | Helper function that modifies kernels found inside some statements.
 onKernels ::
-  (SegOp SegLevel KernelsMem -> ReuseAllocsM (SegOp SegLevel KernelsMem)) ->
+  LocalScope KernelsMem m =>
+  (SegOp SegLevel KernelsMem -> m (SegOp SegLevel KernelsMem)) ->
   Stms KernelsMem ->
-  ReuseAllocsM (Stms KernelsMem)
+  m (Stms KernelsMem)
 onKernels f =
   mapM helper
   where
@@ -209,6 +217,7 @@ onKernels f =
     helper stm =
       inScopeOf stm $ return stm
 
+-- | Perform the reuse-allocations optimization.
 optimise :: Pass KernelsMem KernelsMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
