@@ -2,7 +2,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.Analysis.Interference (Graph, analyse, analyseKernels) where
+-- | Interference analysis for Futhark programs.
+module Futhark.Analysis.Interference (Graph, analyseKernels) where
 
 import Control.Monad.Reader
 import Data.Foldable (toList)
@@ -15,17 +16,26 @@ import qualified Data.Set as Set
 import Futhark.Analysis.LastUse (LastUseMap)
 import Futhark.IR.KernelsMem
 
+-- | The set of `VName` currently in use.
 type InUse = Names
 
+-- | The set of `VName` that are no longer in use.
 type LastUsed = Names
 
+-- | An interference graph. An element `(x, y)` in the set means that there is
+-- an undirected edge between `x` and `y`, and therefore the lifetimes of `x`
+-- and `y` overlap and they "interfere" with each other. We assume that pairs
+-- are always normalized, such that `x` < `y`, before inserting. This should
+-- prevent any duplicates. We also don't allow any pairs where `x == y`.
 type Graph a = Set (a, a)
 
+-- | Insert an edge between two values into the graph.
 insertEdge :: Ord a => a -> a -> Graph a -> Graph a
 insertEdge v1 v2 g
   | v1 == v2 = g
   | otherwise = Set.insert (min v1 v2, max v1 v2) g
 
+-- | Compute pairwise edges between each element of `ns1` and each element of `ns2`.
 cartesian :: Names -> Names -> Graph VName
 cartesian ns1 ns2 =
   [(min x y, max x y) | x <- namesToList ns1, y <- namesToList ns2]
@@ -184,6 +194,9 @@ analyseLambda ::
 analyseLambda lumap inuse (Lambda _ body _) =
   analyseBody lumap inuse body
 
+-- | Perform interference analysis on the given statements. The result is a
+-- triple of the names currently in use, names that hit their last use somewhere
+-- within, and the resulting graph.
 analyseKernels ::
   LocalScope KernelsMem m =>
   LastUseMap ->
@@ -208,18 +221,6 @@ analyseKernels lumap stms =
         analyseKernels lumap $ bodyStms body
     helper stm =
       inScopeOf stm $ return mempty
-
-analyse :: Prog KernelsMem -> Graph VName
-analyse prog =
-  let (lumap, _) = LastUse.analyseProg prog
-      (_, _, graph) =
-        foldMap
-          ( \f ->
-              runReader (analyseKernels lumap (bodyStms $ funDefBody f)) $
-                scopeOf f
-          )
-          $ progFuns prog
-   in graph
 
 nameInfoToMemInfo :: Mem lore => NameInfo lore -> MemBound NoUniqueness
 nameInfoToMemInfo info =

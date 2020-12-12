@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | Provides last-use analysis for Futhark programs.
 module Futhark.Analysis.LastUse (LastUseMap, analyseProg) where
 
 import Control.Arrow (first)
@@ -13,15 +14,22 @@ import Futhark.Analysis.Alias (aliasAnalysis)
 import Futhark.IR.Aliases
 import Futhark.IR.KernelsMem
 
--- | LastUseMap tells which names were last used in a given statement.
--- Statements are uniquely identified by the 'VName' of the first value
--- parameter in the statement pattern. 'Names' is the set of names last used.
+-- | `LastUseMap` tells which names were last used in a given statement.
+-- Statements are uniquely identified by the `VName` of the first value
+-- parameter in the statement pattern. `Names` is the set of names last used.
 type LastUseMap = Map VName Names
 
+-- | `LastUse` is a mapping from a `VName` to the statement identifying it's
+-- last use. `LastUseMap` is the inverse of `LastUse`.
 type LastUse = Map VName VName
 
+-- | `Used` is the set of `VName` that were used somewhere in a statement, body
+-- or otherwise.
 type Used = Names
 
+-- | Analyses a program to return a last-use map, mapping each simple statement
+-- in the program to the values that were last used within that statement, and
+-- the set of all `VName` that were used inside.
 analyseProg :: Prog KernelsMem -> (LastUseMap, Used)
 analyseProg prog =
   let consts =
