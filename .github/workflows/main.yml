@@ -375,7 +375,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        futhark test -c --backend=wasm --runner=node examples --no-tuning
+        futhark test -c --backend=wasm --runner=node --no-tuning --exclude=no_wasm tests examples
 
   test-tools:
     runs-on: ubuntu-20.04
