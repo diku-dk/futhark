@@ -602,7 +602,7 @@ $esc:("#else")
      return x == 0 ? 32 :  __builtin_ctz(x);
    }
    static typename int32_t $id:(funName' "ctz64") (typename int64_t x) {
-     return x == 0 ? 64 : __builtin_ctzl(x);
+     return x == 0 ? 64 : __builtin_ctzll(x);
    }
 $esc:("#endif")
                 |]
