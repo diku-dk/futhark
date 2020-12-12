@@ -27,7 +27,7 @@ import Language.Futhark.Traversals
 -- | An expression or an extended 'Lambda' (with size parameters,
 -- which AST lambdas do not support).
 data ExtExp
-  = ExtLambda [Pattern] Exp (Aliasing, StructType) SrcLoc
+  = ExtLambda [Pattern] Exp StructType SrcLoc
   | ExtExp Exp
   deriving (Show)
 
@@ -164,8 +164,8 @@ replaceStaticValSizes globals orig_substs sv =
 
     onExtExp substs (ExtExp e) =
       ExtExp $ onExp substs e
-    onExtExp substs (ExtLambda params e (als, t) loc) =
-      ExtLambda (map (onAST substs) params) (onExp substs e) (als, onType substs t) loc
+    onExtExp substs (ExtLambda params e t loc) =
+      ExtLambda (map (onAST substs) params) (onExp substs e) (onType substs t) loc
 
     onEnv substs =
       M.fromList
@@ -324,10 +324,10 @@ defuncFun ::
   [VName] ->
   [Pattern] ->
   Exp ->
-  (Aliasing, StructType) ->
+  StructType ->
   SrcLoc ->
   DefM (Exp, StaticVal)
-defuncFun tparams pats e0 (closure, ret) loc = do
+defuncFun tparams pats e0 ret loc = do
   -- Extract the first parameter of the lambda and "push" the
   -- remaining ones (if there are any) into the body of the lambda.
   let (pat, ret', e0') = case pats of
@@ -336,14 +336,14 @@ defuncFun tparams pats e0 (closure, ret) loc = do
         (pat' : pats') ->
           ( pat',
             foldFunType (map (toStruct . patternType) pats') ret,
-            ExtLambda pats' e0 (closure, ret) loc
+            ExtLambda pats' e0 ret loc
           )
 
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   let used =
-        FV.freeVars (Lambda pats e0 Nothing (Info (closure, ret)) loc)
+        FV.freeVars (Lambda pats e0 Nothing (Info (mempty, ret)) loc)
           `FV.without` S.fromList tparams
   used_env <- restrictEnvTo used
 
@@ -488,8 +488,8 @@ defuncExp e@Apply {} = defuncApply 0 e
 defuncExp (Negate e0 loc) = do
   (e0', sv) <- defuncExp e0
   return (Negate e0' loc, sv)
-defuncExp (Lambda pats e0 _ (Info (closure, ret)) loc) =
-  defuncFun [] pats e0 (closure, ret) loc
+defuncExp (Lambda pats e0 _ (Info (_, ret)) loc) =
+  defuncFun [] pats e0 ret loc
 -- Operator sections are expected to be converted to lambda-expressions
 -- by the monomorphizer, so they should no longer occur at this point.
 defuncExp OpSection {} = error "defuncExp: unexpected operator section."
@@ -614,8 +614,8 @@ defuncExp' = fmap fst . defuncExp
 
 defuncExtExp :: ExtExp -> DefM (Exp, StaticVal)
 defuncExtExp (ExtExp e) = defuncExp e
-defuncExtExp (ExtLambda pats e0 (closure, ret) loc) =
-  defuncFun [] pats e0 (closure, ret) loc
+defuncExtExp (ExtLambda pats e0 ret loc) =
+  defuncFun [] pats e0 ret loc
 
 defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
 defuncCase sv (CasePat p e loc) = do
@@ -697,7 +697,7 @@ defuncLet dims ps@(pat : pats) body rettype
         (pat_dims, rest_dims) = partition bound_by_pat dims
         env = envFromPattern pat <> envFromDimNames pat_dims
     (rest_dims', pats', body', sv) <- localEnv env $ defuncLet rest_dims pats body rettype
-    closure <- defuncFun dims ps body (mempty, rettype) mempty
+    closure <- defuncFun dims ps body rettype mempty
     return
       ( pat_dims ++ rest_dims',
         pat : pats',
@@ -705,7 +705,7 @@ defuncLet dims ps@(pat : pats) body rettype
         DynamicFun closure sv
       )
   | otherwise = do
-    (e, sv) <- defuncFun dims ps body (mempty, rettype) mempty
+    (e, sv) <- defuncFun dims ps body rettype mempty
     return ([], [], e, sv)
 defuncLet _ [] body rettype = do
   (body', sv) <- defuncExp body
