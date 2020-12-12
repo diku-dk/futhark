@@ -5,7 +5,7 @@ on:
     branches: [ master ]
 
   push:
-    branches: [ master ]
+    branches: [ master, wasm ]
 
 jobs:
   build-linux-nix:
