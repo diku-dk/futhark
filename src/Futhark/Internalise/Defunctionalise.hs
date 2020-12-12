@@ -75,6 +75,19 @@ askEnv = asks snd
 isGlobal :: VName -> DefM a -> DefM a
 isGlobal v = local $ Arrow.first (S.insert v)
 
+replaceTypeSizes ::
+  M.Map VName SizeSubst ->
+  TypeBase (DimDecl VName) als ->
+  TypeBase (DimDecl VName) als
+replaceTypeSizes substs = first onDim
+  where
+    onDim (NamedDim v) =
+      case M.lookup (qualLeaf v) substs of
+        Just (SubstNamed v') -> NamedDim v'
+        Just (SubstConst d) -> ConstDim d
+        Nothing -> NamedDim v
+    onDim d = d
+
 replaceStaticValSizes ::
   S.Set VName ->
   M.Map VName SizeSubst ->
@@ -89,16 +102,16 @@ replaceStaticValSizes globals orig_substs sv =
               S.fromList (M.keys closure_env)
        in LambdaSV
             (onAST substs param)
-            (onType substs t)
+            (replaceTypeSizes substs t)
             (onExtExp substs e)
             (onEnv orig_substs closure_env) --intentional
     Dynamic t ->
-      Dynamic $ onType orig_substs t
+      Dynamic $ replaceTypeSizes orig_substs t
     RecordSV fs ->
       RecordSV $ map (fmap (replaceStaticValSizes globals orig_substs)) fs
     SumSV c svs ts ->
       SumSV c (map (replaceStaticValSizes globals orig_substs) svs) $
-        map (fmap $ map $ onType orig_substs) ts
+        map (fmap $ map $ replaceTypeSizes orig_substs) ts
     DynamicFun (e, sv1) sv2 ->
       DynamicFun (onExp orig_substs e, replaceStaticValSizes globals orig_substs sv1) $
         replaceStaticValSizes globals orig_substs sv2
@@ -107,10 +120,16 @@ replaceStaticValSizes globals orig_substs sv =
   where
     tv substs =
       identityMapper
-        { mapOnPatternType = pure . onType substs,
-          mapOnStructType = pure . onType substs,
-          mapOnExp = pure . onExp substs
+        { mapOnPatternType = pure . replaceTypeSizes substs,
+          mapOnStructType = pure . replaceTypeSizes substs,
+          mapOnExp = pure . onExp substs,
+          mapOnName = pure . onName substs
         }
+
+    onName substs v =
+      case M.lookup v substs of
+        Just (SubstNamed v') -> qualLeaf v'
+        _ -> v
 
     onExp substs (Var v t loc) =
       case M.lookup (qualLeaf v) substs of
@@ -119,14 +138,14 @@ replaceStaticValSizes globals orig_substs sv =
         Just (SubstConst d) ->
           Literal (SignedValue (Int64Value (fromIntegral d))) loc
         Nothing ->
-          Var v (onType substs <$> t) loc
+          Var v (replaceTypeSizes substs <$> t) loc
     onExp substs (Coerce e tdecl t loc) =
-      Coerce (onExp substs e) tdecl' (first (fmap (onType substs)) t) loc
+      Coerce (onExp substs e) tdecl' (first (fmap (replaceTypeSizes substs)) t) loc
       where
         tdecl' =
           TypeDecl
             { declaredType = onTypeExp substs $ declaredType tdecl,
-              expandedType = onType substs <$> expandedType tdecl
+              expandedType = replaceTypeSizes substs <$> expandedType tdecl
             }
     onExp substs e = onAST substs e
 
@@ -165,7 +184,7 @@ replaceStaticValSizes globals orig_substs sv =
     onExtExp substs (ExtExp e) =
       ExtExp $ onExp substs e
     onExtExp substs (ExtLambda params e t loc) =
-      ExtLambda (map (onAST substs) params) (onExp substs e) (onType substs t) loc
+      ExtLambda (map (onAST substs) params) (onExp substs e) (replaceTypeSizes substs t) loc
 
     onEnv substs =
       M.fromList
@@ -174,20 +193,11 @@ replaceStaticValSizes globals orig_substs sv =
 
     onBinding substs (Binding t bsv) =
       Binding
-        (second (onType substs) <$> t)
+        (second (replaceTypeSizes substs) <$> t)
         (replaceStaticValSizes globals substs bsv)
 
     onAST :: ASTMappable x => M.Map VName SizeSubst -> x -> x
     onAST substs = runIdentity . astMap (tv substs)
-
-    onType substs = first onDim
-      where
-        onDim (NamedDim v) =
-          case M.lookup (qualLeaf v) substs of
-            Just (SubstNamed v') -> NamedDim v'
-            Just (SubstConst d) -> ConstDim d
-            Nothing -> NamedDim v
-        onDim d = d
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names and types.
@@ -246,7 +256,7 @@ lookupVar t loc x = do
   case M.lookup x env of
     Just (Binding (Just (dims, sv_t)) sv) -> do
       globals <- asks fst
-      pure $ instStaticVal globals dims t sv_t sv
+      instStaticVal globals dims t sv_t sv
     Just (Binding Nothing sv) ->
       pure sv
     Nothing -- If the variable is unknown, it may refer to the 'intrinsics'
@@ -314,11 +324,55 @@ dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
     f (SubstNamed d) = Just $ qualLeaf d
     f _ = Nothing
 
-instStaticVal :: S.Set VName -> [VName] -> StructType -> StructType -> StaticVal -> StaticVal
-instStaticVal globals dim t sv_t sv =
-  let isDim k _ = k `elem` dim
-      substs = M.filterWithKey isDim $ dimMapping sv_t t
-   in replaceStaticValSizes globals substs sv
+sizesToRename :: StaticVal -> S.Set VName
+sizesToRename (DynamicFun (_, sv1) sv2) =
+  sizesToRename sv1 <> sizesToRename sv2
+sizesToRename IntrinsicSV =
+  mempty
+sizesToRename Dynamic {} =
+  mempty
+sizesToRename (RecordSV fs) =
+  foldMap (sizesToRename . snd) fs
+sizesToRename (SumSV _ svs _) =
+  foldMap sizesToRename svs
+sizesToRename (LambdaSV param _ _ _) =
+  patternDimNames param
+    <> S.map identName (S.filter couldBeSize $ patternIdents param)
+  where
+    couldBeSize ident =
+      unInfo (identType ident) == Scalar (Prim (Signed Int64))
+
+-- When we instantiate a polymorphic StaticVal, we rename all the
+-- sizes to avoid name conflicts later on.  This is a bit of a hack...
+instStaticVal ::
+  MonadFreshNames m =>
+  S.Set VName ->
+  [VName] ->
+  StructType ->
+  StructType ->
+  StaticVal ->
+  m StaticVal
+instStaticVal globals dims t sv_t sv = do
+  fresh_substs <- mkSubsts $ S.toList $ S.fromList dims <> sizesToRename sv
+
+  let dims' = map (onName fresh_substs) dims
+      isDim k _ = k `elem` dims'
+      dim_substs =
+        M.filterWithKey isDim $ dimMapping (replaceTypeSizes fresh_substs sv_t) t
+      replace (SubstNamed k) = fromMaybe (SubstNamed k) $ M.lookup (qualLeaf k) dim_substs
+      replace k = k
+      substs = M.map replace fresh_substs <> dim_substs
+
+  pure $ replaceStaticValSizes globals substs sv
+  where
+    mkSubsts names =
+      M.fromList . zip names . map (SubstNamed . qualName)
+        <$> mapM newName names
+
+    onName substs v =
+      case M.lookup v substs of
+        Just (SubstNamed v') -> qualLeaf v'
+        _ -> v
 
 defuncFun ::
   [VName] ->
