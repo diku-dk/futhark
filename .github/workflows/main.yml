@@ -8,6 +8,28 @@ on:
     branches: [ master, wasm ]
 
 jobs:
+  build-linux-nix:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v12
+
+    - uses: cachix/cachix-action@v8
+      with:
+        name: futhark
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+    - name: Build Futhark
+      run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+        path: result/futhark-nightly-linux-x86_64.tar.xz
+
   test-unit-and-style:
     runs-on: ubuntu-20.04
 
