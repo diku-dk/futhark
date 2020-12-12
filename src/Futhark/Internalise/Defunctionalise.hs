@@ -330,27 +330,21 @@ defuncFun ::
 defuncFun tparams pats e0 (closure, ret) loc = do
   -- Extract the first parameter of the lambda and "push" the
   -- remaining ones (if there are any) into the body of the lambda.
-  let (dims, pat, ret', e0') = case pats of
+  let (pat, ret', e0') = case pats of
         [] -> error "Received a lambda with no parameters."
-        [pat'] -> (tparams, pat', ret, ExtExp e0)
+        [pat'] -> (pat', ret, ExtExp e0)
         (pat' : pats') ->
-          -- Split shape parameters into those that are determined by
-          -- the first pattern, and those that are determined by later
-          -- patterns.
-          let bound_by_pat = (`S.member` patternArraySizes pat')
-              pat_dims = filter bound_by_pat tparams
-           in ( pat_dims,
-                pat',
-                foldFunType (map (toStruct . patternType) pats') ret,
-                ExtLambda pats' e0 (closure, ret) loc
-              )
+          ( pat',
+            foldFunType (map (toStruct . patternType) pats') ret,
+            ExtLambda pats' e0 (closure, ret) loc
+          )
 
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   let used =
         FV.freeVars (Lambda pats e0 Nothing (Info (closure, ret)) loc)
-          `FV.without` S.fromList dims
+          `FV.without` S.fromList tparams
   used_env <- restrictEnvTo used
 
   -- The closure parts that are sizes are proactively turned into size
