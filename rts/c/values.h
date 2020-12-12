@@ -8,7 +8,7 @@ typedef int (*bin_reader)(void*);
 typedef int (*str_reader)(const char *, void*);
 
 FILE * OUTPUT;
-FILE * STREAM;
+FILE * INPUT;
 
 struct array_reader {
   char* elems;
@@ -22,11 +22,11 @@ struct array_reader {
 static void skipspaces() {
   int c;
   do {
-    c = getc(STREAM);
+    c = getc(INPUT);
   } while (isspace(c));
 
   if (c != EOF) {
-    ungetc(c, STREAM);
+    ungetc(c, INPUT);
   }
 }
 
@@ -41,7 +41,7 @@ static void next_token(char *buf, int bufsize) {
 
   int i = 0;
   while (i < bufsize) {
-    int c = getc(STREAM);
+    int c = getc(INPUT);
     buf[i] = (char)c;
 
     if (c == EOF) {
@@ -49,7 +49,7 @@ static void next_token(char *buf, int bufsize) {
       return;
     } else if (c == '-' && i == 1 && buf[0] == '-') {
       // Line comment, so skip to end of line and start over.
-      for (; c != '\n' && c != EOF; c = getc(STREAM));
+      for (; c != '\n' && c != EOF; c = getc(INPUT));
       goto start;
     } else if (!constituent((char)c)) {
       if (i == 0) {
@@ -59,7 +59,7 @@ static void next_token(char *buf, int bufsize) {
         buf[i+1] = 0;
         return;
       } else {
-        ungetc(c, STREAM);
+        ungetc(c, INPUT);
         buf[i] = 0;
         return;
       }
@@ -474,7 +474,7 @@ static void set_binary_mode(FILE *f) {
 #endif
 
 static int read_byte(void* dest) {
-  int num_elems_read = fread(dest, 1, 1, STREAM);
+  int num_elems_read = fread(dest, 1, 1, INPUT);
   return num_elems_read == 1 ? 0 : 1;
 }
 
@@ -552,7 +552,7 @@ static void stream_init(int bin_output) {
     var iname = UTF8ToString($0);
     fs.writeFileSync(iname, fs.readFileSync("/dev/stdin"));
     }, IPATH + strlen(CWD"/"));
-  STREAM = fopen(IPATH, "r");
+  INPUT = fopen(IPATH, "r");
 
   if (bin_output) {
     OPATH = tempnam("/working", "out");
@@ -563,7 +563,7 @@ static void stream_init(int bin_output) {
 }
 
 static void stream_finish(int bin_output) {
-  fclose(STREAM);
+  fclose(INPUT);
   remove(IPATH);
   free(IPATH);
 
@@ -582,7 +582,7 @@ static void stream_finish(int bin_output) {
 #else
 
 static void stream_init(int bin_output) {
-  STREAM = stdin;
+  INPUT = stdin;
   OUTPUT = stdout;
 }
 
@@ -592,7 +592,7 @@ static void stream_finish(int bin_output) {}
 
 static int read_is_binary() {
   skipspaces();
-  int c = getc(STREAM);
+  int c = getc(INPUT);
   if (c == 'b') {
     int8_t bin_version;
     int ret = read_byte(&bin_version);
@@ -606,14 +606,14 @@ static int read_is_binary() {
 
     return 1;
   }
-  ungetc(c, STREAM);
+  ungetc(c, INPUT);
   return 0;
 }
 
 static const struct primtype_info_t* read_bin_read_type_enum() {
   char read_binname[4];
 
-  int num_matched = fscanf(STREAM, "%4c", read_binname);
+  int num_matched = fscanf(INPUT, "%4c", read_binname);
   if (num_matched != 1) { futhark_panic(1, "binary-input: Couldn't read element type.\n"); }
 
   const struct primtype_info_t **type = primtypes;
@@ -670,7 +670,7 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   int64_t elem_count = 1;
   for (int i=0; i<dims; i++) {
     int64_t bin_shape;
-    ret = fread(&bin_shape, sizeof(bin_shape), 1, STREAM);
+    ret = fread(&bin_shape, sizeof(bin_shape), 1, INPUT);
     if (ret != 1) {
       futhark_panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
     }
@@ -689,7 +689,7 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   }
   *data = tmp;
 
-  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, STREAM);
+  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, INPUT);
   if (num_elems_read != elem_count) {
     futhark_panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
           elem_count, num_elems_read);
@@ -821,7 +821,7 @@ static int read_scalar(const struct primtype_info_t *expected_type, void *dest) 
   } else {
     read_bin_ensure_scalar(expected_type);
     int64_t elem_size = expected_type->size;
-    int num_elems_read = fread(dest, (size_t)elem_size, 1, STREAM);
+    int num_elems_read = fread(dest, (size_t)elem_size, 1, INPUT);
     if (IS_BIG_ENDIAN) {
       flip_bytes(elem_size, (unsigned char*) dest);
     }
