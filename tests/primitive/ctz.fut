@@ -12,7 +12,7 @@
 
 -- ==
 -- entry: ctzi64
--- input { [0i64, 18446744073709551615i64, 9223372036854775808i64] } output { [64, 0, 63] }
+-- no_wasm input { [0i64, 18446744073709551615i64, 9223372036854775808i64] } output { [64, 0, 63] }
 
 entry ctzi8 = map i8.ctz
 entry ctzi16 = map i16.ctz
