@@ -9,12 +9,12 @@ import Data.Functor.Identity
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Sequence ((|>))
--- import Futhark.Analysis.Alias (aliasAnalysis)
--- import Futhark.IR.Aliases (removeProgAliases)
+import Futhark.Analysis.Alias (aliasAnalysis)
+import Futhark.IR.Aliases (Aliases, removeProgAliases)
 import Futhark.IR.KernelsMem
 import Futhark.Pass (Pass (..))
 
-reorderBody :: Names -> Body KernelsMem -> Body KernelsMem
+reorderBody :: Names -> Body (Aliases KernelsMem) -> Body (Aliases KernelsMem)
 reorderBody alreadyDefined body@Body {bodyResult = res, bodyStms = stms} =
   let m = statementMap stms
    in body
@@ -26,7 +26,7 @@ reorderBody alreadyDefined body@Body {bodyResult = res, bodyStms = stms} =
               mempty
         }
 
-reorderKernelBody :: Names -> KernelBody KernelsMem -> KernelBody KernelsMem
+reorderKernelBody :: Names -> KernelBody (Aliases KernelsMem) -> KernelBody (Aliases KernelsMem)
 reorderKernelBody alreadyDefined kbody =
   let m = statementMap $ kernelBodyStms kbody
    in kbody
@@ -57,9 +57,9 @@ statementMap stms =
 reorderStatements ::
   [VName] ->
   Names ->
-  Map VName (Stm KernelsMem) ->
-  Stms KernelsMem ->
-  Stms KernelsMem
+  Map VName (Stm (Aliases KernelsMem)) ->
+  Stms (Aliases KernelsMem) ->
+  Stms (Aliases KernelsMem)
 reorderStatements [] _ _ acc = acc
 reorderStatements (x : xs) vtable m acc =
   if x `nameIn` vtable
@@ -77,7 +77,7 @@ reorderStatements (x : xs) vtable m acc =
         -- vtable.
         reorderStatements xs (oneName x <> vtable) m acc
 
-mapper :: Names -> Mapper KernelsMem KernelsMem Identity
+mapper :: Names -> Mapper (Aliases KernelsMem) (Aliases KernelsMem) Identity
 mapper vtable =
   identityMapper
     { mapOnBody = \_ b -> return $ reorderBody vtable b,
@@ -103,7 +103,10 @@ mapper vtable =
 optimise :: Pass KernelsMem KernelsMem
 optimise =
   Pass "reorder statements" "reorder statements" $ \prog ->
-    return $ prog {progFuns = fmap funHelper $ progFuns prog}
+    let prog' = aliasAnalysis prog
+     in prog' {progFuns = fmap funHelper $ progFuns prog'}
+          & removeProgAliases
+          & return
   where
     funHelper f =
       f {funDefBody = reorderBody (freeIn $ funDefParams f) $ funDefBody f}
