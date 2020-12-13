@@ -1547,7 +1547,7 @@ compilePrimValue :: PrimValue -> C.Exp
 compilePrimValue (IntValue (Int8Value k)) = [C.cexp|(typename int8_t)$int:k|]
 compilePrimValue (IntValue (Int16Value k)) = [C.cexp|(typename int16_t)$int:k|]
 compilePrimValue (IntValue (Int32Value k)) = [C.cexp|$int:k|]
-compilePrimValue (IntValue (Int64Value k)) = [C.cexp|$llint:k|]
+compilePrimValue (IntValue (Int64Value k)) = [C.cexp|(typename int64_t)$int:k|]
 compilePrimValue (FloatValue (Float64Value x))
   | isInfinite x =
     if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
