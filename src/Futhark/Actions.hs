@@ -172,7 +172,7 @@ runEMCC cpath outpath clags_def ldflags = do
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCAction fcfg mode outpath =
   Action
-    { actionName = "Compile to to sequential C",
+    { actionName = "Compile to sequential C",
       actionDescription = "Compile to sequential C",
       actionProcedure = helper
     }

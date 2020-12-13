@@ -18,14 +18,14 @@ struct array_reader {
   str_reader elem_reader;
 };
 
-static void skipspaces() {
+static void skipspaces(FILE *f) {
   int c;
   do {
-    c = getc(INPUT);
+    c = getc(f);
   } while (isspace(c));
 
   if (c != EOF) {
-    ungetc(c, INPUT);
+    ungetc(c, f);
   }
 }
 
@@ -34,13 +34,13 @@ static int constituent(char c) {
 }
 
 // Produces an empty token only on EOF.
-static void next_token(char *buf, int bufsize) {
+static void next_token(FILE *f, char *buf, int bufsize) {
  start:
-  skipspaces();
+  skipspaces(f);
 
   int i = 0;
   while (i < bufsize) {
-    int c = getc(INPUT);
+    int c = getc(f);
     buf[i] = (char)c;
 
     if (c == EOF) {
@@ -48,7 +48,7 @@ static void next_token(char *buf, int bufsize) {
       return;
     } else if (c == '-' && i == 1 && buf[0] == '-') {
       // Line comment, so skip to end of line and start over.
-      for (; c != '\n' && c != EOF; c = getc(INPUT));
+      for (; c != '\n' && c != EOF; c = getc(f));
       goto start;
     } else if (!constituent((char)c)) {
       if (i == 0) {
@@ -58,7 +58,7 @@ static void next_token(char *buf, int bufsize) {
         buf[i+1] = 0;
         return;
       } else {
-        ungetc(c, INPUT);
+        ungetc(c, f);
         buf[i] = 0;
         return;
       }
@@ -70,8 +70,8 @@ static void next_token(char *buf, int bufsize) {
   buf[bufsize-1] = 0;
 }
 
-static int next_token_is(char *buf, int bufsize, const char* expected) {
-  next_token(buf, bufsize);
+static int next_token_is(FILE *f, char *buf, int bufsize, const char* expected) {
+  next_token(f, buf, bufsize);
   return strcmp(buf, expected) == 0;
 }
 
@@ -104,7 +104,8 @@ static int read_str_elem(char *buf, struct array_reader *reader) {
   return ret;
 }
 
-static int read_str_array_elems(char *buf, int bufsize,
+static int read_str_array_elems(FILE *f,
+                                char *buf, int bufsize,
                                 struct array_reader *reader, int64_t dims) {
   int ret;
   int first = 1;
@@ -113,7 +114,7 @@ static int read_str_array_elems(char *buf, int bufsize,
   int64_t *elems_read_in_dim = (int64_t*) calloc((size_t)dims, sizeof(int64_t));
 
   while (1) {
-    next_token(buf, bufsize);
+    next_token(f, buf, bufsize);
 
     if (strcmp(buf, "]") == 0) {
       if (knows_dimsize[cur_dim]) {
@@ -133,7 +134,7 @@ static int read_str_array_elems(char *buf, int bufsize,
         elems_read_in_dim[cur_dim]++;
       }
     } else if (strcmp(buf, ",") == 0) {
-      next_token(buf, bufsize);
+      next_token(f, buf, bufsize);
       if (strcmp(buf, "[") == 0) {
         if (cur_dim == dims - 1) {
           ret = 1;
@@ -183,7 +184,7 @@ static int read_str_array_elems(char *buf, int bufsize,
   return ret;
 }
 
-static int read_str_empty_array(char *buf, int bufsize,
+static int read_str_empty_array(FILE *f, char *buf, int bufsize,
                                 const char *type_name, int64_t *shape, int64_t dims) {
   if (strlen(buf) == 0) {
     // EOF
@@ -194,32 +195,32 @@ static int read_str_empty_array(char *buf, int bufsize,
     return 1;
   }
 
-  if (!next_token_is(buf, bufsize, "(")) {
+  if (!next_token_is(f, buf, bufsize, "(")) {
     return 1;
   }
 
   for (int i = 0; i < dims; i++) {
-    if (!next_token_is(buf, bufsize, "[")) {
+    if (!next_token_is(f, buf, bufsize, "[")) {
       return 1;
     }
 
-    next_token(buf, bufsize);
+    next_token(f, buf, bufsize);
 
     if (sscanf(buf, "%"SCNu64, (uint64_t*)&shape[i]) != 1) {
       return 1;
     }
 
-    if (!next_token_is(buf, bufsize, "]")) {
+    if (!next_token_is(f, buf, bufsize, "]")) {
       return 1;
     }
   }
 
-  if (!next_token_is(buf, bufsize, type_name)) {
+  if (!next_token_is(f, buf, bufsize, type_name)) {
     return 1;
   }
 
 
-  if (!next_token_is(buf, bufsize, ")")) {
+  if (!next_token_is(f, buf, bufsize, ")")) {
     return 1;
   }
 
@@ -234,7 +235,8 @@ static int read_str_empty_array(char *buf, int bufsize,
   return 1;
 }
 
-static int read_str_array(int64_t elem_size, str_reader elem_reader,
+static int read_str_array(FILE *f,
+                          int64_t elem_size, str_reader elem_reader,
                           const char *type_name,
                           void **data, int64_t *shape, int64_t dims) {
   int ret;
@@ -243,13 +245,13 @@ static int read_str_array(int64_t elem_size, str_reader elem_reader,
 
   int dims_seen;
   for (dims_seen = 0; dims_seen < dims; dims_seen++) {
-    if (!next_token_is(buf, sizeof(buf), "[")) {
+    if (!next_token_is(f, buf, sizeof(buf), "[")) {
       break;
     }
   }
 
   if (dims_seen == 0) {
-    return read_str_empty_array(buf, sizeof(buf), type_name, shape, dims);
+    return read_str_empty_array(f, buf, sizeof(buf), type_name, shape, dims);
   }
 
   if (dims_seen != dims) {
@@ -263,7 +265,7 @@ static int read_str_array(int64_t elem_size, str_reader elem_reader,
   reader.elems = (char*) realloc(*data, (size_t)(elem_size*reader.n_elems_space));
   reader.elem_reader = elem_reader;
 
-  ret = read_str_array_elems(buf, sizeof(buf), &reader, dims);
+  ret = read_str_array_elems(f, buf, sizeof(buf), &reader, dims);
 
   *data = reader.elems;
 
@@ -472,8 +474,8 @@ static void set_binary_mode(FILE *f) {
 }
 #endif
 
-static int read_byte(void* dest) {
-  int num_elems_read = fread(dest, 1, 1, INPUT);
+static int read_byte(FILE *f, void* dest) {
+  int num_elems_read = fread(dest, 1, 1, f);
   return num_elems_read == 1 ? 0 : 1;
 }
 
@@ -589,12 +591,12 @@ static void stream_finish(int bin_output) {}
 
 #endif
 
-static int read_is_binary() {
-  skipspaces();
-  int c = getc(INPUT);
+static int read_is_binary(FILE *f) {
+  skipspaces(f);
+  int c = getc(f);
   if (c == 'b') {
     int8_t bin_version;
-    int ret = read_byte(&bin_version);
+    int ret = read_byte(f, &bin_version);
 
     if (ret != 0) { futhark_panic(1, "binary-input: could not read version.\n"); }
 
@@ -605,7 +607,7 @@ static int read_is_binary() {
 
     return 1;
   }
-  ungetc(c, INPUT);
+  ungetc(c, f);
   return 0;
 }
 
@@ -628,9 +630,9 @@ static const struct primtype_info_t* read_bin_read_type_enum() {
   return NULL;
 }
 
-static void read_bin_ensure_scalar(const struct primtype_info_t *expected_type) {
+static void read_bin_ensure_scalar(FILE *f, const struct primtype_info_t *expected_type) {
   int8_t bin_dims;
-  int ret = read_byte(&bin_dims);
+  int ret = read_byte(f, &bin_dims);
   if (ret != 0) { futhark_panic(1, "binary-input: Couldn't get dims.\n"); }
 
   if (bin_dims != 0) {
@@ -648,11 +650,12 @@ static void read_bin_ensure_scalar(const struct primtype_info_t *expected_type) 
 
 //// High-level interface
 
-static int read_bin_array(const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
+static int read_bin_array(FILE *f,
+                            const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
   int ret;
 
   int8_t bin_dims;
-  ret = read_byte(&bin_dims);
+  ret = read_byte(f, &bin_dims);
   if (ret != 0) { futhark_panic(1, "binary-input: Couldn't get dims.\n"); }
 
   if (bin_dims != dims) {
@@ -669,7 +672,7 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   int64_t elem_count = 1;
   for (int i=0; i<dims; i++) {
     int64_t bin_shape;
-    ret = fread(&bin_shape, sizeof(bin_shape), 1, INPUT);
+    ret = fread(&bin_shape, sizeof(bin_shape), 1, f);
     if (ret != 1) {
       futhark_panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
     }
@@ -688,7 +691,8 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   }
   *data = tmp;
 
-  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, INPUT);
+  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
+  
   if (num_elems_read != elem_count) {
     futhark_panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
           elem_count, num_elems_read);
@@ -703,18 +707,18 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
   return 0;
 }
 
-static int read_array(const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
-  if (!read_is_binary()) {
-    return read_str_array(expected_type->size, (str_reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
+static int read_array(FILE *f, const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
+  if (!read_is_binary(f)) {
+    return read_str_array(f, expected_type->size, (str_reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
   } else {
-    return read_bin_array(expected_type, data, shape, dims);
+    return read_bin_array(f, expected_type, data, shape, dims);
   }
 }
 
-static int end_of_input() {
-  skipspaces();
+static int end_of_input(FILE *f) {
+  skipspaces(f);
   char token[2];
-  next_token(token, sizeof(token));
+  next_token(f, token, sizeof(token));
   if (strcmp(token, "") == 0) {
     return 0;
   } else {
@@ -812,15 +816,16 @@ static int write_array(FILE *out, int write_binary,
   }
 }
 
-static int read_scalar(const struct primtype_info_t *expected_type, void *dest) {
-  if (!read_is_binary()) {
+static int read_scalar(FILE *f,
+                       const struct primtype_info_t *expected_type, void *dest) {
+  if (!read_is_binary(f)) {
     char buf[100];
-    next_token(buf, sizeof(buf));
+    next_token(f, buf, sizeof(buf));
     return expected_type->read_str(buf, dest);
   } else {
-    read_bin_ensure_scalar(expected_type);
+    read_bin_ensure_scalar(f, expected_type);
     int64_t elem_size = expected_type->size;
-    int num_elems_read = fread(dest, (size_t)elem_size, 1, INPUT);
+    int num_elems_read = fread(dest, (size_t)elem_size, 1, f);
     if (IS_BIG_ENDIAN) {
       flip_bytes(elem_size, (unsigned char*) dest);
     }
