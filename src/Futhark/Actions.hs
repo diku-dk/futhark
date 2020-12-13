@@ -134,12 +134,12 @@ runEMCC cpath outpath clags_def ldflags = do
     liftIO $
       runProgramWithExitCode
         cmdEMCC
-        ([cpath, "-o", outpath] ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"])-- Add flags here if important later
+        ([cpath, "-o", outpath] ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"]) -- Add flags here if important later
 
-            -- ++ cmdCFLAGS cflags_def
-            -- ++
-            -- The default LDFLAGS are always added.
-            -- ldflags
+        -- ++ cmdCFLAGS cflags_def
+        -- ++
+        -- The default LDFLAGS are always added.
+        -- ldflags
         mempty
   case ret of
     Left err ->
@@ -152,7 +152,6 @@ runEMCC cpath outpath clags_def ldflags = do
           ++ gccerr -- possibly need to change this to emccerr
     Right (ExitSuccess, _, _) ->
       return ()
-
 
 -- | The @futhark c@ action.
 compileCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
