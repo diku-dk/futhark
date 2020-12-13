@@ -175,7 +175,7 @@ primTypeInfo Unit _ = [C.cexp|bool_info|]
 
 readPrimStm :: C.ToIdent a => a -> Int -> PrimType -> Signedness -> C.Stm
 readPrimStm place i t ept =
-  [C.cstm|if (read_scalar(stdin, &$exp:(primTypeInfo t ept), &$id:place) != 0) {
+  [C.cstm|if (read_scalar(INPUT, &$exp:(primTypeInfo t ept), &$id:place) != 0) {
             futhark_panic(1, "Error when reading input #%d of type %s (errno: %s).\n",
                           $int:i,
                           $exp:(primTypeInfo t ept).type_name,
@@ -221,7 +221,7 @@ readInput i (TransparentValue (ArrayValue _ _ t ept dims)) =
            typename int64_t $id:shape[$int:rank];
            $ty:t' *$id:arr = NULL;
            errno = 0;
-           if (read_array(stdin,
+           if (read_array(INPUT,
                           &$exp:(primTypeInfo t ept),
                           (void**) &$id:arr,
                           $id:shape,
@@ -372,10 +372,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
 
     stream_init(binary_output); 
     // Declare and read input.
-    set_binary_mode(stdin);
+    set_binary_mode(INPUT);
     $items:(mconcat input_items)
 
-    if (end_of_input(stdin) != 0) {
+    if (end_of_input(INPUT) != 0) {
       futhark_panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
     }
 
