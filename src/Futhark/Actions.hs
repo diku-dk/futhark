@@ -195,9 +195,9 @@ compileCtoWASMAction fcfg mode outpath =
 
       case mode of
         ToLibrary -> do
-          let (header, impl) = SequentialC.asLibrary cprog
-          liftIO $ writeFile hpath header
-          liftIO $ writeFile cpath impl
+          let (h, imp) = SequentialC.asLibrary cprog
+          liftIO $ writeFile hpath h
+          liftIO $ writeFile cpath imp
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
           runEMCC cpath outpath [] []
