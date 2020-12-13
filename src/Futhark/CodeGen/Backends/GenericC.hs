@@ -1544,10 +1544,10 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body _ _)
       return ([C.cparam|$ty:ty *$id:p_name|], [C.cexp|$id:p_name|])
 
 compilePrimValue :: PrimValue -> C.Exp
-compilePrimValue (IntValue (Int8Value k)) = [C.cexp|$int:k|]
-compilePrimValue (IntValue (Int16Value k)) = [C.cexp|$int:k|]
+compilePrimValue (IntValue (Int8Value k)) = [C.cexp|(typename int8_t)$int:k|]
+compilePrimValue (IntValue (Int16Value k)) = [C.cexp|(typename int16_t)$int:k|]
 compilePrimValue (IntValue (Int32Value k)) = [C.cexp|$int:k|]
-compilePrimValue (IntValue (Int64Value k)) = [C.cexp|$int:k|]
+compilePrimValue (IntValue (Int64Value k)) = [C.cexp|$llint:k|]
 compilePrimValue (FloatValue (Float64Value x))
   | isInfinite x =
     if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
