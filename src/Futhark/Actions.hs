@@ -129,17 +129,18 @@ cmdEMCC :: String
 cmdEMCC = fromMaybe "emcc" $ lookup "emcc" unixEnvironment
 
 runEMCC :: String -> String -> [String] -> [String] -> FutharkM ()
-runEMCC cpath outpath clags_def ldflags = do
+runEMCC cpath outpath cflags_def ldflags = do
   ret <-
     liftIO $
       runProgramWithExitCode
         cmdEMCC
-        ([cpath, "-o", outpath] ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"]) -- Add flags here if important later
-
-        -- ++ cmdCFLAGS cflags_def
-        -- ++
-        -- The default LDFLAGS are always added.
-        -- ldflags
+        ( [cpath, "-o", outpath] 
+            ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"]
+            ++ cmdCFLAGS cflags_def
+            ++
+            -- The default LDFLAGS are always added.
+            ldflags
+        )
         mempty
   case ret of
     Left err ->
@@ -199,7 +200,7 @@ compileCtoWASMAction fcfg mode outpath =
           liftIO $ writeFile cpath imp
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          runEMCC cpath outpath [] []
+          runEMCC cpath outpath ["-O3"] ["-lm"]
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
