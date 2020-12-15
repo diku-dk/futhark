@@ -279,9 +279,12 @@ arraySizeInBytesExp t =
 arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   dims <- mapM dimAllocationSize (arrayDims t)
-  let dim_prod = product $ map pe64 dims
-      elm_size = elemSize t
-  return $ untyped $ dim_prod * elm_size
+  let dim_prod_i64 = product $ map pe64 dims
+      elm_size_i64 = elemSize t
+  return $
+    BinOpExp (SMax Int64) (ValueExp $ IntValue $ Int64Value $ 0) $
+      untyped $
+        dim_prod_i64 * elm_size_i64
 
 arraySizeInBytes :: Allocator lore m => Type -> m SubExp
 arraySizeInBytes = computeSize "bytes" <=< arraySizeInBytesExpM
