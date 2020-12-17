@@ -228,7 +228,7 @@ jobs:
 
     - run: |
         futhark test -c --backend=c tests examples --no-tuning
-        make -C libtests/c
+        make -C libtests/c -j
 
   test-multicore:
     runs-on: ubuntu-20.04
