@@ -1038,8 +1038,14 @@ allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
 prepareEntryInputs ::
   [ExternalValue] ->
   CompilerM op s ([(C.Param, C.Exp)], [C.BlockItem])
-prepareEntryInputs = collect' . zipWithM prepare [(0 :: Int) ..]
+prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
   where
+    arg_names = namesFromList $ concatMap evNames args
+    evNames (OpaqueValue _ vds) = map vdName vds
+    evNames (TransparentValue vd) = [vdName vd]
+    vdName (ArrayValue v _ _ _ _) = v
+    vdName (ScalarValue _ _ v) = v
+
     prepare pno (TransparentValue vd) = do
       let pname = "in" ++ show pno
       (ty, check) <- prepareValue [C.cexp|$id:pname|] vd
@@ -1068,11 +1074,12 @@ prepareEntryInputs = collect' . zipWithM prepare [(0 :: Int) ..]
       stm [C.cstm|$exp:mem = $exp:src->mem;|]
 
       let rank = length shape
-          maybeCopyDim (Var d) i =
-            ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
-              [C.cexp|$id:d == $exp:src->shape[$int:i]|]
-            )
-          maybeCopyDim (Constant x) i =
+          maybeCopyDim (Var d) i
+            | not $ d `nameIn` arg_names =
+              ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
+                [C.cexp|$id:d == $exp:src->shape[$int:i]|]
+              )
+          maybeCopyDim x i =
             ( Nothing,
               [C.cexp|$exp:x == $exp:src->shape[$int:i]|]
             )
@@ -1127,10 +1134,11 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
       stms $ zipWith maybeCopyDim shape [0 .. rank -1]
 
 onEntryPoint ::
+  [C.BlockItem] ->
   Name ->
   Function op ->
   CompilerM op s C.Definition
-onEntryPoint fname (Function _ outputs inputs _ results args) = do
+onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -1140,8 +1148,7 @@ onEntryPoint fname (Function _ outputs inputs _ results args) = do
   let entry_point_name = nameToString fname
   entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
 
-  (inputs', unpack_entry_inputs) <-
-    prepareEntryInputs args
+  (inputs', unpack_entry_inputs) <- prepareEntryInputs args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
 
   (entry_point_output_params, pack_entry_outputs) <-
@@ -1163,12 +1170,14 @@ onEntryPoint fname (Function _ outputs inputs _ results args) = do
          if (!($exp:(allTrue entry_point_input_checks))) {
            ret = 1;
            if (!ctx->error) {
-             ctx->error = msgprintf("Entry point arguments have invalid sizes.");
+             ctx->error = msgprintf("Error: entry point arguments have invalid sizes.");
            }
          } else {
            ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
 
            if (ret == 0) {
+             $items:get_consts
+
              $items:pack_entry_outputs
            }
          }
@@ -1363,7 +1372,7 @@ $edecls:entry_point_decls
 
       mapM_ earlyDecl memstructs
       entry_points <-
-        mapM (uncurry onEntryPoint) $ filter (functionEntry . snd) funs
+        mapM (uncurry (onEntryPoint get_consts)) $ filter (functionEntry . snd) funs
 
       extra
 
