@@ -459,9 +459,9 @@ simpleCall fname = Call (Var fname) . map Arg
 compileName :: VName -> String
 compileName = zEncodeString . pretty
 
-compileDim :: Imp.DimSize -> PyExp
-compileDim (Imp.Constant v) = compilePrimValue v
-compileDim (Imp.Var v) = Var $ compileName v
+compileDim :: Imp.DimSize -> CompilerM op s PyExp
+compileDim (Imp.Constant v) = pure $ compilePrimValue v
+compileDim (Imp.Var v) = compileVar v
 
 unpackDim :: PyExp -> Imp.DimSize -> Int32 -> CompilerM op s ()
 unpackDim arr_name (Imp.Constant c) i = do
@@ -480,7 +480,7 @@ unpackDim arr_name (Imp.Var var) i = do
       (BinOp "==" var' None)
       [Assign var' $ simpleCall "np.int64" [src]]
       [ Assert (BinOp "==" var' src) $
-          String "Entry point arguments have invalid sizes."
+          String "Error: entry point arguments have invalid sizes."
       ]
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
@@ -498,7 +498,8 @@ entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ep
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ bt ept dims)) = do
   mem' <- compileVar mem
   let cast = Cast mem' (compilePrimTypeExt bt ept)
-  return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
+  dims' <- mapM compileDim dims
+  return $ simpleCall "createArray" [cast, Tuple dims']
 
 badInput :: Int -> PyExp -> String -> PyStmt
 badInput i e t =

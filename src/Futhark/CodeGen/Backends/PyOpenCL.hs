@@ -410,11 +410,12 @@ staticOpenCLArray _ space _ _ =
 packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do
   mem' <- Py.compileVar mem
+  dims' <- mapM Py.compileDim dims
   return $
     Call
       (Var "cl.array.Array")
       [ Arg $ Var "self.queue",
-        Arg $ Tuple $ map Py.compileDim dims,
+        Arg $ Tuple dims',
         Arg $ Var $ Py.compilePrimTypeExt bt ept,
         ArgKeyword "data" mem'
       ]

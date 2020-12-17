@@ -498,9 +498,6 @@ compileInParam fparam = case paramDec fparam of
 
 data ArrayDecl = ArrayDecl VName PrimType MemLocation
 
-fparamSizes :: Typed dec => Param dec -> S.Set VName
-fparamSizes = S.fromList . subExpVars . arrayDims . paramType
-
 compileInParams ::
   Mem lore =>
   [FParam lore] ->
@@ -511,7 +508,6 @@ compileInParams params orig_epts = do
         splitAt (length params - sum (map entryPointSize orig_epts)) params
   (inparams, arrayds) <- partitionEithers <$> mapM compileInParam (ctx_params ++ val_params)
   let findArray x = find (isArrayDecl x) arrayds
-      sizes = mconcat $ map fparamSizes $ ctx_params ++ val_params
 
       summaries = M.fromList $ mapMaybe memSummary params
         where
@@ -529,11 +525,8 @@ compileInParams params orig_epts = do
           (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) -> do
             memspace <- findMemInfo mem
             Just $ Imp.ArrayValue mem memspace bt signedness shape
-          (_, Prim bt)
-            | paramName fparam `S.member` sizes ->
-              Nothing
-            | otherwise ->
-              Just $ Imp.ScalarValue bt signedness $ paramName fparam
+          (_, Prim bt) ->
+            Just $ Imp.ScalarValue bt signedness $ paramName fparam
           _ ->
             Nothing
 
