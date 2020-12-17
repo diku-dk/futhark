@@ -16,7 +16,7 @@ endif
 
 .PHONY: test clean
 
-test: do_test_a do_test_b do_test_c do_test_d do_test_e do_test_f
+test: do_test_a do_test_b do_test_c do_test_d do_test_e do_test_f do_test_g
 
 do_test_%: test_%
 	./test_$*
