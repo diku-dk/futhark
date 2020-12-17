@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Fixed a small uniqueness-related bug in the compilation of
     operator section.
 
+  * Sizes of opaque entry point arguments are now properly checked
+    (related to #1198).
+
 ## [0.18.3]
 
 ### Fixed
