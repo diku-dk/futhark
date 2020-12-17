@@ -53,7 +53,7 @@ import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.CodeGen.Backends.GenericPython.Options
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.IR.Primitive hiding (Bool)
-import Futhark.IR.Prop (isBuiltInFunction)
+import Futhark.IR.Prop (isBuiltInFunction, subExpVars)
 import Futhark.IR.Syntax (Space (..))
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
@@ -470,12 +470,18 @@ unpackDim arr_name (Imp.Constant c) i = do
   let constant_i = Integer $ toInteger i
   stm $
     Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) $
-      String "constant dimension wrong"
+      String "Entry point arguments have invalid sizes."
 unpackDim arr_name (Imp.Var var) i = do
   let shape_name = Field arr_name "shape"
       src = Index shape_name $ IdxExp $ Integer $ toInteger i
   var' <- compileVar var
-  stm $ Assign var' $ simpleCall "np.int64" [src]
+  stm $
+    If
+      (BinOp "==" var' None)
+      [Assign var' $ simpleCall "np.int64" [src]]
+      [ Assert (BinOp "==" var' src) $
+          String "Entry point arguments have invalid sizes."
+      ]
 
 entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
 entryPointOutput (Imp.OpaqueValue desc vs) =
@@ -550,6 +556,15 @@ badInputDim i e typ dimf =
           "Bad Python value passed",
           "Actual Futhark type: {}"
         ]
+
+declEntryPointInputSizes :: [Imp.ExternalValue] -> CompilerM op s ()
+declEntryPointInputSizes = mapM_ onSize . concatMap sizes
+  where
+    sizes (Imp.TransparentValue v) = valueSizes v
+    sizes (Imp.OpaqueValue _ vs) = concatMap valueSizes vs
+    valueSizes (Imp.ArrayValue _ _ _ _ dims) = subExpVars dims
+    valueSizes Imp.ScalarValue {} = []
+    onSize v = stm $ Assign (Var (compileName v)) None
 
 entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
 entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
@@ -750,11 +765,11 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
         return $ Just $ compileName name'
       _ -> return Nothing
 
-  prepareIn <-
-    collect $
-      mapM_ entryPointInput $
-        zip3 [0 ..] args $
-          map (Var . extValueDescName) args
+  prepareIn <- collect $ do
+    declEntryPointInputSizes args
+    mapM_ entryPointInput $
+      zip3 [0 ..] args $
+        map (Var . extValueDescName) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
   let argexps_lib = map (compileName . Imp.paramName) inputs

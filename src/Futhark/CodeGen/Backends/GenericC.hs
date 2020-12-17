@@ -1030,25 +1030,38 @@ opaqueToCType desc vds = do
       ct <- valueDescToCType vd
       return [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
-prepareEntryInputs :: [ExternalValue] -> CompilerM op s [C.Param]
-prepareEntryInputs = zipWithM prepare [(0 :: Int) ..]
+allTrue :: [C.Exp] -> C.Exp
+allTrue [] = [C.cexp|true|]
+allTrue [x] = x
+allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
+
+prepareEntryInputs ::
+  [ExternalValue] ->
+  CompilerM op s ([(C.Param, C.Exp)], [C.BlockItem])
+prepareEntryInputs = collect' . zipWithM prepare [(0 :: Int) ..]
   where
     prepare pno (TransparentValue vd) = do
       let pname = "in" ++ show pno
-      ty <- prepareValue [C.cexp|$id:pname|] vd
-      return [C.cparam|const $ty:ty $id:pname|]
+      (ty, check) <- prepareValue [C.cexp|$id:pname|] vd
+      return
+        ( [C.cparam|const $ty:ty $id:pname|],
+          allTrue check
+        )
     prepare pno (OpaqueValue desc vds) = do
       ty <- opaqueToCType desc vds
       let pname = "in" ++ show pno
           field i ScalarValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
           field i ArrayValue {} = [C.cexp|$id:pname->$id:(tupleField i)|]
-      zipWithM_ prepareValue (zipWith field [0 ..] vds) vds
-      return [C.cparam|const $ty:ty *$id:pname|]
+      checks <- map snd <$> zipWithM prepareValue (zipWith field [0 ..] vds) vds
+      return
+        ( [C.cparam|const $ty:ty *$id:pname|],
+          allTrue $ concat checks
+        )
 
     prepareValue src (ScalarValue pt signed name) = do
       let pt' = signedPrimTypeToCType signed pt
       stm [C.cstm|$id:name = $exp:src;|]
-      return pt'
+      return (pt', [])
     prepareValue src vd@(ArrayValue mem _ _ _ shape) = do
       ty <- valueDescToCType vd
 
@@ -1056,15 +1069,22 @@ prepareEntryInputs = zipWithM prepare [(0 :: Int) ..]
 
       let rank = length shape
           maybeCopyDim (Var d) i =
-            Just [C.cstm|$id:d = $exp:src->shape[$int:i];|]
-          maybeCopyDim _ _ = Nothing
+            ( Just [C.cstm|$id:d = $exp:src->shape[$int:i];|],
+              [C.cexp|$id:d == $exp:src->shape[$int:i]|]
+            )
+          maybeCopyDim (Constant x) i =
+            ( Nothing,
+              [C.cexp|$exp:x == $exp:src->shape[$int:i]|]
+            )
 
-      stms $ catMaybes $ zipWith maybeCopyDim shape [0 .. rank -1]
+      let (sets, checks) =
+            unzip $ zipWith maybeCopyDim shape [0 .. rank -1]
+      stms $ catMaybes sets
 
-      return [C.cty|$ty:ty*|]
+      return ([C.cty|$ty:ty*|], checks)
 
-prepareEntryOutputs :: [ExternalValue] -> CompilerM op s [C.Param]
-prepareEntryOutputs = zipWithM prepare [(0 :: Int) ..]
+prepareEntryOutputs :: [ExternalValue] -> CompilerM op s ([C.Param], [C.BlockItem])
+prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
   where
     prepare pno (TransparentValue vd) = do
       let pname = "out" ++ show pno
@@ -1120,10 +1140,12 @@ onEntryPoint fname (Function _ outputs inputs _ results args) = do
   let entry_point_name = nameToString fname
   entry_point_function_name <- publicName $ "entry_" ++ entry_point_name
 
-  (entry_point_input_params, unpack_entry_inputs) <-
-    collect' $ prepareEntryInputs args
+  (inputs', unpack_entry_inputs) <-
+    prepareEntryInputs args
+  let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
+
   (entry_point_output_params, pack_entry_outputs) <-
-    collect' $ prepareEntryOutputs results
+    prepareEntryOutputs results
 
   ctx_ty <- contextType
 
@@ -1138,10 +1160,17 @@ onEntryPoint fname (Function _ outputs inputs _ results args) = do
         [C.citems|
          $items:unpack_entry_inputs
 
-         int ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
+         if (!($exp:(allTrue entry_point_input_checks))) {
+           ret = 1;
+           if (!ctx->error) {
+             ctx->error = msgprintf("Entry point arguments have invalid sizes.");
+           }
+         } else {
+           ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
 
-         if (ret == 0) {
-           $items:pack_entry_outputs
+           if (ret == 0) {
+             $items:pack_entry_outputs
+           }
          }
         |]
 
@@ -1155,6 +1184,8 @@ onEntryPoint fname (Function _ outputs inputs _ results args) = do
             $params:entry_point_input_params) {
          $items:inputdecls
          $items:outputdecls
+
+         int ret = 0;
 
          $items:(criticalSection ops critical)
 
