@@ -175,7 +175,7 @@ primTypeInfo Unit _ = [C.cexp|bool_info|]
 
 readPrimStm :: C.ToIdent a => a -> Int -> PrimType -> Signedness -> C.Stm
 readPrimStm place i t ept =
-  [C.cstm|if (read_scalar(INPUT, &$exp:(primTypeInfo t ept), &$id:place) != 0) {
+  [C.cstm|if (read_scalar(input_file, &$exp:(primTypeInfo t ept), &$id:place) != 0) {
             futhark_panic(1, "Error when reading input #%d of type %s (errno: %s).\n",
                           $int:i,
                           $exp:(primTypeInfo t ept).type_name,
@@ -221,7 +221,7 @@ readInput i (TransparentValue (ArrayValue _ _ t ept dims)) =
            typename int64_t $id:shape[$int:rank];
            $ty:t' *$id:arr = NULL;
            errno = 0;
-           if (read_array(INPUT,
+           if (read_array(input_file,
                           &$exp:(primTypeInfo t ept),
                           (void**) &$id:arr,
                           $id:shape,
@@ -279,7 +279,7 @@ printStm :: ExternalValue -> C.Exp -> C.Stm
 printStm (OpaqueValue desc _) _ =
   [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept _)) e =
-  printPrimStm [C.cexp|OUTPUT|] e bt ept
+  printPrimStm [C.cexp|output_file|] e bt ept
 printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
   let values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
@@ -288,7 +288,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
         $ty:bt' *arr = calloc(sizeof($ty:bt'), $exp:num_elems);
         assert(arr != NULL);
         assert($id:values_array(ctx, $exp:e, arr) == 0);
-        write_array(OUTPUT, binary_output, &$exp:(primTypeInfo bt ept), arr,
+        write_array(output_file, binary_output, &$exp:(primTypeInfo bt ept), arr,
                     $id:shape_array(ctx, $exp:e), $int:rank);
         free(arr);
       }|]
@@ -300,7 +300,7 @@ printStm (TransparentValue (ArrayValue _ _ bt ept shape)) e =
 printResult :: [(ExternalValue, C.Exp)] -> [C.Stm]
 printResult = concatMap f
   where
-    f (v, e) = [printStm v e, [C.cstm|fprintf(OUTPUT, "\n");|]]
+    f (v, e) = [printStm v e, [C.cstm|fprintf(output_file, "\n");|]]
 
 cliEntryPoint ::
   Name ->
@@ -372,10 +372,10 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
 
     stream_init(binary_output); 
     // Declare and read input.
-    set_binary_mode(INPUT);
+    set_binary_mode(input_file);
     $items:(mconcat input_items)
 
-    if (end_of_input(INPUT) != 0) {
+    if (end_of_input(input_file) != 0) {
       futhark_panic(1, "Expected EOF on stdin after reading input for %s.\n", $string:(quote (pretty fname)));
     }
 
