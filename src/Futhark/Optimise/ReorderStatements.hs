@@ -15,8 +15,9 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Sequence ((|>))
+import qualified Data.Set as Set
 import Futhark.Analysis.Alias (aliasAnalysis)
-import Futhark.IR.Aliases (Aliases, removeProgAliases)
+import Futhark.IR.Aliases (Aliases, consumedInStm, removeProgAliases)
 import Futhark.IR.KernelsMem
 import Futhark.Pass (Pass (..), PassM, intraproceduralTransformationWithConsts)
 
@@ -72,25 +73,43 @@ reorderStatements ::
   Stms ReorderLore ->
   m (Stms ReorderLore)
 reorderStatements [] _ _ acc = return acc
-reorderStatements (x : xs) alreadyInserted m acc =
+reorderStatements (x : xs) alreadyInserted stm_map acc =
   if x `nameIn` alreadyInserted
-    then reorderStatements xs alreadyInserted m acc
-    else case Map.lookup x m of
+    then reorderStatements xs alreadyInserted stm_map acc
+    else case Map.lookup x stm_map of
       Just stm -> do
-        let frees = freeIn stm
-        mems <- mapM memInfo $ namesToList frees
-        case namesToList $ (frees <> namesFromList (catMaybes mems)) `namesSubtract` alreadyInserted of
+        frees <- freeWithMems stm
+        let consumed = consumedInStm stm
+        let stm_vnames_using_consumed =
+              ( foldl (<>) mempty $
+                  Map.mapWithKey
+                    ( \vname stm' ->
+                        if consumed `namesIntersect` freeIn stm'
+                          then oneName vname
+                          else mempty
+                    )
+                    stm_map
+              )
+                `namesSubtract` boundByStm stm
+        case namesToList $ stm_vnames_using_consumed <> (frees `namesSubtract` alreadyInserted) of
           [] -> do
             let alreadyInserted' = boundByStm stm <> alreadyInserted
             exp' <- mapExpM (mapper alreadyInserted') $ stmExp stm
             let acc' = acc |> stm {stmExp = exp'}
-            inScopeOf stm $ reorderStatements xs alreadyInserted' m acc'
-          todo -> reorderStatements (todo <> (x : xs)) alreadyInserted m acc
+            let stm_map' = stm_map `Map.withoutKeys` (Set.fromList $ namesToList $ boundByStm stm)
+            inScopeOf stm $ reorderStatements xs alreadyInserted' stm_map' acc'
+          todo -> reorderStatements (todo <> (x : xs)) alreadyInserted stm_map acc
       Nothing ->
         -- The variable doesn't appear in the statement-map. We therefore assume
         -- that it comes from outside this body, and that it is already in
         -- alreadyInserted.
-        reorderStatements xs (oneName x <> alreadyInserted) m acc
+        reorderStatements xs (oneName x <> alreadyInserted) stm_map acc
+
+freeWithMems :: LocalScope ReorderLore m => Stm ReorderLore -> m Names
+freeWithMems stm = do
+  let frees = freeIn stm
+  mems <- mapM memInfo $ namesToList frees
+  return $ frees <> namesFromList (catMaybes mems)
 
 mapper :: LocalScope ReorderLore m => Names -> Mapper ReorderLore ReorderLore m
 mapper alreadyInserted =
