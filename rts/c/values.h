@@ -6,8 +6,8 @@ typedef int (*writer)(FILE*, const void*);
 typedef int (*bin_reader)(void*);
 typedef int (*str_reader)(const char *, void*);
 
-FILE * OUTPUT;
-FILE * INPUT;
+static FILE * input_file;
+static FILE * output_file;
 
 struct array_reader {
   char* elems;
@@ -538,8 +538,8 @@ static const struct primtype_info_t* primtypes[] = {
 #include <emscripten.h>
 #define CWD "/working"
 
-static char * IPATH;
-static char * OPATH;
+static char * input_path;
+static char * output_path;
 
 static void stream_init(int bin_output) {
   EM_ASM(
@@ -547,44 +547,44 @@ static void stream_init(int bin_output) {
     FS.mount(NODEFS, { root: '.' }, '/working');
   );
     
-  IPATH = tempnam(CWD, "in");
+  input_path = tempnam(CWD, "in");
   EM_ASM({
     var fs = require('fs');
     var iname = UTF8ToString($0);
     fs.writeFileSync(iname, fs.readFileSync("/dev/stdin"));
-    }, IPATH + strlen(CWD"/"));
-  INPUT = fopen(IPATH, "r");
+    }, input_path + strlen(CWD"/"));
+  input_file = fopen(input_path, "r");
 
   if (bin_output) {
-    OPATH = tempnam("/working", "out");
-    OUTPUT = fopen(OPATH, "w");
+    output_path = tempnam("/working", "out");
+    output_file = fopen(output_path, "w");
   } else {
-    OUTPUT = stdout;
+    output_file = stdout;
   }
 }
 
 static void stream_finish(int bin_output) {
-  fclose(INPUT);
-  remove(IPATH);
-  free(IPATH);
+  fclose(input_file);
+  remove(input_path);
+  free(input_path);
 
   if (bin_output) {
-    fclose(OUTPUT);
+    fclose(output_file);
     EM_ASM({
       var fs = require('fs');
       var oname = UTF8ToString($0);
       fs.writeFileSync("/dev/stdout", fs.readFileSync(oname));
-      }, OPATH + strlen(CWD"/"));
-    remove(OPATH);
-    free(OPATH);
+      }, output_path + strlen(CWD"/"));
+    remove(output_path);
+    free(output_path);
   }
 }
 
 #else
 
 static void stream_init(int bin_output) {
-  INPUT = stdin;
-  OUTPUT = stdout;
+  input_file = stdin;
+  output_file = stdout;
 }
 
 static void stream_finish(int bin_output) {}
@@ -614,7 +614,7 @@ static int read_is_binary(FILE *f) {
 static const struct primtype_info_t* read_bin_read_type_enum() {
   char read_binname[4];
 
-  int num_matched = fscanf(INPUT, "%4c", read_binname);
+  int num_matched = fscanf(input_file, "%4c", read_binname);
   if (num_matched != 1) { futhark_panic(1, "binary-input: Couldn't read element type.\n"); }
 
   const struct primtype_info_t **type = primtypes;
