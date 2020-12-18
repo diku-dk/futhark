@@ -126,7 +126,7 @@ runCC cpath outpath cflags_def ldflags = do
       return ()
 
 cmdEMCC :: String
-cmdEMCC = fromMaybe "emcc" $ lookup "emcc" unixEnvironment
+cmdEMCC = "emcc"
 
 runEMCC :: String -> String -> [String] -> [String] -> FutharkM ()
 runEMCC cpath outpath cflags_def ldflags = do
