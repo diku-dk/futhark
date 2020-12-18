@@ -1170,7 +1170,7 @@ onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
          if (!($exp:(allTrue entry_point_input_checks))) {
            ret = 1;
            if (!ctx->error) {
-             ctx->error = msgprintf("Error: entry point arguments have invalid sizes.");
+             ctx->error = msgprintf("Error: entry point arguments have invalid sizes.\n");
            }
          } else {
            ret = $id:(funName fname)(ctx, $args:out_args, $args:in_args);
