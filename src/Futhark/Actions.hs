@@ -139,15 +139,12 @@ runCC cpath outpath cflags_def ldflags = do
     Right (ExitSuccess, _, _) ->
       return ()
 
-cmdEMCC :: String
-cmdEMCC = "emcc"
-
 runEMCC :: String -> String -> [String] -> [String] -> FutharkM ()
 runEMCC cpath outpath cflags_def ldflags = do
   ret <-
     liftIO $
       runProgramWithExitCode
-        cmdEMCC
+        "emcc"
         ( [cpath, "-o", outpath]
             ++ ["-lnodefs.js", "-s", "ALLOW_MEMORY_GROWTH=1"]
             ++ cmdCFLAGS cflags_def
@@ -158,10 +155,10 @@ runEMCC cpath outpath cflags_def ldflags = do
         mempty
   case ret of
     Left err ->
-      externalErrorS $ "Failed to run " ++ cmdEMCC ++ ": " ++ show err
+      externalErrorS $ "Failed to run emcc: " ++ show err
     Right (ExitFailure code, _, gccerr) ->
       externalErrorS $
-        cmdEMCC ++ " failed with code "
+        "emcc failed with code "
           ++ show code
           ++ ":\n"
           ++ gccerr -- possibly need to change this to emccerr
