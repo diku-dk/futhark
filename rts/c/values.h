@@ -692,7 +692,6 @@ static int read_bin_array(FILE *f,
   *data = tmp;
 
   int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
-  
   if (num_elems_read != elem_count) {
     futhark_panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
           elem_count, num_elems_read);
