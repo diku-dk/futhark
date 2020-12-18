@@ -23,11 +23,11 @@ import Futhark.Pass (Pass (..), PassM, intraproceduralTransformationWithConsts)
 type ReorderLore = Aliases KernelsMem
 
 reorderBody :: LocalScope ReorderLore m => Names -> Body ReorderLore -> m (Body ReorderLore)
-reorderBody alreadyDefined body@Body {bodyResult = res, bodyStms = stms} = do
+reorderBody alreadyInserted body@Body {bodyResult = res, bodyStms = stms} = do
   stms' <-
     reorderStatements
       (namesToList $ freeIn res)
-      alreadyDefined
+      alreadyInserted
       (statementMap stms)
       mempty
   return $
@@ -40,11 +40,11 @@ reorderKernelBody ::
   Names ->
   KernelBody ReorderLore ->
   m (KernelBody ReorderLore)
-reorderKernelBody alreadyDefined kbody = do
+reorderKernelBody alreadyInserted kbody = do
   stms' <-
     reorderStatements
       (namesToList $ freeIn $ kernelBodyResult kbody)
-      alreadyDefined
+      alreadyInserted
       (statementMap $ kernelBodyStms kbody)
       mempty
   return $ kbody {kernelBodyStms = stms'}
@@ -63,7 +63,7 @@ statementMap stms =
 -- `VName` used in the the computation of `x` and insert those at the front of
 -- the stack. If no no `VName` is required, insert the statement defining `x`
 -- and add `x` and all other `VName` defined in that statement to the set of
--- values in `vtable`.
+-- values in `alreadyInserted`.
 reorderStatements ::
   LocalScope ReorderLore m =>
   [VName] ->
@@ -72,32 +72,32 @@ reorderStatements ::
   Stms ReorderLore ->
   m (Stms ReorderLore)
 reorderStatements [] _ _ acc = return acc
-reorderStatements (x : xs) vtable m acc =
-  if x `nameIn` vtable
-    then reorderStatements xs vtable m acc
+reorderStatements (x : xs) alreadyInserted m acc =
+  if x `nameIn` alreadyInserted
+    then reorderStatements xs alreadyInserted m acc
     else case Map.lookup x m of
       Just stm -> do
         let frees = freeIn stm
         mems <- mapM memInfo $ namesToList frees
-        case namesToList $ (frees <> namesFromList (catMaybes mems)) `namesSubtract` vtable of
+        case namesToList $ (frees <> namesFromList (catMaybes mems)) `namesSubtract` alreadyInserted of
           [] -> do
-            let vtable' = boundByStm stm <> vtable
-            exp' <- mapExpM (mapper vtable') $ stmExp stm
+            let alreadyInserted' = boundByStm stm <> alreadyInserted
+            exp' <- mapExpM (mapper alreadyInserted') $ stmExp stm
             let acc' = acc |> stm {stmExp = exp'}
-            inScopeOf stm $ reorderStatements xs vtable' m acc'
-          todo -> reorderStatements (todo <> (x : xs)) vtable m acc
+            inScopeOf stm $ reorderStatements xs alreadyInserted' m acc'
+          todo -> reorderStatements (todo <> (x : xs)) alreadyInserted m acc
       Nothing ->
         -- The variable doesn't appear in the statement-map. We therefore assume
         -- that it comes from outside this body, and that it is already in
-        -- vtable.
-        reorderStatements xs (oneName x <> vtable) m acc
+        -- alreadyInserted.
+        reorderStatements xs (oneName x <> alreadyInserted) m acc
 
 mapper :: LocalScope ReorderLore m => Names -> Mapper ReorderLore ReorderLore m
-mapper vtable =
+mapper alreadyInserted =
   identityMapper
     { mapOnBody = \s b ->
         localScope s $
-          reorderBody vtable b,
+          reorderBody alreadyInserted b,
       mapOnOp = onOp,
       mapOnRetType = return,
       mapOnBranchType = return,
@@ -117,10 +117,10 @@ mapper vtable =
         }
 
     onKernelBody body = do
-      reorderKernelBody vtable body
+      reorderKernelBody alreadyInserted body
 
     onLambda lam = do
-      body' <- inScopeOf lam $ reorderBody vtable $ lambdaBody lam
+      body' <- inScopeOf lam $ reorderBody alreadyInserted $ lambdaBody lam
       return $ lam {lambdaBody = body'}
 
 optimise :: Pass KernelsMem KernelsMem
