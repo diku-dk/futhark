@@ -611,10 +611,10 @@ static int read_is_binary(FILE *f) {
   return 0;
 }
 
-static const struct primtype_info_t* read_bin_read_type_enum() {
+static const struct primtype_info_t* read_bin_read_type_enum(FILE *f) {
   char read_binname[4];
 
-  int num_matched = fscanf(input_file, "%4c", read_binname);
+  int num_matched = fscanf(f, "%4c", read_binname);
   if (num_matched != 1) { futhark_panic(1, "binary-input: Couldn't read element type.\n"); }
 
   const struct primtype_info_t **type = primtypes;
@@ -640,7 +640,7 @@ static void read_bin_ensure_scalar(FILE *f, const struct primtype_info_t *expect
           bin_dims);
   }
 
-  const struct primtype_info_t *bin_type = read_bin_read_type_enum();
+  const struct primtype_info_t *bin_type = read_bin_read_type_enum(f);
   if (bin_type != expected_type) {
     futhark_panic(1, "binary-input: Expected scalar of type %s but got scalar of type %s.\n",
           expected_type->type_name,
@@ -651,7 +651,7 @@ static void read_bin_ensure_scalar(FILE *f, const struct primtype_info_t *expect
 //// High-level interface
 
 static int read_bin_array(FILE *f,
-                            const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
+                          const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
   int ret;
 
   int8_t bin_dims;
@@ -663,7 +663,7 @@ static int read_bin_array(FILE *f,
           dims, bin_dims);
   }
 
-  const struct primtype_info_t *bin_primtype = read_bin_read_type_enum();
+  const struct primtype_info_t *bin_primtype = read_bin_read_type_enum(f);
   if (expected_type != bin_primtype) {
     futhark_panic(1, "binary-input: Expected %iD-array with element type '%s' but got %iD-array with element type '%s'.\n",
           dims, expected_type->type_name, dims, bin_primtype->type_name);

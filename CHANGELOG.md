@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.18.4]
+
+### Added
+
   * When compiling to binaries in the C-based backends, the compiler
     now respects the ``CFLAGS`` and ``CC`` environment variables.
 
@@ -18,10 +28,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `cuda` backend now uses a much faster single-pass `scan`
     implementation, although only for nonsegmented scans where the
     operator operates on scalars.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -40,6 +46,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fixed a small uniqueness-related bug in the compilation of
     operator section.
+
+  * Sizes of opaque entry point arguments are now properly checked
+    (related to #1198).
 
 ## [0.18.3]
 
