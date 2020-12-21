@@ -15,7 +15,6 @@ import Futhark.MonadFreshNames
 import Futhark.CodeGen.ImpGen.MPI.Base
 import Futhark.CodeGen.ImpGen.MPI.SegMap
 import Prelude hiding (quot, rem)
-import Debug.Trace
 
 
 -- Compile inner code
@@ -29,9 +28,6 @@ compileProg = Futhark.CodeGen.ImpGen.compileProg Env ops Imp.DefaultSpace
     opCompiler dest (Alloc e space) = compileAlloc dest e space
     opCompiler dest (Inner op) = compileMCOp dest op
 
-dumTrace :: (Applicative f, Show a) => [Char] -> a -> f ()
-dumTrace name var = traceM ("--"++name++"\n" ++ show var ++ "\n--")
-
 -- Compile seg
 compileMCOp ::
   Pattern MCMem ->
@@ -40,19 +36,20 @@ compileMCOp ::
 compileMCOp _ (OtherOp ()) = pure ()
 compileMCOp pat (ParOp _par_op op) = do
   -- Contains the arrray size
-  let _space = getSpace op
+  let space = getSpace op
   -- Declare a Int64 with the value 0, the name is in the segFlat part of the arg space ("flat_tid").
   -- I comment it for now I don't ("flat_tid") for now.
   -- dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
 
   seq_code <- compileSegOp pat op
   retvals <- getReturnParams pat op
+  iterations <- getIterationDomain op space
 
   let non_free = map Imp.paramName retvals
 
   s <- segOpString op
   free_params <- freeParams seq_code non_free
-  emit $ Imp.Op $ Imp.Segop s free_params seq_code retvals
+  emit $ Imp.Op $ Imp.Segop s free_params seq_code retvals (untyped iterations)
   pure ()
   {-- For a start, ignore the _par_op, which may contain nested
   -- parallelism.

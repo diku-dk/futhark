@@ -4,7 +4,8 @@ module Futhark.CodeGen.ImpGen.MPI.Base
     getReturnParams,
     segOpString,
     freeParams,
-    extractAllocations
+    extractAllocations,
+    getIterationDomain
   )
 where
 
@@ -92,3 +93,18 @@ extractAllocations segop_code = f segop_code
           )
     f code =
       (mempty, code)
+
+getIterationDomain :: SegOp () MCMem -> SegSpace -> MPIGen (Imp.TExp Int64)
+getIterationDomain SegMap {} space = do
+  let ns = map snd $ unSegSpace space
+      ns_64 = map toInt64Exp ns
+  return $ product ns_64
+getIterationDomain _ space = do
+  let ns = map snd $ unSegSpace space
+      ns_64 = map toInt64Exp ns
+  case unSegSpace space of
+    [_] -> return $ product ns_64
+    -- A segmented SegOp is over the segments
+    -- so we drop the last dimension, which is
+    -- executed sequentially
+    _ -> return $ product $ init ns_64
