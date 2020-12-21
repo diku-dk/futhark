@@ -21,8 +21,6 @@ import Futhark.IR.MCMem (MCMem, Prog)
 import Futhark.MonadFreshNames
 import qualified Language.C.Quote.C as C
 
---import qualified Language.C.Syntax as C
-
 compileProg ::
   MonadFreshNames m =>
   Prog MCMem ->
@@ -124,8 +122,12 @@ compileProg =
                  create_lock(&ctx->lock);
                  $stms:init_fields
                  init_constants(ctx);
-
-                 MPI_Init (NULL, NULL);
+                 int flag;
+                 MPI_Initialized(&flag);
+                 if (!flag){
+                  MPI_Init (NULL, NULL);
+                 }
+                 
                  MPI_Comm_size(MPI_COMM_WORLD, &(ctx->world_size));
                  MPI_Comm_rank(MPI_COMM_WORLD, &(ctx->rank));
 
@@ -170,5 +172,24 @@ compileOp :: GC.OpCompiler MPIOp ()
 compileOp (CrashWithThisMessage s) = do
   GC.stm [C.cstm|fprintf(stderr, "%s\n", $string:s);|]
   GC.stm [C.cstm|exit(1);|]
-compileOp (Segop name params seq_task retvals) = pure ()
-compileOp (DistributedLoop s' i prebody body postbody free tid) = pure ()
+
+compileOp (Segop _name _params code _retvals iterations) = do
+  i <- GC.compileExp iterations
+  GC.decl [C.cdecl|typename int64_t iterations = $exp:i;|]
+  GC.compileCode code
+
+compileOp (DistributedLoop _s i prebody body postbody free _) = do
+  let free_args = map paramName free
+  let output = last free_args
+
+  GC.compileCode prebody
+  GC.decl [C.cdecl|typename int64_t chunk_size = iterations/ctx->world_size;|]
+  GC.stm [C.cstm|$id:i = ctx->rank*chunk_size;|]
+  GC.decl [C.cdecl|typename int64_t end = $id:i + chunk_size;|]
+  body' <- GC.blockScope $ GC.compileCode body
+  GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
+                $items:body'
+              }|]
+  GC.stm [C.cstm|MPI_Gather($id:output.mem+(sizeof(int64_t)*ctx->rank * chunk_size), chunk_size, MPI_INT64_T, 
+                  $id:output.mem, chunk_size, MPI_INT64_T, 0, MPI_COMM_WORLD);|]
+  GC.compileCode postbody

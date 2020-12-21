@@ -9,10 +9,6 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.MPI.Base
 import Futhark.IR.MCMem
 import Futhark.Transform.Rename
-import Debug.Trace
-
-dumTrace :: (Applicative f, Show a) => [Char] -> a -> f ()
-dumTrace name var = traceM ("--"++name++"\n" ++ show var ++ "\n--")
 
 writeResult ::
   [VName] ->
@@ -21,18 +17,6 @@ writeResult ::
   MPIGen ()
 writeResult is pe (Returns _ se) =
   copyDWIMFix (patElemName pe) (map Imp.vi64 is) se []
-writeResult _ pe (WriteReturns rws _ idx_vals) = do
-  let (iss, vs) = unzip idx_vals
-      rws' = map toInt64Exp rws
-  forM_ (zip iss vs) $ \(slice, v) -> do
-    let slice' = map (fmap toInt64Exp) slice
-        condInBounds (DimFix i) rw =
-          0 .<=. i .&&. i .<. rw
-        condInBounds (DimSlice i n s) rw =
-          0 .<=. i .&&. i + n * s .<. rw
-        in_bounds = foldl1 (.&&.) $ zipWith condInBounds slice' rws'
-        when_in_bounds = copyDWIM (patElemName pe) slice' v []
-    sWhen in_bounds when_in_bounds
 writeResult _ _ res =
   error $ "writeResult: cannot handle " ++ pretty res
 
@@ -72,4 +56,3 @@ compileSegMap pat space kbody = do
     -- Moove allocs outside of body
     let (body_allocs, body') = extractAllocations body
     emit $ Imp.Op $ Imp.DistributedLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
-    --emit $ Imp.Op $ Imp.ParLoop "segmap" (tvVar flat_par_idx) body_allocs body' mempty free_params $ segFlat space
