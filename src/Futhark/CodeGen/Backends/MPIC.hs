@@ -102,6 +102,7 @@ compileProg =
                           char *error;
                           int profiling_paused;
                           $sdecls:fields
+                          int init_already;
                           int world_size;
                           int rank;
                         };|]
@@ -122,11 +123,9 @@ compileProg =
                  create_lock(&ctx->lock);
                  $stms:init_fields
                  init_constants(ctx);
-                 int flag;
-                 MPI_Initialized(&flag);
-                 if (!flag){
-                  MPI_Init (NULL, NULL);
-                 }
+                 MPI_Initialized(&(ctx->init_already));
+                 if (!ctx->init_already)
+                  MPI_Init(NULL, NULL);
                  
                  MPI_Comm_size(MPI_COMM_WORLD, &(ctx->world_size));
                  MPI_Comm_rank(MPI_COMM_WORLD, &(ctx->rank));
@@ -141,7 +140,8 @@ compileProg =
                  free_constants(ctx);
                  free_lock(&ctx->lock);
                  free(ctx);
-                 MPI_Finalize();
+                 if(!ctx->init_already)
+                  MPI_Finalize();
                }|]
         )
 
@@ -190,6 +190,9 @@ compileOp (DistributedLoop _s i prebody body postbody free _) = do
   GC.stm [C.cstm|for (; $id:i < end; $id:i++) {
                 $items:body'
               }|]
-  GC.stm [C.cstm|MPI_Gather($id:output.mem+(sizeof(int64_t)*ctx->rank * chunk_size), chunk_size, MPI_INT64_T, 
-                  $id:output.mem, chunk_size, MPI_INT64_T, 0, MPI_COMM_WORLD);|]
+  -- This part should be perfected in the future.
+  GC.decl [C.cdecl|typename int64_t mem_chunk_size = ($id:output.size/ctx->world_size);|]
+  GC.decl [C.cdecl|typename int64_t start = mem_chunk_size*ctx->rank;|]
+  GC.stm [C.cstm|MPI_Gather($id:output.mem+start, mem_chunk_size, MPI_BYTE, 
+                  $id:output.mem, mem_chunk_size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
   GC.compileCode postbody
