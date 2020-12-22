@@ -467,7 +467,9 @@ commandLineOptions =
 -- | Run @futhark bench@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
-  Just $ runBenchmarks config progs
+  case progs of
+    [] -> Nothing
+    _ -> Just $ runBenchmarks config progs
 
 --- The following extracted from hstats package by Marshall Beddoe:
 --- https://hackage.haskell.org/package/hstats-0.3
