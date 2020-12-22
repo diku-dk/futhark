@@ -197,7 +197,7 @@ compileCtoWASMAction fcfg mode outpath =
           liftIO $ writeFile cpath imp
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
-          runEMCC cpath outpath ["-O3"] ["-lm"]
+          runEMCC cpath outpath ["-O"] ["-lm"]
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
