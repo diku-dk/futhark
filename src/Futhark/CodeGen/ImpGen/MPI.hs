@@ -50,12 +50,6 @@ compileMCOp pat (ParOp _par_op op) = do
   s <- segOpString op
   free_params <- freeParams seq_code non_free
   emit $ Imp.Op $ Imp.Segop s free_params seq_code retvals (untyped iterations)
-  pure ()
-  {-- For a start, ignore the _par_op, which may contain nested
-  -- parallelism.
-  traceShow op
-  emit $ Imp.Op $ Imp.CrashWithThisMessage $ "Code for the expression with pattern " ++ pretty pat
-  --}
 
 
 compileSegOp ::
