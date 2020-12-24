@@ -536,48 +536,32 @@ static const struct primtype_info_t* primtypes[] = {
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#define CWD "/working"
-
-static char * input_path;
-static char * output_path;
 
 static void stream_init(int bin_output) {
-  EM_ASM(
-    FS.mkdir('/working');
-    FS.mount(NODEFS, { root: '.' }, '/working');
-  );
-    
-  input_path = tempnam(CWD, "in");
   EM_ASM({
-    var fs = require('fs');
-    var iname = UTF8ToString($0);
-    fs.writeFileSync(iname, fs.readFileSync("/dev/stdin"));
-    }, input_path + strlen(CWD"/"));
-  input_file = fopen(input_path, "r");
+    // Note that 'fs' is the filesystem module from Node.js, and 'FS'
+    // is from Emscripten.  These are _not_ the same!  'fs' touches
+    // the actual file system, and 'FS' touches a virtualised file
+    // system that is the same as the one the C stdio functions
+    // interact with.  It's a mess.
+    var fs = require("fs");
+    FS.writeFile("/fake_stdin", fs.readFileSync("/dev/stdin"));
+    });
 
-  if (bin_output) {
-    output_path = tempnam("/working", "out");
-    output_file = fopen(output_path, "w");
-  } else {
-    output_file = stdout;
-  }
+  input_file = fopen("/fake_stdin", "rb");
+  assert(input_file != NULL);
+  output_file = fopen("/fake_stdout", "wb");
+  assert(output_file != NULL);
 }
 
 static void stream_finish(int bin_output) {
   fclose(input_file);
-  remove(input_path);
-  free(input_path);
+  fclose(output_file);
 
-  if (bin_output) {
-    fclose(output_file);
-    EM_ASM({
-      var fs = require('fs');
-      var oname = UTF8ToString($0);
-      fs.writeFileSync("/dev/stdout", fs.readFileSync(oname));
-      }, output_path + strlen(CWD"/"));
-    remove(output_path);
-    free(output_path);
-  }
+  EM_ASM({
+    var fs = require("fs"); // See 'fs' comment above.
+    fs.writeFileSync("/dev/stdout", FS.readFile("/fake_stdout", { encoding: "binary"}));
+  });
 }
 
 #else
