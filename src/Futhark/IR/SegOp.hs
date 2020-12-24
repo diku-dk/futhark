@@ -56,7 +56,8 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer hiding (mapM_)
 import Data.Bifunctor (first)
 import Data.List
-  ( foldl',
+  ( elemIndex,
+    foldl',
     groupBy,
     intersperse,
     isPrefixOf,
@@ -1332,6 +1333,24 @@ topDownSegOp _ (Pattern [] pes) _ (SegRed lvl space ops ts kbody)
           )
 topDownSegOp _ _ _ _ = Skip
 
+-- A convenient way of operating on the type and body of a SegOp,
+-- without worrying about exactly what kind it is.
+segOpGuts ::
+  SegOp (SegOpLevel lore) lore ->
+  ( [Type],
+    KernelBody lore,
+    Int,
+    [Type] -> KernelBody lore -> SegOp (SegOpLevel lore) lore
+  )
+segOpGuts (SegMap lvl space kts body) =
+  (kts, body, 0, SegMap lvl space)
+segOpGuts (SegScan lvl space ops kts body) =
+  (kts, body, segBinOpResults ops, SegScan lvl space ops)
+segOpGuts (SegRed lvl space ops kts body) =
+  (kts, body, segBinOpResults ops, SegRed lvl space ops)
+segOpGuts (SegHist lvl space ops kts body) =
+  (kts, body, sum $ map (length . histDest) ops, SegHist lvl space ops)
+
 bottomUpSegOp ::
   (HasSegOp lore, BinderOps lore) =>
   (ST.SymbolTable lore, UT.UsageTable) ->
@@ -1341,10 +1360,13 @@ bottomUpSegOp ::
   Rule lore
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
-bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (KernelBody _ kstms kres)) = Simplify $ do
+bottomUpSegOp (vtable, used) (Pattern [] kpes) dec segop = Simplify $ do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
-  -- and kpes and make it a binding outside.
+  -- and kpes and make it a binding outside.  We have to be careful
+  -- not to remove anything that is passed on to a scan/map/histogram
+  -- operation.  Fortunately, these are always first in the result
+  -- list.
   (kpes', kts', kres', kstms') <-
     localScope (scopeOfSegSpace space) $
       foldM distribute (kpes, kts, kres, mempty) kstms
@@ -1357,13 +1379,12 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (Kernel
     localScope (scopeOfSegSpace space) $
       mkKernelBodyM kstms' kres'
 
-  addStm $
-    Let (Pattern [] kpes') dec $
-      Op $
-        segOp $
-          SegMap lvl space kts' kbody
+  addStm $ Let (Pattern [] kpes') dec $ Op $ segOp $ mk_segop kts' kbody
   where
+    (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
+      segOpGuts segop
     free_in_kstms = foldMap freeIn kstms
+    space = segSpace segop
 
     sliceWithGtidsFixed stm
       | Let _ _ (BasicOp (Index arr slice)) <- stm,
@@ -1415,7 +1436,9 @@ bottomUpSegOp (vtable, used) (Pattern [] kpes) dec (SegMap lvl space kts (Kernel
     isResult kpes' kts' kres' pe =
       case partition matches $ zip3 kpes' kts' kres' of
         ([(kpe, _, _)], kpes_and_kres)
-          | (kpes'', kts'', kres'') <- unzip3 kpes_and_kres ->
+          | Just i <- elemIndex kpe kpes,
+            i >= num_nonmap_results,
+            (kpes'', kts'', kres'') <- unzip3 kpes_and_kres ->
             Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
       where
