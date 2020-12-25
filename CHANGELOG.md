@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Fix tiling crash (#1203).
 
+  * `futhark run` now does slightly more type-checking of its inputs
+    (#1208).
+
 ## [0.18.4]
 
 ### Added
