@@ -262,17 +262,19 @@ instance Eq Value where
   _ == _ = False
 
 instance Pretty Value where
-  ppr (ValuePrim v) = ppr v
-  ppr (ValueArray _ a) =
+  ppr = pprPrec 0
+  pprPrec _ (ValuePrim v) = ppr v
+  pprPrec _ (ValueArray _ a) =
     let elements = elems a -- [Value]
         (x : _) = elements
         separator = case x of
           ValueArray _ _ -> comma <> line
           _ -> comma <> space
      in brackets $ cat $ punctuate separator (map ppr elements)
-  ppr (ValueRecord m) = prettyRecord m
-  ppr ValueFun {} = text "#<fun>"
-  ppr (ValueSum _ n vs) = text "#" <> sep (ppr n : map ppr vs)
+  pprPrec _ (ValueRecord m) = prettyRecord m
+  pprPrec _ ValueFun {} = text "#<fun>"
+  pprPrec p (ValueSum _ n vs) =
+    parensIf (p > 0) $ text "#" <> sep (ppr n : map (pprPrec 1) vs)
 
 valueShape :: Value -> ValueShape
 valueShape (ValueArray shape _) = shape

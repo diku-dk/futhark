@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Sum type deduplication issue (#1209).
 
+  * Missing parentheses when printing sum values in interpreter.
+
 ## [0.18.4]
 
 ### Added
