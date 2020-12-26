@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark run` now does slightly more type-checking of its inputs
     (#1208).
 
+  * Sum type deduplication issue (#1209).
+
 ## [0.18.4]
 
 ### Added
