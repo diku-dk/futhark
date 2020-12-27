@@ -1029,7 +1029,7 @@ constraints imposed by size annotations.
 *Size-dependent types* are supported, as the names of parameters can
 be used in the return type of a function::
 
-  let replicate 't (n: i32) (x: t): [n]t = ...
+  let replicate 't (n: i64) (x: t): [n]t = ...
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 
