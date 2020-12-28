@@ -16,10 +16,15 @@ import qualified Data.Map as Map
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Sequence ((|>))
 import qualified Data.Set as Set
+import Debug.Trace
 import Futhark.Analysis.Alias (aliasAnalysis)
-import Futhark.IR.Aliases (Aliases, consumedInStm, removeProgAliases)
+import Futhark.IR.Aliases (Aliases, aliasesOf, consumedInStm, lookupAliases, patternAliases, removeProgAliases)
 import Futhark.IR.KernelsMem
 import Futhark.Pass (Pass (..), PassM, intraproceduralTransformationWithConsts)
+
+-- traceWith s a = trace (s ++ ": " ++ pretty a) a
+
+traceWith s a = a
 
 type ReorderLore = Aliases KernelsMem
 
@@ -76,10 +81,14 @@ reorderStatements [] _ _ acc = return acc
 reorderStatements (x : xs) alreadyInserted stm_map acc =
   if x `nameIn` alreadyInserted
     then reorderStatements xs alreadyInserted stm_map acc
-    else case Map.lookup x stm_map of
+    else case Map.lookup (traceWith "x" x) stm_map of
       Just stm -> do
         frees <- freeWithMems stm
-        let consumed = consumedInStm stm
+        mems' <- inScopeOf stm $ mapM memInfo $ patternNames $ stmPattern stm
+        let mems = catMaybes mems'
+        consumed_arrays <- (`namesSubtract` namesFromList (patternNames $ stmPattern stm)) <$> namesFromList <$> concat <$> mapM (consumeArraysIn stm_map) (traceWith ("x: " ++ pretty x ++ ", stm: " ++ pretty (patternNames $ stmPattern stm) ++ ", mems") mems)
+        let aliases = foldMap id $ patternAliases $ stmPattern stm
+        let consumed = traceWith ("x: " ++ pretty x ++ ", consumedArrays: " ++ pretty consumed_arrays ++ ", aliases: " ++ pretty aliases ++ ", consumedInStm") $ consumedInStm stm <> (consumed_arrays `namesSubtract` aliases)
         let stm_vnames_using_consumed =
               ( foldl (<>) mempty $
                   Map.mapWithKey
@@ -91,7 +100,7 @@ reorderStatements (x : xs) alreadyInserted stm_map acc =
                     stm_map
               )
                 `namesSubtract` boundByStm stm
-        case namesToList $ stm_vnames_using_consumed <> (frees `namesSubtract` alreadyInserted) of
+        case traceWith "todo" $ namesToList $ stm_vnames_using_consumed <> (frees `namesSubtract` alreadyInserted) of
           [] -> do
             let alreadyInserted' = boundByStm stm <> alreadyInserted
             exp' <- mapExpM (mapper alreadyInserted') $ stmExp stm
@@ -104,6 +113,21 @@ reorderStatements (x : xs) alreadyInserted stm_map acc =
         -- that it comes from outside this body, and that it is already in
         -- alreadyInserted.
         reorderStatements xs (oneName x <> alreadyInserted) stm_map acc
+
+consumeArraysIn :: LocalScope ReorderLore m => Map VName (Stm ReorderLore) -> VName -> m [VName]
+consumeArraysIn stm_map mem =
+  Map.elems stm_map
+    & mapM
+      ( \stm -> do
+          let frees = freeIn stm
+          filterM
+            ( \vname -> do
+                mem' <- memInfo vname
+                return $ mem' == Just mem
+            )
+            $ namesToList frees
+      )
+    <&> concat
 
 freeWithMems :: LocalScope ReorderLore m => Stm ReorderLore -> m Names
 freeWithMems stm = do
