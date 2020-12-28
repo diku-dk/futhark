@@ -64,7 +64,7 @@ instance Substitute a => Substitute (Maybe a) where
   substituteNames substs = fmap $ substituteNames substs
 
 instance Substitute Bool where
-  substituteNames = flip const
+  substituteNames = const id
 
 instance Substitute VName where
   substituteNames substs k = M.findWithDefault k k substs
