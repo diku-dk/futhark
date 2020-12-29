@@ -87,8 +87,18 @@ reorderStatements (x : xs) alreadyInserted stm_map acc =
         mems' <- inScopeOf stm $ mapM memInfo $ patternNames $ stmPattern stm
         let mems = catMaybes mems'
         consumed_arrays <- (`namesSubtract` namesFromList (patternNames $ stmPattern stm)) <$> namesFromList <$> concat <$> mapM (consumeArraysIn stm_map) (traceWith ("x: " ++ pretty x ++ ", stm: " ++ pretty (patternNames $ stmPattern stm) ++ ", mems") mems)
-        let aliases = foldMap id $ patternAliases $ stmPattern stm
-        let consumed = traceWith ("x: " ++ pretty x ++ ", consumedArrays: " ++ pretty consumed_arrays ++ ", aliases: " ++ pretty aliases ++ ", consumedInStm") $ consumedInStm stm <> (consumed_arrays `namesSubtract` aliases)
+        let aliases' = mconcat $ patternAliases $ stmPattern stm
+        let aliasesOfAliases =
+              Map.elems stm_map
+                & fmap stmPattern
+                & traceWith "stmPatterns"
+                & trace ("and acc: " ++ (pretty $ fmap patternNames $ fmap stmPattern $ toList acc))
+                & filter ((`namesIntersect` aliases') . mconcat . patternAliases)
+                & fmap patternNames
+                & mconcat
+                & namesFromList
+        let aliases = aliases' <> aliasesOfAliases
+        let consumed = traceWith ("x: " ++ pretty x ++ ", consumedArrays: " ++ pretty consumed_arrays ++ ", aliases: " ++ pretty aliases ++ ", consumedInStm") $ (consumedInStm stm <> (consumed_arrays `namesSubtract` aliases)) `namesSubtract` alreadyInserted
         let stm_vnames_using_consumed =
               ( foldl (<>) mempty $
                   Map.mapWithKey
