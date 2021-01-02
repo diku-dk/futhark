@@ -9,12 +9,14 @@ import Control.Monad.Reader
 import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.Functor ((<&>))
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Futhark.Analysis.LastUse (LastUseMap)
 import Futhark.IR.KernelsMem
+import Futhark.Util (invertMap)
 
 -- | The set of `VName` currently in use.
 type InUse = Names
@@ -30,16 +32,17 @@ type LastUsed = Names
 type Graph a = Set (a, a)
 
 -- | Insert an edge between two values into the graph.
-insertEdge :: Ord a => a -> a -> Graph a -> Graph a
-insertEdge v1 v2 g
-  | v1 == v2 = g
-  | otherwise = Set.insert (min v1 v2, max v1 v2) g
+makeEdge :: Ord a => a -> a -> Graph a
+makeEdge v1 v2
+  | v1 == v2 = mempty
+  | otherwise = Set.singleton (min v1 v2, max v1 v2)
 
--- | Compute pairwise edges between each element of `ns1` and each element of `ns2`.
-cartesian :: Names -> Names -> Graph VName
-cartesian ns1 ns2 =
-  [(min x y, max x y) | x <- namesToList ns1, y <- namesToList ns2]
-    & foldr (uncurry insertEdge) mempty
+-- | Compute the cartesian product of two foldable collections, using the given
+-- combinator function.
+cartesian :: (Monoid m, Foldable t) => (a -> a -> m) -> t a -> t a -> m
+cartesian f xs ys =
+  [(x, y) | x <- toList xs, y <- toList ys]
+    & foldMap (uncurry f)
 
 analyseStm ::
   LocalScope KernelsMem m =>
@@ -82,9 +85,10 @@ analyseStm lumap inuse0 stm =
           <> new_mems,
         (lus <> last_use_mems) `namesSubtract` new_mems,
         graph
-          <> ( inuse_outside
-                 `cartesian` (inuse_outside <> inuse <> lus <> last_use_mems)
-             )
+          <> cartesian
+            makeEdge
+            (namesToList inuse_outside)
+            (namesToList $ inuse_outside <> inuse <> lus <> last_use_mems)
       )
 
 analyseExp ::
@@ -164,7 +168,11 @@ segWithBinOps ::
   m (InUse, LastUsed, Graph VName)
 segWithBinOps lumap inuse binops body = do
   (inuse', lus', graph) <- analyseKernelBody lumap inuse body
-  (inuse'', lus'', graph') <- mconcat <$> mapM (analyseSegBinOp lumap inuse') binops
+  (inuse'', lus'', graph') <-
+    mconcat
+      <$> mapM
+        (analyseSegBinOp lumap inuse')
+        binops
   return (inuse'', lus' <> lus'', graph <> graph')
 
 analyseSegBinOp ::
@@ -201,8 +209,81 @@ analyseKernels ::
   LocalScope KernelsMem m =>
   LastUseMap ->
   Stms KernelsMem ->
+  m (Graph VName)
+analyseKernels lumap stms = do
+  (_, _, graph) <- analyseKernels' lumap stms
+  -- Now, we need to insert edges between memory blocks which differ in size, if
+  -- they are in DefaultSpace.
+  spaces <- Map.filter (== DefaultSpace) <$> memSpaces stms
+  inv_size_map <-
+    memSizes stms
+      <&> flip Map.restrictKeys (Set.fromList $ Map.keys spaces)
+      <&> invertMap
+  let new_edges =
+        cartesian
+          (\x y -> if x /= y then cartesian makeEdge x y else mempty)
+          inv_size_map
+          inv_size_map
+  return $ graph <> new_edges
+
+-- | Return a mapping from memory blocks to their element sizes in the given
+-- statements.
+memSizes :: LocalScope KernelsMem m => Stms KernelsMem -> m (Map VName Int)
+memSizes stms =
+  inScopeOf stms $ fmap mconcat <$> mapM memSizesStm $ stmsToList stms
+  where
+    memSizesStm :: LocalScope KernelsMem m => Stm KernelsMem -> m (Map VName Int)
+    memSizesStm (Let pat _ e) = do
+      arraySizes <- fmap mconcat <$> mapM memElemSize $ patternNames pat
+      arraySizes' <- memSizesExp e
+      return $ arraySizes <> arraySizes'
+    memSizesExp :: LocalScope KernelsMem m => Exp KernelsMem -> m (Map VName Int)
+    memSizesExp (Op (Inner (SegOp segop))) =
+      let body = segopBody segop
+       in inScopeOf (kernelBodyStms body) $
+            fmap mconcat
+              <$> mapM memSizesStm
+              $ stmsToList $ kernelBodyStms body
+    memSizesExp (If _ then_body else_body _) = do
+      then_res <- memSizes $ bodyStms then_body
+      else_res <- memSizes $ bodyStms else_body
+      return $ then_res <> else_res
+    memSizesExp (DoLoop _ _ _ body) =
+      memSizes $ bodyStms body
+    memSizesExp _ = return mempty
+
+-- | Return a mapping from memory blocks to the space they are allocated in.
+memSpaces :: LocalScope KernelsMem m => Stms KernelsMem -> m (Map VName Space)
+memSpaces stms =
+  return $ foldMap getSpacesStm stms
+  where
+    getSpacesStm :: Stm KernelsMem -> Map VName Space
+    getSpacesStm (Let (Pattern [] [PatElem name _]) _ (Op (Alloc _ sp))) =
+      Map.singleton name sp
+    getSpacesStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
+    getSpacesStm (Let _ _ (Op (Inner (SegOp segop)))) =
+      foldMap getSpacesStm $ kernelBodyStms $ segopBody segop
+    getSpacesStm (Let _ _ (If _ then_body else_body _)) =
+      foldMap getSpacesStm (bodyStms then_body)
+        <> foldMap getSpacesStm (bodyStms else_body)
+    getSpacesStm (Let _ _ (DoLoop _ _ _ body)) =
+      foldMap getSpacesStm (bodyStms body)
+    getSpacesStm _ = mempty
+
+segopBody :: SegOp lvl lore -> KernelBody lore
+segopBody segop =
+  case segop of
+    SegMap _ _ _ body -> body
+    SegRed _ _ _ _ body -> body
+    SegScan _ _ _ _ body -> body
+    SegHist _ _ _ _ body -> body
+
+analyseKernels' ::
+  LocalScope KernelsMem m =>
+  LastUseMap ->
+  Stms KernelsMem ->
   m (InUse, LastUsed, Graph VName)
-analyseKernels lumap stms =
+analyseKernels' lumap stms =
   mconcat . toList <$> mapM helper stms
   where
     helper ::
@@ -213,12 +294,12 @@ analyseKernels lumap stms =
       inScopeOf stm $ analyseSegOp lumap mempty segop
     helper stm@Let {stmExp = If _ then_body else_body _} =
       inScopeOf stm $ do
-        res1 <- analyseKernels lumap (bodyStms then_body)
-        res2 <- analyseKernels lumap (bodyStms else_body)
+        res1 <- analyseKernels' lumap (bodyStms then_body)
+        res2 <- analyseKernels' lumap (bodyStms else_body)
         return (res1 <> res2)
     helper stm@Let {stmExp = DoLoop _ _ _ body} =
       inScopeOf stm $
-        analyseKernels lumap $ bodyStms body
+        analyseKernels' lumap $ bodyStms body
     helper stm =
       inScopeOf stm $ return mempty
 
@@ -238,3 +319,15 @@ memInfo vname = do
       return $ Just mem
     _ ->
       return Nothing
+
+-- | Returns a mapping from memory block to element size. The input is the
+-- `VName` of a variable (supposedly an array), and the result is a mapping from
+-- the memory block of that array to element size of the array.
+memElemSize :: LocalScope KernelsMem m => VName -> m (Map VName Int)
+memElemSize vname = do
+  summary <- asksScope (fmap nameInfoToMemInfo . Map.lookup vname)
+  case summary of
+    Just (MemArray pt _ _ (ArrayIn mem _)) ->
+      return $ Map.singleton mem (primByteSize pt)
+    _ ->
+      return mempty
