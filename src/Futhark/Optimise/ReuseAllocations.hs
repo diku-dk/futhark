@@ -215,7 +215,7 @@ optimise :: Pass KernelsMem KernelsMem
 optimise =
   Pass "reuse allocations" "reuse allocations" $ \prog ->
     let (lumap, _) = LastUse.analyseProg prog
-        (_, _, graph) =
+        graph =
           foldMap
             ( \f ->
                 runReader
