@@ -47,21 +47,29 @@ module Futhark.Util
     UserString,
     EncodedString,
     zEncodeString,
+    invertMap,
   )
 where
 
+import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import qualified Data.ByteString as BS
 import Data.Char
 import Data.Either
+import Data.Function ((&))
 import Data.List (foldl', genericDrop, genericSplitAt, sort)
 import qualified Data.List.NonEmpty as NE
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe
+import Data.Set (Set)
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
+import Data.Tuple (swap)
 import Numeric
 import qualified System.Directory.Tree as Dir
 import System.Environment
@@ -407,3 +415,9 @@ encodeAsUnicodeCharar c =
     else '0' : hex_str
   where
     hex_str = showHex (ord c) "U"
+
+invertMap :: (Ord v, Ord k) => Map k v -> Map v (Set k)
+invertMap m =
+  Map.toList m
+    & fmap (swap . first Set.singleton)
+    & foldr (uncurry $ Map.insertWith (<>)) mempty
