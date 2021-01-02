@@ -36,7 +36,7 @@ psumTest =
     case prog of
       Right prog' ->
         let (lumap, _) = LastUse.analyseProg prog'
-            (_, _, graph) =
+            graph =
               foldMap
                 ( \f ->
                     runReader
