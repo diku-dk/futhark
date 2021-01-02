@@ -8,7 +8,6 @@
 -- might allow more programs to run using intra-group parallelism.
 module Futhark.Optimise.ReuseAllocations (optimise) where
 
-import Control.Arrow (first)
 import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.State.Strict
@@ -17,7 +16,6 @@ import Data.Map (Map, (!))
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Tuple (swap)
 import qualified Futhark.Analysis.Interference as Interference
 import qualified Futhark.Analysis.LastUse as LastUse
 import Futhark.Binder.Class
@@ -26,6 +24,7 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.Optimise.ReuseAllocations.GreedyColoring as GreedyColoring
 import Futhark.Pass (Pass (..), PassM)
 import qualified Futhark.Pass as Pass
+import Futhark.Util (invertMap)
 
 -- | A mapping from allocation names to their size and space.
 type Allocs = Map VName (SubExp, Space)
@@ -95,12 +94,6 @@ setAllocsSegOp m (SegScan lvl sp segbinops tps body) =
 setAllocsSegOp m (SegHist lvl sp segbinops tps body) =
   SegHist lvl sp segbinops tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-
-invertMap :: (Ord v, Ord k) => Map k v -> Map v (Set k)
-invertMap m =
-  Map.toList m
-    & fmap (swap . first Set.singleton)
-    & foldr (uncurry $ Map.insertWith (<>)) mempty
 
 maxSubExp :: MonadBinder m => Set SubExp -> m SubExp
 maxSubExp = helper . Set.toList
