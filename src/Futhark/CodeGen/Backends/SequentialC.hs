@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.SequentialC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asServer,
   )
 where
 

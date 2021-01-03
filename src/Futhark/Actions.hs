@@ -160,6 +160,9 @@ compileCAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
           runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
+        ToServer -> do
+          liftIO $ writeFile cpath $ SequentialC.asServer cprog
+          runCC cpath outpath ["-O3", "-std=c99"] ["-lm"]
 
 -- | The @futhark opencl@ action.
 compileOpenCLAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -190,6 +193,9 @@ compileOpenCLAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ COpenCL.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+        ToServer -> do
+          liftIO $ writeFile cpath $ COpenCL.asServer cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action KernelsMem
@@ -217,6 +223,9 @@ compileCUDAAction fcfg mode outpath =
         ToExecutable -> do
           liftIO $ writeFile cpath $ CCUDA.asExecutable cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+        ToServer -> do
+          liftIO $ writeFile cpath $ CCUDA.asServer cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark multicore@ action.
 compileMulticoreAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
@@ -239,4 +248,7 @@ compileMulticoreAction fcfg mode outpath =
           liftIO $ writeFile cpath impl
         ToExecutable -> do
           liftIO $ writeFile cpath $ MulticoreC.asExecutable cprog
+          runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]
+        ToServer -> do
+          liftIO $ writeFile cpath $ MulticoreC.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ["-lm", "-pthread"]

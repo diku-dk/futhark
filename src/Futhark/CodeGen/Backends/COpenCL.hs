@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.COpenCL
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asServer,
   )
 where
 
