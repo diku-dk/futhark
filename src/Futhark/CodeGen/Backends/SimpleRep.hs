@@ -13,6 +13,7 @@ module Futhark.CodeGen.Backends.SimpleRep
     arrayName,
     opaqueName,
     cproduct,
+    csum,
 
     -- * Primitive value operations
     cIntOps,
@@ -21,6 +22,11 @@ module Futhark.CodeGen.Backends.SimpleRep
     cFloat64Ops,
     cFloat64Funs,
     cFloatConvOps,
+
+    -- * Storing/restoring values in byte sequences
+    storageSize,
+    storeValueHeader,
+    loadValueHeader,
   )
 where
 
@@ -124,6 +130,14 @@ cproduct [] = [C.cexp|1|]
 cproduct (e : es) = foldl mult e es
   where
     mult x y = [C.cexp|$exp:x * $exp:y|]
+
+-- | Return an expression summing the given expressions.
+-- If an empty list is given, the expression @0@ is returned.
+csum :: [C.Exp] -> C.Exp
+csum [] = [C.cexp|0|]
+csum (e : es) = foldl mult e es
+  where
+    mult x y = [C.cexp|$exp:x + $exp:y|]
 
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeString . nameToString
@@ -953,3 +967,65 @@ $esc:("#else")
     }
 $esc:("#endif")
 |]
+
+storageSize :: PrimType -> Int -> C.Exp -> C.Exp
+storageSize pt rank shape =
+  [C.cexp|$int:header_size +
+          $int:rank * sizeof(typename int64_t) +
+          $exp:(cproduct dims) * $int:pt_size|]
+  where
+    header_size, pt_size :: Int
+    header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
+    pt_size = primByteSize pt
+    dims = [[C.cexp|$exp:shape[$int:i]|] | i <- [0 .. rank -1]]
+
+typeStr :: Signedness -> PrimType -> String
+typeStr sign pt =
+  case (sign, pt) of
+    (_, Bool) -> "bool"
+    (_, Cert) -> "bool"
+    (_, FloatType Float32) -> " f32"
+    (_, FloatType Float64) -> " f64"
+    (TypeDirect, IntType Int8) -> "  i8"
+    (TypeDirect, IntType Int16) -> " i16"
+    (TypeDirect, IntType Int32) -> " i32"
+    (TypeDirect, IntType Int64) -> " i64"
+    (TypeUnsigned, IntType Int8) -> "  u8"
+    (TypeUnsigned, IntType Int16) -> " u16"
+    (TypeUnsigned, IntType Int32) -> " u32"
+    (TypeUnsigned, IntType Int64) -> " u64"
+
+storeValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
+storeValueHeader sign pt rank shape dest =
+  [C.cstms|
+          *$exp:dest++ = 'b';
+          *$exp:dest++ = 1;
+          *$exp:dest++ = $int:rank;
+          memcpy($exp:dest, $string:(typeStr sign pt), 4);
+          $exp:dest += 4;
+          $stms:copy_shape
+          |]
+  where
+    copy_shape
+      | rank == 0 = []
+      | otherwise =
+        [C.cstms|
+                memcpy($exp:dest, $exp:shape, $int:rank*sizeof(typename int64_t));
+                $exp:dest += $int:rank*sizeof(typename int64_t);|]
+
+loadValueHeader :: Signedness -> PrimType -> Int -> C.Exp -> C.Exp -> [C.Stm]
+loadValueHeader sign pt rank shape src =
+  [C.cstms|
+     err |= (*$exp:src++ != 'b');
+     err |= (*$exp:src++ != 1);
+     err |= (*$exp:src++ != $exp:rank);
+     err |= (memcmp($exp:src, $string:(typeStr sign pt), 4) != 0);
+     $exp:src += 4;
+     if (err == 0) {
+       $stms:load_shape
+       $exp:src += $int:rank*sizeof(typename int64_t);
+     }|]
+  where
+    load_shape
+      | rank == 0 = []
+      | otherwise = [C.cstms|memcpy($exp:shape, src, $int:rank*sizeof(typename int64_t));|]
