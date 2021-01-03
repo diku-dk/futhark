@@ -14,9 +14,11 @@ CFLAGS=-O3 -std=c99
 LDFLAGS=-lm
 endif
 
+.SECONDARY:
+
 .PHONY: test clean
 
-test: do_test_a do_test_b do_test_c do_test_d do_test_e do_test_f do_test_g
+test: do_test_a do_test_b do_test_c do_test_d do_test_e do_test_f do_test_g do_test_restore
 
 do_test_%: test_%
 	./test_$*
@@ -24,9 +26,11 @@ do_test_%: test_%
 test_%: test_%.c %.o
 	gcc -o $@ $^ -Wall -Wextra -pedantic -std=c99 $(LDFLAGS) -lpthread
 
-%.o: %.fut
-	futhark $(FUTHARK_BACKEND) --library $^
+%.o: %.c
 	gcc $*.c -c $(CFLAGS)
 
+%.c: %.fut
+	futhark $(FUTHARK_BACKEND) --library $^
+
 clean:
-	rm -rf test_? ?.c ?.h ?.o
+	rm -rf test_? ?.c ?.h ?.o $(patsubst %.fut, %.c, $(wildcard *.fut))
