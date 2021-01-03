@@ -947,6 +947,8 @@ opaqueLibraryFunctions ::
 opaqueLibraryFunctions desc vds = do
   name <- publicName $ opaqueName desc vds
   free_opaque <- publicName $ "free_" ++ opaqueName desc vds
+  store_opaque <- publicName $ "store_" ++ opaqueName desc vds
+  restore_opaque <- publicName $ "restore_" ++ opaqueName desc vds
 
   let opaque_type = [C.cty|struct $id:name|]
 
@@ -954,23 +956,96 @@ opaqueLibraryFunctions desc vds = do
         return ()
       freeComponent i (ArrayValue _ _ pt signed shape) = do
         let rank = length shape
+            field = tupleField i
         free_array <- publicName $ "free_" ++ arrayName pt signed rank
+        -- Protect against NULL here, because we also want to use this
+        -- to free partially loaded opaques.
         stm
-          [C.cstm|if ((tmp = $id:free_array(ctx, obj->$id:(tupleField i))) != 0) {
+          [C.cstm|if (obj->$id:field != NULL && (tmp = $id:free_array(ctx, obj->$id:field)) != 0) {
                 ret = tmp;
              }|]
+
+      storeComponent i (ScalarValue pt sign _) =
+        let field = tupleField i
+         in ( storageSize pt 0 [C.cexp|NULL|],
+              storeValueHeader sign pt 0 [C.cexp|NULL|] [C.cexp|out|]
+                ++ [C.cstms|memcpy(out, &obj->$id:field, sizeof(obj->$id:field));
+                            out += sizeof(obj->$id:field);|]
+            )
+      storeComponent i (ArrayValue _ _ pt sign shape) =
+        let rank = length shape
+            arr_name = arrayName pt sign rank
+            field = tupleField i
+            shape_array = "futhark_shape_" ++ arr_name
+            values_array = "futhark_values_" ++ arr_name
+            shape' = [C.cexp|$id:shape_array(ctx, obj->$id:field)|]
+            num_elems = cproduct [[C.cexp|$exp:shape'[$int:j]|] | j <- [0 .. rank -1]]
+         in ( storageSize pt rank shape',
+              storeValueHeader sign pt rank shape' [C.cexp|out|]
+                ++ [C.cstms|ret |= $id:values_array(ctx, obj->$id:field, (void*)out);
+                            out += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+            )
 
   ctx_ty <- contextType
 
   free_body <- collect $ zipWithM_ freeComponent [0 ..] vds
 
+  store_body <- collect $ do
+    let (sizes, stores) = unzip $ zipWith storeComponent [0 ..] vds
+        size_vars = map (("size_" ++) . show) [0 .. length sizes -1]
+        size_sum = csum [[C.cexp|$id:size|] | size <- size_vars]
+    forM_ (zip size_vars sizes) $ \(v, e) ->
+      item [C.citem|typename int64_t $id:v = $exp:e;|]
+    stm [C.cstm|*n = $exp:size_sum;|]
+    stm [C.cstm|if (p != NULL && *p == NULL) { *p = malloc(*n); }|]
+    stm [C.cstm|if (p != NULL) { unsigned char *out = *p; $stms:(concat stores) }|]
+
+  let restoreComponent i (ScalarValue pt sign _) = do
+        let field = tupleField i
+            dataptr = "data_" ++ show i
+        stms $ loadValueHeader sign pt 0 [C.cexp|NULL|] [C.cexp|src|]
+        item [C.citem|const void* $id:dataptr = src;|]
+        stm [C.cstm|src += sizeof(obj->$id:field);|]
+        pure [C.cstms|memcpy(&obj->$id:field, $id:dataptr, sizeof(obj->$id:field));|]
+      restoreComponent i (ArrayValue _ _ pt sign shape) = do
+        let field = tupleField i
+            rank = length shape
+            arr_name = arrayName pt sign rank
+            new_array = "futhark_new_" ++ arr_name
+            dataptr = "data_" ++ show i
+            shapearr = "shape_" ++ show i
+            dims = [[C.cexp|$id:shapearr[$int:j]|] | j <- [0 .. rank -1]]
+            num_elems = cproduct dims
+        item [C.citem|typename int64_t $id:shapearr[$int:rank];|]
+        stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
+        item [C.citem|const void* $id:dataptr = src;|]
+        stm [C.cstm|obj->$id:field = NULL;|]
+        stm [C.cstm|src += $exp:num_elems * sizeof($ty:(primTypeToCType pt));|]
+        pure
+          [C.cstms|
+             obj->$id:field = $id:new_array(ctx, $id:dataptr, $args:dims);
+             if (obj->$id:field == NULL) { err = 1; }|]
+
+  load_body <- collect $ do
+    loads <- concat <$> zipWithM restoreComponent [0 ..] vds
+    stm
+      [C.cstm|if (err == 0) {
+                $stms:loads
+              }|]
+
   headerDecl
     (OpaqueDecl desc)
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:store_opaque($ty:ctx_ty *ctx, const $ty:opaque_type *obj, void **p, size_t *n);|]
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
 
   -- We do not need to enclose the body in a critical section, because
-  -- when we free the components of the opaque, we are calling public
-  -- API functions that do their own locking.
+  -- when we operate on the components of the opaque, we are calling
+  -- public API functions that do their own locking.
   return
     [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
@@ -979,7 +1054,29 @@ opaqueLibraryFunctions desc vds = do
             free(obj);
             return ret;
           }
-           |]
+
+          int $id:store_opaque($ty:ctx_ty *ctx,
+                               const $ty:opaque_type *obj, void **p, size_t *n) {
+            int ret = 0;
+            $items:store_body
+            return ret;
+          }
+
+          $ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx,
+                                              const void *p) {
+            int err = 0;
+            const unsigned char *src = p;
+            $ty:opaque_type* obj = malloc(sizeof($ty:opaque_type));
+            $items:load_body
+            if (err != 0) {
+              int ret = 0, tmp;
+              $items:free_body
+              free(obj);
+              obj = NULL;
+            }
+            return obj;
+          }
+    |]
 
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
 valueDescToCType (ScalarValue pt signed _) =
