@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The C API now exposes serialisation functions for opaque values.
+
 ### Removed
 
 ### Changed
