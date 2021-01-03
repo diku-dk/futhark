@@ -6,6 +6,7 @@ module Futhark.CodeGen.Backends.GenericPython.Definitions
     pyValues,
     pyPanic,
     pyTuning,
+    pyServer,
   )
 where
 
@@ -25,3 +26,6 @@ pyPanic = $(embedStringFile "rts/python/panic.py")
 
 pyTuning :: String
 pyTuning = $(embedStringFile "rts/python/tuning.py")
+
+pyServer :: String
+pyServer = $(embedStringFile "rts/python/server.py")

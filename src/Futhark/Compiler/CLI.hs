@@ -117,6 +117,11 @@ commandLineOptions =
       (NoArg $ Right $ \config -> config {compilerMode = ToExecutable})
       "Generate an executable instead of a library (set by default).",
     Option
+      []
+      ["server"]
+      (NoArg $ Right $ \config -> config {compilerMode = ToServer})
+      "Generate a server executable instead of a library.",
+    Option
       "w"
       []
       (NoArg $ Right $ \config -> config {compilerWarn = False})
@@ -160,7 +165,11 @@ data CompilerConfig cfg = CompilerConfig
   }
 
 -- | Are we compiling a library or an executable?
-data CompilerMode = ToLibrary | ToExecutable deriving (Eq, Ord, Show)
+data CompilerMode
+  = ToLibrary
+  | ToExecutable
+  | ToServer
+  deriving (Eq, Ord, Show)
 
 -- | The configuration of the compiler.
 newCompilerConfig :: cfg -> CompilerConfig cfg

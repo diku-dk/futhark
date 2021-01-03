@@ -133,9 +133,8 @@ data Signedness
 
 -- | A description of an externally meaningful value.
 data ValueDesc
-  = -- | An array with memory block, memory block size,
-    -- memory space, element type, signedness of element
-    -- type (if applicable), and shape.
+  = -- | An array with memory block memory space, element type,
+    -- signedness of element type (if applicable), and shape.
     ArrayValue VName Space PrimType Signedness [DimSize]
   | -- | A scalar value with signedness if applicable.
     ScalarValue PrimType Signedness VName

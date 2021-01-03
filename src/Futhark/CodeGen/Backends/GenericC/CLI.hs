@@ -372,12 +372,9 @@ cliDefs options (Functions funs) =
       (cli_entry_point_decls, entry_point_inits) =
         unzip $ map (uncurry cliEntryPoint) funs
    in [C.cunit|
-$esc:("#include <string.h>")
-$esc:("#include <inttypes.h>")
-$esc:("#include <errno.h>")
-$esc:("#include <ctype.h>")
-$esc:("#include <errno.h>")
 $esc:("#include <getopt.h>")
+$esc:("#include <ctype.h>")
+$esc:("#include <inttypes.h>")
 
 $esc:values_h
 
@@ -404,10 +401,6 @@ struct entry_point_entry {
 int main(int argc, char** argv) {
   fut_progname = argv[0];
 
-  struct entry_point_entry entry_points[] = {
-    $inits:entry_point_inits
-  };
-
   struct futhark_context_config *cfg = futhark_context_config_new();
   assert(cfg != NULL);
 
@@ -426,6 +419,10 @@ int main(int argc, char** argv) {
   if (error != NULL) {
     futhark_panic(1, "%s", error);
   }
+
+  struct entry_point_entry entry_points[] = {
+    $inits:entry_point_inits
+  };
 
   if (entry_point != NULL) {
     int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
