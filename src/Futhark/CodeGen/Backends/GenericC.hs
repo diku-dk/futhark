@@ -1504,7 +1504,7 @@ commonLibFuns memreport = do
       [C.cedecl|char* $id:s($ty:ctx *ctx) {
                  struct str_builder builder;
                  str_builder_init(&builder);
-                 if (ctx->detail_memory || ctx->profiling) {
+                 if (ctx->detail_memory || ctx->profiling || ctx->logging) {
                    $items:memreport
                  }
                  if (ctx->profiling) {
