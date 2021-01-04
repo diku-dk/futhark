@@ -10,8 +10,10 @@ import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
+import Data.Function ((&))
 import Data.IORef
 import Data.List (foldl', sortBy)
+import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Text as T
@@ -297,7 +299,20 @@ runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Suc
         putStr $ descString dataset_desc pad_to
 
       reportResult runtimes
-      return $ Just $ DataResult dataset_desc $ Right (runtimes, errout)
+      Result runtimes (getMemoryUsage errout) errout
+        & Right
+        & DataResult dataset_desc
+        & Just
+        & return
+
+getMemoryUsage :: T.Text -> M.Map T.Text Int
+getMemoryUsage t =
+  foldMap matchMap $ T.lines t
+  where
+    mem_regex = "Peak memory usage for space '([^']+)': ([0-9]+) bytes." :: T.Text
+    matchMap line = case (line =~ mem_regex :: (T.Text, T.Text, T.Text, [T.Text])) of
+      (_, _, _, [device, bytes]) -> M.singleton device (read $ T.unpack bytes)
+      _ -> mempty
 
 commandLineOptions :: [FunOptDescr BenchOptions]
 commandLineOptions =
