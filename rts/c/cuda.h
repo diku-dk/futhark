@@ -495,7 +495,7 @@ static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
     struct profiling_record record = ctx->profiling_records[i];
 
     float ms;
-    if ((err = cudaEventElapsedTime(&ms, record.events[0], record.events[1])) != CUDA_SUCCESS) {
+    if ((err = cudaEventElapsedTime(&ms, record.events[0], record.events[1])) != cudaSuccess) {
       return err;
     }
 
@@ -503,10 +503,10 @@ static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
     *record.runs += 1;
     *record.runtime += ms*1000;
 
-    if ((err = cudaEventDestroy(record.events[0])) != CUDA_SUCCESS) {
+    if ((err = cudaEventDestroy(record.events[0])) != cudaSuccess) {
       return err;
     }
-    if ((err = cudaEventDestroy(record.events[1])) != CUDA_SUCCESS) {
+    if ((err = cudaEventDestroy(record.events[1])) != cudaSuccess) {
       return err;
     }
 
@@ -515,7 +515,7 @@ static cudaError_t cuda_tally_profiling_records(struct cuda_context *ctx) {
 
   ctx->profiling_records_used = 0;
 
-  return CUDA_SUCCESS;
+  return cudaSuccess;
 }
 
 // Returns pointer to two events.
