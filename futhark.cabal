@@ -59,6 +59,7 @@ library
       Futhark.Analysis.HORep.MapNest
       Futhark.Analysis.HORep.SOAC
       Futhark.Analysis.Metrics
+      Futhark.Analysis.Metrics.Type
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Generalize
