@@ -114,6 +114,7 @@ compileProg =
                           int debugging;
                           int profiling;
                           int profiling_paused;
+                          int logging;
                           typename lock_t lock;
                           char *error;
                           int total_runs;
@@ -140,6 +141,7 @@ compileProg =
                  ctx->debugging = cfg->debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
+                 ctx->logging = 0;
                  ctx->error = NULL;
                  create_lock(&ctx->lock);
 
