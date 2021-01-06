@@ -2,6 +2,7 @@
 
 module Futhark.BenchTests (tests) where
 
+import qualified Data.Map as M
 import qualified Data.Text as T
 import Futhark.Bench
 import Test.Tasty
@@ -19,10 +20,11 @@ instance Arbitrary DataResult where
       <$> printable
       <*> oneof
         [ Left <$> arbText,
-          Right <$> ((,) <$> arbitrary <*> arbText)
+          Right <$> (Result <$> arbitrary <*> arbMap <*> arbText)
         ]
     where
       arbText = T.pack <$> printable
+      arbMap = M.fromList <$> listOf ((,) <$> arbText <*> arbitrary)
 
 -- XXX: we restrict this generator to single datasets to we don't have
 -- to worry about duplicates.
