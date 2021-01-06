@@ -80,6 +80,7 @@ compileProg =
                           int detail_memory;
                           int debugging;
                           int profiling;
+                          int logging;
                           typename lock_t lock;
                           char *error;
                           int profiling_paused;
@@ -97,6 +98,7 @@ compileProg =
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
                                   ctx->profiling = cfg->debugging;
+                                  ctx->logging = cfg->debugging;
                                   ctx->error = NULL;
                                   create_lock(&ctx->lock);
                                   $stms:init_fields
