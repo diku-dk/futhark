@@ -9,11 +9,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * The C API now exposes serialisation functions for opaque values.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+## [0.18.5]
+
+### Fixed
+
+  * Fix tiling crash (#1203).
+
+  * `futhark run` now does slightly more type-checking of its inputs
+    (#1208).
+
+  * Sum type deduplication issue (#1209).
+
+  * Missing parentheses when printing sum values in interpreter.
 
 ## [0.18.4]
 

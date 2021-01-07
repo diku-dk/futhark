@@ -38,7 +38,6 @@ import Data.Vector.Binary
 import Data.Vector.Generic (freeze)
 import qualified Data.Vector.Unboxed as UVec
 import qualified Data.Vector.Unboxed.Mutable as UMVec
-import Futhark.IR.Pretty ()
 import Futhark.IR.Primitive (PrimValue)
 import Futhark.IR.Prop.Constants (IsValue (..))
 import Futhark.Util (maybeHead)

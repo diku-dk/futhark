@@ -57,7 +57,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import Data.Void
-import Futhark.Analysis.Metrics
+import Futhark.Analysis.Metrics.Type
 import Futhark.IR.Primitive
   ( FloatType (..),
     IntType (..),

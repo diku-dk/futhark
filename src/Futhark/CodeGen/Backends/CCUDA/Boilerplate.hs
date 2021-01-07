@@ -337,6 +337,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          int debugging;
                          int profiling;
                          int profiling_paused;
+                         int logging;
                          typename lock_t lock;
                          char *error;
                          $sdecls:fields
@@ -371,6 +372,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
+                 ctx->logging = cfg->cu_cfg.logging;
                  ctx->error = NULL;
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;

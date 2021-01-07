@@ -24,25 +24,8 @@ import Data.List (tails)
 import qualified Data.Map.Strict as M
 import Data.Text (Text)
 import qualified Data.Text as T
+import Futhark.Analysis.Metrics.Type
 import Futhark.IR
-
--- | AST metrics are simply a collection from identifiable node names
--- to the number of times that node appears.
-newtype AstMetrics = AstMetrics (M.Map Text Int)
-
-instance Show AstMetrics where
-  show (AstMetrics m) = unlines $ map metric $ M.toList m
-    where
-      metric (k, v) = pretty k ++ " " ++ pretty v
-
-instance Read AstMetrics where
-  readsPrec _ s =
-    maybe [] success $ mapM onLine $ lines s
-    where
-      onLine l = case words l of
-        [k, x] | [(n, "")] <- reads x -> Just (T.pack k, n)
-        _ -> Nothing
-      success m = [(AstMetrics $ M.fromList m, "")]
 
 -- | Compute the metrics for some operation.
 class OpMetrics op where

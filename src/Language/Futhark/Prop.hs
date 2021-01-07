@@ -118,6 +118,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Ord
 import qualified Data.Set as S
+import qualified Data.Text as T
 import qualified Futhark.IR.Primitive as Primitive
 import Futhark.Util (maxinum, nubOrd)
 import Futhark.Util.Pretty
@@ -386,9 +387,11 @@ sortFields :: M.Map Name a -> [(Name, a)]
 sortFields l = map snd $ sortOn fst $ zip (map (fieldish . fst) l') l'
   where
     l' = M.toList l
-    fieldish s = case reads $ nameToString s of
-      [(x, "")] -> Left (x :: Int)
-      _ -> Right s
+    onDigit Nothing _ = Nothing
+    onDigit (Just d) c
+      | isDigit c = Just $ d * 10 + ord c - ord '0'
+      | otherwise = Nothing
+    fieldish s = maybe (Right s) Left $ T.foldl' onDigit (Just 0) $ nameToText s
 
 -- | Sort the constructors of a sum type in some well-defined (but not
 -- otherwise significant) manner.
