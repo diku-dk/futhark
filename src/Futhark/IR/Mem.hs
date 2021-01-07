@@ -661,7 +661,7 @@ getExtMaps ::
     M.Map (Ext VName) (TPrimExp Int64 (Ext VName))
   )
 getExtMaps ctx_lst_ids =
-  ( M.map leafExp $ M.mapKeys Free $ M.fromListWith (flip const) ctx_lst_ids,
+  ( M.map leafExp $ M.mapKeys Free $ M.fromListWith (const id) ctx_lst_ids,
     M.fromList $
       mapMaybe
         ( traverse

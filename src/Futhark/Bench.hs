@@ -7,6 +7,7 @@ module Futhark.Bench
   ( RunResult (..),
     DataResult (..),
     BenchResult (..),
+    Result (..),
     encodeBenchResults,
     decodeBenchResults,
     binaryName,
@@ -24,6 +25,7 @@ import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.HashMap.Strict as HM
+import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
@@ -40,10 +42,17 @@ import System.Timeout (timeout)
 newtype RunResult = RunResult {runMicroseconds :: Int}
   deriving (Eq, Show)
 
--- | The results for a single named dataset is either an error
--- message, or runtime measurements along the stderr that was
+data Result = Result
+  { runResults :: [RunResult],
+    memoryMap :: M.Map T.Text Int,
+    stdErr :: T.Text
+  }
+  deriving (Eq, Show)
+
+-- | The results for a single named dataset is either an error message, or
+-- runtime measurements, the number of bytes used, and the stderr that was
 -- produced.
-data DataResult = DataResult String (Either T.Text ([RunResult], T.Text))
+data DataResult = DataResult String (Either T.Text Result)
   deriving (Eq, Show)
 
 -- | The results for all datasets for some benchmark program.
@@ -53,6 +62,12 @@ data BenchResult = BenchResult FilePath [DataResult]
 newtype DataResults = DataResults {unDataResults :: [DataResult]}
 
 newtype BenchResults = BenchResults {unBenchResults :: [BenchResult]}
+
+instance JSON.ToJSON Result where
+  toJSON (Result runres memmap err) = JSON.toJSON (runres, memmap, err)
+
+instance JSON.FromJSON Result where
+  parseJSON = fmap (\(runres, memmap, err) -> Result runres memmap err) . JSON.parseJSON
 
 instance JSON.ToJSON RunResult where
   toJSON = JSON.toJSON . runMicroseconds
@@ -74,15 +89,16 @@ instance JSON.FromJSON DataResults where
         DataResult (T.unpack k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
-        (,) <$> o JSON..: "runtimes" <*> o JSON..: "stderr"
+        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..: "stderr"
 
 dataResultJSON :: DataResult -> (T.Text, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
   (T.pack desc, JSON.toJSON err)
-dataResultJSON (DataResult desc (Right (runtimes, progerr))) =
+dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr))) =
   ( T.pack desc,
     JSON.object
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
+        ("bytes", JSON.toJSON bytes),
         ("stderr", JSON.toJSON progerr)
       ]
   )
@@ -240,7 +256,8 @@ benchmarkDataset opts futhark program entry input_spec expected_spec ref_out =
                  tmpfile,
                  "-r",
                  show $ runRuns opts,
-                 "-b"
+                 "-b",
+                 "-L"
                ]
 
     -- Explicitly prefixing the current directory is necessary for

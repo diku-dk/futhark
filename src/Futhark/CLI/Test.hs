@@ -719,4 +719,6 @@ commandLineOptions =
 -- | Run @futhark test@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions defaultConfig commandLineOptions "options... programs..." $ \progs config ->
-  Just $ runTests config progs
+  case progs of
+    [] -> Nothing
+    _ -> Just $ runTests config progs
