@@ -123,6 +123,7 @@ instance Binary Value where
     where
       getBool = (/= 0) <$> getWord8
 
+      {-# INLINE get' #-}
       get' mk get_elem num_elems =
         mk <$> genericGetVectorWith (pure num_elems) get_elem
 
@@ -573,28 +574,45 @@ compareValue i got_v expected_v
   | otherwise =
     [ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)]
   where
+    {-# INLINE compareGen #-}
+    {-# INLINE compareNum #-}
+    {-# INLINE compareFloat #-}
+    {-# INLINE compareFloatElement #-}
+    {-# INLINE compareElement #-}
     compareNum tol = compareGen $ compareElement tol
     compareFloat tol = compareGen $ compareFloatElement tol
 
     compareGen cmp got expected =
-      concat $
-        zipWith cmp (UVec.toList $ UVec.indexed got) (UVec.toList expected)
+      let l = UVec.length got
+          check acc j
+            | j < l =
+              case cmp j (got UVec.! j) (expected UVec.! j) of
+                Just mismatch ->
+                  check (mismatch : acc) (j + 1)
+                Nothing ->
+                  check acc (j + 1)
+            | otherwise =
+              acc
+       in reverse $ check [] 0
 
-    compareElement tol (j, got) expected
-      | comparePrimValue tol got expected = []
-      | otherwise = [PrimValueMismatch (i, j) (value got) (value expected)]
+    compareElement tol j got expected
+      | comparePrimValue tol got expected = Nothing
+      | otherwise = Just $ PrimValueMismatch (i, j) (value got) (value expected)
 
-    compareFloatElement tol (j, got) expected
-      | isNaN got, isNaN expected = []
+    compareFloatElement tol j got expected
+      | isNaN got,
+        isNaN expected =
+        Nothing
       | isInfinite got,
         isInfinite expected,
         signum got == signum expected =
-        []
-      | otherwise = compareElement tol (j, got) expected
+        Nothing
+      | otherwise =
+        compareElement tol j got expected
 
-    compareBool (j, got) expected
-      | got == expected = []
-      | otherwise = [PrimValueMismatch (i, j) (value got) (value expected)]
+    compareBool j got expected
+      | got == expected = Nothing
+      | otherwise = Just $ PrimValueMismatch (i, j) (value got) (value expected)
 
 comparePrimValue ::
   (Ord num, Num num) =>
