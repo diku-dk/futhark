@@ -13,6 +13,7 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Tree
 import Futhark.Bench
+import Futhark.Server
 import Futhark.Test
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
@@ -49,23 +50,14 @@ compileOptions opts = do
         compOptions = mempty
       }
 
-runOptions :: Path -> Int -> AutotuneOptions -> RunOptions
-runOptions path timeout_s opts =
+runOptions :: Int -> AutotuneOptions -> RunOptions
+runOptions timeout_s opts =
   RunOptions
-    { runRunner = "",
-      runRuns = optRuns opts,
-      runExtraOptions =
-        "--default-threshold" :
-        show (optDefaultThreshold opts) :
-        "-L" :
-        map opt path
-          ++ optExtraOptions opts,
+    { runRuns = optRuns opts,
       runTimeout = timeout_s,
       runVerbose = optVerbose opts,
       runResultAction = Nothing
     }
-  where
-    opt (name, val) = "--size=" ++ name ++ "=" ++ show val
 
 type Path = [(String, Int)]
 
@@ -87,6 +79,16 @@ comparisons = mapMaybe isComparison . lines
 type RunDataset = Int -> Path -> IO (Either String ([(String, Int)], Int))
 
 type DatasetName = String
+
+serverOptions :: Path -> AutotuneOptions -> [String]
+serverOptions path opts =
+  "--default-threshold" :
+  show (optDefaultThreshold opts) :
+  "-L" :
+  map opt path
+    ++ optExtraOptions opts
+  where
+    opt (name, val) = "--size=" ++ name ++ "=" ++ show val
 
 prepare :: AutotuneOptions -> FutharkExe -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
 prepare opts futhark prog = do
@@ -118,15 +120,11 @@ prepare opts futhark prog = do
               Just (runDescription trun, run entry_point trun expected)
           _ -> Nothing
 
-  fmap concat $
-    forM truns $ \ios ->
-      forM
-        ( mapMaybe
-            (runnableDataset $ iosEntryPoint ios)
-            (iosTestRuns ios)
-        )
-        $ \(dataset, do_run) ->
-          return (dataset, do_run, iosEntryPoint ios)
+  fmap concat . forM truns $ \ios -> do
+    let cases =
+          mapMaybe (runnableDataset $ iosEntryPoint ios) (iosTestRuns ios)
+    forM cases $ \(dataset, do_run) ->
+      return (dataset, do_run, iosEntryPoint ios)
   where
     run entry_point trun expected timeout path = do
       let bestRuntime :: ([RunResult], T.Text) -> ([(String, Int)], Int)
@@ -135,20 +133,26 @@ prepare opts futhark prog = do
               minimum $ map runMicroseconds runres
             )
 
-          ropts = runOptions path timeout opts
+          ropts = runOptions timeout opts
 
       when (optVerbose opts > 1) $
-        putStrLn $ "Running with options: " ++ unwords (runExtraOptions ropts)
+        putStrLn $ "Running with options: " ++ unwords (serverOptions path opts)
 
-      either (Left . T.unpack) (Right . bestRuntime)
-        <$> benchmarkDataset
-          ropts
-          futhark
-          prog
-          entry_point
-          (runInput trun)
-          expected
-          (testRunReferenceOutput prog entry_point trun)
+      -- XXX: it is really inefficient to start a new server for every
+      -- run, but unfortunately we can only set threshold parameters
+      -- on startup.
+      let progbin = "." </> dropExtension prog
+      withServer progbin (serverOptions path opts) $ \server ->
+        either (Left . T.unpack) (Right . bestRuntime)
+          <$> benchmarkDataset
+            server
+            ropts
+            futhark
+            prog
+            entry_point
+            (runInput trun)
+            expected
+            (testRunReferenceOutput prog entry_point trun)
 
 --- Benchmarking a program
 

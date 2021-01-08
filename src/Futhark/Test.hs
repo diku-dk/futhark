@@ -14,6 +14,7 @@ module Futhark.Test
     FutharkExe (..),
     getValues,
     getValuesBS,
+    withValuesFile,
     compareValues,
     compareValues1,
     testRunReferenceOutput,
@@ -252,7 +253,10 @@ parseInputOutputs :: Parser [InputOutputs]
 parseInputOutputs = do
   entrys <- parseEntryPoints
   cases <- parseRunCases
-  return $ map (`InputOutputs` cases) entrys
+  return $
+    if null cases
+      then []
+      else map (`InputOutputs` cases) entrys
 
 parseEntryPoints :: Parser [T.Text]
 parseEntryPoints = (lexstr "entry:" *> many entry <* space) <|> pure ["main"]
@@ -503,11 +507,11 @@ testSpecFromFile path = do
       `catch` couldNotRead
   case blocks_or_err of
     Left err -> return $ Left err
-    Right blocks -> do
-      let (first_spec_line, first_spec, rest_specs) =
-            case blocks of
-              [] -> (0, mempty, [])
-              (n, s) : ss -> (n, s, ss)
+    Right [] ->
+      -- The absence of a test block is interpreted as a program that
+      -- should compile, but not run.
+      return $ Right $ ProgramTest mempty mempty $ RunCases mempty mempty mempty
+    Right ((first_spec_line, first_spec) : rest_specs) ->
       case readTestSpec (1 + first_spec_line) path first_spec of
         Left err -> return $ Left $ errorBundlePretty err
         Right v -> return $ foldM moreCases v rest_specs
@@ -640,6 +644,24 @@ getValuesBS _ dir (InFile file) =
       E.evaluate $ decompress s
 getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
+
+-- | Evaluate an IO action while the values are available in a file by
+-- some name.  The file will be removed after the action is done.
+withValuesFile ::
+  MonadIO m =>
+  FutharkExe ->
+  FilePath ->
+  Values ->
+  (FilePath -> IO a) ->
+  m a
+withValuesFile _ dir (InFile file) f
+  | takeExtension file /= ".gz" =
+    liftIO $ f $ dir </> file
+withValuesFile futhark dir vs f =
+  liftIO . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+    BS.hPutStr tmpf_h =<< getValuesBS futhark dir vs
+    hClose tmpf_h
+    f tmpf
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
@@ -788,14 +810,13 @@ compileProgram extra_options (FutharkExe futhark) backend program = do
 -- the Python backends).  The @extra_options@ are passed to the
 -- program.
 runProgram ::
-  MonadIO m =>
   FutharkExe ->
   FilePath ->
   [String] ->
   String ->
   T.Text ->
   Values ->
-  m (ExitCode, SBS.ByteString, SBS.ByteString)
+  IO (ExitCode, SBS.ByteString, SBS.ByteString)
 runProgram futhark runner extra_options prog entry input = do
   let progbin = binaryName prog
       dir = takeDirectory prog

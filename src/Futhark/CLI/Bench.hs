@@ -18,6 +18,7 @@ import Data.Maybe
 import Data.Ord
 import qualified Data.Text as T
 import Futhark.Bench
+import Futhark.Server
 import Futhark.Test
 import Futhark.Util (fancyTerminal, maxinum, maybeNth, pmapIO)
 import Futhark.Util.Console
@@ -27,6 +28,7 @@ import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.Exit
+import System.FilePath
 import System.IO
 import Text.Printf
 import Text.Regex.TDFA
@@ -163,10 +165,26 @@ compileBenchmark opts (program, spec) =
   where
     hasRuns (InputOutputs _ runs) = not $ null runs
 
+withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO a) -> IO a
+withProgramServer program runner extra_options f = do
+  -- Explicitly prefixing the current directory is necessary for
+  -- readProcessWithExitCode to find the binary when binOutputf has
+  -- no path component.
+  let binOutputf = dropExtension program
+      binpath = "." </> binOutputf
+
+      (to_run, to_run_args)
+        | null runner = (binpath, extra_options)
+        | otherwise = (runner, binpath : extra_options)
+
+  liftIO $ withServer to_run to_run_args f
+
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
-runBenchmark opts futhark (program, cases) = mapM forInputOutputs $ filter relevant cases
+runBenchmark opts futhark (program, cases) =
+  withProgramServer program (optRunner opts) (optExtraOptions opts) $ \server ->
+    mapM (forInputOutputs server) $ filter relevant cases
   where
-    forInputOutputs (InputOutputs entry_name runs) = do
+    forInputOutputs server (InputOutputs entry_name runs) = do
       (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
 
       putStr $ inBold $ "\nResults for " ++ program' ++ tuning_desc ++ ":\n"
@@ -176,7 +194,7 @@ runBenchmark opts futhark (program, cases) = mapM forInputOutputs $ filter relev
                   optExtraOptions opts ++ tuning_opts
               }
       BenchResult program' . catMaybes
-        <$> mapM (runBenchmarkCase opts' futhark program entry_name pad_to) runs
+        <$> mapM (runBenchmarkCase server opts' futhark program entry_name pad_to) runs
       where
         program' =
           if entry_name == "main"
@@ -190,9 +208,7 @@ runBenchmark opts futhark (program, cases) = mapM forInputOutputs $ filter relev
 runOptions :: (Int -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
   RunOptions
-    { runRunner = optRunner opts,
-      runRuns = optRuns opts,
-      runExtraOptions = optExtraOptions opts,
+    { runRuns = optRuns opts,
       runTimeout = optTimeout opts,
       runVerbose = optVerbose opts,
       runResultAction = Just f
@@ -256,6 +272,7 @@ reportResult results = do
       ((maxinum runtimes / avg - 1) * 100)
 
 runBenchmarkCase ::
+  Server ->
   BenchOptions ->
   FutharkExe ->
   FilePath ->
@@ -263,12 +280,12 @@ runBenchmarkCase ::
   Int ->
   TestRun ->
   IO (Maybe DataResult)
-runBenchmarkCase _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
+runBenchmarkCase _ _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase opts _ _ _ _ (TestRun tags _ _ _ _)
+runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
     return Nothing
-runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
+runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
   prompt <- mkProgressPrompt (optRuns opts) pad_to dataset_desc
 
   -- Report the dataset name before running the program, so that if an
@@ -277,6 +294,7 @@ runBenchmarkCase opts futhark program entry pad_to tr@(TestRun _ input_spec (Suc
 
   res <-
     benchmarkDataset
+      server
       (runOptions (prompt . Just) opts)
       futhark
       program
