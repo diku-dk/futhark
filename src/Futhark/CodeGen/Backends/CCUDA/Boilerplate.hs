@@ -340,6 +340,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          int logging;
                          typename lock_t lock;
                          char *error;
+                         typename FILE *log;
                          $sdecls:fields
                          $sdecls:kernel_fields
                          typename CUdeviceptr global_failure;
@@ -374,6 +375,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->profiling_paused = 0;
                  ctx->logging = cfg->cu_cfg.logging;
                  ctx->error = NULL;
+                 ctx->log = stderr;
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;
                  ctx->cuda.profiling_records =

@@ -604,7 +604,7 @@ defineMemorySpace space = do
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
-      fprintf(stderr, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
+      fprintf(ctx->log, "Unreferencing block %s (allocated as %s) in %s: %d references remaining.\n",
                       desc, block->desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
@@ -612,7 +612,7 @@ defineMemorySpace space = do
       $items:free
       free(block->references);
       if (ctx->detail_memory) {
-        fprintf(stderr, "%lld bytes freed (now allocated: %lld bytes)\n",
+        fprintf(ctx->log, "%lld bytes freed (now allocated: %lld bytes)\n",
                 (long long) block->size, (long long) ctx->$id:usagename);
       }
     }
@@ -635,7 +635,7 @@ defineMemorySpace space = do
 
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
+    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
             (long long) size,
             desc, $string:spacedesc,
             (long long) ctx->$id:usagename);
@@ -643,10 +643,10 @@ defineMemorySpace space = do
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
     if (ctx->detail_memory) {
-      fprintf(stderr, " (new peak).\n");
+      fprintf(ctx->log, " (new peak).\n");
     }
   } else if (ctx->detail_memory) {
-    fprintf(stderr, ".\n");
+    fprintf(ctx->log, ".\n");
   }
 
   $items:alloc
@@ -1380,6 +1380,7 @@ $esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
+$esc:("#include <stdio.h>")
 $esc:("#include <float.h>")
 $esc:(header_extra)
 
@@ -1520,6 +1521,13 @@ commonLibFuns memreport = do
                          char* error = ctx->error;
                          ctx->error = NULL;
                          return error;
+                       }|]
+    )
+
+  publicDef_ "context_set_logging_file" MiscDecl $ \s ->
+    ( [C.cedecl|char* $id:s($ty:ctx* ctx, typename FILE* f);|],
+      [C.cedecl|char* $id:s($ty:ctx* ctx, typename FILE* f) {
+                         ctx->log = f;
                        }|]
     )
 
@@ -1849,7 +1857,7 @@ compileCode (DebugPrint s (Just e)) = do
   e' <- compileExp e
   stm
     [C.cstm|if (ctx->debugging) {
-          fprintf(stderr, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
+          fprintf(ctx->log, $string:fmtstr, $exp:s, ($ty:ety)$exp:e', '\n');
        }|]
   where
     (fmt, ety) = case primExpType e of
@@ -1860,7 +1868,7 @@ compileCode (DebugPrint s (Just e)) = do
 compileCode (DebugPrint s Nothing) =
   stm
     [C.cstm|if (ctx->debugging) {
-          fprintf(stderr, "%s\n", $exp:s);
+          fprintf(ctx->log, "%s\n", $exp:s);
        }|]
 compileCode c
   | Just (name, vol, t, e, c') <- declareAndSet c = do

@@ -318,7 +318,7 @@ callKernel (CmpSizeLe v key x) = do
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
   GC.stm
     [C.cstm|if (ctx->logging) {
-    fprintf(stderr, "Compared %s <= %ld: %s.\n", $string:(pretty key), (long)$exp:x', $id:v ? "true" : "false");
+    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(pretty key), (long)$exp:x', $id:v ? "true" : "false");
     }|]
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ pretty size_class
@@ -389,11 +389,11 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       typename int64_t $id:time_start = 0, $id:time_end = 0;
       if (ctx->debugging) {
-        fprintf(stderr, "Launching %s with global work size [", $string:(pretty kernel_name));
+        fprintf(ctx->log, "Launching %s with global work size [", $string:(pretty kernel_name));
         $stms:(printKernelSize global_work_size)
-        fprintf(stderr, "] and local work size [");
+        fprintf(ctx->log, "] and local work size [");
         $stms:(printKernelSize local_work_size)
-        fprintf(stderr, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
+        fprintf(ctx->log, "]; local memory parameters sum to %d bytes.\n", (int)$exp:local_bytes);
         $id:time_start = get_wall_time();
       }
       OPENCL_SUCCEED_OR_RETURN(
@@ -404,7 +404,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
         OPENCL_SUCCEED_FATAL(clFinish(ctx->opencl.queue));
         $id:time_end = get_wall_time();
         long int $id:time_diff = $id:time_end - $id:time_start;
-        fprintf(stderr, "kernel %s runtime: %ldus\n",
+        fprintf(ctx->log, "kernel %s runtime: %ldus\n",
                 $string:(pretty kernel_name), $id:time_diff);
       }
     }|]
@@ -421,7 +421,7 @@ launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
 
     printKernelSize :: VName -> [C.Stm]
     printKernelSize work_size =
-      intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
+      intercalate [[C.cstm|fprintf(ctx->log, ", ");|]] $
         map (printKernelDim work_size) [0 .. kernel_rank -1]
     printKernelDim global_work_size i =
-      [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
+      [[C.cstm|fprintf(ctx->log, "%zu", $id:global_work_size[$int:i]);|]]
