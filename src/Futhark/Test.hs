@@ -21,6 +21,7 @@ module Futhark.Test
     getExpectedResult,
     compileProgram,
     runProgram,
+    readResults,
     ensureReferenceOutput,
     determineTuning,
     binaryName,
@@ -67,6 +68,7 @@ import Futhark.IR.Primitive
     intByteSize,
     intValue,
   )
+import Futhark.Server
 import Futhark.Test.Values
 import Futhark.Util (directoryContents, pmapIO)
 import Futhark.Util.Pretty (pretty, prettyText)
@@ -829,6 +831,28 @@ runProgram futhark runner extra_options prog entry input = do
 
   input' <- getValuesBS futhark dir input
   liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
+
+readResults ::
+  (MonadIO m, MonadError T.Text m) =>
+  Server ->
+  [VarName] ->
+  FilePath ->
+  m (SBS.ByteString, [Value])
+readResults server outs program =
+  join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
+    hClose outputh
+    store_r <- cmdStore server outputf outs
+    case store_r of
+      Just (CmdFailure _ err) ->
+        pure $ throwError $ T.unlines err
+      Nothing -> do
+        bytes <- BS.readFile outputf
+        case valuesFromByteString "output" bytes of
+          Left e -> do
+            let actualf = program `addExtension` "actual"
+            liftIO $ BS.writeFile actualf bytes
+            pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
+          Right vs -> pure $ pure (BS.toStrict bytes, vs)
 
 -- | Ensure that any reference output files exist, or create them (by
 -- compiling the program with the reference compiler and running it on

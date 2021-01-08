@@ -31,8 +31,6 @@ import Futhark.Server
 import Futhark.Test
 import System.Exit
 import System.FilePath
-import System.IO
-import System.IO.Temp (withSystemTempFile)
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Timeout (timeout)
 
@@ -225,24 +223,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   report <- cmdEither $ cmdReport server
 
-  let readResults :: (MonadIO m, MonadError T.Text m) => m (SBS.ByteString, [Value])
-      readResults =
-        join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
-          liftIO $ hClose outputh
-          store_r <- cmdStore server outputf outs
-          case store_r of
-            Just (CmdFailure _ err) ->
-              pure $ throwError $ T.unlines err
-            Nothing -> do
-              bytes <- LBS.readFile outputf
-              case valuesFromByteString "output" bytes of
-                Left e -> do
-                  let actualf = program `addExtension` "actual"
-                  liftIO $ LBS.writeFile actualf bytes
-                  pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
-                Right vs -> pure $ pure (LBS.toStrict bytes, vs)
-
-  vs <- readResults <* freeOuts
+  vs <- readResults server outs program <* freeOuts
 
   maybe_expected <-
     liftIO $ maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec

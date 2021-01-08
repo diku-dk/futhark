@@ -33,7 +33,6 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
-import System.IO.Temp
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.Regex.TDFA
 
@@ -51,14 +50,17 @@ throwError e = E.throwError [e]
 runTestM :: TestM () -> IO TestResult
 runTestM = fmap (either Failure $ const Success) . runExceptT
 
-io :: IO a -> TestM a
-io = liftIO
+liftExcept :: ExceptT T.Text IO a -> TestM a
+liftExcept = either (E.throwError . pure) pure <=< liftIO . runExceptT
 
 context :: T.Text -> TestM a -> TestM a
 context s = withExceptT $
   \case
     [] -> []
     (e : es') -> (s <> ":\n" <> e) : es'
+
+context1 :: Monad m => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
+context1 s = withExceptT $ \e -> s <> ":\n" <> e
 
 accErrors :: [TestM a] -> TestM [a]
 accErrors tests = do
@@ -135,9 +137,9 @@ optimisedProgramMetrics programs pipeline program =
       check []
   where
     check opt = do
-      futhark <- io $ maybe getExecutablePath return $ configFuthark programs
+      futhark <- liftIO $ maybe getExecutablePath return $ configFuthark programs
       let opts = ["dev"] ++ opt ++ ["--metrics", program]
-      (code, output, err) <- io $ readProcessWithExitCode futhark opts ""
+      (code, output, err) <- liftIO $ readProcessWithExitCode futhark opts ""
       let output' = T.decodeUtf8 output
       case code of
         ExitSuccess
@@ -193,56 +195,48 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
               input <- T.unlines . map prettyText <$> getValues (FutharkExe futhark) dir inputValues
               expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
               (code, output, err) <-
-                io $
+                liftIO $
                   readProcessWithExitCode futhark ["run", "-e", T.unpack entry, program] $
                     T.encodeUtf8 input
               case code of
-                ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+                ExitFailure 127 ->
+                  throwError $ progNotFound $ T.pack futhark
                 _ ->
-                  compareResult entry index program expectedResult'
-                    =<< runResult program code output err
+                  liftExcept $
+                    compareResult entry index program expectedResult'
+                      =<< runResult program code output err
    in accErrors_ $ map runInterpretedCase run_cases
 
 runTestCase :: TestCase -> TestM ()
 runTestCase (TestCase mode program testcase progs) = do
-  futhark <- io $ maybe getExecutablePath return $ configFuthark progs
+  futhark <- liftIO $ maybe getExecutablePath return $ configFuthark progs
+  let checkctx =
+        mconcat
+          [ "Type-checking with '",
+            T.pack futhark,
+            " check ",
+            T.pack program,
+            "'"
+          ]
   case testAction testcase of
     CompileTimeFailure expected_error ->
-      context
-        ( mconcat
-            [ "Type-checking with '",
-              T.pack futhark,
-              " check ",
-              T.pack program,
-              "'"
-            ]
-        )
-        $ do
-          (code, _, err) <-
-            io $ readProcessWithExitCode futhark ["check", program] ""
-          case code of
-            ExitSuccess -> throwError "Expected failure\n"
-            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-            ExitFailure 1 -> throwError $ T.decodeUtf8 err
-            ExitFailure _ -> checkError expected_error $ T.decodeUtf8 err
+      context checkctx $ do
+        (code, _, err) <-
+          liftIO $ readProcessWithExitCode futhark ["check", program] ""
+        case code of
+          ExitSuccess -> throwError "Expected failure\n"
+          ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+          ExitFailure 1 -> throwError $ T.decodeUtf8 err
+          ExitFailure _ -> liftExcept $ checkError expected_error $ T.decodeUtf8 err
     RunCases {} | mode == TypeCheck -> do
       let options = ["check", program] ++ configExtraCompilerOptions progs
-      context
-        ( mconcat
-            [ "Type-checking with '",
-              T.pack futhark,
-              " check ",
-              T.pack program,
-              "'"
-            ]
-        )
-        $ do
-          (code, _, err) <- io $ readProcessWithExitCode futhark options ""
+      context checkctx $ do
+        (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
 
-          case code of
-            ExitSuccess -> return ()
-            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-            ExitFailure _ -> throwError $ T.decodeUtf8 err
+        case code of
+          ExitSuccess -> return ()
+          ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+          ExitFailure _ -> throwError $ T.decodeUtf8 err
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let backend = configBackend progs
@@ -272,11 +266,14 @@ runTestCase (TestCase mode program testcase progs) = do
         context "Interpreting" $
           accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
 
-liftCommand :: IO (Maybe CmdFailure) -> TestM ()
+liftCommand ::
+  (MonadError T.Text m, MonadIO m) =>
+  IO (Maybe CmdFailure) ->
+  m ()
 liftCommand m = do
   r <- liftIO m
   case r of
-    Just (CmdFailure _ err) -> throwError $ T.unlines err
+    Just (CmdFailure _ err) -> E.throwError $ T.unlines err
     Nothing -> pure ()
 
 runCompiledEntry :: FutharkExe -> Server -> FilePath -> InputOutputs -> IO [TestResult]
@@ -285,17 +282,18 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
   Right input_types <- cmdInputs server entry
   let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
       ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
-  mapM (runTestM . runCompiledCase input_types outs ins) run_cases
+      onRes = either (Failure . pure) (const Success)
+  mapM (fmap onRes . runCompiledCase input_types outs ins) run_cases
   where
     dir = takeDirectory program
 
-    runCompiledCase input_types outs ins run = do
+    runCompiledCase input_types outs ins run = runExceptT $ do
       let TestRun _ inputValues _ index _ = run
           case_ctx =
             "Entry point: " <> entry <> "; dataset: "
               <> T.pack (runDescription run)
 
-      context case_ctx $ do
+      context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
         (liftCommand . withValuesFile futhark dir inputValues) $ \values_f ->
@@ -304,47 +302,39 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
         call_r <- liftIO $ cmdCall server entry outs ins
         liftCommand $ cmdFree server ins
 
-        let readResults =
-              join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
-                hClose outputh
-                store_r <- cmdStore server outputf outs
-                case store_r of
-                  Just (CmdFailure _ err) ->
-                    pure $ throwError $ T.unlines err
-                  Nothing -> do
-                    bytes <- LBS.readFile outputf
-                    case valuesFromByteString "output" bytes of
-                      Left e -> do
-                        let actualf = program `addExtension` "actual"
-                        liftIO $ LBS.writeFile actualf bytes
-                        pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
-                      Right vs -> pure $ pure $ SuccessResult vs
-
         res <- case call_r of
           Left (CmdFailure _ err) ->
             pure $ ErrorResult $ T.unlines err
           Right _ ->
-            readResults <* liftCommand (cmdFree server outs)
+            SuccessResult . snd
+              <$> readResults server outs program
+                <* liftCommand (cmdFree server outs)
 
         compareResult entry index program expected res
 
-checkError :: ExpectedError -> T.Text -> TestM ()
+checkError :: MonadError T.Text m => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
-    throwError $
+    E.throwError $
       "Expected error:\n  " <> regex_s
         <> "\nGot error:\n  "
         <> err
 checkError _ _ =
   return ()
 
-runResult :: FilePath -> ExitCode -> SBS.ByteString -> SBS.ByteString -> TestM RunResult
+runResult ::
+  (MonadIO m, MonadError T.Text m) =>
+  FilePath ->
+  ExitCode ->
+  SBS.ByteString ->
+  SBS.ByteString ->
+  m RunResult
 runResult program ExitSuccess stdout_s _ =
   case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
     Left e -> do
       let actualf = program `addExtension` "actual"
-      io $ SBS.writeFile actualf stdout_s
-      throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
+      liftIO $ SBS.writeFile actualf stdout_s
+      E.throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
     Right vs -> return $ SuccessResult vs
 runResult _ (ExitFailure _) _ stderr_s =
   return $ ErrorResult $ T.decodeUtf8 stderr_s
@@ -355,12 +345,13 @@ compileTestProgram extra_options futhark backend program warnings = do
   testWarnings warnings futerr
 
 compareResult ::
+  (MonadIO m, MonadError T.Text m) =>
   T.Text ->
   Int ->
   FilePath ->
   ExpectedResult [Value] ->
   RunResult ->
-  TestM ()
+  m ()
 compareResult _ _ _ (Succeeds Nothing) SuccessResult {} =
   return ()
 compareResult entry index program (Succeeds (Just expectedResult)) (SuccessResult actualResult) =
@@ -368,13 +359,11 @@ compareResult entry index program (Succeeds (Just expectedResult)) (SuccessResul
     Just mismatch -> do
       let actualf = program <.> T.unpack entry <.> show index <.> "actual"
           expectedf = program <.> T.unpack entry <.> show index <.> "expected"
-      io $
-        SBS.writeFile actualf $
-          T.encodeUtf8 $ T.unlines $ map prettyText actualResult
-      io $
-        SBS.writeFile expectedf $
-          T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
-      throwError $
+      liftIO . SBS.writeFile actualf . T.encodeUtf8 . T.unlines $
+        map prettyText actualResult
+      liftIO . SBS.writeFile expectedf . T.encodeUtf8 . T.unlines $
+        map prettyText expectedResult
+      E.throwError $
         T.pack actualf <> " and " <> T.pack expectedf
           <> " do not match:\n"
           <> T.pack (show mismatch)
@@ -384,10 +373,9 @@ compareResult entry index program (Succeeds (Just expectedResult)) (SuccessResul
 compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult actualError) =
   checkError expectedError actualError
 compareResult _ _ _ (Succeeds _) (ErrorResult err) =
-  throwError $
-    "Function failed with error:\n" <> err
+  E.throwError $ "Function failed with error:\n" <> err
 compareResult _ _ _ (RunTimeFailure f) (SuccessResult _) =
-  throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
+  E.throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
 
 ---
 --- Test manager
