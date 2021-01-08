@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.MulticoreC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asServer,
   )
 where
 

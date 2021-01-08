@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.CCUDA
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asServer,
   )
 where
 
