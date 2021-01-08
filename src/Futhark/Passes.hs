@@ -25,7 +25,6 @@ import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
-import qualified Futhark.Optimise.ReorderStatements as ReorderStatements
 import qualified Futhark.Optimise.ReuseAllocations as ReuseAllocations
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
@@ -102,8 +101,6 @@ gpuPipeline =
         performCSE False,
         simplifyKernelsMem,
         doubleBufferKernels,
-        simplifyKernelsMem,
-        ReorderStatements.optimise,
         simplifyKernelsMem,
         ReuseAllocations.optimise,
         simplifyKernelsMem,
