@@ -117,6 +117,7 @@ compileProg =
                           int logging;
                           typename lock_t lock;
                           char *error;
+                          typename FILE *log;
                           int total_runs;
                           long int total_runtime;
                           $sdecls:fields
@@ -143,6 +144,7 @@ compileProg =
                  ctx->profiling_paused = 0;
                  ctx->logging = 0;
                  ctx->error = NULL;
+                 ctx->log = stderr;
                  create_lock(&ctx->lock);
 
                  int tune_kappa = 0;
