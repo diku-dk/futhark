@@ -207,7 +207,6 @@ library
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
-      Futhark.Optimise.ReorderStatements
       Futhark.Optimise.ReuseAllocations
       Futhark.Optimise.ReuseAllocations.GreedyColoring
       Futhark.Optimise.Simplify
