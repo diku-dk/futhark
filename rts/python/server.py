@@ -125,7 +125,8 @@ class Server:
                   'free': _cmd_free,
                   'clear': _cmd_dummy,
                   'pause_profiling': _cmd_dummy,
-                  'unpause_profiling': _cmd_dummy
+                  'unpause_profiling': _cmd_dummy,
+                  'report': _cmd_dummy
                  }
 
     def _process_line(self, line):

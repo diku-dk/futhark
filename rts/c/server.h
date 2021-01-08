@@ -481,6 +481,13 @@ void cmd_unpause_profiling(struct server_state *s, const char *args[]) {
   futhark_context_unpause_profiling(s->ctx);
 }
 
+void cmd_report(struct server_state *s, const char *args[]) {
+  (void)args;
+  char *report = futhark_context_report(s->ctx);
+  puts(report);
+  free(report);
+}
+
 void process_line(struct server_state *s, char *line) {
   int max_num_tokens = 100;
   const char* tokens[max_num_tokens];
@@ -519,6 +526,8 @@ void process_line(struct server_state *s, char *line) {
     cmd_pause_profiling(s, tokens+1);
   } else if (strcmp(command, "unpause_profiling") == 0) {
     cmd_unpause_profiling(s, tokens+1);
+  } else if (strcmp(command, "report") == 0) {
+    cmd_report(s, tokens+1);
   } else {
     futhark_panic(1, "Unknown command: %s\n", command);
   }

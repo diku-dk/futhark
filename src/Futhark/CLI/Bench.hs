@@ -181,7 +181,7 @@ withProgramServer program runner extra_options f = do
 
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
 runBenchmark opts futhark (program, cases) =
-  withProgramServer program (optRunner opts) (optExtraOptions opts) $ \server ->
+  withProgramServer program (optRunner opts) ("-L" : optExtraOptions opts) $ \server ->
     mapM (forInputOutputs server) $ filter relevant cases
   where
     forInputOutputs server (InputOutputs entry_name runs) = do

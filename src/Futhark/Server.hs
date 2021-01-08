@@ -16,6 +16,7 @@ module Futhark.Server
     cmdInputs,
     cmdOutputs,
     cmdClear,
+    cmdReport,
   )
 where
 
@@ -169,3 +170,6 @@ cmdOutputs s entry =
 
 cmdClear :: Server -> IO (Maybe CmdFailure)
 cmdClear s = helpCmd s ["clear"]
+
+cmdReport :: Server -> IO (Either CmdFailure [T.Text])
+cmdReport s = sendCommand s ["report"]
