@@ -19,21 +19,19 @@ module Futhark.Bench
 where
 
 import Control.Applicative
-import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Monad.Except
 import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map as M
+import Data.Maybe
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
+import Futhark.Server
 import Futhark.Test
 import System.Exit
 import System.FilePath
 import System.IO
-import System.IO.Error
 import System.IO.Temp (withSystemTempFile)
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Timeout (timeout)
@@ -133,21 +131,6 @@ decodeBenchResults = fmap unBenchResults . JSON.eitherDecode'
 
 --- Running benchmarks
 
-readRuntime :: T.Text -> Maybe Int
-readRuntime s = case reads $ T.unpack s of
-  [(runtime, _)] -> Just runtime
-  _ -> Nothing
-
-didNotFail :: FilePath -> ExitCode -> T.Text -> ExceptT T.Text IO ()
-didNotFail _ ExitSuccess _ =
-  return ()
-didNotFail program (ExitFailure code) stderr_s =
-  throwError $
-    T.pack $
-      program ++ " failed with error code " ++ show code
-        ++ " and output:\n"
-        ++ T.unpack stderr_s
-
 compareResult ::
   (MonadError T.Text m, MonadIO m) =>
   FilePath ->
@@ -168,32 +151,9 @@ compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
     Nothing ->
       return ()
 
-runResult ::
-  (MonadError T.Text m, MonadIO m) =>
-  FilePath ->
-  ExitCode ->
-  SBS.ByteString ->
-  SBS.ByteString ->
-  m (SBS.ByteString, [Value])
-runResult program ExitSuccess stdout_s _ =
-  case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
-    Left e -> do
-      let actualf = program `replaceExtension` "actual"
-      liftIO $ SBS.writeFile actualf stdout_s
-      throwError $ T.pack $ show e <> "\n(See " <> actualf <> ")"
-    Right vs -> return (stdout_s, vs)
-runResult program (ExitFailure code) _ stderr_s =
-  throwError $
-    T.pack $
-      binaryName program ++ " failed with error code " ++ show code
-        ++ " and output:\n"
-        ++ T.unpack (T.decodeUtf8 stderr_s)
-
 -- | How to run a benchmark.
 data RunOptions = RunOptions
-  { runRunner :: String,
-    runRuns :: Int,
-    runExtraOptions :: [String],
+  { runRuns :: Int,
     runTimeout :: Int,
     runVerbose :: Int,
     -- | Invoked for every runtime measured during the run.  Can be
@@ -201,33 +161,15 @@ data RunOptions = RunOptions
     runResultAction :: Maybe (Int -> IO ())
   }
 
--- | Like @tail -f@, but running an arbitrary IO action per line.
-follow :: (String -> IO ()) -> FilePath -> IO ()
-follow f fname = go 0
-  where
-    go i = do
-      i' <- withFile fname ReadMode $ \h -> do
-        hSeek h AbsoluteSeek i
-        goH h i
-      go i'
+cmdMaybe :: (MonadError T.Text m, MonadIO m) => IO (Maybe CmdFailure) -> m ()
+cmdMaybe = maybe (pure ()) (throwError . T.unlines . failureMsg) <=< liftIO
 
-    goH h i = do
-      res <- tryIOError $ hGetLine h
-      case res of
-        Left e
-          | isEOFError e -> do
-            threadDelay followDelayMicroseconds
-            pure i
-          | otherwise -> ioError e
-        Right l -> do
-          f l
-          goH h =<< hTell h
-
-    triesPerSecond = 10
-    followDelayMicroseconds = 1000000 `div` triesPerSecond
+cmdEither :: (MonadError T.Text m, MonadIO m) => IO (Either CmdFailure a) -> m a
+cmdEither = either (throwError . T.unlines . failureMsg) pure <=< liftIO
 
 -- | Run the benchmark program on the indicated dataset.
 benchmarkDataset ::
+  Server ->
   RunOptions ->
   FutharkExe ->
   FilePath ->
@@ -236,78 +178,89 @@ benchmarkDataset ::
   Maybe Success ->
   FilePath ->
   IO (Either T.Text ([RunResult], T.Text))
-benchmarkDataset opts futhark program entry input_spec expected_spec ref_out =
-  -- We store the runtime in a temporary file.
-  withSystemTempFile "futhark-bench" $ \tmpfile h -> do
-    hClose h -- We will be writing and reading this ourselves.
-    input <- getValuesBS futhark dir input_spec
-    let getValuesAndBS (SuccessValues vs) = do
-          vs' <- getValues futhark dir vs
-          bs <- getValuesBS futhark dir vs
-          return (LBS.toStrict bs, vs')
-        getValuesAndBS SuccessGenerateValues =
-          getValuesAndBS $ SuccessValues $ InFile ref_out
-    maybe_expected <- maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
-    let options =
-          runExtraOptions opts
-            ++ [ "-e",
-                 T.unpack entry,
-                 "-t",
-                 tmpfile,
-                 "-r",
-                 show $ runRuns opts,
-                 "-b",
-                 "-L"
-               ]
+benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
+  output_types <- cmdEither $ cmdOutputs server entry
+  input_types <- cmdEither $ cmdInputs server entry
+  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
+      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
+      freeOuts = cmdMaybe (cmdFree server outs)
+      freeIns = cmdMaybe (cmdFree server ins)
 
-    -- Explicitly prefixing the current directory is necessary for
-    -- readProcessWithExitCode to find the binary when binOutputf has
-    -- no program component.
-    let (to_run, to_run_args)
-          | null $ runRunner opts = ("." </> binaryName program, options)
-          | otherwise = (runRunner opts, binaryName program : options)
+  cmdMaybe . liftIO $ cmdClear server
 
-    when (runVerbose opts > 1) $
-      putStrLn $
-        unwords
-          [ "Running executable",
-            show to_run,
-            "with arguments",
-            show to_run_args
-          ]
+  cmdMaybe . liftIO . withValuesFile futhark dir input_spec $ \values_f ->
+    cmdRestore server values_f (zip ins input_types)
 
-    let onResult l
-          | Just f <- runResultAction opts,
-            [(x, "")] <- reads l =
-            f x
-          | otherwise =
-            pure ()
-    watcher <- forkIO $ follow onResult tmpfile
+  let runtime l
+        | Just l' <- T.stripPrefix "runtime: " l,
+          [(x, "")] <- reads $ T.unpack l' =
+          Just x
+        | otherwise =
+          Nothing
 
-    run_res <-
-      timeout (runTimeout opts * 1000000) $
-        readProcessWithExitCode to_run to_run_args $
-          LBS.toStrict input
+      doRun = do
+        call_lines <- cmdEither (cmdCall server entry outs ins)
+        case mapMaybe runtime call_lines of
+          [call_runtime] -> do
+            liftIO $ fromMaybe (const $ pure ()) (runResultAction opts) call_runtime
+            return (RunResult call_runtime, call_lines)
+          [] -> throwError "Could not find runtime in output."
+          ls -> throwError $ "Ambiguous runtimes: " <> T.pack (show ls)
 
-    killThread watcher
+  maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
+    -- First one uncounted warmup run.
+    void $ cmdEither $ cmdCall server entry outs ins
+    freeOuts
+    xs <- replicateM (runRuns opts -1) (doRun <* freeOuts)
+    y <- doRun
+    pure $ xs ++ [y]
 
-    runExceptT $ case run_res of
-      Just (progCode, output, progerr) -> do
-        case maybe_expected of
-          Nothing ->
-            didNotFail program progCode $ T.decodeUtf8 progerr
-          Just expected ->
-            compareResult program expected
-              =<< runResult program progCode output progerr
-        runtime_result <- liftIO $ T.readFile tmpfile
-        runtimes <- case mapM readRuntime $ T.lines runtime_result of
-          Just runtimes -> return $ map RunResult runtimes
-          Nothing -> throwError $ "Runtime file has invalid contents:\n" <> runtime_result
+  call_logs <- case maybe_call_logs of
+    Nothing ->
+      throwError . T.pack $
+        "Execution exceeded " ++ show (runTimeout opts) ++ " seconds."
+    Just x -> liftEither x
 
-        return (runtimes, T.decodeUtf8 progerr)
-      Nothing ->
-        throwError $ T.pack $ "Execution exceeded " ++ show (runTimeout opts) ++ " seconds."
+  freeIns
+
+  let readResults :: (MonadIO m, MonadError T.Text m) => m (SBS.ByteString, [Value])
+      readResults =
+        join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
+          liftIO $ hClose outputh
+          store_r <- cmdStore server outputf outs
+          case store_r of
+            Just (CmdFailure _ err) ->
+              pure $ throwError $ T.unlines err
+            Nothing -> do
+              bytes <- LBS.readFile outputf
+              case valuesFromByteString "output" bytes of
+                Left e -> do
+                  let actualf = program `addExtension` "actual"
+                  liftIO $ LBS.writeFile actualf bytes
+                  pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
+                Right vs -> pure $ pure (LBS.toStrict bytes, vs)
+
+  vs <- readResults <* freeOuts
+
+  maybe_expected <-
+    liftIO $ maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
+
+  case maybe_expected of
+    Just expected -> compareResult program expected vs
+    Nothing -> pure ()
+
+  return
+    ( map fst call_logs,
+      T.unlines $ map (T.unlines . snd) call_logs
+    )
   where
+    getValuesAndBS (SuccessValues vs) = do
+      vs' <- getValues futhark dir vs
+      bs <- getValuesBS futhark dir vs
+      return (LBS.toStrict bs, vs')
+    getValuesAndBS SuccessGenerateValues =
+      getValuesAndBS $ SuccessValues $ InFile ref_out
+
     dir = takeDirectory program
 
 -- | How to compile a benchmark.
@@ -345,7 +298,7 @@ prepareBenchmarkProgram concurrency opts program cases = do
         liftIO $
           readProcessWithExitCode
             futhark
-            ( [compBackend opts, program, "-o", binaryName program]
+            ( [compBackend opts, program, "-o", binaryName program, "--server"]
                 <> compOptions opts
             )
             ""
