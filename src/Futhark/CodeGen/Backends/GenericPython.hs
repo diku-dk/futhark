@@ -352,7 +352,7 @@ compileProg mode class_name constructor imports defines ops userstate sync optio
       maybe_shebang =
         case mode of
           ToLibrary -> ""
-          _ -> "#!/usr/bin/env python\n"
+          _ -> "#!/usr/bin/env python3\n"
   return $
     maybe_shebang
       ++ pretty
