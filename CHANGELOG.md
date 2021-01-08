@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The C API now lets you pick which stream (if any) is used for
     logging prints (#1214).
 
+  * New compilation mode: `--server`.  For now used to support faster
+    benchmarking and testing tools, but can be used to build even
+    fancier things in the future (#1179).
+
 ### Removed
 
 ### Changed

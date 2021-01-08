@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.SimpleRep
     signedPrimTypeToCType,
     arrayName,
     opaqueName,
+    externalValueType,
     cproduct,
     csum,
 
@@ -122,6 +123,16 @@ opaqueName s vds = "opaque_" ++ hash (zipWith xor [0 ..] $ map ord (s ++ concatM
               . fromIntegral
           )
     iter x = ((x :: Word32) `shiftR` 16) `xor` x
+
+-- | The type used to expose a Futhark value in the C API.  A pointer
+-- in the case of arrays and opaques.
+externalValueType :: ExternalValue -> C.Type
+externalValueType (OpaqueValue desc vds) =
+  [C.cty|struct $id:("futhark_" ++ opaqueName desc vds)*|]
+externalValueType (TransparentValue (ArrayValue _ _ pt signed shape)) =
+  [C.cty|struct $id:("futhark_" ++ arrayName pt signed (length shape))*|]
+externalValueType (TransparentValue (ScalarValue pt signed _)) =
+  signedPrimTypeToCType signed pt
 
 -- | Return an expression multiplying together the given expressions.
 -- If an empty list is given, the expression @1@ is returned.

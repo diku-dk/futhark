@@ -21,14 +21,14 @@ main = compilerMain
   $ \fcfg () mode outpath prog -> do
     let class_name =
           case mode of
-            ToLibrary -> Just $ takeBaseName outpath
-            ToExecutable -> Nothing
-    pyprog <- handleWarnings fcfg $ PyOpenCL.compileProg class_name prog
+            ToLibrary -> takeBaseName outpath
+            _ -> "internal"
+    pyprog <- handleWarnings fcfg $ PyOpenCL.compileProg mode class_name prog
 
     case mode of
       ToLibrary ->
         liftIO $ writeFile (outpath `addExtension` "py") pyprog
-      ToExecutable -> liftIO $ do
+      _ -> liftIO $ do
         writeFile outpath pyprog
         perms <- liftIO $ getPermissions outpath
         setPermissions outpath $ setOwnerExecutable True perms

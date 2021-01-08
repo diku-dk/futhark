@@ -12,6 +12,7 @@ module Futhark.CodeGen.Backends.GenericC
     CParts (..),
     asLibrary,
     asExecutable,
+    asServer,
 
     -- * Pluggable compiler
     Operations (..),
@@ -58,6 +59,7 @@ module Futhark.CodeGen.Backends.GenericC
     publicDef,
     publicDef_,
     profileReport,
+    onClear,
     HeaderSection (..),
     libDecl,
     earlyDecl,
@@ -86,8 +88,9 @@ import Data.FileEmbed
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Futhark.CodeGen.Backends.GenericC.CLI
+import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
@@ -106,6 +109,7 @@ data CompilerState s = CompilerState
     compLibDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
     compProfileItems :: DL.DList C.BlockItem,
+    compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)]
   }
 
@@ -122,6 +126,7 @@ newCompilerState src s =
       compLibDecls = mempty,
       compCtxFields = mempty,
       compProfileItems = mempty,
+      compClearItems = mempty,
       compDeclaredMem = mempty
     }
 
@@ -486,6 +491,10 @@ profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
   s {compProfileItems = compProfileItems s <> DL.singleton x}
 
+onClear :: C.BlockItem -> CompilerM op s ()
+onClear x = modify $ \s ->
+  s {compClearItems = compClearItems s <> DL.singleton x}
+
 stm :: C.Stm -> CompilerM op s ()
 stm s = item [C.citem|$stm:s|]
 
@@ -669,6 +678,8 @@ defineMemorySpace space = do
   return ret;
 }
 |]
+
+  onClear [C.citem|ctx->$id:peakname = 0;|]
 
   let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
   return
@@ -1304,9 +1315,9 @@ onEntryPoint get_consts fname (Function _ outputs inputs _ results args) = do
       let ty' = primTypeToCType ty
       decl [C.cdecl|$ty:ty' $id:name;|]
 
--- | The result of compilation to C is four parts, which can be put
--- together in various ways.  The obvious way is to concatenate all of
--- them, which yields a CLI program.  Another is to compile the
+-- | The result of compilation to C is multiple parts, which can be
+-- put together in various ways.  The obvious way is to concatenate
+-- all of them, which yields a CLI program.  Another is to compile the
 -- library part by itself, and use the header file to call into it.
 data CParts = CParts
   { cHeader :: String,
@@ -1314,6 +1325,7 @@ data CParts = CParts
     -- to both CLI and library parts.
     cUtils :: String,
     cCLI :: String,
+    cServer :: String,
     cLib :: String
   }
 
@@ -1350,7 +1362,13 @@ asLibrary parts =
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
-asExecutable (CParts a b c d) = disableWarnings <> a <> b <> c <> d
+asExecutable parts =
+  disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
+
+-- | As server executable.
+asServer :: CParts -> String
+asServer parts =
+  disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -1423,12 +1441,12 @@ $esc:timing_h
   let early_decls = DL.toList $ compEarlyDecls endstate
   let lib_decls = DL.toList $ compLibDecls endstate
   let clidefs = cliDefs options $ Functions entry_funs
+  let serverdefs = serverDefs options $ Functions entry_funs
   let libdefs =
         [C.cunit|
 $esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
 $esc:("#include <string.h>")
-$esc:("#include <inttypes.h>")
-$esc:("#include <ctype.h>")
+$esc:("#include <string.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
 
@@ -1453,7 +1471,14 @@ $edecls:(opaqueDefinitions endstate)
 $edecls:entry_point_decls
   |]
 
-  return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
+  return $
+    CParts
+      { cHeader = pretty headerdefs,
+        cUtils = pretty utildefs,
+        cCLI = pretty clidefs,
+        cServer = pretty serverdefs,
+        cLib = pretty libdefs
+      }
   where
     Definitions consts (Functions funs) = prog
     entry_funs = filter (functionEntry . snd) funs
@@ -1498,6 +1523,7 @@ $edecls:entry_point_decls
 commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 commonLibFuns memreport = do
   ctx <- contextType
+  ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
 
   publicDef_ "context_report" MiscDecl $ \s ->
@@ -1543,6 +1569,15 @@ commonLibFuns memreport = do
       [C.cedecl|void $id:s($ty:ctx* ctx) {
                  ctx->profiling_paused = 0;
                }|]
+    )
+
+  clears <- gets $ DL.toList . compClearItems
+  publicDef_ "context_clear_caches" MiscDecl $ \s ->
+    ( [C.cedecl|int $id:s($ty:ctx* ctx);|],
+      [C.cedecl|int $id:s($ty:ctx* ctx) {
+                         $items:(criticalSection ops clears)
+                         return ctx->error != NULL;
+                       }|]
     )
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]

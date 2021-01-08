@@ -18,7 +18,8 @@ import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import Futhark.Analysis.Metrics
+import Futhark.Analysis.Metrics.Type
+import Futhark.Server
 import Futhark.Test
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Console
@@ -32,6 +33,7 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
+import System.IO.Temp
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.Regex.TDFA
 
@@ -72,6 +74,31 @@ data TestResult
   | Failure [T.Text]
   deriving (Eq, Show)
 
+pureTestResults :: IO [TestResult] -> TestM ()
+pureTestResults m =
+  mapM_ check =<< liftIO m
+  where
+    check Success = pure ()
+    check (Failure err) = E.throwError err
+
+withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [TestResult]) -> TestM ()
+withProgramServer program runner extra_options f = do
+  -- Explicitly prefixing the current directory is necessary for
+  -- readProcessWithExitCode to find the binary when binOutputf has
+  -- no path component.
+  let binOutputf = dropExtension program
+      binpath = "." </> binOutputf
+
+      (to_run, to_run_args)
+        | null runner = (binpath, extra_options)
+        | otherwise = (runner, binpath : extra_options)
+
+      prog_ctx =
+        "Running " <> T.pack (unwords $ binpath : extra_options)
+
+  context prog_ctx $
+    pureTestResults $ liftIO $ withServer to_run to_run_args f
+
 data TestCase = TestCase
   { _testCaseMode :: TestMode,
     testCaseProgram :: FilePath,
@@ -87,7 +114,7 @@ instance Ord TestCase where
   x `compare` y = testCaseProgram x `compare` testCaseProgram y
 
 data RunResult
-  = ErrorResult Int SBS.ByteString
+  = ErrorResult T.Text
   | SuccessResult [Value]
 
 progNotFound :: T.Text -> T.Text
@@ -152,73 +179,6 @@ testWarnings warnings futerr = accErrors_ $ map testWarning warnings
             <> T.decodeUtf8 futerr
       | otherwise = return ()
 
-runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase mode program testcase progs) = do
-  futhark <- io $ maybe getExecutablePath return $ configFuthark progs
-  case testAction testcase of
-    CompileTimeFailure expected_error ->
-      context
-        ( mconcat
-            [ "Type-checking with '",
-              T.pack futhark,
-              " check ",
-              T.pack program,
-              "'"
-            ]
-        )
-        $ do
-          (code, _, err) <-
-            io $ readProcessWithExitCode futhark ["check", program] ""
-          case code of
-            ExitSuccess -> throwError "Expected failure\n"
-            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-            ExitFailure 1 -> throwError $ T.decodeUtf8 err
-            ExitFailure _ -> checkError expected_error err
-    RunCases {} | mode == TypeCheck -> do
-      let options = ["check", program] ++ configExtraCompilerOptions progs
-      context
-        ( mconcat
-            [ "Type-checking with '",
-              T.pack futhark,
-              " check ",
-              T.pack program,
-              "'"
-            ]
-        )
-        $ do
-          (code, _, err) <- io $ readProcessWithExitCode futhark options ""
-
-          case code of
-            ExitSuccess -> return ()
-            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-            ExitFailure _ -> throwError $ T.decodeUtf8 err
-    RunCases ios structures warnings -> do
-      -- Compile up-front and reuse same executable for several entry points.
-      let backend = configBackend progs
-          extra_options = configExtraCompilerOptions progs
-      unless (mode == Compile) $
-        context "Generating reference outputs" $
-          -- We probably get the concurrency at the test program level,
-          -- so force just one data set at a time here.
-          ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
-      unless (mode == Interpreted) $
-        context ("Compiling with --backend=" <> T.pack backend) $ do
-          compileTestProgram extra_options (FutharkExe futhark) backend program warnings
-          mapM_ (testMetrics progs program) structures
-          unless (mode == Compile) $ do
-            (tuning_opts, _) <-
-              liftIO $ determineTuning (configTuning progs) program
-            let progs' =
-                  progs
-                    { configExtraOptions =
-                        tuning_opts ++ configExtraOptions progs
-                    }
-            context "Running compiled program" $
-              accErrors_ $ map (runCompiledEntry (FutharkExe futhark) program progs') ios
-      unless (mode == Compile || mode == Compiled) $
-        context "Interpreting" $
-          accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
-
 runInterpretedEntry :: FutharkExe -> FilePath -> InputOutputs -> TestM ()
 runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) =
   let dir = takeDirectory program
@@ -243,40 +203,138 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
                     =<< runResult program code output err
    in accErrors_ $ map runInterpretedCase run_cases
 
-runCompiledEntry :: FutharkExe -> FilePath -> ProgConfig -> InputOutputs -> TestM ()
-runCompiledEntry futhark program progs (InputOutputs entry run_cases) =
-  -- Explicitly prefixing the current directory is necessary for
-  -- readProcessWithExitCode to find the binary when binOutputf has
-  -- no path component.
-  let binOutputf = dropExtension program
-      binpath = "." </> binOutputf
-      entry_options = ["-e", T.unpack entry]
+runTestCase :: TestCase -> TestM ()
+runTestCase (TestCase mode program testcase progs) = do
+  futhark <- io $ maybe getExecutablePath return $ configFuthark progs
+  case testAction testcase of
+    CompileTimeFailure expected_error ->
+      context
+        ( mconcat
+            [ "Type-checking with '",
+              T.pack futhark,
+              " check ",
+              T.pack program,
+              "'"
+            ]
+        )
+        $ do
+          (code, _, err) <-
+            io $ readProcessWithExitCode futhark ["check", program] ""
+          case code of
+            ExitSuccess -> throwError "Expected failure\n"
+            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+            ExitFailure 1 -> throwError $ T.decodeUtf8 err
+            ExitFailure _ -> checkError expected_error $ T.decodeUtf8 err
+    RunCases {} | mode == TypeCheck -> do
+      let options = ["check", program] ++ configExtraCompilerOptions progs
+      context
+        ( mconcat
+            [ "Type-checking with '",
+              T.pack futhark,
+              " check ",
+              T.pack program,
+              "'"
+            ]
+        )
+        $ do
+          (code, _, err) <- io $ readProcessWithExitCode futhark options ""
 
-      runner = configRunner progs
-      extra_options = configExtraOptions progs
+          case code of
+            ExitSuccess -> return ()
+            ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+            ExitFailure _ -> throwError $ T.decodeUtf8 err
+    RunCases ios structures warnings -> do
+      -- Compile up-front and reuse same executable for several entry points.
+      let backend = configBackend progs
+          extra_compiler_options = configExtraCompilerOptions progs
 
-      runCompiledCase run@(TestRun _ inputValues _ index _) =
-        context
-          ( "Entry point: " <> entry
-              <> "; dataset: "
+      unless (mode == Compile) $
+        context "Generating reference outputs" $
+          -- We probably get the concurrency at the test program level,
+          -- so force just one data set at a time here.
+          ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
+
+      unless (mode == Interpreted) $
+        context ("Compiling with --backend=" <> T.pack backend) $ do
+          compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
+          mapM_ (testMetrics progs program) structures
+          unless (mode == Compile) $ do
+            (tuning_opts, _) <-
+              liftIO $ determineTuning (configTuning progs) program
+            let extra_options = tuning_opts ++ configExtraOptions progs
+                runner = configRunner progs
+            context "Running compiled program" $
+              withProgramServer program runner extra_options $ \server -> do
+                let run = runCompiledEntry (FutharkExe futhark) server program
+                concat <$> mapM run ios
+
+      unless (mode == Compile || mode == Compiled) $
+        context "Interpreting" $
+          accErrors_ $ map (runInterpretedEntry (FutharkExe futhark) program) ios
+
+liftCommand :: IO (Maybe CmdFailure) -> TestM ()
+liftCommand m = do
+  r <- liftIO m
+  case r of
+    Just (CmdFailure _ err) -> throwError $ T.unlines err
+    Nothing -> pure ()
+
+runCompiledEntry :: FutharkExe -> Server -> FilePath -> InputOutputs -> IO [TestResult]
+runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
+  Right output_types <- cmdOutputs server entry
+  Right input_types <- cmdInputs server entry
+  let outs = ["out" <> T.pack (show i) | i <- [0 .. length output_types -1]]
+      ins = ["in" <> T.pack (show i) | i <- [0 .. length input_types -1]]
+  mapM (runTestM . runCompiledCase input_types outs ins) run_cases
+  where
+    dir = takeDirectory program
+
+    runCompiledCase input_types outs ins run = do
+      let TestRun _ inputValues _ index _ = run
+          case_ctx =
+            "Entry point: " <> entry <> "; dataset: "
               <> T.pack (runDescription run)
-          )
-          $ do
-            expected <- getExpectedResult futhark program entry run
-            (progCode, output, progerr) <-
-              runProgram futhark runner extra_options program entry inputValues
-            compareResult entry index program expected
-              =<< runResult program progCode output progerr
-   in context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $
-        accErrors_ $ map runCompiledCase run_cases
 
-checkError :: ExpectedError -> SBS.ByteString -> TestM ()
+      context case_ctx $ do
+        expected <- getExpectedResult futhark program entry run
+
+        (liftCommand . withValuesFile futhark dir inputValues) $ \values_f ->
+          cmdRestore server values_f (zip ins input_types)
+
+        call_r <- liftIO $ cmdCall server entry outs ins
+        liftCommand $ cmdFree server ins
+
+        let readResults =
+              join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
+                hClose outputh
+                store_r <- cmdStore server outputf outs
+                case store_r of
+                  Just (CmdFailure _ err) ->
+                    pure $ throwError $ T.unlines err
+                  Nothing -> do
+                    bytes <- LBS.readFile outputf
+                    case valuesFromByteString "output" bytes of
+                      Left e -> do
+                        let actualf = program `addExtension` "actual"
+                        liftIO $ LBS.writeFile actualf bytes
+                        pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
+                      Right vs -> pure $ pure $ SuccessResult vs
+
+        res <- case call_r of
+          Left (CmdFailure _ err) ->
+            pure $ ErrorResult $ T.unlines err
+          Right _ ->
+            readResults <* liftCommand (cmdFree server outs)
+
+        compareResult entry index program expected res
+
+checkError :: ExpectedError -> T.Text -> TestM ()
 checkError (ThisError regex_s regex) err
-  | not (match regex $ T.unpack $ T.decodeUtf8 err) =
+  | not (match regex $ T.unpack err) =
     throwError $
       "Expected error:\n  " <> regex_s
         <> "\nGot error:\n  "
-        <> T.decodeUtf8 err
+        <> err
 checkError _ _ =
   return ()
 
@@ -288,12 +346,12 @@ runResult program ExitSuccess stdout_s _ =
       io $ SBS.writeFile actualf stdout_s
       throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
     Right vs -> return $ SuccessResult vs
-runResult _ (ExitFailure code) _ stderr_s =
-  return $ ErrorResult code stderr_s
+runResult _ (ExitFailure _) _ stderr_s =
+  return $ ErrorResult $ T.decodeUtf8 stderr_s
 
 compileTestProgram :: [String] -> FutharkExe -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futhark backend program warnings = do
-  (_, futerr) <- compileProgram extra_options futhark backend program
+  (_, futerr) <- compileProgram ("--server" : extra_options) futhark backend program
   testWarnings warnings futerr
 
 compareResult ::
@@ -323,14 +381,11 @@ compareResult entry index program (Succeeds (Just expectedResult)) (SuccessResul
           <> "\n"
     Nothing ->
       return ()
-compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
+compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult actualError) =
   checkError expectedError actualError
-compareResult _ _ _ (Succeeds _) (ErrorResult code err) =
+compareResult _ _ _ (Succeeds _) (ErrorResult err) =
   throwError $
-    "Program failed with error code "
-      <> T.pack (show code)
-      <> " and stderr:\n  "
-      <> T.decodeUtf8 err
+    "Function failed with error:\n" <> err
 compareResult _ _ _ (RunTimeFailure f) (SuccessResult _) =
   throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
 
@@ -581,7 +636,7 @@ defaultConfig =
           { configBackend = "c",
             configFuthark = Nothing,
             configRunner = "",
-            configExtraOptions = ["-b"],
+            configExtraOptions = [],
             configExtraCompilerOptions = [],
             configTuning = Just "tuning"
           },

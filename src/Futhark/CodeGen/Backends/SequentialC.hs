@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.SequentialC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asServer,
   )
 where
 
@@ -119,14 +120,6 @@ compileProg =
         )
 
       GC.publicDef_ "context_sync" GC.MiscDecl $ \s ->
-        ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-          [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                                 (void)ctx;
-                                 return 0;
-                               }|]
-        )
-
-      GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
         ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
           [C.cedecl|int $id:s(struct $id:ctx* ctx) {
                                  (void)ctx;
