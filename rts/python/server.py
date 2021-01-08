@@ -86,8 +86,16 @@ class Server:
         with open(fname, 'wb') as f:
             for i in range(1, len(args)):
                 vname = args[i]
-                self._check_var(vname)
-                f.write(construct_binary_value(self._vars[vname]))
+                value = self._get_var(vname)
+                # In case we are using the PyOpenCL backend, we first
+                # need to convert OpenCL arrays to ordinary NumPy
+                # arrays.  We do this in a nasty way.
+                if isinstance(value, np.number) or isinstance(value, np.bool) or isinstance(value, np.bool_) or isinstance(value, np.ndarray):
+                    # Ordinary NumPy value.
+                    f.write(construct_binary_value(self._vars[vname]))
+                else:
+                    # Assuming PyOpenCL array.
+                    f.write(construct_binary_value(self._vars[vname].get()))
 
     def _cmd_restore(self, args):
         if len(args) % 2 == 0:
