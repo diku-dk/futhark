@@ -13,11 +13,13 @@ different.  They all provide roughly the same command line interface,
 but there may be minor differences and quirks due to characteristics
 of the specific backends.
 
-There are two main ways of compiling a Futhark program: to an
-executable (by using ``--executable``, which is the default), and to a
-library (``--library``).  Executables can be run immediately, but are
-useful mostly for testing and benchmarking.  Libraries can be called
-from non-Futhark code.
+There are three main ways of compiling a Futhark program: to an
+ordinary executable (by using ``--executable``, which is the default),
+to a *server executable* (``--server``), and to a library
+(``--library``).  Plain executables can be run immediately, but are
+useful mostly for testing and benchmarking.  Server executables are
+discussed in :ref:`server-protocol`. Libraries can be called from
+non-Futhark code.
 
 .. _executable:
 
@@ -78,6 +80,19 @@ All generated executables support the following options.
 
     Print help text to standard output and exit.
 
+  ``-D``
+
+    Print debugging information on standard error.  Exactly what is
+    printed, and how it looks, depends on which Futhark compiler is
+    used.  This option may also enable more conservative (and slower)
+    execution, such as frequently synchronising to check for errors.
+
+Non-Server Executable Options
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following options are only supported on non-server executables,
+because they make no sense in a server context.
+
   ``-t FILE``
 
     Print the time taken to execute the program to the indicated file,
@@ -92,13 +107,6 @@ All generated executables support the following options.
     warmup run).  The program result is only printed once, after the
     last run.  If combined with ``-t``, one measurement is printed per
     run.  This is a good way to perform benchmarking.
-
-  ``-D``
-
-    Print debugging information on standard error.  Exactly what is
-    printed, and how it looks, depends on which Futhark compiler is
-    used.  This option may also enable more conservative (and slower)
-    execution, such as frequently synchronising to check for errors.
 
   ``-b``
 
