@@ -358,7 +358,7 @@ multiCoreReport names = report_kernels
             then
               [ [C.citem|
                      for (int i = 0; i < ctx->scheduler.num_threads; i++) {
-                       fprintf(stderr,
+                       fprintf(ctx->log,
                          $string:(format_string name is_array),
                          i,
                          ctx->$id:runs[i],
@@ -373,7 +373,7 @@ multiCoreReport names = report_kernels
               ]
             else
               [ [C.citem|
-                    fprintf(stderr,
+                    fprintf(ctx->log,
                        $string:(format_string name is_array),
                        ctx->$id:runs,
                        (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),

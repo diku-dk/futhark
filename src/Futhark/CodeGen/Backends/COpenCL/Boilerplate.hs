@@ -320,6 +320,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          int logging;
                          typename lock_t lock;
                          char *error;
+                         typename FILE *log;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
                          typename cl_mem global_failure;
@@ -342,6 +343,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->profiling_paused = 0;
                      ctx->logging = cfg->opencl.logging;
                      ctx->error = NULL;
+                     ctx->log = stderr;
                      ctx->opencl.profiling_records_capacity = 200;
                      ctx->opencl.profiling_records_used = 0;
                      ctx->opencl.profiling_records =
@@ -577,7 +579,7 @@ loadKernel (name, safety) =
   OPENCL_SUCCEED_FATAL(error);
   $items:set_args
   if (ctx->debugging) {
-    fprintf(stderr, "Created kernel %s.\n", $string:(pretty name));
+    fprintf(ctx->log, "Created kernel %s.\n", $string:(pretty name));
   }
   }|]
   where
