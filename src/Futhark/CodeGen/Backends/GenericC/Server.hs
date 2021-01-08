@@ -262,6 +262,8 @@ int main(int argc, char** argv) {
   struct futhark_context *ctx = futhark_context_new(cfg);
   assert (ctx != NULL);
 
+  futhark_context_set_logging_file(ctx, stdout);
+
   char* error = futhark_context_get_error(ctx);
   if (error != NULL) {
     futhark_panic(1, "Error during context initialisation:\n%s", error);
