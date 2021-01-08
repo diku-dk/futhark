@@ -117,7 +117,7 @@ Context
    subsequent call to the function returns ``NULL``, until a new error
    occurs.
 
-.. c:function:: char *futhark_context_set_logging_file(struct futhark_context *ctx, FILE* f)
+.. c:function:: void futhark_context_set_logging_file(struct futhark_context *ctx, FILE* f)
 
    Set the stream used to print diagnostics, debug prints, and logging
    messages during runtime.  This is ``stderr`` by default.  Even when

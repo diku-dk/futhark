@@ -1525,10 +1525,10 @@ commonLibFuns memreport = do
     )
 
   publicDef_ "context_set_logging_file" MiscDecl $ \s ->
-    ( [C.cedecl|char* $id:s($ty:ctx* ctx, typename FILE* f);|],
-      [C.cedecl|char* $id:s($ty:ctx* ctx, typename FILE* f) {
-                         ctx->log = f;
-                       }|]
+    ( [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f);|],
+      [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f) {
+                  ctx->log = f;
+                }|]
     )
 
   publicDef_ "context_pause_profiling" MiscDecl $ \s ->
