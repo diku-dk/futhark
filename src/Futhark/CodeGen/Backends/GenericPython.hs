@@ -305,6 +305,12 @@ standardOptions =
         optionShortName = Nothing,
         optionArgument = RequiredArgument "open",
         optionAction = [Exp $ simpleCall "read_tuning_file" [Var "sizes", Var "optarg"]]
+      },
+    Option
+      { optionLongName = "log",
+        optionShortName = Just 'L',
+        optionArgument = NoArgument,
+        optionAction = [Pass]
       }
   ]
 
