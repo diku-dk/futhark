@@ -223,6 +223,8 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   freeIns
 
+  report <- cmdEither $ cmdReport server
+
   let readResults :: (MonadIO m, MonadError T.Text m) => m (SBS.ByteString, [Value])
       readResults =
         join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
@@ -251,7 +253,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   return
     ( map fst call_logs,
-      T.unlines $ map (T.unlines . snd) call_logs
+      T.unlines $ map (T.unlines . snd) call_logs <> report
     )
   where
     getValuesAndBS (SuccessValues vs) = do

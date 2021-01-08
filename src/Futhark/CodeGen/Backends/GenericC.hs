@@ -59,6 +59,7 @@ module Futhark.CodeGen.Backends.GenericC
     publicDef,
     publicDef_,
     profileReport,
+    onClear,
     HeaderSection (..),
     libDecl,
     earlyDecl,
@@ -108,6 +109,7 @@ data CompilerState s = CompilerState
     compLibDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp),
     compProfileItems :: DL.DList C.BlockItem,
+    compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)]
   }
 
@@ -124,6 +126,7 @@ newCompilerState src s =
       compLibDecls = mempty,
       compCtxFields = mempty,
       compProfileItems = mempty,
+      compClearItems = mempty,
       compDeclaredMem = mempty
     }
 
@@ -488,6 +491,10 @@ profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
   s {compProfileItems = compProfileItems s <> DL.singleton x}
 
+onClear :: C.BlockItem -> CompilerM op s ()
+onClear x = modify $ \s ->
+  s {compClearItems = compClearItems s <> DL.singleton x}
+
 stm :: C.Stm -> CompilerM op s ()
 stm s = item [C.citem|$stm:s|]
 
@@ -671,6 +678,8 @@ defineMemorySpace space = do
   return ret;
 }
 |]
+
+  onClear [C.citem|ctx->$id:peakname = 0;|]
 
   let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
   return
@@ -1514,6 +1523,7 @@ $edecls:entry_point_decls
 commonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 commonLibFuns memreport = do
   ctx <- contextType
+  ops <- asks envOperations
   profilereport <- gets $ DL.toList . compProfileItems
 
   publicDef_ "context_report" MiscDecl $ \s ->
@@ -1559,6 +1569,15 @@ commonLibFuns memreport = do
       [C.cedecl|void $id:s($ty:ctx* ctx) {
                  ctx->profiling_paused = 0;
                }|]
+    )
+
+  clears <- gets $ DL.toList . compClearItems
+  publicDef_ "context_clear_caches" MiscDecl $ \s ->
+    ( [C.cedecl|int $id:s($ty:ctx* ctx);|],
+      [C.cedecl|int $id:s($ty:ctx* ctx) {
+                         $items:(criticalSection ops clears)
+                         return ctx->error != NULL;
+                       }|]
     )
 
 compileConstants :: Constants op -> CompilerM op s [C.BlockItem]
