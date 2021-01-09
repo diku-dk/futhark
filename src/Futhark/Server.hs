@@ -162,11 +162,11 @@ cmdFree s vs = helpCmd s $ "free" : vs
 
 cmdInputs :: Server -> EntryName -> IO (Either CmdFailure [TypeName])
 cmdInputs s entry =
-  fmap (T.words . T.unlines) <$> sendCommand s ["inputs", entry]
+  sendCommand s ["inputs", entry]
 
 cmdOutputs :: Server -> EntryName -> IO (Either CmdFailure [TypeName])
 cmdOutputs s entry =
-  fmap (T.words . T.unlines) <$> sendCommand s ["outputs", entry]
+  sendCommand s ["outputs", entry]
 
 cmdClear :: Server -> IO (Maybe CmdFailure)
 cmdClear s = helpCmd s ["clear"]
