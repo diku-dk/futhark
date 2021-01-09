@@ -806,6 +806,10 @@ simplifyIndexing vtable seType idd inds consuming =
     Just (Copy src, cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
+        -- It is generally not safe to simplify a slice of a copy,
+        -- because the result may be used in an in-place update of the
+        -- original.
+        Just _ <- mapM dimFix inds,
         not consuming,
         ST.available src vtable ->
         Just $ pure $ IndexResult cs src inds
