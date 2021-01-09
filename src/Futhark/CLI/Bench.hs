@@ -24,7 +24,6 @@ import Futhark.Util (fancyTerminal, maxinum, maybeNth, pmapIO)
 import Futhark.Util.Console
 import Futhark.Util.Options
 import System.Console.ANSI (clearLine)
-import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.Exit

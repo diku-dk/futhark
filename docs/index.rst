@@ -56,4 +56,5 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-python.rst
    man/futhark-repl.rst
    man/futhark-run.rst
+   man/futhark-script.rst
    man/futhark-test.rst
