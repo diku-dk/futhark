@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     benchmarking and testing tools, but can be used to build even
     fancier things in the future (#1179).
 
+  * Significantly faster reading/writing of large values.  This mainly
+    means that validation of test and benchmark results is much faster
+    (close to an order of magnitude).
+
 ### Removed
 
 ### Changed
