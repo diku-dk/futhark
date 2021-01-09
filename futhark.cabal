@@ -79,6 +79,7 @@ library
       Futhark.CLI.Dataset
       Futhark.CLI.Dev
       Futhark.CLI.Doc
+      Futhark.CLI.Script
       Futhark.CLI.Misc
       Futhark.CLI.Multicore
       Futhark.CLI.OpenCL
@@ -303,7 +304,7 @@ library
     , language-c-quote >=0.12
     , mainland-pretty >=0.6.1
     , cmark-gfm >=0.2.1
-    , megaparsec >=8.0.0
+    , megaparsec >=9.0.0
     , mtl >=2.2.1
     , neat-interpolation >=0.3
     , parallel >=3.2.1.0
