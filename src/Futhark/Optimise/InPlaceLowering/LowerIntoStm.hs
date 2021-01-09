@@ -127,6 +127,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
           find ((== v) . updateValue) updates = do
         Returns _ se <- Just ret
 
+        guard $ sliceDims slice == arrayDims (typeOf bindee_dec)
+
         Just $ do
           (slice', bodystms) <-
             flip runBinderT scope $
