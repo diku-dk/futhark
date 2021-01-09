@@ -234,6 +234,7 @@ library
       Futhark.Pkg.Info
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
+      Futhark.Script
       Futhark.Server
       Futhark.Test
       Futhark.Test.Values

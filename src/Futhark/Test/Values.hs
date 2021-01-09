@@ -18,6 +18,10 @@ module Futhark.Test.Values
     -- * Types of values
     ValueType (..),
     valueType,
+    valueShape,
+
+    -- * Manipulating values
+    valueElems,
 
     -- * Comparing Values
     compareValues,
@@ -189,8 +193,7 @@ instance PP.Pretty ValueType where
     where
       pprDim d = brackets $ ppr d
 
--- | A textual description of the type of a value.  Follows Futhark
--- type notation, and contains the exact dimension sizes if an array.
+-- | Get the type of a value.
 valueType :: Value -> ValueType
 valueType v = ValueType (valueShape v) $ valueElemType v
 
@@ -207,6 +210,7 @@ valueElemType Float32Value {} = F.FloatType F.Float32
 valueElemType Float64Value {} = F.FloatType F.Float64
 valueElemType BoolValue {} = F.Bool
 
+-- | The shape of a value.  Empty list in case of a scalar.
 valueShape :: Value -> [Int]
 valueShape (Int8Value shape _) = SVec.toList shape
 valueShape (Int16Value shape _) = SVec.toList shape
@@ -219,6 +223,34 @@ valueShape (Word64Value shape _) = SVec.toList shape
 valueShape (Float32Value shape _) = SVec.toList shape
 valueShape (Float64Value shape _) = SVec.toList shape
 valueShape (BoolValue shape _) = SVec.toList shape
+
+-- | Produce a list of the immediate elements of the value.  That is,
+-- a 2D array will produce a list of 1D values.  While lists are of
+-- course inefficient, the actual values are just slices of the
+-- original value, which makes them fairly efficient.
+valueElems :: Value -> [Value]
+valueElems v
+  | n : ns <- valueShape v =
+    let k = product ns
+        slices mk vs =
+          [ mk (SVec.fromList ns) $
+              SVec.slice (k * i) k vs
+            | i <- [0 .. n -1]
+          ]
+     in case v of
+          Int8Value _ vs -> slices Int8Value vs
+          Int16Value _ vs -> slices Int16Value vs
+          Int32Value _ vs -> slices Int32Value vs
+          Int64Value _ vs -> slices Int64Value vs
+          Word8Value _ vs -> slices Word8Value vs
+          Word16Value _ vs -> slices Word16Value vs
+          Word32Value _ vs -> slices Word32Value vs
+          Word64Value _ vs -> slices Word64Value vs
+          Float32Value _ vs -> slices Float32Value vs
+          Float64Value _ vs -> slices Float64Value vs
+          BoolValue _ vs -> slices BoolValue vs
+  | otherwise =
+    []
 
 -- The parser
 
