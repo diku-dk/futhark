@@ -62,16 +62,18 @@ parseEntryName =
 
 parseDouble :: Parser Double
 parseDouble = do
-  x <- many $ satisfy isDigit
+  x <- parseInteger
   ( do
       void "."
-      y <- many $ satisfy isDigit
-      pure $ read $ x ++ "." ++ y
+      y <- parseInteger
+      pure $ read $ show x <> "." <> show y
     )
-    <|> pure (read x)
+    <|> pure (read (show x))
 
 parseInteger :: Parser Integer
-parseInteger = read <$> some (satisfy isDigit)
+parseInteger = read <$> ((<>) <$> pSign <*> some (satisfy isDigit))
+  where
+    pSign = maybe "" T.unpack <$> optional "-"
 
 parseIntConst :: Parser PrimValue
 parseIntConst = do
