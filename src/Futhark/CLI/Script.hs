@@ -170,31 +170,52 @@ withTempFile f =
     hClose tmpf_h
     either throwError pure <$> runExceptT (f tmpf)
 
-argbIntToImg ::
+ppmHeader :: Int -> Int -> BS.ByteString
+ppmHeader h w =
+  "P6\n" <> BS.pack (show w) <> " " <> BS.pack (show h) <> "\n255\n"
+
+rgbIntToImg ::
   (Integral a, Bits a, SVec.Storable a) =>
   Int ->
   Int ->
   SVec.Vector a ->
   BS.ByteString
-argbIntToImg h w bytes =
-  "P6\n" <> BS.pack (show w) <> " " <> BS.pack (show h) <> "\n255\n"
-    <> fst (BS.unfoldrN (h * w * 3) byte 0)
+rgbIntToImg h w bytes =
+  ppmHeader h w <> fst (BS.unfoldrN (h * w * 3) byte 0)
   where
     getChan word chan =
       (word `shiftR` (chan * 8)) .&. 0xFF
     byte i =
       Just
-        ( chr . fromIntegral $ getChan (bytes SVec.! (i `div` 3)) (i `mod` 3),
+        ( chr . fromIntegral $ getChan (bytes SVec.! (i `div` 3)) (2 - (i `mod` 3)),
           i + 1
         )
+
+greyFloatToImg ::
+  (RealFrac a, SVec.Storable a) =>
+  Int ->
+  Int ->
+  SVec.Vector a ->
+  BS.ByteString
+greyFloatToImg h w bytes =
+  ppmHeader h w <> fst (BS.unfoldrN (h * w * 3) byte 0)
+  where
+    byte i =
+      Just (chr $ round (bytes SVec.! (i `div` 3)) * 255, i + 1)
 
 valueToPPM :: V.Value -> Maybe BS.ByteString
 valueToPPM v@(V.Word32Value _ bytes)
   | [h, w] <- V.valueShape v =
-    Just $ argbIntToImg h w bytes
+    Just $ rgbIntToImg h w bytes
 valueToPPM v@(V.Int32Value _ bytes)
   | [h, w] <- V.valueShape v =
-    Just $ argbIntToImg h w bytes
+    Just $ rgbIntToImg h w bytes
+valueToPPM v@(V.Float32Value _ bytes)
+  | [h, w] <- V.valueShape v =
+    Just $ greyFloatToImg h w bytes
+valueToPPM v@(V.Float64Value _ bytes)
+  | [h, w] <- V.valueShape v =
+    Just $ greyFloatToImg h w bytes
 valueToPPM _ = Nothing
 
 system :: FilePath -> [String] -> T.Text -> ScriptM T.Text
