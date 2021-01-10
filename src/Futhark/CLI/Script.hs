@@ -139,6 +139,8 @@ parseScriptFile prog = do
     Right script ->
       pure script
 
+type ScriptM = ExceptT T.Text IO
+
 argbIntToImg ::
   (Integral a, Bits a, SVec.Storable a) =>
   Int ->
@@ -166,11 +168,11 @@ valueToPPM v@(V.Int32Value _ bytes)
     Just $ argbIntToImg h w bytes
 valueToPPM _ = Nothing
 
-ppmToPNG :: FilePath -> IO FilePath
+ppmToPNG :: FilePath -> ScriptM FilePath
 ppmToPNG ppm = do
-  res <- runProgramWithExitCode "convert" [ppm, png] mempty
+  res <- liftIO $ runProgramWithExitCode "convert" [ppm, png] mempty
   case res of
-    Left err -> throwError err
+    Left err -> throwError $ T.pack $ show err
     Right _ -> pure png
   where
     png = ppm `replaceExtension` "png"
@@ -193,7 +195,7 @@ imgRes e f =
       "![](" <> T.pack f <> ")\n"
     ]
 
-processDirective :: FilePath -> Server -> Directive -> IO T.Text
+processDirective :: FilePath -> Server -> Directive -> ScriptM T.Text
 processDirective _ server (DirectiveRes e) = do
   vs <- evalExp server e
   pure $
@@ -210,15 +212,15 @@ processDirective imgdir server (DirectiveImg e) = do
     [v]
       | Just ppm <- valueToPPM v -> do
         let ppmfile = imgdir </> "img.ppm"
-        createDirectoryIfMissing True imgdir
-        BS.writeFile ppmfile ppm
+        liftIO $ createDirectoryIfMissing True imgdir
+        liftIO $ BS.writeFile ppmfile ppm
         pngfile <- ppmToPNG ppmfile
-        removeFile ppmfile
+        liftIO $ removeFile ppmfile
         pure $ imgRes e pngfile
-    _ -> do
-      hPutStrLn stderr $
-        "Cannot create image from values of types " ++ pretty (map V.valueType vs)
-      exitFailure
+    _ ->
+      throwError $
+        "Cannot create image from values of types "
+          <> prettyText (map V.valueType vs)
 --
 processDirective imgdir server (DirectivePlot size e) = do
   vs <- evalExp server e
@@ -239,19 +241,18 @@ processDirective imgdir server (DirectivePlot size e) = do
                   "set output '" <> BS.pack pngfile <> "'",
                   "plot '" <> BS.pack datafile <> "' notitle"
                 ]
-        T.writeFile datafile $ formatDataForGnuplot xs ys
-        res <- runProgramWithExitCode "gnuplot" [] script
+        liftIO $ T.writeFile datafile $ formatDataForGnuplot xs ys
+        res <- liftIO $ runProgramWithExitCode "gnuplot" [] script
         case res of
-          Left err -> throwError err
+          Left err -> throwError $ T.pack $ show err
           Right _ -> do
-            removeFile datafile
+            liftIO $ removeFile datafile
             pure $ imgRes e pngfile
-    _ -> do
-      hPutStrLn stderr $
-        "Cannot plot values of types " ++ pretty (map V.valueType vs)
-      exitFailure
+    _ ->
+      throwError $
+        "Cannot plot values of types " <> prettyText (map V.valueType vs)
 
-processScriptBlock :: ScriptOptions -> FilePath -> Server -> ScriptBlock -> IO T.Text
+processScriptBlock :: ScriptOptions -> FilePath -> Server -> ScriptBlock -> ScriptM T.Text
 processScriptBlock _ _ _ (BlockCode code)
   | T.null code = pure mempty
   | otherwise = pure $ "\n```\n" <> code <> "```\n\n"
@@ -259,10 +260,15 @@ processScriptBlock _ _ _ (BlockComment text) =
   pure text
 processScriptBlock opts server imgdir (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
-    T.hPutStrLn stderr $ "Processing " <> prettyText directive <> "..."
-  processDirective server imgdir directive
+    liftIO $ T.hPutStrLn stderr $ "Processing " <> prettyText directive <> "..."
+  processDirective server imgdir directive `catchError` failed
+  where
+    failed err = do
+      let message = prettyText directive <> " failed:\n" <> err <> "\n"
+      liftIO $ T.hPutStr stderr message
+      pure $ T.unlines ["```", message, "```"]
 
-processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> IO T.Text
+processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> ScriptM T.Text
 processScript opts imgdir server script =
   mconcat <$> mapM (processScriptBlock opts imgdir server) script
 
@@ -351,6 +357,10 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
           imgdir = dropExtension mdfile <> "-img"
 
       withServer ("." </> dropExtension prog) run_options $ \server -> do
-        md <- processScript opts imgdir server script
-        T.writeFile mdfile md
+        res <- runExceptT $ processScript opts imgdir server script
+        case res of
+          Right md -> T.writeFile mdfile md
+          Left err -> do
+            T.hPutStrLn stderr err
+            exitFailure
     _ -> Nothing
