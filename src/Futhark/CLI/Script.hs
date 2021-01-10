@@ -3,12 +3,15 @@
 module Futhark.CLI.Script (main) where
 
 import Control.Monad.Except
+import Data.Bifunctor (first)
 import Data.Bits
 import qualified Data.ByteString.Char8 as BS
 import Data.Char
 import Data.Functor
+import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import qualified Data.Vector.Storable as SVec
 import Data.Void
@@ -184,7 +187,7 @@ formatDataForGnuplot xs ys =
     line x y = prettyText x <> " " <> prettyText y
 
 promptLine :: Exp -> T.Text
-promptLine e = "> " <> prettyText e
+promptLine e = "> " <> prettyTextOneLine e
 
 imgRes :: Exp -> FilePath -> T.Text
 imgRes e f =
@@ -195,8 +198,8 @@ imgRes e f =
       "![](" <> T.pack f <> ")\n"
     ]
 
-processDirective :: FilePath -> Server -> Directive -> ScriptM T.Text
-processDirective _ server (DirectiveRes e) = do
+processDirective :: FilePath -> Server -> Int -> Directive -> ScriptM T.Text
+processDirective _ server _ (DirectiveRes e) = do
   vs <- evalExp server e
   pure $
     T.unlines
@@ -208,12 +211,12 @@ processDirective _ server (DirectiveRes e) = do
         ""
       ]
 --
-processDirective imgdir server (DirectiveImg e) = do
+processDirective imgdir server i (DirectiveImg e) = do
   vs <- evalExp server e
   case vs of
     V.ValueAtom v
       | Just ppm <- valueToPPM v -> do
-        let ppmfile = imgdir </> "img.ppm"
+        let ppmfile = imgdir </> "img" <> show i <.> ".ppm"
         liftIO $ createDirectoryIfMissing True imgdir
         liftIO $ BS.writeFile ppmfile ppm
         pngfile <- ppmToPNG ppmfile
@@ -224,55 +227,81 @@ processDirective imgdir server (DirectiveImg e) = do
         "Cannot create image from values of types "
           <> prettyText (fmap V.valueType vs)
 --
-processDirective imgdir server (DirectivePlot size e) = do
+processDirective imgdir server i (DirectivePlot size e) = do
   vs <- evalExp server e
   case vs of
-    V.ValueTuple [V.ValueAtom xs, V.ValueAtom ys]
-      | [n_xs] <- V.valueShape xs,
-        [n_ys] <- V.valueShape ys,
-        n_xs == n_ys -> do
-        let pngfile = imgdir </> "plot.png"
-            datafile = imgdir </> "plot.data"
-            size' = BS.pack $
-              case size of
-                Nothing -> "500,500"
-                Just (w, h) -> show w ++ "," ++ show h
-            script =
-              BS.unlines
-                [ "set terminal png size " <> size' <> " enhanced",
-                  "set output '" <> BS.pack pngfile <> "'",
-                  "plot '" <> BS.pack datafile <> "' title 'data'"
-                ]
-        liftIO $ T.writeFile datafile $ formatDataForGnuplot xs ys
-        res <- liftIO $ runProgramWithExitCode "gnuplot" [] script
-        case res of
-          Left err -> throwError $ T.pack $ show err
-          Right _ -> do
-            liftIO $ removeFile datafile
-            pure $ imgRes e pngfile
+    V.ValueTuple [v]
+      | Just (xs, ys) <- plottable v ->
+        plotWith [(Nothing, (xs, ys))]
+    V.ValueRecord m
+      | Just m' <- traverse plottable m ->
+        plotWith $ map (first Just) $ M.toList m'
     _ ->
       throwError $
         "Cannot plot values of types " <> prettyText (fmap V.valueType vs)
+  where
+    plottable (V.ValueTuple [V.ValueAtom xs, V.ValueAtom ys])
+      | [n_xs] <- V.valueShape xs,
+        [n_ys] <- V.valueShape ys,
+        n_xs == n_ys =
+        Just (xs, ys)
+    plottable _ = Nothing
 
-processScriptBlock :: ScriptOptions -> FilePath -> Server -> ScriptBlock -> ScriptM T.Text
-processScriptBlock _ _ _ (BlockCode code)
+    plotWith :: [(Maybe T.Text, (V.Value, V.Value))] -> ScriptM T.Text
+    plotWith xys = do
+      let pngfile = imgdir </> "plot" <> show i <.> ".png"
+          size' = BS.pack $
+            case size of
+              Nothing -> "500,500"
+              Just (w, h) -> show w ++ "," ++ show h
+      (datafiles, cmds) <-
+        fmap unzip $
+          forM (zip xys [0 ..]) $ \((title, (xs, ys)), j) -> do
+            let datafile =
+                  imgdir
+                    </> ("plot" <> show i <> "_" <> show (j :: Int))
+                    <.> "data"
+                title' = case title of
+                  Nothing -> "notitle"
+                  Just x -> "title '" <> T.encodeUtf8 x <> "' with lines"
+            liftIO $ T.writeFile datafile $ formatDataForGnuplot xs ys
+            pure
+              ( datafile,
+                "'" <> BS.pack datafile <> "' " <> title'
+              )
+      let script =
+            BS.unlines
+              [ "set key outside",
+                "set terminal png size " <> size' <> " enhanced",
+                "set output '" <> BS.pack pngfile <> "'",
+                "plot " <> BS.intercalate ", " cmds
+              ]
+      res <- liftIO $ runProgramWithExitCode "gnuplot" [] script
+      case res of
+        Left err -> throwError $ T.pack $ show err
+        Right _ -> do
+          liftIO $ mapM_ removeFile datafiles
+          pure $ imgRes e pngfile
+
+processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> ScriptM T.Text
+processScriptBlock _ _ _ _ (BlockCode code)
   | T.null code = pure mempty
   | otherwise = pure $ "\n```\n" <> code <> "```\n\n"
-processScriptBlock _ _ _ (BlockComment text) =
+processScriptBlock _ _ _ _ (BlockComment text) =
   pure text
-processScriptBlock opts server imgdir (BlockDirective directive) = do
+processScriptBlock opts server imgdir i (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
     liftIO $ T.hPutStrLn stderr $ "Processing " <> prettyText directive <> "..."
-  processDirective server imgdir directive `catchError` failed
+  processDirective server imgdir i directive `catchError` failed
   where
     failed err = do
-      let message = prettyText directive <> " failed:\n" <> err <> "\n"
+      let message = prettyTextOneLine directive <> " failed:\n" <> err <> "\n"
       liftIO $ T.hPutStr stderr message
       pure $ T.unlines ["```", message, "```"]
 
 processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> ScriptM T.Text
 processScript opts imgdir server script =
-  mconcat <$> mapM (processScriptBlock opts imgdir server) script
+  mconcat <$> zipWithM (processScriptBlock opts imgdir server) [0 ..] script
 
 commandLineOptions :: [FunOptDescr ScriptOptions]
 commandLineOptions =
