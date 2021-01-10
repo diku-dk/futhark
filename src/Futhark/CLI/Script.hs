@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 
 module Futhark.CLI.Script (main) where
 
@@ -345,7 +344,7 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
 data Failure = Failure | Success
   deriving (Eq, Ord, Show)
 
-processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> ScriptM (Failure, T.Text)
+processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> IO (Failure, T.Text)
 processScriptBlock _ _ _ _ (BlockCode code)
   | T.null code = pure (Success, mempty)
   | otherwise = pure (Success, "\n```\n" <> code <> "```\n\n")
@@ -353,12 +352,13 @@ processScriptBlock _ _ _ _ (BlockComment text) =
   pure (Success, text)
 processScriptBlock opts server imgdir i (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
-    liftIO . T.hPutStrLn stderr . prettyText $
+    T.hPutStrLn stderr . prettyText $
       "Processing " <> PP.align (PP.ppr directive) <> "..."
   let prompt = "```\n" <> prettyText directive <> "\n```\n"
-  second (prompt <>)
-    <$> ((Success,) <$> processDirective server imgdir i directive)
-      `catchError` failed
+  r <- runExceptT $ processDirective server imgdir i directive
+  second (prompt <>) <$> case r of
+    Left err -> failed err
+    Right t -> pure (Success, t)
   where
     failed err = do
       let message = prettyTextOneLine directive <> " failed:\n" <> err <> "\n"
@@ -368,7 +368,7 @@ processScriptBlock opts server imgdir i (BlockDirective directive) = do
           T.unlines ["**FAILED**", "```", err, "```"]
         )
 
-processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> ScriptM (Failure, T.Text)
+processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> IO (Failure, T.Text)
 processScript opts imgdir server script =
   bimap (foldl' min Success) mconcat . unzip
     <$> zipWithM (processScriptBlock opts imgdir server) [0 ..] script
@@ -458,12 +458,7 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
           imgdir = dropExtension mdfile <> "-img"
 
       withServer ("." </> dropExtension prog) run_options $ \server -> do
-        res <- runExceptT $ processScript opts imgdir server script
-        case res of
-          Right (failure, md) -> do
-            T.writeFile mdfile md
-            when (failure == Failure) exitFailure
-          Left err -> do
-            T.hPutStrLn stderr err
-            exitFailure
+        (failure, md) <- processScript opts imgdir server script
+        when (failure == Failure) exitFailure
+        T.writeFile mdfile md
     _ -> Nothing
