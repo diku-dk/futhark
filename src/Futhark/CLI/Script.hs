@@ -19,14 +19,16 @@ import Futhark.Script
 import Futhark.Server
 import Futhark.Test
 import qualified Futhark.Test.Values as V
-import Futhark.Util
+import Futhark.Util (runProgramWithExitCode)
 import Futhark.Util.Options
-import Futhark.Util.Pretty hiding (float, line, string, text, (</>), (<|>))
+import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
+import qualified Futhark.Util.Pretty as PP
 import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
+import System.IO.Temp (withSystemTempFile)
 import Text.Megaparsec hiding (token)
 import Text.Megaparsec.Char
 
@@ -56,17 +58,23 @@ data Directive
   = DirectiveRes Exp
   | DirectiveImg Exp
   | DirectivePlot (Maybe (Int, Int)) Exp
+  | DirectiveGnuplot Exp T.Text
   deriving (Show)
 
-instance Pretty Directive where
+instance PP.Pretty Directive where
   ppr (DirectiveRes e) =
-    ":res " <> ppr e
+    "> " <> PP.align (PP.ppr e)
   ppr (DirectiveImg e) =
-    ":img " <> ppr e
+    "> :img " <> PP.align (PP.ppr e)
   ppr (DirectivePlot Nothing e) =
-    ":plot " <> ppr e
+    ">:plot " <> PP.align (PP.ppr e)
   ppr (DirectivePlot (Just (w, h)) e) =
-    ":plot<" <> ppr w <> "," <> ppr h <> "> " <> ppr e
+    "> :plot<" <> PP.ppr w <> "," <> PP.ppr h <> "> " <> PP.align (PP.ppr e)
+  ppr (DirectiveGnuplot e script) =
+    PP.stack
+      [ "> :gnuplot " <> PP.align (PP.ppr e) <> ";",
+        PP.strictText script
+      ]
 
 data ScriptBlock
   = BlockCode T.Text
@@ -110,22 +118,25 @@ parseBlockCode = T.unlines . noblanks <$> some line
 parseScriptBlock :: Parser ScriptBlock
 parseScriptBlock =
   choice
-    [ BlockDirective <$> parseDirective,
+    [ token "-- >" *> (BlockDirective <$> parseDirective),
       BlockCode <$> parseBlockCode,
       BlockComment <$> parseBlockComment
     ]
   where
     parseDirective =
       choice
-        [ directiveName "img"
+        [ DirectiveRes <$> parseExp postlexeme,
+          directiveName "img"
             *> (DirectiveImg <$> parseExp postlexeme),
-          directiveName "res"
-            *> (DirectiveRes <$> parseExp postlexeme),
           directiveName "plot2d"
-            *> (DirectivePlot <$> parsePlotParams <*> parseExp postlexeme)
+            *> (DirectivePlot <$> parsePlotParams <*> parseExp postlexeme),
+          directiveName "gnuplot"
+            *> ( DirectiveGnuplot <$> parseExp postlexeme
+                   <*> (";" *> hspace *> eol *> parseBlockComment)
+               )
         ]
-        <* eol
-    directiveName s = try $ token "--" *> token (":" <> s)
+        <* (void eol <|> eof)
+    directiveName s = try $ token (":" <> s)
 
 parseScript :: FilePath -> T.Text -> Either T.Text [ScriptBlock]
 parseScript fname s =
@@ -143,6 +154,12 @@ parseScriptFile prog = do
       pure script
 
 type ScriptM = ExceptT T.Text IO
+
+withTempFile :: (FilePath -> ScriptM a) -> ScriptM a
+withTempFile f =
+  join . liftIO . withSystemTempFile "futhark-script" $ \tmpf tmpf_h -> do
+    hClose tmpf_h
+    either throwError pure <$> runExceptT (f tmpf)
 
 argbIntToImg ::
   (Integral a, Bits a, SVec.Storable a) =>
@@ -171,12 +188,27 @@ valueToPPM v@(V.Int32Value _ bytes)
     Just $ argbIntToImg h w bytes
 valueToPPM _ = Nothing
 
+system :: FilePath -> [String] -> T.Text -> ScriptM T.Text
+system prog options input = do
+  res <- liftIO $ runProgramWithExitCode prog options $ T.encodeUtf8 input
+  case res of
+    Left err ->
+      throwError $ prog' <> " failed: " <> T.pack (show err)
+    Right (ExitSuccess, stdout_t, _) ->
+      pure $ T.pack stdout_t
+    Right (ExitFailure code', _, stderr_t) ->
+      throwError $
+        prog' <> " failed with exit code "
+          <> T.pack (show code')
+          <> " and stderr:\n"
+          <> T.pack stderr_t
+  where
+    prog' = "'" <> T.pack prog <> "'"
+
 ppmToPNG :: FilePath -> ScriptM FilePath
 ppmToPNG ppm = do
-  res <- liftIO $ runProgramWithExitCode "convert" [ppm, png] mempty
-  case res of
-    Left err -> throwError $ T.pack $ show err
-    Right _ -> pure png
+  void $ system "convert" [ppm, png] mempty
+  pure png
   where
     png = ppm `replaceExtension` "png"
 
@@ -186,17 +218,16 @@ formatDataForGnuplot xs ys =
   where
     line x y = prettyText x <> " " <> prettyText y
 
-promptLine :: Exp -> T.Text
-promptLine e = "> " <> prettyTextOneLine e
+imgBlock :: FilePath -> T.Text
+imgBlock f = "\n\n![](" <> T.pack f <> ")\n\n"
 
-imgRes :: Exp -> FilePath -> T.Text
-imgRes e f =
-  T.unlines
-    [ "```",
-      promptLine e,
-      "```",
-      "![](" <> T.pack f <> ")\n"
-    ]
+plottable :: V.CompoundValue -> Maybe (V.Value, V.Value)
+plottable (V.ValueTuple [V.ValueAtom xs, V.ValueAtom ys])
+  | [n_xs] <- V.valueShape xs,
+    [n_ys] <- V.valueShape ys,
+    n_xs == n_ys =
+    Just (xs, ys)
+plottable _ = Nothing
 
 processDirective :: FilePath -> Server -> Int -> Directive -> ScriptM T.Text
 processDirective _ server _ (DirectiveRes e) = do
@@ -205,7 +236,6 @@ processDirective _ server _ (DirectiveRes e) = do
     T.unlines
       [ "",
         "```",
-        promptLine e,
         prettyText vs,
         "```",
         ""
@@ -221,7 +251,7 @@ processDirective imgdir server i (DirectiveImg e) = do
         liftIO $ BS.writeFile ppmfile ppm
         pngfile <- ppmToPNG ppmfile
         liftIO $ removeFile ppmfile
-        pure $ imgRes e pngfile
+        pure $ imgBlock pngfile
     _ ->
       throwError $
         "Cannot create image from values of types "
@@ -240,17 +270,11 @@ processDirective imgdir server i (DirectivePlot size e) = do
       throwError $
         "Cannot plot values of types " <> prettyText (fmap V.valueType vs)
   where
-    plottable (V.ValueTuple [V.ValueAtom xs, V.ValueAtom ys])
-      | [n_xs] <- V.valueShape xs,
-        [n_ys] <- V.valueShape ys,
-        n_xs == n_ys =
-        Just (xs, ys)
-    plottable _ = Nothing
+    pngfile = imgdir </> "plot" <> show i <.> ".png"
 
     plotWith :: [(Maybe T.Text, (V.Value, V.Value))] -> ScriptM T.Text
     plotWith xys = do
-      let pngfile = imgdir </> "plot" <> show i <.> ".png"
-          size' = BS.pack $
+      let size' = T.pack $
             case size of
               Nothing -> "500,500"
               Just (w, h) -> show w ++ "," ++ show h
@@ -263,25 +287,53 @@ processDirective imgdir server i (DirectivePlot size e) = do
                     <.> "data"
                 title' = case title of
                   Nothing -> "notitle"
-                  Just x -> "title '" <> T.encodeUtf8 x <> "' with lines"
+                  Just x -> "title '" <> x <> "' with lines"
             liftIO $ T.writeFile datafile $ formatDataForGnuplot xs ys
             pure
               ( datafile,
-                "'" <> BS.pack datafile <> "' " <> title'
+                "'" <> T.pack datafile <> "' " <> title'
               )
       let script =
-            BS.unlines
-              [ "set key outside",
-                "set terminal png size " <> size' <> " enhanced",
-                "set output '" <> BS.pack pngfile <> "'",
-                "plot " <> BS.intercalate ", " cmds
+            T.unlines
+              [ "set terminal png size " <> size' <> " enhanced",
+                "set output '" <> T.pack pngfile <> "'",
+                "set key outside",
+                "plot " <> T.intercalate ", " cmds
               ]
-      res <- liftIO $ runProgramWithExitCode "gnuplot" [] script
-      case res of
-        Left err -> throwError $ T.pack $ show err
-        Right _ -> do
-          liftIO $ mapM_ removeFile datafiles
-          pure $ imgRes e pngfile
+      void $ system "gnuplot" [] script
+      liftIO $ mapM_ removeFile datafiles
+      pure $ imgBlock pngfile
+processDirective imgdir server i (DirectiveGnuplot e script) = do
+  vs <- evalExp server e
+  case vs of
+    V.ValueRecord m
+      | Just m' <- traverse plottable m ->
+        plotWith $ M.toList m'
+    _ ->
+      throwError $
+        "Cannot plot values of types " <> prettyText (fmap V.valueType vs)
+  where
+    pngfile = imgdir </> "plot" <> show i <.> ".png"
+
+    withDataFiles sets [] cont = cont sets
+    withDataFiles sets ((f, (xs, ys)) : xys) cont =
+      withTempFile $ \fname -> do
+        liftIO $ T.writeFile fname $ formatDataForGnuplot xs ys
+        withDataFiles (f <> "='" <> T.pack fname <> "'" : sets) xys cont
+
+    plotWith :: [(T.Text, (V.Value, V.Value))] -> ScriptM T.Text
+    plotWith xys = withDataFiles [] xys $ \sets -> do
+      let script' =
+            T.unlines
+              [ "set terminal png enhanced",
+                "set output '" <> T.pack pngfile <> "'",
+                T.unlines sets,
+                script
+              ]
+      void $ system "gnuplot" [] script'
+      pure $ imgBlock pngfile
+
+--
 
 processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> ScriptM T.Text
 processScriptBlock _ _ _ _ (BlockCode code)
@@ -291,13 +343,17 @@ processScriptBlock _ _ _ _ (BlockComment text) =
   pure text
 processScriptBlock opts server imgdir i (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
-    liftIO $ T.hPutStrLn stderr $ "Processing " <> prettyText directive <> "..."
-  processDirective server imgdir i directive `catchError` failed
+    liftIO . T.hPutStrLn stderr . prettyText $
+      "Processing " <> PP.align (PP.ppr directive) <> "..."
+  let prompt = "```\n" <> prettyText directive <> "\n```\n"
+  (prompt <>)
+    <$> processDirective server imgdir i directive
+      `catchError` failed
   where
     failed err = do
       let message = prettyTextOneLine directive <> " failed:\n" <> err <> "\n"
       liftIO $ T.hPutStr stderr message
-      pure $ T.unlines ["```", message, "```"]
+      pure $ T.unlines ["**FAILED**", "```", err, "```"]
 
 processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> ScriptM T.Text
 processScript opts imgdir server script =
