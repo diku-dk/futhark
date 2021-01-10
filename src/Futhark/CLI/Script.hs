@@ -265,7 +265,7 @@ processDirective imgdir server i (DirectiveImg e) = do
         pure $ imgBlock pngfile
     _ ->
       throwError $
-        "Cannot create image from values of types "
+        "Cannot create image from value of type "
           <> prettyText (fmap V.valueType vs)
 --
 processDirective imgdir server i (DirectivePlot size e) = do
@@ -279,7 +279,7 @@ processDirective imgdir server i (DirectivePlot size e) = do
         plotWith $ map (first Just) $ M.toList m'
     _ ->
       throwError $
-        "Cannot plot values of types " <> prettyText (fmap V.valueType vs)
+        "Cannot plot value of type " <> prettyText (fmap V.valueType vs)
   where
     pngfile = imgdir </> "plot" <> show i <.> ".png"
 
@@ -316,7 +316,7 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
         plotWith $ M.toList m'
     _ ->
       throwError $
-        "Cannot plot values of types " <> prettyText (fmap V.valueType vs)
+        "Cannot plot value of type " <> prettyText (fmap V.valueType vs)
   where
     pngfile = imgdir </> "plot" <> show i <.> ".png"
 
