@@ -74,7 +74,7 @@ data ScriptBlock
 type Parser = Parsec Void T.Text
 
 postlexeme :: Parser ()
-postlexeme = void $ hspace *> optional (try $ eol *> string "-- " *> postlexeme)
+postlexeme = void $ hspace *> optional (try $ eol *> "-- " *> postlexeme)
 
 lexeme :: Parser a -> Parser a
 lexeme p = p <* postlexeme
@@ -96,13 +96,13 @@ restOfLine = takeWhileP Nothing (/= '\n') <* eol
 parseBlockComment :: Parser T.Text
 parseBlockComment = T.unlines <$> some line
   where
-    line = (string "-- " *> restOfLine) <|> (string "--" *> eol $> "")
+    line = ("-- " *> restOfLine) <|> ("--" *> eol $> "")
 
 parseBlockCode :: Parser T.Text
 parseBlockCode = T.unlines . noblanks <$> some line
   where
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
-    line = try (notFollowedBy $ string "--") *> restOfLine
+    line = try (notFollowedBy "--") *> restOfLine
 
 parseScriptBlock :: Parser ScriptBlock
 parseScriptBlock =
