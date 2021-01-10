@@ -66,6 +66,9 @@ The following directives are supported:
   The two arrays must have the same length and are interpreted as
   ``x`` and ``y`` values, respectively.
 
+  The expression may also be a record, where each field will be
+  plotted separately and must have the type mentioned above.
+
 FutharkScript
 =============
 
