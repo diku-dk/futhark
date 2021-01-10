@@ -229,6 +229,17 @@ plottable (V.ValueTuple [V.ValueAtom xs, V.ValueAtom ys])
     Just (xs, ys)
 plottable _ = Nothing
 
+withGnuplotData ::
+  [(T.Text, T.Text)] ->
+  [(T.Text, (Value, Value))] ->
+  ([T.Text] -> [T.Text] -> ScriptM a) ->
+  ScriptM a
+withGnuplotData sets [] cont = uncurry cont $ unzip sets
+withGnuplotData sets ((f, (xs, ys)) : xys) cont =
+  withTempFile $ \fname -> do
+    liftIO $ T.writeFile fname $ formatDataForGnuplot xs ys
+    withGnuplotData ((f, f <> "='" <> T.pack fname <> "'") : sets) xys cont
+
 processDirective :: FilePath -> Server -> Int -> Directive -> ScriptM T.Text
 processDirective _ server _ (DirectiveRes e) = do
   vs <- evalExp server e
@@ -272,37 +283,31 @@ processDirective imgdir server i (DirectivePlot size e) = do
   where
     pngfile = imgdir </> "plot" <> show i <.> ".png"
 
-    plotWith :: [(Maybe T.Text, (V.Value, V.Value))] -> ScriptM T.Text
-    plotWith xys = do
+    tag (Nothing, xys) j = ("data" <> T.pack (show (j :: Int)), xys)
+    tag (Just f, xys) _ = (f, xys)
+
+    plotWith xys = withGnuplotData [] (zipWith tag xys [0 ..]) $ \fs sets -> do
       let size' = T.pack $
             case size of
               Nothing -> "500,500"
               Just (w, h) -> show w ++ "," ++ show h
-      (datafiles, cmds) <-
-        fmap unzip $
-          forM (zip xys [0 ..]) $ \((title, (xs, ys)), j) -> do
-            let datafile =
-                  imgdir
-                    </> ("plot" <> show i <> "_" <> show (j :: Int))
-                    <.> "data"
-                title' = case title of
+          plotCmd f title =
+            let title' = case title of
                   Nothing -> "notitle"
                   Just x -> "title '" <> x <> "' with lines"
-            liftIO $ T.writeFile datafile $ formatDataForGnuplot xs ys
-            pure
-              ( datafile,
-                "'" <> T.pack datafile <> "' " <> title'
-              )
-      let script =
+             in f <> " " <> title'
+          cmds = T.intercalate ", " (zipWith plotCmd fs (map fst xys))
+          script =
             T.unlines
               [ "set terminal png size " <> size' <> " enhanced",
                 "set output '" <> T.pack pngfile <> "'",
                 "set key outside",
-                "plot " <> T.intercalate ", " cmds
+                T.unlines sets,
+                "plot " <> cmds
               ]
       void $ system "gnuplot" [] script
-      liftIO $ mapM_ removeFile datafiles
       pure $ imgBlock pngfile
+--
 processDirective imgdir server i (DirectiveGnuplot e script) = do
   vs <- evalExp server e
   case vs of
@@ -315,14 +320,7 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
   where
     pngfile = imgdir </> "plot" <> show i <.> ".png"
 
-    withDataFiles sets [] cont = cont sets
-    withDataFiles sets ((f, (xs, ys)) : xys) cont =
-      withTempFile $ \fname -> do
-        liftIO $ T.writeFile fname $ formatDataForGnuplot xs ys
-        withDataFiles (f <> "='" <> T.pack fname <> "'" : sets) xys cont
-
-    plotWith :: [(T.Text, (V.Value, V.Value))] -> ScriptM T.Text
-    plotWith xys = withDataFiles [] xys $ \sets -> do
+    plotWith xys = withGnuplotData [] xys $ \_ sets -> do
       let script' =
             T.unlines
               [ "set terminal png enhanced",
@@ -332,8 +330,6 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
               ]
       void $ system "gnuplot" [] script'
       pure $ imgBlock pngfile
-
---
 
 processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> ScriptM T.Text
 processScriptBlock _ _ _ _ (BlockCode code)
