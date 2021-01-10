@@ -60,15 +60,19 @@ parseEntryName =
   where
     constituent c = isAlphaNum c || c == '_'
 
+parseSign :: Parser String
+parseSign = maybe "" T.unpack <$> optional "-"
+
 parseDouble :: Parser Double
 parseDouble = do
-  x <- parseInteger
+  sign <- parseSign
+  x <- some (satisfy isDigit)
   ( do
       void "."
-      y <- parseInteger
-      pure $ read $ show x <> "." <> show y
+      y <- some (satisfy isDigit)
+      pure $ read $ sign <> x <> "." <> y
     )
-    <|> pure (read (show x))
+    <|> pure (read $ sign <> x)
 
 parseInteger :: Parser Integer
 parseInteger = read <$> ((<>) <$> pSign <*> some (satisfy isDigit))
