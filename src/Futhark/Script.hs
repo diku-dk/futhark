@@ -16,11 +16,13 @@ import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char
 import Data.Functor
 import Data.IORef
+import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Void
 import Futhark.Server
 import qualified Futhark.Test.Values as V
+import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (float, line, sep, string, text, (</>), (<|>))
 import Language.Futhark.Prop (primValueType)
 import Language.Futhark.Syntax
@@ -31,11 +33,12 @@ import Language.Futhark.Syntax
 import System.IO
 import System.IO.Temp
 import Text.Megaparsec
-import Text.Megaparsec.Char
 
 data Exp
   = Call EntryName [Exp]
   | Const PrimValue
+  | Tuple [Exp]
+  | Record [(T.Text, Exp)]
   deriving (Show)
 
 instance Pretty Exp where
@@ -43,6 +46,11 @@ instance Pretty Exp where
   pprPrec _ (Const v) = ppr v
   pprPrec i (Call v args) =
     parensIf (i > 0) $ ppr v <+> spread (map (pprPrec 1) args)
+  pprPrec _ (Tuple vs) =
+    parens $ commasep $ map ppr vs
+  pprPrec _ (Record m) = braces $ commasep $ map field m
+    where
+      field (k, v) = ppr k <> equals <> ppr v
 
 type Parser = Parsec Void T.Text
 
@@ -56,7 +64,7 @@ parseDouble :: Parser Double
 parseDouble = do
   x <- many $ satisfy isDigit
   ( do
-      void $ string "."
+      void "."
       y <- many $ satisfy isDigit
       pure $ read $ x ++ "." ++ y
     )
@@ -76,7 +84,7 @@ parseIntConst = do
     ]
   where
     signed mk x suffix =
-      string suffix $> SignedValue (mk (fromInteger x))
+      suffix $> SignedValue (mk (fromInteger x))
 
 parseFloatConst :: Parser PrimValue
 parseFloatConst = do
@@ -87,25 +95,40 @@ parseFloatConst = do
     ]
   where
     float mk x suffix =
-      string suffix $> FloatValue (mk (realToFrac x))
+      suffix $> FloatValue (mk (realToFrac x))
 
 parsePrimValue :: Parser PrimValue
 parsePrimValue =
   choice
     [ try parseIntConst,
       parseFloatConst,
-      string "true" $> BoolValue True,
-      string "false" $> BoolValue False
+      "true" $> BoolValue True,
+      "false" $> BoolValue False
     ]
 
 lexeme :: Parser () -> Parser a -> Parser a
 lexeme sep p = p <* sep
 
+inParens :: Parser () -> Parser a -> Parser a
+inParens sep = between (lexeme sep "(") (lexeme sep ")")
+
+inBraces :: Parser () -> Parser a -> Parser a
+inBraces sep = between (lexeme sep "{") (lexeme sep "}")
+
 parseExp :: Parser () -> Parser Exp
 parseExp sep =
-  between (lexeme sep (string "(")) (lexeme sep (string ")")) (parseExp sep)
-    <|> Call <$> lexeme sep parseEntryName <*> many (parseExp sep)
-    <|> Const <$> lexeme sep parsePrimValue
+  choice
+    [ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
+      inBraces sep (Record <$> (pField `sepBy` pComma)),
+      Call <$> lexeme sep parseEntryName <*> many (parseExp sep),
+      Const <$> lexeme sep parsePrimValue
+    ]
+  where
+    pField = (,) <$> parseEntryName <*> (pEquals *> parseExp sep)
+    pEquals = lexeme sep "="
+    pComma = lexeme sep ","
+    mkTuple [v] = v
+    mkTuple vs = Tuple vs
 
 prettyFailure :: CmdFailure -> T.Text
 prettyFailure (CmdFailure bef aft) =
@@ -139,7 +162,7 @@ writeVar server v val =
     let t = prettyText $ primValueType val
     cmdRestore server tmpf [(v, t)]
 
-evalExp :: (MonadError T.Text m, MonadIO m) => Server -> Exp -> m [V.Value]
+evalExp :: (MonadError T.Text m, MonadIO m) => Server -> Exp -> m V.CompoundValue
 evalExp server top_level_e = do
   counter <- liftIO $ newIORef (0 :: Int)
   let newVar base = liftIO $ do
@@ -150,19 +173,25 @@ evalExp server top_level_e = do
       evalExpToVar e = do
         vs <- evalExpToVars e
         case vs of
-          [v] -> pure v
-          _ -> throwError "Expression produced more than one value."
+          V.ValueAtom v -> pure v
+          _ -> throwError $ "Expression " <> prettyText e <> " produced more than one value."
 
       evalExpToVars (Call name es) = do
         ins <- mapM evalExpToVar es
         out_types <- cmdEither $ cmdOutputs server name
         outs <- replicateM (length out_types) $ newVar "out"
         void $ cmdEither $ cmdCall server name outs ins
-        pure outs
+        pure $ V.mkCompound outs
       evalExpToVars (Const val) = do
         v <- newVar "const"
         writeVar server v val
-        pure [v]
+        pure $ V.ValueAtom v
+      evalExpToVars (Tuple es) =
+        V.ValueTuple <$> mapM evalExpToVars es
+      evalExpToVars e@(Record m) = do
+        when (length (nubOrd (map fst m)) /= length (map fst m)) $
+          throwError $ "Record " <> prettyText e <> " has duplicate fields."
+        V.ValueRecord <$> traverse evalExpToVars (M.fromList m)
 
   cmdMaybe $ cmdClear server
-  mapM (readVar server) =<< evalExpToVars top_level_e
+  traverse (readVar server) =<< evalExpToVars top_level_e

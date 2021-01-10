@@ -199,17 +199,19 @@ processDirective :: FilePath -> Server -> Directive -> ScriptM T.Text
 processDirective _ server (DirectiveRes e) = do
   vs <- evalExp server e
   pure $
-    T.unlines $
-      "" :
-      "```" :
-      promptLine e :
-      map prettyText vs
-        ++ ["```", ""]
+    T.unlines
+      [ "",
+        "```",
+        promptLine e,
+        prettyText vs,
+        "```",
+        ""
+      ]
 --
 processDirective imgdir server (DirectiveImg e) = do
   vs <- evalExp server e
   case vs of
-    [v]
+    V.ValueAtom v
       | Just ppm <- valueToPPM v -> do
         let ppmfile = imgdir </> "img.ppm"
         liftIO $ createDirectoryIfMissing True imgdir
@@ -220,12 +222,12 @@ processDirective imgdir server (DirectiveImg e) = do
     _ ->
       throwError $
         "Cannot create image from values of types "
-          <> prettyText (map V.valueType vs)
+          <> prettyText (fmap V.valueType vs)
 --
 processDirective imgdir server (DirectivePlot size e) = do
   vs <- evalExp server e
   case vs of
-    [xs, ys]
+    V.ValueTuple [V.ValueAtom xs, V.ValueAtom ys]
       | [n_xs] <- V.valueShape xs,
         [n_ys] <- V.valueShape ys,
         n_xs == n_ys -> do
@@ -239,7 +241,7 @@ processDirective imgdir server (DirectivePlot size e) = do
               BS.unlines
                 [ "set terminal png size " <> size' <> " enhanced",
                   "set output '" <> BS.pack pngfile <> "'",
-                  "plot '" <> BS.pack datafile <> "' notitle"
+                  "plot '" <> BS.pack datafile <> "' title 'data'"
                 ]
         liftIO $ T.writeFile datafile $ formatDataForGnuplot xs ys
         res <- liftIO $ runProgramWithExitCode "gnuplot" [] script
@@ -250,7 +252,7 @@ processDirective imgdir server (DirectivePlot size e) = do
             pure $ imgRes e pngfile
     _ ->
       throwError $
-        "Cannot plot values of types " <> prettyText (map V.valueType vs)
+        "Cannot plot values of types " <> prettyText (fmap V.valueType vs)
 
 processScriptBlock :: ScriptOptions -> FilePath -> Server -> ScriptBlock -> ScriptM T.Text
 processScriptBlock _ _ _ (BlockCode code)

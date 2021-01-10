@@ -74,6 +74,9 @@ Only an extremely limited subset of Futhark is supported:
 .. productionlist::
    scriptexp:   `id` `scriptexp`*
             : | "(" `scriptexp` ")"
+            : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
+            : | "{" "}"
+            : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
             : | `intnumber`
 
 Any numeric literals *must* have a type suffix.  All variables
