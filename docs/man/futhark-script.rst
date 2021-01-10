@@ -15,9 +15,9 @@ DESCRIPTION
 ===========
 
 The command ``futhark script foo.fut`` will compile the given program
- and then generate a Markdown file ``foo.md`` that contains a
- prettyprinted form of the program.  This is useful for illustrative
- example programs.
+and then generate a Markdown file ``foo.md`` that contains a
+prettyprinted form of the program.  This is useful for illustrative
+example programs.
 
 * Top-level comments that start with a line comment marker (``--``)
   and a space in the first column will be turned into ordinary text in
@@ -32,34 +32,34 @@ The command ``futhark script foo.fut`` will compile the given program
 Directives
 ==========
 
-A directive is a way to automatically embed the result of evaluating a
-*FutharkScript* expression in the program.  Depending on the
-directive, this can be as simple as printing the textual
-representation of the result, or as complex as running an external
-plotting program and referencing a generated image.
+A directive is a way to embed the result of a *FutharkScript*
+expression in the program.  Depending on the directive, this can be as
+simple as printing the textual representation of the result, or as
+complex as running an external plotting program and referencing a
+generated image.
 
 Any directives that produce images for a program ``foo.fut`` will
 place them in the directory ``foo-img/``.
 
-A directive ``:foo`` is indicated by a line starting with ``-- :foo``,
-which must follow an empty line.  Arguments to the directive follow on
-the remainder of the line.  Any expression arguments are given in a
-very restricted subset of Futhark called *FutharkScript* (see below).
+A directive is a line starting with ``-- >``, which must follow an
+empty line.  Arguments to the directive follow on the remainder of the
+line.  Any expression arguments are given in a very restricted subset
+of Futhark called *FutharkScript* (see below).
 
 The following directives are supported:
 
-* ``:res e``
+* ``> e``
 
-  Shows the result of executing ``e``, which can have any
-  (transparent) type.
+  Shows the result of executing the FutharkScript expression ``e``,
+  which can have any (transparent) type.
 
-* ``:img e``
+* ``> :img e``
 
-  Shows a visualisation of ``e``, which must be of type ``[][]i32`` or
-  ``[][]u32`` (interpreted as rows of ARGB pixel values).  Shells out
-  to ``convert`` (from ImageMagick) to generate the image.
+  Visualises ``e``, which must be of type ``[][]i32`` or ``[][]u32``
+  (interpreted as rows of ARGB pixel values).  Shells out to
+  ``convert`` (from ImageMagick) to generate the image.
 
-* ``:plot2d [<height,width>] e``
+* ``> :plot2d [<height,width>] e``
 
   Shows a plot generated with ``gnuplot`` of ``e``, which must be an
   expression of type ``([]t, []t)``, where ``t`` is some numeric type.
@@ -68,6 +68,15 @@ The following directives are supported:
 
   The expression may also be a record, where each field will be
   plotted separately and must have the type mentioned above.
+
+* ``> :gnuplot e;\n script...``
+
+  There *must* be a newline after the semicolon.  Similar to
+  ``plot2d``, except that it uses the provided Gnuplot script.  The
+  ``e`` argument must be a record and the data will be available in
+  temporary files whose names are in variables named after the fields.
+  Use ``set term png size width,height`` to change the size to
+  ``width`` by ``height`` pixels.
 
 FutharkScript
 =============
