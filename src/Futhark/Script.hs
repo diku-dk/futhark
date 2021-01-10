@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | FutharkScript is a (tiny) subset of Futhark used to write small
@@ -27,7 +28,6 @@ import Language.Futhark.Syntax
     IntValue (..),
     PrimValue (..),
   )
-import System.Exit
 import System.IO
 import System.IO.Temp
 import Text.Megaparsec
@@ -107,54 +107,52 @@ parseExp sep =
     <|> Call <$> lexeme sep parseEntryName <*> many (parseExp sep)
     <|> Const <$> lexeme sep parsePrimValue
 
-cmdFailure :: CmdFailure -> IO a
-cmdFailure (CmdFailure bef aft) = do
-  T.hPutStrLn stderr "Server failure:"
-  mapM_ (T.hPutStrLn stderr) $ bef ++ aft
-  exitFailure
+prettyFailure :: CmdFailure -> T.Text
+prettyFailure (CmdFailure bef aft) =
+  T.unlines $ bef ++ aft
 
-cmdMaybe :: IO (Maybe CmdFailure) -> IO ()
-cmdMaybe m = maybe (pure ()) cmdFailure =<< m
+cmdMaybe :: (MonadError T.Text m, MonadIO m) => IO (Maybe CmdFailure) -> m ()
+cmdMaybe m = maybe (pure ()) (throwError . prettyFailure) =<< liftIO m
 
-cmdEither :: IO (Either CmdFailure a) -> IO a
-cmdEither m = either cmdFailure pure =<< m
+cmdEither :: (MonadError T.Text m, MonadIO m) => IO (Either CmdFailure a) -> m a
+cmdEither m = either (throwError . prettyFailure) pure =<< liftIO m
 
-readVar :: Server -> VarName -> IO V.Value
+readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =
-  withSystemTempFile "futhark-server-read" $ \tmpf tmpf_h -> do
-    hClose tmpf_h
-    cmdMaybe $ cmdStore server tmpf [v]
-    s <- LBS.readFile tmpf
-    case V.readValues s of
-      Just [val] -> pure val
-      _ -> error "Invalid data file produced by Futhark server."
+  either throwError pure <=< liftIO $
+    withSystemTempFile "futhark-server-read" $ \tmpf tmpf_h -> do
+      hClose tmpf_h
+      store_res <- cmdStore server tmpf [v]
+      case store_res of
+        Just err -> pure $ Left $ prettyFailure err
+        Nothing -> do
+          s <- LBS.readFile tmpf
+          case V.readValues s of
+            Just [val] -> pure $ Right val
+            _ -> pure $ Left "Invalid data file produced by Futhark server."
 
-writeVar :: Server -> VarName -> PrimValue -> IO ()
+writeVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> PrimValue -> m ()
 writeVar server v val =
-  withSystemTempFile "futhark-server-write" $ \tmpf tmpf_h -> do
+  cmdMaybe . liftIO . withSystemTempFile "futhark-server-write" $ \tmpf tmpf_h -> do
     T.hPutStr tmpf_h $ prettyText val
     hClose tmpf_h
     let t = prettyText $ primValueType val
-    cmdMaybe $ cmdRestore server tmpf [(v, t)]
+    cmdRestore server tmpf [(v, t)]
 
-evalExp :: Server -> Exp -> IO [V.Value]
+evalExp :: (MonadError T.Text m, MonadIO m) => Server -> Exp -> m [V.Value]
 evalExp server top_level_e = do
-  counter <- newIORef (0 :: Int)
-  let newVar base = do
+  counter <- liftIO $ newIORef (0 :: Int)
+  let newVar base = liftIO $ do
         x <- readIORef counter
         modifyIORef counter (+ 1)
         pure $ base <> prettyText x
 
-      evalExpToVar :: Exp -> IO VarName
       evalExpToVar e = do
         vs <- evalExpToVars e
         case vs of
           [v] -> pure v
-          _ -> do
-            T.hPutStrLn stderr "Expression produced more than one value."
-            exitFailure
+          _ -> throwError "Expression produced more than one value."
 
-      evalExpToVars :: Exp -> IO [VarName]
       evalExpToVars (Call name es) = do
         ins <- mapM evalExpToVar es
         out_types <- cmdEither $ cmdOutputs server name
@@ -166,6 +164,5 @@ evalExp server top_level_e = do
         writeVar server v val
         pure [v]
 
-  vs <- mapM (readVar server) =<< evalExpToVars top_level_e
   cmdMaybe $ cmdClear server
-  pure vs
+  mapM (readVar server) =<< evalExpToVars top_level_e
