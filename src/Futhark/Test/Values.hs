@@ -10,6 +10,8 @@
 -- for your test programs.
 module Futhark.Test.Values
   ( Value (..),
+    Compound (..),
+    CompoundValue,
     Vector,
 
     -- * Reading Values
@@ -22,6 +24,7 @@ module Futhark.Test.Values
 
     -- * Manipulating values
     valueElems,
+    mkCompound,
 
     -- * Comparing Values
     compareValues,
@@ -39,6 +42,9 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char (chr, isSpace, ord)
 import Data.Int (Int16, Int32, Int64, Int8)
+import qualified Data.Map as M
+import qualified Data.Text as T
+import Data.Traversable
 import Data.Vector.Generic (freeze)
 import qualified Data.Vector.Storable as SVec
 import Data.Vector.Storable.ByteString (byteStringToVector, vectorToByteString)
@@ -183,6 +189,43 @@ pprArray (d : ds) vs =
     separator
       | null ds = comma <> space
       | otherwise = comma <> line
+
+-- | The structure of a compound value, parameterised over the actual
+-- values.  For most cases you probably want 'CompoundValue'.
+data Compound v
+  = ValueRecord (M.Map T.Text (Compound v))
+  | -- | Must not be single value.
+    ValueTuple [Compound v]
+  | ValueAtom v
+  deriving (Eq, Ord, Show)
+
+instance Functor Compound where
+  fmap = fmapDefault
+
+instance Foldable Compound where
+  foldMap = foldMapDefault
+
+instance Traversable Compound where
+  traverse f (ValueAtom v) = ValueAtom <$> f v
+  traverse f (ValueTuple vs) = ValueTuple <$> traverse (traverse f) vs
+  traverse f (ValueRecord m) = ValueRecord <$> traverse (traverse f) m
+
+instance Pretty v => Pretty (Compound v) where
+  ppr (ValueAtom v) = ppr v
+  ppr (ValueTuple vs) = parens $ commasep $ map ppr vs
+  ppr (ValueRecord m) = braces $ commasep $ map field $ M.toList m
+    where
+      field (k, v) = ppr k <> equals <> ppr v
+
+-- | Create a tuple for a non-unit list, and otherwise a 'ValueAtom'
+mkCompound :: [v] -> Compound v
+mkCompound [v] = ValueAtom v
+mkCompound vs = ValueTuple $ map ValueAtom vs
+
+-- | Like a 'Value', but also grouped in compound ways that are not
+-- supported by raw values.  You cannot parse or read these in
+-- standard ways, and they cannot be elements of arrays.
+type CompoundValue = Compound Value
 
 -- | A representation of the simple values we represent in this module.
 data ValueType = ValueType [Int] F.PrimType
