@@ -109,6 +109,13 @@ parseBlockComment = T.unlines <$> some line
   where
     line = ("-- " *> restOfLine) <|> ("--" *> eol $> "")
 
+parseTestBlock :: Parser T.Text
+parseTestBlock =
+  T.unlines <$> ((:) <$> header <*> remainder)
+  where
+    header = "-- ==" <* eol
+    remainder = map ("-- " <>) . T.lines <$> parseBlockComment
+
 parseBlockCode :: Parser T.Text
 parseBlockCode = T.unlines . noblanks <$> some line
   where
@@ -119,6 +126,7 @@ parseScriptBlock :: Parser ScriptBlock
 parseScriptBlock =
   choice
     [ token "-- >" *> (BlockDirective <$> parseDirective),
+      BlockCode <$> parseTestBlock,
       BlockCode <$> parseBlockCode,
       BlockComment <$> parseBlockComment
     ]
