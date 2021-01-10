@@ -56,7 +56,8 @@ The following directives are supported:
 * ``:img e``
 
   Shows a visualisation of ``e``, which must be of type ``[][]i32`` or
-  ``[][]u32`` (interpreted as rows of ARGB pixel values).
+  ``[][]u32`` (interpreted as rows of ARGB pixel values).  Shells out
+  to ``convert`` (from ImageMagick) to generate the image.
 
 * ``:plot2d [<height,width>] e``
 
