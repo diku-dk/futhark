@@ -446,7 +446,7 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
         cres <-
           runExceptT $
-            compileProgram compile_options (FutharkExe futhark) "c" prog
+            compileProgram compile_options (FutharkExe futhark) (scriptBackend opts) prog
         case cres of
           Left err -> do
             mapM_ (T.hPutStrLn stderr) err
