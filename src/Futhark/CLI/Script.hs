@@ -1,13 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 
 module Futhark.CLI.Script (main) where
 
 import Control.Monad.Except
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap, first, second)
 import Data.Bits
 import qualified Data.ByteString.Char8 as BS
 import Data.Char
 import Data.Functor
+import Data.List (foldl')
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Text as T
@@ -29,7 +31,7 @@ import System.Exit
 import System.FilePath
 import System.IO
 import System.IO.Temp (withSystemTempFile)
-import Text.Megaparsec hiding (token)
+import Text.Megaparsec hiding (failure, token)
 import Text.Megaparsec.Char
 
 data ScriptOptions = ScriptOptions
@@ -339,29 +341,37 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
       void $ system "gnuplot" [] script'
       pure $ imgBlock pngfile
 
-processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> ScriptM T.Text
+-- Did this script block succeed or fail?
+data Failure = Failure | Success
+  deriving (Eq, Ord, Show)
+
+processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> ScriptM (Failure, T.Text)
 processScriptBlock _ _ _ _ (BlockCode code)
-  | T.null code = pure mempty
-  | otherwise = pure $ "\n```\n" <> code <> "```\n\n"
+  | T.null code = pure (Success, mempty)
+  | otherwise = pure (Success, "\n```\n" <> code <> "```\n\n")
 processScriptBlock _ _ _ _ (BlockComment text) =
-  pure text
+  pure (Success, text)
 processScriptBlock opts server imgdir i (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
     liftIO . T.hPutStrLn stderr . prettyText $
       "Processing " <> PP.align (PP.ppr directive) <> "..."
   let prompt = "```\n" <> prettyText directive <> "\n```\n"
-  (prompt <>)
-    <$> processDirective server imgdir i directive
+  second (prompt <>)
+    <$> ((Success,) <$> processDirective server imgdir i directive)
       `catchError` failed
   where
     failed err = do
       let message = prettyTextOneLine directive <> " failed:\n" <> err <> "\n"
       liftIO $ T.hPutStr stderr message
-      pure $ T.unlines ["**FAILED**", "```", err, "```"]
+      pure
+        ( Failure,
+          T.unlines ["**FAILED**", "```", err, "```"]
+        )
 
-processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> ScriptM T.Text
+processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> ScriptM (Failure, T.Text)
 processScript opts imgdir server script =
-  mconcat <$> zipWithM (processScriptBlock opts imgdir server) [0 ..] script
+  bimap (foldl' min Success) mconcat . unzip
+    <$> zipWithM (processScriptBlock opts imgdir server) [0 ..] script
 
 commandLineOptions :: [FunOptDescr ScriptOptions]
 commandLineOptions =
@@ -450,7 +460,9 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
       withServer ("." </> dropExtension prog) run_options $ \server -> do
         res <- runExceptT $ processScript opts imgdir server script
         case res of
-          Right md -> T.writeFile mdfile md
+          Right (failure, md) -> do
+            T.writeFile mdfile md
+            when (failure == Failure) exitFailure
           Left err -> do
             T.hPutStrLn stderr err
             exitFailure
