@@ -49,12 +49,26 @@ initialScriptOptions =
       scriptVerbose = 0
     }
 
+data Directive
+  = DirectiveRes Exp
+  | DirectiveImg Exp
+  | DirectivePlot (Maybe (Int, Int)) Exp
+  deriving (Show)
+
+instance Pretty Directive where
+  ppr (DirectiveRes e) =
+    ":res " <> ppr e
+  ppr (DirectiveImg e) =
+    ":img " <> ppr e
+  ppr (DirectivePlot Nothing e) =
+    ":plot " <> ppr e
+  ppr (DirectivePlot (Just (w, h)) e) =
+    ":plot<" <> ppr w <> "," <> ppr h <> "> " <> ppr e
+
 data ScriptBlock
   = BlockCode T.Text
   | BlockComment T.Text
-  | BlockRes Exp
-  | BlockImg Exp
-  | BlockPlot (Maybe (Int, Int)) Exp
+  | BlockDirective Directive
   deriving (Show)
 
 type Parser = Parsec Void T.Text
@@ -67,9 +81,6 @@ lexeme p = p <* postlexeme
 
 token :: T.Text -> Parser ()
 token = void . try . lexeme . string
-
-parseDirective :: T.Text -> Parser ()
-parseDirective s = try $ token "--" *> token (":" <> s)
 
 parseInt :: Parser Int
 parseInt = read <$> some (satisfy isDigit)
@@ -96,16 +107,22 @@ parseBlockCode = T.unlines . noblanks <$> some line
 parseScriptBlock :: Parser ScriptBlock
 parseScriptBlock =
   choice
-    [ parseDirective "img"
-        *> (BlockImg <$> parseExp postlexeme <* eol),
-      parseDirective "res"
-        *> (BlockRes <$> parseExp postlexeme <* eol),
-      parseDirective "plot2d"
-        *> (BlockPlot <$> parsePlotParams <*> parseExp postlexeme <* eol),
-      BlockCode
-        <$> parseBlockCode,
+    [ BlockDirective <$> parseDirective,
+      BlockCode <$> parseBlockCode,
       BlockComment <$> parseBlockComment
     ]
+  where
+    parseDirective =
+      choice
+        [ directiveName "img"
+            *> (DirectiveImg <$> parseExp postlexeme),
+          directiveName "res"
+            *> (DirectiveRes <$> parseExp postlexeme),
+          directiveName "plot2d"
+            *> (DirectivePlot <$> parsePlotParams <*> parseExp postlexeme)
+        ]
+        <* eol
+    directiveName s = try $ token "--" *> token (":" <> s)
 
 parseScript :: FilePath -> T.Text -> Either T.Text [ScriptBlock]
 parseScript fname s =
@@ -176,15 +193,8 @@ imgRes e f =
       "![](" <> T.pack f <> ")\n"
     ]
 
-processScriptBlock :: FilePath -> Server -> ScriptBlock -> IO T.Text
-processScriptBlock _ _ (BlockCode code)
-  | T.null code = pure mempty
-  | otherwise = pure $ "\n```\n" <> code <> "```\n\n"
---
-processScriptBlock _ _ (BlockComment text) =
-  pure text
---
-processScriptBlock _ server (BlockRes e) = do
+processDirective :: FilePath -> Server -> Directive -> IO T.Text
+processDirective _ server (DirectiveRes e) = do
   vs <- evalExp server e
   pure $
     T.unlines $
@@ -194,7 +204,7 @@ processScriptBlock _ server (BlockRes e) = do
       map prettyText vs
         ++ ["```", ""]
 --
-processScriptBlock imgdir server (BlockImg e) = do
+processDirective imgdir server (DirectiveImg e) = do
   vs <- evalExp server e
   case vs of
     [v]
@@ -210,7 +220,7 @@ processScriptBlock imgdir server (BlockImg e) = do
         "Cannot create image from values of types " ++ pretty (map V.valueType vs)
       exitFailure
 --
-processScriptBlock imgdir server (BlockPlot size e) = do
+processDirective imgdir server (DirectivePlot size e) = do
   vs <- evalExp server e
   case vs of
     [xs, ys]
@@ -241,9 +251,20 @@ processScriptBlock imgdir server (BlockPlot size e) = do
         "Cannot plot values of types " ++ pretty (map V.valueType vs)
       exitFailure
 
-processScript :: FilePath -> Server -> [ScriptBlock] -> IO T.Text
-processScript imgdir server script =
-  mconcat <$> mapM (processScriptBlock imgdir server) script
+processScriptBlock :: ScriptOptions -> FilePath -> Server -> ScriptBlock -> IO T.Text
+processScriptBlock _ _ _ (BlockCode code)
+  | T.null code = pure mempty
+  | otherwise = pure $ "\n```\n" <> code <> "```\n\n"
+processScriptBlock _ _ _ (BlockComment text) =
+  pure text
+processScriptBlock opts server imgdir (BlockDirective directive) = do
+  when (scriptVerbose opts > 0) $
+    T.hPutStrLn stderr $ "Processing " <> prettyText directive <> "..."
+  processDirective server imgdir directive
+
+processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> IO T.Text
+processScript opts imgdir server script =
+  mconcat <$> mapM (processScriptBlock opts imgdir server) script
 
 commandLineOptions :: [FunOptDescr ScriptOptions]
 commandLineOptions =
@@ -314,6 +335,8 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
       script <- parseScriptFile prog
 
       unless (scriptSkipCompilation opts) $ do
+        when (scriptVerbose opts > 0) $
+          T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
         cres <-
           runExceptT $
             compileProgram compile_options (FutharkExe futhark) "c" prog
@@ -328,6 +351,6 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
           imgdir = dropExtension mdfile <> "-img"
 
       withServer ("." </> dropExtension prog) run_options $ \server -> do
-        md <- processScript imgdir server script
+        md <- processScript opts imgdir server script
         T.writeFile mdfile md
     _ -> Nothing
