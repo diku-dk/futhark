@@ -107,6 +107,12 @@ OPTIONS
   The program used to perform operations (eg. compilation).  Defaults
   to the binary running ``futhark script`` itself.
 
+--output=FILE
+
+  Override the default output file.  The image directory will be set
+  to the provided ``FILE`` with its extension stripped and ``-img/``
+  appended.
+
 --pass-option=opt
 
   Pass an option to benchmark programs that are being run.  For
@@ -123,16 +129,17 @@ OPTIONS
   Do not run the compiler, and instead assume that the program has
   already been compiled.  Use with caution.
 
+--stop-on-error
+
+  Terminate immediately without producing an output file if a
+  directive fails.  Otherwise a file will still be produced, and
+  failing directives will be followed by an error message.
+
 -v, --verbose
 
   Print verbose information on stderr about directives as they are
   executing.
 
---output=FILE
-
-  Override the default output file.  The image directory will be set
-  to the provided ``FILE`` with its extension stripped and ``-img/``
-  appended.
 
 SEE ALSO
 ========
