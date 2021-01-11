@@ -89,7 +89,7 @@ Only an extremely limited subset of Futhark is supported:
             : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
             : | "{" "}"
             : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
-            : | `intnumber`
+            : | `literal`
 
 Any numeric literals *must* have a type suffix.  All variables
 referenced must be defined as entry points.
