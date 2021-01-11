@@ -17,7 +17,6 @@ import Futhark.Server
 import Futhark.Test
 import Futhark.Util (maxinum)
 import Futhark.Util.Options
-import System.Console.GetOpt
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath

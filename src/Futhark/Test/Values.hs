@@ -10,6 +10,8 @@
 -- for your test programs.
 module Futhark.Test.Values
   ( Value (..),
+    Compound (..),
+    CompoundValue,
     Vector,
 
     -- * Reading Values
@@ -18,6 +20,11 @@ module Futhark.Test.Values
     -- * Types of values
     ValueType (..),
     valueType,
+    valueShape,
+
+    -- * Manipulating values
+    valueElems,
+    mkCompound,
 
     -- * Comparing Values
     compareValues,
@@ -35,6 +42,9 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char (chr, isSpace, ord)
 import Data.Int (Int16, Int32, Int64, Int8)
+import qualified Data.Map as M
+import qualified Data.Text as T
+import Data.Traversable
 import Data.Vector.Generic (freeze)
 import qualified Data.Vector.Storable as SVec
 import Data.Vector.Storable.ByteString (byteStringToVector, vectorToByteString)
@@ -180,6 +190,43 @@ pprArray (d : ds) vs =
       | null ds = comma <> space
       | otherwise = comma <> line
 
+-- | The structure of a compound value, parameterised over the actual
+-- values.  For most cases you probably want 'CompoundValue'.
+data Compound v
+  = ValueRecord (M.Map T.Text (Compound v))
+  | -- | Must not be single value.
+    ValueTuple [Compound v]
+  | ValueAtom v
+  deriving (Eq, Ord, Show)
+
+instance Functor Compound where
+  fmap = fmapDefault
+
+instance Foldable Compound where
+  foldMap = foldMapDefault
+
+instance Traversable Compound where
+  traverse f (ValueAtom v) = ValueAtom <$> f v
+  traverse f (ValueTuple vs) = ValueTuple <$> traverse (traverse f) vs
+  traverse f (ValueRecord m) = ValueRecord <$> traverse (traverse f) m
+
+instance Pretty v => Pretty (Compound v) where
+  ppr (ValueAtom v) = ppr v
+  ppr (ValueTuple vs) = parens $ commasep $ map ppr vs
+  ppr (ValueRecord m) = braces $ commasep $ map field $ M.toList m
+    where
+      field (k, v) = ppr k <> equals <> ppr v
+
+-- | Create a tuple for a non-unit list, and otherwise a 'ValueAtom'
+mkCompound :: [v] -> Compound v
+mkCompound [v] = ValueAtom v
+mkCompound vs = ValueTuple $ map ValueAtom vs
+
+-- | Like a 'Value', but also grouped in compound ways that are not
+-- supported by raw values.  You cannot parse or read these in
+-- standard ways, and they cannot be elements of arrays.
+type CompoundValue = Compound Value
+
 -- | A representation of the simple values we represent in this module.
 data ValueType = ValueType [Int] F.PrimType
   deriving (Show)
@@ -189,8 +236,7 @@ instance PP.Pretty ValueType where
     where
       pprDim d = brackets $ ppr d
 
--- | A textual description of the type of a value.  Follows Futhark
--- type notation, and contains the exact dimension sizes if an array.
+-- | Get the type of a value.
 valueType :: Value -> ValueType
 valueType v = ValueType (valueShape v) $ valueElemType v
 
@@ -207,6 +253,7 @@ valueElemType Float32Value {} = F.FloatType F.Float32
 valueElemType Float64Value {} = F.FloatType F.Float64
 valueElemType BoolValue {} = F.Bool
 
+-- | The shape of a value.  Empty list in case of a scalar.
 valueShape :: Value -> [Int]
 valueShape (Int8Value shape _) = SVec.toList shape
 valueShape (Int16Value shape _) = SVec.toList shape
@@ -219,6 +266,34 @@ valueShape (Word64Value shape _) = SVec.toList shape
 valueShape (Float32Value shape _) = SVec.toList shape
 valueShape (Float64Value shape _) = SVec.toList shape
 valueShape (BoolValue shape _) = SVec.toList shape
+
+-- | Produce a list of the immediate elements of the value.  That is,
+-- a 2D array will produce a list of 1D values.  While lists are of
+-- course inefficient, the actual values are just slices of the
+-- original value, which makes them fairly efficient.
+valueElems :: Value -> [Value]
+valueElems v
+  | n : ns <- valueShape v =
+    let k = product ns
+        slices mk vs =
+          [ mk (SVec.fromList ns) $
+              SVec.slice (k * i) k vs
+            | i <- [0 .. n -1]
+          ]
+     in case v of
+          Int8Value _ vs -> slices Int8Value vs
+          Int16Value _ vs -> slices Int16Value vs
+          Int32Value _ vs -> slices Int32Value vs
+          Int64Value _ vs -> slices Int64Value vs
+          Word8Value _ vs -> slices Word8Value vs
+          Word16Value _ vs -> slices Word16Value vs
+          Word32Value _ vs -> slices Word32Value vs
+          Word64Value _ vs -> slices Word64Value vs
+          Float32Value _ vs -> slices Float32Value vs
+          Float64Value _ vs -> slices Float64Value vs
+          BoolValue _ vs -> slices BoolValue vs
+  | otherwise =
+    []
 
 -- The parser
 

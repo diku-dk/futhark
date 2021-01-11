@@ -21,7 +21,6 @@ import Futhark.Pkg.Types
 import Futhark.Util (directoryContents, maxinum)
 import Futhark.Util.Log
 import Futhark.Util.Options
-import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.Exit

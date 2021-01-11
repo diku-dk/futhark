@@ -7,7 +7,6 @@ import Futhark.Compiler
 import Futhark.Util.Options
 import Futhark.Util.Pretty (pretty)
 import Language.Futhark.Warnings
-import System.Console.GetOpt
 import System.IO
 
 newtype CheckConfig = CheckConfig {checkWarn :: Bool}

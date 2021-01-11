@@ -52,7 +52,6 @@ import Futhark.Util.Options
 import qualified Futhark.Util.Pretty as PP
 import Language.Futhark.Parser (parseFuthark)
 import qualified Language.SexpGrammar as Sexp
-import System.Console.GetOpt
 import System.Exit
 import System.FilePath
 import System.IO
