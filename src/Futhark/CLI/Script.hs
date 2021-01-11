@@ -33,28 +33,6 @@ import System.IO.Temp (withSystemTempFile)
 import Text.Megaparsec hiding (failure, token)
 import Text.Megaparsec.Char
 
-data ScriptOptions = ScriptOptions
-  { scriptBackend :: String,
-    scriptFuthark :: Maybe FilePath,
-    scriptExtraOptions :: [String],
-    scriptCompilerOptions :: [String],
-    scriptSkipCompilation :: Bool,
-    scriptOutput :: Maybe FilePath,
-    scriptVerbose :: Int
-  }
-
-initialScriptOptions :: ScriptOptions
-initialScriptOptions =
-  ScriptOptions
-    { scriptBackend = "c",
-      scriptFuthark = Nothing,
-      scriptExtraOptions = [],
-      scriptCompilerOptions = [],
-      scriptSkipCompilation = False,
-      scriptOutput = Nothing,
-      scriptVerbose = 0
-    }
-
 data Directive
   = DirectiveRes Exp
   | DirectiveImg Exp
@@ -367,6 +345,30 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
 data Failure = Failure | Success
   deriving (Eq, Ord, Show)
 
+data ScriptOptions = ScriptOptions
+  { scriptBackend :: String,
+    scriptFuthark :: Maybe FilePath,
+    scriptExtraOptions :: [String],
+    scriptCompilerOptions :: [String],
+    scriptSkipCompilation :: Bool,
+    scriptOutput :: Maybe FilePath,
+    scriptVerbose :: Int,
+    scriptStopOnError :: Bool
+  }
+
+initialScriptOptions :: ScriptOptions
+initialScriptOptions =
+  ScriptOptions
+    { scriptBackend = "c",
+      scriptFuthark = Nothing,
+      scriptExtraOptions = [],
+      scriptCompilerOptions = [],
+      scriptSkipCompilation = False,
+      scriptOutput = Nothing,
+      scriptVerbose = 0,
+      scriptStopOnError = False
+    }
+
 processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> IO (Failure, T.Text)
 processScriptBlock _ _ _ _ (BlockCode code)
   | T.null code = pure (Success, mempty)
@@ -386,6 +388,7 @@ processScriptBlock opts server imgdir i (BlockDirective directive) = do
     failed err = do
       let message = prettyTextOneLine directive <> " failed:\n" <> err <> "\n"
       liftIO $ T.hPutStr stderr message
+      when (scriptStopOnError opts) exitFailure
       pure
         ( Failure,
           T.unlines ["**FAILED**", "```", err, "```"]
@@ -450,7 +453,12 @@ commandLineOptions =
       "o"
       ["output"]
       (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
-      "Enable logging.  Pass multiple times for more."
+      "Enable logging.  Pass multiple times for more.",
+    Option
+      []
+      ["stop-on-error"]
+      (NoArg $ Right $ \config -> config {scriptStopOnError = True})
+      "Stop and do not produce output file if any directive fails."
   ]
 
 -- | Run @futhark script@.
