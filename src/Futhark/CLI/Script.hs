@@ -299,9 +299,9 @@ processDirective imgdir server i (DirectiveImg e) = do
           <> prettyText (fmap V.valueType vs)
 --
 processDirective imgdir server i (DirectivePlot size e) = do
-  vs <- evalExp server e
-  case vs of
-    V.ValueTuple [v]
+  v <- evalExp server e
+  case v of
+    _
       | Just (xs, ys) <- plottable v ->
         plotWith [(Nothing, (xs, ys))]
     V.ValueRecord m
@@ -309,7 +309,7 @@ processDirective imgdir server i (DirectivePlot size e) = do
         plotWith $ map (first Just) $ M.toList m'
     _ ->
       throwError $
-        "Cannot plot value of type " <> prettyText (fmap V.valueType vs)
+        "Cannot plot value of type " <> prettyText (fmap V.valueType v)
   where
     pngfile = imgdir </> "plot" <> show i <.> ".png"
 
@@ -317,6 +317,7 @@ processDirective imgdir server i (DirectivePlot size e) = do
     tag (Just f, xys) _ = (f, xys)
 
     plotWith xys = withGnuplotData [] (zipWith tag xys [0 ..]) $ \fs sets -> do
+      liftIO $ createDirectoryIfMissing True imgdir
       let size' = T.pack $
             case size of
               Nothing -> "500,500"
@@ -324,8 +325,8 @@ processDirective imgdir server i (DirectivePlot size e) = do
           plotCmd f title =
             let title' = case title of
                   Nothing -> "notitle"
-                  Just x -> "title '" <> x <> "' with lines"
-             in f <> " " <> title'
+                  Just x -> "title '" <> x <> "'"
+             in f <> " " <> title' <> " with lines"
           cmds = T.intercalate ", " (zipWith plotCmd fs (map fst xys))
           script =
             T.unlines
@@ -351,6 +352,7 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
     pngfile = imgdir </> "plot" <> show i <.> ".png"
 
     plotWith xys = withGnuplotData [] xys $ \_ sets -> do
+      liftIO $ createDirectoryIfMissing True imgdir
       let script' =
             T.unlines
               [ "set terminal png enhanced",
