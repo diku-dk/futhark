@@ -371,10 +371,10 @@ initialScriptOptions =
 
 processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> IO (Failure, T.Text)
 processScriptBlock _ _ _ _ (BlockCode code)
-  | T.null code = pure (Success, mempty)
+  | T.null code = pure (Success, "\n")
   | otherwise = pure (Success, "\n```\n" <> code <> "```\n\n")
 processScriptBlock _ _ _ _ (BlockComment text) =
-  pure (Success, "\n" <> text)
+  pure (Success, text)
 processScriptBlock opts server imgdir i (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
     T.hPutStrLn stderr . prettyText $
