@@ -31,7 +31,6 @@ import Language.Futhark.Parser hiding (EOF)
 import qualified Language.Futhark.Semantic as T
 import qualified Language.Futhark.TypeChecker as T
 import NeatInterpolation (text)
-import System.Console.GetOpt
 import qualified System.Console.Haskeline as Haskeline
 import System.Directory
 import System.FilePath

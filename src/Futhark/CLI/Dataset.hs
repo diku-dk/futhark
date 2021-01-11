@@ -26,7 +26,6 @@ import Language.Futhark.Syntax hiding
     Value,
     ValueType,
   )
-import System.Console.GetOpt
 import System.Exit
 import System.IO
 import System.Random.PCG (Variate, initialize, uniformR)

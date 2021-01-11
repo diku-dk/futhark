@@ -18,7 +18,6 @@ import Futhark.IR (Prog)
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Pipeline
 import Futhark.Util.Options
-import System.Console.GetOpt
 import System.FilePath
 import System.IO
 

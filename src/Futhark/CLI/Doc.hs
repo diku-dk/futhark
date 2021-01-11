@@ -17,7 +17,6 @@ import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)
 import Futhark.Util (directoryContents, trim)
 import Futhark.Util.Options
 import Language.Futhark.Syntax (DocComment (..), progDoc)
-import System.Console.GetOpt
 import System.Directory (createDirectoryIfMissing)
 import System.Exit
 import System.FilePath

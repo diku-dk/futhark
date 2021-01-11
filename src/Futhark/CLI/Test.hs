@@ -27,7 +27,6 @@ import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Table
 import System.Console.ANSI
-import System.Console.GetOpt
 import qualified System.Console.Terminal.Size as Terminal
 import System.Environment
 import System.Exit

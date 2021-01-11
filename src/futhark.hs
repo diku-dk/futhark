@@ -27,6 +27,7 @@ import qualified Futhark.CLI.Python as Python
 import qualified Futhark.CLI.Query as Query
 import qualified Futhark.CLI.REPL as REPL
 import qualified Futhark.CLI.Run as Run
+import qualified Futhark.CLI.Script as Script
 import qualified Futhark.CLI.Test as Test
 import Futhark.Error
 import Futhark.Util (maxinum)
@@ -63,7 +64,8 @@ commands =
       ("check", (Check.main, "Type check a program.")),
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
       ("autotune", (Autotune.main, "Autotune threshold parameters.")),
-      ("query", (Query.main, "Query semantic information about program."))
+      ("query", (Query.main, "Query semantic information about program.")),
+      ("script", (Script.main, "Process a FutharkScript program."))
     ]
 
 msg :: String
