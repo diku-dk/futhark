@@ -5,7 +5,7 @@
 -- | Low-level compilation parts.  Look at "Futhark.Compiler" for a
 -- more high-level API.
 module Futhark.Compiler.Program
-  ( readLibraryWithBasis,
+  ( readLibrary,
     readImports,
     Imports,
     FileModule (..),
@@ -18,9 +18,8 @@ where
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (intercalate)
+import Data.List (intercalate, isPrefixOf)
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -36,14 +35,87 @@ import Language.Futhark.Warnings
 import qualified System.FilePath.Posix as Posix
 import System.IO.Error
 
--- | A little monad for reading and type-checking a Futhark program.
-type CompilerM m = ReaderT [FilePath] (StateT ReaderState m)
+readFileSafely :: String -> IO (Maybe (Either String (String, T.Text)))
+readFileSafely filepath =
+  (Just . Right . (filepath,) <$> T.readFile filepath) `catch` couldNotRead
+  where
+    couldNotRead e
+      | isDoesNotExistError e =
+        return Nothing
+      | otherwise =
+        return $ Just $ Left $ show e
 
-data ReaderState = ReaderState
-  { alreadyImported :: Imports,
-    nameSource :: VNameSource,
-    warnings :: E.Warnings
-  }
+newtype ReaderState = ReaderState
+  {alreadyRead :: [(ImportName, E.UncheckedProg)]}
+
+-- | A little monad for parsing a Futhark program.
+type ReaderM m = StateT ReaderState m
+
+runReaderM ::
+  (MonadError CompilerError m) =>
+  ReaderM m a ->
+  m [(ImportName, E.UncheckedProg)]
+runReaderM m = reverse . alreadyRead <$> execStateT m (ReaderState mempty)
+
+readImportFile ::
+  (MonadError CompilerError m, MonadIO m) =>
+  ImportName ->
+  ReaderM m (T.Text, FilePath)
+readImportFile include = do
+  -- First we try to find a file of the given name in the search path,
+  -- then we look at the builtin library if we have to.  For the
+  -- builtins, we don't use the search path.
+  r <- liftIO $ readFileSafely $ includeToFilePath include
+  case (r, lookup prelude_str prelude) of
+    (Just (Right (filepath, s)), _) -> return (s, filepath)
+    (Just (Left e), _) -> externalErrorS e
+    (Nothing, Just t) -> return (t, prelude_str)
+    (Nothing, Nothing) -> externalErrorS not_found
+  where
+    prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
+
+    not_found =
+      "Error at " ++ E.locStr (E.srclocOf include)
+        ++ ": could not find import '"
+        ++ includeToString include
+        ++ "'."
+
+readImport ::
+  (MonadError CompilerError m, MonadIO m) =>
+  [ImportName] ->
+  ImportName ->
+  ReaderM m ()
+readImport steps include
+  | include `elem` steps =
+    externalErrorS $
+      "Import cycle: "
+        ++ intercalate
+          " -> "
+          (map includeToString $ reverse $ include : steps)
+  | otherwise = do
+    already_done <- gets $ isJust . lookup include . alreadyRead
+
+    unless already_done $
+      uncurry (handleFile steps include) =<< readImportFile include
+
+handleFile ::
+  (MonadIO m, MonadError CompilerError m) =>
+  [ImportName] ->
+  ImportName ->
+  T.Text ->
+  FilePath ->
+  ReaderM m ()
+handleFile steps import_name file_contents file_name = do
+  prog <- case parseFuthark file_name file_contents of
+    Left err -> externalErrorS $ show err
+    Right prog -> return prog
+
+  let steps' = import_name : steps
+  mapM_ (readImport steps' . uncurry (mkImportFrom import_name)) $
+    E.progImports prog
+
+  modify $ \s ->
+    s {alreadyRead = (import_name, prog) : alreadyRead s}
 
 -- | Pre-typechecked imports, including a starting point for the name source.
 data Basis = Basis
@@ -65,126 +137,43 @@ emptyBasis =
   where
     src = newNameSource $ E.maxIntrinsicTag + 1
 
-readImport ::
-  (MonadError CompilerError m, MonadIO m) =>
-  [ImportName] ->
-  ImportName ->
-  CompilerM m ()
-readImport steps include
-  | include `elem` steps =
-    externalErrorS $
-      "Import cycle: "
-        ++ intercalate
-          " -> "
-          (map includeToString $ reverse $ include : steps)
-  | otherwise = do
-    already_done <- gets $ isJust . lookup (includeToString include) . alreadyImported
-
-    unless already_done $
-      uncurry (handleFile steps include) =<< readImportFile include
-
-handleFile ::
-  (MonadIO m, MonadError CompilerError m) =>
-  [ImportName] ->
-  ImportName ->
-  T.Text ->
-  FilePath ->
-  CompilerM m ()
-handleFile steps include file_contents file_name = do
-  prog <- case parseFuthark file_name file_contents of
-    Left err -> externalErrorS $ show err
-    Right prog -> return prog
-
-  mapM_ (readImport steps' . uncurry (mkImportFrom include)) $
-    E.progImports prog
-
-  -- It is important to not read these before the above calls to
-  -- readImport.
-  imports <- gets alreadyImported
-  src <- gets nameSource
-  roots <- ask
-
-  case E.checkProg imports src include $ prependRoots roots prog of
-    (prog_ws, Left err) -> do
-      prev_ws <- gets warnings
-      let ws = prev_ws <> prog_ws
-      externalError $
-        if anyWarnings ws
-          then ppr (prev_ws <> ws) </> line <> ppr err
-          else ppr err
-    (ws, Right (m, src')) ->
-      modify $ \s ->
-        s
-          { alreadyImported = (includeToString include, m) : imports,
-            nameSource = src',
-            warnings = warnings s <> ws
-          }
+typeCheckProgram ::
+  MonadError CompilerError m =>
+  Basis ->
+  [(ImportName, E.UncheckedProg)] ->
+  m (E.Warnings, Imports, VNameSource)
+typeCheckProgram basis =
+  foldM f (mempty, basisImports basis, basisNameSource basis)
   where
-    steps' = include : steps
+    roots = ["/prelude/prelude"]
 
-readFileSafely :: String -> IO (Maybe (Either String (String, T.Text)))
-readFileSafely filepath =
-  (Just . Right . (filepath,) <$> T.readFile filepath) `catch` couldNotRead
-  where
-    couldNotRead e
-      | isDoesNotExistError e =
-        return Nothing
-      | otherwise =
-        return $ Just $ Left $ show e
-
-readImportFile ::
-  (MonadError CompilerError m, MonadIO m) =>
-  ImportName ->
-  m (T.Text, FilePath)
-readImportFile include = do
-  -- First we try to find a file of the given name in the search path,
-  -- then we look at the builtin library if we have to.  For the
-  -- builtins, we don't use the search path.
-  r <- liftIO $ readFileSafely $ includeToFilePath include
-  case (r, lookup prelude_str prelude) of
-    (Just (Right (filepath, s)), _) -> return (s, filepath)
-    (Just (Left e), _) -> externalErrorS e
-    (Nothing, Just t) -> return (t, prelude_str)
-    (Nothing, Nothing) -> externalErrorS not_found
-  where
-    prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
-
-    not_found =
-      "Error at " ++ E.locStr (E.srclocOf include)
-        ++ ": could not find import '"
-        ++ includeToString include
-        ++ "'."
+    f (ws, imports, src) (import_name, prog) = do
+      let prog'
+            | "/prelude" `isPrefixOf` includeToFilePath import_name = prog
+            | otherwise = prependRoots roots prog
+      case E.checkProg imports src import_name prog' of
+        (prog_ws, Left err) -> do
+          let ws' = ws <> prog_ws
+          externalError $
+            if anyWarnings ws'
+              then ppr ws' </> line <> ppr err
+              else ppr err
+        (prog_ws, Right (m, src')) ->
+          pure
+            ( ws <> prog_ws,
+              imports ++ [(includeToString import_name, m)],
+              src'
+            )
 
 -- | Read Futhark files from some basis, and printing log messages if
 -- the first parameter is True.
-readLibraryWithBasis ::
+readLibrary ::
   (MonadError CompilerError m, MonadIO m) =>
-  Basis ->
   [FilePath] ->
-  m
-    ( E.Warnings,
-      Imports,
-      VNameSource
-    )
-readLibraryWithBasis builtin fps = do
-  (_, imps, src) <-
-    runCompilerM builtin $
-      readImport [] $ mkInitialImport "/prelude/prelude"
-  let basis = Basis imps src ["/prelude/prelude"]
-  readLibrary' basis fps
-
--- | Read and type-check a Futhark library (multiple files, relative
--- to the same search path), including all imports.
-readLibrary' ::
-  (MonadError CompilerError m, MonadIO m) =>
-  Basis ->
-  [FilePath] ->
-  m
-    ( E.Warnings,
-      Imports,
-      VNameSource
-    )
-readLibrary' basis fps = runCompilerM basis $ mapM onFile fps
+  m (E.Warnings, Imports, VNameSource)
+readLibrary fps = typeCheckProgram emptyBasis <=< runReaderM $ do
+  readImport [] (mkInitialImport "/prelude/prelude")
+  mapM_ onFile fps
   where
     onFile fp = do
       r <- liftIO $ readFileSafely fp
@@ -208,22 +197,9 @@ readImports ::
       Imports,
       VNameSource
     )
-readImports basis imps =
-  runCompilerM basis $ mapM (readImport []) imps
-
-runCompilerM ::
-  Monad m =>
-  Basis ->
-  CompilerM m a ->
-  m (E.Warnings, [(String, FileModule)], VNameSource)
-runCompilerM (Basis imports src roots) m = do
-  let s = ReaderState (reverse imports) src mempty
-  s' <- execStateT (runReaderT m roots) s
-  return
-    ( warnings s',
-      reverse $ alreadyImported s',
-      nameSource s'
-    )
+readImports basis imps = do
+  files <- runReaderM $ mapM (readImport []) imps
+  typeCheckProgram basis files
 
 prependRoots :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
 prependRoots roots (E.Prog doc ds) =

@@ -13,7 +13,6 @@ module Futhark.Compiler
     handleWarnings,
     module Futhark.Compiler.Program,
     readProgram,
-    readLibrary,
     readProgramOrDie,
   )
 where
@@ -154,14 +153,6 @@ readProgram ::
   FilePath ->
   m (Warnings, Imports, VNameSource)
 readProgram = readLibrary . pure
-
--- | Read and type-check a collection of Futhark files, including all
--- imports.
-readLibrary ::
-  (MonadError CompilerError m, MonadIO m) =>
-  [FilePath] ->
-  m (Warnings, Imports, VNameSource)
-readLibrary = readLibraryWithBasis emptyBasis
 
 -- | Not verbose, and terminates process on error.
 readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
