@@ -117,7 +117,7 @@ newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft show
       =<< liftIO
-        ( runExceptT (readProgram file)
+        ( runExceptT (readProgram [] file)
             `catch` \(err :: IOException) ->
               return (externalErrorS (show err))
         )
