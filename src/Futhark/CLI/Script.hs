@@ -11,6 +11,7 @@ import Data.Functor
 import Data.List (foldl')
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
@@ -40,6 +41,12 @@ data Directive
   | DirectiveGnuplot Exp T.Text
   deriving (Show)
 
+varsInDirective :: Directive -> S.Set EntryName
+varsInDirective (DirectiveRes e) = varsInExp e
+varsInDirective (DirectiveImg e) = varsInExp e
+varsInDirective (DirectivePlot _ e) = varsInExp e
+varsInDirective (DirectiveGnuplot e _) = varsInExp e
+
 instance PP.Pretty Directive where
   ppr (DirectiveRes e) =
     "> " <> PP.align (PP.ppr e)
@@ -60,6 +67,13 @@ data ScriptBlock
   | BlockComment T.Text
   | BlockDirective Directive
   deriving (Show)
+
+varsInScript :: [ScriptBlock] -> S.Set EntryName
+varsInScript = foldMap varsInBlock
+  where
+    varsInBlock (BlockDirective d) = varsInDirective d
+    varsInBlock BlockCode {} = mempty
+    varsInBlock BlockComment {} = mempty
 
 type Parser = Parsec Void T.Text
 
@@ -467,12 +481,15 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
   case args of
     [prog] -> Just $ do
       futhark <- maybe getExecutablePath return $ scriptFuthark opts
-      let compile_options = "--server" : scriptCompilerOptions opts
-          run_options = scriptExtraOptions opts
 
       script <- parseScriptFile prog
 
       unless (scriptSkipCompilation opts) $ do
+        let entryOpt v = "--entry=" ++ T.unpack v
+            compile_options =
+              "--server" :
+              map entryOpt (S.toList (varsInScript script))
+                ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."
         cres <-
@@ -487,6 +504,7 @@ main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args
 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
           imgdir = dropExtension mdfile <> "-img"
+          run_options = scriptExtraOptions opts
 
       withServer ("." </> dropExtension prog) run_options $ \server -> do
         (failure, md) <- processScript opts imgdir server script

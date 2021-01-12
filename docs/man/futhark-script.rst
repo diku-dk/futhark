@@ -91,8 +91,7 @@ Only an extremely limited subset of Futhark is supported:
             : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
             : | `literal`
 
-Any numeric literals *must* have a type suffix.  All variables
-referenced must be defined as entry points.
+Any numeric literals *must* have a type suffix.
 
 OPTIONS
 =======
