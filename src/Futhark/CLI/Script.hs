@@ -8,7 +8,7 @@ import Data.Bits
 import qualified Data.ByteString.Char8 as BS
 import Data.Char
 import Data.Functor
-import Data.List (foldl')
+import Data.List (foldl', transpose)
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -21,7 +21,7 @@ import Futhark.Script
 import Futhark.Server
 import Futhark.Test
 import qualified Futhark.Test.Values as V
-import Futhark.Util (runProgramWithExitCode)
+import Futhark.Util (nubOrd, runProgramWithExitCode)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
@@ -234,32 +234,34 @@ ppmToPNG ppm = do
   where
     png = ppm `replaceExtension` "png"
 
-formatDataForGnuplot :: V.Value -> V.Value -> T.Text
-formatDataForGnuplot xs ys =
-  T.unlines $ zipWith line (V.valueElems xs) (V.valueElems ys)
+formatDataForGnuplot :: [V.Value] -> T.Text
+formatDataForGnuplot = T.unlines . map line . transpose . map V.valueElems
   where
-    line x y = prettyText x <> " " <> prettyText y
+    line = T.unwords . map prettyText
 
 imgBlock :: FilePath -> T.Text
 imgBlock f = "\n\n![](" <> T.pack f <> ")\n\n"
 
-plottable :: V.CompoundValue -> Maybe (V.Value, V.Value)
-plottable (V.ValueTuple [V.ValueAtom xs, V.ValueAtom ys])
-  | [n_xs] <- V.valueShape xs,
-    [n_ys] <- V.valueShape ys,
-    n_xs == n_ys =
-    Just (xs, ys)
+plottable :: V.CompoundValue -> Maybe [V.Value]
+plottable (V.ValueTuple vs) = do
+  (vs', ns') <- unzip <$> mapM inspect vs
+  guard $ length (nubOrd ns') == 1
+  Just vs'
+  where
+    inspect (V.ValueAtom v)
+      | [n] <- V.valueShape v = Just (v, n)
+    inspect _ = Nothing
 plottable _ = Nothing
 
 withGnuplotData ::
   [(T.Text, T.Text)] ->
-  [(T.Text, (Value, Value))] ->
+  [(T.Text, [Value])] ->
   ([T.Text] -> [T.Text] -> ScriptM a) ->
   ScriptM a
 withGnuplotData sets [] cont = uncurry cont $ unzip sets
-withGnuplotData sets ((f, (xs, ys)) : xys) cont =
+withGnuplotData sets ((f, vs) : xys) cont =
   withTempFile $ \fname -> do
-    liftIO $ T.writeFile fname $ formatDataForGnuplot xs ys
+    liftIO $ T.writeFile fname $ formatDataForGnuplot vs
     withGnuplotData ((f, f <> "='" <> T.pack fname <> "'") : sets) xys cont
 
 processDirective :: FilePath -> Server -> Int -> Directive -> ScriptM T.Text
@@ -294,15 +296,19 @@ processDirective imgdir server i (DirectivePlot size e) = do
   v <- evalExp server e
   case v of
     _
-      | Just (xs, ys) <- plottable v ->
-        plotWith [(Nothing, (xs, ys))]
+      | Just vs <- plottable2d v ->
+        plotWith [(Nothing, vs)]
     V.ValueRecord m
-      | Just m' <- traverse plottable m ->
+      | Just m' <- traverse plottable2d m ->
         plotWith $ map (first Just) $ M.toList m'
     _ ->
       throwError $
         "Cannot plot value of type " <> prettyText (fmap V.valueType v)
   where
+    plottable2d v = do
+      [x, y] <- plottable v
+      Just [x, y]
+
     pngfile = imgdir </> "plot" <> show i <.> ".png"
 
     tag (Nothing, xys) j = ("data" <> T.pack (show (j :: Int)), xys)

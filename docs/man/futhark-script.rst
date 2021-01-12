@@ -73,8 +73,9 @@ The following directives are supported:
 
   There *must* be a newline after the semicolon.  Similar to
   ``plot2d``, except that it uses the provided Gnuplot script.  The
-  ``e`` argument must be a record and the data will be available in
-  temporary files whose names are in variables named after the fields.
+  ``e`` argument must be a record whose fields are tuples of
+  one-dimensional arrays, and the data will be available in temporary
+  files whose names are in variables named after the record fields.
   Use ``set term png size width,height`` to change the size to
   ``width`` by ``height`` pixels.
 
