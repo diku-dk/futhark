@@ -8,6 +8,7 @@ module Futhark.Script
   ( Exp (..),
     parseExp,
     evalExp,
+    varsInExp,
   )
 where
 
@@ -17,6 +18,7 @@ import Data.Char
 import Data.Functor
 import Data.IORef
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Void
@@ -201,3 +203,11 @@ evalExp server top_level_e = do
 
   cmdMaybe $ cmdClear server
   traverse (readVar server) =<< evalExpToVars top_level_e
+
+-- | The set of variables that are referenced by the expression -
+-- these will have to be entry points in the Futhark program.
+varsInExp :: Exp -> S.Set EntryName
+varsInExp (Call v es) = S.insert v $ foldMap varsInExp es
+varsInExp (Tuple es) = foldMap varsInExp es
+varsInExp (Record fs) = foldMap (foldMap varsInExp) fs
+varsInExp Const {} = mempty
