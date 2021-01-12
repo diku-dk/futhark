@@ -14,7 +14,7 @@ where
 import Control.Monad
 import Data.Maybe
 import Futhark.Compiler
-import Futhark.IR (Prog)
+import Futhark.IR (Name, Prog, nameFromString)
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Pipeline
 import Futhark.Util.Options
@@ -134,7 +134,20 @@ commandLineOptions =
       []
       ["safe"]
       (NoArg $ Right $ \config -> config {compilerSafe = True})
-      "Ignore 'unsafe' in code."
+      "Ignore 'unsafe' in code.",
+    Option
+      []
+      ["entry-points"]
+      ( ReqArg
+          ( \arg -> Right $ \config ->
+              config
+                { compilerEntryPoints =
+                    nameFromString arg : compilerEntryPoints config
+                }
+          )
+          "NAME"
+      )
+      "Treat this function as an additional entry point."
   ]
 
 wrapOption :: CompilerOption cfg -> CoreCompilerOption cfg
@@ -160,7 +173,8 @@ data CompilerConfig cfg = CompilerConfig
     compilerWerror :: Bool,
     compilerSafe :: Bool,
     compilerWarn :: Bool,
-    compilerConfig :: cfg
+    compilerConfig :: cfg,
+    compilerEntryPoints :: [Name]
   }
 
 -- | Are we compiling a library or an executable?
@@ -180,7 +194,8 @@ newCompilerConfig x =
       compilerWerror = False,
       compilerSafe = False,
       compilerWarn = True,
-      compilerConfig = x
+      compilerConfig = x,
+      compilerEntryPoints = mempty
     }
 
 outputFilePath :: FilePath -> CompilerConfig cfg -> FilePath
@@ -193,5 +208,6 @@ futharkConfig config =
     { futharkVerbose = compilerVerbose config,
       futharkWerror = compilerWerror config,
       futharkSafe = compilerSafe config,
-      futharkWarn = compilerWarn config
+      futharkWarn = compilerWarn config,
+      futharkEntryPoints = compilerEntryPoints config
     }

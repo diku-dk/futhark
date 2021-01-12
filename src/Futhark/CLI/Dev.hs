@@ -569,7 +569,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
               | futharkPrintAST config -> print prog
               | otherwise -> putStrLn $ pretty prog
         TypeCheck -> do
-          (_, imports, _) <- readProgram file
+          (_, imports, _) <- readProgram [] file
           liftIO $
             forM_ (map snd imports) $ \fm ->
               putStrLn $
@@ -577,17 +577,17 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   then show $ fileProg fm
                   else pretty $ fileProg fm
         Defunctorise -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram [] file
           liftIO $ p $ evalState (Defunctorise.transformProg imports) src
         Monomorphise -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram [] file
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
                   >>= Monomorphise.transformProg
         LiftLambdas -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram [] file
           liftIO $
             p $
               flip evalState src $
@@ -595,7 +595,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
         Defunctionalise -> do
-          (_, imports, src) <- readProgram file
+          (_, imports, src) <- readProgram [] file
           liftIO $
             p $
               flip evalState src $

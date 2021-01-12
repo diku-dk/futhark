@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The experimental `futhark script` command allows vaguely a
     notebook-like programming experience.
 
+  * All compilers now accept an `--entry` option for treating more
+    functions as entry points.
+
 ### Removed
 
 ### Changed

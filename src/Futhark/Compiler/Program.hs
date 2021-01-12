@@ -165,14 +165,37 @@ typeCheckProgram basis =
               src'
             )
 
+setEntryPoints ::
+  [E.Name] ->
+  [FilePath] ->
+  [(ImportName, E.UncheckedProg)] ->
+  [(ImportName, E.UncheckedProg)]
+setEntryPoints extra_eps fps = map onProg
+  where
+    onProg (name, prog)
+      | includeToFilePath name `elem` fps =
+        (name, prog {E.progDecs = map onDec (E.progDecs prog)})
+      | otherwise =
+        (name, prog)
+
+    onDec (E.ValDec vb)
+      | E.valBindName vb `elem` extra_eps =
+        E.ValDec vb {E.valBindEntryPoint = Just E.NoInfo}
+    onDec dec = dec
+
 -- | Read and type-check some Futhark files.
 readLibrary ::
   (MonadError CompilerError m, MonadIO m) =>
+  -- | Extra functions that should be marked as entry points; only
+  -- applies to the immediate files, not any imports imported.
+  [E.Name] ->
+  -- | The files to read.
   [FilePath] ->
   m (E.Warnings, Imports, VNameSource)
-readLibrary fps = typeCheckProgram emptyBasis <=< runReaderM $ do
-  readImport [] (mkInitialImport "/prelude/prelude")
-  mapM_ onFile fps
+readLibrary extra_eps fps =
+  typeCheckProgram emptyBasis . setEntryPoints extra_eps fps <=< runReaderM $ do
+    readImport [] (mkInitialImport "/prelude/prelude")
+    mapM_ onFile fps
   where
     onFile fp = do
       r <- liftIO $ readFileSafely fp

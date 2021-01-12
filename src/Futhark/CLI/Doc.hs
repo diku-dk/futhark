@@ -49,7 +49,7 @@ main = mainWithOptions initialDocConfig commandLineOptions "options... -o outdir
             liftIO $ do
               mapM_ (hPutStrLn stderr . ("Found source file " <>)) files
               hPutStrLn stderr "Reading files..."
-          (_w, imports, _vns) <- readLibrary files
+          (_w, imports, _vns) <- readLibrary [] files
           liftIO $ printDecs config outdir files $ nubBy sameImport imports
 
     sameImport (x, _) (y, _) = x == y

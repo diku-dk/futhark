@@ -157,7 +157,7 @@ newFutharkiState count maybe_file = runExceptT $ do
   (imports, src, tenv, ienv) <- case maybe_file of
     Nothing -> do
       -- Load the builtins through the type checker.
-      (_, imports, src) <- badOnLeft show =<< runExceptT (readLibrary [])
+      (_, imports, src) <- badOnLeft show =<< runExceptT (readLibrary [] [])
       -- Then into the interpreter.
       ienv <-
         foldM
@@ -182,7 +182,7 @@ newFutharkiState count maybe_file = runExceptT $ do
       (ws, imports, src) <-
         badOnLeft show
           =<< liftIO
-            ( runExceptT (readProgram file)
+            ( runExceptT (readProgram [] file)
                 `catch` \(err :: IOException) ->
                   return (externalErrorS (show err))
             )
