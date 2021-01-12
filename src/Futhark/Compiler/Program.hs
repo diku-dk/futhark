@@ -165,8 +165,7 @@ typeCheckProgram basis =
               src'
             )
 
--- | Read Futhark files from some basis, and printing log messages if
--- the first parameter is True.
+-- | Read and type-check some Futhark files.
 readLibrary ::
   (MonadError CompilerError m, MonadIO m) =>
   [FilePath] ->
