@@ -50,7 +50,7 @@ optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody))
   case res3dtiling of
     Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
     Nothing -> do
-      blkRegTiling_res <- return Nothing -- mmBlkRegTiling stm
+      blkRegTiling_res <- mmBlkRegTiling stm -- return Nothing
       case blkRegTiling_res of
         Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
         Nothing -> do

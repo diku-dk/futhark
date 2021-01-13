@@ -66,7 +66,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
     -- trace ("!!!! var_dims: "++pretty var_dims) $ var_dims == [0,1] || var_dims == [1,0],
-    var_dims == [0,1],
+    -- var_dims == [0,1],
     -- get the variables on which the first result of redomap depends on
     [redomap_orig_res] <- patternValueElements pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
@@ -90,7 +90,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
     trace
-      ( "Cosmin debug: code1':\n" ++ pretty code1' ++ "\ncode 2:\n" ++ pretty code2
+      ( "Cosmin BlkReg debug: code1':\n" ++ pretty code1' ++ "\ncode 2:\n" ++ pretty code2
           ++ "\ncode2': \n"
           ++ pretty code2'
           ++ "\n Orig SegSpace: "
@@ -360,8 +360,13 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                                         map_lam' <- renameLambda map_lam
                                         red_lam' <- renameLambda red_lam
 
+                                        -- the inputs to map are supposed to be permutted with the
+                                        -- inverted permutation, so as to reach the original position;
+                                        -- it just so happens that the inverse of [a,b] is [b,a]
+                                        let map_inp_reg = if var_dims == [0,1] then [a,b] else [b,a]
+
                                         addStms $
-                                          rebindLambda map_lam' [a, b] [map_res]
+                                          rebindLambda map_lam' map_inp_reg [map_res]
                                             <> rebindLambda red_lam' [c, map_res] [c]
 
                                         css <- update "css" css_merge' [i, j] c
