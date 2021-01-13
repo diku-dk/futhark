@@ -866,7 +866,7 @@ getSeqTile tk_str tk_name len_dim ty tx =
 ----------------------------------------------------------------------------------------------
 
 maxRegTile :: Int64
-maxRegTile = 48 --30
+maxRegTile = 36 --30
 
 mkRegTileSe :: Int64 -> SubExp
 mkRegTileSe = constant
