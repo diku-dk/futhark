@@ -29,6 +29,8 @@ example programs.
 * Any *directives* will be executed and replaced with their output.
   See below.
 
+**Warning:** Do not run untrusted script files.  See SECURITY below.
+
 Directives
 ==========
 
@@ -140,6 +142,14 @@ OPTIONS
   Print verbose information on stderr about directives as they are
   executing.
 
+SECURITY
+========
+
+Some directives (e.g. ``:gnuplot``) can run arbitrary shell commands.
+Running an untrusted Futhark script is as dangerous as running a shell
+script you downloaded off the Internet.  Before running a script from
+an unknown source, you should always give it a quick read to see if
+anything looks fishy.
 
 SEE ALSO
 ========
