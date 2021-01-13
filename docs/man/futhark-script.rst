@@ -78,6 +78,9 @@ The following directives are supported:
   ``e`` argument must be a record whose fields are tuples of
   one-dimensional arrays, and the data will be available in temporary
   files whose names are in variables named after the record fields.
+  Each file will contain a column of data for each array in the
+  corresponding tuple.
+
   Use ``set term png size width,height`` to change the size to
   ``width`` by ``height`` pixels.
 
