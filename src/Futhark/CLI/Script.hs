@@ -53,9 +53,9 @@ instance PP.Pretty Directive where
   ppr (DirectiveImg e) =
     "> :img " <> PP.align (PP.ppr e)
   ppr (DirectivePlot Nothing e) =
-    ">:plot " <> PP.align (PP.ppr e)
+    "> :plot2d " <> PP.align (PP.ppr e)
   ppr (DirectivePlot (Just (w, h)) e) =
-    "> :plot<" <> PP.ppr w <> "," <> PP.ppr h <> "> " <> PP.align (PP.ppr e)
+    "> :plot2d<" <> PP.ppr w <> "," <> PP.ppr h <> "> " <> PP.align (PP.ppr e)
   ppr (DirectiveGnuplot e script) =
     PP.stack
       [ "> :gnuplot " <> PP.align (PP.ppr e) <> ";",
