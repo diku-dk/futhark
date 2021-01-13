@@ -179,7 +179,8 @@ rgbIntToImg h w bytes =
       (word `shiftR` (chan * 8)) .&. 0xFF
     byte i =
       Just
-        ( chr . fromIntegral $ getChan (bytes SVec.! (i `div` 3)) (2 - (i `mod` 3)),
+        ( chr . max 0 . fromIntegral $
+            getChan (bytes SVec.! (i `div` 3)) (2 - (i `mod` 3)),
           i + 1
         )
 
@@ -193,7 +194,7 @@ greyFloatToImg h w bytes =
   ppmHeader h w <> fst (BS.unfoldrN (h * w * 3) byte 0)
   where
     byte i =
-      Just (chr $ round (bytes SVec.! (i `div` 3)) * 255, i + 1)
+      Just (chr . max 0 $ round (bytes SVec.! (i `div` 3)) * 255, i + 1)
 
 valueToPPM :: V.Value -> Maybe BS.ByteString
 valueToPPM v@(V.Word32Value _ bytes)
