@@ -259,7 +259,7 @@ withGnuplotData ::
   [(T.Text, [Value])] ->
   ([T.Text] -> [T.Text] -> ScriptM a) ->
   ScriptM a
-withGnuplotData sets [] cont = uncurry cont $ unzip sets
+withGnuplotData sets [] cont = uncurry cont $ unzip $ reverse sets
 withGnuplotData sets ((f, vs) : xys) cont =
   withTempFile $ \fname -> do
     liftIO $ T.writeFile fname $ formatDataForGnuplot vs
