@@ -36,7 +36,7 @@ import Futhark.IR.Primitive (intByteSize)
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (bool, group, space)
 import Language.Futhark hiding (unscopeType)
-import Language.Futhark.Semantic (includeToString)
+import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Match
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -621,7 +621,7 @@ checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, 
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
     me <- liftTypeM askImportName
-    unless ("/prelude" `isPrefixOf` includeToString me) $
+    unless ("/prelude" `isPrefixOf` includeToFilePath me) $
       warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
     scope <- asks termScope
     return (scope, v)

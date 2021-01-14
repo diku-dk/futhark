@@ -574,6 +574,7 @@ cheapExp (BasicOp UnOp {}) = True
 cheapExp (BasicOp CmpOp {}) = True
 cheapExp (BasicOp ConvOp {}) = True
 cheapExp (BasicOp Copy {}) = False
+cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Manifest {}) = False
 cheapExp DoLoop {} = False
 cheapExp (If _ tbranch fbranch _) =

@@ -32,6 +32,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    language-reference.rst
    c-api.rst
    package-management.rst
+   server-protocol.rst
    c-porting-guide.rst
    versus-other-languages.rst
    hacking.rst
@@ -55,4 +56,5 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-python.rst
    man/futhark-repl.rst
    man/futhark-run.rst
+   man/futhark-script.rst
    man/futhark-test.rst

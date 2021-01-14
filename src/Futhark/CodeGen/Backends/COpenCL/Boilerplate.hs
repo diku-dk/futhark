@@ -320,6 +320,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                          int logging;
                          typename lock_t lock;
                          char *error;
+                         typename FILE *log;
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
                          typename cl_mem global_failure;
@@ -342,6 +343,7 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                      ctx->profiling_paused = 0;
                      ctx->logging = cfg->opencl.logging;
                      ctx->error = NULL;
+                     ctx->log = stderr;
                      ctx->opencl.profiling_records_capacity = 200;
                      ctx->opencl.profiling_records_used = 0;
                      ctx->opencl.profiling_records =
@@ -490,22 +492,17 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                }|]
     )
 
-  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         lock_lock(&ctx->lock);
-                         ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
-                         lock_unlock(&ctx->lock);
-                         return ctx->error != NULL;
-                       }|]
-    )
-
   GC.publicDef_ "context_get_command_queue" GC.InitDecl $ \s ->
     ( [C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx);|],
       [C.cedecl|typename cl_command_queue $id:s(struct $id:ctx* ctx) {
                  return ctx->opencl.queue;
                }|]
     )
+
+  GC.onClear
+    [C.citem|if (ctx->error == NULL) {
+                        ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(&ctx->opencl));
+                      }|]
 
   GC.profileReport [C.citem|OPENCL_SUCCEED_FATAL(opencl_tally_profiling_records(&ctx->opencl));|]
   mapM_ GC.profileReport $
@@ -577,7 +574,7 @@ loadKernel (name, safety) =
   OPENCL_SUCCEED_FATAL(error);
   $items:set_args
   if (ctx->debugging) {
-    fprintf(stderr, "Created kernel %s.\n", $string:(pretty name));
+    fprintf(ctx->log, "Created kernel %s.\n", $string:(pretty name));
   }
   }|]
   where

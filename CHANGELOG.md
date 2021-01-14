@@ -11,11 +11,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * The C API now exposes serialisation functions for opaque values.
 
+  * The C API now lets you pick which stream (if any) is used for
+    logging prints (#1214).
+
+  * New compilation mode: `--server`.  For now used to support faster
+    benchmarking and testing tools, but can be used to build even
+    fancier things in the future (#1179).
+
+  * Significantly faster reading/writing of large values.  This mainly
+    means that validation of test and benchmark results is much faster
+    (close to an order of magnitude).
+
+  * The experimental `futhark script` command allows vaguely a
+    notebook-like programming experience.
+
+  * All compilers now accept an `--entry` option for treating more
+    functions as entry points.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+  * Interaction between slice simplification and in-place updates
+    (#1222).
 
 ## [0.18.5]
 
