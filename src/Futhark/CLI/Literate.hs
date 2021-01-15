@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Futhark.CLI.Script (main) where
+module Futhark.CLI.Literate (main) where
 
 import Control.Monad.Except
 import Data.Bifunctor (bimap, first, second)
@@ -62,14 +62,14 @@ instance PP.Pretty Directive where
         PP.strictText script
       ]
 
-data ScriptBlock
+data Block
   = BlockCode T.Text
   | BlockComment T.Text
   | BlockDirective Directive
   deriving (Show)
 
-varsInScript :: [ScriptBlock] -> S.Set EntryName
-varsInScript = foldMap varsInBlock
+varsInScripts :: [Block] -> S.Set EntryName
+varsInScripts = foldMap varsInBlock
   where
     varsInBlock (BlockDirective d) = varsInDirective d
     varsInBlock BlockCode {} = mempty
@@ -115,8 +115,8 @@ parseBlockCode = T.unlines . noblanks <$> some line
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
     line = try (notFollowedBy "--") *> restOfLine
 
-parseScriptBlock :: Parser ScriptBlock
-parseScriptBlock =
+parseBlock :: Parser Block
+parseBlock =
   choice
     [ token "-- >" *> (BlockDirective <$> parseDirective),
       BlockCode <$> parseTestBlock,
@@ -139,14 +139,14 @@ parseScriptBlock =
         <* (void eol <|> eof)
     directiveName s = try $ token (":" <> s)
 
-parseScript :: FilePath -> T.Text -> Either T.Text [ScriptBlock]
-parseScript fname s =
+parseProg :: FilePath -> T.Text -> Either T.Text [Block]
+parseProg fname s =
   either (Left . T.pack . errorBundlePretty) Right $
-    parse (many parseScriptBlock <* eof) fname s
+    parse (many parseBlock <* eof) fname s
 
-parseScriptFile :: FilePath -> IO [ScriptBlock]
-parseScriptFile prog = do
-  pres <- parseScript prog <$> T.readFile prog
+parseProgFile :: FilePath -> IO [Block]
+parseProgFile prog = do
+  pres <- parseProg prog <$> T.readFile prog
   case pres of
     Left err -> do
       T.hPutStr stderr err
@@ -366,7 +366,7 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
 data Failure = Failure | Success
   deriving (Eq, Ord, Show)
 
-data ScriptOptions = ScriptOptions
+data Options = Options
   { scriptBackend :: String,
     scriptFuthark :: Maybe FilePath,
     scriptExtraOptions :: [String],
@@ -377,9 +377,9 @@ data ScriptOptions = ScriptOptions
     scriptStopOnError :: Bool
   }
 
-initialScriptOptions :: ScriptOptions
-initialScriptOptions =
-  ScriptOptions
+initialOptions :: Options
+initialOptions =
+  Options
     { scriptBackend = "c",
       scriptFuthark = Nothing,
       scriptExtraOptions = [],
@@ -390,13 +390,13 @@ initialScriptOptions =
       scriptStopOnError = False
     }
 
-processScriptBlock :: ScriptOptions -> FilePath -> Server -> Int -> ScriptBlock -> IO (Failure, T.Text)
-processScriptBlock _ _ _ _ (BlockCode code)
+processBlock :: Options -> FilePath -> Server -> Int -> Block -> IO (Failure, T.Text)
+processBlock _ _ _ _ (BlockCode code)
   | T.null code = pure (Success, "\n")
   | otherwise = pure (Success, "\n```futhark\n" <> code <> "```\n\n")
-processScriptBlock _ _ _ _ (BlockComment text) =
+processBlock _ _ _ _ (BlockComment text) =
   pure (Success, text)
-processScriptBlock opts server imgdir i (BlockDirective directive) = do
+processBlock opts server imgdir i (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
     T.hPutStrLn stderr . prettyText $
       "Processing " <> PP.align (PP.ppr directive) <> "..."
@@ -415,12 +415,12 @@ processScriptBlock opts server imgdir i (BlockDirective directive) = do
           T.unlines ["**FAILED**", "```", err, "```"]
         )
 
-processScript :: ScriptOptions -> FilePath -> Server -> [ScriptBlock] -> IO (Failure, T.Text)
+processScript :: Options -> FilePath -> Server -> [Block] -> IO (Failure, T.Text)
 processScript opts imgdir server script =
   bimap (foldl' min Success) mconcat . unzip
-    <$> zipWithM (processScriptBlock opts imgdir server) [0 ..] script
+    <$> zipWithM (processBlock opts imgdir server) [0 ..] script
 
-commandLineOptions :: [FunOptDescr ScriptOptions]
+commandLineOptions :: [FunOptDescr Options]
 commandLineOptions =
   [ Option
       []
@@ -484,18 +484,18 @@ commandLineOptions =
 
 -- | Run @futhark script@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions initialScriptOptions commandLineOptions "program" $ \args opts ->
+main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts ->
   case args of
     [prog] -> Just $ do
       futhark <- maybe getExecutablePath return $ scriptFuthark opts
 
-      script <- parseScriptFile prog
+      script <- parseProgFile prog
 
       unless (scriptSkipCompilation opts) $ do
         let entryOpt v = "--entry=" ++ T.unpack v
             compile_options =
               "--server" :
-              map entryOpt (S.toList (varsInScript script))
+              map entryOpt (S.toList (varsInScripts script))
                 ++ scriptCompilerOptions opts
         when (scriptVerbose opts > 0) $
           T.hPutStrLn stderr $ "Compiling " <> T.pack prog <> "..."

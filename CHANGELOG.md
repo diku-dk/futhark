@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     means that validation of test and benchmark results is much faster
     (close to an order of magnitude).
 
-  * The experimental `futhark script` command allows vaguely a
+  * The experimental `futhark literate` command allows vaguely a
     notebook-like programming experience.
 
   * All compilers now accept an `--entry` option for treating more

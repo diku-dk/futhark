@@ -1,23 +1,23 @@
 .. role:: ref(emphasis)
 
-.. _futhark-script(1):
+.. _futhark-literate(1):
 
-==============
-futhark-script
-==============
+================
+futhark-literate
+================
 
 SYNOPSIS
 ========
 
-futhark script [options...] program
+futhark literate [options...] program
 
 DESCRIPTION
 ===========
 
-The command ``futhark script foo.fut`` will compile the given program
-and then generate a Markdown file ``foo.md`` that contains a
-prettyprinted form of the program.  This is useful for illustrative
-example programs.
+The command ``futhark literate foo.fut`` will compile the given
+program and then generate a Markdown file ``foo.md`` that contains a
+prettyprinted form of the program.  This is useful for demonstrating
+programming techniques.
 
 * Top-level comments that start with a line comment marker (``--``)
   and a space in the first column will be turned into ordinary text in
@@ -29,16 +29,15 @@ example programs.
 * Any *directives* will be executed and replaced with their output.
   See below.
 
-**Warning:** Do not run untrusted script files.  See SECURITY below.
+**Warning:** Do not run untrusted programs.  See SECURITY below.
 
 Directives
 ==========
 
-A directive is a way to embed the result of a *FutharkScript*
-expression in the program.  Depending on the directive, this can be as
-simple as printing the textual representation of the result, or as
-complex as running an external plotting program and referencing a
-generated image.
+A directive is a way to embed the results the running the program.
+Depending on the directive, this can be as simple as printing the
+textual representation of the result, or as complex as running an
+external plotting program and referencing a generated image.
 
 Any directives that produce images for a program ``foo.fut`` will
 place them in the directory ``foo-img/``.
@@ -110,7 +109,7 @@ OPTIONS
 --futhark=program
 
   The program used to perform operations (eg. compilation).  Defaults
-  to the binary running ``futhark script`` itself.
+  to the binary running ``futhark literate`` itself.
 
 --output=FILE
 
@@ -123,7 +122,7 @@ OPTIONS
   Pass an option to benchmark programs that are being run.  For
   example, we might want to run OpenCL programs on a specific device::
 
-    futhark script prog.fut --backend=opencl --pass-option=-dHawaii
+    futhark literate prog.fut --backend=opencl --pass-option=-dHawaii
 
 --pass-compiler-option=opt
 
@@ -149,10 +148,10 @@ SECURITY
 ========
 
 Some directives (e.g. ``:gnuplot``) can run arbitrary shell commands.
-Running an untrusted Futhark script is as dangerous as running a shell
-script you downloaded off the Internet.  Before running a script from
-an unknown source, you should always give it a quick read to see if
-anything looks fishy.
+Running an untrusted literate Futhark program is as dangerous as
+running a shell script you downloaded off the Internet.  Before
+running a program from an unknown source, you should always give it a
+quick read to see if anything looks fishy.
 
 SEE ALSO
 ========

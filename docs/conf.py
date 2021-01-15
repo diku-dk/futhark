@@ -274,7 +274,7 @@ man_pages = [
     ('man/futhark-doc', 'futhark-doc', 'generate documentation for Futhark code', [], 1),
     ('man/futhark-dataset', 'futhark-dataset', 'generate random data sets', [], 1),
     ('man/futhark-pkg', 'futhark-pkg', 'manage Futhark packages', [], 1),
-    ('man/futhark-script', 'futhark-script', 'execute FutharkScript directives', [], 1)
+    ('man/futhark-literate', 'futhark-literate', 'execute literate Futhark program', [], 1)
 ]
 
 # If true, show URL addresses after external links.
