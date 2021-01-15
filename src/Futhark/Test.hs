@@ -195,12 +195,15 @@ data Success
 
 type Parser = Parsec Void T.Text
 
+postlexeme :: Parser ()
+postlexeme = void $ hspace *> optional (try $ eol *> "-- " *> postlexeme)
+
 lexeme :: Parser a -> Parser a
-lexeme p = p <* space
+lexeme p = p <* postlexeme
 
 -- Like 'lexeme', but does not consume trailing linebreaks.
 lexeme' :: Parser a -> Parser a
-lexeme' p = p <* many (oneOf (" \t" :: String))
+lexeme' p = p <* hspace
 
 lexstr :: T.Text -> Parser ()
 lexstr = void . try . lexeme . string
@@ -221,22 +224,18 @@ parseNatural =
   where
     num c = ord c - ord '0'
 
+restOfLine :: Parser T.Text
+restOfLine = takeWhileP Nothing (/= '\n') <* eol
+
 parseDescription :: Parser T.Text
-parseDescription = lexeme $ T.pack <$> (anySingle `manyTill` parseDescriptionSeparator)
-
-parseDescriptionSeparator :: Parser ()
-parseDescriptionSeparator =
-  try
-    ( string descriptionSeparator
-        >> void (satisfy isSpace `manyTill` newline)
-    )
-    <|> eof
-
-descriptionSeparator :: T.Text
-descriptionSeparator = "=="
+parseDescription =
+  T.unlines <$> pDescLine `manyTill` pDescriptionSeparator
+  where
+    pDescLine = "--" *> restOfLine
+    pDescriptionSeparator = void $ "-- ==" *> postlexeme
 
 parseTags :: Parser [T.Text]
-parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
+parseTags = lexeme' "tags" *> braces (many parseTag) <|> pure []
   where
     parseTag = T.pack <$> lexeme (some $ satisfy tagConstituent)
 
@@ -261,19 +260,18 @@ parseInputOutputs = do
       else map (`InputOutputs` cases) entrys
 
 parseEntryPoints :: Parser [T.Text]
-parseEntryPoints = (lexstr "entry:" *> many entry <* space) <|> pure ["main"]
+parseEntryPoints =
+  (lexeme' "entry:" *> many entry <* postlexeme)
+    <|> pure ["main"]
   where
     constituent c = not (isSpace c) && c /= '}'
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
 parseRunTags :: Parser [String]
-parseRunTags = many parseTag
-  where
-    parseTag = try $
-      lexeme $ do
-        s <- some $ satisfy tagConstituent
-        guard $ s `notElem` ["input", "structure", "warning"]
-        return s
+parseRunTags = try . many . lexeme' $ do
+  s <- some $ satisfy tagConstituent
+  guard $ s `notElem` ["input", "structure", "warning"]
+  return s
 
 parseRunCases :: Parser [TestRun]
 parseRunCases = parseRunCases' (0 :: Int)
@@ -319,7 +317,7 @@ parseExpectedResult =
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
-  s <- T.strip <$> restOfLine
+  s <- T.strip <$> restOfLine <* postlexeme
   if T.null s
     then return AnyError
     else -- blankCompOpt creates a regular expression that treats
@@ -418,15 +416,13 @@ parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
 
 parseBlockBody :: Int -> Parser String
 parseBlockBody n = do
-  c <- lookAhead anySingle
+  c <- lookAhead $ lexeme anySingle
   case (c, n) of
     ('}', 0) -> return mempty
     ('}', _) -> (:) <$> anySingle <*> parseBlockBody (n -1)
     ('{', _) -> (:) <$> anySingle <*> parseBlockBody (n + 1)
+    ('\n', _) -> anySingle *> string "--" *> ((' ' :) <$> parseBlockBody n)
     _ -> (:) <$> anySingle <*> parseBlockBody n
-
-restOfLine :: Parser T.Text
-restOfLine = T.pack <$> (anySingle `manyTill` (void newline <|> eof))
 
 nextWord :: Parser T.Text
 nextWord = T.pack <$> (anySingle `manyTill` satisfy isSpace)
@@ -464,68 +460,39 @@ testSpec :: Parser ProgramTest
 testSpec =
   ProgramTest <$> parseDescription <*> parseTags <*> parseAction
 
-parserState :: Int -> FilePath -> s -> State s e
-parserState line name t =
-  State
-    { stateInput = t,
-      stateOffset = 0,
-      statePosState =
-        PosState
-          { pstateInput = t,
-            pstateOffset = 0,
-            pstateSourcePos =
-              SourcePos
-                { sourceName = name,
-                  sourceLine = mkPos line,
-                  sourceColumn = mkPos 3
-                },
-            pstateTabWidth = defaultTabWidth,
-            pstateLinePrefix = "-- "
-          },
-      stateParseErrors = []
-    }
-
-readTestSpec :: Int -> String -> T.Text -> Either (ParseErrorBundle T.Text Void) ProgramTest
-readTestSpec line name t =
-  snd $ runParser' (testSpec <* eof) $ parserState line name t
-
-readInputOutputs :: Int -> String -> T.Text -> Either (ParseErrorBundle T.Text Void) [InputOutputs]
-readInputOutputs line name t =
-  snd $
-    runParser' (parseDescription *> space *> parseInputOutputs <* eof) $
-      parserState line name t
-
-commentPrefix :: T.Text
-commentPrefix = T.pack "--"
-
 couldNotRead :: IOError -> IO (Either String a)
 couldNotRead = return . Left . show
 
+pProgramTest :: Parser ProgramTest
+pProgramTest = do
+  void $ many pNonTestLine
+  maybe_spec <- optional testSpec <* many pNonTestLine
+  case maybe_spec of
+    Just spec
+      | RunCases old_cases structures warnings <- testAction spec -> do
+        cases <- many $ pInputOutputs <* many pNonTestLine
+        pure spec {testAction = RunCases (old_cases ++ concat cases) structures warnings}
+      | otherwise ->
+        many pNonTestLine *> notFollowedBy "-- ==" *> pure spec
+          <?> "no more test blocks, since first test block specifies type error."
+    Nothing ->
+      eof $> noTest
+  where
+    noTest =
+      ProgramTest mempty mempty (RunCases mempty mempty mempty)
+
+    pNonTestLine =
+      void $ notFollowedBy "-- ==" *> restOfLine
+    pInputOutputs =
+      parseDescription *> parseInputOutputs
+
 -- | Read the test specification from the given Futhark program.
 testSpecFromFile :: FilePath -> IO (Either String ProgramTest)
-testSpecFromFile path = do
-  blocks_or_err <-
-    (Right . testBlocks <$> T.readFile path)
-      `catch` couldNotRead
-  case blocks_or_err of
-    Left err -> return $ Left err
-    Right [] ->
-      -- The absence of a test block is interpreted as a program that
-      -- should compile, but not run.
-      return $ Right $ ProgramTest mempty mempty $ RunCases mempty mempty mempty
-    Right ((first_spec_line, first_spec) : rest_specs) ->
-      case readTestSpec (1 + first_spec_line) path first_spec of
-        Left err -> return $ Left $ errorBundlePretty err
-        Right v -> return $ foldM moreCases v rest_specs
-  where
-    moreCases test (lineno, cases) =
-      case readInputOutputs lineno path cases of
-        Left err -> Left $ errorBundlePretty err
-        Right cases' ->
-          case testAction test of
-            RunCases old_cases structures warnings ->
-              Right test {testAction = RunCases (old_cases ++ cases') structures warnings}
-            _ -> Left "Secondary test block provided, but primary test block specifies compilation error."
+testSpecFromFile path =
+  ( either (Left . errorBundlePretty) Right . parse pProgramTest path
+      <$> T.readFile path
+  )
+    `catch` couldNotRead
 
 -- | Like 'testSpecFromFile', but kills the process on error.
 testSpecFromFileOrDie :: FilePath -> IO ProgramTest
@@ -536,28 +503,6 @@ testSpecFromFileOrDie prog = do
       putStrLn err
       exitFailure
     Right spec -> return spec
-
-testBlocks :: T.Text -> [(Int, T.Text)]
-testBlocks = mapMaybe isTestBlock . commentBlocks
-  where
-    isTestBlock (n, block)
-      | any ((" " <> descriptionSeparator) `T.isPrefixOf`) block =
-        Just (n, T.unlines block)
-      | otherwise =
-        Nothing
-
-commentBlocks :: T.Text -> [(Int, [T.Text])]
-commentBlocks = commentBlocks' . zip [0 ..] . T.lines
-  where
-    isComment = (commentPrefix `T.isPrefixOf`)
-    commentBlocks' ls =
-      let ls' = dropWhile (not . isComment . snd) ls
-       in case ls' of
-            [] -> []
-            (n, _) : _ ->
-              let (block, ls'') = span (isComment . snd) ls'
-                  block' = map (T.drop 2 . snd) block
-               in (n, block') : commentBlocks' ls''
 
 -- | Read test specifications from the given path, which can be a file
 -- or directory containing @.fut@ files and further directories.
