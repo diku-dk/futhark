@@ -200,10 +200,7 @@ compileOp (Gather output) = do
   GC.stm
     [C.cstm|MPI_Gather($id:output.mem+start, mem_chunk_size, MPI_BYTE, 
                   $id:output.mem, mem_chunk_size, MPI_BYTE, 0, MPI_COMM_WORLD);|]
-compileOp (DistributedLoop _s i prebody body postbody free _) = do
-  let free_args = map paramName free
-  let output = last free_args
-
+compileOp (DistributedLoop _s i prebody body postbody _ _) = do
   GC.compileCode prebody
   GC.decl [C.cdecl|typename int64_t chunk_size = iterations/ctx->world_size;|]
   GC.stm [C.cstm|$id:i = ctx->rank*chunk_size;|]
