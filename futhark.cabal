@@ -79,7 +79,7 @@ library
       Futhark.CLI.Dataset
       Futhark.CLI.Dev
       Futhark.CLI.Doc
-      Futhark.CLI.Script
+      Futhark.CLI.Literate
       Futhark.CLI.Misc
       Futhark.CLI.Multicore
       Futhark.CLI.OpenCL
