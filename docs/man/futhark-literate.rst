@@ -40,12 +40,16 @@ textual representation of the result, or as complex as running an
 external plotting program and referencing a generated image.
 
 Any directives that produce images for a program ``foo.fut`` will
-place them in the directory ``foo-img/``.
+place them in the directory ``foo-img/``.  If this directory already
+exists, it will be deleted.
 
 A directive is a line starting with ``-- >``, which must follow an
 empty line.  Arguments to the directive follow on the remainder of the
 line.  Any expression arguments are given in a very restricted subset
 of Futhark called *FutharkScript* (see below).
+
+Some directives take mandatory or optional parameters.  These are
+entered after a semicolon *and a linebreak*.
 
 The following directives are supported:
 
@@ -53,6 +57,19 @@ The following directives are supported:
 
   Shows the result of executing the FutharkScript expression ``e``,
   which can have any (transparent) type.
+
+* ``> :anim e[; parameters...]``
+
+  Creates a video from ``e``, which must be a 3D array where the 2D
+  elements is of a type acceptable to ``:img``.  The outermost
+  dimension is the number of frames.  The optional parameters are
+  lines of the form *key: value*:
+
+  * ``repeat: <true|false>``
+
+  * ``fps: <int>``
+
+  Shells out to ``fmpeg`` to actually create the video file.
 
 * ``> :img e``
 
@@ -70,15 +87,14 @@ The following directives are supported:
   The expression may also be a record, where each field will be
   plotted separately and must have the type mentioned above.
 
-* ``> :gnuplot e;\n script...``
+* ``> :gnuplot e; script...``
 
-  There *must* be a newline after the semicolon.  Similar to
-  ``plot2d``, except that it uses the provided Gnuplot script.  The
-  ``e`` argument must be a record whose fields are tuples of
-  one-dimensional arrays, and the data will be available in temporary
-  files whose names are in variables named after the record fields.
-  Each file will contain a column of data for each array in the
-  corresponding tuple.
+  Similar to ``plot2d``, except that it uses the provided Gnuplot
+  script.  The ``e`` argument must be a record whose fields are tuples
+  of one-dimensional arrays, and the data will be available in
+  temporary files whose names are in variables named after the record
+  fields.  Each file will contain a column of data for each array in
+  the corresponding tuple.
 
   Use ``set term png size width,height`` to change the size to
   ``width`` by ``height`` pixels.

@@ -25,20 +25,41 @@ import Futhark.Util (nubOrd, runProgramWithExitCode)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
-import System.Directory (createDirectoryIfMissing, removeFile)
+import System.Directory
+  ( createDirectoryIfMissing,
+    removeDirectoryRecursive,
+    removeFile,
+  )
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
 import System.IO
-import System.IO.Temp (withSystemTempFile)
+import System.IO.Temp (withSystemTempDirectory, withSystemTempFile)
 import Text.Megaparsec hiding (failure, token)
 import Text.Megaparsec.Char
+import Text.Printf
+
+data AnimParams = AnimParams
+  { animFPS :: Maybe Int,
+    animLoop :: Maybe Bool,
+    animAutoplay :: Maybe Bool
+  }
+  deriving (Show)
+
+defaultAnimParams :: AnimParams
+defaultAnimParams =
+  AnimParams
+    { animFPS = Nothing,
+      animLoop = Nothing,
+      animAutoplay = Nothing
+    }
 
 data Directive
   = DirectiveRes Exp
   | DirectiveImg Exp
   | DirectivePlot (Maybe (Int, Int)) Exp
   | DirectiveGnuplot Exp T.Text
+  | DirectiveAnim Exp AnimParams
   deriving (Show)
 
 varsInDirective :: Directive -> S.Set EntryName
@@ -46,6 +67,7 @@ varsInDirective (DirectiveRes e) = varsInExp e
 varsInDirective (DirectiveImg e) = varsInExp e
 varsInDirective (DirectivePlot _ e) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
+varsInDirective (DirectiveAnim e _) = varsInExp e
 
 instance PP.Pretty Directive where
   ppr (DirectiveRes e) =
@@ -57,10 +79,23 @@ instance PP.Pretty Directive where
   ppr (DirectivePlot (Just (w, h)) e) =
     "> :plot2d<" <> PP.ppr w <> "," <> PP.ppr h <> "> " <> PP.align (PP.ppr e)
   ppr (DirectiveGnuplot e script) =
-    PP.stack
-      [ "> :gnuplot " <> PP.align (PP.ppr e) <> ";",
-        PP.strictText script
-      ]
+    PP.stack $
+      "> :gnuplot " <> PP.align (PP.ppr e) <> ";" :
+      map PP.strictText (T.lines script)
+  ppr (DirectiveAnim e params) =
+    "> :anim " <> PP.ppr e
+      <> if null params' then mempty else PP.stack $ ";" : params'
+    where
+      params' =
+        catMaybes
+          [ p "fps" animFPS PP.ppr,
+            p "loop" animLoop ppBool,
+            p "autoplay" animAutoplay ppBool
+          ]
+      ppBool b = if b then "true" else "false"
+      p s f ppr = do
+        x <- f params
+        Just $ s <> ": " <> ppr x
 
 data Block
   = BlockCode T.Text
@@ -87,7 +122,7 @@ token :: T.Text -> Parser ()
 token = void . try . lexeme . string
 
 parseInt :: Parser Int
-parseInt = read <$> some (satisfy isDigit)
+parseInt = lexeme $ read <$> some (satisfy isDigit)
 
 parsePlotParams :: Parser (Maybe (Int, Int))
 parsePlotParams =
@@ -115,6 +150,32 @@ parseBlockCode = T.unlines . noblanks <$> some line
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
     line = try (notFollowedBy "--") *> restOfLine
 
+parseAnimParams :: Parser AnimParams
+parseAnimParams =
+  fmap (fromMaybe defaultAnimParams) $
+    optional $ ";" *> hspace *> eol *> "-- " *> parseParams defaultAnimParams
+  where
+    parseParams params =
+      choice
+        [ choice
+            [pLoop params, pFPS params, pAutoplay params]
+            >>= parseParams,
+          pure params
+        ]
+    parseBool = token "true" $> True <|> token "false" $> False
+    pLoop params = do
+      token "loop:"
+      b <- parseBool
+      pure params {animLoop = Just b}
+    pFPS params = do
+      token "fps:"
+      fps <- parseInt
+      pure params {animFPS = Just fps}
+    pAutoplay params = do
+      token "autoplay:"
+      b <- parseBool
+      pure params {animAutoplay = Just b}
+
 parseBlock :: Parser Block
 parseBlock =
   choice
@@ -134,7 +195,10 @@ parseBlock =
           directiveName "gnuplot"
             *> ( DirectiveGnuplot <$> parseExp postlexeme
                    <*> (";" *> hspace *> eol *> parseBlockComment)
-               )
+               ),
+          (directiveName "anim" $> DirectiveAnim)
+            <*> parseExp postlexeme
+            <*> parseAnimParams
         ]
         <* (void eol <|> eof)
     directiveName s = try $ token (":" <> s)
@@ -158,9 +222,14 @@ type ScriptM = ExceptT T.Text IO
 
 withTempFile :: (FilePath -> ScriptM a) -> ScriptM a
 withTempFile f =
-  join . liftIO . withSystemTempFile "futhark-script" $ \tmpf tmpf_h -> do
+  join . liftIO . withSystemTempFile "futhark-literate" $ \tmpf tmpf_h -> do
     hClose tmpf_h
     either throwError pure <$> runExceptT (f tmpf)
+
+withTempDir :: (FilePath -> ScriptM a) -> ScriptM a
+withTempDir f =
+  join . liftIO . withSystemTempDirectory "futhark-literate" $ \dir ->
+    either throwError pure <$> runExceptT (f dir)
 
 ppmHeader :: Int -> Int -> BS.ByteString
 ppmHeader h w =
@@ -211,6 +280,9 @@ valueToPPM v@(V.Float64Value _ bytes)
     Just $ greyFloatToImg h w bytes
 valueToPPM _ = Nothing
 
+valueToPPMs :: V.Value -> Maybe [BS.ByteString]
+valueToPPMs = mapM valueToPPM . V.valueElems
+
 system :: FilePath -> [String] -> T.Text -> ScriptM T.Text
 system prog options input = do
   res <- liftIO $ runProgramWithExitCode prog options $ T.encodeUtf8 input
@@ -242,6 +314,18 @@ formatDataForGnuplot = T.unlines . map line . transpose . map V.valueElems
 
 imgBlock :: FilePath -> T.Text
 imgBlock f = "\n\n![](" <> T.pack f <> ")\n\n"
+
+videoBlock :: AnimParams -> FilePath -> T.Text
+videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
+  where
+    opts' = "{" <> T.unwords [loop, autoplay] <> "}"
+    boolOpt s prop
+      | Just b <- prop opts =
+        if b then s <> "=\"true\"" else s <> "=\"false\""
+      | otherwise =
+        mempty
+    loop = boolOpt "loop" animLoop
+    autoplay = boolOpt "autoplay" animAutoplay
 
 plottable :: V.CompoundValue -> Maybe [V.Value]
 plottable (V.ValueTuple vs) = do
@@ -361,6 +445,44 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
               ]
       void $ system "gnuplot" [] script'
       pure $ imgBlock pngfile
+--
+processDirective imgdir server i (DirectiveAnim e params) = do
+  vs <- evalExp server e
+  case vs of
+    V.ValueAtom arr
+      | Just ppms <- valueToPPMs arr ->
+        withTempDir $ \dir -> do
+          zipWithM_ (writePPMFile dir) [0 ..] ppms
+          void $
+            system
+              "ffmpeg"
+              [ "-y",
+                "-r",
+                show framerate,
+                "-i",
+                dir </> "frame%010d.ppm",
+                "-c:v",
+                "libvpx-vp9",
+                "-pix_fmt",
+                "yuv420p",
+                "-b:v",
+                "2M",
+                webmfile
+              ]
+              mempty
+          pure $ videoBlock params webmfile
+    _ ->
+      throwError $
+        "Cannot animate value of type " <> prettyText (fmap V.valueType vs)
+  where
+    framerate = fromMaybe 30 $ animFPS params
+    webmfile = imgdir </> "anim" <> show i <.> ".webm"
+    ppmfile dir j = dir </> printf "frame%010d.ppm" (j :: Int)
+
+    writePPMFile dir j ppm = do
+      let fname = ppmfile dir j
+      liftIO $ BS.writeFile fname ppm
+      pure fname
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success
@@ -512,6 +634,8 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
           imgdir = dropExtension mdfile <> "-img"
           run_options = scriptExtraOptions opts
+
+      removeDirectoryRecursive imgdir
 
       withServer ("." </> dropExtension prog) run_options $ \server -> do
         (failure, md) <- processScript opts imgdir server script
