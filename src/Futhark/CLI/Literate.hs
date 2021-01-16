@@ -56,6 +56,8 @@ defaultAnimParams =
 
 data Directive
   = DirectiveRes Exp
+  | DirectiveBrief Directive
+  | DirectiveCovert Directive
   | DirectiveImg Exp
   | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
@@ -64,41 +66,54 @@ data Directive
 
 varsInDirective :: Directive -> S.Set EntryName
 varsInDirective (DirectiveRes e) = varsInExp e
+varsInDirective (DirectiveBrief d) = varsInDirective d
+varsInDirective (DirectiveCovert d) = varsInDirective d
 varsInDirective (DirectiveImg e) = varsInExp e
 varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveAnim e _) = varsInExp e
 
+pprDirective :: Bool -> Directive -> PP.Doc
+pprDirective _ (DirectiveRes e) =
+  "> " <> PP.align (PP.ppr e)
+pprDirective _ (DirectiveBrief f) =
+  pprDirective False f
+pprDirective _ (DirectiveCovert f) =
+  pprDirective False f
+pprDirective _ (DirectiveImg e) =
+  "> :img " <> PP.align (PP.ppr e)
+pprDirective True (DirectivePlot e (Just (h, w))) =
+  PP.stack
+    [ "> :plot2d " <> PP.ppr e <> ";",
+      "size: (" <> PP.ppr w <> "," <> PP.ppr h <> ")"
+    ]
+pprDirective _ (DirectivePlot e _) =
+  "> :plot2d " <> PP.align (PP.ppr e)
+pprDirective True (DirectiveGnuplot e script) =
+  PP.stack $
+    "> :gnuplot " <> PP.align (PP.ppr e) <> ";" :
+    map PP.strictText (T.lines script)
+pprDirective False (DirectiveGnuplot e _) =
+  "> :gnuplot " <> PP.align (PP.ppr e)
+pprDirective False (DirectiveAnim e _) =
+  "> :anim " <> PP.align (PP.ppr e)
+pprDirective True (DirectiveAnim e params) =
+  "> :anim " <> PP.ppr e
+    <> if null params' then mempty else PP.stack $ ";" : params'
+  where
+    params' =
+      catMaybes
+        [ p "fps" animFPS PP.ppr,
+          p "loop" animLoop ppBool,
+          p "autoplay" animAutoplay ppBool
+        ]
+    ppBool b = if b then "true" else "false"
+    p s f ppr = do
+      x <- f params
+      Just $ s <> ": " <> ppr x
+
 instance PP.Pretty Directive where
-  ppr (DirectiveRes e) =
-    "> " <> PP.align (PP.ppr e)
-  ppr (DirectiveImg e) =
-    "> :img " <> PP.align (PP.ppr e)
-  ppr (DirectivePlot e Nothing) =
-    "> :plot2d " <> PP.align (PP.ppr e)
-  ppr (DirectivePlot e (Just (w, h))) =
-    PP.stack
-      [ "> :plot2d " <> PP.ppr e <> ";",
-        "size: (" <> PP.ppr w <> "," <> PP.ppr h <> ")"
-      ]
-  ppr (DirectiveGnuplot e script) =
-    PP.stack $
-      "> :gnuplot " <> PP.align (PP.ppr e) <> ";" :
-      map PP.strictText (T.lines script)
-  ppr (DirectiveAnim e params) =
-    "> :anim " <> PP.ppr e
-      <> if null params' then mempty else PP.stack $ ";" : params'
-    where
-      params' =
-        catMaybes
-          [ p "fps" animFPS PP.ppr,
-            p "loop" animLoop ppBool,
-            p "autoplay" animAutoplay ppBool
-          ]
-      ppBool b = if b then "true" else "false"
-      p s f ppr = do
-        x <- f params
-        Just $ s <> ": " <> ppr x
+  ppr = pprDirective True
 
 data Block
   = BlockCode T.Text
@@ -184,7 +199,7 @@ parseAnimParams =
 parseBlock :: Parser Block
 parseBlock =
   choice
-    [ token "-- >" *> (BlockDirective <$> parseDirective),
+    [ token "-- >" $> BlockDirective <*> parseDirective <* void eol,
       BlockCode <$> parseTestBlock,
       BlockCode <$> parseBlockCode,
       BlockComment <$> parseBlockComment
@@ -193,20 +208,22 @@ parseBlock =
     parseDirective =
       choice
         [ DirectiveRes <$> parseExp postlexeme,
-          directiveName "img"
-            *> (DirectiveImg <$> parseExp postlexeme),
-          (directiveName "plot2d" $> DirectivePlot)
+          directiveName "covert" $> DirectiveCovert
+            <*> parseDirective,
+          directiveName "brief" $> DirectiveBrief
+            <*> parseDirective,
+          directiveName "img" $> DirectiveImg
+            <*> parseExp postlexeme,
+          directiveName "plot2d" $> DirectivePlot
             <*> parseExp postlexeme
             <*> parsePlotParams,
-          directiveName "gnuplot"
-            *> ( DirectiveGnuplot <$> parseExp postlexeme
-                   <*> (";" *> hspace *> eol *> parseBlockComment)
-               ),
+          directiveName "gnuplot" $> DirectiveGnuplot
+            <*> parseExp postlexeme
+            <*> (";" *> hspace *> eol *> parseBlockComment),
           directiveName "anim" $> DirectiveAnim
             <*> parseExp postlexeme
             <*> parseAnimParams
         ]
-        <* (void eol <|> eof)
     directiveName s = try $ token (":" <> s)
 
 parseProg :: FilePath -> T.Text -> Either T.Text [Block]
@@ -356,6 +373,10 @@ withGnuplotData sets ((f, vs) : xys) cont =
     withGnuplotData ((f, f <> "='" <> T.pack fname <> "'") : sets) xys cont
 
 processDirective :: FilePath -> Server -> Int -> Directive -> ScriptM T.Text
+processDirective imgdir server i (DirectiveBrief d) =
+  processDirective imgdir server i d
+processDirective imgdir server i (DirectiveCovert d) =
+  processDirective imgdir server i d
 processDirective _ server _ (DirectiveRes e) = do
   vs <- evalExp server e
   pure $
@@ -528,7 +549,12 @@ processBlock opts server imgdir i (BlockDirective directive) = do
   when (scriptVerbose opts > 0) $
     T.hPutStrLn stderr . prettyText $
       "Processing " <> PP.align (PP.ppr directive) <> "..."
-  let prompt = "```\n" <> prettyText directive <> "\n```\n"
+  let prompt = case directive of
+        DirectiveCovert _ -> mempty
+        DirectiveBrief _ ->
+          "```\n" <> prettyText (pprDirective False directive) <> "\n```\n"
+        _ ->
+          "```\n" <> prettyText (pprDirective True directive) <> "\n```\n"
   r <- runExceptT $ processDirective server imgdir i directive
   second (prompt <>) <$> case r of
     Left err -> failed err
