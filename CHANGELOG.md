@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * All compilers now accept an `--entry` option for treating more
     functions as entry points.
 
+  * The `negate` function is now `neg`, but `negate` is kept around
+    for a short while for backwards compatibility.
+
 ### Removed
 
 ### Changed
