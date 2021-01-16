@@ -71,6 +71,17 @@ The following directives are supported:
 
   Shells out to ``fmpeg`` to actually create the video file.
 
+* ``> :brief <directive>``
+
+  The same as the given *directive* (which must not start with another
+  ``>``), but suppress parameters when printing it.
+
+* ``> :covert <directive>``
+
+  The same as the given *directive* (which must not start with another
+  ``>``), but do not show the directive itself in the output, only its
+  result.
+
 * ``> :img e``
 
   Visualises ``e``, which must be of type ``[][]i32`` or ``[][]u32``
