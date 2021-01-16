@@ -35,8 +35,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
-  * Test programs must now end in a newline character.
-
 ### Fixed
 
   * Interaction between slice simplification and in-place updates
