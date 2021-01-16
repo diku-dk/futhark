@@ -77,7 +77,7 @@ The following directives are supported:
   (interpreted as rows of ARGB pixel values).  Shells out to
   ``convert`` (from ImageMagick) to generate the image.
 
-* ``> :plot2d [<height,width>] e``
+* ``> :plot2d e[; size=(height,width)]``
 
   Shows a plot generated with ``gnuplot`` of ``e``, which must be an
   expression of type ``([]t, []t)``, where ``t`` is some numeric type.

@@ -57,7 +57,7 @@ defaultAnimParams =
 data Directive
   = DirectiveRes Exp
   | DirectiveImg Exp
-  | DirectivePlot (Maybe (Int, Int)) Exp
+  | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
   | DirectiveAnim Exp AnimParams
   deriving (Show)
@@ -65,7 +65,7 @@ data Directive
 varsInDirective :: Directive -> S.Set EntryName
 varsInDirective (DirectiveRes e) = varsInExp e
 varsInDirective (DirectiveImg e) = varsInExp e
-varsInDirective (DirectivePlot _ e) = varsInExp e
+varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
 varsInDirective (DirectiveAnim e _) = varsInExp e
 
@@ -74,10 +74,13 @@ instance PP.Pretty Directive where
     "> " <> PP.align (PP.ppr e)
   ppr (DirectiveImg e) =
     "> :img " <> PP.align (PP.ppr e)
-  ppr (DirectivePlot Nothing e) =
+  ppr (DirectivePlot e Nothing) =
     "> :plot2d " <> PP.align (PP.ppr e)
-  ppr (DirectivePlot (Just (w, h)) e) =
-    "> :plot2d<" <> PP.ppr w <> "," <> PP.ppr h <> "> " <> PP.align (PP.ppr e)
+  ppr (DirectivePlot e (Just (w, h))) =
+    PP.stack
+      [ "> :plot2d " <> PP.ppr e <> ";",
+        "size: (" <> PP.ppr w <> "," <> PP.ppr h <> ")"
+      ]
   ppr (DirectiveGnuplot e script) =
     PP.stack $
       "> :gnuplot " <> PP.align (PP.ppr e) <> ";" :
@@ -124,11 +127,6 @@ token = void . try . lexeme . string
 parseInt :: Parser Int
 parseInt = lexeme $ read <$> some (satisfy isDigit)
 
-parsePlotParams :: Parser (Maybe (Int, Int))
-parsePlotParams =
-  optional . between (token "<") (token ">") $
-    (,) <$> parseInt <* token "," <*> parseInt
-
 restOfLine :: Parser T.Text
 restOfLine = takeWhileP Nothing (/= '\n') <* eol
 
@@ -149,6 +147,13 @@ parseBlockCode = T.unlines . noblanks <$> some line
   where
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
     line = try (notFollowedBy "--") *> restOfLine
+
+parsePlotParams :: Parser (Maybe (Int, Int))
+parsePlotParams =
+  optional $
+    ";" *> hspace *> eol *> token "-- size:"
+      *> token "("
+      *> ((,) <$> parseInt <* token "," <*> parseInt) <* token ")"
 
 parseAnimParams :: Parser AnimParams
 parseAnimParams =
@@ -190,13 +195,14 @@ parseBlock =
         [ DirectiveRes <$> parseExp postlexeme,
           directiveName "img"
             *> (DirectiveImg <$> parseExp postlexeme),
-          directiveName "plot2d"
-            *> (DirectivePlot <$> parsePlotParams <*> parseExp postlexeme),
+          (directiveName "plot2d" $> DirectivePlot)
+            <*> parseExp postlexeme
+            <*> parsePlotParams,
           directiveName "gnuplot"
             *> ( DirectiveGnuplot <$> parseExp postlexeme
                    <*> (";" *> hspace *> eol *> parseBlockComment)
                ),
-          (directiveName "anim" $> DirectiveAnim)
+          directiveName "anim" $> DirectiveAnim
             <*> parseExp postlexeme
             <*> parseAnimParams
         ]
@@ -377,7 +383,7 @@ processDirective imgdir server i (DirectiveImg e) = do
         "Cannot create image from value of type "
           <> prettyText (fmap V.valueType vs)
 --
-processDirective imgdir server i (DirectivePlot size e) = do
+processDirective imgdir server i (DirectivePlot e size) = do
   v <- evalExp server e
   case v of
     _
