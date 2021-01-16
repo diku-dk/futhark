@@ -264,18 +264,20 @@ instance Eq Value where
   _ == _ = False
 
 instance Pretty Value where
-  ppr (ValuePrim v) = ppr v
-  ppr (ValueArray _ a) =
+  ppr = pprPrec 0
+  pprPrec _ (ValuePrim v) = ppr v
+  pprPrec _ (ValueArray _ a) =
     let elements = elems a -- [Value]
         (x : _) = elements
         separator = case x of
           ValueArray _ _ -> comma <> line
           _ -> comma <> space
      in brackets $ cat $ punctuate separator (map ppr elements)
-  ppr (ValueRecord m) = prettyRecord m
-  ppr ValueFun {} = text "#<fun>"
-  ppr ValueAcc {} = text "#<acc>"
-  ppr (ValueSum _ n vs) = text "#" <> sep (ppr n : map ppr vs)
+  pprPrec _ (ValueRecord m) = prettyRecord m
+  pprPrec _ ValueFun {} = text "#<fun>"
+  pprPrec _ ValueAcc {} = text "#<acc>"
+  pprPrec p (ValueSum _ n vs) =
+    parensIf (p > 0) $ text "#" <> sep (ppr n : map (pprPrec 1) vs)
 
 valueShape :: Value -> ValueShape
 valueShape (ValueArray shape _) = shape
@@ -1753,9 +1755,9 @@ interpretFunction :: Ctx -> VName -> [F.Value] -> Either String (F ExtOp Value)
 interpretFunction ctx fname vs = do
   ft <- case lookupVar (qualName fname) $ ctxEnv ctx of
     Just (TermValue (Just (T.BoundV _ t)) _) ->
-      Right $ updateType (map valueType vs) t
+      updateType (map valueType vs) t
     Just (TermPoly (Just (T.BoundV _ t)) _) ->
-      Right $ updateType (map valueType vs) t
+      updateType (map valueType vs) t
     _ ->
       Left $ "Unknown function `" <> prettyName fname <> "`."
 
@@ -1770,9 +1772,26 @@ interpretFunction ctx fname vs = do
       f <- evalTermVar (ctxEnv ctx) (qualName fname) ft
       foldM (apply noLoc mempty) f vs'
   where
-    updateType (vt : vts) (Scalar (Arrow als u _ rt)) =
-      Scalar $ Arrow als u (valueStructType vt) $ updateType vts rt
-    updateType _ t = t
+    updateType (vt : vts) (Scalar (Arrow als u pt rt)) = do
+      checkInput vt pt
+      Scalar . Arrow als u (valueStructType vt) <$> updateType vts rt
+    updateType _ t =
+      Right t
+
+    -- FIXME: we don't check array sizes.
+    checkInput :: ValueType -> StructType -> Either String ()
+    checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
+      | vt /= pt = badPrim vt pt
+    checkInput (Array _ _ (Prim vt) _) (Array _ _ (Prim pt) _)
+      | vt /= pt = badPrim vt pt
+    checkInput _ _ =
+      Right ()
+
+    badPrim vt pt =
+      Left . pretty $
+        "Invalid argument type."
+          </> "Expected:" <+> align (ppr pt)
+          </> "Got:     " <+> align (ppr vt)
 
     convertValue (F.PrimValue p) = Just $ ValuePrim p
     convertValue (F.ArrayValue arr t) = mkArray t =<< mapM convertValue (elems arr)

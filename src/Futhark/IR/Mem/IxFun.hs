@@ -564,7 +564,7 @@ reshapeCoercion ::
   IxFun num ->
   ShapeChange num ->
   Maybe (IxFun num)
-reshapeCoercion (IxFun (lmad@(LMAD off dims) :| lmads) _ cg) newshape = do
+reshapeCoercion (IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape = do
   let perm = lmadPermutation lmad
   (head_coercions, reshapes, tail_coercions) <- splitCoercions newshape
   let hd_len = length head_coercions
@@ -580,7 +580,7 @@ reshapeCoercion (IxFun (lmad@(LMAD off dims) :| lmads) _ cg) newshape = do
             dims'
             (newDims newshape)
       lmad' = LMAD off dims''
-  return $ IxFun (lmad' :| lmads) (newDims newshape) cg
+  return $ IxFun (lmad' :| lmads) oldbase cg
 
 -- | Handle the case where a reshape operation can stay inside a single LMAD.
 --
@@ -603,7 +603,7 @@ reshapeOneLMAD ::
   IxFun num ->
   ShapeChange num ->
   Maybe (IxFun num)
-reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) _ cg) newshape = do
+reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape = do
   let perm = lmadPermutation lmad
   (head_coercions, reshapes, tail_coercions) <- splitCoercions newshape
   let hd_len = length head_coercions
@@ -678,7 +678,7 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) _ cg) newshape = do
           sortBy (compare `on` fst) $
             zip sup_inds dims_sup ++ zip rpt_inds repeats'
       lmad' = LMAD off' dims'
-  return $ IxFun (setLMADPermutation perm' lmad' :| lmads) (newDims newshape) cg
+  return $ IxFun (setLMADPermutation perm' lmad' :| lmads) oldbase cg
   where
     consecutive _ [] = True
     consecutive i [p] = i == p

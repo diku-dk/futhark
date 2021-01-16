@@ -66,7 +66,7 @@ where
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
-import Data.List (find, foldl', mapAccumL, nub)
+import Data.List (find, foldl', mapAccumL)
 import Data.Maybe
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -75,7 +75,7 @@ import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Lore
 import Futhark.Optimise.Simplify.Rule
-import Futhark.Util (splitFromEnd)
+import Futhark.Util (nubOrd, splitFromEnd)
 
 data HoistBlockers lore = HoistBlockers
   { -- | Blocker for hoisting out of parallel loops.
@@ -576,6 +576,7 @@ cheapExp (BasicOp UnOp {}) = True
 cheapExp (BasicOp CmpOp {}) = True
 cheapExp (BasicOp ConvOp {}) = True
 cheapExp (BasicOp Copy {}) = False
+cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Manifest {}) = False
 cheapExp DoLoop {} = False
 cheapExp (If _ tbranch fbranch _) =
@@ -1029,7 +1030,7 @@ consumeResult = mconcat . map inspect
     inspect _ = mempty
 
 instance Simplifiable Certificates where
-  simplify (Certificates ocs) = Certificates . nub . concat <$> mapM check ocs
+  simplify (Certificates ocs) = Certificates . nubOrd . concat <$> mapM check ocs
     where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable

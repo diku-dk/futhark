@@ -24,7 +24,7 @@ will erase any interactively entered definitions.  Use the ``:help``
 command to see a list of commands.  All commands are prefixed with a
 colon.
 
-``futhark-repl`` uses the Futhark interpreter, which grants access to
+``futhark repl`` uses the Futhark interpreter, which grants access to
 certain special functions.  See :ref:`futhark-run(1)` for a description.
 
 OPTIONS

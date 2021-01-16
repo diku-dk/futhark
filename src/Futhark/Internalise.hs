@@ -12,8 +12,6 @@
 module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.Reader
-import Control.Monad.State
-import Data.Bitraversable
 import Data.List (find, intercalate, intersperse, transpose)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
@@ -115,93 +113,11 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
   where
     zeroExts ts = generaliseExtTypes ts ts
 
-allDimsFreshInType :: MonadFreshNames m => E.PatternType -> m E.PatternType
-allDimsFreshInType = bitraverse onDim pure
-  where
-    onDim (E.NamedDim v) =
-      E.NamedDim . E.qualName <$> newVName (baseString $ E.qualLeaf v)
-    onDim _ =
-      E.NamedDim . E.qualName <$> newVName "size"
-
--- | Replace all named dimensions with a fresh name, and remove all
--- constant dimensions.  The point is to remove the constraints, but
--- keep the names around.  We use this for constructing the entry
--- point parameters.
-allDimsFreshInPat :: MonadFreshNames m => E.Pattern -> m E.Pattern
-allDimsFreshInPat (PatternAscription p _ _) =
-  allDimsFreshInPat p
-allDimsFreshInPat (PatternParens p _) =
-  allDimsFreshInPat p
-allDimsFreshInPat (Id v (Info t) loc) =
-  Id v <$> (Info <$> allDimsFreshInType t) <*> pure loc
-allDimsFreshInPat (TuplePattern ps loc) =
-  TuplePattern <$> mapM allDimsFreshInPat ps <*> pure loc
-allDimsFreshInPat (RecordPattern ps loc) =
-  RecordPattern <$> mapM (traverse allDimsFreshInPat) ps <*> pure loc
-allDimsFreshInPat (Wildcard (Info t) loc) =
-  Wildcard <$> (Info <$> allDimsFreshInType t) <*> pure loc
-allDimsFreshInPat (PatternLit e (Info t) loc) =
-  PatternLit e <$> (Info <$> allDimsFreshInType t) <*> pure loc
-allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
-  PatternConstr c <$> (Info <$> allDimsFreshInType t)
-    <*> mapM allDimsFreshInPat pats
-    <*> pure loc
-
-data EntryTrust
-  = -- | This parameter or return value is an opaque type.  When a
-    -- parameter, this implies that it must have been returned by a
-    -- previous call to Futhark, and hence we can preserve (constant)
-    -- size constraints.
-    EntryTrusted
-  | -- | The type is directly exposed.  Any size constraint cannot be
-    -- trusted.
-    EntryUntrusted
-
-entryTrust :: EntryType -> EntryTrust
-entryTrust t
-  | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-    EntryUntrusted
-  | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
-    EntryUntrusted
-  | E.Scalar E.Prim {} <- E.entryType t =
-    EntryUntrusted
-  | E.Array _ _ E.Prim {} _ <- E.entryType t =
-    EntryUntrusted
-  | otherwise =
-    EntryTrusted
-
-fixEntryParamSizes :: MonadFreshNames m => E.Pattern -> EntryTrust -> m E.Pattern
-fixEntryParamSizes p EntryTrusted = pure p
-fixEntryParamSizes p EntryUntrusted = allDimsFreshInPat p
-
--- When we are returning a value from the entry point, we fully
--- existentialise the return type.  This is because it might otherwise
--- refer to sizes that are not in scope, because the generated entry
--- point function does not keep the size parameters of the original
--- entry point.
-fullyExistential ::
-  [[I.TypeBase ExtShape u]] ->
-  [[I.TypeBase ExtShape u]]
-fullyExistential tss =
-  evalState (mapM (mapM (bitraverse (traverse onDim) pure)) tss) 0
-  where
-    onDim _ = do
-      i <- get
-      modify (+ 1)
-      pure $ Ext i
-
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
-  let (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ attrs loc) = vb
-  -- We replace all shape annotations, so there should be no constant
-  -- parameters here.
-  params_fresh <- zipWithM fixEntryParamSizes params $ map entryTrust e_paramts
-  let tparams =
-        map (`E.TypeParamDim` mempty) $
-          S.toList $
-            mconcat $ map E.patternDimNames params_fresh
-  bindingParams tparams params_fresh $ \shapeparams params' -> do
-    entry_rettype <- fullyExistential <$> internaliseEntryReturnType rettype
+  let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
+  bindingParams tparams params $ \shapeparams params' -> do
+    entry_rettype <- internaliseEntryReturnType rettype
     let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 

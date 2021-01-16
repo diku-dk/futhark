@@ -11,8 +11,8 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import Data.Vector.Generic (freeze)
-import qualified Data.Vector.Unboxed as UVec
-import qualified Data.Vector.Unboxed.Mutable as UMVec
+import qualified Data.Vector.Storable as SVec
+import qualified Data.Vector.Storable.Mutable as USVec
 import Data.Word
 import Futhark.Test.Values
 import Futhark.Util.Options
@@ -26,7 +26,6 @@ import Language.Futhark.Syntax hiding
     Value,
     ValueType,
   )
-import System.Console.GetOpt
 import System.Exit
 import System.IO
 import System.Random.PCG (Variate, initialize, uniformR)
@@ -282,9 +281,9 @@ randomValue conf (ValueType ds t) seed =
     gen range final = randomVector (range conf) final ds seed
 
 randomVector ::
-  (UMVec.Unbox v, Variate v) =>
+  (SVec.Storable v, Variate v) =>
   Range v ->
-  (UVec.Vector Int -> UVec.Vector v -> Value) ->
+  (SVec.Vector Int -> SVec.Vector v -> Value) ->
   [Int] ->
   Word64 ->
   Value
@@ -292,15 +291,15 @@ randomVector range final ds seed = runST $ do
   -- USe some nice impure computation where we can preallocate a
   -- vector of the desired size, populate it via the random number
   -- generator, and then finally reutrn a frozen binary vector.
-  arr <- UMVec.new n
+  arr <- USVec.new n
   g <- initialize 6364136223846793006 seed
   let fill i
         | i < n = do
           v <- uniformR range g
-          UMVec.write arr i v
+          USVec.write arr i v
           fill $! i + 1
         | otherwise =
-          final (UVec.fromList ds) <$> freeze arr
+          final (SVec.fromList ds) . SVec.convert <$> freeze arr
   fill 0
   where
     n = product ds

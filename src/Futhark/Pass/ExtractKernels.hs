@@ -656,7 +656,7 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
           else bodyInterest (lambdaBody lam')
       | Op Scatter {} <- stmExp stm =
         0 -- Basically a map.
-      | DoLoop _ _ _ body <- stmExp stm =
+      | DoLoop _ _ ForLoop {} body <- stmExp stm =
         bodyInterest body * 10
       | Op (Screma _ form@(ScremaForm _ _ lam') _) <- stmExp stm =
         1 + bodyInterest (lambdaBody lam')
