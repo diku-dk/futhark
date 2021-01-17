@@ -39,19 +39,19 @@ import Text.Megaparsec hiding (failure, token)
 import Text.Megaparsec.Char
 import Text.Printf
 
-data AnimParams = AnimParams
-  { animFPS :: Maybe Int,
-    animLoop :: Maybe Bool,
-    animAutoplay :: Maybe Bool
+data VideoParams = VideoParams
+  { videoFPS :: Maybe Int,
+    videoLoop :: Maybe Bool,
+    videoAutoplay :: Maybe Bool
   }
   deriving (Show)
 
-defaultAnimParams :: AnimParams
-defaultAnimParams =
-  AnimParams
-    { animFPS = Nothing,
-      animLoop = Nothing,
-      animAutoplay = Nothing
+defaultVideoParams :: VideoParams
+defaultVideoParams =
+  VideoParams
+    { videoFPS = Nothing,
+      videoLoop = Nothing,
+      videoAutoplay = Nothing
     }
 
 data Directive
@@ -61,7 +61,7 @@ data Directive
   | DirectiveImg Exp
   | DirectivePlot Exp (Maybe (Int, Int))
   | DirectiveGnuplot Exp T.Text
-  | DirectiveAnim Exp AnimParams
+  | DirectiveVideo Exp VideoParams
   deriving (Show)
 
 varsInDirective :: Directive -> S.Set EntryName
@@ -71,7 +71,7 @@ varsInDirective (DirectiveCovert d) = varsInDirective d
 varsInDirective (DirectiveImg e) = varsInExp e
 varsInDirective (DirectivePlot e _) = varsInExp e
 varsInDirective (DirectiveGnuplot e _) = varsInExp e
-varsInDirective (DirectiveAnim e _) = varsInExp e
+varsInDirective (DirectiveVideo e _) = varsInExp e
 
 pprDirective :: Bool -> Directive -> PP.Doc
 pprDirective _ (DirectiveRes e) =
@@ -95,17 +95,17 @@ pprDirective True (DirectiveGnuplot e script) =
     map PP.strictText (T.lines script)
 pprDirective False (DirectiveGnuplot e _) =
   "> :gnuplot " <> PP.align (PP.ppr e)
-pprDirective False (DirectiveAnim e _) =
-  "> :anim " <> PP.align (PP.ppr e)
-pprDirective True (DirectiveAnim e params) =
-  "> :anim " <> PP.ppr e
+pprDirective False (DirectiveVideo e _) =
+  "> :video " <> PP.align (PP.ppr e)
+pprDirective True (DirectiveVideo e params) =
+  "> :video " <> PP.ppr e
     <> if null params' then mempty else PP.stack $ ";" : params'
   where
     params' =
       catMaybes
-        [ p "fps" animFPS PP.ppr,
-          p "loop" animLoop ppBool,
-          p "autoplay" animAutoplay ppBool
+        [ p "fps" videoFPS PP.ppr,
+          p "loop" videoLoop ppBool,
+          p "autoplay" videoAutoplay ppBool
         ]
     ppBool b = if b then "true" else "false"
     p s f ppr = do
@@ -170,10 +170,10 @@ parsePlotParams =
       *> token "("
       *> ((,) <$> parseInt <* token "," <*> parseInt) <* token ")"
 
-parseAnimParams :: Parser AnimParams
-parseAnimParams =
-  fmap (fromMaybe defaultAnimParams) $
-    optional $ ";" *> hspace *> eol *> "-- " *> parseParams defaultAnimParams
+parseVideoParams :: Parser VideoParams
+parseVideoParams =
+  fmap (fromMaybe defaultVideoParams) $
+    optional $ ";" *> hspace *> eol *> "-- " *> parseParams defaultVideoParams
   where
     parseParams params =
       choice
@@ -186,15 +186,15 @@ parseAnimParams =
     pLoop params = do
       token "loop:"
       b <- parseBool
-      pure params {animLoop = Just b}
+      pure params {videoLoop = Just b}
     pFPS params = do
       token "fps:"
       fps <- parseInt
-      pure params {animFPS = Just fps}
+      pure params {videoFPS = Just fps}
     pAutoplay params = do
       token "autoplay:"
       b <- parseBool
-      pure params {animAutoplay = Just b}
+      pure params {videoAutoplay = Just b}
 
 parseBlock :: Parser Block
 parseBlock =
@@ -220,9 +220,9 @@ parseBlock =
           directiveName "gnuplot" $> DirectiveGnuplot
             <*> parseExp postlexeme
             <*> (";" *> hspace *> eol *> parseBlockComment),
-          directiveName "anim" $> DirectiveAnim
+          directiveName "video" $> DirectiveVideo
             <*> parseExp postlexeme
-            <*> parseAnimParams
+            <*> parseVideoParams
         ]
     directiveName s = try $ token (":" <> s)
 
@@ -338,7 +338,7 @@ formatDataForGnuplot = T.unlines . map line . transpose . map V.valueElems
 imgBlock :: FilePath -> T.Text
 imgBlock f = "\n\n![](" <> T.pack f <> ")\n\n"
 
-videoBlock :: AnimParams -> FilePath -> T.Text
+videoBlock :: VideoParams -> FilePath -> T.Text
 videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
   where
     opts' = "{" <> T.unwords [loop, autoplay] <> "}"
@@ -347,8 +347,8 @@ videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
         if b then s <> "=\"true\"" else s <> "=\"false\""
       | otherwise =
         mempty
-    loop = boolOpt "loop" animLoop
-    autoplay = boolOpt "autoplay" animAutoplay
+    loop = boolOpt "loop" videoLoop
+    autoplay = boolOpt "autoplay" videoAutoplay
 
 plottable :: V.CompoundValue -> Maybe [V.Value]
 plottable (V.ValueTuple vs) = do
@@ -473,7 +473,7 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
       void $ system "gnuplot" [] script'
       pure $ imgBlock pngfile
 --
-processDirective imgdir server i (DirectiveAnim e params) = do
+processDirective imgdir server i (DirectiveVideo e params) = do
   vs <- evalExp server e
   case vs of
     V.ValueAtom arr
@@ -500,10 +500,10 @@ processDirective imgdir server i (DirectiveAnim e params) = do
           pure $ videoBlock params webmfile
     _ ->
       throwError $
-        "Cannot animate value of type " <> prettyText (fmap V.valueType vs)
+        "Cannot videoate value of type " <> prettyText (fmap V.valueType vs)
   where
-    framerate = fromMaybe 30 $ animFPS params
-    webmfile = imgdir </> "anim" <> show i <.> ".webm"
+    framerate = fromMaybe 30 $ videoFPS params
+    webmfile = imgdir </> "video" <> show i <.> ".webm"
     ppmfile dir j = dir </> printf "frame%010d.ppm" (j :: Int)
 
     writePPMFile dir j ppm = do

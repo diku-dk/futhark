@@ -58,7 +58,7 @@ The following directives are supported:
   Shows the result of executing the FutharkScript expression ``e``,
   which can have any (transparent) type.
 
-* ``> :anim e[; parameters...]``
+* ``> :video e[; parameters...]``
 
   Creates a video from ``e``, which must be a 3D array where the 2D
   elements is of a type acceptable to ``:img``.  The outermost
