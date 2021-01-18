@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 
 -- | The type checker checks whether the program is type-consistent
 -- and adds type annotations and various other elaborations.  The

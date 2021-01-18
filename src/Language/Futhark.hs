@@ -1,5 +1,3 @@
-{-# LANGUAGE Safe #-}
-
 -- | Re-export the external Futhark modules for convenience.
 module Language.Futhark
   ( module Language.Futhark.Syntax,
