@@ -27,8 +27,8 @@ import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import qualified Futhark.Util.Pretty as PP
 import System.Directory
   ( createDirectoryIfMissing,
-    removeDirectoryRecursive,
     removeFile,
+    removePathForcibly,
   )
 import System.Environment (getExecutablePath)
 import System.Exit
@@ -667,7 +667,7 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
           imgdir = dropExtension mdfile <> "-img"
           run_options = scriptExtraOptions opts
 
-      removeDirectoryRecursive imgdir
+      removePathForcibly imgdir
 
       withServer ("." </> dropExtension prog) run_options $ \server -> do
         (failure, md) <- processScript opts imgdir server script
