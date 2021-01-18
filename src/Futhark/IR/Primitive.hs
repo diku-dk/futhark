@@ -2,7 +2,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Definitions of primitive types, the values that inhabit these

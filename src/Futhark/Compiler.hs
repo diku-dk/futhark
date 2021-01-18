@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 
 -- | High-level API for invoking the Futhark compiler.

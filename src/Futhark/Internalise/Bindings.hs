@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE Safe #-}
 
 -- | Internalising bindings.
 module Futhark.Internalise.Bindings

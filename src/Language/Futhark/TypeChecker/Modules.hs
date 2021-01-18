@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE TupleSections #-}
 
 -- | Implementation of the Futhark module system (at least most of it;
