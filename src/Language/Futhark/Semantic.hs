@@ -1,5 +1,3 @@
-{-# LANGUAGE Safe #-}
-
 -- | Definitions of various semantic objects (*not* the Futhark
 -- semantics themselves).
 module Language.Futhark.Semantic

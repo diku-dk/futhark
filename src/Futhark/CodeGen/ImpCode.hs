@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TupleSections #-}
 

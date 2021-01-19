@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | = Constructing Futhark ASTs
