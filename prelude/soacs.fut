@@ -268,3 +268,8 @@ let any [n] 'a (f: a -> bool) (as: [n]a): bool =
 -- **Span:** *O(1)*
 let scatter 't [m] [n] (dest: *[m]t) (is: [n]i64) (vs: [n]t): *[m]t =
   intrinsics.scatter (dest, is, vs) :> *[m]t
+
+-- | A one-dimensional stencil.  The first argument is relative
+-- indexes for the 'd'-element neighbourhood surrounding an element.
+let stencil_1d [n][d] 'a 'b 'c (is: [d]i64) (f: c -> [d]a -> b) (cs: [n]c) (as: [n]a) : [n]b =
+  intrinsics.stencil_1d (is, f, cs, as)

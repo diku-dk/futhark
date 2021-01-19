@@ -1632,6 +1632,15 @@ isOverloadedFunction qname args loc = do
       where
         reduce w scan_lam nes arrs =
           I.Screma w <$> I.scanSOAC [Scan scan_lam nes] <*> pure arrs
+    handleSOACs [TupLit [is, lam, inv, arr] _] "stencil_1d" = Just $ \desc -> do
+      is' <- internaliseExpToVars "stencil_is" is
+      inv' <- internaliseExpToVars "stencil_arr" inv
+      arr' <- internaliseExpToVars "stencil_arr" arr
+      lam' <- internaliseStencilLambda internaliseLambda is' lam inv' arr'
+      w <- arraysSize 0 <$> mapM lookupType arr'
+      letTupExp' desc $
+        I.Op $
+          I.Stencil [w] is' lam' (map ([],) inv') arr'
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
       internaliseStreamRed desc InOrder Noncommutative op f arr
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->

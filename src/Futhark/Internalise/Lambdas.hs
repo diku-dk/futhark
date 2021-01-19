@@ -7,6 +7,7 @@ module Futhark.Internalise.Lambdas
     internaliseFoldLambda,
     internaliseStreamLambda,
     internalisePartitionLambda,
+    internaliseStencilLambda,
   )
 where
 
@@ -149,3 +150,28 @@ internalisePartitionLambda internaliseLambda k lam args = do
     lambdaWithIncrement lam_body = runBodyBinder $ do
       eq_class <- head <$> bodyBind lam_body
       resultBody <$> mkResult eq_class 0
+
+internaliseStencilLambda ::
+  InternaliseLambda ->
+  [VName] ->
+  E.Exp ->
+  [VName] ->
+  [VName] ->
+  InternaliseM I.Lambda
+internaliseStencilLambda internaliseLambda is lam invariant arrs = do
+  let r = length is
+  p <- arraysSize 0 <$> mapM lookupType is
+  invariant_ts <- mapM lookupType invariant
+  arr_ts <- mapM lookupType arrs
+  let invariant_inptypes = map (I.stripArray r) invariant_ts
+      arr_inptypes = map ((`arrayOfRow` p) . I.stripArray r) arr_ts
+  (params, body, rettype) <-
+    internaliseLambda lam $ invariant_inptypes ++ arr_inptypes
+  body' <-
+    localScope (scopeOfLParams params) $
+      ensureResultShape
+        (ErrorMsg [ErrorString "not all iterations produce same shape"])
+        (srclocOf lam)
+        rettype
+        body
+  return $ I.Lambda params body' rettype

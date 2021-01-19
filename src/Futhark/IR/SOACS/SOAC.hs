@@ -104,17 +104,33 @@ data SOAC lore
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp (ScremaForm lore) [VName]
+  | Stencil
+      -- Dimensions of input arrays in each dimension; length of list
+      -- is dimensionality of stencil ('r').
+      [SubExp]
+      -- Neighbourhood indexes.  Conceptually a 'p'-size array of
+      -- 'r'-tuples, but we encode it as 'r' arrs each of size [p]i64.
+      [VName]
+      -- ...invariant... -> [p]a -> ... -> [p]a -> b.
+      (Lambda lore)
+      [([Int], VName)] -- List of (invariant,arr)
+      [VName] -- [...ds...]a, input to stencil.
   deriving (Eq, Ord, Show, Generic)
 
 instance Decorations lore => SexpIso (SOAC lore) where
   sexpIso =
-    match $
-      With (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-        With (. Sexp.list (Sexp.el (Sexp.sym "scatter") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-          With (. Sexp.list (Sexp.el (Sexp.sym "hist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With
-              (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+    match $ With streamsexp $ With scattersexp $ With histsexp $ With scremasexp $ With stencilsexp End
+    where
+      streamsexp =
+        (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+      scattersexp =
+        (. Sexp.list (Sexp.el (Sexp.sym "scatter") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+      histsexp =
+        (. Sexp.list (Sexp.el (Sexp.sym "hist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+      scremasexp =
+        (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+      stencilsexp =
+        (. Sexp.list (Sexp.el (Sexp.sym "stencil") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
 
 -- | Information about computing a single histogram.
 data HistOp lore = HistOp
@@ -457,6 +473,12 @@ mapSOACM tv (Screma w (ScremaForm scans reds map_lam) arrs) =
             <*> mapOnSOACLambda tv map_lam
         )
     <*> mapM (mapOnSOACVName tv) arrs
+mapSOACM tv (Stencil ws is lam inv arrs) =
+  Stencil <$> mapM (mapOnSOACSubExp tv) ws
+    <*> mapM (mapOnSOACVName tv) is
+    <*> mapOnSOACLambda tv lam
+    <*> mapM (traverse (mapOnSOACVName tv)) inv
+    <*> mapM (mapOnSOACVName tv) arrs
 
 instance ASTLore lore => FreeIn (SOAC lore) where
   freeIn' = flip execState mempty . mapSOACM free
@@ -509,6 +531,8 @@ soacType (Hist _len ops _bucket_fun _imgs) = do
   map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
 soacType (Screma w form _arrs) =
   scremaType w form
+soacType (Stencil ws _ lam _ _) =
+  map (`arrayOfShape` Shape ws) $ lambdaReturnType lam
 
 instance TypedOp (SOAC lore) where
   opType = pure . staticShapes . soacType
@@ -542,6 +566,14 @@ instance (ASTLore lore, Aliased lore) => AliasedOp (SOAC lore) where
     namesFromList $ map (\(_, _, a) -> a) as
   consumedInOp (Hist _ ops _ _) =
     namesFromList $ concatMap histDest ops
+  -- Only the invariant arrays can be consumed (and only those that
+  -- are not *actually* invariant to any dimensions, but that's part
+  -- of type checking).
+  consumedInOp (Stencil _ _ lam inv _) =
+    mapNames consumedArray $ consumedByLambda lam
+    where
+      consumedArray v = fromMaybe v $ lookup v params_to_arrs
+      params_to_arrs = zip (map paramName $ lambdaParams lam) $ map snd inv
 
 mapHistOp ::
   (Lambda flore -> Lambda tlore) ->
@@ -589,6 +621,8 @@ instance
     where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
+  addOpAliases aliases (Stencil ws is lam inv arrs) =
+    Stencil ws is (Alias.analyseLambda aliases lam) inv arrs
 
   removeOpAliases = runIdentity . mapSOACM remove
     where
@@ -826,6 +860,9 @@ typeCheckSOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
       TC.TypeError $
         "Map function return type " ++ prettyTuple map_lam_ts
           ++ " wrong for given scan and reduction functions."
+--
+typeCheckSOAC (Stencil ws is lam inv arrs) = do
+  pure ()
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
@@ -844,6 +881,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
       lambdaMetrics map_lam
+  opMetrics (Stencil _ _ lam _ _) =
+    inside "Stencil" $ lambdaMetrics lam
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Stream size form lam arrs) =
@@ -894,6 +933,15 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
               </> commasep (map ppr arrs)
           )
   ppr (Screma w form arrs) = ppScrema w form arrs
+  ppr (Stencil ws is lam inv arrs) =
+    "stencil"
+      <> parens
+        ( PP.braces (commasep $ map ppr ws) <> comma
+            </> PP.braces (commasep $ map ppr is) <> comma
+            </> ppr lam <> comma
+            </> PP.braces (commasep $ map ppr inv) <> comma
+            </> commasep (map ppr arrs)
+        )
 
 -- | Prettyprint the given Screma.
 ppScrema ::

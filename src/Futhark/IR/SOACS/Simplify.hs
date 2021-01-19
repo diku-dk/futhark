@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -149,6 +150,14 @@ simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
             <*> Engine.simplify arrs
         )
     <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
+--
+simplifySOAC (Stencil ws is lam inv arrs) = do
+  (lam', hoisted) <- Engine.simplifyLambda lam
+  (,hoisted)
+    <$> ( Stencil <$> Engine.simplify ws <*> Engine.simplify is <*> pure lam'
+            <*> Engine.simplify inv
+            <*> Engine.simplify arrs
+        )
 
 instance BinderOps (Wise SOACS)
 

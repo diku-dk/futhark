@@ -919,7 +919,22 @@ intrinsics =
                    Scalar t_a `arr` Scalar (Prim $ Signed Int64),
                    arr_a
                  ]
-                 $ tupleRecord [uarr_a, Array () Unique (Prim $ Signed Int64) (rank 1)]
+                 $ tupleRecord [uarr_a, rank 1 `uarray` Prim (Signed Int64)]
+             ),
+             ( "stencil_1d",
+               IntrinsicPolyFun
+                 [ tp_a,
+                   tp_b,
+                   tp_c,
+                   TypeParamDim tv_n mempty,
+                   TypeParamDim tv_k mempty
+                 ]
+                 [ shape_k `array` Prim (Signed Int64),
+                   Scalar t_c `arr` ((shape_k `array` t_a) `arr` Scalar t_b),
+                   shape_n `array` t_c,
+                   shape_n `array` t_a
+                 ]
+                 $ shape_n `uarray` t_b
              ),
              ( "map_stream",
                IntrinsicPolyFun
@@ -955,33 +970,42 @@ intrinsics =
              ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)
            ]
   where
-    tv_a = VName (nameFromString "a") 0
+    [tv_a, tv_b, tv_c, tv_n, tv_k] =
+      zipWith
+        VName
+        (map nameFromString ["a", "b", "c", "n", "k"])
+        [0 ..]
+
+    array = flip $ Array () Nonunique
+    uarray = flip $ Array () Unique
+
     t_a = TypeVar () Nonunique (typeName tv_a) []
-    arr_a = Array () Nonunique t_a (rank 1)
-    arr_2d_a = Array () Nonunique t_a (rank 2)
-    uarr_a = Array () Unique t_a (rank 1)
+    arr_a = rank 1 `array` t_a
+    arr_2d_a = rank 2 `array` t_a
+    uarr_a = rank 1 `uarray` t_a
     tp_a = TypeParamType Unlifted tv_a mempty
 
-    tv_b = VName (nameFromString "b") 1
     t_b = TypeVar () Nonunique (typeName tv_b) []
-    arr_b = Array () Nonunique t_b (rank 1)
-    uarr_b = Array () Unique t_b (rank 1)
+    arr_b = rank 1 `array` t_b
+    uarr_b = rank 1 `uarray` t_b
     tp_b = TypeParamType Unlifted tv_b mempty
 
+    t_c = TypeVar () Nonunique (typeName tv_c) []
+    tp_c = TypeParamType Unlifted tv_c mempty
+
     arr_a_b =
-      Array
-        ()
-        Nonunique
-        (Record (M.fromList $ zip tupleFieldNames [Scalar t_a, Scalar t_b]))
-        (rank 1)
-    t_arr_a_arr_b = Scalar $ Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
+      rank 1
+        `array` Record (M.fromList $ zip tupleFieldNames [Scalar t_a, Scalar t_b])
+    t_arr_a_arr_b =
+      Scalar $ Record $ M.fromList $ zip tupleFieldNames [arr_a, arr_b]
 
     arr x y = Scalar $ Arrow mempty Unnamed x y
 
-    kv = VName (nameFromString "k") 2
-    arr_ka = Array () Nonunique t_a (ShapeDecl [NamedDim $ qualName kv])
-    arr_kb = Array () Nonunique t_b (ShapeDecl [NamedDim $ qualName kv])
-    karr x y = Scalar $ Arrow mempty (Named kv) x y
+    shape_n = ShapeDecl [NamedDim (qualName tv_n)]
+    shape_k = ShapeDecl [NamedDim (qualName tv_k)]
+    arr_ka = shape_k `array` t_a
+    arr_kb = shape_k `array` t_b
+    karr x y = Scalar $ Arrow mempty (Named tv_k) x y
 
     namify i (k, v) = (VName (nameFromString k) i, v)
 

@@ -1388,6 +1388,8 @@ initialCtx =
               <> quote (pretty v)
               <> "."
 
+    typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
+
     def "!" =
       Just $
         unopDef
@@ -1528,8 +1530,6 @@ initialCtx =
               error $
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [pretty t, pretty v]
-      where
-        typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
     def s | "reduce" `isPrefixOf` s = Just $
       fun3t $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
@@ -1573,6 +1573,29 @@ initialCtx =
               v' <- apply2 noLoc mempty fun (arr' ! i) v
               return $ arr' // [(i, v')]
             else return arr'
+    --
+    def "stencil_1d" = Just $
+      TermPoly Nothing $ \t -> return $
+        ValueFun $ \v ->
+          case (fromTuple v, unfoldFunType t) of
+            (Just [is, f, cs, as], ([_], ret_t))
+              | Just rowshape <- typeRowShape ret_t,
+                ValueArray (ShapeDim n as_rowshape) as_arr <- as -> do
+                -- We Hardcode the boundary condition to repeat edge element.
+                let getElem i = as_arr ! fromIntegral (0 `max` ((n -1) `min` i))
+                    (_, is') = fromArray is
+                    hood i = toArray' as_rowshape $ map getElem $ map ((+ i) . asInt64) is'
+                    hoods = map hood [0 .. n -1]
+                toArray' rowshape
+                  <$> zipWithM (apply2 noLoc mempty f) (snd $ fromArray cs) hoods
+              | otherwise ->
+                error $ "Bad return type: " ++ pretty ret_t
+            _ ->
+              error $
+                "Invalid arguments to stencil_1d intrinsic:\n"
+                  ++ unlines [pretty t, pretty v]
+      where
+    --
     def "partition" = Just $
       fun3t $ \k f xs -> do
         let (ShapeDim _ rowshape, xs') = fromArray xs
