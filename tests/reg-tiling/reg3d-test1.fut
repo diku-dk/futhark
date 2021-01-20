@@ -12,9 +12,7 @@
 --   , [ [18.0f32, 21.0], [24.0, 28.0] ]
 --   ]
 -- }
-
--- compile input @ data/medium.in
--- output @ data/medium-1.out
+-- compiled random input { [16][512]f32 [512][16]f32 [65536][512]f32 } auto output
 
 let pred (x : f32) : bool = x < 9.0
 
