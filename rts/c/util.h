@@ -32,7 +32,6 @@ static char* msgprintf(const char *s, ...) {
 static inline void check_err(int errval, int sets_errno, const char *fun, int line,
                             const char *msg, ...) {
   if (errval) {
-    char str[256];
     char errnum[10];
 
     va_list vl;

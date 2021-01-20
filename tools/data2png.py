@@ -38,14 +38,17 @@ def read_image(f):
 
         return (width, height, array)
 
-    if rank == 2 and type in [b' i32', b' u32', b' f32']:
+    if rank == 2 and type in [b' i32', b' u32', b' f32', b' f64']:
         height = np.int64(struct.unpack('<Q', f.read(8))[0])
         width = np.int64(struct.unpack('<Q', f.read(8))[0])
 
         image=np.empty((height,width,3), dtype=np.uint8)
         if type == b' f32':
             array = np.frombuffer(f.read(height*width*4), dtype=np.float32).reshape(height, width)
-            image[:,:,0] = image[:,:,1] = image[:,:,2] = np.uint8(np.float32(array)*256)
+            image[:,:,0] = image[:,:,1] = image[:,:,2] = np.uint8(np.float32(array)*255)
+        if type == b' f64':
+            array = np.frombuffer(f.read(height*width*8), dtype=np.float64).reshape(height, width)
+            image[:,:,0] = image[:,:,1] = image[:,:,2] = np.uint8(np.float64(array)*255)
         else:
             array = np.frombuffer(f.read(height*width*4), dtype=np.uint32).reshape(height, width)
             image[:,:,0] = (array & 0xFF0000) >> 16

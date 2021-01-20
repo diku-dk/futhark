@@ -20,8 +20,8 @@ datasets.  If a directory is given, all contained files with a
 
 A Futhark test program is an ordinary Futhark program, with at least
 one test block describing input/output test cases and possibly other
-options.  A test block consists of commented-out text with the
-following overall format::
+options.  The last line must end in a newline.  A test block consists
+of commented-out text with the following overall format::
 
   description
   ==

@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE GADTs #-}
 
 -- | Facilities for changing the lore of some fragment, with no
 -- context.  We call this "rephrasing", for no deep reason.

@@ -34,8 +34,8 @@ import Futhark.Error
 import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (IntegralExp, divUp, quot)
-import Prelude hiding (quot)
+import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
+import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations KernelsMem HostEnv Imp.HostOp
 callKernelOperations =
@@ -76,8 +76,8 @@ compileProg env prog =
 compileProgOpenCL,
   compileProgCUDA ::
     MonadFreshNames m => Prog KernelsMem -> m (Warnings, Imp.Program)
-compileProgOpenCL = compileProg $ HostEnv openclAtomics
-compileProgCUDA = compileProg $ HostEnv cudaAtomics
+compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL
+compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA
 
 opCompiler ::
   Pattern KernelsMem ->
@@ -155,7 +155,7 @@ segOpCompiler pat segop =
 checkLocalMemoryReqs :: Imp.Code -> CallKernelGen (Maybe (Imp.TExp Bool))
 checkLocalMemoryReqs code = do
   scope <- askScope
-  let alloc_sizes = map (sum . localAllocSizes . Imp.kernelBody) $ getKernels code
+  let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getKernels code
 
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
@@ -178,6 +178,11 @@ checkLocalMemoryReqs code = do
     localAllocSizes = foldMap localAllocSize
     localAllocSize (Imp.LocalAlloc _ size) = [size]
     localAllocSize _ = []
+
+    -- These allocations will actually be padded to an 8-byte aligned
+    -- size, so we should take that into account when checking whether
+    -- they fit.
+    alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
 
 expCompiler :: ExpCompiler KernelsMem HostEnv Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.

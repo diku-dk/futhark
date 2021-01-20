@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.SequentialC
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
+    GC.asServer,
   )
 where
 
@@ -29,8 +30,7 @@ compileProg =
     operations :: GC.Operations Imp.Sequential ()
     operations =
       GC.defaultOperations
-        { GC.opsCompiler = const $ return (),
-          GC.opsCopy = copySequentialMemory
+        { GC.opsCompiler = const $ return ()
         }
 
     generateContext = do
@@ -81,8 +81,10 @@ compileProg =
                           int detail_memory;
                           int debugging;
                           int profiling;
+                          int logging;
                           typename lock_t lock;
                           char *error;
+                          typename FILE *log;
                           int profiling_paused;
                           $sdecls:fields
                         };|]
@@ -98,7 +100,9 @@ compileProg =
                                   ctx->detail_memory = cfg->debugging;
                                   ctx->debugging = cfg->debugging;
                                   ctx->profiling = cfg->debugging;
+                                  ctx->logging = cfg->debugging;
                                   ctx->error = NULL;
+                                  ctx->log = stderr;
                                   create_lock(&ctx->lock);
                                   $stms:init_fields
                                   init_constants(ctx);
@@ -122,17 +126,3 @@ compileProg =
                                  return 0;
                                }|]
         )
-
-      GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
-        ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-          [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                                 (void)ctx;
-                                 return 0;
-                               }|]
-        )
-
-copySequentialMemory :: GC.Copy Imp.Sequential ()
-copySequentialMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
-  GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-copySequentialMemory _ _ destspace _ _ srcspace _ =
-  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace

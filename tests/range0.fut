@@ -5,7 +5,8 @@
 -- input { 1 5 } output { [1i32, 2i32, 3i32, 4i32, 5i32] }
 -- input { 5 1 } error: 5...1
 -- input { 5 0 } error: 5...0
--- input { 0 5 } output { [0i32, 1i32, 2i32, 3i32, 4i32, 5i32] }
+-- input { 0 5 } output { [0i32, 1i32, 2i32,
+-- 3i32, 4i32, 5i32] }
 
 -- ==
 -- entry: test1

@@ -365,46 +365,33 @@ transformExp (Lambda params e0 decl tp loc) = do
   return $ Lambda params e0' decl tp loc
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
-transformExp
-  ( OpSectionLeft
-      fname
-      (Info t)
-      e
-      (Info (xtype, xargext), Info ytype)
-      (Info rettype, Info retext)
-      loc
-    ) = do
-    fname' <- transformFName loc fname $ toStruct t
-    e' <- transformExp e
-    desugarBinOpSection
-      fname'
-      (Just e')
-      Nothing
-      t
-      (xtype, xargext)
-      (ytype, Nothing)
-      (rettype, retext)
-      loc
-transformExp
-  ( OpSectionRight
-      fname
-      (Info t)
-      e
-      (Info xtype, Info (ytype, yargext))
-      (Info rettype)
-      loc
-    ) = do
-    fname' <- transformFName loc fname $ toStruct t
-    e' <- transformExp e
-    desugarBinOpSection
-      fname'
-      Nothing
-      (Just e')
-      t
-      (xtype, Nothing)
-      (ytype, yargext)
-      (rettype, [])
-      loc
+transformExp (OpSectionLeft fname (Info t) e arg ret loc) = do
+  let (Info (xtype, xargext), Info ytype) = arg
+      (Info rettype, Info retext) = ret
+  fname' <- transformFName loc fname $ toStruct t
+  e' <- transformExp e
+  desugarBinOpSection
+    fname'
+    (Just e')
+    Nothing
+    t
+    (xtype, xargext)
+    (ytype, Nothing)
+    (rettype, retext)
+    loc
+transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
+  let (Info xtype, Info (ytype, yargext)) = arg
+  fname' <- transformFName loc fname $ toStruct t
+  e' <- transformExp e
+  desugarBinOpSection
+    fname'
+    Nothing
+    (Just e')
+    t
+    (xtype, Nothing)
+    (ytype, yargext)
+    (rettype, [])
+    loc
 transformExp (ProjectSection fields (Info t) loc) =
   desugarProjectSection fields t loc
 transformExp (IndexSection idxs (Info t) loc) =
@@ -537,8 +524,8 @@ desugarBinOpSection ::
   SrcLoc ->
   MonoM Exp
 desugarBinOpSection op e_left e_right t (xtype, xext) (ytype, yext) (rettype, retext) loc = do
-  (e1, p1) <- makeVarParam e_left $ fromStruct xtype
-  (e2, p2) <- makeVarParam e_right $ fromStruct ytype
+  (wrap_left, e1, p1) <- makeVarParam e_left $ fromStruct xtype
+  (wrap_right, e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let apply_left =
         Apply
           op
@@ -554,15 +541,23 @@ desugarBinOpSection op e_left e_right t (xtype, xext) (ytype, yext) (rettype, re
           (Info rettype, Info retext)
           loc
       rettype' = toStruct rettype
-  return $ Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
+  return $ wrap_left $ wrap_right $ Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype')) loc
   where
-    makeVarParam (Just e) _ = return (e, [])
-    makeVarParam Nothing argtype = do
+    patAndVar argtype = do
       x <- newNameFromString "x"
-      return
-        ( Var (qualName x) (Info argtype) mempty,
-          [Id x (Info $ fromStruct argtype) mempty]
+      pure
+        ( Id x (Info argtype) mempty,
+          Var (qualName x) (Info argtype) mempty
         )
+
+    makeVarParam (Just e) argtype = do
+      (pat, var_e) <- patAndVar argtype
+      let wrap body =
+            LetPat pat e body (Info (typeOf body), Info mempty) mempty
+      return (wrap, var_e, [])
+    makeVarParam Nothing argtype = do
+      (pat, var_e) <- patAndVar argtype
+      return (id, var_e, [pat])
 
 desugarProjectSection :: [Name] -> PatternType -> SrcLoc -> MonoM Exp
 desugarProjectSection fields (Scalar (Arrow _ _ t1 t2)) loc = do

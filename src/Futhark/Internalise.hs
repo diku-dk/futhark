@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -12,8 +11,6 @@
 module Futhark.Internalise (internaliseProg) where
 
 import Control.Monad.Reader
-import Control.Monad.State
-import Data.Bitraversable
 import Data.List (find, intercalate, intersperse, transpose)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
@@ -59,25 +56,14 @@ internaliseAttrs = mconcat . map (oneAttr . internaliseAttr)
 internaliseValBinds :: [E.ValBind] -> InternaliseM ()
 internaliseValBinds = mapM_ internaliseValBind
 
-internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
-internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
-internaliseFunName ofname _ = do
-  info <- lookupFunction' ofname
-  -- In some rare cases involving local functions, the same function
-  -- name may be re-used in multiple places.  We check whether the
-  -- function name has already been used, and generate a new one if
-  -- so.
-  case info of
-    Just _ -> nameFromString . pretty <$> newNameFromString (baseString ofname)
-    Nothing -> return $ nameFromString $ pretty ofname
+internaliseFunName :: VName -> Name
+internaliseFunName = nameFromString . pretty
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams params body _ attrs loc) = do
   localConstsScope $
     bindingParams tparams params $ \shapeparams params' -> do
       let shapenames = map I.paramName shapeparams
-
-      fname' <- internaliseFunName fname params
 
       msg <- case retdecl of
         Just dt ->
@@ -101,7 +87,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
             I.FunDef
               Nothing
               (internaliseAttrs attrs)
-              fname'
+              (internaliseFunName fname)
               rettype'
               all_params
               body'
@@ -112,8 +98,7 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
           bindFunction
             fname
             fd
-            ( fname',
-              shapenames,
+            ( shapenames,
               map declTypeOf $ concat params',
               all_params,
               applyRetType rettype' all_params
@@ -125,93 +110,11 @@ internaliseValBind fb@(E.ValBind entry fname retdecl (Info (rettype, _)) tparams
   where
     zeroExts ts = generaliseExtTypes ts ts
 
-allDimsFreshInType :: MonadFreshNames m => E.PatternType -> m E.PatternType
-allDimsFreshInType = bitraverse onDim pure
-  where
-    onDim (E.NamedDim v) =
-      E.NamedDim . E.qualName <$> newVName (baseString $ E.qualLeaf v)
-    onDim _ =
-      E.NamedDim . E.qualName <$> newVName "size"
-
--- | Replace all named dimensions with a fresh name, and remove all
--- constant dimensions.  The point is to remove the constraints, but
--- keep the names around.  We use this for constructing the entry
--- point parameters.
-allDimsFreshInPat :: MonadFreshNames m => E.Pattern -> m E.Pattern
-allDimsFreshInPat (PatternAscription p _ _) =
-  allDimsFreshInPat p
-allDimsFreshInPat (PatternParens p _) =
-  allDimsFreshInPat p
-allDimsFreshInPat (Id v (Info t) loc) =
-  Id v <$> (Info <$> allDimsFreshInType t) <*> pure loc
-allDimsFreshInPat (TuplePattern ps loc) =
-  TuplePattern <$> mapM allDimsFreshInPat ps <*> pure loc
-allDimsFreshInPat (RecordPattern ps loc) =
-  RecordPattern <$> mapM (traverse allDimsFreshInPat) ps <*> pure loc
-allDimsFreshInPat (Wildcard (Info t) loc) =
-  Wildcard <$> (Info <$> allDimsFreshInType t) <*> pure loc
-allDimsFreshInPat (PatternLit e (Info t) loc) =
-  PatternLit e <$> (Info <$> allDimsFreshInType t) <*> pure loc
-allDimsFreshInPat (PatternConstr c (Info t) pats loc) =
-  PatternConstr c <$> (Info <$> allDimsFreshInType t)
-    <*> mapM allDimsFreshInPat pats
-    <*> pure loc
-
-data EntryTrust
-  = -- | This parameter or return value is an opaque type.  When a
-    -- parameter, this implies that it must have been returned by a
-    -- previous call to Futhark, and hence we can preserve (constant)
-    -- size constraints.
-    EntryTrusted
-  | -- | The type is directly exposed.  Any size constraint cannot be
-    -- trusted.
-    EntryUntrusted
-
-entryTrust :: EntryType -> EntryTrust
-entryTrust t
-  | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t =
-    EntryUntrusted
-  | E.Array _ _ (E.Prim E.Unsigned {}) _ <- E.entryType t =
-    EntryUntrusted
-  | E.Scalar E.Prim {} <- E.entryType t =
-    EntryUntrusted
-  | E.Array _ _ E.Prim {} _ <- E.entryType t =
-    EntryUntrusted
-  | otherwise =
-    EntryTrusted
-
-fixEntryParamSizes :: MonadFreshNames m => E.Pattern -> EntryTrust -> m E.Pattern
-fixEntryParamSizes p EntryTrusted = pure p
-fixEntryParamSizes p EntryUntrusted = allDimsFreshInPat p
-
--- When we are returning a value from the entry point, we fully
--- existentialise the return type.  This is because it might otherwise
--- refer to sizes that are not in scope, because the generated entry
--- point function does not keep the size parameters of the original
--- entry point.
-fullyExistential ::
-  [[I.TypeBase ExtShape u]] ->
-  [[I.TypeBase ExtShape u]]
-fullyExistential tss =
-  evalState (mapM (mapM (bitraverse (traverse onDim) pure)) tss) 0
-  where
-    onDim _ = do
-      i <- get
-      modify (+ 1)
-      pure $ Ext i
-
 generateEntryPoint :: E.EntryPoint -> E.ValBind -> InternaliseM ()
 generateEntryPoint (E.EntryPoint e_paramts e_rettype) vb = localConstsScope $ do
-  let (E.ValBind _ ofname _ (Info (rettype, _)) _ params _ _ attrs loc) = vb
-  -- We replace all shape annotations, so there should be no constant
-  -- parameters here.
-  params_fresh <- zipWithM fixEntryParamSizes params $ map entryTrust e_paramts
-  let tparams =
-        map (`E.TypeParamDim` mempty) $
-          S.toList $
-            mconcat $ map E.patternDimNames params_fresh
-  bindingParams tparams params_fresh $ \shapeparams params' -> do
-    entry_rettype <- fullyExistential <$> internaliseEntryReturnType rettype
+  let (E.ValBind _ ofname _ (Info (rettype, _)) tparams params _ _ attrs loc) = vb
+  bindingParams tparams params $ \shapeparams params' -> do
+    entry_rettype <- internaliseEntryReturnType rettype
     let entry' = entryPoint (zip e_paramts params') (e_rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
 
@@ -290,20 +193,6 @@ entryPoint params (eret, crets) =
        in (d + 1, te')
     withoutDims te = (0 :: Int, te)
 
-internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) loc) =
-  case tp of
-    E.Scalar E.Prim {} -> return name
-    _ ->
-      error $
-        "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-          ++ pretty name
-          ++ " of type "
-          ++ pretty tp
-          ++ " at "
-          ++ locStr loc
-          ++ "."
-
 internaliseBody :: String -> E.Exp -> InternaliseM Body
 internaliseBody desc e =
   insertStmsM $ resultBody <$> internaliseExp (desc <> "_res") e
@@ -324,17 +213,11 @@ internaliseExp desc (E.StringLit vs _) =
   fmap pure $
     letSubExp desc $
       I.BasicOp $ I.ArrayLit (map constant vs) $ I.Prim int8
-internaliseExp _ (E.Var (E.QualName _ name) (Info t) loc) = do
+internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
   subst <- lookupSubst name
   case subst of
     Just substs -> return substs
-    Nothing -> do
-      -- If this identifier is the name of a constant, we have to turn it
-      -- into a call to the corresponding function.
-      is_const <- lookupConst name
-      case is_const of
-        Just ses -> return ses
-        Nothing -> (: []) . I.Var <$> internaliseIdent (E.Ident name (Info t) loc)
+    Nothing -> pure [I.Var name]
 internaliseExp desc (E.Index e idxs (Info ret, Info retext) loc) = do
   vs <- internaliseExpToVars "indexed" e
   dims <- case vs of
@@ -708,7 +591,6 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
               I.ForLoop i Int64 w loopvars
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
-      i' <- internaliseIdent i
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
         I.Prim (IntType it) -> return it
@@ -717,7 +599,7 @@ internaliseExp desc (E.DoLoop sparams mergepat mergeexp form loopbody (Info (ret
       bindingLoopParams sparams' mergepat $
         \shapepat mergepat' ->
           forLoop mergepat' shapepat mergeinit $
-            I.ForLoop i' it num_iterations' []
+            I.ForLoop (E.identName i) it num_iterations' []
     handleForm mergeinit (E.While cond) =
       bindingLoopParams sparams' mergepat $ \shapepat mergepat' -> do
         mergeinit_ts <- mapM subExpType mergeinit
@@ -1945,7 +1827,7 @@ funcall ::
   SrcLoc ->
   InternaliseM ([SubExp], [I.ExtType])
 funcall desc (QualName _ fname) args loc = do
-  (fname', shapes, value_paramts, fun_params, rettype_fun) <-
+  (shapes, value_paramts, fun_params, rettype_fun) <-
     lookupFunction fname
   argts <- mapM subExpType args
 
@@ -1984,7 +1866,7 @@ funcall desc (QualName _ fname) args loc = do
       ses <-
         attributing attrs $
           letTupExp' desc $
-            I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
+            I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
 
 -- Bind existential names defined by an expression, based on the

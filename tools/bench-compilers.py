@@ -170,7 +170,7 @@ def ensure_repo(what, url):
     if os.path.exists(dir):
         shell('cd {} && git checkout master && git pull'.format(dir))
     else:
-        shell('git clone --recursive {} dir'.format(url, dir))
+        shell('git clone --recursive {} {}'.format(url, dir))
     return dir
 
 def ensure_futhark_repo():

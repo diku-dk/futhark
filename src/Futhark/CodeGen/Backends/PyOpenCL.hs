@@ -10,7 +10,6 @@ import Control.Monad
 import qualified Data.Map as M
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
-import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
@@ -22,10 +21,11 @@ import Futhark.Util (zEncodeString)
 --maybe pass the config file rather than multiple arguments
 compileProg ::
   MonadFreshNames m =>
-  Maybe String ->
+  Py.CompilerMode ->
+  String ->
   Prog KernelsMem ->
   m (ImpGen.Warnings, String)
-compileProg module_name prog = do
+compileProg mode class_name prog = do
   ( ws,
     Imp.Program
       opencl_code
@@ -58,11 +58,7 @@ compileProg module_name prog = do
           Assign (Var "default_num_groups") None,
           Assign (Var "default_tile_size") None,
           Assign (Var "default_reg_tile_size") None,
-          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
-          Escape pyValues,
-          Escape pyFunctions,
-          Escape pyPanic,
-          Escape pyTuning
+          Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code
         ]
 
   let imports =
@@ -154,7 +150,8 @@ compileProg module_name prog = do
 
   (ws,)
     <$> Py.compileProg
-      module_name
+      mode
+      class_name
       constructor
       imports
       defines
@@ -412,11 +409,12 @@ staticOpenCLArray _ space _ _ =
 packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do
   mem' <- Py.compileVar mem
+  dims' <- mapM Py.compileDim dims
   return $
     Call
       (Var "cl.array.Array")
       [ Arg $ Var "self.queue",
-        Arg $ Tuple $ map Py.compileDim dims,
+        Arg $ Tuple dims',
         Arg $ Var $ Py.compilePrimTypeExt bt ept,
         ArgKeyword "data" mem'
       ]

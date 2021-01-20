@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE Safe #-}
 
 -- | Futhark error definitions.
 module Futhark.Error

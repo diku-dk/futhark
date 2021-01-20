@@ -1,11 +1,8 @@
-resolver: lts-16.7
+resolver: nightly-2020-12-14
 packages:
 - .
 
-extra-deps:
-  - sexp-grammar-2.2.1@sha256:a05a86f83e7d1d9767fbc1b0cba7859455a10c6365173b72c10f5b0e93140a50,2473
-  - invertible-grammar-0.1.3@sha256:aeae40093db800e1130b8f58ae47f4474b131c22d830913d1051d1ab083f6f13,1651
-  - versions-4.0.1
+extra-deps: []
 
 flags: {}
 

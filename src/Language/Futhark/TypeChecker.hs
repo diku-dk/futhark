@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 
 -- | The type checker checks whether the program is type-consistent
 -- and adds type annotations and various other elaborations.  The
@@ -43,7 +42,7 @@ import Prelude hiding (abs, mod)
 -- | Type check a program containing no type information, yielding
 -- either a type error or a program with complete type information.
 -- Accepts a mapping from file names (excluding extension) to
--- previously type checker results.  The 'FilePath' is used to resolve
+-- previously type checked results.  The 'ImportName' is used to resolve
 -- relative @import@s.
 checkProg ::
   Imports ->
