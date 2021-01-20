@@ -1329,6 +1329,17 @@ data CParts = CParts
     cLib :: String
   }
 
+gnuSource :: String
+gnuSource =
+  pretty
+    [C.cunit|
+// We need to define _GNU_SOURCE before
+// _any_ headers files are imported to get
+// the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
+// https://manpages.courier-mta.org/htmlman2/getrusage.2.html
+$esc:("#define _GNU_SOURCE")
+|]
+
 -- We may generate variables that are never used (e.g. for
 -- certificates) or functions that are never called (e.g. unused
 -- intrinsics), and generated code may have other cosmetic issues that
@@ -1357,18 +1368,18 @@ $esc:("#endif")
 asLibrary :: CParts -> (String, String)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
-    disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
+    gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
 -- | As executable with command-line interface.
 asExecutable :: CParts -> String
 asExecutable parts =
-  disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cCLI parts <> cLib parts
 
 -- | As server executable.
 asServer :: CParts -> String
 asServer parts =
-  disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
+  gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -1390,11 +1401,6 @@ compileProg backend ops extra header_extra spaces options prog = do
   let headerdefs =
         [C.cunit|
 $esc:("// Headers\n")
-/* We need to define _GNU_SOURCE before
-   _any_ headers files are imported to get
-   the usage statistics of a thread (i.e. have RUSAGE_THREAD) on GNU/Linux
-   https://manpages.courier-mta.org/htmlman2/getrusage.2.html */
-$esc:("#define _GNU_SOURCE")
 $esc:("#include <stdint.h>")
 $esc:("#include <stddef.h>")
 $esc:("#include <stdbool.h>")
