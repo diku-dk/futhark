@@ -82,7 +82,7 @@ data KernelUse
   = ScalarUse VName PrimType
   | MemoryUse VName
   | ConstUse VName KernelConstExp
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 instance Pretty KernelConst where
   ppr (SizeConst key) = text "get_size" <> parens (ppr key)

@@ -21,7 +21,6 @@ import qualified Language.Futhark.Interpreter as I
 import Language.Futhark.Parser hiding (EOF)
 import qualified Language.Futhark.Semantic as T
 import qualified Language.Futhark.TypeChecker as T
-import System.Console.GetOpt
 import System.Exit
 import System.FilePath
 import System.IO
@@ -118,7 +117,7 @@ newFutharkiState cfg file = runExceptT $ do
   (ws, imports, src) <-
     badOnLeft show
       =<< liftIO
-        ( runExceptT (readProgram file)
+        ( runExceptT (readProgram [] file)
             `catch` \(err :: IOException) ->
               return (externalErrorS (show err))
         )

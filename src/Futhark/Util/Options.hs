@@ -3,6 +3,7 @@ module Futhark.Util.Options
   ( FunOptDescr,
     mainWithOptions,
     commonOptions,
+    module System.Console.GetOpt,
   )
 where
 

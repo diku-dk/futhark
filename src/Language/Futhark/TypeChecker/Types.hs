@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 
 -- | Type checker building blocks that do not involve unification.
 module Language.Futhark.TypeChecker.Types
@@ -26,9 +25,10 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List (foldl', nub, sort)
+import Data.List (foldl', sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -144,7 +144,7 @@ checkTypeExp (TETuple ts loc) = do
 checkTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
-  unless (sort field_names == sort (nub field_names)) $
+  unless (sort field_names == sort (nubOrd field_names)) $
     typeError loc mempty $ "Duplicate record fields in" <+> ppr t <> "."
 
   fs_ts_ls <- traverse checkTypeExp $ M.fromList fs
@@ -265,7 +265,7 @@ checkTypeExp ote@TEApply {} = do
           <+> ppr p <> "."
 checkTypeExp t@(TESum cs loc) = do
   let constructors = map fst cs
-  unless (sort constructors == sort (nub constructors)) $
+  unless (sort constructors == sort (nubOrd constructors)) $
     typeError loc mempty $ "Duplicate constructors in" <+> ppr t
 
   unless (length constructors < 256) $

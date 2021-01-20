@@ -2,7 +2,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Safe #-}
 {-# LANGUAGE Strict #-}
 
 -- | The most primitive ("core") aspects of the AST.  Split out of

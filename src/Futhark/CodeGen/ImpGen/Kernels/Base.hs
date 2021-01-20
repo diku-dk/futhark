@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
     CallKernelGen,
     InKernelGen,
     HostEnv (..),
+    Target (..),
     KernelEnv (..),
     computeThreadChunkSize,
     groupReduce,
@@ -34,7 +35,7 @@ module Futhark.CodeGen.ImpGen.Kernels.Base
 where
 
 import Control.Monad.Except
-import Data.List (elemIndex, find, nub, zip4)
+import Data.List (elemIndex, find, zip4)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -45,12 +46,20 @@ import Futhark.IR.KernelsMem
 import qualified Futhark.IR.Mem.IxFun as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Util (chunks, dropLast, mapAccumLM, maybeNth, takeLast)
+import Futhark.Util (chunks, dropLast, mapAccumLM, maybeNth, nubOrd, takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
-newtype HostEnv = HostEnv
-  {hostAtomics :: AtomicBinOp}
+-- | Which target are we ultimately generating code for?  While most
+-- of the kernels code is the same, there are some cases where we
+-- generate special code based on the ultimate low-level API we are
+-- targeting.
+data Target = CUDA | OpenCL
+
+data HostEnv = HostEnv
+  { hostAtomics :: AtomicBinOp,
+    hostTarget :: Target
+  }
 
 data KernelEnv = KernelEnv
   { kernelAtomics :: AtomicBinOp,
@@ -740,7 +749,7 @@ computeKernelUses ::
 computeKernelUses kernel_body bound_in_kernel = do
   let actually_free = freeIn kernel_body `namesSubtract` namesFromList bound_in_kernel
   -- Compute the variables that we need to pass to the kernel.
-  nub <$> readsFromSet actually_free
+  nubOrd <$> readsFromSet actually_free
 
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
 readsFromSet free =
@@ -1322,7 +1331,7 @@ sKernelFailureTolerant ::
   InKernelGen () ->
   CallKernelGen ()
 sKernelFailureTolerant tol ops constants name m = do
-  HostEnv atomics <- askEnv
+  HostEnv atomics _ <- askEnv
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants) ops m
   uses <- computeKernelUses body mempty
   emit $

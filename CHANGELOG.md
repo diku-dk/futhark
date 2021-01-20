@@ -9,17 +9,84 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-  * When compiling to binaries in the C-based backends, the compiler
-    now respects the ``CFLAGS`` and ``CC`` environment variables.
+  * The C API now exposes serialisation functions for opaque values.
 
-  * GPU backends: avoid some bounds-checks for parallel sections
-    inside intra-kernel loops.
+  * The C API now lets you pick which stream (if any) is used for
+    logging prints (#1214).
+
+  * New compilation mode: `--server`.  For now used to support faster
+    benchmarking and testing tools, but can be used to build even
+    fancier things in the future (#1179).
+
+  * Significantly faster reading/writing of large values.  This mainly
+    means that validation of test and benchmark results is much faster
+    (close to an order of magnitude).
+
+  * The experimental `futhark literate` command allows vaguely a
+    notebook-like programming experience.
+
+  * All compilers now accept an `--entry` option for treating more
+    functions as entry points.
+
+  * The `negate` function is now `neg`, but `negate` is kept around
+    for a short while for backwards compatibility.
 
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+  * Interaction between slice simplification and in-place updates
+    (#1222).
+
+## [0.18.5]
+
+### Fixed
+
+  * Fix tiling crash (#1203).
+
+  * `futhark run` now does slightly more type-checking of its inputs
+    (#1208).
+
+  * Sum type deduplication issue (#1209).
+
+  * Missing parentheses when printing sum values in interpreter.
+
+## [0.18.4]
+
+### Added
+
+  * When compiling to binaries in the C-based backends, the compiler
+    now respects the ``CFLAGS`` and ``CC`` environment variables.
+
+  * GPU backends: avoid some bounds-checks for parallel sections
+    inside intra-kernel loops.
+
+  * The `cuda` backend now uses a much faster single-pass `scan`
+    implementation, although only for nonsegmented scans where the
+    operator operates on scalars.
+
+### Fixed
+
+  * `futhark dataset` now correctly detects trailing commas in textual
+    input (#1189).
+
+  * Fixed local memory capacity check for intra-group-parallel GPU kernels.
+
+  * Fixed compiler bug on segmented rotates where the rotation amount
+    is variant to the nest (#1192).
+
+  * `futhark repl` no longer crashes on type errors in given file (#1193).
+
+  * Fixed a simplification error for certain arithmetic expressions
+    (#1194).
+
+  * Fixed a small uniqueness-related bug in the compilation of
+    operator section.
+
+  * Sizes of opaque entry point arguments are now properly checked
+    (related to #1198).
 
 ## [0.18.3]
 

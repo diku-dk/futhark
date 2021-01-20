@@ -1,5 +1,3 @@
-{-# LANGUAGE Safe #-}
-
 -- |
 --
 -- Functions for generic traversals across Futhark syntax trees.  The

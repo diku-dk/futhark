@@ -120,14 +120,14 @@ generateSizeFuns sizes = do
 
 generateConfigFuns :: M.Map Name SizeClass -> GC.CompilerM OpenCL () String
 generateConfigFuns sizes = do
-  let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
+  let size_decls = map (\k -> [C.csdecl|typename int64_t $id:k;|]) $ M.keys sizes
       num_sizes = M.size sizes
   GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
     ( [C.cedecl|struct $id:s;|],
       [C.cedecl|struct $id:s { struct cuda_config cu_cfg;
                               int profiling;
-                              size_t sizes[$int:num_sizes];
+                              typename int64_t sizes[$int:num_sizes];
                               int num_nvrtc_opts;
                               const char **nvrtc_opts;
                             };|]
@@ -343,8 +343,10 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                          int debugging;
                          int profiling;
                          int profiling_paused;
+                         int logging;
                          typename lock_t lock;
                          char *error;
+                         typename FILE *log;
                          $sdecls:fields
                          $sdecls:kernel_fields
                          typename CUdeviceptr global_failure;
@@ -377,7 +379,9 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                  ctx->debugging = ctx->detail_memory = cfg->cu_cfg.debugging;
                  ctx->profiling = cfg->profiling;
                  ctx->profiling_paused = 0;
+                 ctx->logging = cfg->cu_cfg.logging;
                  ctx->error = NULL;
+                 ctx->log = stderr;
                  ctx->cuda.profiling_records_capacity = 200;
                  ctx->cuda.profiling_records_used = 0;
                  ctx->cuda.profiling_records =
@@ -464,12 +468,7 @@ generateContextFuns cfg cost_centres kernels sizes failures = do
                }|]
     )
 
-  GC.publicDef_ "context_clear_caches" GC.MiscDecl $ \s ->
-    ( [C.cedecl|int $id:s(struct $id:ctx* ctx);|],
-      [C.cedecl|int $id:s(struct $id:ctx* ctx) {
-                         lock_lock(&ctx->lock);
-                         CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
-                         lock_unlock(&ctx->lock);
-                         return 0;
-                       }|]
-    )
+  GC.onClear
+    [C.citem|if (ctx->error == NULL) {
+               CUDA_SUCCEED(cuda_free_all(&ctx->cuda));
+             }|]
