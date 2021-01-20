@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The `negate` function is now `neg`, but `negate` is kept around
     for a short while for backwards compatibility.
 
+  * Generated header-files are now declared `extern "C"` when
+    processed with a C++ compiler.
+
 ### Removed
 
 ### Changed
