@@ -21,7 +21,7 @@ module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List
+import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Sequence as Seq
@@ -84,7 +84,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- [inp_A, inp_B] <- arrs,
     zip_AB <- zip tmp_stms arrs,
     [(load_A, inp_A), (load_B, inp_B)] <- if var_dims == [0,1] then zip_AB else reverse zip_AB,
-    code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
+    -- code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
 
     -- we get the global-thread id for the two inner dimensions,
@@ -647,7 +647,7 @@ varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma {})))
         stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
 
         v' =
-          foldl'
+          L.foldl'
             ( \vacc (v_a, v_fm, v_fr_acc, v_fr_var) ->
                 let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
                     vacc' = M.insert v_fm vrc vacc
@@ -655,14 +655,14 @@ varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma {})))
                  in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
             )
             v
-            $ zip4 arrs (map paramName map_args) (map paramName acc_lam_f) (map paramName arr_lam_f)
+            $ L.zip4 arrs (map paramName map_args) (map paramName acc_lam_f) (map paramName arr_lam_f)
      in varianceInStms v' stm_lam
   | otherwise = defVarianceInStm v0 bnd
 varianceInStm v0 bnd = defVarianceInStm v0 bnd
 
 defVarianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
 defVarianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
+  L.foldl' add variance $ patternNames $ stmPattern bnd
   where
     add variance' v = M.insert v binding_variance variance'
     look variance' v = oneName v <> M.findWithDefault mempty v variance'
@@ -961,7 +961,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- check that code1 contains exacly one slice for each of the input array to redomap
     tmp_stms <- mapMaybe (`M.lookup` arr_tab0) inp_soac_arrs,
     length tmp_stms == length inp_soac_arrs,
-    code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
+    -- code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
     -- we assume the kernel results are variant to the thrid-outer parallel dimension
     -- (for sanity sake, they should be)
@@ -1223,7 +1223,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       | [p] <- patternValueElements patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p = do
-        case findIndices (variantSliceDim variance gidz) slc of
+        case L.findIndices (variantSliceDim variance gidz) slc of
           [] -> return (M.insert p_nm stm tab_inn, tab_out)
           i : _ -> do
             arr_tp <- lookupType arr_nm
