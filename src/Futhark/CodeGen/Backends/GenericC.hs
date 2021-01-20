@@ -1367,7 +1367,14 @@ $esc:("#endif")
 -- | Produce header and implementation files.
 asLibrary :: CParts -> (String, String)
 asLibrary parts =
-  ( "#pragma once\n\n" <> cHeader parts,
+  ( "#pragma once\n\n"
+      <> "#ifdef __cplusplus\n"
+      <> "extern \"C\" {\n"
+      <> "#endif\n\n"
+      <> cHeader parts
+      <> "\n#ifdef __cplusplus\n"
+      <> "}\n"
+      <> "#endif\n",
     gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
