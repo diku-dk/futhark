@@ -246,15 +246,17 @@ preludeToPostlude variance prelude stm_to_tile postlude =
 --
 -- The third category duplicates computation, so we only want to do it
 -- when absolutely necessary.  Currently, this is necessary for
--- results that are views of an array (slicing, rotate, etc), because
--- these cannot be efficiently represented by a scalar segmap (they'll
--- be manifested in memory).
+-- results that are views of an array (slicing, rotate, etc) and which
+-- results are used after the prelude, because these cannot be
+-- efficiently represented by a scalar segmap (they'll be manifested
+-- in memory).
 partitionPrelude ::
   VarianceTable ->
   Stms Kernels ->
   Names ->
+  Names ->
   (Stms Kernels, Stms Kernels, Stms Kernels)
-partitionPrelude variance prestms private =
+partitionPrelude variance prestms private used_after =
   (invariant_prestms, precomputed_variant_prestms, recomputed_variant_prestms)
   where
     invariantTo names stm =
@@ -273,7 +275,9 @@ partitionPrelude variance prestms private =
     mustBeInlinedExp (BasicOp Rearrange {}) = True
     mustBeInlinedExp (BasicOp Reshape {}) = True
     mustBeInlinedExp _ = False
-    mustBeInlined = mustBeInlinedExp . stmExp
+    mustBeInlined stm =
+      mustBeInlinedExp (stmExp stm)
+        && any (`nameIn` used_after) (patternNames (stmPattern stm))
 
     must_be_inlined =
       namesFromList $
@@ -311,7 +315,7 @@ injectPrelude initial_space private variance prestms used (host_stms, tiling, ti
             precomputed_variant_prestms,
             recomputed_variant_prestms
             ) =
-              partitionPrelude variance prestms private'
+              partitionPrelude variance prestms private' used
 
       addStms invariant_prestms
 
@@ -321,7 +325,7 @@ injectPrelude initial_space private variance prestms used (host_stms, tiling, ti
                 used <> freeIn recomputed_variant_prestms
       prelude_arrs <-
         inScopeOf precomputed_variant_prestms $
-          doPrelude tiling precomputed_variant_prestms live_set
+          doPrelude tiling privstms precomputed_variant_prestms live_set
 
       let prelude_privstms =
             PrivStms recomputed_variant_prestms $
@@ -346,11 +350,15 @@ tileDoLoop ::
   Result ->
   TileM (Stms Kernels, Tiling, TiledBody)
 tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBody) res_ts pat aux merge i it bound poststms poststms_res = do
-  let ( invariant_prestms,
+  let prestms_used =
+        used_in_body
+          <> freeIn poststms
+          <> freeIn poststms_res
+      ( invariant_prestms,
         precomputed_variant_prestms,
         recomputed_variant_prestms
         ) =
-          partitionPrelude variance prestms tiled_kdims
+          partitionPrelude variance prestms tiled_kdims prestms_used
 
   let (mergeparams, mergeinits) = unzip merge
 
@@ -365,14 +373,11 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
         let live_set =
               namesToList $
                 liveSet precomputed_variant_prestms $
-                  freeIn recomputed_variant_prestms
-                    <> used_in_body
-                    <> freeIn poststms
-                    <> freeIn poststms_res
+                  freeIn recomputed_variant_prestms <> prestms_used
 
         prelude_arrs <-
           inScopeOf precomputed_variant_prestms $
-            doPrelude tiling precomputed_variant_prestms live_set
+            doPrelude tiling privstms precomputed_variant_prestms live_set
 
         mergeparams' <- forM mergeparams $ \(Param pname pt) ->
           Param <$> newVName (baseString pname ++ "_group") <*> pure (tileDim pt)
@@ -422,17 +427,18 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
           filter (`notElem` unSegSpace (tilingSpace tiling)) $
             unSegSpace initial_space
 
-doPrelude :: Tiling -> Stms Kernels -> [VName] -> Binder Kernels [VName]
-doPrelude tiling prestms prestms_live =
+doPrelude :: Tiling -> PrivStms -> Stms Kernels -> [VName] -> Binder Kernels [VName]
+doPrelude tiling privstms prestms prestms_live =
   -- Create a SegMap that takes care of the prelude for every thread.
   tilingSegMap tiling "prelude" (scalarLevel tiling) ResultPrivate $
-    \in_bounds _slice -> do
+    \in_bounds slice -> do
       ts <- mapM lookupType prestms_live
       fmap (map Var) $
         letTupExp "pre"
           =<< eIf
             (toExp in_bounds)
             ( do
+                addPrivStms slice privstms
                 addStms prestms
                 resultBodyM $ map Var prestms_live
             )

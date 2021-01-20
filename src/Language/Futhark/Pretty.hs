@@ -147,7 +147,7 @@ instance Pretty (ShapeDecl dim) => Pretty (ScalarTypeBase dim as) where
       oneLine (mconcat $ punctuate (text " | ") cs')
         <|> align (mconcat $ punctuate (text " |" <> line) cs')
     where
-      ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map (pprPrec 1) fs
+      ppConstr (name, fs) = sep $ (text "#" <> ppr name) : map (pprPrec 2) fs
       cs' = map ppConstr $ M.toList cs
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where

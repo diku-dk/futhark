@@ -44,7 +44,10 @@ module type numeric = {
   val >=: t -> t -> bool
   val !=: t -> t -> bool
 
-  val negate: t-> t
+  -- | Arithmetic negation (use `!` for bitwise negation).
+  val neg: t -> t
+  -- | Deprecated alias for `neg`.
+  val negate: t -> t
   val max: t -> t -> t
   val min: t -> t -> t
 
@@ -278,14 +281,15 @@ module i8: (integral with t = i8) = {
   let sgn (x: i8) = intrinsics.ssignum8 x
   let abs (x: i8) = intrinsics.abs8 x
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax8 (x, y)
   let min (x: t) (y: t) = intrinsics.smin8 (x, y)
 
   let highest = 127i8
   let lowest = highest + 1i8
 
-  let num_bits = 8
+  let num_bits = 8i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
@@ -350,14 +354,15 @@ module i16: (integral with t = i16) = {
   let sgn (x: i16) = intrinsics.ssignum16 x
   let abs (x: i16) = intrinsics.abs16 x
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax16 (x, y)
   let min (x: t) (y: t) = intrinsics.smin16 (x, y)
 
   let highest = 32767i16
   let lowest = highest + 1i16
 
-  let num_bits = 16
+  let num_bits = 16i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
@@ -425,14 +430,15 @@ module i32: (integral with t = i32) = {
   let sgn (x: i32) = intrinsics.ssignum32 x
   let abs (x: i32) = intrinsics.abs32 x
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax32 (x, y)
   let min (x: t) (y: t) = intrinsics.smin32 (x, y)
 
-  let highest = 2147483647
+  let highest = 2147483647i32
   let lowest = highest + 1
 
-  let num_bits = 32
+  let num_bits = 32i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
@@ -500,14 +506,15 @@ module i64: (integral with t = i64) = {
   let sgn (x: i64) = intrinsics.ssignum64 x
   let abs (x: i64) = intrinsics.abs64 x
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax64 (x, y)
   let min (x: t) (y: t) = intrinsics.smin64 (x, y)
 
   let highest = 9223372036854775807i64
   let lowest = highest + 1i64
 
-  let num_bits = 64
+  let num_bits = 64i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
@@ -575,14 +582,15 @@ module u8: (integral with t = u8) = {
   let sgn (x: u8) = unsign (intrinsics.usignum8 (sign x))
   let abs (x: u8) = x
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax8 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin8 (sign x, sign y))
 
   let highest = 255u8
   let lowest = 0u8
 
-  let num_bits = 8
+  let num_bits = 8i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
@@ -650,14 +658,15 @@ module u16: (integral with t = u16) = {
   let sgn (x: u16) = unsign (intrinsics.usignum16 (sign x))
   let abs (x: u16) = x
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax16 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin16 (sign x, sign y))
 
   let highest = 65535u16
   let lowest = 0u16
 
-  let num_bits = 16
+  let num_bits = 16i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
@@ -728,11 +737,12 @@ module u32: (integral with t = u32) = {
   let highest = 4294967295u32
   let lowest = highest + 1u32
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax32 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin32 (sign x, sign y))
 
-  let num_bits = 32
+  let num_bits = 32i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
@@ -800,14 +810,15 @@ module u64: (integral with t = u64) = {
   let sgn (x: u64) = unsign (intrinsics.usignum64 (sign x))
   let abs (x: u64) = x
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax64 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin64 (sign x, sign y))
 
   let highest = 18446744073709551615u64
   let lowest = highest + 1u64
 
-  let num_bits = 64
+  let num_bits = 64i32
   let get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
   let set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (intrinsics.!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
@@ -863,7 +874,8 @@ module f64: (float with t = f64 with int_t = u64) = {
   let (x: f64) >= (y: f64) = intrinsics.le64 (y, x)
   let (x: f64) != (y: f64) = intrinsics.! (x == y)
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = intrinsics.fmax64 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin64 (x, y)
 
@@ -907,7 +919,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let to_bits (x: f64): u64 = u64m.i64 (intrinsics.to_bits64 x)
   let from_bits (x: u64): f64 = intrinsics.from_bits64 (intrinsics.sign_i64 x)
 
-  let num_bits = 64
+  let num_bits = 64i32
   let get_bit (bit: i32) (x: t) = u64m.get_bit bit (to_bits x)
   let set_bit (bit: i32) (x: t) (b: i32) = from_bits (u64m.set_bit bit (to_bits x) b)
 
@@ -970,7 +982,8 @@ module f32: (float with t = f32 with int_t = u32) = {
   let (x: f32) >= (y: f32) = intrinsics.le32 (y, x)
   let (x: f32) != (y: f32) = intrinsics.! (x == y)
 
-  let negate (x: t) = -x
+  let neg (x: t) = -x
+  let negate = neg
   let max (x: t) (y: t) = intrinsics.fmax32 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin32 (x, y)
 
@@ -1014,7 +1027,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let to_bits (x: f32): u32 = u32m.i32 (intrinsics.to_bits32 x)
   let from_bits (x: u32): f32 = intrinsics.from_bits32 (intrinsics.sign_i32 x)
 
-  let num_bits = 32
+  let num_bits = 32i32
   let get_bit (bit: i32) (x: t) = u32m.get_bit bit (to_bits x)
   let set_bit (bit: i32) (x: t) (b: i32) = from_bits (u32m.set_bit bit (to_bits x) b)
 

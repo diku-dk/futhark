@@ -551,17 +551,17 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
               lambdaBody = mkBody (oneStm tmpbnd) [Var tmp]
             }
     maybeDistributeStm newbnd acc
-maybeDistributeStm bnd@(Let _ aux (BasicOp Copy {})) acc =
-  distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
+maybeDistributeStm stm@(Let _ aux (BasicOp (Copy stm_arr))) acc =
+  distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
     return $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
-maybeDistributeStm bnd@(Let (Pattern [] [pe]) aux (BasicOp Opaque {})) acc
+maybeDistributeStm stm@(Let (Pattern [] [pe]) aux (BasicOp (Opaque (Var stm_arr)))) acc
   | not $ primType $ typeOf pe =
-    distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
+    distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
       return $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
-maybeDistributeStm bnd@(Let _ aux (BasicOp (Rearrange perm _))) acc =
-  distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
+maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange perm stm_arr))) acc =
+  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let r = length (snd nest) + 1
         perm' = [0 .. r -1] ++ map (+ r) perm
     -- We need to add a copy, because the original map nest
@@ -573,14 +573,14 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Rearrange perm _))) acc =
         [ Let (Pattern [] [PatElem arr' arr_t]) aux $ BasicOp $ Copy arr,
           Let outerpat aux $ BasicOp $ Rearrange perm' arr'
         ]
-maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
-  distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
+maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape reshape stm_arr))) acc =
+  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let reshape' =
           map DimNew (kernelNestWidths nest)
             ++ map DimNew (newDims reshape)
     return $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
-maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots _))) acc =
-  distributeSingleUnaryStm acc stm $ \nest outerpat arr -> do
+maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots stm_arr))) acc =
+  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots
     return $ oneStm $ Let outerpat aux $ BasicOp $ Rotate rots' arr
 maybeDistributeStm stm@(Let pat aux (BasicOp (Update arr slice (Var v)))) acc
@@ -644,15 +644,16 @@ distributeSingleUnaryStm ::
   (MonadFreshNames m, LocalScope lore m, DistLore lore) =>
   DistAcc lore ->
   Stm SOACS ->
+  VName ->
   (KernelNest -> PatternT Type -> VName -> DistNestT lore m (Stms lore)) ->
   DistNestT lore m (DistAcc lore)
-distributeSingleUnaryStm acc bnd f =
-  distributeSingleStm acc bnd >>= \case
+distributeSingleUnaryStm acc stm stm_arr f =
+  distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
-      | res == map Var (patternNames $ stmPattern bnd),
+      | res == map Var (patternNames $ stmPattern stm),
         (outer, _) <- nest,
         [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
-        boundInKernelNest nest `namesIntersection` freeIn bnd
+        boundInKernelNest nest `namesIntersection` freeIn stm
           == oneName (paramName arr_p),
         perfectlyMapped arr nest -> do
         addPostStms kernels
@@ -660,13 +661,13 @@ distributeSingleUnaryStm acc bnd f =
         localScope (typeEnvFromDistAcc acc') $ do
           postStm =<< f nest outerpat arr
           return acc'
-    _ -> addStmToAcc bnd acc
+    _ -> addStmToAcc stm acc
   where
     perfectlyMapped arr (outer, nest)
       | [(p, arr')] <- loopNestingParamsAndArrs outer,
         arr == arr' =
         case nest of
-          [] -> True
+          [] -> paramName p == stm_arr
           x : xs -> perfectlyMapped (paramName p) (x, xs)
       | otherwise =
         False
