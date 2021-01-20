@@ -25,7 +25,6 @@ import Data.List
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Sequence as Seq
-import Debug.Trace
 import Futhark.IR.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -65,8 +64,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
-    -- trace ("!!!! var_dims: "++pretty var_dims) $ var_dims == [0,1] || var_dims == [1,0],
-    -- var_dims == [0,1],
     -- get the variables on which the first result of redomap depends on
     [redomap_orig_res] <- patternValueElements pat_redomap,
     Just res_red_var <- M.lookup (patElemName redomap_orig_res) variance, -- variance of the reduce result
@@ -89,28 +86,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     [(load_A, inp_A), (load_B, inp_B)] <- if var_dims == [0,1] then zip_AB else reverse zip_AB,
     code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
-    trace
-      ( "Cosmin BlkReg debug: code1':\n" ++ pretty code1' ++ "\ncode 2:\n" ++ pretty code2
-          ++ "\ncode2': \n"
-          ++ pretty code2'
-          ++ "\n Orig SegSpace: "
-          ++ pretty seg_space
-          ++ "\n load_A: "
-          ++ pretty load_A
-          ++ "\n load_B: "
-          ++ pretty load_B
-          ++ "\n redomap orig result"
-          ++ pretty redomap_orig_res
-          ++ "\n Cosmin Kernel return: "
-          ++ pretty res_nm
-          ++ " type: "
-          ++ pretty ts
-          ++ "\n Old Kernel Body: \n"
-          ++ pretty old_kbody
-          ++ "\n END MAT-MAT Kernel!"
-      )
-      True,
-    -- TODO: remove the need for these assumptions !
 
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
@@ -466,9 +441,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
           kbody' = KernelBody () stms_seggroup ret_seggroup
       return $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
-
-    trace ("COSMIN kernel: "++pretty new_kernel) $
-      return $ Just (host_stms, new_kernel)
+    return $ Just (host_stms, new_kernel)
 mmBlkRegTiling _ = return Nothing
 
 ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
@@ -953,8 +926,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     Just (common_dim, inp_soac_arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
     not (null red_nes),
     -- assuming we have a budget of maxRegTile registers, we distribute
-    -- that budget across the result of redomap
-    reg_tile <- maxRegTile `quot` fromIntegral (length red_nes),
+    -- that budget across the result of redomap and the kernel result
+    num_res <- max (length red_nes) (length kres),
+    reg_tile <- maxRegTile `quot` fromIntegral num_res,
     reg_tile_se <- mkRegTileSe reg_tile,
     -- check that the element-type of the map and reduce are scalars:
     all (primType . paramDec) $ lambdaParams map_lam,
@@ -995,21 +969,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     length ker_res_nms == length kres,
     Pattern [] _ <- pat,
     all primType kertp,
-    all (variantToDim variance gtid_z) ker_res_nms,
-    trace
-      ( "Cosmin3D debug: old_kernel: " ++ pretty old_kernel ++ "\ncode1':\n" ++ pretty code1'
-          ++ "\ncode 2:\n"
-          ++ pretty code2
-          ++ "\ncode2': \n"
-          ++ pretty code2'
-          ++ "\n redomap orig result"
-          ++ pretty redomap_orig_res
-          ++ "\n Kernel return: "
-          ++ pretty ker_res_nms
-          ++ " type: "
-          ++ pretty kertp
-      )
-      True = do
+    all (variantToDim variance gtid_z) ker_res_nms = do
     -- HERE STARTS THE IMPLEMENTATION:
     (new_kernel, host_stms) <- runBinder $ do
       -- host code
@@ -1189,17 +1149,15 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
                     rss' <- letSubExp "rss" $ BasicOp $ Update rss slice $ Var thread_res
                     resultBodyM [rss']
-            else segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
+            else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) -> do
               letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
               letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
               rss_init <- forM kertp $ \res_tp ->
-                scratch "rss_init" (elemType res_tp) [rz]
-              css <- forM redomap_res $ \n_res ->
-                index "redomap_thd" n_res [ltid_y, ltid_x]
+                scratch "rss_init" (elemType res_tp) [rz, se1, se1]
               rss <- forLoop' rz rss_init $ \i rss_merge -> do
                 letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
-                forM_ (zip redomap_orig_res css) $ \(o_res, cs) -> do
-                  c <- index "redomap_elm" cs [i]
+                forM_ (zip redomap_orig_res redomap_res) $ \(o_res, n_res) -> do
+                  c <- index "redomap_thd" n_res [ltid_y, ltid_x, i]
                   letBindNames [patElemName o_res] =<< toExp (le64 c)
                   return c
                 res_els <-
@@ -1215,9 +1173,10 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                           resultBodyM $ map Var ker_res_nms
                       )
                       (eBody $ map eBlank kertp)
-                rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) ->
-                  update' "rss" rs_merge [i] res_el
-                resultBodyM $ map Var rss'
+                rss' <- forM (zip res_els rss_merge) $ \(res_el, rs_merge) -> do
+                  let slice = [DimFix $ Var i, DimFix se0, DimFix se0]
+                  letSubExp "rss" $ BasicOp $ Update rs_merge slice res_el
+                resultBodyM rss'
               return $ map Var rss
 
         ----------------------------------------------------------------
@@ -1247,7 +1206,6 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
 
       return $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
     -- END (new_kernel, host_stms) <- runBinder $ do
-    --trace ("Cosmin3D end\nhost_stms: " ++ pretty host_stms ++ "\nnew kernel: " ++ pretty new_kernel ++ "\n") $
     return $ Just (host_stms, new_kernel)
   where
     getResNm (Returns ResultMaySimplify (Var res_nm)) = Just res_nm
@@ -1282,7 +1240,5 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     variantSliceDim :: VarianceTable -> VName -> DimIndex SubExp -> Bool
     variantSliceDim variance gidz (DimFix (Var vnm)) = variantToDim variance gidz vnm
     variantSliceDim _ _ _ = False
---processDimSlice (DimFix d) = DimFix d
---processDimSlice (DimSlice beg n strd) = DimSlice se0 n se1
 
 doRegTiling3D _ = return Nothing

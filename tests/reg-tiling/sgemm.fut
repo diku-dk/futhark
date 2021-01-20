@@ -1,18 +1,10 @@
 -- SGEMM  performs the matrix-matrix operation:
 --    C := alpha * A * B + beta * C
 -- ==
--- compile input @ data-cos/ref-reg.in
--- output @ data-cos/ref-reg.out
---
--- compile input @ data-cos/ref-irreg.in
--- output @ data-cos/ref-irreg.out
+-- entry: main1 main2
+-- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 0.5f32 0.75f32} auto output
 
-
---
--- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 0.5f32 0.75f32}
--- output @ auto
-
-let main0 [n][m][q] (A: [n][q]f32) 
+entry main1 [n][m][q] (A: [n][q]f32) 
 					(B: [q][m]f32)
 					(C: [n][m]f32)
 					(alpha: f32)
@@ -25,7 +17,7 @@ let main0 [n][m][q] (A: [n][q]f32)
 				) (transpose B) Crow
 		) A C
 
-let main [n][m][q]  (A: [n][q]f32)
+entry main2 [n][m][q]  (A: [n][q]f32)
 					(B: [q][m]f32)
 					(C: [n][m]f32)
 					(alpha: f32)
@@ -34,12 +26,16 @@ let main [n][m][q]  (A: [n][q]f32)
 	map2(\Arow i ->
 			map2(\Bcol j ->
 					let y = beta * #[unsafe] C[i/2, j/2+1]
-					let x = map2 (*) Arow Bcol |> f32.sum
+					let x = map2 (*) Bcol Arow |> f32.sum
 					in  alpha * x + y
 				) (transpose B) (iota m)
 		) A (iota n)
 
-let main3 [n][m][q] (A: [n][q]f32)
+-- ==
+-- entry: main3
+-- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 0.5f32 0.75f32} auto output
+
+entry main3 [n][m][q] (A: [n][q]f32)
 					(B: [q][m]f32)
 					(C: [n][m]f32)
 					(D: [n][q]f32)
