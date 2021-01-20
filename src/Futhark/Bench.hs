@@ -129,26 +129,6 @@ decodeBenchResults = fmap unBenchResults . JSON.eitherDecode'
 
 --- Running benchmarks
 
-compareResult ::
-  (MonadError T.Text m, MonadIO m) =>
-  FilePath ->
-  (SBS.ByteString, [Value]) ->
-  (SBS.ByteString, [Value]) ->
-  m ()
-compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
-  case compareValues1 actual_vs expected_vs of
-    Just mismatch -> do
-      let actualf = program `replaceExtension` "actual"
-          expectedf = program `replaceExtension` "expected"
-      liftIO $ SBS.writeFile actualf actual_bs
-      liftIO $ SBS.writeFile expectedf expected_bs
-      throwError $
-        T.pack actualf <> " and " <> T.pack expectedf
-          <> " do not match:\n"
-          <> T.pack (show mismatch)
-    Nothing ->
-      return ()
-
 -- | How to run a benchmark.
 data RunOptions = RunOptions
   { runRuns :: Int,
@@ -226,10 +206,10 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   vs <- readResults server outs program <* freeOuts
 
   maybe_expected <-
-    liftIO $ maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
+    liftIO $ maybe (return Nothing) (fmap Just . getExpectedValues) expected_spec
 
   case maybe_expected of
-    Just expected -> compareResult program expected vs
+    Just expected -> checkResult program expected vs
     Nothing -> pure ()
 
   return
@@ -237,12 +217,10 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
       T.unlines $ map (T.unlines . snd) call_logs <> report
     )
   where
-    getValuesAndBS (SuccessValues vs) = do
-      vs' <- getValues futhark dir vs
-      bs <- getValuesBS futhark dir vs
-      return (LBS.toStrict bs, vs')
-    getValuesAndBS SuccessGenerateValues =
-      getValuesAndBS $ SuccessValues $ InFile ref_out
+    getExpectedValues (SuccessValues vs) =
+      getValues futhark dir vs
+    getExpectedValues SuccessGenerateValues =
+      getExpectedValues $ SuccessValues $ InFile ref_out
 
     dir = takeDirectory program
 
