@@ -268,7 +268,7 @@ parseEntryPoints =
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
 parseRunTags :: Parser [String]
-parseRunTags = try . many . lexeme' $ do
+parseRunTags = many . try . lexeme' $ do
   s <- some $ satisfy tagConstituent
   guard $ s `notElem` ["input", "structure", "warning"]
   return s
@@ -425,7 +425,7 @@ parseBlockBody n = do
     _ -> (:) <$> anySingle <*> parseBlockBody n
 
 nextWord :: Parser T.Text
-nextWord = T.pack <$> (anySingle `manyTill` satisfy isSpace)
+nextWord = takeWhileP Nothing $ not . isSpace
 
 parseWarning :: Parser WarningTest
 parseWarning = lexstr "warning:" >> parseExpectedWarning
