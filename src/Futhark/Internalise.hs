@@ -492,7 +492,8 @@ internaliseExp desc e@E.Apply {} = do
       ()
         | Just internalise <- isOverloadedFunction qfname (map fst args) loc ->
           internalise desc
-        | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+        | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
+          Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
           let tag ses = [(se, I.Observe) | se <- ses]
           args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
           let args'' = concatMap tag args'
