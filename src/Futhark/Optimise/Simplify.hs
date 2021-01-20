@@ -44,11 +44,11 @@ simplifyProg ::
 simplifyProg simpl rules blockers (Prog consts funs) = do
   (consts_vtable, consts') <-
     simplifyConsts
-      (UT.usages $ foldMap (freeIn . funDefBody) funs)
+      (UT.usages $ foldMap freeIn funs)
       (mempty, consts)
 
   funs' <- parPass (simplifyFun' consts_vtable) funs
-  let funs_uses = UT.usages $ foldMap (freeIn . funDefBody) funs'
+  let funs_uses = UT.usages $ foldMap freeIn funs'
 
   (_, consts'') <- simplifyConsts funs_uses (mempty, consts')
 

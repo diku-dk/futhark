@@ -31,7 +31,6 @@ import Language.Futhark.Parser hiding (EOF)
 import qualified Language.Futhark.Semantic as T
 import qualified Language.Futhark.TypeChecker as T
 import NeatInterpolation (text)
-import System.Console.GetOpt
 import qualified System.Console.Haskeline as Haskeline
 import System.Directory
 import System.FilePath
@@ -87,9 +86,18 @@ repl maybe_prog = do
         if quit then return () else toploop s
 
   maybe_init_state <- liftIO $ newFutharkiState 0 maybe_prog
-  case maybe_init_state of
-    Left err -> error $ "Failed to initialise interpreter state: " ++ err
-    Right init_state -> Haskeline.runInputT Haskeline.defaultSettings $ toploop init_state
+  s <- case maybe_init_state of
+    Left prog_err -> do
+      noprog_init_state <- liftIO $ newFutharkiState 0 Nothing
+      case noprog_init_state of
+        Left err ->
+          error $ "Failed to initialise interpreter state: " ++ err
+        Right s -> do
+          liftIO $ putStrLn prog_err
+          return s {futharkiLoaded = maybe_prog}
+    Right s ->
+      return s
+  Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
 
@@ -149,7 +157,7 @@ newFutharkiState count maybe_file = runExceptT $ do
   (imports, src, tenv, ienv) <- case maybe_file of
     Nothing -> do
       -- Load the builtins through the type checker.
-      (_, imports, src) <- badOnLeft show =<< runExceptT (readLibrary [])
+      (_, imports, src) <- badOnLeft show =<< runExceptT (readLibrary [] [])
       -- Then into the interpreter.
       ienv <-
         foldM
@@ -174,7 +182,7 @@ newFutharkiState count maybe_file = runExceptT $ do
       (ws, imports, src) <-
         badOnLeft show
           =<< liftIO
-            ( runExceptT (readProgram file)
+            ( runExceptT (readProgram [] file)
                 `catch` \(err :: IOException) ->
                   return (externalErrorS (show err))
             )

@@ -649,10 +649,10 @@ have the same type and shape.
 ............
 
 Construct a signed integer array whose first element is ``x`` and
-which proceeds stride of ``y-x`` until reaching ``z`` (inclusive).
-The ``..y`` part can be elided in which case a stride of 1 is used.  A
-run-time error occurs if ``z`` is lesser than ``x`` or ``y``, or if
-``x`` and ``y`` are the same value.
+which proceeds with a stride of ``y-x`` until reaching ``z``
+(inclusive).  The ``..y`` part can be elided in which case a stride of
+1 is used.  A run-time error occurs if ``z`` is less than ``x`` or
+``y``, or if ``x`` and ``y`` are the same value.
 
 In the general case, the size of the array produced by a range is
 unknown (see `Size types`_).  In a few cases, the size is known
@@ -668,9 +668,9 @@ This holds only if ``n`` is a variable or constant.
 ............
 
 Construct a signed integer array whose first elements is ``x``, and
-which proceeds upwards with a stride of ``y`` until reaching ``z``
+which proceeds upwards with a stride of ``y-x`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
-1 is used.  A run-time error occurs if ``z`` is lesser than ``x`` or
+1 is used.  A run-time error occurs if ``z`` is less than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
 
   * ``0..1..<n`` has size ``n``
@@ -683,7 +683,7 @@ This holds only if ``n`` is a variable or constant.
 ...............
 
 Construct a signed integer array whose first elements is ``x``, and
-which proceeds downwards with a stride of ``y`` until reaching ``z``
+which proceeds downwards with a stride of ``y-x`` until reaching ``z``
 (exclusive).  The ``..y`` part can be elided in which case a stride of
 -1 is used.  A run-time error occurs if ``z`` is greater than ``x`` or
 ``y``, or if ``x`` and ``y`` are the same value.
@@ -1029,7 +1029,7 @@ constraints imposed by size annotations.
 *Size-dependent types* are supported, as the names of parameters can
 be used in the return type of a function::
 
-  let replicate 't (n: i32) (x: t): [n]t = ...
+  let replicate 't (n: i64) (x: t): [n]t = ...
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 

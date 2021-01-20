@@ -18,9 +18,9 @@ Execute the given program by evaluating the ``main`` function with
 arguments read from standard input, and write the results on standard
 output.
 
-``futhark-run`` is very slow, and in practice only useful for testing,
+``futhark run`` is very slow, and in practice only useful for testing,
 teaching, and experimenting with the language.  Certain special
-debugging functions are available in ``futhark-run``:
+debugging functions are available in ``futhark run``:
 
 ``trace 'a : a -> a``
   Semantically identity, but prints the value on standard output.
