@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Interaction between slice simplification and in-place updates
     (#1222).
 
+  * Problem with user-defined functions with the same name as intrinsics.
+
 ## [0.18.5]
 
 ### Fixed
