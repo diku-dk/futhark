@@ -225,7 +225,10 @@ parseNatural =
     num c = ord c - ord '0'
 
 restOfLine :: Parser T.Text
-restOfLine = takeWhileP Nothing (/= '\n') <* eol
+restOfLine = restOfLine_ <* eol
+
+restOfLine_ :: Parser T.Text
+restOfLine_ = takeWhileP Nothing (/= '\n')
 
 parseDescription :: Parser T.Text
 parseDescription =
@@ -268,7 +271,7 @@ parseEntryPoints =
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
 parseRunTags :: Parser [String]
-parseRunTags = try . many . lexeme' $ do
+parseRunTags = many . try . lexeme' $ do
   s <- some $ satisfy tagConstituent
   guard $ s `notElem` ["input", "structure", "warning"]
   return s
@@ -317,7 +320,7 @@ parseExpectedResult =
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
-  s <- T.strip <$> restOfLine <* postlexeme
+  s <- T.strip <$> restOfLine_ <* postlexeme
   if T.null s
     then return AnyError
     else -- blankCompOpt creates a regular expression that treats
@@ -425,13 +428,13 @@ parseBlockBody n = do
     _ -> (:) <$> anySingle <*> parseBlockBody n
 
 nextWord :: Parser T.Text
-nextWord = T.pack <$> (anySingle `manyTill` satisfy isSpace)
+nextWord = takeWhileP Nothing $ not . isSpace
 
 parseWarning :: Parser WarningTest
 parseWarning = lexstr "warning:" >> parseExpectedWarning
   where
     parseExpectedWarning = lexeme $ do
-      s <- T.strip <$> restOfLine
+      s <- T.strip <$> restOfLine_
       ExpectedWarning s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
 parseExpectedStructure :: Parser StructureTest
