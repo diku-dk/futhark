@@ -57,7 +57,7 @@ import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Lore (mkWiseBody)
 import Futhark.Pass
 import Futhark.Tools
-import Futhark.Util (splitFromEnd, takeLast)
+import Futhark.Util (splitAt3, splitFromEnd, takeLast)
 
 data AllocStm
   = SizeComputation VName (PrimExp VName)
@@ -941,17 +941,46 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
         let (_, val_res) = splitFromEnd num_vals res
         mem_ixfs <- mapM subExpIxFun val_res
         return (Body () bnds' res, mem_ixfs)
-allocInExp (MkAcc arrs shape op) =
-  MkAcc arrs shape <$> traverse onOp op
+allocInExp (MkAcc accshape arrs op) =
+  MkAcc accshape arrs <$> traverse onOp op
   where
     onOp (lam, nes) = do
-      params <- mapM onParam $ lambdaParams lam
-      lam' <- allocInLambda params (lambdaBody lam) (lambdaReturnType lam)
+      let num_vs = length (lambdaReturnType lam)
+          num_is = length (lambdaParams lam) - 2 * num_vs
+          (i_params, x_params, y_params) =
+            splitAt3 num_is num_vs $ lambdaParams lam
+          i_params' = map ((`Param` MemPrim int64) . paramName) i_params
+          is = map (DimFix . Var . paramName) i_params'
+      x_params' <- zipWithM (onXParam is) x_params arrs
+      y_params' <- zipWithM (onYParam is) y_params arrs
+      lam' <-
+        allocInLambda
+          (i_params' <> x_params' <> y_params')
+          (lambdaBody lam)
+          (lambdaReturnType lam)
       return (lam', nes)
 
-    onParam (Param p (Prim t)) =
+    mkP p pt shape u mem ixfun is =
+      Param p . MemArray pt shape u . ArrayIn mem . IxFun.slice ixfun $
+        fmap (fmap pe64) $ is ++ map sliceDim (shapeDims shape)
+
+    onXParam _ (Param p (Prim t)) _ =
       return $ Param p (MemPrim t)
-    onParam p =
+    onXParam is (Param p (Array (ElemPrim pt) shape u)) arr = do
+      (mem, ixfun) <- lookupArraySummary arr
+      return $ mkP p pt shape u mem ixfun is
+    onXParam _ p _ =
+      error $ "Cannot handle MkAcc param: " ++ pretty p
+
+    onYParam _ (Param p (Prim t)) _ =
+      return $ Param p (MemPrim t)
+    onYParam is (Param p (Array (ElemPrim pt) shape u)) arr = do
+      arr_t <- lookupType arr
+      mem <- allocForArray arr_t DefaultSpace
+      let base_dims = map pe64 $ arrayDims arr_t
+          ixfun = IxFun.iota base_dims
+      pure $ mkP p pt shape u mem ixfun is
+    onYParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ pretty p
 allocInExp e = mapExpM alloc e
   where

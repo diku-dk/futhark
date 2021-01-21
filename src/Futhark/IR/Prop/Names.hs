@@ -145,17 +145,23 @@ freeWalker ::
     FreeIn (FParamInfo lore),
     FreeIn (LParamInfo lore),
     FreeIn (LetDec lore),
+    FreeIn (RetType lore),
+    FreeIn (BranchType lore),
     FreeIn (Op lore)
   ) =>
   Walker lore (State FV)
 freeWalker =
-  identityWalker
+  Walker
     { walkOnSubExp = modify . (<>) . freeIn',
       walkOnBody = \scope body -> do
         modify $ (<>) $ freeIn' body
         modify $ fvBind (namesFromList (M.keys scope)),
       walkOnVName = modify . (<>) . fvName,
-      walkOnOp = modify . (<>) . freeIn'
+      walkOnOp = modify . (<>) . freeIn',
+      walkOnFParam = modify . (<>) . freeIn',
+      walkOnLParam = modify . (<>) . freeIn',
+      walkOnRetType = modify . (<>) . freeIn',
+      walkOnBranchType = modify . (<>) . freeIn'
     }
 
 -- | Return the set of variable names that are free in the given
@@ -167,6 +173,8 @@ freeInStmsAndRes ::
     FreeIn (LParamInfo lore),
     FreeIn (FParamInfo lore),
     FreeDec (BodyDec lore),
+    FreeIn (RetType lore),
+    FreeIn (BranchType lore),
     FreeDec (ExpDec lore)
   ) =>
   Stms lore ->
@@ -210,6 +218,7 @@ instance
     FreeIn (LParamInfo lore),
     FreeIn (LetDec lore),
     FreeIn (RetType lore),
+    FreeIn (BranchType lore),
     FreeIn (Op lore)
   ) =>
   FreeIn (FunDef lore)
@@ -224,6 +233,8 @@ instance
     FreeIn (FParamInfo lore),
     FreeIn (LParamInfo lore),
     FreeIn (LetDec lore),
+    FreeIn (RetType lore),
+    FreeIn (BranchType lore),
     FreeIn (Op lore)
   ) =>
   FreeIn (Lambda lore)
@@ -238,6 +249,8 @@ instance
     FreeIn (FParamInfo lore),
     FreeIn (LParamInfo lore),
     FreeIn (LetDec lore),
+    FreeIn (RetType lore),
+    FreeIn (BranchType lore),
     FreeIn (Op lore)
   ) =>
   FreeIn (Body lore)
@@ -251,6 +264,8 @@ instance
     FreeIn (FParamInfo lore),
     FreeIn (LParamInfo lore),
     FreeIn (LetDec lore),
+    FreeIn (RetType lore),
+    FreeIn (BranchType lore),
     FreeIn (Op lore)
   ) =>
   FreeIn (Exp lore)
@@ -267,6 +282,8 @@ instance
           freeIn' (ctxinits ++ valinits) <> freeIn' form
             <> freeIn' (ctxparams ++ valparams)
             <> freeIn' loopbody
+  freeIn' (MkAcc shape arrs op) =
+    freeIn' shape <> freeIn' arrs <> foldMap freeIn' op
   freeIn' e = execState (walkExpM freeWalker e) mempty
 
 instance
@@ -275,6 +292,8 @@ instance
     FreeIn (FParamInfo lore),
     FreeIn (LParamInfo lore),
     FreeIn (LetDec lore),
+    FreeIn (RetType lore),
+    FreeIn (BranchType lore),
     FreeIn (Op lore)
   ) =>
   FreeIn (Stm lore)

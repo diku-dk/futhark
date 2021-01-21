@@ -1,6 +1,5 @@
 -- Writing an array.
 -- ==
--- tags { disable }
 -- input { [[2],[3],[4]] }
 -- output { [[3i32], [3i32], [5i32]] }
 

@@ -920,7 +920,7 @@ defCompileBasicOp _ Reshape {} =
 defCompileBasicOp _ UnAcc {} =
   return ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = do
-  let is' = map (DimFix . toInt64Exp) is
+  let is' = map toInt64Exp is
 
   -- We need to figure out whether we are updating a scatter-like
   -- accumulator or a generalised reduction.
@@ -931,27 +931,31 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = do
   -- we might otherwise end up declaring lambda parameters (if any) multiple
   -- times, as they are duplicated every time we do an UpdateAcc for
   -- the same accumulator.
-  sWhen (inBounds is' dims) $
+  sWhen (inBounds (map DimFix is') dims) $
     sComment "UpdateAcc" $
       case op of
         Nothing ->
           -- Scatter-like.
-          forM_ (zip arrs vs) $ \(arr, v) -> copyDWIM arr is' v []
+          forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
         Just (lam, _) -> do
           -- Generalised reduction.
           dLParams $ lambdaParams lam
-          let (x_params, y_params) =
-                splitAt (length vs) $ map paramName $ lambdaParams lam
+          let num_is =
+                length (lambdaParams lam) - 2 * length (lambdaReturnType lam)
+              (i_params, x_params, y_params) =
+                splitAt3 num_is (length vs) $ map paramName $ lambdaParams lam
+
+          zipWithM_ (<--) (map (`mkTV` int64) i_params) is'
 
           forM_ (zip x_params arrs) $ \(xp, arr) ->
-            copyDWIM xp [] (Var arr) is'
+            copyDWIMFix xp [] (Var arr) is'
 
           forM_ (zip y_params vs) $ \(yp, v) ->
             copyDWIM yp [] v []
 
           compileStms mempty (bodyStms $ lambdaBody lam) $
             forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, se) ->
-              copyDWIM arr is' se []
+              copyDWIMFix arr is' se []
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "

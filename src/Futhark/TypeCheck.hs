@@ -1091,10 +1091,13 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
 checkExp (MkAcc shape arrs op) = do
   mapM_ (require [Prim int64]) (shapeDims shape)
   arrs_ts <- mapM checkArrIdent arrs
-  let mkArg t = (rowType t, mempty)
 
   case op of
     Just (lam, nes) -> do
+      let num_is =
+            length (lambdaParams lam)
+              - 2 * length (lambdaReturnType lam)
+          mkArrArg t = (stripArray num_is t, mempty)
       nes_ts <- mapM checkSubExp nes
       unless (nes_ts == lambdaReturnType lam) $
         bad $
@@ -1103,7 +1106,8 @@ checkExp (MkAcc shape arrs op) = do
               [ "Accumulator operator return type: " ++ pretty (lambdaReturnType lam),
                 "Type of neutral elements: " ++ pretty nes_ts
               ]
-      checkLambda lam $ map mkArg $ arrs_ts ++ arrs_ts
+      checkLambda lam $
+        replicate num_is (Prim int64, mempty) ++ map mkArrArg (arrs_ts ++ arrs_ts)
     Nothing ->
       return ()
 checkExp (Op op) = do

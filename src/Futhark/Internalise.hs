@@ -1270,8 +1270,10 @@ internaliseStreamAcc desc dest op lam bs = do
       Just (op_lam, ne) -> do
         ne' <- internaliseExp "hist_ne" ne
         ne_ts <- mapM I.subExpType ne'
-        (lam_params, lam_body, lam_rettype) <- internaliseLambda op_lam $ ne_ts ++ ne_ts
-        let op_lam' = I.Lambda lam_params lam_body lam_rettype
+        (lam_params, lam_body, lam_rettype) <-
+          internaliseLambda op_lam $ ne_ts ++ ne_ts
+        idxp <- newParam "idx" $ I.Prim int64
+        let op_lam' = I.Lambda (idxp : lam_params) lam_body lam_rettype
         return $ Just (op_lam', ne')
       Nothing ->
         return Nothing
@@ -1284,10 +1286,7 @@ internaliseStreamAcc desc dest op lam bs = do
       map I.Var $ acc : bs'
 
   acc' <-
-    letExp "scatter_acc_res" $
-      I.Op $
-        I.Screma w (I.mapSOAC lam') $
-          acc : bs'
+    letExp "scatter_acc_res" . I.Op . I.Screma w (I.mapSOAC lam') $ acc : bs'
 
   letTupExp' desc (BasicOp $ UnAcc acc' dest_ts)
 

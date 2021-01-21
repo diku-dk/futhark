@@ -182,8 +182,10 @@ usageInExp (If _ tbranch fbranch _) =
   foldMap consumedUsage $
     namesToList $
       consumedInBody tbranch <> consumedInBody fbranch
+usageInExp (MkAcc _ arrs _) =
+  foldMap consumedUsage arrs
 usageInExp (BasicOp (Update src _ _)) =
   consumedUsage src
 usageInExp (Op op) =
   mconcat $ map consumedUsage (namesToList $ consumedInOp op)
-usageInExp _ = mempty
+usageInExp (BasicOp _) = mempty
