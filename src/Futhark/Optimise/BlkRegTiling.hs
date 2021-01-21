@@ -83,10 +83,9 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     length tmp_stms == length arrs,
     -- [inp_A, inp_B] <- arrs,
     zip_AB <- zip tmp_stms arrs,
-    [(load_A, inp_A), (load_B, inp_B)] <- if var_dims == [0,1] then zip_AB else reverse zip_AB,
+    [(load_A, inp_A), (load_B, inp_B)] <- if var_dims == [0, 1] then zip_AB else reverse zip_AB,
     -- code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
-
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
     (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims_rev <- reverse $ unSegSpace seg_space,
@@ -338,7 +337,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                                         -- the inputs to map are supposed to be permutted with the
                                         -- inverted permutation, so as to reach the original position;
                                         -- it just so happens that the inverse of [a,b] is [b,a]
-                                        let map_inp_reg = if var_dims == [0,1] then [a,b] else [b,a]
+                                        let map_inp_reg = if var_dims == [0, 1] then [a, b] else [b, a]
 
                                         addStms $
                                           rebindLambda map_lam' map_inp_reg [map_res]
@@ -679,13 +678,13 @@ segMap2D ::
   ) ->
   Binder Kernels [VName]
 segMap2D desc lvl manifest (dim_y, dim_x) f = do
-  ltid_x <- newVName "ltid_x"
+  ltid_xx <- newVName "ltid_x"
   ltid_flat <- newVName "ltid_flat"
-  ltid_y <- newVName "ltid_y"
-  let segspace = SegSpace ltid_flat [(ltid_y, dim_y), (ltid_x, dim_x)]
+  ltid_yy <- newVName "ltid_y"
+  let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
 
   ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_y, ltid_x)
+    res <- f (ltid_yy, ltid_xx)
     ts <- mapM subExpType res
     return (ts, res)
 
@@ -997,8 +996,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       let grid_pexp =
             foldl (\x d -> pe64 d * x) gridxyz_pexp $
               map snd rem_outer_dims_rev
-      grid_size <- letSubExp "grid_size" =<< toExp grid_pexp
-      group_size <- letSubExp "group_size" =<< toExp (pe64 ty * pe64 tx)
+      grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
+      group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
       let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
 
       count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz group_size
@@ -1240,5 +1239,4 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     variantSliceDim :: VarianceTable -> VName -> DimIndex SubExp -> Bool
     variantSliceDim variance gidz (DimFix (Var vnm)) = variantToDim variance gidz vnm
     variantSliceDim _ _ _ = False
-
 doRegTiling3D _ = return Nothing
