@@ -1367,14 +1367,7 @@ $esc:("#endif")
 -- | Produce header and implementation files.
 asLibrary :: CParts -> (String, String)
 asLibrary parts =
-  ( "#pragma once\n\n"
-      <> "#ifdef __cplusplus\n"
-      <> "extern \"C\" {\n"
-      <> "#endif\n\n"
-      <> cHeader parts
-      <> "\n#ifdef __cplusplus\n"
-      <> "}\n"
-      <> "#endif\n",
+  ( "#pragma once\n\n" <> cHeader parts,
     gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts
   )
 
@@ -1415,6 +1408,10 @@ $esc:("#include <stdio.h>")
 $esc:("#include <float.h>")
 $esc:(header_extra)
 
+$esc:("#ifdef __cplusplus")
+$esc:("extern \"C\" {")
+$esc:("#endif")
+
 $esc:("\n// Initialisation\n")
 $edecls:(initDecls endstate)
 
@@ -1430,6 +1427,10 @@ $edecls:(entryDecls endstate)
 $esc:("\n// Miscellaneous\n")
 $edecls:(miscDecls endstate)
 $esc:("#define FUTHARK_BACKEND_"++backend)
+
+$esc:("#ifdef __cplusplus")
+$esc:("}")
+$esc:("#endif")
                            |]
 
   let utildefs =
