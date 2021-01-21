@@ -305,7 +305,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
           Left (CmdFailure _ err) ->
             pure $ ErrorResult $ T.unlines err
           Right _ ->
-            SuccessResult . snd
+            SuccessResult
               <$> readResults server outs program
                 <* liftCommand (cmdFree server outs)
 
@@ -353,22 +353,11 @@ compareResult ::
   m ()
 compareResult _ _ _ (Succeeds Nothing) SuccessResult {} =
   return ()
-compareResult entry index program (Succeeds (Just expectedResult)) (SuccessResult actualResult) =
-  case compareValues1 actualResult expectedResult of
-    Just mismatch -> do
-      let actualf = program <.> T.unpack entry <.> show index <.> "actual"
-          expectedf = program <.> T.unpack entry <.> show index <.> "expected"
-      liftIO . SBS.writeFile actualf . T.encodeUtf8 . T.unlines $
-        map prettyText actualResult
-      liftIO . SBS.writeFile expectedf . T.encodeUtf8 . T.unlines $
-        map prettyText expectedResult
-      E.throwError $
-        T.pack actualf <> " and " <> T.pack expectedf
-          <> " do not match:\n"
-          <> T.pack (show mismatch)
-          <> "\n"
-    Nothing ->
-      return ()
+compareResult entry index program (Succeeds (Just expected_vs)) (SuccessResult actual_vs) =
+  checkResult
+    (program <.> T.unpack entry <.> show index)
+    expected_vs
+    actual_vs
 compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult actualError) =
   checkError expectedError actualError
 compareResult _ _ _ (Succeeds _) (ErrorResult err) =
