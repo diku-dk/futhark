@@ -37,6 +37,7 @@ import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
+import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
@@ -476,6 +477,7 @@ commandLineOptions =
     typedPassOption soacsProg Seq firstOrderTransform "f",
     soacsPassOption fuseSOACs "o",
     soacsPassOption inlineFunctions [],
+    soacsPassOption revADEntryPoints [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
     kernelsPassOption unstreamKernels [],
