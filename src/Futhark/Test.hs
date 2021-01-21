@@ -17,6 +17,7 @@ module Futhark.Test
     withValuesFile,
     compareValues,
     compareValues1,
+    checkResult,
     testRunReferenceOutput,
     getExpectedResult,
     compileProgram,
@@ -48,6 +49,7 @@ import Control.Exception (catch)
 import qualified Control.Exception.Base as E
 import Control.Monad
 import Control.Monad.Except
+import qualified Data.Binary as Bin
 import qualified Data.ByteString as SBS
 import qualified Data.ByteString.Lazy as BS
 import Data.Char
@@ -225,7 +227,10 @@ parseNatural =
     num c = ord c - ord '0'
 
 restOfLine :: Parser T.Text
-restOfLine = takeWhileP Nothing (/= '\n') <* eol
+restOfLine = restOfLine_ <* eol
+
+restOfLine_ :: Parser T.Text
+restOfLine_ = takeWhileP Nothing (/= '\n')
 
 parseDescription :: Parser T.Text
 parseDescription =
@@ -268,7 +273,7 @@ parseEntryPoints =
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
 parseRunTags :: Parser [String]
-parseRunTags = try . many . lexeme' $ do
+parseRunTags = many . try . lexeme' $ do
   s <- some $ satisfy tagConstituent
   guard $ s `notElem` ["input", "structure", "warning"]
   return s
@@ -317,7 +322,7 @@ parseExpectedResult =
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
-  s <- T.strip <$> restOfLine <* postlexeme
+  s <- T.strip <$> restOfLine_ <* postlexeme
   if T.null s
     then return AnyError
     else -- blankCompOpt creates a regular expression that treats
@@ -425,13 +430,13 @@ parseBlockBody n = do
     _ -> (:) <$> anySingle <*> parseBlockBody n
 
 nextWord :: Parser T.Text
-nextWord = T.pack <$> (anySingle `manyTill` satisfy isSpace)
+nextWord = takeWhileP Nothing $ not . isSpace
 
 parseWarning :: Parser WarningTest
 parseWarning = lexstr "warning:" >> parseExpectedWarning
   where
     parseExpectedWarning = lexeme $ do
-      s <- T.strip <$> restOfLine
+      s <- T.strip <$> restOfLine_
       ExpectedWarning s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
 parseExpectedStructure :: Parser StructureTest
@@ -782,7 +787,7 @@ readResults ::
   Server ->
   [VarName] ->
   FilePath ->
-  m (SBS.ByteString, [Value])
+  m [Value]
 readResults server outs program =
   join . liftIO . withSystemTempFile "futhark-output" $ \outputf outputh -> do
     hClose outputh
@@ -797,7 +802,7 @@ readResults server outs program =
             let actualf = program `addExtension` "actual"
             liftIO $ BS.writeFile actualf bytes
             pure $ throwError $ T.pack e <> "\n(See " <> T.pack actualf <> ")"
-          Right vs -> pure $ pure (BS.toStrict bytes, vs)
+          Right vs -> pure $ pure vs
 
 -- | Ensure that any reference output files exist, or create them (by
 -- compiling the program with the reference compiler and running it on
@@ -864,3 +869,28 @@ determineTuning (Just ext) program = do
           " (using " <> takeFileName (program <.> ext) <> ")"
         )
     else return ([], mempty)
+
+-- | Check that the result is as expected, and write files and throw
+-- an error if not.
+checkResult ::
+  (MonadError T.Text m, MonadIO m) =>
+  FilePath ->
+  [Value] ->
+  [Value] ->
+  m ()
+checkResult program expected_vs actual_vs =
+  case compareValues actual_vs expected_vs of
+    mismatch : mismatches -> do
+      let actualf = program <.> "actual"
+          expectedf = program <.> "expected"
+      liftIO $ BS.writeFile actualf $ mconcat $ map Bin.encode actual_vs
+      liftIO $ BS.writeFile expectedf $ mconcat $ map Bin.encode expected_vs
+      throwError $
+        T.pack actualf <> " and " <> T.pack expectedf
+          <> " do not match:\n"
+          <> T.pack (show mismatch)
+          <> if null mismatches
+            then mempty
+            else "\n...and " <> prettyText (length mismatches) <> " other mismatches."
+    [] ->
+      return ()
