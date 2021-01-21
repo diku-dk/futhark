@@ -9,13 +9,12 @@ module Futhark.Optimise.TileLoops (tileLoops) where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (foldl')
-
-import Futhark.Optimise.BlkRegTiling
 import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Sequence as Seq
 import Futhark.IR.Kernels
 import Futhark.MonadFreshNames
+import Futhark.Optimise.BlkRegTiling
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -43,9 +42,8 @@ optimiseStms stms =
   localScope (scopeOf stms) $
     mconcat <$> mapM optimiseStm (stmsToList stms)
 
-
 optimiseStm :: Stm Kernels -> TileM (Stms Kernels)
-optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody)))) = do
+optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
   res3dtiling <- doRegTiling3D stm
   case res3dtiling of
     Just (extra_bnds, stmt') -> return (extra_bnds <> oneStm stmt')
@@ -56,8 +54,8 @@ optimiseStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread{} space ts kbody))
         Nothing -> do
           (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
           return $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
-  where initial_variance = M.map mempty $ scopeOfSegSpace space
-
+  where
+    initial_variance = M.map mempty $ scopeOfSegSpace space
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
   where
