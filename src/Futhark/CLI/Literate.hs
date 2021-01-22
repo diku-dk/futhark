@@ -530,6 +530,7 @@ processDirective imgdir server i (DirectiveAnim e params) = do
             _ -> nope
 
     ppmsToVideo dir = do
+      liftIO $ createDirectoryIfMissing True imgdir
       void $
         system
           "ffmpeg"
