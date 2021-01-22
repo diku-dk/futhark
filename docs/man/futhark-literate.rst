@@ -67,7 +67,9 @@ The following directives are supported:
 
   * ``fps: <int>``
 
-  Shells out to ``fmpeg`` to actually create the video file.
+  * ``format: <webm|gif>``
+
+  Shells out to ``ffmpeg`` to actually create the video file.
 
   ``e`` must be one of the following:
 

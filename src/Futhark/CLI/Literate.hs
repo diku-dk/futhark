@@ -44,7 +44,8 @@ import Text.Printf
 data AnimParams = AnimParams
   { animFPS :: Maybe Int,
     animLoop :: Maybe Bool,
-    animAutoplay :: Maybe Bool
+    animAutoplay :: Maybe Bool,
+    animFormat :: Maybe T.Text
   }
   deriving (Show)
 
@@ -53,7 +54,8 @@ defaultAnimParams =
   AnimParams
     { animFPS = Nothing,
       animLoop = Nothing,
-      animAutoplay = Nothing
+      animAutoplay = Nothing,
+      animFormat = Nothing
     }
 
 data Directive
@@ -107,7 +109,8 @@ pprDirective True (DirectiveAnim e params) =
       catMaybes
         [ p "fps" animFPS PP.ppr,
           p "loop" animLoop ppBool,
-          p "autoplay" animAutoplay ppBool
+          p "autoplay" animAutoplay ppBool,
+          p "format" animFormat PP.strictText
         ]
     ppBool b = if b then "true" else "false"
     p s f ppr = do
@@ -180,7 +183,7 @@ parseAnimParams =
     parseParams params =
       choice
         [ choice
-            [pLoop params, pFPS params, pAutoplay params]
+            [pLoop params, pFPS params, pAutoplay params, pFormat params]
             >>= parseParams,
           pure params
         ]
@@ -197,6 +200,10 @@ parseAnimParams =
       token "autoplay:"
       b <- parseBool
       pure params {animAutoplay = Just b}
+    pFormat params = do
+      token "format:"
+      s <- lexeme $ takeWhileP Nothing (not . isSpace)
+      pure params {animFormat = Just s}
 
 parseBlock :: Parser Block
 parseBlock =
@@ -343,7 +350,11 @@ imgBlock f = "\n\n![](" <> T.pack f <> ")\n\n"
 videoBlock :: AnimParams -> FilePath -> T.Text
 videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
   where
-    opts' = "{" <> T.unwords [loop, autoplay] <> "}"
+    opts'
+      | all T.null [loop, autoplay] =
+        mempty
+      | otherwise =
+        "{" <> T.unwords [loop, autoplay] <> "}"
     boolOpt s prop
       | Just b <- prop opts =
         if b then s <> "=\"true\"" else s <> "=\"false\""
@@ -476,6 +487,9 @@ processDirective imgdir server i (DirectiveGnuplot e script) = do
       pure $ imgBlock pngfile
 --
 processDirective imgdir server i (DirectiveAnim e params) = do
+  when (format `notElem` ["webm", "gif"]) $
+    throwError $ "Unknown animation format: " <> format
+
   v <- evalExp server e
   let nope =
         throwError $
@@ -501,10 +515,19 @@ processDirective imgdir server i (DirectiveAnim e params) = do
           ppmsToVideo dir
     _ ->
       nope
+
+  when (animFormat params == Just "gif") $ do
+    void $ system "ffmpeg" ["-i", webmfile, giffile] mempty
+    liftIO $ removeFile webmfile
+
+  pure $ videoBlock params animfile
   where
     framerate = fromMaybe 30 $ animFPS params
-    webmfile = imgdir </> "anim" <> show i <.> ".webm"
+    format = fromMaybe "webm" $ animFormat params
+    webmfile = imgdir </> "anim" <> show i <.> "webm"
+    giffile = imgdir </> "anim" <> show i <.> "gif"
     ppmfile dir j = dir </> printf "frame%010d.ppm" (j :: Int)
+    animfile = imgdir </> "anim" <> show i <.> T.unpack format
 
     renderFrames dir (stepfun, closure) initial num_frames =
       foldM_ frame initial [0 .. num_frames -1]
@@ -548,7 +571,6 @@ processDirective imgdir server i (DirectiveAnim e params) = do
             webmfile
           ]
           mempty
-      pure $ videoBlock params webmfile
 
     writePPMFile dir j ppm = do
       let fname = ppmfile dir j
