@@ -121,11 +121,17 @@ parseIntConst = do
     [ signed Int8Value x "i8",
       signed Int16Value x "i16",
       signed Int32Value x "i32",
-      signed Int64Value x "i64"
+      signed Int64Value x "i64",
+      unsigned Int8Value x "u8",
+      unsigned Int16Value x "u16",
+      unsigned Int32Value x "u32",
+      unsigned Int64Value x "u64"
     ]
   where
     signed mk x suffix =
       suffix $> SignedValue (mk (fromInteger x))
+    unsigned mk x suffix =
+      suffix $> UnsignedValue (mk (fromInteger x))
 
 parseFloatConst :: Parser PrimValue
 parseFloatConst = do
