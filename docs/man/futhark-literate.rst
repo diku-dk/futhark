@@ -60,16 +60,23 @@ The following directives are supported:
 
 * ``> :anim e[; parameters...]``
 
-  Creates a video from ``e``, which must be a 3D array where the 2D
-  elements is of a type acceptable to ``:img``.  The outermost
-  dimension is the number of frames.  The optional parameters are
-  lines of the form *key: value*:
+  Creates a video from ``e``.  The optional parameters are lines of
+  the form *key: value*:
 
   * ``repeat: <true|false>``
 
   * ``fps: <int>``
 
   Shells out to ``fmpeg`` to actually create the video file.
+
+  ``e`` must be one of the following:
+
+  * A 3D array where the 2D elements is of a type acceptable to
+    ``:img``, and the outermost dimension is the number of frames.
+
+  * A triple ``(s -> (img,s), s, i64)``, for some types ``s`` and
+    ``img``, where ``img`` is an array acceptable to ``:img``.  This
+    means not all frames have to be held in memory at once.
 
 * ``> :brief <directive>``
 
