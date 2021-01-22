@@ -698,20 +698,15 @@ checkOneDec (ValDec vb) = do
   return (mempty, env, ValDec vb')
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
-checkDecs (LocalDec d loc : ds) = do
-  (d_abstypes, d_env, d') <- checkOneDec d
-  (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
-  return
-    ( d_abstypes <> ds_abstypes,
-      ds_env,
-      LocalDec d' loc : ds'
-    )
 checkDecs (d : ds) = do
   (d_abstypes, d_env, d') <- checkOneDec d
   (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
   return
     ( d_abstypes <> ds_abstypes,
-      ds_env <> d_env,
+      case d' of
+        LocalDec {} -> ds_env
+        ImportDec {} -> ds_env
+        _ -> ds_env <> d_env,
       d' : ds'
     )
 checkDecs [] =
