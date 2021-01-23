@@ -861,6 +861,11 @@ generateCond orig_p orig_ses = do
       return ([], id_ses, rest_ses)
     compares (E.PatternParens pat _) ses =
       compares pat ses
+    -- XXX: treat empty tuples and records as bool.
+    compares (E.TuplePattern [] loc) ses =
+      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
+    compares (E.RecordPattern [] loc) ses =
+      compares (E.Wildcard (Info $ E.Scalar $ E.Prim E.Bool) loc) ses
     compares (E.TuplePattern pats _) ses =
       comparesMany pats ses
     compares (E.RecordPattern fs _) ses =
