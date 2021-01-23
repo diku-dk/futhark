@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Names from transitive imports no longer leak into scope (#1231).
 
+  * Pattern-matching unit values now works (#1232).
+
 ## [0.18.5]
 
 ### Fixed
