@@ -27,6 +27,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
+import Futhark.Util.Pretty (prettyOneLine)
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.Semantic (Imports)
 
@@ -176,7 +177,7 @@ entryPoint params (eret, crets) =
       | otherwise =
         [I.TypeOpaque desc $ length ts]
       where
-        desc = maybe (pretty t') typeExpOpaqueName $ E.entryAscribed t
+        desc = maybe (prettyOneLine t') typeExpOpaqueName $ E.entryAscribed t
         t' = noSizes (E.entryType t) `E.setUniqueness` Nonunique
     typeExpOpaqueName (TEApply te TypeArgExpDim {} _) =
       typeExpOpaqueName te
@@ -186,7 +187,7 @@ entryPoint params (eret, crets) =
             ++ "_"
             ++ show (1 + d)
             ++ "d"
-    typeExpOpaqueName te = pretty te
+    typeExpOpaqueName te = prettyOneLine te
 
     withoutDims (TEArray te _ _) =
       let (d, te') = withoutDims te
