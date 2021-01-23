@@ -129,6 +129,13 @@ compileProg mode class_name prog = do
                 [Assign (Var "default_tile_size") $ Var "optarg"]
             },
           Option
+            { optionLongName = "default-reg-tile-size",
+              optionShortName = Nothing,
+              optionArgument = RequiredArgument "int",
+              optionAction =
+                [Assign (Var "default_reg_tile_size") $ Var "optarg"]
+            },
+          Option
             { optionLongName = "size",
               optionShortName = Nothing,
               optionArgument = RequiredArgument "size_assignment",

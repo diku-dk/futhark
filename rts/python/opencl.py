@@ -81,6 +81,7 @@ def initialise_opencl_object(self,
                              default_group_size=None,
                              default_num_groups=None,
                              default_tile_size=None,
+                             default_reg_tile_size=None,
                              default_threshold=None,
                              size_heuristics=[],
                              required_types=[],
@@ -138,6 +139,10 @@ def initialise_opencl_object(self,
         default_tile_size = sizes['default_tile_size']
         del sizes['default_tile_size']
 
+    if 'default_reg_tile_size' in sizes:
+        default_reg_tile_size = sizes['default_reg_tile_size']
+        del sizes['default_reg_tile_size']
+
     if 'default_threshold' in sizes:
         default_threshold = sizes['default_threshold']
         del sizes['default_threshold']
@@ -147,6 +152,7 @@ def initialise_opencl_object(self,
     default_sizes = apply_size_heuristics(self, size_heuristics,
                                           {'group_size': default_group_size,
                                            'tile_size': default_tile_size,
+                                           'reg_tile_size': default_reg_tile_size,
                                            'num_groups': default_num_groups,
                                            'lockstep_width': None,
                                            'threshold': default_threshold})
@@ -154,6 +160,7 @@ def initialise_opencl_object(self,
     default_num_groups = default_sizes['num_groups']
     default_threshold = default_sizes['threshold']
     default_tile_size = default_sizes['tile_size']
+    default_reg_tile_size = default_sizes['reg_tile_size']
     lockstep_width = default_sizes['lockstep_width']
 
     if default_group_size > max_group_size:
@@ -185,6 +192,9 @@ def initialise_opencl_object(self,
         elif v['class'] == 'tile_size':
             max_value = max_tile_size
             default_value = default_tile_size
+        elif v['class'] == 'reg_tile_size':
+            max_value = max_reg_tile_size
+            default_value = default_reg_tile_size
         elif v['class'].startswith('threshold'):
             max_value = None
             default_value = default_threshold
