@@ -30,6 +30,9 @@ module Futhark.Test.Values
     compareValues,
     compareValues1,
     Mismatch,
+
+    -- * Extracting values
+    GetValue (..),
   )
 where
 
@@ -715,3 +718,38 @@ tolerance = SVec.foldl tolerance' minTolerance . SVec.filter (not . nanOrInf)
   where
     tolerance' t v = max t $ minTolerance * v
     nanOrInf x = isInfinite x || isNaN x
+
+-- | A class for Haskell values that can be retrieved from 'Value'.
+-- This is a convenience facility - don't expect it to be fast.
+class GetValue t where
+  getValue :: Value -> Maybe t
+
+instance GetValue Bool where
+  getValue (BoolValue shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int8 where
+  getValue (Int8Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int16 where
+  getValue (Int16Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int32 where
+  getValue (Int32Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int64 where
+  getValue (Int64Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing

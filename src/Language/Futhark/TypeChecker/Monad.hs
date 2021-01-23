@@ -412,7 +412,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       | reachable (qs ++ orig_qs) name outer_env = QualName (qs ++ orig_qs) name
       | otherwise = case rem_qs of
         q : rem_qs' -> prependAsNecessary (qs ++ [q]) rem_qs' (QualName orig_qs name)
-        [] -> QualName (qs ++ orig_qs) name
+        [] -> QualName orig_qs name
 
     reachable [] name env =
       name `M.member` envVtable env

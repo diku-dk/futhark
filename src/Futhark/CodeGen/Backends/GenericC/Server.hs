@@ -122,7 +122,7 @@ valueDescBoilerplate ev@(OpaqueValue name vds) =
                 .name = $string:name,
                 .restore = (typename restore_fn)$id:opaque_store,
                 .store = (typename store_fn)$id:opaque_restore,
-                .free = (typename free_fn)$id:opaque_free,
+                .free = (typename free_fn)free_opaque,
                 .aux = &$id:aux_name
               };|]
         )

@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Problem with user-defined functions with the same name as intrinsics.
 
+  * Names from transitive imports no longer leak into scope (#1231).
+
+  * Pattern-matching unit values now works (#1232).
+
 ## [0.18.5]
 
 ### Fixed
