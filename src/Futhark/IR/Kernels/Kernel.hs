@@ -74,7 +74,6 @@ instance SexpIso SegLevel where
           (. Sexp.list (Sexp.el (Sexp.sym "group") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
           End
 
-
 instance PP.Pretty SegLevel where
   ppr lvl =
     lvl'
