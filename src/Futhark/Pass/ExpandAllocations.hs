@@ -166,7 +166,9 @@ transformScanRed lvl space ops kbody = do
 
   case find badVariant $ M.elems variant_allocs of
     Just v ->
-      throwError $ "Cannot handle un-sliceable allocation size: " ++ pretty v
+      throwError $
+        "Cannot handle un-sliceable allocation size: " ++ pretty v
+          ++ "\nLikely cause: irregular nested operations inside parallel constructs."
     Nothing ->
       return ()
 
