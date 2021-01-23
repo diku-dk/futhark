@@ -17,4 +17,4 @@ try:
     obj.use_vec(vec_n, vec_m) # Should fail.
     assert(False)
 except Exception as e:
-    assert('size' in str(e))
+    assert('invalid' in str(e))
