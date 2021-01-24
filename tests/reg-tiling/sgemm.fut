@@ -2,7 +2,7 @@
 --    C := alpha * A * B + beta * C
 -- ==
 -- entry: main1 main2
--- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 0.5f32 0.75f32} auto output
+-- no_python compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 0.5f32 0.75f32} auto output
 
 entry main1 [n][m][q] (A: [n][q]f32) 
 					(B: [q][m]f32)
