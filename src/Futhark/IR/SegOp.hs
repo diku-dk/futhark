@@ -446,23 +446,21 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
     checkKernelResult (RegTileReturns dims_n_tiles arr) t = do
-      -- assert that dimension and tile sizes have type int32
-      forM_ dims $ TC.require [Prim int64]
-      forM_ blk_tiles $ TC.require [Prim int64]
-      forM_ reg_tiles $ TC.require [Prim int64]
+      mapM_ (TC.require [Prim int64]) dims
+      mapM_ (TC.require [Prim int64]) blk_tiles
+      mapM_ (TC.require [Prim int64]) reg_tiles
 
       -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
       arr_t <- lookupType arr
       unless (arr_t == expected) $
-        TC.bad $
-          TC.TypeError $
-            "Invalid type for TileReturns. Expected:\n  "
-              ++ pretty expected
-              ++ ",\ngot:\n  "
-              ++ pretty arr_t
+        TC.bad . TC.TypeError $
+          "Invalid type for TileReturns. Expected:\n  "
+            ++ pretty expected
+            ++ ",\ngot:\n  "
+            ++ pretty arr_t
       where
         (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
-        expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles) -- TODO: different solution?
+        expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles)
 
 kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
 kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
@@ -493,21 +491,14 @@ instance Pretty KernelResult where
         SplitContiguous -> mempty
         SplitStrided stride -> text "Strided" <> parens (ppr stride)
   ppr (TileReturns dims v) =
-    text "tile"
-      <> parens (commasep $ map onDim dims) <+> ppr v
+    "tile" <> parens (commasep $ map onDim dims) <+> ppr v
     where
-      onDim (dim, tile) = ppr dim <+> text "/" <+> ppr tile
+      onDim (dim, tile) = ppr dim <+> "/" <+> ppr tile
   ppr (RegTileReturns dims_n_tiles v) =
-    -- TODO: finish this!!! but for now, just pretty print like TileReturns.
-    text "blkreg_tile"
-      <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v
+    "blkreg_tile" <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v
     where
       onDim (dim, blk_tile, reg_tile) =
-        ppr dim <+> text "/ ("
-          <+> ppr blk_tile
-          <+> text "*"
-          <+> ppr reg_tile
-          <+> text ")"
+        ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
 
 -- | Do we need group-virtualisation when generating code for the
 -- segmented operation?  In most cases, we do, but for some simple
