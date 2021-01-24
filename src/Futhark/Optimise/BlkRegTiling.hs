@@ -59,8 +59,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     primType map_t1t && primType map_t2t && primType red_t1,
     map_t1 <- elemType map_t1t,
     map_t2 <- elemType map_t2t,
-    --    map_t1 : map_t2 : [] <- map (elemType . paramDec) (lambdaParams map_lam),
-
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
     Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
@@ -107,11 +105,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
       rx_name <- nameFromString . pretty <$> newVName "Rx"
       ry_name <- nameFromString . pretty <$> newVName "Ry"
 
-      --        tk         <- letSubExp "Tk" $ Op $ SizeOp $ GetSize tk_name SizeTile
-      --        tx         <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
-      --        ty         <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
-      --        rx         <- letSubExp "Rx" $ Op $ SizeOp $ GetSize rx_name SizeRegTile
-      --        ry         <- letSubExp "Ry" $ Op $ SizeOp $ GetSize ry_name SizeRegTile
       (ty, ry) <- getParTiles ("Ty", "Ry") (ty_name, ry_name) height_A
       (tx, rx) <- getParTiles ("Tx", "Rx") (tx_name, rx_name) width_B
       tk <- getSeqTile "Tk" tk_name common_dim ty tx
@@ -742,28 +735,6 @@ segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
   let body = KernelBody () stms [ret]
 
   letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
-
-{--
-processIndirections :: Names   -- input arrays to redomap
-                    -> Names   -- variables on which the result of redomap depends on.
-                    -> Maybe (Stms Kernels, M.Map VName (VName, Slice SubExp, Type))
-                    -> Stm Kernels
-                    -> Maybe (Stms Kernels, M.Map VName (VName, Slice SubExp, Type))
-processIndirections arrs _ acc (Let patt _ (BasicOp (Index arr_nm slc)))
-  | Just (ss, tab) <- acc,
-    [p] <- patternValueElements patt,
-    (p_nm, p_tp) <- (patElemName p, patElemType p),
-    nameIn p_nm arrs,
-    Array _ (Shape [_]) _ <- p_tp =
-      Just (ss, M.insert p_nm (arr_nm, slc, p_tp) tab)
-
-processIndirections _ res_red_var acc stm'@(Let patt _ _)
-  | Just (ss, tab) <- acc,
-    ps <- patternValueElements patt,
-    all (\p -> not (nameIn (patElemName p) res_red_var)) ps =
-      Just (ss Seq.|> stm', tab)
-  | otherwise = Nothing
---}
 
 processIndirections ::
   Names -> -- input arrays to redomap
