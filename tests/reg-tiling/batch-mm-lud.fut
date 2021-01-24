@@ -1,6 +1,6 @@
 -- Batched matrix multiplication as it appears in Rodinia's LUD
 -- ==
--- compiled random input { [128][16][16]f32 [128][16][16]f32 [128][128][16][16]f32 } auto output
+-- no_python compiled random input { [128][16][16]f32 [128][16][16]f32 [128][128][16][16]f32 } auto output
 
 
 let main [m][b] (Bs: [m][b][b]f32)
