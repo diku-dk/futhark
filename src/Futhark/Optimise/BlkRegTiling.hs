@@ -985,7 +985,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         jj2 <- letExp "jj2" =<< toExp (le64 gid_x * pe64 tx)
 
         -- initialize the register arrays corresponding to the result of redomap;
-        reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tx) $ \_ -> do
+        reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tx) $ \_ ->
           forM (zip red_nes red_res_tps) $ \(red_ne, red_t) -> do
             css_init <- scratch "res_init" (elemType red_t) [rz]
             css <- forLoop rz [css_init] $ \i [css_merge] -> do
@@ -1070,9 +1070,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                                     (toExp $ le64 gtid_z .<. pe64 d_M)
                                     ( do
                                         -- read from shared memory
-                                        ys <- forM loc_arr_nms' $ \loc_arr_nm -> do
+                                        ys <- forM loc_arr_nms' $ \loc_arr_nm ->
                                           index "inp_reg_var2z" loc_arr_nm [i]
-                                        cs <- forM reg_arr_mm_nms $ \reg_arr_nm -> do
+                                        cs <- forM reg_arr_mm_nms $ \reg_arr_nm ->
                                           index "res_reg_var2z" reg_arr_nm [i]
                                         -- here we need to put in order the scalar inputs to map:
                                         let tab_scals =
@@ -1089,7 +1089,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                                         addStms $
                                           rebindLambda map_lam' map_inp_scals map_res_scals
                                             <> rebindLambda red_lam' (cs ++ map_res_scals) cs
-                                        css <- forM (zip reg_arr_mm_nms cs) $ \(reg_arr_nm, c) -> do
+                                        css <- forM (zip reg_arr_mm_nms cs) $ \(reg_arr_nm, c) ->
                                           update (baseString reg_arr_nm) reg_arr_nm [i] c
                                         resultBodyM $ map Var css
                                     )
@@ -1192,7 +1192,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
       | [p] <- patternValueElements patt,
         ptp <- elemType $ patElemType p,
-        p_nm == patElemName p = do
+        p_nm == patElemName p =
         case L.findIndices (variantSliceDim variance gidz) slc of
           [] -> return (M.insert p_nm stm tab_inn, tab_out)
           i : _ -> do
