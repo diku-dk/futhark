@@ -807,11 +807,11 @@ defCompileExp pat (DoLoop ctx val form body) = do
   where
     merge = ctx ++ val
     mergepat = map fst merge
-defCompileExp _ (MkAcc _ arrs Nothing) =
+defCompileExp _ (MkAcc _ arrs _ Nothing) =
   -- In case these arrays have been used for another accumulator on
   -- another code path, we have to forget about that.
   modify $ \s -> s {stateAccs = M.delete arrs $ stateAccs s}
-defCompileExp _ (MkAcc _ arrs (Just (lam, nes))) =
+defCompileExp _ (MkAcc _ arrs _ (Just (lam, nes))) =
   modify $ \s -> s {stateAccs = M.insert arrs (lam, nes) $ stateAccs s}
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler

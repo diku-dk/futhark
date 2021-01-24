@@ -153,7 +153,7 @@ consumedInExp (DoLoop _ merge _ _) =
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
     )
-consumedInExp (MkAcc _ arrs _) = foldMap oneName arrs
+consumedInExp (MkAcc _ arrs _ _) = foldMap oneName arrs
 consumedInExp (BasicOp (Update src _ _)) = oneName src
 consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
 consumedInExp (Op op) = consumedInOp op

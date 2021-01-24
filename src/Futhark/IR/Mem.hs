@@ -1212,7 +1212,7 @@ expReturns (BasicOp (UnAcc acc _)) = do
     _ -> error $ "UnAcc accumulator has info: " ++ pretty acc_info
 expReturns (BasicOp (UpdateAcc acc _ _)) =
   pure <$> varReturns acc
-expReturns (MkAcc shape arrs _) =
+expReturns (MkAcc shape arrs _ _) =
   return [MemAcc arrs $ fmap Free shape]
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op

@@ -1,9 +1,14 @@
--- Writing an array with a vector operator.
+-- Writing an array with a non-vector operator.
 -- ==
 -- input { [[2],[3],[4]] }
 -- output { [[3i32], [3i32], [5i32]] }
 
 import "intrinsics"
+
+let vecadd [n] (xs: [n]i32) (ys: [n]i32) : [n]i32 =
+  -- This is just map2 (+), but written in a way the compiler
+  -- hopefully will not recognise.
+  loop acc = replicate n 0 for i < n do acc with [i] = xs[i] + ys[i]
 
 let f (acc: *acc ([][]i32)) (i, x) =
   let acc = write acc (i*2) x

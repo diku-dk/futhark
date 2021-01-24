@@ -155,8 +155,10 @@ mapExpM tv (BasicOp (UpdateAcc v is ses)) =
             <*> mapM (mapOnSubExp tv) is
             <*> mapM (mapOnSubExp tv) ses
         )
-mapExpM tv (MkAcc shape vs lam) =
-  MkAcc <$> mapOnShape tv shape <*> mapM (mapOnVName tv) vs
+mapExpM tv (MkAcc shape vs ishape lam) =
+  MkAcc <$> mapOnShape tv shape
+    <*> mapM (mapOnVName tv) vs
+    <*> mapOnShape tv ishape
     <*> traverse (bitraverse (mapOnLambda tv) (mapM (mapOnSubExp tv))) lam
 mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   ctxparams' <- mapM (mapOnFParam tv) ctxparams
@@ -314,9 +316,10 @@ walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
   walkOnVName tv v
   mapM_ (walkOnSubExp tv) is
   mapM_ (walkOnSubExp tv) ses
-walkExpM tv (MkAcc shape vs lam) = do
+walkExpM tv (MkAcc shape vs ishape lam) = do
   walkOnShape tv shape
   mapM_ (walkOnVName tv) vs
+  walkOnShape tv ishape
   traverse_ (bitraverse (walkOnLambda tv) (mapM (walkOnSubExp tv))) lam
 walkExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   mapM_ (walkOnFParam tv) ctxparams

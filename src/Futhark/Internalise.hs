@@ -1285,7 +1285,8 @@ internaliseStreamAcc desc dest op lam bs = do
         return Nothing
 
   w <- arraysSize 0 <$> mapM lookupType bs'
-  acc <- letExp "scatter_acc" $ MkAcc (Shape [w]) dest' op'
+  destw <- arraysSize 0 <$> mapM lookupType dest'
+  acc <- letExp "scatter_acc" $ MkAcc (Shape [w]) dest' (Shape [destw]) op'
 
   lam' <-
     internaliseMapLambda internaliseLambda lam $
