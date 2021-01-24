@@ -20,19 +20,15 @@
 module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D) where
 
 import Control.Monad.Reader
-import Control.Monad.State
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Sequence as Seq
 import Futhark.IR.Kernels
 import Futhark.MonadFreshNames
+import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
 import Futhark.Transform.Rename
-
-type TileM = ReaderT (Scope Kernels) (State VNameSource)
-
-type VarianceTable = M.Map VName Names
 
 mmBlkRegTiling :: Stm Kernels -> TileM (Maybe (Stms Kernels, Stm Kernels))
 mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -88,8 +84,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     --   as we are probably going to use it in code generation
     (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims_rev <- reverse $ unSegSpace seg_space,
     rem_outer_dims <- reverse rem_outer_dims_rev,
-    -- null rem_outer_dims, -- TODO: remove the need for this assumption !
-
     -- sanity check that the reduce part is not missing
     not $ null red_nes = do
     let red_ne : _ = red_nes
@@ -448,19 +442,10 @@ index :: MonadBinder m => String -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
   let shape = arrayShape arr_t
-
-  let inner_dims = shapeDims $ stripDims (length outer_indices) shape
-  let inner_slices =
-        map
-          ( \inner_dim ->
-              DimSlice
-                (intConst Int64 0)
-                inner_dim
-                (intConst Int64 1)
-          )
-          inner_dims
-
-  let indices = map (DimFix . Var) outer_indices ++ inner_slices
+      inner_dims = shapeDims $ stripDims (length outer_indices) shape
+      untouched d = DimSlice (intConst Int64 0) d (intConst Int64 1)
+      inner_slices = map untouched inner_dims
+      indices = map (DimFix . Var) outer_indices ++ inner_slices
   letExp se_desc $ BasicOp $ Index arr indices
 
 update :: MonadBinder m => String -> VName -> [VName] -> VName -> m VName
@@ -565,27 +550,6 @@ matchCodeStreamCode kstms =
           (stmsToList kstms)
    in (stmsFromList code1, screma, stmsFromList code2)
 
-isTileableRedomap ::
-  Stm Kernels ->
-  Maybe
-    ( SubExp,
-      [VName],
-      (Commutativity, Lambda Kernels, [SubExp], Lambda Kernels)
-    )
-isTileableRedomap stm
-  | Op (OtherOp (Screma w form arrs)) <- stmExp stm,
-    Just (reds, map_lam) <- isRedomapSOAC form,
-    Reduce red_comm red_lam red_nes <- singleReduce reds,
-    all (primType . rowType . paramType) $ lambdaParams red_lam,
-    all (primType . rowType . paramType) $ lambdaParams map_lam,
-    lambdaReturnType map_lam == lambdaReturnType red_lam, -- No mapout arrays.
-    not (null arrs),
-    all primType $ lambdaReturnType map_lam,
-    all (primType . paramType) $ lambdaParams map_lam =
-    Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
-  | otherwise =
-    Nothing
-
 -- | Checks that all streamed arrays are variant to exacly one of
 --   the two innermost parallel dimensions, and conversely, for
 --   each of the two innermost parallel dimensions, there is at
@@ -622,120 +586,6 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
                 then Just 1
                 else Nothing
 
-varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
-varianceInStms = foldl varianceInStm
-
--- just in case you need the Screma being treated differently than
--- by default; previously Cosmin had to enhance it when dealing with stream.
-varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-varianceInStm v0 bnd@(Let _ _ (Op (OtherOp Screma {})))
-  | Just (_, arrs, (_, red_lam, red_nes, map_lam)) <- isTileableRedomap bnd =
-    let v = defVarianceInStm v0 bnd
-        red_args = lambdaParams red_lam
-        map_args = lambdaParams map_lam
-        card_red = length red_nes
-        acc_lam_f = take (card_red `quot` 2) red_args
-        arr_lam_f = drop (card_red `quot` 2) red_args
-        stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
-
-        v' =
-          L.foldl'
-            ( \vacc (v_a, v_fm, v_fr_acc, v_fr_var) ->
-                let vrc = oneName v_a <> M.findWithDefault mempty v_a vacc
-                    vacc' = M.insert v_fm vrc vacc
-                    vrc' = oneName v_fm <> vrc
-                 in M.insert v_fr_acc (oneName v_fr_var <> vrc') $ M.insert v_fr_var vrc' vacc'
-            )
-            v
-            $ L.zip4 arrs (map paramName map_args) (map paramName acc_lam_f) (map paramName arr_lam_f)
-     in varianceInStms v' stm_lam
-  | otherwise = defVarianceInStm v0 bnd
-varianceInStm v0 bnd = defVarianceInStm v0 bnd
-
-defVarianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-defVarianceInStm variance bnd =
-  L.foldl' add variance $ patternNames $ stmPattern bnd
-  where
-    add variance' v = M.insert v binding_variance variance'
-    look variance' v = oneName v <> M.findWithDefault mempty v variance'
-    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
-
--- alternatively, import TileLoops?
-segMap2D ::
-  String -> -- desc
-  SegLevel -> -- lvl
-  ResultManifest -> -- manifest
-  (SubExp, SubExp) -> -- (dim_x, dim_y)
-  ( (VName, VName) -> -- f
-    Binder Kernels [SubExp]
-  ) ->
-  Binder Kernels [VName]
-segMap2D desc lvl manifest (dim_y, dim_x) f = do
-  ltid_xx <- newVName "ltid_x"
-  ltid_flat <- newVName "ltid_flat"
-  ltid_yy <- newVName "ltid_y"
-  let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
-
-  ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_yy, ltid_xx)
-    ts <- mapM subExpType res
-    return (ts, res)
-
-  letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
-
-segMap3D ::
-  String -> -- desc
-  SegLevel -> -- lvl
-  ResultManifest -> -- manifest
-  (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
-  ( (VName, VName, VName) -> -- f
-    Binder Kernels [SubExp]
-  ) ->
-  Binder Kernels [VName]
-segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
-  ltid_x <- newVName "ltid_x"
-  ltid_flat <- newVName "ltid_flat"
-  ltid_y <- newVName "ltid_y"
-  ltid_z <- newVName "ltid_z"
-  let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
-
-  ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_z, ltid_y, ltid_x)
-    ts <- mapM subExpType res
-    return (ts, res)
-
-  letTupExp desc <=< renameExp $
-    Op $
-      SegOp $
-        SegMap lvl segspace ts $ KernelBody () stms $ map (Returns manifest) res
-
-segScatter2D ::
-  String -> -- desc
-  SubExp -> -- arr_size
-  VName ->
-  SegLevel -> -- lvl
-  (SubExp, SubExp) -> -- (dim_y, dim_x)
-  ((VName, VName) -> Binder Kernels (SubExp, SubExp)) -> -- f
-  Binder Kernels [VName]
-segScatter2D desc arr_size updt_arr lvl (dim_x, dim_y) f = do
-  ltid_x <- newVName "ltid_x"
-  ltid_y <- newVName "ltid_y"
-  ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
-
-  ((t_v, res_v, res_i), stms) <- runBinder $ do
-    (res_v, res_i) <- f (ltid_x, ltid_y)
-    t_v <- subExpType res_v
-    return (t_v, res_v, res_i)
-
-  let ret = WriteReturns [arr_size] updt_arr [([DimFix res_i], res_v)]
-  let body = KernelBody () stms [ret]
-
-  letTupExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
-
 processIndirections ::
   Names -> -- input arrays to redomap
   Names -> -- variables on which the result of redomap depends on.
@@ -756,35 +606,29 @@ processIndirections _ res_red_var acc stm'@(Let patt _ _)
   | otherwise = Nothing
 
 se0 :: SubExp
-se0 = Constant $ IntValue $ Int64Value 0
+se0 = intConst Int64 0
 
 se1 :: SubExp
-se1 = Constant $ IntValue $ Int64Value 1
+se1 = intConst Int64 1
 
 se2 :: SubExp
-se2 = Constant $ IntValue $ Int64Value 2
+se2 = intConst Int64 2
 
 se4 :: SubExp
-se4 = Constant $ IntValue $ Int64Value 4
+se4 = intConst Int64 4
 
 se8 :: SubExp
-se8 = Constant $ IntValue $ Int64Value 8
+se8 = intConst Int64 8
 
 getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Binder Kernels (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
   case len_dim of
-    Constant (IntValue (Int64Value 8)) -> do
-      t <- letSubExp t_str $ BasicOp $ SubExp se8
-      r <- letSubExp r_str $ BasicOp $ SubExp se1
-      return (t, r)
-    Constant (IntValue (Int64Value 16)) -> do
-      t <- letSubExp t_str $ BasicOp $ SubExp se8
-      r <- letSubExp r_str $ BasicOp $ SubExp se2
-      return (t, r)
-    Constant (IntValue (Int64Value 32)) -> do
-      t <- letSubExp t_str $ BasicOp $ SubExp se8
-      r <- letSubExp r_str $ BasicOp $ SubExp se4
-      return (t, r)
+    Constant (IntValue (Int64Value 8)) ->
+      return (se8, se1)
+    Constant (IntValue (Int64Value 16)) ->
+      return (se8, se2)
+    Constant (IntValue (Int64Value 32)) ->
+      return (se8, se4)
     _ -> do
       t <- letSubExp t_str $ Op $ SizeOp $ GetSize t_name SizeTile
       r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
@@ -794,13 +638,10 @@ getSeqTile :: String -> Name -> SubExp -> SubExp -> SubExp -> Binder Kernels Sub
 getSeqTile tk_str tk_name len_dim ty tx =
   case (tx, ty) of
     (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
-      letSubExp tk_str $
-        BasicOp $
-          SubExp $
-            constant $
-              case len_dim of
-                Constant (IntValue (Int64Value v_d)) -> min v_d $ min v_x v_y
-                _ -> min v_x v_y
+      letSubExp tk_str . BasicOp . SubExp . constant $
+        case len_dim of
+          Constant (IntValue (Int64Value v_d)) -> min v_d $ min v_x v_y
+          _ -> min v_x v_y
     _ ->
       letSubExp tk_str $ Op $ SizeOp $ GetSize tk_name SizeTile
 
@@ -809,7 +650,7 @@ getSeqTile tk_str tk_name len_dim ty tx =
 ----------------------------------------------------------------------------------------------
 
 maxRegTile :: Int64
-maxRegTile = 30 --30
+maxRegTile = 30
 
 mkRegTileSe :: Int64 -> SubExp
 mkRegTileSe = constant
@@ -1200,8 +1041,6 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             let perm = [i + 1 .. arrayRank arr_tp -1] ++ [0 .. i]
             let arr_tr_str = baseString arr_nm ++ "_transp"
             arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest perm arr_nm
-            --let p' = p {patElemName = arr_tr_nm}
-            --let patt' = patt { patternValueElements = [p']}
             let e_ind' = BasicOp $ Index arr_tr_nm slc
             let stm' = Let patt yy e_ind'
             return (tab_inn, M.insert p_nm (ptp, stm') tab_out)
