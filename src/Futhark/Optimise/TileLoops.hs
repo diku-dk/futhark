@@ -8,13 +8,13 @@ module Futhark.Optimise.TileLoops (tileLoops) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Sequence as Seq
 import Futhark.IR.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Optimise.BlkRegTiling
+import Futhark.Optimise.TileLoops.Shared
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -30,8 +30,6 @@ tileLoops =
       modifyNameSource $
         runState $
           runReaderT (optimiseStms stms) scope
-
-type TileM = ReaderT (Scope Kernels) (State VNameSource)
 
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
 optimiseBody (Body () stms res) =
@@ -988,30 +986,6 @@ invariantToOneOfTwoInnerDims branch_variant variance dims arr = do
         then Just $ InputTile [1, 0] arr
         else Just $ InputDontTile arr
 
-segMap2D ::
-  String ->
-  SegLevel ->
-  ResultManifest ->
-  (SubExp, SubExp) ->
-  ((VName, VName) -> Binder Kernels [SubExp]) ->
-  Binder Kernels [VName]
-segMap2D desc lvl manifest (dim_x, dim_y) f = do
-  ltid_x <- newVName "ltid_x"
-  ltid_y <- newVName "ltid_y"
-  ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
-
-  ((ts, res), stms) <- runBinder $ do
-    res <- f (ltid_x, ltid_y)
-    ts <- mapM subExpType res
-    return (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
-
-  letTupExp desc $
-    Op $
-      SegOp $
-        SegMap lvl space ts $ KernelBody () stms' $ map (Returns manifest) res'
-
 -- Reconstruct the original gtids from group and local IDs.
 reconstructGtids2D ::
   SubExp ->
@@ -1286,21 +1260,3 @@ tiling2d dims_on_top _initial_lvl (gtid_x, gtid_y) (kdim_x, kdim_y) w = do
         tilingLevel = lvl,
         tilingSpace = space
       }
-
--- | The variance table keeps a mapping from a variable name
--- (something produced by a 'Stm') to the kernel thread indices
--- that name depends on.  If a variable is not present in this table,
--- that means it is bound outside the kernel (and so can be considered
--- invariant to all dimensions).
-type VarianceTable = M.Map VName Names
-
-varianceInStms :: VarianceTable -> Stms Kernels -> VarianceTable
-varianceInStms = foldl varianceInStm
-
-varianceInStm :: VarianceTable -> Stm Kernels -> VarianceTable
-varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ stmPattern bnd
-  where
-    add variance' v = M.insert v binding_variance variance'
-    look variance' v = oneName v <> M.findWithDefault mempty v variance'
-    binding_variance = mconcat $ map (look variance) $ namesToList (freeIn bnd)
