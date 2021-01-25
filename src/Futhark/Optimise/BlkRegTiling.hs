@@ -420,7 +420,6 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                   new_shape = concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) epilogue_res
 
-        -- TODO: RegTileReturns is still missing boundary checks.
         return [RegTileReturns regtile_ret_dims epilogue_res']
 
       let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
@@ -1008,7 +1007,6 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                   new_shape = concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" $ BasicOp $ Reshape (map DimNew new_shape) res
 
-        -- TODO: RegTileReturns is still incorrect, please Fix It
         return $ map (RegTileReturns regtile_ret_dims) epilogue_res'
       -- END (ret_seggroup, stms_seggroup) <- runBinder $ do
       let level' = SegGroup (Count grid_size) (Count group_size) SegNoVirt
