@@ -227,7 +227,10 @@ parseNatural =
     num c = ord c - ord '0'
 
 restOfLine :: Parser T.Text
-restOfLine = restOfLine_ <* eol
+restOfLine = do
+  l <- restOfLine_
+  if T.null l then void eol else void eol <|> eof
+  pure l
 
 restOfLine_ :: Parser T.Text
 restOfLine_ = takeWhileP Nothing (/= '\n')
