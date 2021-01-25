@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Code generation for Python with OpenCL.
 module Futhark.CodeGen.Backends.PyOpenCL
   ( compileProg,
   )
@@ -18,7 +19,7 @@ import Futhark.IR.KernelsMem (KernelsMem, Prog)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeString)
 
---maybe pass the config file rather than multiple arguments
+-- | Compile the program to Python with calls to OpenCL.
 compileProg ::
   MonadFreshNames m =>
   Py.CompilerMode ->

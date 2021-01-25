@@ -170,8 +170,8 @@ decideScheduling code =
     else Imp.Dynamic
 
 -- | Try to extract invariant allocations.  If we assume that the
--- given 'Code' is the body of a 'SegOp', then it is always safe to
--- move the immediate allocations to the prebody.
+-- given 'Imp.Code' is the body of a 'SegOp', then it is always safe
+-- to move the immediate allocations to the prebody.
 extractAllocations :: Imp.Code -> (Imp.Code, Imp.Code)
 extractAllocations segop_code = f segop_code
   where

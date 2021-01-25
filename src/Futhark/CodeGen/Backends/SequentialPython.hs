@@ -1,3 +1,4 @@
+-- | Code generation for sequential Python.
 module Futhark.CodeGen.Backends.SequentialPython
   ( compileProg,
   )
@@ -11,6 +12,7 @@ import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
+-- | Compile the program to Python.
 compileProg ::
   MonadFreshNames m =>
   GenericPython.CompilerMode ->

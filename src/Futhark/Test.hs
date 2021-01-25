@@ -787,6 +787,7 @@ runProgram futhark runner extra_options prog entry input = do
   input' <- getValuesBS futhark dir input
   liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
 
+-- | Read the given variables from a running server.
 readResults ::
   (MonadIO m, MonadError T.Text m) =>
   Server ->

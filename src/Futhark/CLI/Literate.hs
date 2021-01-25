@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | @futhark literate@
 module Futhark.CLI.Literate (main) where
 
 import Control.Monad.Except
