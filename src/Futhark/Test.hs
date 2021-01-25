@@ -474,7 +474,7 @@ couldNotRead = return . Left . show
 pProgramTest :: Parser ProgramTest
 pProgramTest = do
   void $ many pNonTestLine
-  maybe_spec <- optional testSpec <* many pNonTestLine
+  maybe_spec <- optional testSpec <* pEndOfTestBlock <* many pNonTestLine
   case maybe_spec of
     Just spec
       | RunCases old_cases structures warnings <- testAction spec -> do
@@ -489,10 +489,12 @@ pProgramTest = do
     noTest =
       ProgramTest mempty mempty (RunCases mempty mempty mempty)
 
+    pEndOfTestBlock =
+      (void eol <|> eof) *> notFollowedBy "--"
     pNonTestLine =
       void $ notFollowedBy "-- ==" *> restOfLine
     pInputOutputs =
-      parseDescription *> parseInputOutputs
+      parseDescription *> parseInputOutputs <* pEndOfTestBlock
 
 -- | Read the test specification from the given Futhark program.
 testSpecFromFile :: FilePath -> IO (Either String ProgramTest)
