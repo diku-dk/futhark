@@ -379,12 +379,20 @@ maybeDistributeStm stm@(Let pat _ (Op (Screma w form arrs))) acc
     distributeIfPossible acc >>= \case
       Nothing -> addStmToAcc stm acc
       Just acc' -> distribute =<< onInnerMap (MapLoop pat (stmAux stm) w lam arrs) acc'
-maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop {} body)) acc
+maybeDistributeStm bnd@(Let pat aux (DoLoop [] val form@ForLoop {} body)) acc
   | null (patternContextElements pat),
     bodyContainsParallelism body =
     distributeSingleStm acc bnd >>= \case
       Just (kernels, res, nest, acc')
-        | not $ freeIn form `namesIntersect` boundInKernelNest nest,
+        | -- XXX: We cannot distribute if this loop depends on
+          -- certificates bound within the loop nest (well, we could,
+          -- but interchange would not be valid).  This is not a
+          -- fundamental restriction, but an artifact of our
+          -- certificate representation, which we should probably
+          -- rethink.
+          not $
+            (freeIn form <> freeIn aux)
+              `namesIntersect` boundInKernelNest nest,
           Just (perm, pat_unused) <- permutationAndMissing pat res ->
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
