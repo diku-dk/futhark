@@ -1,7 +1,7 @@
 -- Floats can contain underscores
 -- ==
--- input { 100_000.123_456f32 }
+-- input {  }
 -- output { 100000.123456f32 }
 
-let main(x: f32) =
-  x
+let main =
+  100_000.123_456f32

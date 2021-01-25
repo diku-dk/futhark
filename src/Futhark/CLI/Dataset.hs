@@ -170,17 +170,17 @@ tryMakeGenerator ::
   Either String (RandomConfiguration -> OutputFormat -> Word64 -> IO ())
 tryMakeGenerator t
   | Just vs <- readValues $ BS.pack t =
-    return $ \_ fmt _ -> mapM_ (putValue fmt) vs
+    return $ \_ fmt _ -> mapM_ (outValue fmt) vs
   | otherwise = do
     t' <- toValueType =<< either (Left . show) Right (parseType name (T.pack t))
     return $ \conf fmt seed -> do
       let v = randomValue conf t' seed
-      putValue fmt v
+      outValue fmt v
   where
     name = "option " ++ t
-    putValue Text = putStrLn . pretty
-    putValue Binary = BS.putStr . Bin.encode
-    putValue Type = putStrLn . pretty . valueType
+    outValue Text = putStrLn . pretty
+    outValue Binary = BS.putStr . Bin.encode
+    outValue Type = putStrLn . pretty . valueType
 
 toValueType :: UncheckedTypeExp -> Either String ValueType
 toValueType TETuple {} = Left "Cannot handle tuples yet."

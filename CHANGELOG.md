@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Generated header-files are now declared `extern "C"` when
     processed with a C++ compiler.
 
+  * Parser errors in test blocks used by `futhark bench` and `futhark
+    test` are now reported with much better error messages.
+
 ### Removed
 
 ### Changed

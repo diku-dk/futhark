@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
@@ -31,8 +32,9 @@ module Futhark.Test.Values
     compareValues1,
     Mismatch,
 
-    -- * Extracting values
+    -- * Converting values
     GetValue (..),
+    PutValue (..),
   )
 where
 
@@ -232,7 +234,7 @@ type CompoundValue = Compound Value
 
 -- | A representation of the simple values we represent in this module.
 data ValueType = ValueType [Int] F.PrimType
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 instance PP.Pretty ValueType where
   ppr (ValueType ds t) = mconcat (map pprDim ds) <> ppr t
@@ -753,3 +755,63 @@ instance GetValue Int64 where
     | [] <- SVec.toList shape =
       Just $ vs SVec.! 0
   getValue _ = Nothing
+
+-- | A class for Haskell values that can be converted to 'Value'.
+-- This is a convenience facility - don't expect it to be fast.
+class PutValue t where
+  -- | This may fail for cases such as irregular arrays.
+  putValue :: t -> Maybe Value
+
+instance PutValue F.PrimValue where
+  putValue (F.SignedValue (F.Int8Value x)) =
+    Just $ Int8Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int16Value x)) =
+    Just $ Int16Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int32Value x)) =
+    Just $ Int32Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int64Value x)) =
+    Just $ Int64Value mempty $ SVec.singleton x
+  putValue (F.UnsignedValue (F.Int8Value x)) =
+    Just $ Word8Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int16Value x)) =
+    Just $ Word16Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int32Value x)) =
+    Just $ Word32Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int64Value x)) =
+    Just $ Word64Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.FloatValue (F.Float32Value x)) =
+    Just $ Float32Value mempty $ SVec.singleton x
+  putValue (F.FloatValue (F.Float64Value x)) =
+    Just $ Float64Value mempty $ SVec.singleton x
+  putValue (F.BoolValue b) =
+    Just $ BoolValue mempty $ SVec.singleton b
+
+instance PutValue [Value] where
+  putValue [] = Nothing
+  putValue (x : xs) = do
+    let res_shape = SVec.fromList $ length (x : xs) : valueShape x
+    guard $ all ((== valueType x) . valueType) xs
+    Just $ case x of
+      Int8Value {} -> Int8Value res_shape $ foldMap getVec (x : xs)
+      Int16Value {} -> Int16Value res_shape $ foldMap getVec (x : xs)
+      Int32Value {} -> Int32Value res_shape $ foldMap getVec (x : xs)
+      Int64Value {} -> Int64Value res_shape $ foldMap getVec (x : xs)
+      Word8Value {} -> Word8Value res_shape $ foldMap getVec (x : xs)
+      Word16Value {} -> Word16Value res_shape $ foldMap getVec (x : xs)
+      Word32Value {} -> Word32Value res_shape $ foldMap getVec (x : xs)
+      Word64Value {} -> Word64Value res_shape $ foldMap getVec (x : xs)
+      Float32Value {} -> Float32Value res_shape $ foldMap getVec (x : xs)
+      Float64Value {} -> Float64Value res_shape $ foldMap getVec (x : xs)
+      BoolValue {} -> BoolValue res_shape $ foldMap getVec (x : xs)
+    where
+      getVec (Int8Value _ vec) = SVec.unsafeCast vec
+      getVec (Int16Value _ vec) = SVec.unsafeCast vec
+      getVec (Int32Value _ vec) = SVec.unsafeCast vec
+      getVec (Int64Value _ vec) = SVec.unsafeCast vec
+      getVec (Word8Value _ vec) = SVec.unsafeCast vec
+      getVec (Word16Value _ vec) = SVec.unsafeCast vec
+      getVec (Word32Value _ vec) = SVec.unsafeCast vec
+      getVec (Word64Value _ vec) = SVec.unsafeCast vec
+      getVec (Float32Value _ vec) = SVec.unsafeCast vec
+      getVec (Float64Value _ vec) = SVec.unsafeCast vec
+      getVec (BoolValue _ vec) = SVec.unsafeCast vec
