@@ -1626,7 +1626,7 @@ initialCtx =
       fun2t $ \i xs -> do
         let (shape, xs') = fromArray xs
         return $
-          let idx = rem (asInt i) (length xs')
+          let idx = if null xs' then 0 else rem (asInt i) (length xs')
            in if idx > 0
                 then
                   let (bef, aft) = splitAt idx xs'
