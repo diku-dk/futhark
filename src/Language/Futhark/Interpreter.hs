@@ -1626,13 +1626,14 @@ initialCtx =
       fun2t $ \i xs -> do
         let (shape, xs') = fromArray xs
         return $
-          if asInt i > 0
-            then
-              let (bef, aft) = splitAt (asInt i) xs'
-               in toArray shape $ aft ++ bef
-            else
-              let (bef, aft) = splitFromEnd (- asInt i) xs'
-               in toArray shape $ aft ++ bef
+          let idx = if null xs' then 0 else rem (asInt i) (length xs')
+           in if idx > 0
+                then
+                  let (bef, aft) = splitAt idx xs'
+                   in toArray shape $ aft ++ bef
+                else
+                  let (bef, aft) = splitFromEnd (- idx) xs'
+                   in toArray shape $ aft ++ bef
     def "flatten" = Just $
       fun1 $ \xs -> do
         let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
