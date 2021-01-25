@@ -71,7 +71,7 @@ maxNumOps = 10
 -- | Code generation for the body of the SegRed, taking a continuation
 -- for saving the results of the body.  The results should be
 -- represented as a pairing of a t'SubExp' along with a list of
--- indexes into that 'SubExp' for reading the result.
+-- indexes into that t'SubExp' for reading the result.
 type DoSegBody = ([(SubExp, [Imp.TExp Int64])] -> InKernelGen ()) -> InKernelGen ()
 
 -- | Compile 'SegRed' instance to host-level code with calls to

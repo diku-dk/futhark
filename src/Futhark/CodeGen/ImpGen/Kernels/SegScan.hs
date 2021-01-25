@@ -1,3 +1,6 @@
+-- | Code generation for 'SegScan'.  Dispatches to either a
+-- single-pass or two-pass implementation, depending on the nature of
+-- the scan and the chosen abckend.
 module Futhark.CodeGen.ImpGen.Kernels.SegScan (compileSegScan) where
 
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp

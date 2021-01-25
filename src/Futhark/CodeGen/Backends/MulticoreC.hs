@@ -27,6 +27,7 @@ import Futhark.MonadFreshNames
 import qualified Language.C.Quote.OpenCL as C
 import qualified Language.C.Syntax as C
 
+-- | Compile the program to ImpCode with multicore operations.
 compileProg ::
   MonadFreshNames m =>
   Prog MCMem ->

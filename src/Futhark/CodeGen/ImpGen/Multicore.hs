@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Code generation for ImpCode with multicore operations.
 module Futhark.CodeGen.ImpGen.Multicore
   ( Futhark.CodeGen.ImpGen.Multicore.compileProg,
     Warnings,

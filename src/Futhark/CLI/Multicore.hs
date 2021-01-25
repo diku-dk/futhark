@@ -1,11 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 
+-- | @futhark multicore@
 module Futhark.CLI.Multicore (main) where
 
 import Futhark.Actions (compileMulticoreAction)
 import Futhark.Compiler.CLI
 import Futhark.Passes (multicorePipeline)
 
+-- | Run @futhark multicore@.
 main :: String -> [String] -> IO ()
 main = compilerMain
   ()

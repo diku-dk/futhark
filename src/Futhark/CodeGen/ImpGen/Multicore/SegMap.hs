@@ -1,3 +1,4 @@
+-- | Multicore code generation for 'SegMap'.
 module Futhark.CodeGen.ImpGen.Multicore.SegMap
   ( compileSegMap,
   )

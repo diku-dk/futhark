@@ -3,7 +3,7 @@
 
 -- | FutharkScript is a (tiny) subset of Futhark used to write small
 -- expressions that are evaluated by server executables.  The @futhark
--- script@ command is the main user.
+-- literate@ command is the main user.
 module Futhark.Script
   ( -- * Server
     ScriptServer,
@@ -65,6 +65,10 @@ withScriptServer prog options f = withServer prog options $ \server -> do
   counter <- newIORef 0
   f $ ScriptServer server counter
 
+-- | A FutharkScript expression.  This is a simple AST that might not
+-- correspond exactly to what the user wrote (e.g. no parentheses or
+-- source locations).  This is fine for small expressions, which is
+-- all this is meant for.
 data Exp
   = Call EntryName [Exp]
   | Const PrimValue
@@ -162,6 +166,7 @@ inParens sep = between (lexeme sep "(") (lexeme sep ")")
 inBraces :: Parser () -> Parser a -> Parser a
 inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 
+-- | Parse a FutharkScript expression.
 parseExp :: Parser () -> Parser Exp
 parseExp sep =
   choice
@@ -270,6 +275,7 @@ valueToExp (V.ValueRecord fs) =
 valueToExp (V.ValueTuple fs) =
   Tuple $ map valueToExp fs
 
+-- | Evaluate a FutharkScript expression relative to some running server.
 evalExp :: (MonadError T.Text m, MonadIO m) => ScriptServer -> Exp -> m ExpValue
 evalExp (ScriptServer server counter) top_level_e = do
   vars <- liftIO $ newIORef []

@@ -6,6 +6,7 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Code generation for server executables.
 module Futhark.CodeGen.Backends.GenericC.Server
   ( serverDefs,
   )
@@ -205,6 +206,8 @@ mkBoilerplate funs =
    in (type_defs ++ entry_defs, type_inits, entry_inits)
 
 {-# NOINLINE serverDefs #-}
+
+-- | Generate Futhark server executable code.
 serverDefs :: [Option] -> Functions a -> [C.Definition]
 serverDefs options funs =
   let server_h = $(embedStringFile "rts/c/server.h")

@@ -599,6 +599,8 @@ instance Traversable Code where
   traverse _ (DebugPrint s v) =
     pure $ DebugPrint s v
 
+-- | The names declared with 'DeclareMem', 'DeclareScalar', and
+-- 'DeclareArray' in the given code.
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = oneName name
 declaredIn (DeclareScalar name _ _) = oneName name
