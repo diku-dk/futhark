@@ -238,6 +238,7 @@ library
       Futhark.Server
       Futhark.Test
       Futhark.Test.Values
+      Futhark.Test.Values.Parser
       Futhark.Tools
       Futhark.Transform.CopyPropagate
       Futhark.Transform.FirstOrderTransform

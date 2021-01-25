@@ -31,7 +31,6 @@ import Control.Monad.Except
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Char
 import Data.Foldable (toList)
-import Data.Functor
 import Data.IORef
 import Data.List (intersperse)
 import qualified Data.Map as M
@@ -42,14 +41,11 @@ import Data.Traversable
 import Data.Void
 import Futhark.Server
 import qualified Futhark.Test.Values as V
+import qualified Futhark.Test.Values.Parser as V
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (float, line, sep, string, (</>), (<|>))
 import Language.Futhark.Prop (primValueType)
-import Language.Futhark.Syntax
-  ( FloatValue (..),
-    IntValue (..),
-    PrimValue (..),
-  )
+import Language.Futhark.Syntax (PrimValue (..))
 import System.IO
 import System.IO.Temp
 import Text.Megaparsec
@@ -99,64 +95,6 @@ parseEntryName =
   where
     constituent c = isAlphaNum c || c == '_'
 
-parseSign :: Parser String
-parseSign = maybe "" T.unpack <$> optional "-"
-
-parseDouble :: Parser Double
-parseDouble = do
-  sign <- parseSign
-  x <- some (satisfy isDigit)
-  ( do
-      void "."
-      y <- some (satisfy isDigit)
-      pure $ read $ sign <> x <> "." <> y
-    )
-    <|> pure (read $ sign <> x)
-
-parseInteger :: Parser Integer
-parseInteger = read <$> ((<>) <$> pSign <*> some (satisfy isDigit))
-  where
-    pSign = maybe "" T.unpack <$> optional "-"
-
-parseIntConst :: Parser PrimValue
-parseIntConst = do
-  x <- parseInteger
-  choice
-    [ signed Int8Value x "i8",
-      signed Int16Value x "i16",
-      signed Int32Value x "i32",
-      signed Int64Value x "i64",
-      unsigned Int8Value x "u8",
-      unsigned Int16Value x "u16",
-      unsigned Int32Value x "u32",
-      unsigned Int64Value x "u64"
-    ]
-  where
-    signed mk x suffix =
-      suffix $> SignedValue (mk (fromInteger x))
-    unsigned mk x suffix =
-      suffix $> UnsignedValue (mk (fromInteger x))
-
-parseFloatConst :: Parser PrimValue
-parseFloatConst = do
-  x <- parseDouble
-  choice
-    [ float Float32Value x "f32",
-      float Float64Value x "f64"
-    ]
-  where
-    float mk x suffix =
-      suffix $> FloatValue (mk (realToFrac x))
-
-parsePrimValue :: Parser PrimValue
-parsePrimValue =
-  choice
-    [ try parseIntConst,
-      parseFloatConst,
-      "true" $> BoolValue True,
-      "false" $> BoolValue False
-    ]
-
 lexeme :: Parser () -> Parser a -> Parser a
 lexeme sep p = p <* sep
 
@@ -173,7 +111,7 @@ parseExp sep =
     [ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
       inBraces sep (Record <$> (pField `sepBy` pComma)),
       Call <$> lexeme sep parseEntryName <*> many (parseExp sep),
-      Const <$> lexeme sep parsePrimValue
+      Const <$> lexeme sep V.parsePrimValue
     ]
   where
     pField = (,) <$> parseEntryName <*> (pEquals *> parseExp sep)
