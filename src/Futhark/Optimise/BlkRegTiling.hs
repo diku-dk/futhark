@@ -470,16 +470,11 @@ forLoop' i_bound merge body = do
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
 
   loop_body <-
-    runBodyBinder $
-      inScopeOf loop_form $
-        localScope (scopeOfFParams loop_inits) $ body i $ map paramName loop_inits
+    runBodyBinder . inScopeOf loop_form . localScope (scopeOfFParams loop_inits) $
+      body i $ map paramName loop_inits
 
   letTupExp "loop" $
-    DoLoop
-      []
-      (zip loop_inits $ map Var merge)
-      loop_form
-      loop_body
+    DoLoop [] (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
   SubExp ->
@@ -572,9 +567,7 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
       (j, _) : (i, _) : _ <- Just $ reverse $ unSegSpace kspace
       let variant_to = M.findWithDefault mempty arr variance
           branch_invariant =
-            not $
-              nameIn j branch_variant
-                || nameIn i branch_variant
+            not $ nameIn j branch_variant || nameIn i branch_variant
       if not branch_invariant
         then Nothing -- if i or j in branch_variant; return nothing
         else
@@ -750,13 +743,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     -- get the free variables on which the result of redomap depends on
     redomap_orig_res <- patternValueElements pat_redomap,
     res_red_var <- -- variance of the reduce result
-      foldl
-        ( \acc nm -> case M.lookup nm variance of
-            Nothing -> acc
-            Just nms -> acc <> nms
-        )
-        mempty
-        $ map patElemName redomap_orig_res,
+      mconcat $ mapMaybe ((`M.lookup` variance) . patElemName) redomap_orig_res,
     mempty /= res_red_var,
     -- we furthermore check that code1 is only formed by
     -- 1. statements that slice some globally-declared arrays
@@ -804,9 +791,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv d_Ky ty
       gridDim_z <- letSubExp "gridDim_z" =<< ceilDiv d_M rz
       let gridxyz_pexp = pe64 gridDim_z * pe64 gridDim_y * pe64 gridDim_x
-      let grid_pexp =
-            foldl (\x d -> pe64 d * x) gridxyz_pexp $
-              map snd rem_outer_dims_rev
+      let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
       grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
       group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
       let segthd_lvl = SegThread (Count grid_size) (Count group_size) SegNoVirtFull
