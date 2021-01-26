@@ -52,6 +52,9 @@ OPTIONS
   Where to write the resulting binary.  By default, if the source
   program is named 'foo.fut', the binary will be named 'foo'.
 
+--server
+  Generate a server-mode executable that reads commands from stdin.
+
 --safe
   Ignore ``unsafe`` in program and perform safety checks unconditionally.
 

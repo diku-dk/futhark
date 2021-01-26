@@ -50,6 +50,9 @@ OPTIONS
 --safe
   Ignore ``unsafe`` in program and perform safety checks unconditionally.
 
+--server
+  Generate a server-mode executable that reads commands from stdin.
+
 -v verbose
   Enable debugging output.  If compilation fails due to a compiler
   error, the result of the last successful compiler step will be
