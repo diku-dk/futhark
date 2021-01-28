@@ -420,7 +420,7 @@ instance Pretty op => Pretty (FunctionT op) where
 
 instance Pretty Param where
   ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
-  ppr (MemParam name space) = text "mem" <> ppr space <+> ppr name
+  ppr (MemParam name space) = text "mem" <> ppr space <> text " " <> ppr name
 
 instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
