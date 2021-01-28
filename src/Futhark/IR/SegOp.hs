@@ -344,10 +344,11 @@ aliasAnalyseKernelBody ::
   ( ASTLore lore,
     CanBeAliased (Op lore)
   ) =>
+  AliasTable ->
   KernelBody lore ->
   KernelBody (Aliases lore)
-aliasAnalyseKernelBody (KernelBody dec stms res) =
-  let Body dec' stms' _ = Alias.analyseBody mempty $ Body dec stms []
+aliasAnalyseKernelBody aliases (KernelBody dec stms res) =
+  let Body dec' stms' _ = Alias.analyseBody aliases $ Body dec stms []
    in KernelBody dec' stms' res
 
 removeKernelBodyAliases ::
@@ -954,13 +955,13 @@ instance
   where
   type OpWithAliases (SegOp lvl lore) = SegOp lvl (Aliases lore)
 
-  addOpAliases = runIdentity . mapSegOpM alias
+  addOpAliases aliases = runIdentity . mapSegOpM alias
     where
       alias =
         SegOpMapper
           return
-          (return . Alias.analyseLambda)
-          (return . aliasAnalyseKernelBody)
+          (return . Alias.analyseLambda aliases)
+          (return . aliasAnalyseKernelBody aliases)
           return
           return
 

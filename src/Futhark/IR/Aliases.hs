@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -386,13 +387,17 @@ trackAliases ::
   AliasesAndConsumed ->
   Stm lore ->
   AliasesAndConsumed
-trackAliases (aliasmap, consumed) bnd =
-  let pat = stmPattern bnd
-      als =
-        M.fromList $
-          zip (patternNames pat) (map addAliasesOfAliases $ patternAliases pat)
-      aliasmap' = als <> aliasmap
-      consumed' = consumed <> addAliasesOfAliases (consumedInStm bnd)
+trackAliases (aliasmap, consumed) stm =
+  let pat = stmPattern stm
+      pe_als =
+        zip (patternNames pat) $ map addAliasesOfAliases $ patternAliases pat
+      als = M.fromList pe_als
+      rev_als = foldMap revAls pe_als
+      revAls (v, v_als) =
+        M.fromList $ map (,oneName v) $ namesToList v_als
+      comb = M.unionWith (<>)
+      aliasmap' = rev_als `comb` als `comb` aliasmap
+      consumed' = consumed <> addAliasesOfAliases (consumedInStm stm)
    in (aliasmap', consumed')
   where
     addAliasesOfAliases names = names <> aliasesOfAliases names
