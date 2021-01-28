@@ -105,10 +105,10 @@ instance
   where
   type OpWithAliases (MCOp lore op) = MCOp (Aliases lore) (OpWithAliases op)
 
-  addOpAliases (ParOp par_op op) =
-    ParOp (addOpAliases <$> par_op) (addOpAliases op)
-  addOpAliases (OtherOp op) =
-    OtherOp $ addOpAliases op
+  addOpAliases aliases (ParOp par_op op) =
+    ParOp (addOpAliases aliases <$> par_op) (addOpAliases aliases op)
+  addOpAliases aliases (OtherOp op) =
+    OtherOp $ addOpAliases aliases op
 
   removeOpAliases (ParOp par_op op) =
     ParOp (removeOpAliases <$> par_op) (removeOpAliases op)

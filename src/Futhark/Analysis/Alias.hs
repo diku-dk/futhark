@@ -12,7 +12,6 @@ module Futhark.Analysis.Alias
   ( aliasAnalysis,
 
     -- * Ad-hoc utilities
-    AliasTable,
     analyseFun,
     analyseStms,
     analyseExp,
@@ -41,10 +40,6 @@ analyseFun (FunDef entry attrs fname restype params body) =
   FunDef entry attrs fname restype params body'
   where
     body' = analyseBody mempty body
-
--- | Pre-existing aliases for variables.  Used to add transitive
--- aliases.
-type AliasTable = M.Map VName Names
 
 analyseBody ::
   ( ASTLore lore,
@@ -116,18 +111,16 @@ analyseExp aliases e = mapExp analyse e
           mapOnBranchType = return,
           mapOnFParam = return,
           mapOnLParam = return,
-          mapOnOp = return . addOpAliases
+          mapOnOp = return . addOpAliases aliases
         }
 
 analyseLambda ::
   (ASTLore lore, CanBeAliased (Op lore)) =>
+  AliasTable ->
   Lambda lore ->
   Lambda (Aliases lore)
-analyseLambda lam =
-  -- XXX: it may cause trouble that we pass mempty to analyseBody
-  -- here.  However, fixing this generally involves adding an
-  -- AliasTable argument to addOpAliases.
-  let body = analyseBody mempty $ lambdaBody lam
+analyseLambda aliases lam =
+  let body = analyseBody aliases $ lambdaBody lam
    in lam
         { lambdaBody = body,
           lambdaParams = lambdaParams lam

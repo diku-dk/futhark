@@ -25,6 +25,7 @@ module Futhark.IR.Prop.Aliases
     consumedByLambda,
 
     -- * Extensibility
+    AliasTable,
     AliasedOp (..),
     CanBeAliased (..),
   )
@@ -188,6 +189,10 @@ instance AliasedOp () where
   opAliases () = []
   consumedInOp () = mempty
 
+-- | Pre-existing aliases for variables.  Used to add transitive
+-- aliases.
+type AliasTable = M.Map VName Names
+
 -- | The class of operations that can be given aliasing information.
 -- This is a somewhat subtle concept that is only used in the
 -- simplifier and when using "lore adapters".
@@ -199,9 +204,9 @@ class AliasedOp (OpWithAliases op) => CanBeAliased op where
   removeOpAliases :: OpWithAliases op -> op
 
   -- | Add aliases to this op.
-  addOpAliases :: op -> OpWithAliases op
+  addOpAliases :: AliasTable -> op -> OpWithAliases op
 
 instance CanBeAliased () where
   type OpWithAliases () = ()
   removeOpAliases = id
-  addOpAliases = id
+  addOpAliases = const id

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Exotic core language alias tracking bug (#1239).
+
 ## [0.18.6]
 
 ### Added

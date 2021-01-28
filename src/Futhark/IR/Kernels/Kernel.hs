@@ -321,9 +321,9 @@ instance (ASTLore lore, FreeIn op) => FreeIn (HostOp lore op) where
 instance (CanBeAliased (Op lore), CanBeAliased op, ASTLore lore) => CanBeAliased (HostOp lore op) where
   type OpWithAliases (HostOp lore op) = HostOp (Aliases lore) (OpWithAliases op)
 
-  addOpAliases (SegOp op) = SegOp $ addOpAliases op
-  addOpAliases (OtherOp op) = OtherOp $ addOpAliases op
-  addOpAliases (SizeOp op) = SizeOp op
+  addOpAliases aliases (SegOp op) = SegOp $ addOpAliases aliases op
+  addOpAliases aliases (OtherOp op) = OtherOp $ addOpAliases aliases op
+  addOpAliases _ (SizeOp op) = SizeOp op
 
   removeOpAliases (SegOp op) = SegOp $ removeOpAliases op
   removeOpAliases (OtherOp op) = OtherOp $ removeOpAliases op
