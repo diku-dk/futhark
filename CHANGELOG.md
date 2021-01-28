@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Exotic core language alias tracking bug (#1239).
 
+  * Issue with entry points returning constant arrays (#1240).
+
 ## [0.18.6]
 
 ### Added
