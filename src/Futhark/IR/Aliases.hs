@@ -42,7 +42,7 @@ module Futhark.IR.Aliases
     -- * Tracking aliases
     AliasesAndConsumed,
     trackAliases,
-    consumedInStms,
+    mkStmsAliases,
   )
 where
 
@@ -354,6 +354,8 @@ mkBodyAliases bnds res =
       consumed' = consumed `namesSubtract` boundNames
    in (map AliasDec aliases', AliasDec consumed')
 
+-- | The aliases of the result and everything consumed in the given
+-- statements.
 mkStmsAliases ::
   Aliased lore =>
   Stms lore ->
@@ -371,11 +373,6 @@ mkStmsAliases bnds res = delve mempty $ stmsToList bnds
       names <> mconcat (map look $ namesToList names)
       where
         look k = M.findWithDefault mempty k aliasmap
-
--- | Everything consumed in the given statements and result (even
--- transitively).
-consumedInStms :: Aliased lore => Stms lore -> Names
-consumedInStms = snd . flip mkStmsAliases []
 
 type AliasesAndConsumed =
   ( M.Map VName Names,
