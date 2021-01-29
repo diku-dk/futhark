@@ -41,7 +41,7 @@ import Futhark.Analysis.Alias
 import Futhark.IR
 import Futhark.IR.Aliases
   ( Aliases,
-    consumedInStms,
+    mkStmsAliases,
     removeFunDefAliases,
     removeProgAliases,
     removeStmAliases,
@@ -53,6 +53,9 @@ import Futhark.IR.Prop.Aliases
 import qualified Futhark.IR.SOACS.SOAC as SOAC
 import Futhark.Pass
 import Futhark.Transform.Substitute
+
+consumedInStms :: Aliased lore => Stms lore -> Names
+consumedInStms = snd . flip mkStmsAliases []
 
 -- | Perform CSE on every function in a program.
 --
@@ -136,7 +139,16 @@ cseInFunDef cse_arrays fundec =
         runReader (cseInBody ds $ funDefBody fundec) $ newCSEState cse_arrays
     }
   where
-    ds = map (diet . declExtTypeOf) $ funDefRetType fundec
+    -- XXX: we treat every result as a consumption here, because we
+    -- our core language is not strong enough to fully capture the
+    -- aliases we want, so we are turning some parts off (see #803,
+    -- #1241, and the related comment in TypeCheck.hs).  This is not a
+    -- practical problem while we still perform such aggressive
+    -- inlining.
+    ds = map retDiet $ funDefRetType fundec
+    retDiet t
+      | primType $ declExtTypeOf t = Observe
+      | otherwise = Consume
 
 type CSEM lore = Reader (CSEState lore)
 
@@ -145,15 +157,16 @@ cseInBody ::
   [Diet] ->
   Body lore ->
   CSEM lore (Body lore)
-cseInBody ds (Body bodydec bnds res) = do
-  (bnds', res') <-
-    cseInStms (res_cons <> consumedInStms bnds) (stmsToList bnds) $ do
+cseInBody ds (Body bodydec stms res) = do
+  (stms', res') <-
+    cseInStms (res_cons <> stms_cons) (stmsToList stms) $ do
       CSEState (_, nsubsts) _ <- ask
       return $ substituteNames nsubsts res
-  return $ Body bodydec bnds' res'
+  return $ Body bodydec stms' res'
   where
-    res_cons = mconcat $ zipWith consumeResult ds res
-    consumeResult Consume se = freeIn se
+    (res_als, stms_cons) = mkStmsAliases stms res
+    res_cons = mconcat $ zipWith consumeResult ds res_als
+    consumeResult Consume als = als
     consumeResult _ _ = mempty
 
 cseInLambda ::

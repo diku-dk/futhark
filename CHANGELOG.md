@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Issue with entry points returning constant arrays (#1240).
 
+  * Overzealous CSE collided with uniqueness types (#1241).
+
 ## [0.18.6]
 
 ### Added
