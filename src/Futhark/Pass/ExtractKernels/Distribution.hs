@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -356,7 +357,8 @@ distributionBodyFromStm targets bnd =
   distributionBodyFromStms targets $ oneStm bnd
 
 createKernelNest ::
-  (MonadFreshNames m, HasScope t m) =>
+  forall lore m.
+  (MonadFreshNames m, HasScope lore m) =>
   Nestings ->
   DistributionBody ->
   m (Maybe (Targets, KernelNest))
@@ -379,7 +381,6 @@ createKernelNest (inner_nest, nests) distrib_body = do
       (== mempty) . namesIntersection bound_in_nest . freeIn . arrayDims
 
     distributeAtNesting ::
-      (HasScope t m, MonadFreshNames m) =>
       Nesting ->
       PatternT Type ->
       (LoopNesting -> KernelNest, Names) ->
@@ -462,7 +463,6 @@ createKernelNest (inner_nest, nests) distrib_body = do
           )
 
     recurse ::
-      (HasScope t m, MonadFreshNames m) =>
       [(Nesting, Target)] ->
       MaybeT m (KernelNest, Names, Targets)
     recurse [] =
