@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Overzealous CSE collided with uniqueness types (#1241).
 
+  * Defunctionalisation issue (#1242).
+
 ## [0.18.6]
 
 ### Added
