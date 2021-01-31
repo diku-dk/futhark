@@ -985,7 +985,7 @@ histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBinde
       =<< segHist lvl orig_pat hist_w ispace inputs' ops' lam arrs
 
 determineReduceOp ::
-  (MonadBinder m, Lore m ~ lore) =>
+  MonadBinder m =>
   Lambda SOACS ->
   [SubExp] ->
   m (Lambda SOACS, [SubExp], Shape)
