@@ -1,5 +1,5 @@
 cabal-version: 2.4
-
+-- Run 'cabal2nix . >futhark.nix' after adding deps.
 name:           futhark
 version:        0.19.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
