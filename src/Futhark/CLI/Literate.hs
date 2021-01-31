@@ -4,10 +4,12 @@
 -- | @futhark literate@
 module Futhark.CLI.Literate (main) where
 
+import qualified Codec.BMP as BMP
 import Control.Monad.Except
 import Data.Bifunctor (bimap, first, second)
 import Data.Bits
-import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
 import Data.Char
 import Data.Functor
 import Data.Int (Int64)
@@ -19,7 +21,9 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import qualified Data.Vector.Storable as SVec
+import qualified Data.Vector.Storable.ByteString as SVec
 import Data.Void
+import Data.Word (Word32, Word8)
 import Futhark.Script
 import Futhark.Server
 import Futhark.Test
@@ -264,57 +268,46 @@ withTempDir f =
   join . liftIO . withSystemTempDirectory "futhark-literate" $ \dir ->
     either throwError pure <$> runExceptT (f dir)
 
-ppmHeader :: Int -> Int -> BS.ByteString
-ppmHeader h w =
-  "P6\n" <> BS.pack (show w) <> " " <> BS.pack (show h) <> "\n255\n"
-
-rgbIntToImg ::
-  (Integral a, Bits a, SVec.Storable a) =>
-  Int ->
-  Int ->
-  SVec.Vector a ->
-  BS.ByteString
-rgbIntToImg h w bytes =
-  ppmHeader h w <> fst (BS.unfoldrN (h * w * 3) byte 0)
-  where
-    getChan word chan =
-      (word `shiftR` (chan * 8)) .&. 0xFF
-    byte i =
-      Just
-        ( chr . max 0 . fromIntegral $
-            getChan (bytes SVec.! (i `div` 3)) (2 - (i `mod` 3)),
-          i + 1
-        )
-
 greyFloatToImg ::
   (RealFrac a, SVec.Storable a) =>
-  Int ->
-  Int ->
   SVec.Vector a ->
-  BS.ByteString
-greyFloatToImg h w bytes =
-  ppmHeader h w <> fst (BS.unfoldrN (h * w * 3) byte 0)
+  SVec.Vector Word32
+greyFloatToImg = SVec.map grey
   where
-    byte i =
-      Just (chr . max 0 $ round (bytes SVec.! (i `div` 3)) * 255, i + 1)
+    grey i =
+      let i' = round (i * 255) .&. 0xFF
+       in (i' `shiftL` 16) .|. (i' `shiftL` 8) .|. i'
 
-valueToPPM :: Value -> Maybe BS.ByteString
-valueToPPM v@(Word32Value _ bytes)
-  | [h, w] <- valueShape v =
-    Just $ rgbIntToImg h w bytes
-valueToPPM v@(Int32Value _ bytes)
-  | [h, w] <- valueShape v =
-    Just $ rgbIntToImg h w bytes
-valueToPPM v@(Float32Value _ bytes)
-  | [h, w] <- valueShape v =
-    Just $ greyFloatToImg h w bytes
-valueToPPM v@(Float64Value _ bytes)
-  | [h, w] <- valueShape v =
-    Just $ greyFloatToImg h w bytes
-valueToPPM _ = Nothing
+-- BMPs are RGBA and bottom-up where we assumes images are top-down
+-- and ARGB.  We fix this up before encoding the BMP.  This is
+-- probably a little slower than it has to be.
+vecToBMP :: Int -> Int -> SVec.Vector Word32 -> LBS.ByteString
+vecToBMP h w = BMP.renderBMP . BMP.packRGBA32ToBMP24 w h . SVec.vectorToByteString . frobVec
+  where
+    frobVec vec = SVec.generate (h * w * 4) (pix vec)
+    pix vec l =
+      let (i, j) = (l `div` 4) `divMod` w
+          argb = vec SVec.! ((h -1 - i) * w + j)
+          c = (argb `shiftR` (24 - ((l + 1) `mod` 4) * 8)) .&. 0xFF
+       in fromIntegral c :: Word8
 
-valueToPPMs :: Value -> Maybe [BS.ByteString]
-valueToPPMs = mapM valueToPPM . valueElems
+valueToBMP :: Value -> Maybe LBS.ByteString
+valueToBMP v@(Word32Value _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w bytes
+valueToBMP v@(Int32Value _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ SVec.map fromIntegral bytes
+valueToBMP v@(Float32Value _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP v@(Float64Value _ bytes)
+  | [h, w] <- valueShape v =
+    Just $ vecToBMP h w $ greyFloatToImg bytes
+valueToBMP _ = Nothing
+
+valueToBMPs :: Value -> Maybe [LBS.ByteString]
+valueToBMPs = mapM valueToBMP . valueElems
 
 system :: FilePath -> [String] -> T.Text -> ScriptM T.Text
 system prog options input = do
@@ -333,12 +326,12 @@ system prog options input = do
   where
     prog' = "'" <> T.pack prog <> "'"
 
-ppmToPNG :: FilePath -> ScriptM FilePath
-ppmToPNG ppm = do
-  void $ system "convert" [ppm, png] mempty
+bmpToPNG :: FilePath -> ScriptM FilePath
+bmpToPNG bmp = do
+  void $ system "convert" [bmp, png] mempty
   pure png
   where
-    png = ppm `replaceExtension` "png"
+    png = bmp `replaceExtension` "png"
 
 formatDataForGnuplot :: [Value] -> T.Text
 formatDataForGnuplot = T.unlines . map line . transpose . map valueElems
@@ -386,13 +379,54 @@ withGnuplotData sets ((f, vs) : xys) cont =
     liftIO $ T.writeFile fname $ formatDataForGnuplot vs
     withGnuplotData ((f, f <> "='" <> T.pack fname <> "'") : sets) xys cont
 
+loadBMP :: FilePath -> ScriptM (Compound Value)
+loadBMP bmpfile = do
+  res <- liftIO $ BMP.readBMP bmpfile
+  case res of
+    Left err ->
+      throwError $ "Failed to read BMP:\n" <> T.pack (show err)
+    Right bmp -> do
+      let bmp_bs = BMP.unpackBMPToRGBA32 bmp
+          (w, h) = BMP.bmpDimensions bmp
+          shape = SVec.fromList [fromIntegral h, fromIntegral w]
+          pix l =
+            let (i, j) = l `divMod` w
+                l' = (h -1 - i) * w + j
+                r = fromIntegral $ bmp_bs `BS.index` (l' * 4)
+                g = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 1)
+                b = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 2)
+                a = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 3)
+             in (a `shiftL` 24) .|. (r `shiftL` 16) .|. (g `shiftL` 8) .|. b
+      pure $ ValueAtom $ Word32Value shape $ SVec.generate (w * h) pix
+
+loadImage :: FilePath -> ScriptM (Compound Value)
+loadImage imgfile =
+  withTempDir $ \dir -> do
+    let bmpfile = dir </> imgfile `replaceExtension` "bmp"
+    void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
+    loadBMP bmpfile
+
+literateBuiltin :: EvalBuiltin ScriptM
+literateBuiltin "loadimg" vs =
+  case vs of
+    [ValueAtom v]
+      | Just path <- getValue v -> do
+        let path' = map (chr . fromIntegral) (path :: [Word8])
+        loadImage path'
+    _ ->
+      throwError $
+        "$imgfile does not accept arguments of types: "
+          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
+literateBuiltin f _ =
+  throwError $ "Unknown builtin function $" <> prettyText f
+
 processDirective :: FilePath -> ScriptServer -> Int -> Directive -> ScriptM T.Text
 processDirective imgdir server i (DirectiveBrief d) =
   processDirective imgdir server i d
 processDirective imgdir server i (DirectiveCovert d) =
   processDirective imgdir server i d
 processDirective _ server _ (DirectiveRes e) = do
-  vs <- evalExpToGround server e
+  vs <- evalExpToGround literateBuiltin server e
   pure $
     T.unlines
       [ "",
@@ -403,15 +437,15 @@ processDirective _ server _ (DirectiveRes e) = do
       ]
 --
 processDirective imgdir server i (DirectiveImg e) = do
-  vs <- evalExpToGround server e
+  vs <- evalExpToGround literateBuiltin server e
   case vs of
     ValueAtom v
-      | Just ppm <- valueToPPM v -> do
-        let ppmfile = imgdir </> "img" <> show i <.> ".ppm"
+      | Just bmp <- valueToBMP v -> do
+        let bmpfile = imgdir </> "img" <> show i <.> ".bmp"
         liftIO $ createDirectoryIfMissing True imgdir
-        liftIO $ BS.writeFile ppmfile ppm
-        pngfile <- ppmToPNG ppmfile
-        liftIO $ removeFile ppmfile
+        liftIO $ LBS.writeFile bmpfile bmp
+        pngfile <- bmpToPNG bmpfile
+        liftIO $ removeFile bmpfile
         pure $ imgBlock pngfile
     _ ->
       throwError $
@@ -419,7 +453,7 @@ processDirective imgdir server i (DirectiveImg e) = do
           <> prettyText (fmap valueType vs)
 --
 processDirective imgdir server i (DirectivePlot e size) = do
-  v <- evalExpToGround server e
+  v <- evalExpToGround literateBuiltin server e
   case v of
     _
       | Just vs <- plottable2d v ->
@@ -464,7 +498,7 @@ processDirective imgdir server i (DirectivePlot e size) = do
       pure $ imgBlock pngfile
 --
 processDirective imgdir server i (DirectiveGnuplot e script) = do
-  vs <- evalExpToGround server e
+  vs <- evalExpToGround literateBuiltin server e
   case vs of
     ValueRecord m
       | Just m' <- traverse plottable m ->
@@ -491,19 +525,19 @@ processDirective imgdir server i (DirectiveAnim e params) = do
   when (format `notElem` ["webm", "gif"]) $
     throwError $ "Unknown animation format: " <> format
 
-  v <- evalExp server e
+  v <- evalExp literateBuiltin server e
   let nope =
         throwError $
           "Cannot animate value of type " <> prettyText (fmap scriptValueType v)
   case v of
     ValueAtom SValue {} -> do
       ValueAtom arr <- getExpValue server v
-      case valueToPPMs arr of
+      case valueToBMPs arr of
         Nothing -> nope
-        Just ppms ->
+        Just bmps ->
           withTempDir $ \dir -> do
-            zipWithM_ (writePPMFile dir) [0 ..] ppms
-            ppmsToVideo dir
+            zipWithM_ (writeBMPFile dir) [0 ..] bmps
+            bmpsToVideo dir
     ValueTuple [stepfun, initial, num_frames]
       | ValueAtom (SFun stepfun' _ [_, _] closure) <- stepfun,
         ValueAtom (SValue _ _) <- initial,
@@ -513,7 +547,7 @@ processDirective imgdir server i (DirectiveAnim e params) = do
         withTempDir $ \dir -> do
           let num_frames_int = fromIntegral (num_frames' :: Int64)
           renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
-          ppmsToVideo dir
+          bmpsToVideo dir
     _ ->
       nope
 
@@ -527,14 +561,18 @@ processDirective imgdir server i (DirectiveAnim e params) = do
     format = fromMaybe "webm" $ animFormat params
     webmfile = imgdir </> "anim" <> show i <.> "webm"
     giffile = imgdir </> "anim" <> show i <.> "gif"
-    ppmfile dir j = dir </> printf "frame%010d.ppm" (j :: Int)
+    bmpfile dir j = dir </> printf "frame%010d.bmp" (j :: Int)
     animfile = imgdir </> "anim" <> show i <.> T.unpack format
 
     renderFrames dir (stepfun, closure) initial num_frames =
       foldM_ frame initial [0 .. num_frames -1]
       where
         frame old_state j = do
-          v <- evalExp server . Call stepfun . map valueToExp $ closure ++ [old_state]
+          v <-
+            evalExp literateBuiltin server
+              . Call (FuncFut stepfun)
+              . map valueToExp
+              $ closure ++ [old_state]
           freeValue server old_state
 
           let nope =
@@ -546,14 +584,14 @@ processDirective imgdir server i (DirectiveAnim e params) = do
             ValueTuple [arr_v@(ValueAtom SValue {}), new_state] -> do
               ValueAtom arr <- getExpValue server arr_v
               freeValue server arr_v
-              case valueToPPM arr of
+              case valueToBMP arr of
                 Nothing -> nope
-                Just ppm -> do
-                  writePPMFile dir j ppm
+                Just bmp -> do
+                  writeBMPFile dir j bmp
                   pure new_state
             _ -> nope
 
-    ppmsToVideo dir = do
+    bmpsToVideo dir = do
       liftIO $ createDirectoryIfMissing True imgdir
       void $
         system
@@ -562,7 +600,7 @@ processDirective imgdir server i (DirectiveAnim e params) = do
             "-r",
             show framerate,
             "-i",
-            dir </> "frame%010d.ppm",
+            dir </> "frame%010d.bmp",
             "-c:v",
             "libvpx-vp9",
             "-pix_fmt",
@@ -573,9 +611,8 @@ processDirective imgdir server i (DirectiveAnim e params) = do
           ]
           mempty
 
-    writePPMFile dir j ppm = do
-      let fname = ppmfile dir j
-      liftIO $ BS.writeFile fname ppm
+    writeBMPFile dir j bmp =
+      liftIO $ LBS.writeFile (bmpfile dir j) bmp
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success

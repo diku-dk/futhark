@@ -49,6 +49,7 @@ import Data.Char (chr, isSpace, ord)
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Data.Traversable
 import Data.Vector.Generic (freeze)
 import qualified Data.Vector.Storable as SVec
@@ -726,6 +727,9 @@ tolerance = SVec.foldl tolerance' minTolerance . SVec.filter (not . nanOrInf)
 class GetValue t where
   getValue :: Value -> Maybe t
 
+instance GetValue t => GetValue [t] where
+  getValue = mapM getValue . valueElems
+
 instance GetValue Bool where
   getValue (BoolValue shape vs)
     | [] <- SVec.toList shape =
@@ -756,11 +760,38 @@ instance GetValue Int64 where
       Just $ vs SVec.! 0
   getValue _ = Nothing
 
+instance GetValue Word8 where
+  getValue (Word8Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word16 where
+  getValue (Word16Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word32 where
+  getValue (Word32Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word64 where
+  getValue (Word64Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
 -- | A class for Haskell values that can be converted to 'Value'.
 -- This is a convenience facility - don't expect it to be fast.
 class PutValue t where
   -- | This may fail for cases such as irregular arrays.
   putValue :: t -> Maybe Value
+
+instance PutValue Word8 where
+  putValue = Just . Word8Value mempty . SVec.singleton
 
 instance PutValue F.PrimValue where
   putValue (F.SignedValue (F.Int8Value x)) =
@@ -815,3 +846,12 @@ instance PutValue [Value] where
       getVec (Float32Value _ vec) = SVec.unsafeCast vec
       getVec (Float64Value _ vec) = SVec.unsafeCast vec
       getVec (BoolValue _ vec) = SVec.unsafeCast vec
+
+instance PutValue T.Text where
+  putValue = putValue . T.encodeUtf8
+
+instance PutValue BS.ByteString where
+  putValue bs =
+    Just $ Word8Value size $ byteStringToVector bs
+    where
+      size = SVec.fromList [fromIntegral (BS.length bs)]
