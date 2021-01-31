@@ -209,6 +209,8 @@ topDownRules =
     RuleOp removeUnusedSOACInput,
     RuleOp simplifyClosedFormReduce,
     RuleOp simplifyKnownIterationSOAC,
+    RuleOp liftIdentityMapping,
+    RuleOp removeDuplicateMapOutput,
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
     RuleOp moveTransformToInput
@@ -220,9 +222,7 @@ bottomUpRules =
     RuleOp removeDeadReduction,
     RuleOp removeDeadWrite,
     RuleBasicOp removeUnnecessaryCopy,
-    RuleOp liftIdentityMapping,
     RuleOp liftIdentityStreaming,
-    RuleOp removeDuplicateMapOutput,
     RuleOp mapOpToOp
   ]
 
@@ -256,8 +256,8 @@ hoistCertificates _ _ _ _ =
 liftIdentityMapping ::
   forall lore.
   (Bindable lore, Simplify.SimplifiableLore lore, HasSOAC (Wise lore)) =>
-  BottomUpRuleOp (Wise lore)
-liftIdentityMapping (_, usages) pat aux op
+  TopDownRuleOp (Wise lore)
+liftIdentityMapping _ pat aux op
   | Just (Screma w form arrs :: SOAC (Wise lore)) <- asSOAC op,
     Just fun <- isMapSOAC form = do
     let inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
@@ -270,16 +270,10 @@ liftIdentityMapping (_, usages) pat aux op
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- M.lookup v inputMap =
-            let e
-                  | patElemName outId `UT.isConsumed` usages
-                      || inp `UT.isConsumed` usages =
-                    Copy inp
-                  | otherwise =
-                    SubExp $ Var inp
-             in ( (Pattern [] [outId], BasicOp e) : invariant,
-                  mapresult,
-                  rettype'
-                )
+            ( (Pattern [] [outId], BasicOp (Copy inp)) : invariant,
+              mapresult,
+              rettype'
+            )
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
           | freeOrConst e =
             ( (Pattern [] [outId], BasicOp $ Replicate (Shape [w]) e) : invariant,
@@ -434,8 +428,8 @@ removeDeadMapping (_, used) pat aux (Screma w form arrs)
           else Skip
 removeDeadMapping _ _ _ _ = Skip
 
-removeDuplicateMapOutput :: BottomUpRuleOp (Wise SOACS)
-removeDuplicateMapOutput (_, used) pat aux (Screma w form arrs)
+removeDuplicateMapOutput :: TopDownRuleOp (Wise SOACS)
+removeDuplicateMapOutput _ pat aux (Screma w form arrs)
   | Just fun <- isMapSOAC form =
     let ses = bodyResult $ lambdaBody fun
         ts = lambdaReturnType fun
@@ -455,9 +449,7 @@ removeDuplicateMapOutput (_, used) pat aux (Screma w form arrs)
                     }
             auxing aux $ letBind pat' $ Op $ Screma w (mapSOAC fun') arrs
             forM_ copies $ \(from, to) ->
-              if UT.isConsumed (patElemName to) used
-                then letBind (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
-                else letBind (Pattern [] [to]) $ BasicOp $ SubExp $ Var $ patElemName from
+              letBind (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
   where
     checkForDuplicates (ses_ts_pes', copies) (se, t, pe)
       | Just (_, _, pe') <- find (\(x, _, _) -> x == se) ses_ts_pes' =
