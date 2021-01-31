@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark literate` now supports a `$loadimg` builtin function for
     passing images to Futhark programs.
 
+  * The `futhark literate` directive for generating videos is now
+    `:video`.
+
 ### Removed
 
 ### Changed
