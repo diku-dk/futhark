@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `futhark literate` now supports a `$loadimg` builtin function for
+    passing images to Futhark programs.
+
 ### Removed
 
 ### Changed
