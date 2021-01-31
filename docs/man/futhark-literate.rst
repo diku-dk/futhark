@@ -61,7 +61,7 @@ The following directives are supported:
   Shows the result of executing the FutharkScript expression ``e``,
   which can have any (transparent) type.
 
-* ``> :anim e[; parameters...]``
+* ``> :video e[; parameters...]``
 
   Creates a video from ``e``.  The optional parameters are lines of
   the form *key: value*:
