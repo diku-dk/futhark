@@ -1,0 +1,166 @@
+-- This file was generated automatically
+{-# OPTIONS_GHC -Wno-unused-matches #-}
+module Futhark.CodeGen.Backends.SPIRV.Spec
+  ( module Futhark.CodeGen.Backends.SPIRV.Spec
+  )
+where
+import Data.Word
+import Data.List
+import Data.Bits
+import Futhark.IR.Primitive (floatToWord, doubleToWord)
+import Data.Function (on)
+import Codec.Binary.UTF8.String (encode)
+import Data.Maybe
+
+class SPIRVInfo a where
+  infoCapabilities :: a -> [Capability]
+  infoCapabilities _ = []
+  infoExtensions :: a -> [String]
+  infoExtensions _ = []
+  infoVersionRange :: a -> SPIRVVersionRange
+  infoVersionRange _ = SPIRVVersionRange (Nothing, Nothing)
+
+instance SPIRVInfo a => SPIRVInfo [a] where
+  infoCapabilities = concat . map infoCapabilities
+  infoExtensions = concat . map infoExtensions
+  infoVersionRange = mconcat . map infoVersionRange
+
+class SPIRVSerialize a where
+  spirvSerialize :: a -> [Word32]
+
+instance SPIRVSerialize a => SPIRVSerialize [a] where
+  spirvSerialize = concatMap spirvSerialize
+
+instance SPIRVSerialize a => SPIRVSerialize (Maybe a) where
+  spirvSerialize = maybe [] spirvSerialize
+
+data SPIRVNumber
+  = -- The boolean denotes signedness
+    SPIRVInt Bool SPIRVWord
+  | -- "A literal 32-bit float is always one operand, directly holding a 32-bit
+    -- IEEE 754 floating-point representation."
+    SPIRVFloat32 Float
+  | -- "A literal 64-bit float is always two operands, directly holding a
+    -- 64-bit IEEE 754 representation. The low-order 32 bits appear in the
+    -- first operand.
+    SPIRVFloat64 Double
+  deriving (Show, Eq, Ord)
+instance SPIRVInfo SPIRVNumber where
+  -- default
+instance SPIRVSerialize SPIRVNumber where
+  spirvSerialize (SPIRVInt _ w) = spirvSerialize w
+  spirvSerialize (SPIRVFloat32 f) = [floatToWord f]
+  spirvSerialize (SPIRVFloat64 d) = spirvSerialize . Word64 $ doubleToWord d
+
+data SPIRVWord
+  = Word8 Word8
+  | Word16 Word16
+  | Word32 Word32
+  | Word64 Word64
+  deriving (Show, Eq, Ord)
+instance SPIRVInfo SPIRVWord where
+  -- default
+instance SPIRVSerialize SPIRVWord where
+  -- See https://www.khronos.org/registry/spir-v/specs/unified1/SPIRV.html#_instructions_2
+  spirvSerialize (Word8 w) = [fromIntegral w]
+  spirvSerialize (Word16 w) = [fromIntegral w]
+  spirvSerialize (Word32 w) = [w]
+  spirvSerialize (Word64 w) = map fromIntegral [w .&. 0xFFFFFFFF, w `shiftR` 32]
+
+newtype Id = Id Word32
+  deriving (Show, Eq, Ord)
+instance SPIRVInfo Id where
+  infoCapabilities _ = []
+  infoExtensions _ = []
+  infoVersionRange _ = SPIRVVersionRange (Nothing, Nothing)
+instance SPIRVSerialize Id where
+  spirvSerialize (Id w) = [w]
+
+newtype SPIRVString = String String
+  deriving (Show, Eq, Ord)
+
+instance SPIRVInfo SPIRVString where
+  infoCapabilities _ = []
+  infoExtensions _ = []
+  infoVersionRange _ = SPIRVVersionRange (Nothing, Nothing)
+
+instance SPIRVSerialize SPIRVString where
+  spirvSerialize (String s) = ser . map fromIntegral $ encode s ++ [0]
+    where
+      ser (x0:x1:x2:x3:xs) =
+        (x0 .|. x1 `shiftL` 8 .|. x2 `shiftL` 16 .|.  x3 `shiftL` 24) : ser xs
+      ser [] = []
+      ser xs = ser $ xs ++ replicate (4 - length xs) 0
+
+data SPIRVVersion = SPIRVVersion Int Int
+  deriving (Show)
+
+instance Eq SPIRVVersion where
+  (SPIRVVersion ma1 mi1) == (SPIRVVersion ma2 mi2) = ma1 == ma2 && mi1 == mi2
+
+instance Ord SPIRVVersion where
+  (SPIRVVersion ma1 mi1) <= (SPIRVVersion ma2 mi2) =
+    ma1 < ma2 || (ma1 == ma2 && mi1 <= mi2)
+
+instance SPIRVSerialize SPIRVVersion where
+  spirvSerialize (SPIRVVersion ma mi) = [ma' `shiftL` 16 .|. mi' `shiftL` 8]
+    where
+      ma' = fromIntegral (fromIntegral ma :: Word8)
+      mi' = fromIntegral (fromIntegral mi :: Word8)
+
+newtype SPIRVVersionRange = SPIRVVersionRange (Maybe SPIRVVersion, Maybe SPIRVVersion)
+instance Semigroup SPIRVVersionRange where
+  (SPIRVVersionRange (f1, l1)) <> (SPIRVVersionRange (f2, l2)) =
+    SPIRVVersionRange (f max f1 f2, f min l1 l2)
+    where
+      f choose (Just a) (Just b) = Just $ choose a b
+      f choose Nothing x = x
+      f choose x Nothing = x
+
+instance Monoid SPIRVVersionRange where
+  mempty = SPIRVVersionRange (Nothing, Nothing)
+
+data SPIRVHeader = SPIRVHeader
+  { headerVersion :: SPIRVVersion
+  , headerGenerator :: Word16
+  , headerGeneratorVersion ::  Word16
+  , headerIdBound :: Word32
+  } deriving (Show, Eq)
+
+instance SPIRVSerialize SPIRVHeader where
+  spirvSerialize hdr =
+    [ magic,
+      version,
+      generator `shiftL` 16 .|. generatorVersion,
+      headerIdBound hdr,
+      0 -- Reserved
+    ]
+    where
+      [version] = spirvSerialize $ headerVersion hdr
+      generator = fromIntegral $ headerGenerator hdr
+      generatorVersion = fromIntegral $ headerGeneratorVersion hdr
+
+-- Helper
+makeHeader :: SPIRVVersion -> Word32 -> SPIRVHeader
+makeHeader version idBound =
+  SPIRVHeader
+    { headerVersion = version
+    , headerGenerator = 0
+    , headerGeneratorVersion = 0
+    , headerIdBound = idBound
+    }
+
+trueThenFalse :: [Bool] -> Bool
+trueThenFalse = all not . dropWhile id
+
+makeInstructionHeader :: Int -> Int -> Word32
+makeInstructionHeader opcode wcount = wcount' `shiftL` 16 .|. opcode'
+  where
+    opcode' = fromIntegral (fromIntegral opcode :: Word16)
+    wcount' = fromIntegral (fromIntegral wcount :: Word16)
+
+type RInstruction = IdResult -> Instruction
+type RTInstruction = IdResultType -> IdResult -> Instruction
+
+-- Header ends here
+----------------------------------------

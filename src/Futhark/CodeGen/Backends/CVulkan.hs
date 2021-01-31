@@ -10,12 +10,10 @@ module Futhark.CodeGen.Backends.CVulkan
   )
 where
 
-import Control.Monad.Identity
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import Futhark.CodeGen.Backends.CVulkan.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
-import qualified Futhark.CodeGen.ImpCode.Kernels as Kernel
 import Futhark.CodeGen.ImpCode.Vulkan
 import qualified Futhark.CodeGen.ImpGen.Vulkan as ImpGen
 import Futhark.IR.KernelsMem hiding (CmpSizeLe, GetSize, GetSizeMax)
@@ -196,7 +194,7 @@ staticVulkanArray name "device" t (ArrayValues vs) = do
   mapped_mem <- newVName "mapped_src_memory"
   mem_t <- vulkanMemoryType "local"
   name_realtype <- newVName $ baseString name ++ "_realtype"
-  GC.libDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:num_elems] = {$inits:vs'};|]
+  GC.earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:num_elems] = {$inits:vs'};|]
   -- Fake a memory block.
   GC.contextField (C.toIdent name mempty) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
@@ -239,7 +237,6 @@ callKernel (CmpSizeLe v key x) = do
     }|]
 callKernel (GetSizeMax v size_class) =
   GC.stm [C.cstm|$id:v = ctx->vulkan.$id:("max_" ++ pretty size_class);|]
-callKernel (HostCode c) = GC.compileCode c
 callKernel (LaunchEntryPoint name args spec_consts (wg_x, wg_y, wg_z)) = do
   cmd_buffer_id <- newVName "cmd_buffer_id"
   scalar_buffers <- newVName "scalar_buffers"
@@ -338,18 +335,13 @@ callKernel (LaunchEntryPoint name args spec_consts (wg_x, wg_y, wg_z)) = do
 
 specConstToExp :: SpecConstExp -> GC.CompilerM op s C.Exp
 specConstToExp (SpecConstSizeExp ds) = return [C.cexp|$exp:ds|]
-specConstToExp SpecConstLockstepWidth = return [C.cexp|ctx->vulkan.lockstep_width|]
-specConstToExp (SpecConstKernelExp vn _) = return [C.cexp|$id:vn|]
 specConstToExp (SpecConstExp e) = GC.compileExp e
-specConstToExp (SpecConstLocalMemExp kc) =
-  return $ runIdentity $ GC.compilePrimExp compileKernelConst kc
-  where
-    compileKernelConst (Kernel.SizeConst key) = return [C.cexp|$id:(pretty key)|]
+specConstToExp (SpecConstKernelExp vn _) = return [C.cexp|$id:vn|]
+specConstToExp (SpecConstLocalMemExp (Count size)) = GC.compileExp size
 
 specConstToType :: SpecConstExp -> C.Type
 specConstToType SpecConstSizeExp {} = [C.cty|typename int32_t|]
 specConstToType SpecConstLocalMemExp {} = [C.cty|typename int32_t|]
-specConstToType SpecConstLockstepWidth = [C.cty|typename int32_t|]
 specConstToType (SpecConstExp e) =
   [C.cty|$ty:(GC.primTypeToCType $ primExpType e)|]
 specConstToType (SpecConstKernelExp _ kce) =
@@ -401,18 +393,19 @@ initBufferInfo bexp = do
 
 writeDescriptorInits :: VName -> VName -> Int -> C.Initializer
 writeDescriptorInits cmd_buffer_id biname i =
+  -- VkWriteDescriptorSet initialization
   [C.cinit|
     {
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-      0,
-      ctx->vulkan.command_buffers[$id:cmd_buffer_id].descriptor_set,
-      $int:i,
-      0,
-      1,
-      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      0,
-      &$id:biname,
-      0
+      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,                         // .sType
+      NULL,                                                           // .pNext
+      ctx->vulkan.command_buffers[$id:cmd_buffer_id].descriptor_set,  // .dstSet
+      $int:i,                                                         // .dstBinding
+      0,                                                              // .dstArrayElement
+      1,                                                              // .descriptorCount
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,                              // .descriptorType
+      NULL,                                                           // .pImageInfo
+      &$id:biname,                                                    // .pBufferInfo
+      NULL                                                            // .pTexelBufferView
     }
   |]
 

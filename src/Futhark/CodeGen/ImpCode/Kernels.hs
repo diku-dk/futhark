@@ -138,7 +138,7 @@ instance Pretty Kernel where
 -- | When we do a barrier or fence, is it at the local or global
 -- level?
 data Fence = FenceLocal | FenceGlobal
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | An operation that occurs within a kernel body.
 data KernelOp

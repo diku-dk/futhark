@@ -14,7 +14,6 @@ where
 import Data.FileEmbed
 import qualified Data.Map as M
 import qualified Futhark.CodeGen.Backends.GenericC as GC
-import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 import Futhark.CodeGen.ImpCode.Vulkan
 import Futhark.Util (zEncodeString)
 import qualified Language.C.Quote.OpenCL as C
@@ -35,19 +34,19 @@ generateBoilerplate (Program shaders sizes _) = do
                                           typename uint8_t owned;
                                         };|]
 
-  let entry_point_names = map SPIRV.shaderEntryPoint shaders
+  let entry_point_names = map shaderEntryPoint shaders
       vulkan_boilerplate = vulkanBoilerplate shaders
       vulkan_ctx_fields = vulkanCtxFields entry_point_names
       vulkan_ctx_inits = vulkanCtxInits entry_point_names
       vulkan_shader_ctx_inits = map vulkanShaderCtxInit shaders
       vulkan_shader_ctx_clrs = map vulkanShaderCtxCleanup shaders
-      max_desc_count = maximum $ 0 : map SPIRV.shaderDescriptorSetSize shaders
+      max_desc_count = maximum $ 0 : map shaderDescriptorSetSize shaders
 
   mapM_ GC.earlyDecl vulkan_boilerplate
 
   let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
       size_var_inits = map (\k -> [C.cinit|$string:(zEncodeString (pretty k))|]) $ M.keys sizes
-      size_class_inits = map (\(c, _) -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
       num_sizes = M.size sizes
 
   GC.earlyDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
@@ -287,7 +286,7 @@ generateBoilerplate (Program shaders sizes _) = do
 
   mapM_ GC.profileReport $ vulkanReport entry_point_names
 
-vulkanBoilerplate :: [SPIRV.SingleEntryShader] -> [C.Definition]
+vulkanBoilerplate :: [SingleEntryShader] -> [C.Definition]
 vulkanBoilerplate shaders =
   [C.cunit|
     $esc:("typedef struct vk_buffer_mem_pair fl_mem_t;")
@@ -300,16 +299,16 @@ vulkanBoilerplate shaders =
     vulkan_h = $(embedStringFile "rts/c/vulkan.h")
     shader_inits = map vulkanShaderInit shaders
 
-vulkanShaderInit :: SPIRV.SingleEntryShader -> C.Definition
-vulkanShaderInit (SPIRV.SEShader name _ code) =
+vulkanShaderInit :: SingleEntryShader -> C.Definition
+vulkanShaderInit (SEShader name _ code) =
   [C.cedecl|
     const typename uint32_t $id:(shaderCodeName name)[] = { $inits:code_words };
   |]
   where
     code_words = [[C.cinit|$int:w|] | w <- code]
 
-vulkanShaderCtxInit :: SPIRV.SingleEntryShader -> C.Stm
-vulkanShaderCtxInit (SPIRV.SEShader name desc_set_size _) =
+vulkanShaderCtxInit :: SingleEntryShader -> C.Stm
+vulkanShaderCtxInit (SEShader name desc_set_size _) =
   [C.cstm|
     vulkan_setup_shader(&ctx->vulkan,
                         &ctx->$id:(shaderCtx name),
@@ -319,8 +318,8 @@ vulkanShaderCtxInit (SPIRV.SEShader name desc_set_size _) =
                         sizeof($id:(shaderCodeName name)));
   |]
 
-vulkanShaderCtxCleanup :: SPIRV.SingleEntryShader -> C.Stm
-vulkanShaderCtxCleanup (SPIRV.SEShader name _ _) =
+vulkanShaderCtxCleanup :: SingleEntryShader -> C.Stm
+vulkanShaderCtxCleanup (SEShader name _ _) =
   [C.cstm|
     vulkan_shader_cleanup(&ctx->vulkan, &ctx->$id:(shaderCtx name));
   |]

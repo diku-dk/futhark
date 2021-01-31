@@ -38,7 +38,7 @@ void vulkan_config_init(struct vulkan_config *cfg,
                         const char *size_names[],
                         size_t *size_values,
                         const char *size_classes[]) {
-  cfg->api_version = VK_MAKE_VERSION(1, 1, 0);
+  cfg->api_version = VK_API_VERSION_1_2;
   cfg->debugging = 0;
   cfg->logging = 0;
   cfg->lunarg_debugging = 0;
@@ -309,7 +309,7 @@ static VkResult vulkan_allocate_command_buffers(struct vulkan_context *ctx,
 
   VkCommandBuffer *tmp_buffers = malloc(count * sizeof(VkCommandBuffer));
 
-  VkCommandBufferAllocateInfo command_buffer_allocate_info;
+  VkCommandBufferAllocateInfo command_buffer_allocate_info = {0};
   command_buffer_allocate_info.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   command_buffer_allocate_info.pNext              = 0;
   command_buffer_allocate_info.commandPool        = ctx->command_pool;
@@ -351,7 +351,7 @@ VkResult vulkan_create_descriptor_pool(struct vulkan_context *ctx, VkDescriptorP
   descriptor_pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   descriptor_pool_size.descriptorCount = ctx->max_descriptor_set_size * ALLOC_STEP;
 
-  VkDescriptorPoolCreateInfo descriptor_pool_create_info;
+  VkDescriptorPoolCreateInfo descriptor_pool_create_info = {0};
   descriptor_pool_create_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   descriptor_pool_create_info.pNext         = 0;
   descriptor_pool_create_info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -367,7 +367,7 @@ static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
 
   free_list_init(&ctx->free_list);
 
-  VkApplicationInfo application_info;
+  VkApplicationInfo application_info = {0};
   application_info.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   application_info.pNext              = 0;
   application_info.pApplicationName   = "";
@@ -376,9 +376,9 @@ static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
   application_info.engineVersion      = 0;
   application_info.apiVersion         = ctx->cfg.api_version;
 
-  const char *layer_names[] = { "VK_LAYER_LUNARG_standard_validation" };
+  const char *layer_names[] = { "VK_LAYER_KHRONOS_validation" };
 
-  VkInstanceCreateInfo instance_create_info;
+  VkInstanceCreateInfo instance_create_info = {0};
   instance_create_info.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   instance_create_info.pNext                   = 0;
   instance_create_info.flags                   = 0;
@@ -396,8 +396,38 @@ static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
 
   ctx->queue_family_index = get_preferred_queue_family(&ctx->cfg, ctx->physical_device);
 
+
+  VkPhysicalDeviceFeatures2 device_features = {0};
+  VkPhysicalDeviceVariablePointersFeatures feature_varptrs = {0};
+  VkPhysicalDeviceShaderFloat16Int8Features feature_f16i8 = {0};
+  VkPhysicalDevice8BitStorageFeatures feature_8bitstorage = {0};
+  VkPhysicalDeviceShaderAtomicInt64Features feature_atomic64 = {0};
+  device_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+  device_features.pNext = &feature_varptrs;
+  feature_varptrs.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES;
+  feature_varptrs.pNext = &feature_f16i8;
+  feature_f16i8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+  feature_f16i8.pNext = &feature_8bitstorage;
+  feature_8bitstorage.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
+  feature_8bitstorage.pNext = &feature_atomic64;
+  feature_atomic64.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
+  feature_atomic64.pNext = NULL;
+  vkGetPhysicalDeviceFeatures2(ctx->physical_device, &device_features);
+
+#define CHECK_FEATURE(a, b) if (a.b == VK_FALSE) { printf("WARNING: Feature " #b " is not supported.\n"); }
+  CHECK_FEATURE(feature_varptrs, variablePointers);
+  CHECK_FEATURE(feature_varptrs, variablePointersStorageBuffer);
+  CHECK_FEATURE(feature_f16i8, shaderInt8);
+  CHECK_FEATURE(feature_8bitstorage, storageBuffer8BitAccess);
+  CHECK_FEATURE(feature_atomic64, shaderBufferInt64Atomics);
+  CHECK_FEATURE(feature_atomic64, shaderSharedInt64Atomics);
+  CHECK_FEATURE(device_features.features, shaderInt16);
+  CHECK_FEATURE(device_features.features, shaderInt64);
+  CHECK_FEATURE(device_features.features, shaderFloat64);
+#undef CHECK_FEATURE
+
   const float queue_prio = 1.0f;
-  VkDeviceQueueCreateInfo device_queue_create_info;
+  VkDeviceQueueCreateInfo device_queue_create_info = {0};
   device_queue_create_info.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
   device_queue_create_info.pNext            = 0;
   device_queue_create_info.flags            = 0;
@@ -405,35 +435,24 @@ static void setup_vulkan(struct vulkan_context *ctx, uint32_t max_desc_count) {
   device_queue_create_info.queueCount       = 1;
   device_queue_create_info.pQueuePriorities = &queue_prio;
 
-  const char *device_extension_names[] = { "VK_KHR_8bit_storage" };
-
-  VkPhysicalDevice8BitStorageFeaturesKHR storage_8bit_features;
-  storage_8bit_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR;
-  storage_8bit_features.pNext                             = 0;
-  storage_8bit_features.storageBuffer8BitAccess           = true;
-
-  VkPhysicalDeviceFeatures device_features = {};
-  device_features.shaderInt16   = true;
-  device_features.shaderInt64   = true;
-  device_features.shaderFloat64 = true;
-
-  VkDeviceCreateInfo device_create_info;
+  VkDeviceCreateInfo device_create_info = {0};
   device_create_info.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-  device_create_info.pNext                   = &storage_8bit_features;
+  device_create_info.pNext                   = &device_features;
   device_create_info.flags                   = 0;
   device_create_info.queueCreateInfoCount    = 1;
   device_create_info.pQueueCreateInfos       = &device_queue_create_info;
   device_create_info.enabledLayerCount       = 0;
   device_create_info.ppEnabledLayerNames     = 0;
-  device_create_info.enabledExtensionCount   = sizeof(device_extension_names) / sizeof(char*);
-  device_create_info.ppEnabledExtensionNames = device_extension_names;
-  device_create_info.pEnabledFeatures        = &device_features;
+  device_create_info.enabledExtensionCount   = 0;
+  device_create_info.ppEnabledExtensionNames = NULL;
+  // Features passed via VkPhysicalDeviceFeatures2
+  device_create_info.pEnabledFeatures        = NULL;
 
   VULKAN_SUCCEED(vkCreateDevice(ctx->physical_device, &device_create_info, 0, &ctx->device));
 
   vkGetDeviceQueue(ctx->device, ctx->queue_family_index, 0, &ctx->queue);
 
-  VkCommandPoolCreateInfo command_pool_create_info;
+  VkCommandPoolCreateInfo command_pool_create_info = {0};
   command_pool_create_info.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   command_pool_create_info.pNext            = 0;
   command_pool_create_info.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -475,7 +494,7 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
   sh_ctx->pipeline_cache_count = 0;
   sh_ctx->pipeline_cache = NULL;
 
-  VkShaderModuleCreateInfo shader_module_create_info;
+  VkShaderModuleCreateInfo shader_module_create_info = {0};
   shader_module_create_info.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   shader_module_create_info.pNext    = 0;
   shader_module_create_info.flags    = 0;
@@ -495,7 +514,7 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
     desc_set_layout_bindings[i].pImmutableSamplers = 0;
   }
 
-  VkDescriptorSetLayoutCreateInfo desc_set_layout_create_info;
+  VkDescriptorSetLayoutCreateInfo desc_set_layout_create_info = {0};
   desc_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   desc_set_layout_create_info.pNext = 0;
   desc_set_layout_create_info.flags = 0;
@@ -508,7 +527,7 @@ void vulkan_setup_shader(struct vulkan_context *ctx,
                                              &sh_ctx->descriptor_set_layout));
   free(desc_set_layout_bindings);
 
-  VkPipelineLayoutCreateInfo pipeline_layout_create_info;
+  VkPipelineLayoutCreateInfo pipeline_layout_create_info = {0};
   pipeline_layout_create_info.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   pipeline_layout_create_info.pNext                  = 0;
   pipeline_layout_create_info.flags                  = 0;
@@ -527,7 +546,7 @@ void vulkan_create_pipeline(struct vulkan_context *ctx,
                             struct vulkan_shader_context *sh_ctx,
                             const VkSpecializationInfo spec_info,
                             VkPipeline *pipeline) {
-  VkComputePipelineCreateInfo compute_pipeline_create_info;
+  VkComputePipelineCreateInfo compute_pipeline_create_info = {0};
   compute_pipeline_create_info.sType                     = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
   compute_pipeline_create_info.pNext                     = 0;
   compute_pipeline_create_info.flags                     = 0;
@@ -622,7 +641,7 @@ VkResult vulkan_alloc(struct vulkan_context *ctx,
     min_size = sizeof(int);
   }
 
-  VkBufferCreateInfo buffer_create_info;
+  VkBufferCreateInfo buffer_create_info = {0};
   buffer_create_info.sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   buffer_create_info.pNext                 = 0;
   buffer_create_info.flags                 = 0;
@@ -631,8 +650,6 @@ VkResult vulkan_alloc(struct vulkan_context *ctx,
                                            | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
                                            | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   buffer_create_info.sharingMode           = VK_SHARING_MODE_EXCLUSIVE;
-  buffer_create_info.queueFamilyIndexCount = 1;
-  buffer_create_info.pQueueFamilyIndices   = &ctx->queue_family_index;
 
   VkResult error = vkCreateBuffer(ctx->device, &buffer_create_info, 0, &mem_out->buffer);
 
@@ -689,7 +706,7 @@ VkResult vulkan_alloc(struct vulkan_context *ctx,
   mem_out->owned = 0;
   mem_out->owner_index = 0;
 
-  VkMemoryAllocateInfo mem_alloc_info;
+  VkMemoryAllocateInfo mem_alloc_info = {0};
   mem_alloc_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   mem_alloc_info.pNext           = 0;
   mem_alloc_info.allocationSize  = mem_req.size;
@@ -850,7 +867,7 @@ VkResult vulkan_allocate_descriptor_set(struct vulkan_context *ctx,
 
   command_buffer_ctx->active_descriptor_set = 1;
 
-  VkDescriptorSetAllocateInfo descriptor_set_allocate_info;
+  VkDescriptorSetAllocateInfo descriptor_set_allocate_info = {0};
   descriptor_set_allocate_info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   descriptor_set_allocate_info.pNext              = 0;
   descriptor_set_allocate_info.descriptorPool     = ctx->descriptor_pools[command_buffer_index/ALLOC_STEP];
@@ -866,7 +883,7 @@ VkResult vulkan_begin_recording(struct vulkan_context *ctx, uint32_t command_buf
 
   VkCommandBuffer command_buffer = ctx->command_buffers[command_buffer_index].command_buffer;
 
-  VkCommandBufferBeginInfo command_buffer_begin_info;
+  VkCommandBufferBeginInfo command_buffer_begin_info = {0};
   command_buffer_begin_info.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   command_buffer_begin_info.pNext            = 0;
   command_buffer_begin_info.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -886,7 +903,7 @@ VkResult vulkan_end_recording_and_submit(struct vulkan_context *ctx,
   if (error != VK_SUCCESS)
     return error;
 
-  VkSubmitInfo submit_info;
+  VkSubmitInfo submit_info = {0};
   submit_info.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit_info.pNext                = 0;
   submit_info.waitSemaphoreCount   = 0;

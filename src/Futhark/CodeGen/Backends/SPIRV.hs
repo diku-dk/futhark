@@ -1,1404 +1,802 @@
-{-# LANGUAGE FlexibleInstances #-}
-
-module Futhark.CodeGen.Backends.SPIRV
-  ( EntryPointName,
-    SingleEntryShader (..),
-    ReservedSpec (..),
-    reservedSpecList,
-    runCompilerM,
-    CompilerM,
-    CompilerState,
-    newCompilerState,
-    stringToCode,
-    getEntryPoints,
-    getDescriptorSets,
-    compileKernel,
-    finalizedShader,
-    kernelToShader,
-  )
-where
-
-import Control.Monad.State
-import Data.Bits
-import Data.Char hiding (Space)
-import Data.Foldable
-import Data.List
-import qualified Data.Map.Strict as M
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE LambdaCase #-}
+module Futhark.CodeGen.Backends.SPIRV (kernelToShader) where
+import Data.Function (on)
 import Data.Maybe
-import qualified Data.Sequence as S
-import Data.Word
-import Futhark.CodeGen.Backends.SPIRV.Operations
+import Data.List
+import Control.Monad (void, when, unless)
+import qualified Data.Set as S
+import qualified Data.Map as M
+import Futhark.CodeGen.Backends.SPIRV.Builder hiding (Builder)
+import qualified Futhark.CodeGen.Backends.SPIRV.Builder as SPIRVB (Builder)
 import Futhark.CodeGen.ImpCode hiding (Constant, Function, (.|.))
 import Futhark.CodeGen.ImpCode.Kernels hiding (Code, Constant, Function, (.|.))
-import Futhark.IR.Prop.Types
-import Futhark.MonadFreshNames
+import Futhark.CodeGen.ImpCode.Vulkan (EntryPointArg, SpecConstExp(..), SingleEntryShader(..), EntryPointArg(..))
+import Futhark.CodeGen.Backends.SPIRV.ArrayAccess (ArrayAccesses, getArrayAccesses)
+import Futhark.CodeGen.Backends.SPIRV.Operations
+import Futhark.IR.Prop.Types (int32, int64, float32, float64)
+import Futhark.IR.Syntax.Core (SubExp(..))
 
-type EntryPointName = String
-
-data SingleEntryShader = SEShader
-  { shaderEntryPoint :: EntryPointName,
-    shaderDescriptorSetSize :: Int,
-    shaderCode :: [Word32]
+data ScalarInfo = ScalarInfo
+  { varId :: Id,
+    varType :: SPIRVType,
+    varVol :: Volatility
   }
-
-data VarScope
-  = Local
-  | Global
-  | UniformConstant
-  | Private
-  | FunctionLocal
-  | StorageBuffer
-  | -- Only used by builtin variables
-    Input
-  deriving (Eq, Ord)
-
-data SPIRVType
-  = Scalar PrimType
-  | Array SPIRVType (Maybe Word32)
-  | -- Only used by builtin variables
-    Vector SPIRVType Word32
-  | -- Only used by interop buffers
-    Struct [SPIRVType]
-  | Void
-  | Function SPIRVType
-  | Pointer SPIRVType VarScope
-  deriving (Eq, Ord)
-
-type ExprInfo = (Word32, SPIRVType)
-
-data VarDec
-  = Inline
-  | LocalMem
-  | InterOp
-  | Constant
-  deriving (Eq, Ord)
-
-type VarInfo = (Word32, SPIRVType, VarDec)
-
-data Builtin
-  = GlobalInvocationId
-  | WorkgroupId
-  | NumWorkgroups
-  | LocalInvocationId
-  deriving (Eq, Ord)
-
-type Descriptor = (Word32, KernelUse)
-
-type DescriptorSet = [Descriptor]
-
-type DescriptorSetMap = M.Map EntryPointName DescriptorSet
-
-data ReservedSpec
-  = WorkgroupSizeXSpec
-  | WorkgroupSizeYSpec
-  | WorkgroupSizeZSpec
-  | LockstepWidthSpec
-  deriving (Eq, Ord)
-
-reservedSpecList :: [ReservedSpec]
-reservedSpecList =
-  [ WorkgroupSizeXSpec,
-    WorkgroupSizeYSpec,
-    WorkgroupSizeZSpec,
-    LockstepWidthSpec
-  ]
-
-reservedSpecId :: ReservedSpec -> Word32
-reservedSpecId res = fromIntegral $ maybe 0 (1 +) $ elemIndex res reservedSpecList
-
-reservedSpecType :: ReservedSpec -> SPIRVType
-reservedSpecType WorkgroupSizeXSpec = Scalar int32
-reservedSpecType WorkgroupSizeYSpec = Scalar int32
-reservedSpecType WorkgroupSizeZSpec = Scalar int32
-reservedSpecType LockstepWidthSpec = Scalar int32
-
-reservedSpecRef :: ReservedSpec -> (Word32, SPIRVType)
-reservedSpecRef res = (reservedSpecId res, reservedSpecType res)
-
-data Reserved = WorkgroupSize
-  deriving (Eq, Ord)
-
-reservedList :: [Reserved]
-reservedList = [WorkgroupSize]
-
-reservedId :: Reserved -> Word32
-reservedId res =
-  fromIntegral $ length reservedSpecList + maybe 0 (1 +) (elemIndex res reservedList)
-
-totalReservedIdCount :: Word32
-totalReservedIdCount = fromIntegral $ length reservedSpecList + length reservedList
-
-data CompilerState = CompilerState
-  { compCurrentMaxId :: Word32,
-    compNameSrc :: VNameSource,
-    -- | ^ Used only by transpose kernels to access corresponding descriptors
-    compVarRefs :: M.Map VName VarInfo,
-    -- | ^ Type is the variable type without the required pointer wrapper
-    compTypeRefs :: M.Map SPIRVType Word32,
-    compConstRefs :: M.Map PrimValue Word32,
-    -- | ^ Constants used inside the SPIR-V program
-    compEntryPoints :: [(EntryPointName, Word32)],
-    compResult :: S.Seq Word32,
-    compGLSLExtId :: Maybe Word32,
-    compBuiltinRefs :: M.Map Builtin Word32,
-    compDescriptors :: DescriptorSetMap,
-    compSpecConstRefs :: [(Word32, SPIRVType)],
-    compArrayLeastAccessSize :: M.Map VName Int
+  deriving (Show)
+data FutConstInfo = FutConstInfo
+  { fcId :: Id,
+    fcType :: SPIRVType
   }
+  deriving (Show)
+data ArrayInfo = ArrayInfo
+  { arrId :: Id,
+    arrElemType :: SPIRVType
+  }
+  deriving (Show)
 
-newCompilerState :: CompilerState
-newCompilerState =
-  CompilerState
-    { compCurrentMaxId = totalReservedIdCount,
-      compNameSrc = blankNameSource,
-      compVarRefs = M.empty,
-      compTypeRefs = M.empty,
-      compConstRefs = M.empty,
-      compEntryPoints = [],
-      compResult = S.Empty,
-      compGLSLExtId = Nothing,
-      compBuiltinRefs = M.empty,
-      compDescriptors = M.empty,
-      compSpecConstRefs = map reservedSpecRef reservedSpecList,
-      compArrayLeastAccessSize = M.empty
-    }
+data Var
+  = VarScalar ScalarInfo
+  | VarFutConst FutConstInfo
+  | VarArray ArrayInfo
+  deriving (Show)
 
-type CompilerM = State CompilerState
+fromScalarInfo :: Var -> ScalarInfo
+fromScalarInfo (VarScalar v) = v
+fromScalarInfo (VarFutConst _) =
+  error "Expected scalar variable, got Futhark const"
+fromScalarInfo (VarArray _) = error "Expected scalar variable, got array"
 
-instance MonadFreshNames CompilerM where
-  getNameSource = gets compNameSrc
-  putNameSource src = modify $ \s -> s {compNameSrc = src}
+fromArrayInfo :: Var -> ArrayInfo
+fromArrayInfo (VarScalar _) = error "Expected array variable, got scalar"
+fromArrayInfo (VarFutConst _) =
+  error "Expected array variable, got Futhark const"
+fromArrayInfo (VarArray v) = v
 
-runCompilerM :: CompilerState -> CompilerM a -> a
-runCompilerM cs comp = evalState comp cs
+data ImpCodeToShader = ImpCodeToShader
+  { shVars :: M.Map VName Var,
+    shInterfaceVars :: [(EntryPointArg, BindingId)],
+    shSpecConsts :: [(SpecConstExp, SpecId)],
+    shArrayElemTypes :: M.Map VName PrimType
+  }
+  deriving (Show)
 
-newId :: CompilerM Word32
-newId = do
-  modify $ \s -> s {compCurrentMaxId = compCurrentMaxId s + 1}
-  gets compCurrentMaxId
+type Builder = SPIRVB.Builder ImpCodeToShader
 
-insertType :: SPIRVType -> CompilerM Word32
-insertType t = do
-  t_id <- newId
-  modify $ \s -> s {compTypeRefs = M.insert t t_id $ compTypeRefs s}
-  return t_id
+-- | Translate a Futhark @Volatility@ to SPIR-V @MemoryAccess@ flags
+volatilityToMemoryAccess :: Volatility -> Maybe MemoryAccess
+volatilityToMemoryAccess Volatile = Just $ MemoryAccess [MemoryAccessVolatile]
+volatilityToMemoryAccess Nonvolatile = Nothing
 
-getTypeId :: SPIRVType -> CompilerM Word32
-getTypeId t = do
-  s <- get
-  maybe (ensureAllSubTypeIds t >> insertType t) return $ (M.!?) (compTypeRefs s) t
+addScalar :: VName -> ScalarInfo -> Builder ()
+addScalar v info = modifyUserState $
+  \s -> s { shVars = M.insert v (VarScalar info) (shVars s) }
 
-ensureTypeId :: SPIRVType -> CompilerM ()
-ensureTypeId t = void $ getTypeId t
+addFutConst :: VName -> FutConstInfo -> Builder ()
+addFutConst v info = modifyUserState $
+  \s -> s { shVars = M.insert v (VarFutConst info) (shVars s) }
 
-ensureAllSubTypeIds :: SPIRVType -> CompilerM ()
-ensureAllSubTypeIds (Function st) = ensureTypeId st
-ensureAllSubTypeIds (Array st _) = ensureTypeId st
-ensureAllSubTypeIds (Pointer st _) = ensureTypeId st
-ensureAllSubTypeIds (Vector st _) = ensureTypeId st
-ensureAllSubTypeIds (Struct sts) = mapM_ ensureTypeId sts
-ensureAllSubTypeIds _ = return ()
+addArray :: VName -> ArrayInfo -> Builder ()
+addArray v info = modifyUserState $
+  \s -> s { shVars = M.insert v (VarArray info) (shVars s) }
 
-getConstId :: PrimValue -> CompilerM Word32
-getConstId v = do
-  s <- get
-  case (M.!?) (compConstRefs s) v of
-    Just a -> return a
-    Nothing -> do
-      v_id <- newId
-      modify $ \s_n -> s_n {compConstRefs = M.insert v v_id $ compConstRefs s_n}
-      return v_id
+getVar :: VName -> Builder Var
+getVar v =
+  getUserStateS $
+    fromMaybe (error $ "Variable does not exist: " ++ show v)
+    . M.lookup v . shVars
 
-getBuiltinId :: Builtin -> CompilerM Word32
-getBuiltinId builtin = do
-  s <- get
-  case (M.!?) (compBuiltinRefs s) builtin of
-    Just a -> return a
-    Nothing -> do
-      b_id <- newId
-      modify $ \s_n -> s_n {compBuiltinRefs = M.insert builtin b_id $ compBuiltinRefs s_n}
-      return b_id
+getScalar :: VName -> Builder ScalarInfo
+getScalar v = fromScalarInfo <$> getVar v
 
-clearVars :: CompilerM ()
-clearVars = modify $ \s -> s {compVarRefs = M.empty}
+getArray :: VName -> Builder ArrayInfo
+getArray v = fromArrayInfo <$> getVar v
 
-getVarInfo :: VName -> CompilerM VarInfo
-getVarInfo v = do
-  s <- get
-  return $ (M.!) (compVarRefs s) v
+loadScalar :: VName -> Builder Id
+loadScalar v = do
+  s <- getVar v
+  case s of
+    VarScalar (ScalarInfo vId vType vVol) ->
+      let memAccess = volatilityToMemoryAccess vVol
+      in instrRT vType $ OpLoad vId memAccess
+    VarFutConst (FutConstInfo cId _) ->
+      return cId
+    _ -> error  "Expected scalar or const variable, got array"
 
-suggestArrayLeastAccessSize :: VName -> Int -> CompilerM ()
-suggestArrayLeastAccessSize vn size = do
-  s <- get
-  let n = case (M.!?) (compArrayLeastAccessSize s) vn of
-        Just _ -> M.adjust (min size) vn $ compArrayLeastAccessSize s
-        Nothing -> M.insert vn size $ compArrayLeastAccessSize s
-  modify $ \s_n -> s_n {compArrayLeastAccessSize = n}
+getFutConst :: VName -> Builder Id
+getFutConst v = do
+  s <- getVar v
+  case s of
+    VarFutConst (FutConstInfo cId _) ->
+      return cId
+    _ -> error $ "No such Futhark constant: " ++ show v
 
-getCapabilities :: [Word32]
-getCapabilities =
-  concatMap
-    opCapability
-    [ cShaderCapability,
-      cStorageBuffer8BitAccessCapability,
-      cInt16Capability,
-      cInt64Capability,
-      cFloat64Capability
-      --, cInt8Capability
-    ]
+storeScalar :: VName -> Id -> Builder ()
+storeScalar v i = do
+  ScalarInfo vId vType vVol <- getScalar v
+  let memAccess = volatilityToMemoryAccess vVol
+  assertType vType i
+  instr $ OpStore vId i memAccess
 
-encodeString :: String -> [Word32]
-encodeString s = stringToCode $ s ++ [chr 0 | length s `mod` 4 == 0]
+modifyScalar :: VName -> (Id -> Builder Id) -> Builder ()
+modifyScalar v f = do
+  ScalarInfo vId vType vVol <- getScalar v
+  let memAccess = volatilityToMemoryAccess vVol
+  loaded <- instrRT vType $ OpLoad vId memAccess
+  storeMe <- f loaded
+  assertType vType storeMe
+  instr $ OpStore vId storeMe memAccess
 
--- | ^ SPIR-V strings must be null-terminated
-stringToCode :: String -> [Word32]
-stringToCode [] = []
-stringToCode (c1 : c2 : c3 : c4 : cs) =
-  let ws = map (fromIntegral . ord) [c1, c2, c3, c4]
-      bs = zipWith (\w i -> w `shift` (8 * i)) ws [0 .. 3]
-      wd = foldl' (.|.) 0 bs
-   in wd : stringToCode cs
-stringToCode cs = stringToCode $ (++) cs $ replicate (4 - length cs) $ chr 0
+loadArray :: VName -> Id -> Volatility -> Builder Id
+loadArray v idx vol = do
+  ArrayInfo aId aType <- getArray v
+  (accessId, _) <- makeArrayAccess aId idx
+  let memAccess = volatilityToMemoryAccess vol
+  instrRT aType $ OpLoad accessId memAccess
 
-getExtensions :: [Word32]
-getExtensions = concatMap (opExtension . encodeString) ["SPV_KHR_8bit_storage"]
+storeArray :: VName -> Id -> Id -> Volatility -> Builder ()
+storeArray v idx storeMe vol = do
+  ArrayInfo aId _ <- getArray v
+  (accessId, _) <- makeArrayAccess aId idx
+  let memAccess = volatilityToMemoryAccess vol
+  instr $ OpStore accessId storeMe memAccess
 
-getGLSLExt :: CompilerM [Word32]
-getGLSLExt = do
-  glsl_id <- gets compGLSLExtId
-  return $ case glsl_id of
-    Nothing -> opMemoryModel cSimpleMemoryModel
-    Just gid ->
-      opExtInstImport (encodeString "GLSL.std.450") gid
-        ++ opMemoryModel cGLSLMemoryModel
+declareFunctionScalar :: VName -> SPIRVType -> Volatility -> Maybe SPIRVConstant -> Builder Id
+declareFunctionScalar v t vol initValue = do
+  i <- makeFunctionVar t initValue
+  addScalar v $ ScalarInfo i t vol
+  return i
 
-spaceToScope :: Space -> VarScope
-spaceToScope (Space "global") = Global
-spaceToScope (Space "constant") = UniformConstant
-spaceToScope (Space "private") = Private
-spaceToScope _ = Local
+as :: PrimType -> Id -> Builder Id
+as dstPrimType i = do
+  srcType <- getType i
+  case (dstPrimType, srcType) of
+    (_, TScalar srcPrimType) | dstPrimType == srcPrimType ->
+      return i
+    (IntType _, TScalar (IntType _)) ->
+      instrRT (TScalar dstPrimType) $ OpUConvert i
+    (FloatType _, TScalar (FloatType _)) ->
+      instrRT (TScalar dstPrimType) $ OpFConvert i
+    _ -> error $ "Bad conversion: " ++ show srcType ++
+                  " to " ++ show (TScalar dstPrimType)
 
-decSpaceToScope :: VarDec -> Space -> VarScope
-decSpaceToScope InterOp _ = StorageBuffer
-decSpaceToScope _ space = spaceToScope space
-
-builtinToBuiltinId :: Builtin -> Word32
-builtinToBuiltinId GlobalInvocationId = cBuiltinGlobalInvocationId
-builtinToBuiltinId WorkgroupId = cBuiltinWorkgroupId
-builtinToBuiltinId NumWorkgroups = cBuiltinNumWorkgroups
-builtinToBuiltinId LocalInvocationId = cBuiltinLocalInvocationId
-
-insertVarInline :: VName -> VarScope -> SPIRVType -> CompilerM Word32
-insertVarInline name scope t = do
-  let p_t = Pointer t scope -- Variables must be of pointer type
-      storage = scopeToStorageClass scope
-  (var_id, _) <- insertReturnOp p_t $ opVariable storage
-  ensureTypeId p_t
-  modify $ \s -> s {compVarRefs = M.insert name (var_id, t, Inline) $ compVarRefs s}
-  return var_id
-
-getUseName :: KernelUse -> VName
-getUseName (ScalarUse name _) = name
-getUseName (MemoryUse name) = name
-getUseName (ConstUse name _) = name
-
-getUseType :: KernelUse -> CompilerM SPIRVType
-getUseType (ScalarUse _ t) = return $ Scalar t
-getUseType (MemoryUse name) = do
-  access_size_map <- gets compArrayLeastAccessSize
-  let elem_size = (M.!) access_size_map name
-      t = Scalar $ byteSizeToIntPrimType elem_size
-  return $ Array t Nothing
-getUseType (ConstUse _ e) = return $ Scalar $ primExpType e
-
-getActualDescriptorType :: SPIRVType -> SPIRVType
-getActualDescriptorType (Scalar Bool) = Scalar int8
-getActualDescriptorType t = t
-
-registerDescriptorAccessEarly :: KernelUse -> CompilerM ()
-registerDescriptorAccessEarly use = do
-  t <- getUseType use
-  let at = getActualDescriptorType t
-      p_t = Pointer t StorageBuffer
-      s_t = Struct [t]
-      pa_t = Pointer at StorageBuffer
-      sa_t = Struct [at]
-  ensureTypeId p_t
-  ensureTypeId s_t
-  ensureTypeId pa_t
-  ensureTypeId sa_t
-  var_id <- newId
-  modify $ \s -> s {compVarRefs = M.insert (getUseName use) (var_id, t, InterOp) $ compVarRefs s}
-
-insertDescriptorAccess :: Word32 -> KernelUse -> CompilerM ()
-insertDescriptorAccess desc_id use = do
-  zero_id <- getConstId $ IntValue $ Int32Value 0
-  (var_id, p_t, _) <- getVarInfo $ getUseName use
-  let pa_t = getActualDescriptorType p_t
-  t_id <- getTypeId $ Pointer pa_t StorageBuffer
-  appendCode $ opAccessChain desc_id zero_id t_id var_id
-
-insertDescriptorAccesses :: EntryPointName -> CompilerM ()
-insertDescriptorAccesses name = do
-  desc_map <- gets compDescriptors
-  mapM_ (uncurry insertDescriptorAccess) $ (M.!) desc_map name
-
-getEntryPoints :: CompilerM [String]
-getEntryPoints = map fst <$> gets compEntryPoints
-
-getDescriptorSets :: CompilerM (M.Map String DescriptorSet)
-getDescriptorSets = gets compDescriptors
-
-getGLSLExtId :: CompilerM Word32
-getGLSLExtId = do
-  s <- get
-  case compGLSLExtId s of
-    Just ext_id -> return ext_id
-    Nothing -> do
-      ext_id <- newId
-      modify $ \s_n -> s_n {compGLSLExtId = Just ext_id}
-      return ext_id
-
-appendCode :: [Word32] -> CompilerM ()
-appendCode code = modify $ \s -> s {compResult = (S.><) (compResult s) (S.fromList code)}
-
-addEntryPoint :: EntryPointName -> Word32 -> CompilerM ()
-addEntryPoint name entry_id = modify $ \s -> s {compEntryPoints = (name, entry_id) : compEntryPoints s}
-
-addDescriptors :: EntryPointName -> [KernelUse] -> CompilerM ()
-addDescriptors kernel uses = do
-  id_uses <- mapM (\u -> newId >>= (\u_id -> return (u_id, u))) uses
-  modify $ \s -> s {compDescriptors = M.insert kernel id_uses $ compDescriptors s}
-
-registerConstUse :: KernelUse -> CompilerM ()
-registerConstUse (ConstUse name e) = do
-  let t = Scalar $ primExpType e
-  var_id <- newId
-  modify $ \s ->
-    s
-      { compVarRefs = M.insert name (var_id, t, Constant) $ compVarRefs s,
-        compSpecConstRefs = compSpecConstRefs s ++ [(var_id, t)]
-      }
-registerConstUse _ = return ()
-
--- In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Count Bytes Exp)
-
-insertLocalMemory :: LocalMemoryUse -> CompilerM ()
-insertLocalMemory (name, _) = do
-  size_id <- newId
-  size_expr_id <- newId
-  access_size_map <- gets compArrayLeastAccessSize
-  let elem_size = fromMaybe 4 $ (M.!?) access_size_map name -- Default if unused
-      elem_t = Scalar $ byteSizeToIntPrimType elem_size
-      t = Array elem_t $ Just size_expr_id
-      p_t = Pointer t Local
-  (var_id, _) <- insertReturnOp p_t $ opVariable cStorageClassWorkgroup
-  ensureTypeId p_t
-  modify $ \s ->
-    s
-      { compVarRefs = M.insert name (var_id, t, LocalMem) $ compVarRefs s,
-        compSpecConstRefs = compSpecConstRefs s ++ [(size_id, t)]
-      }
-
-getDescriptorUses :: [KernelUse] -> [KernelUse]
-getDescriptorUses [] = []
-getDescriptorUses (ConstUse _ _ : ks) = getDescriptorUses ks
-getDescriptorUses (use : ks) = use : getDescriptorUses ks
-
-scopeToStorageClass :: VarScope -> Word32
-scopeToStorageClass StorageBuffer = cStorageClassStorageBuffer
-scopeToStorageClass FunctionLocal = cStorageClassFunction
-scopeToStorageClass Local = cStorageClassWorkgroup
-scopeToStorageClass Global = cStorageClassCrossWorkgroup
-scopeToStorageClass Private = cStorageClassPrivate
-scopeToStorageClass UniformConstant = cStorageClassUniformConstant
-scopeToStorageClass Input = cStorageClassInput
-
-insertReturnOp :: SPIRVType -> (Word32 -> Word32 -> [Word32]) -> CompilerM ExprInfo
-insertReturnOp t f = do
-  t_id <- getTypeId t
-  ret_id <- newId
-  appendCode $ f t_id ret_id
-  return (ret_id, t)
-
-glslReturnOp :: GLSLInstr -> [Word32] -> SPIRVType -> CompilerM ExprInfo
-glslReturnOp instr ops t = do
-  glsl_id <- getGLSLExtId
-  insertReturnOp t $ opExtInst instr ops glsl_id
-
-insertEntryHead :: EntryPointName -> CompilerM ()
-insertEntryHead name = do
-  void_func_t <- getTypeId $ Function Void
-  (entry_id, _) <- insertReturnOp Void $ opFunction cFunctionControlNone void_func_t
-  addEntryPoint name entry_id
-  desc_map <- gets compDescriptors
-  newId >>= appendCode . opLabel
-  mapM_ (registerDescriptorAccessEarly . snd) $ (M.!) desc_map name
-
-insertEntryTail :: CompilerM ()
-insertEntryTail = do
-  appendCode opReturn
-  appendCode opFunctionEnd
-  clearVars
-
-insertCompareEqual :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
-insertCompareEqual (FloatType _) x_id y_id = insertReturnOp (Scalar Bool) $ opFOrdEqual x_id y_id
-insertCompareEqual (IntType _) x_id y_id = insertReturnOp (Scalar Bool) $ opIEqual x_id y_id
-insertCompareEqual Bool x_id y_id = insertReturnOp (Scalar Bool) $ opLogicalEqual x_id y_id
-insertCompareEqual _ _ _ = error "Equality of certs not supported."
-
-insertVarStore :: VarInfo -> Word32 -> CompilerM ()
-insertVarStore (to_id, Scalar Bool, InterOp) from_id = do
-  (c_id, _) <- insertBitcast int8 Bool from_id
-  appendCode $ opStore to_id c_id []
-insertVarStore (to_id, _, _) from_id = appendCode $ opStore to_id from_id []
-
-insertInternalArrayWrite :: VName -> VarScope -> PrimType -> Int -> PrimValue -> CompilerM ()
-insertInternalArrayWrite dest scope r_pt i val = do
-  let aligned_i = i * primByteSize r_pt
-  val_id <- getConstId val
-  i_id <- getConstId $ IntValue $ Int32Value $ fromIntegral aligned_i
-  insertArrayWrite dest i_id val_id r_pt scope Nonvolatile
-
-insertLoop :: CompilerM ExprInfo -> CompilerM () -> CompilerM () -> CompilerM ()
-insertLoop check body continue = do
-  start_id <- newId
-  check_id <- newId
-  body_id <- newId
-  continue_id <- newId
-  end_id <- newId
-  appendCode $ opBranch start_id
-  appendCode $ opLabel start_id
-  appendCode $ opLoopMerge end_id continue_id
-  appendCode $ opBranch check_id
-  appendCode $ opLabel check_id
-  (cond_id, cond_st) <- check
-
-  -- Fix for implicit conversion
-  (condc_id, _) <- case cond_st of
-    Scalar cond_t -> insertBitcast Bool cond_t cond_id
-    _ -> return (cond_id, cond_st)
-
-  appendCode $ opBranchConditional condc_id body_id end_id
-  appendCode $ opLabel body_id
+-- Insert a loop. @check@ must return an Id of a Bool
+loop :: Builder Id -> Builder () -> Builder () -> Builder ()
+loop check body continue = do
+  startLabel <- newId
+  checkLabel <- newId
+  bodyLabel <- newId
+  contLabel <- newId
+  endLabel <- newId
+  instr $ OpBranch startLabel
+  instr $ OpLabel startLabel
+  instr $ OpLoopMerge endLabel contLabel $ LoopControl [LoopControlNone]
+  instr $ OpBranch checkLabel
+  instr $ OpLabel checkLabel
+  cond <- check
+  assertType (TScalar Bool) cond
+  instr $ OpBranchConditional cond bodyLabel endLabel []
+  instr $ OpLabel bodyLabel
   body
-  appendCode $ opBranch continue_id
-  appendCode $ opLabel continue_id
+  instr $ OpBranch contLabel
+  instr $ OpLabel contLabel
   continue
-  appendCode $ opBranch start_id
-  appendCode $ opLabel end_id
+  instr $ OpBranch startLabel
+  instr $ OpLabel endLabel
 
-insertIf :: Word32 -> CompilerM () -> CompilerM () -> CompilerM ()
-insertIf cond_id t_branch f_branch = do
-  true_id <- newId
-  false_id <- newId
-  end_id <- newId
-  appendCode $ opSelectionMerge end_id
-  appendCode $ opBranchConditional cond_id true_id false_id
-  appendCode $ opLabel true_id
-  t_branch
-  appendCode $ opBranch end_id
-  appendCode $ opLabel false_id
-  f_branch
-  appendCode $ opBranch end_id
-  appendCode $ opLabel end_id
+if_ :: Builder Id -> Builder () -> Builder () -> Builder ()
+if_ check tbranch fbranch = do
+  trueLabel <- newId
+  falseLabel <- newId
+  endLabel <- newId
+  cond <- check
+  assertType (TScalar Bool) cond
+  instr $ OpSelectionMerge endLabel $ SelectionControl [SelectionControlNone]
+  instr $ OpBranchConditional cond trueLabel falseLabel []
+  instr $ OpLabel trueLabel
+  tbranch
+  instr $ OpBranch endLabel
+  instr $ OpLabel falseLabel
+  fbranch
+  instr $ OpBranch endLabel
+  instr $ OpLabel endLabel
 
-insertVarLoad :: VarInfo -> CompilerM ExprInfo
-insertVarLoad (var_id, var_t, Constant) = return (var_id, var_t)
-insertVarLoad (var_id, Scalar Bool, InterOp) = do
-  (l_id, _) <- insertReturnOp (Scalar int8) $ opLoad var_id []
-  insertBitcast Bool int8 l_id
-insertVarLoad (var_id, var_t, _) = insertReturnOp var_t $ opLoad var_id []
+compileLeafExp :: ExpLeaf -> Builder Id
+compileLeafExp (ScalarVar v) = loadScalar v
+compileLeafExp (SizeOf t) =
+  getConstId $ Const $ IntValue $ Int32Value $ primByteSize t
+compileLeafExp (Index v (Count idxExp) t _ vol) = do
+  idx <- compileExp $ untyped idxExp
+  loaded <- loadArray v idx vol
+  assertType (TScalar t) loaded
+  return loaded
 
-byteSizeToIntPrimType :: Int -> PrimType
-byteSizeToIntPrimType 1 = int8
-byteSizeToIntPrimType 2 = int16
-byteSizeToIntPrimType 4 = int32
-byteSizeToIntPrimType _ = int64
-
-atomicOpArrayAndExp :: AtomicOp -> (VName, Exp, Maybe Exp)
-atomicOpArrayAndExp (AtomicAdd _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicSMax _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicSMin _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicUMax _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicUMin _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicAnd _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicOr _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicXor _ _ rname _ e) = (rname, e, Nothing)
-atomicOpArrayAndExp (AtomicCmpXchg _ _ rname _ le re) = (rname, le, Just re)
-atomicOpArrayAndExp (AtomicXchg _ _ rname _ e) = (rname, e, Nothing)
-
--- Bitcast assumes equal size (Boolean values are size-less)
-insertBitcast :: PrimType -> PrimType -> Word32 -> CompilerM ExprInfo
-insertBitcast Cert _ _ = error "Cert bitcasts are not supported"
-insertBitcast _ Cert _ = error "Cert bitcasts are not supported"
-insertBitcast to_pt from_pt from_id
-  | to_pt == from_pt = return (from_id, Scalar from_pt)
-insertBitcast Bool from_pt from_id = do
-  zero_id <- getConstId $ blankPrimValue from_pt
-  (is_zero_id, _) <- insertCompareEqual from_pt zero_id from_id
-  insertReturnOp (Scalar Bool) $ opLogicalNot is_zero_id
-insertBitcast to_pt@(IntType to_it) Bool from_id = do
-  zero_id <- getConstId $ IntValue $ intValue to_it (0 :: Integer)
-  one_id <- getConstId $ IntValue $ intValue to_it (1 :: Integer)
-  insertReturnOp (Scalar to_pt) $ opSelect from_id one_id zero_id
-insertBitcast to_pt@(FloatType to_ft) Bool from_id = do
-  zero_id <- getConstId $ FloatValue $ floatValue to_ft (0.0 :: Double)
-  one_id <- getConstId $ FloatValue $ floatValue to_ft (1.0 :: Double)
-  insertReturnOp (Scalar to_pt) $ opSelect from_id one_id zero_id
-insertBitcast to_pt _ from_id = insertReturnOp (Scalar to_pt) (opBitcast from_id)
-
-insertShiftRightConst :: SPIRVType -> Word32 -> Int -> CompilerM Word32
-insertShiftRightConst _ val_id 0 = return val_id
-insertShiftRightConst val_t val_id shift_by = do
-  sb_id <- getConstId $ IntValue $ Int32Value $ fromIntegral shift_by
-  fst <$> insertReturnOp val_t (opShiftRightLogical val_id sb_id)
-
-insertShiftLeftConst :: SPIRVType -> Word32 -> Int -> CompilerM Word32
-insertShiftLeftConst _ val_id 0 = return val_id
-insertShiftLeftConst val_t val_id shift_by = do
-  sb_id <- getConstId $ IntValue $ Int32Value $ fromIntegral shift_by
-  fst <$> insertReturnOp val_t (opShiftLeftLogical val_id sb_id)
-
-insertIntConversion :: SPIRVType -> SPIRVType -> Word32 -> CompilerM Word32
-insertIntConversion to_t from_t from_id
-  | to_t == from_t = return from_id
-  | otherwise = fst <$> insertReturnOp to_t (opUConvert from_id)
-
-insertIndexIncrConst :: Word32 -> Int -> CompilerM Word32
-insertIndexIncrConst i_id 0 = return i_id
-insertIndexIncrConst i_id v = do
-  v_id <- getConstId $ IntValue $ Int32Value $ fromIntegral v
-  fst <$> insertReturnOp (Scalar int32) (opIAdd i_id v_id)
-
-insertArrayWriteChunk :: SPIRVType -> VarScope -> Volatility -> Word32 -> Word32 -> Word32 -> CompilerM ()
-insertArrayWriteChunk chunk_t scope vol arr_id i_id b_id = do
-  let pc_t = Pointer chunk_t scope
-      mem_a = getMemoryAccessType vol
-  (chain_id, _) <- insertReturnOp pc_t $ opAccessChain arr_id i_id
-  appendCode $ opStore chain_id b_id [mem_a]
-
-insertArrayWrite :: VName -> Word32 -> Word32 -> PrimType -> VarScope -> Volatility -> CompilerM ()
-insertArrayWrite arr i_id val_id val_pt scope vol = do
-  (arr_id, _, _) <- getVarInfo arr
-  access_size_map <- gets compArrayLeastAccessSize
-  let elem_size = (M.!) access_size_map arr
-      r_size = primByteSize val_pt
-      chunks = r_size `div` elem_size
-      int_pt = byteSizeToIntPrimType r_size
-      int_t = Scalar int_pt
-      int32_t = Scalar int32
-      c_t = Scalar $ byteSizeToIntPrimType elem_size
-  size_id <- getConstId $ IntValue $ Int32Value $ fromIntegral elem_size
-  (i_id', _) <- insertReturnOp int32_t $ opUDiv i_id size_id
-  c_id <- fst <$> insertBitcast int_pt val_pt val_id
-  shf_ids <- mapM (insertShiftRightConst int_t c_id . (elem_size * 8 *)) [0 .. chunks -1]
-  vs_ids <- mapM (insertIntConversion c_t int_t) shf_ids
-  is_ids <- mapM (insertIndexIncrConst i_id' . fromIntegral) [0 .. chunks -1]
-  zipWithM_ (insertArrayWriteChunk c_t scope vol arr_id) is_ids vs_ids
-
-insertArrayReadChunk :: SPIRVType -> VarScope -> Volatility -> Word32 -> Word32 -> CompilerM Word32
-insertArrayReadChunk chunk_t scope vol arr_id i_id = do
-  let pc_t = Pointer chunk_t scope
-      mem_a = getMemoryAccessType vol
-  (chain_id, _) <- insertReturnOp pc_t $ opAccessChain arr_id i_id
-  fst <$> insertReturnOp chunk_t (opLoad chain_id [mem_a])
-
-insertArrayRead :: VName -> Word32 -> PrimType -> VarScope -> Volatility -> CompilerM ExprInfo
-insertArrayRead arr i_id r_pt scope vol = do
-  (arr_id, _, _) <- getVarInfo arr
-  access_size_map <- gets compArrayLeastAccessSize
-  let elem_size = (M.!) access_size_map arr
-      r_size = primByteSize r_pt
-      chunks = r_size `div` elem_size
-      c_t = Scalar $ byteSizeToIntPrimType elem_size
-      int_pt = byteSizeToIntPrimType r_size
-      int_t = Scalar int_pt
-      int32_t = Scalar int32
-      shf_is = map (elem_size * 8 *) [0 .. chunks -1]
-  size_id <- getConstId $ IntValue $ Int32Value $ fromIntegral elem_size
-  (i_id', _) <- insertReturnOp int32_t $ opUDiv i_id size_id
-  is_ids <- mapM (insertIndexIncrConst i_id' . fromIntegral) [0 .. chunks -1]
-  vs_ids <- mapM (insertArrayReadChunk c_t scope vol arr_id) is_ids
-  vis_ids <- mapM (insertIntConversion int_t c_t) vs_ids
-  shf_ids <- zipWithM (insertShiftLeftConst int_t) vis_ids shf_is
-  zero_id <- getConstId $ blankPrimValue int_pt
-  iv_id <- foldM (\x y -> fst <$> insertReturnOp int_t (opIAdd x y)) zero_id shf_ids
-  insertBitcast r_pt int_pt iv_id
-
-readBuiltin :: Builtin -> Int32 -> CompilerM ExprInfo
-readBuiltin builtin i = do
-  let r_t = Scalar int32
-      vr_t = Vector r_t 3
-      pr_t = Pointer r_t Input
-      pvr_t = Pointer vr_t Input
-  ensureTypeId pvr_t
-  var_id <- getBuiltinId builtin
-  i_id <- getConstId $ IntValue $ Int32Value i
-  (chain_id, _) <- insertReturnOp pr_t $ opAccessChain var_id i_id
-  insertReturnOp r_t $ opLoad chain_id []
-
-readBuiltinTo :: Builtin -> Int32 -> VName -> CompilerM ()
-readBuiltinTo builtin i target = do
-  (builtin_id, _) <- readBuiltin builtin i
-  target_var <- getVarInfo target
-  insertVarStore target_var builtin_id
-
-readWorkgroupSizeTo :: Word32 -> VName -> CompilerM ()
-readWorkgroupSizeTo i target = do
-  let r_t = Scalar int32
-      ws_id = reservedId WorkgroupSize
-  (v_id, _) <- insertReturnOp r_t $ opCompositeExtract ws_id i
-  target_var <- getVarInfo target
-  insertVarStore target_var v_id
-
-getMemoryAccessType :: Volatility -> Word32
-getMemoryAccessType Volatile = cMemoryAccessVolatile
-getMemoryAccessType Nonvolatile = cMemoryAccessNone
-
-getPrimTypeDeclaration :: PrimType -> Word32 -> [Word32]
-getPrimTypeDeclaration t@(IntType _) t_id = opTypeInt (fromIntegral (primBitSize t)) cNoSignedness t_id
-getPrimTypeDeclaration t@(FloatType _) t_id = opTypeFloat (fromIntegral (primBitSize t)) t_id
-getPrimTypeDeclaration Bool t_id = opTypeBool t_id
-getPrimTypeDeclaration Cert _ = []
-
-getScalarTypeDeclaration :: SPIRVType -> Word32 -> CompilerM [Word32]
-getScalarTypeDeclaration (Scalar t) t_id = return $ getPrimTypeDeclaration t t_id
-getScalarTypeDeclaration _ _ = return []
-
-getScalarTypeDeclarations :: CompilerM [Word32]
-getScalarTypeDeclarations = do
-  type_map <- gets compTypeRefs
-  types <- sequence $ M.elems $ M.mapWithKey getScalarTypeDeclaration type_map
-  return $ concat types
-
-getNonScalarTypeDeclaration :: SPIRVType -> Word32 -> CompilerM [Word32]
-getNonScalarTypeDeclaration (Scalar _) _ = return []
-getNonScalarTypeDeclaration Void d_id = return $ opTypeVoid d_id
-getNonScalarTypeDeclaration (Vector t len) d_id = do
-  t_id <- getTypeId t
-  return $ opTypeVector t_id len d_id
-getNonScalarTypeDeclaration (Pointer t scope) d_id = do
-  let storage = scopeToStorageClass scope
-  t_id <- getTypeId t
-  return $ opTypePointer storage t_id d_id
-getNonScalarTypeDeclaration (Function t) d_id = do
-  t_id <- getTypeId t
-  return $ opTypeFunction t_id d_id
-getNonScalarTypeDeclaration (Struct ts) d_id = do
-  t_ids <- mapM getTypeId ts
-  return $ opTypeStruct t_ids d_id
-getNonScalarTypeDeclaration (Array t s) d_id = do
-  t_id <- getTypeId t
-  return $ maybe (opTypeRuntimeArray t_id d_id) (\size -> opTypeArray t_id size d_id) s
-
-getNonScalarTypeDeclarations :: CompilerM [Word32]
-getNonScalarTypeDeclarations = do
-  type_map <- gets compTypeRefs
-  types <- sequence $ M.elems $ M.mapWithKey getNonScalarTypeDeclaration type_map
-  return $ concat types
-
-getBuiltinVarDeclaration :: Builtin -> Word32 -> CompilerM [Word32]
-getBuiltinVarDeclaration _ builtin_id = do
-  let t = Scalar int32
-      vt = Vector t 3
-      pvt = Pointer vt Input
-  t_id <- getTypeId pvt
-  return $ opVariable cStorageClassInput t_id builtin_id
-
-getBuiltinVarDeclarations :: CompilerM [Word32]
-getBuiltinVarDeclarations = do
-  builtin_map <- gets compBuiltinRefs
-  builtin <- sequence $ M.elems $ M.mapWithKey getBuiltinVarDeclaration builtin_map
-  return $ concat builtin
-
-getDescVarDeclaration :: Word32 -> KernelUse -> CompilerM [Word32]
-getDescVarDeclaration desc_id use = do
-  t <- getUseType use
-  let at = getActualDescriptorType t
-  pt_id <- getTypeId $ Pointer (Struct [at]) StorageBuffer
-  return $ opVariable cStorageClassStorageBuffer pt_id desc_id
-
-getDescVarDeclarations :: CompilerM [Word32]
-getDescVarDeclarations = do
-  desc_map <- gets compDescriptors
-  descs <- sequence $ M.elems $ M.map (mapM (uncurry getDescVarDeclaration)) desc_map
-  return $ concat $ concat descs
-
-intValueToWords :: IntValue -> [Word32]
-intValueToWords (Int8Value v) =
-  if v < 0
-    then [0xFF `xor` fromIntegral (complement v)]
-    else [fromIntegral v]
-intValueToWords (Int16Value v) =
-  if v < 0
-    then [0xFFFF `xor` fromIntegral (complement v)]
-    else [fromIntegral v]
-intValueToWords (Int32Value v) = [fromIntegral v]
-intValueToWords (Int64Value v) = [fromIntegral v, fromIntegral $ shiftR v 32]
-
-floatValueToWords :: FloatValue -> [Word32]
-floatValueToWords (Float32Value v) = [floatToWord v]
-floatValueToWords (Float64Value v) =
-  let w = doubleToWord v
-   in [fromIntegral w, fromIntegral $ shiftR w 32]
-
-getConstDeclaration :: PrimValue -> Word32 -> CompilerM [Word32]
-getConstDeclaration (BoolValue b) c_id = do
-  let op = if b then opConstantTrue else opConstantFalse
-  t_id <- getTypeId $ Scalar Bool
-  return $ op t_id c_id
-getConstDeclaration (IntValue i) c_id = do
-  let lit = intValueToWords i
-  t_id <- getTypeId $ Scalar $ IntType $ intValueType i
-  return $ opConstant lit t_id c_id
-getConstDeclaration (FloatValue f) c_id = do
-  let lit = floatValueToWords f
-  t_id <- getTypeId $ Scalar $ FloatType $ floatValueType f
-  return $ opConstant lit t_id c_id
-getConstDeclaration Checked _ = return []
-
-getConstDeclarations :: CompilerM [Word32]
-getConstDeclarations = do
-  const_map <- gets compConstRefs
-  consts <- sequence $ M.elems $ M.mapWithKey getConstDeclaration const_map
-  return $ concat consts
-
-getSpecConstDeclaration :: (Word32, SPIRVType) -> CompilerM [Word32]
-getSpecConstDeclaration (spec_id, t@(Scalar Bool)) = do
-  t_id <- getTypeId t
-  return $ opSpecConstantFalse t_id spec_id
-getSpecConstDeclaration (spec_id, t@(Scalar pt)) = do
-  let num_lits = primByteSize pt `div` 4
-      default_lit = replicate (max (num_lits - 1) 0) 0 ++ [1]
-  t_id <- getTypeId t
-  return $ opSpecConstant default_lit t_id spec_id
-getSpecConstDeclaration (spec_id, Array t@(Scalar pt) (Just expr_id)) = do
-  spec_const <- getSpecConstDeclaration (spec_id, Scalar int32)
-  elem_size_id <- getConstId $ IntValue $ Int32Value $ primByteSize pt
-  t_id <- getTypeId t
-  return $ spec_const ++ opSpecConstantOp opcUDiv [spec_id, elem_size_id] t_id expr_id
-getSpecConstDeclaration _ = return []
-
-getSpecConstDeclarations :: CompilerM [Word32]
-getSpecConstDeclarations = do
-  spec_refs <- gets compSpecConstRefs
-  spec_decls <- mapM getSpecConstDeclaration spec_refs
-  return $ concat spec_decls
-
-getReservedDeclarations :: CompilerM [Word32]
-getReservedDeclarations = do
-  let ws_x_id = reservedSpecId WorkgroupSizeXSpec
-      ws_y_id = reservedSpecId WorkgroupSizeYSpec
-      ws_z_id = reservedSpecId WorkgroupSizeZSpec
-      ws_id = reservedId WorkgroupSize
-  vec3_id <- getTypeId $ Vector (Scalar int32) 3
-  return $ opSpecConstantComposite [ws_x_id, ws_y_id, ws_z_id] vec3_id ws_id
-
-getEntryPointDeclaration :: EntryPointName -> Word32 -> [Word32] -> [Word32]
-getEntryPointDeclaration name entry_id inputs =
-  let name_string = encodeString name
-   in opEntryPoint cExecutionModelGLCompute entry_id name_string inputs
-
-getEntryPointDeclarations :: CompilerM [Word32]
-getEntryPointDeclarations = do
-  builtin_ids <- M.elems <$> gets compBuiltinRefs
-  concatMap (\(n, e_id) -> getEntryPointDeclaration n e_id builtin_ids) <$> gets compEntryPoints
-
-getExecutionModeDeclaration :: Word32 -> [Word32]
-getExecutionModeDeclaration exec_id = opExecutionMode exec_id cExecutionModeLocalSize [1, 1, 1]
-
-getExecutionModeDeclarations :: CompilerM [Word32]
-getExecutionModeDeclarations =
-  concatMap (getExecutionModeDeclaration . snd) <$> gets compEntryPoints
-
-getTypeDecoration :: SPIRVType -> Word32 -> [Word32]
-getTypeDecoration (Array (Scalar t) _) t_id =
-  opDecorate t_id cDecorationArrayStride [primByteSize t]
-getTypeDecoration (Struct _) t_id =
-  opDecorate t_id cDecorationBlock []
-    ++ opMemberDecorate t_id 0 cDecorationOffset [0]
-getTypeDecoration _ _ = []
-
-getTypeDecorations :: CompilerM [Word32]
-getTypeDecorations =
-  concat . M.elems . M.mapWithKey getTypeDecoration <$> gets compTypeRefs
-
-getBuiltinDecoration :: Builtin -> Word32 -> [Word32]
-getBuiltinDecoration builtin b_id = opDecorate b_id cDecorationBuiltin [bid]
-  where
-    bid = builtinToBuiltinId builtin
-
-getBuiltinDecorations :: CompilerM [Word32]
-getBuiltinDecorations =
-  concat . M.elems . M.mapWithKey getBuiltinDecoration <$> gets compBuiltinRefs
-
-getSpecConstDecoration :: Word32 -> Word32 -> [Word32]
-getSpecConstDecoration spec_id const_id = opDecorate spec_id cDecorationSpecId [const_id]
-
-getSpecConstDecorations :: CompilerM [Word32]
-getSpecConstDecorations = do
-  spec_ids <- map fst <$> gets compSpecConstRefs
-  let const_ids = map fromIntegral [0 .. length spec_ids - 1]
-  return $ concat $ zipWith getSpecConstDecoration spec_ids const_ids
-
-getReservedDecorations :: CompilerM [Word32]
-getReservedDecorations =
-  let ws_id = reservedId WorkgroupSize
-   in return $ opDecorate ws_id cDecorationBuiltin [cBuiltinWorkgroupSize]
-
-getKernelDescriptorDecorations :: Word32 -> Word32 -> Descriptor -> [Word32]
-getKernelDescriptorDecorations set binding (desc_id, _) =
-  opDecorate desc_id cDecorationDescriptorSet [set]
-    ++ opDecorate desc_id cDecorationBinding [binding]
-
-getKernelDescriptorSetDecorations :: Word32 -> DescriptorSet -> [Word32]
-getKernelDescriptorSetDecorations set desc_set =
-  let desc_is = map fromIntegral [0 .. length desc_set - 1]
-   in concat $ zipWith (getKernelDescriptorDecorations set) desc_is desc_set
-
-getDescriptorDecorations :: CompilerM [Word32]
-getDescriptorDecorations = do
-  descs <- M.elems <$> gets compDescriptors
-  let set_is = map fromIntegral [0 .. length descs - 1]
-  return $ concat $ zipWith getKernelDescriptorSetDecorations set_is descs
-
-getDecorations :: CompilerM [Word32]
-getDecorations = do
-  desc_deco <- getDescriptorDecorations
-  reserved_deco <- getReservedDecorations
-  spec_deco <- getSpecConstDecorations
-  type_deco <- getTypeDecorations
-  builtin_deco <- getBuiltinDecorations
-  return $ concat [type_deco, builtin_deco, reserved_deco, spec_deco, desc_deco]
-
-fun64To32 :: String -> [Word32] -> CompilerM ExprInfo
-fun64To32 fun arg_ids = do
-  args32 <- mapM (insertReturnOp (Scalar float32) . opFConvert) arg_ids
-  (r32_id, _) <- compileFunCall (fun ++ "32") $ map fst args32
-  insertReturnOp (Scalar float64) $ opFConvert r32_id
-
-compileFunCall :: String -> [Word32] -> CompilerM ExprInfo
-compileFunCall "isnan32" [a_id] = insertReturnOp (Scalar Bool) $ opIsNan a_id
-compileFunCall "isinf32" [a_id] = insertReturnOp (Scalar Bool) $ opIsInf a_id
-compileFunCall "round32" [a_id] = glslReturnOp glslRound [a_id] (Scalar float32)
-compileFunCall "log32" [a_id] = glslReturnOp glslLog [a_id] (Scalar float32)
-compileFunCall "log2_32" [a_id] = glslReturnOp glslLog2 [a_id] (Scalar float32)
-compileFunCall "exp32" [a_id] = glslReturnOp glslExp [a_id] (Scalar float32)
-compileFunCall "sqrt32" [a_id] = glslReturnOp glslSqrt [a_id] (Scalar float32)
-compileFunCall "sin32" [a_id] = glslReturnOp glslSin [a_id] (Scalar float32)
-compileFunCall "cos32" [a_id] = glslReturnOp glslCos [a_id] (Scalar float32)
-compileFunCall "tan32" [a_id] = glslReturnOp glslTan [a_id] (Scalar float32)
-compileFunCall "asin32" [a_id] = glslReturnOp glslASin [a_id] (Scalar float32)
-compileFunCall "acos32" [a_id] = glslReturnOp glslACos [a_id] (Scalar float32)
-compileFunCall "atan32" [a_id] = glslReturnOp glslATan [a_id] (Scalar float32)
-compileFunCall "atan2_32" [a1_id, a2_id] = glslReturnOp glslATan2 [a1_id, a2_id] (Scalar float32)
-compileFunCall "pow32" [a1_id, a2_id] = glslReturnOp glslPow [a1_id, a2_id] (Scalar float32)
-compileFunCall "to_bits32" [a_id] = insertBitcast int32 float32 a_id
-compileFunCall "from_bits32" [a_id] = insertBitcast float32 int32 a_id
-compileFunCall "log10_32" [a_id] = do
-  base_id <- getConstId $ FloatValue $ Float32Value 10.0
-  (numer_id, _) <- glslReturnOp glslLog [a_id] (Scalar float32)
-  (denom_id, _) <- glslReturnOp glslLog [base_id] (Scalar float32)
-  insertReturnOp (Scalar float32) $ opFDiv numer_id denom_id
-compileFunCall "isnan64" [a_id] = insertReturnOp (Scalar Bool) $ opIsNan a_id
-compileFunCall "isinf64" [a_id] = insertReturnOp (Scalar Bool) $ opIsInf a_id
-compileFunCall "round64" [a_id] = glslReturnOp glslRound [a_id] (Scalar float64)
-compileFunCall "sqrt64" [a_id] = glslReturnOp glslSqrt [a_id] (Scalar float64)
-compileFunCall "to_bits64" [a_id] = insertBitcast int64 float64 a_id
-compileFunCall "from_bits64" [a_id] = insertBitcast float64 int64 a_id
-compileFunCall "pow64" arg_ids = fun64To32 "pow" arg_ids
-compileFunCall "log64" arg_ids = fun64To32 "log" arg_ids
-compileFunCall "log2_64" arg_ids = fun64To32 "log2_" arg_ids
-compileFunCall "exp64" arg_ids = fun64To32 "exp" arg_ids
-compileFunCall "sin64" arg_ids = fun64To32 "sin" arg_ids
-compileFunCall "cos64" arg_ids = fun64To32 "cos" arg_ids
-compileFunCall "tan64" arg_ids = fun64To32 "tan" arg_ids
-compileFunCall "asin64" arg_ids = fun64To32 "asin" arg_ids
-compileFunCall "acos64" arg_ids = fun64To32 "acos" arg_ids
-compileFunCall "atan64" arg_ids = fun64To32 "atan" arg_ids
-compileFunCall "atan2_64" arg_ids = fun64To32 "atan2_" arg_ids
-compileFunCall "log10_64" arg_ids = fun64To32 "log10_" arg_ids
-compileFunCall h _ = error $ "Call to " ++ pretty h ++ " not implemented."
-
-signedDivision :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
-signedDivision pt@(IntType it) x_id y_id = do
-  let t = Scalar pt
-      bt = Scalar Bool
-  zero_id <- getConstId $ IntValue $ intValue it (0 :: Integer)
-  one_id <- getConstId $ IntValue $ intValue it (1 :: Integer)
-  (q_id, _) <- insertReturnOp t $ opSDiv x_id y_id
-  (r_id, _) <- signedRemainder pt x_id y_id
-  (r_lz_id, _) <- insertReturnOp bt $ opSLessThan r_id zero_id
-  (y_lz_id, _) <- insertReturnOp bt $ opSLessThan y_id zero_id
-  (r_neqz_id, _) <- insertReturnOp bt $ opINotEqual r_id zero_id
-  (cm1_id, _) <- insertReturnOp bt $ opLogicalNotEqual r_lz_id y_lz_id
-  (cm2_id, _) <- insertReturnOp bt $ opLogicalAnd r_neqz_id cm1_id
-  (s_id, _) <- insertReturnOp t $ opSelect cm2_id one_id zero_id
-  insertReturnOp t $ opISub q_id s_id
-signedDivision pt _ _ = error $ "SDiv " ++ pretty pt ++ " invalid result type."
-
-signedRemainder :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
-signedRemainder pt@(IntType _) x_id y_id = do
-  let t = Scalar pt
-  (xa_id, _) <- glslReturnOp glslSAbs [x_id] t
-  (ya_id, _) <- glslReturnOp glslSAbs [y_id] t
-  (mod_id, _) <- insertReturnOp t $ opUMod xa_id ya_id
-  (xs_id, _) <- glslReturnOp glslSSign [x_id] t
-  insertReturnOp t $ opIMul xs_id mod_id
-signedRemainder pt _ _ = error $ "SRem " ++ pretty pt ++ " invalid result type."
-
-signedModulo :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
-signedModulo pt@(IntType it) x_id y_id = do
-  let t = Scalar pt
-      bt = Scalar Bool
-  zero_id <- getConstId $ IntValue $ intValue it (0 :: Integer)
-  (xa_id, _) <- glslReturnOp glslSAbs [x_id] t
-  (ya_id, _) <- glslReturnOp glslSAbs [y_id] t
-  (moda_id, _) <- insertReturnOp t $ opUMod xa_id ya_id
-  (xs_id, _) <- glslReturnOp glslSSign [x_id] t
-  (ys_id, _) <- glslReturnOp glslSSign [y_id] t
-  (s_eq_id, _) <- insertReturnOp bt $ opIEqual xs_id ys_id
-  (moda_eqz_id, _) <- insertReturnOp bt $ opIEqual moda_id zero_id
-  (or_id, _) <- insertReturnOp bt $ opLogicalOr s_eq_id moda_eqz_id
-  (c_id, _) <- insertReturnOp t $ opSelect or_id zero_id ya_id
-  (modc_id, _) <- insertReturnOp t $ opISub moda_id c_id
-  (modca_id, _) <- glslReturnOp glslSAbs [modc_id] t
-  insertReturnOp t $ opIMul ys_id modca_id
-signedModulo pt _ _ = error $ "SMod " ++ pretty pt ++ " invalid result type."
-
-integerPower :: PrimType -> Word32 -> Word32 -> CompilerM ExprInfo
-integerPower pt@(IntType it) x_id y_id = do
-  let t = Scalar pt
-      bt = Scalar Bool
-  t_id <- getTypeId t
-  zero_id <- getConstId $ IntValue $ intValue it (0 :: Integer)
-  one_id <- getConstId $ IntValue $ intValue it (1 :: Integer)
-  pre_id <- newId
-  start_id <- newId
-  check_id <- newId
-  body_id <- newId
-  if_true_id <- newId
-  if_end_id <- newId
-  continue_id <- newId
-  end_id <- newId
-  res_inc_id <- newId
-  rem_sh_id <- newId
-  xp_sqr_id <- newId
-  appendCode $ opBranch pre_id
-  appendCode $ opLabel pre_id
-  appendCode $ opBranch start_id
-  appendCode $ opLabel start_id
-  (res_id, _) <- insertReturnOp t $ opPhi [one_id, pre_id, res_inc_id, continue_id]
-  (rem_id, _) <- insertReturnOp t $ opPhi [y_id, pre_id, rem_sh_id, continue_id]
-  (xp_id, _) <- insertReturnOp t $ opPhi [x_id, pre_id, xp_sqr_id, continue_id]
-  appendCode $ opLoopMerge end_id continue_id
-  appendCode $ opBranch check_id
-  appendCode $ opLabel check_id
-  (cond1_id, _) <- insertReturnOp bt $ opINotEqual rem_id zero_id
-  appendCode $ opBranchConditional cond1_id body_id end_id
-  appendCode $ opLabel body_id
-  -- Insert if here
-  (rem_fb_id, _) <- insertReturnOp t $ opBitwiseAnd rem_id one_id
-  (cond2_id, _) <- insertReturnOp bt $ opINotEqual rem_fb_id zero_id
-  appendCode $ opSelectionMerge if_end_id
-  appendCode $ opBranchConditional cond2_id if_true_id if_end_id
-  appendCode $ opLabel if_true_id
-  appendCode $ opIMul res_id xp_id t_id res_inc_id
-  appendCode $ opBranch if_end_id
-  appendCode $ opLabel if_end_id
-  appendCode $ opShiftRightLogical rem_id one_id t_id rem_sh_id
-  appendCode $ opIMul xp_id xp_id t_id xp_sqr_id
-  appendCode $ opBranch continue_id
-  appendCode $ opLabel continue_id
-  appendCode $ opBranch start_id
-  appendCode $ opLabel end_id
-  return (res_id, t)
-integerPower pt _ _ = error $ "IPow " ++ pretty pt ++ " invalid result type."
-
-compileLeaf :: ExpLeaf -> CompilerM ExprInfo
-compileLeaf (SizeOf t) = do
-  s_id <- getConstId $ IntValue $ Int32Value $ primByteSize t
-  return (s_id, Scalar int32)
-compileLeaf (ScalarVar src) = getVarInfo src >>= insertVarLoad
-compileLeaf (Index src (Count iexp) restype space vol) = do
-  (_, _, src_dec) <- getVarInfo src
-  let scope = decSpaceToScope src_dec space
-  (i_id, _) <- compileExp $ untyped iexp
-  insertArrayRead src i_id restype scope vol
-
-compileExp :: Exp -> CompilerM ExprInfo
-compileExp = compilePrimExp compileLeaf
-
-compilePrimExp :: (v -> CompilerM ExprInfo) -> PrimExp v -> CompilerM ExprInfo
-compilePrimExp f (LeafExp v _) = f v
-compilePrimExp _ (ValueExp val) = do
-  c_id <- getConstId val
-  let t = Scalar $ primValueType val
-  return (c_id, t)
-compilePrimExp f (UnOpExp uop x) = do
-  (x_id, _) <- compilePrimExp f x
-  let pt = unOpType uop
-      t = Scalar pt
-  case uop of
-    Complement {} -> case pt of
-      Bool -> insertReturnOp t $ opLogicalNot x_id
-      (IntType _) -> insertReturnOp t $ opNot x_id
-      (FloatType _) -> do
-        let int_t = byteSizeToIntPrimType $ primByteSize pt
-        (i_id, _) <- insertBitcast int_t pt x_id
-        (c_id, _) <- insertReturnOp t $ opNot i_id
-        insertBitcast pt int_t c_id
-      Cert -> error "Cert complement is not supported"
-    Not {} -> insertReturnOp t $ opLogicalNot x_id
-    Abs {} -> glslReturnOp glslSAbs [x_id] t
-    FAbs {} -> glslReturnOp glslFAbs [x_id] t
-    SSignum {} -> glslReturnOp glslSSign [x_id] t
-    USignum {} -> glslReturnOp glslFSign [x_id] t
-compilePrimExp f (CmpOpExp cmp x y) = do
-  (x_id, _) <- compilePrimExp f x
-  (y_id, _) <- compilePrimExp f y
-  let t = Scalar Bool
-  case cmp of
-    CmpEq {} -> insertCompareEqual (cmpOpType cmp) x_id y_id
-    FCmpLt {} -> insertReturnOp t $ opFOrdLessThan x_id y_id
-    FCmpLe {} -> insertReturnOp t $ opFOrdLessThanEqual x_id y_id
-    CmpSle {} -> insertReturnOp t $ opSLessThanEqual x_id y_id
-    CmpSlt {} -> insertReturnOp t $ opSLessThan x_id y_id
-    CmpUle {} -> insertReturnOp t $ opULessThanEqual x_id y_id
-    CmpUlt {} -> insertReturnOp t $ opULessThan x_id y_id
-    CmpLlt {} -> do
-      (n_x_id, _) <- insertReturnOp t $ opNot x_id
-      insertReturnOp t $ opLogicalAnd n_x_id y_id
-    CmpLle {} -> do
-      (n_x_id, _) <- insertReturnOp t $ opNot x_id
-      insertReturnOp t $ opLogicalOr n_x_id y_id
-compilePrimExp f (ConvOpExp conv x) = do
-  (x_id, x_t) <- compilePrimExp f x
-  let (_, r_it) = convOpType conv
-      r_t = Scalar r_it
-  case conv of
-    ZExt {} ->
-      if x_t == r_t
-        then return (x_id, x_t)
-        else insertReturnOp r_t $ opUConvert x_id
-    SExt {} ->
-      if x_t == r_t
-        then return (x_id, x_t)
-        else insertReturnOp r_t $ opSConvert x_id
-    FPConv {} ->
-      if x_t == r_t
-        then return (x_id, x_t)
-        else insertReturnOp r_t $ opFConvert x_id
-    FPToUI {} -> insertReturnOp r_t $ opConvertFToU x_id
-    FPToSI {} -> insertReturnOp r_t $ opConvertFToS x_id
-    UIToFP {} -> insertReturnOp r_t $ opConvertUToF x_id
-    SIToFP {} -> insertReturnOp r_t $ opConvertSToF x_id
-    BToI {} -> insertBitcast r_it Bool x_id
-    IToB {} -> case x_t of
-      Scalar x_pt -> insertBitcast Bool x_pt x_id
-      _ -> error "IToB applied to non-scalar value."
-compilePrimExp f (BinOpExp bop x y) = do
-  (x_id, _) <- compilePrimExp f x
-  (y_id, _) <- compilePrimExp f y
+compilePrimExp :: PrimExp ExpLeaf -> Builder Id
+compilePrimExp (LeafExp leaf pt) = compileLeafExp leaf >>= as pt
+compilePrimExp (ValueExp val) = getConstId (Const val)
+compilePrimExp (BinOpExp bop e1 e2) = do
   let pt = binOpType bop
-      t = Scalar pt
+      t = TScalar pt
+  x <- compileExp e1 >>= as pt
+  y <- compileExp e2 >>= as pt
   case bop of
-    Add {} -> insertReturnOp t $ opIAdd x_id y_id
-    FAdd {} -> insertReturnOp t $ opFAdd x_id y_id
-    Sub {} -> insertReturnOp t $ opISub x_id y_id
-    FSub {} -> insertReturnOp t $ opFSub x_id y_id
-    Mul {} -> insertReturnOp t $ opIMul x_id y_id
-    FMul {} -> insertReturnOp t $ opFMul x_id y_id
-    FDiv {} -> insertReturnOp t $ opFDiv x_id y_id
-    UDiv {} -> insertReturnOp t $ opUDiv x_id y_id
-    SDiv {} -> signedDivision pt x_id y_id
-    UMod {} -> insertReturnOp t $ opUMod x_id y_id
-    -- Replace with opSMod when NVIDIA fixes bug
-    SMod {} -> signedModulo pt x_id y_id
-    SQuot {} -> insertReturnOp t $ opUDiv x_id y_id
-    SRem {} -> signedRemainder pt x_id y_id
-    FMin {} -> glslReturnOp glslFMin [x_id, y_id] t
-    SMin {} -> glslReturnOp glslSMin [x_id, y_id] t
-    UMin {} -> glslReturnOp glslUMin [x_id, y_id] t
-    FMax {} -> glslReturnOp glslFMax [x_id, y_id] t
-    UMax {} -> glslReturnOp glslUMax [x_id, y_id] t
-    SMax {} -> glslReturnOp glslSMax [x_id, y_id] t
-    Pow {} -> integerPower pt x_id y_id
-    FPow {} -> compileFunCall ("pow" ++ show (primBitSize pt)) [x_id, y_id]
-    Xor {} -> insertReturnOp t $ opBitwiseXor x_id y_id
-    And {} -> insertReturnOp t $ opBitwiseAnd x_id y_id
-    Or {} -> insertReturnOp t $ opBitwiseOr x_id y_id
-    Shl {} -> insertReturnOp t $ opShiftLeftLogical x_id y_id
-    LShr {} -> insertReturnOp t $ opShiftRightLogical x_id y_id
-    AShr {} -> insertReturnOp t $ opShiftRightArithmetic x_id y_id
-    LogAnd {} -> insertReturnOp t $ opLogicalAnd x_id y_id
-    LogOr {} -> insertReturnOp t $ opLogicalOr x_id y_id
-compilePrimExp f (FunExp h args _) = do
-  arg_ids <- mapM (compilePrimExp f) args
-  compileFunCall h $ map fst arg_ids
+    Add _ _ -> instrRT t $ OpIAdd x y
+    FAdd _ -> instrRT t $ OpFAdd x y
+    Sub _ _ -> instrRT t $ OpISub x y
+    FSub _ -> instrRT t $ OpFSub x y
+    Mul _ _ -> instrRT t $ OpIMul x y
+    FMul _ -> instrRT t $ OpFMul x y
+    UDiv _ _ -> instrRT t $ OpUDiv x y
+    UDivUp _ _ -> unsignedDivisionUp t x y
+    SDiv _ _ -> signedDivision t x y
+    SDivUp _ _ -> signedDivisionUp t x y
+    FDiv _ -> instrRT t $ OpFDiv x y
+    FMod _ -> floatModulo t x y
+    UMod _ _ -> instrRT t $ OpUMod x y
+    SMod _ _ -> instrRT t $ OpSMod x y
+    SQuot _ _ -> instrRT t $ OpUDiv x y
+    SRem _ _ ->
+      -- OpSRem doesn't do what we want here (at least not on my machine - is
+      -- it a bug?)
+      signedRemainder t x y
+    SMin _ -> glslInstr t $ GlslSMin x y
+    UMin _ -> glslInstr t $ GlslUMin x y
+    FMin _ -> glslInstr t $ GlslFMin x y
+    SMax _ -> glslInstr t $ GlslSMax x y
+    UMax _ -> glslInstr t $ GlslUMax x y
+    FMax _ -> glslInstr t $ GlslFMax x y
+    Shl _ -> instrRT t $ OpShiftLeftLogical x y
+    LShr _ -> instrRT t $ OpShiftRightLogical x y
+    AShr _ -> instrRT t $ OpShiftRightArithmetic x y
+    And _ -> instrRT t $ OpBitwiseAnd x y
+    Or _ -> instrRT t $ OpBitwiseOr x y
+    Xor _ -> instrRT t $ OpBitwiseXor x y
+    Pow _ -> integerPower t x y
+    FPow _ ->
+      case t of
+        TScalar (FloatType Float32) -> glslInstr t $ GlslPow x y
+        TScalar (FloatType Float64) ->
+          withF64AsF32_2 (x, y) $ \(x', y') ->
+            glslInstr t $ GlslPow x' y'
+        _ -> error "Unsupported type for FPow"
+    LogAnd -> instrRT t $ OpLogicalAnd x y
+    LogOr -> instrRT t $ OpLogicalOr x y
+compilePrimExp (CmpOpExp cop e1 e2) = do
+  let bool = TScalar Bool
+      pt = cmpOpType cop
+  x <- compileExp e1 >>= as pt
+  y <- compileExp e2 >>= as pt
+  case cop of
+    CmpEq (IntType _) -> instrRT bool $ OpIEqual x y
+    CmpEq (FloatType _) -> instrRT bool $ OpFOrdEqual x y
+    CmpEq Bool -> instrRT bool $ OpLogicalEqual x y
+    CmpEq _ -> error "Unsupported type for CmpEq"
+    CmpUlt _ -> instrRT bool $ OpULessThan x y
+    CmpUle _ -> instrRT bool $ OpULessThanEqual x y
+    CmpSlt _ -> instrRT bool $ OpSLessThan x y
+    CmpSle _ -> instrRT bool $ OpSLessThanEqual x y
+    FCmpLt _ -> instrRT bool $ OpFOrdLessThan x y
+    FCmpLe _ -> instrRT bool $ OpFOrdLessThanEqual x y
+    CmpLlt -> do
+      not_x <- instrRT bool $ OpLogicalNot x
+      instrRT bool $ OpLogicalAnd not_x y
+    CmpLle -> do
+      not_x <- instrRT bool $ OpLogicalNot x
+      instrRT bool $ OpLogicalOr not_x y
+compilePrimExp (UnOpExp uop e) = do
+  x <- compileExp e >>= as (unOpType uop)
+  case uop of
+    Not -> instrRT (TScalar Bool) $ OpLogicalNot x
+    Complement t -> instrRT (TScalar $ IntType t) $ OpNot x
+    Abs t -> glslInstr (TScalar $ IntType t) $ GlslSAbs x
+    FAbs t -> glslInstr (TScalar $ FloatType t) $ GlslFAbs x
+    SSignum t -> glslInstr (TScalar $ IntType t) $ GlslSSign x
+    USignum t -> do
+      const0 <- getConstId (Const $ IntValue $ intValue t (0 :: Integer))
+      const1 <- getConstId (Const $ IntValue $ intValue t (1 :: Integer))
+      isZero <- instrRT (TScalar Bool) $ OpIEqual x const0
+      instrRT (TScalar $ IntType t) $ OpSelect isZero const0 const1
+compilePrimExp (ConvOpExp cop e) = do
+  x <- compileExp e >>= as (fst $ convOpType cop)
+  case cop of
+    ZExt _ t -> instrRT (TScalar $ IntType t) $ OpUConvert x
+    SExt _ t -> instrRT (TScalar $ IntType t) $ OpSConvert x
+    FPConv _ t -> instrRT (TScalar $ FloatType t) $ OpFConvert x
+    FPToUI tf ti -> do
+      -- "Behavior is undefined if Result Type is not wide enough to hold the
+      -- converted value."
+      unless (intCanDefinitelyHold ti tf) $ error "FPToUI: Dst type possibly too small"
+      instrRT (TScalar $ IntType ti) $ OpConvertFToU x
+    FPToSI tf ti -> do
+      -- "Behavior is undefined if Result Type is not wide enough to hold the
+      -- converted value."
+      unless (intCanDefinitelyHold ti tf) $ error "FPToSI: Dst type possibly too small"
+      instrRT (TScalar $ IntType ti) $ OpConvertFToS x
+    UIToFP _ t -> instrRT (TScalar $ FloatType t) $ OpConvertUToF x
+    SIToFP _ t -> instrRT (TScalar $ FloatType t) $ OpConvertSToF x
+    IToB t -> do
+      const0 <- getConstId (Const $ IntValue $ intValue t (0 :: Integer))
+      instrRT (TScalar Bool) $ OpINotEqual x const0
+    BToI t -> do
+      const0 <- getConstId (Const $ IntValue $ intValue t (0 :: Integer))
+      const1 <- getConstId (Const $ IntValue $ intValue t (1 :: Integer))
+      instrRT (TScalar Bool) $ OpSelect x const1 const0
+    where
+      intCanDefinitelyHold Int32 Float32 = True
+      intCanDefinitelyHold Int64 Float32 = True
+      intCanDefinitelyHold Int64 Float64 = True
+      intCanDefinitelyHold _ _ = False
+compilePrimExp (FunExp fn argExps primType) = do
+  args <- mapM compileExp argExps
+  compileFunCall fn args primType
 
-compileAtomicOp :: Space -> AtomicOp -> CompilerM ()
-compileAtomicOp _ op = do
-  let int_t = Scalar int32
-      ptr_t = Pointer int_t StorageBuffer
-  (s_op, old, arr, i, e) <- unpack op
-  (arr_id, _, _) <- getVarInfo arr
-  old_var <- getVarInfo old
-  dev_scope_id <- getConstId $ IntValue $ Int32Value $ fromIntegral cScopeDevice
-  sem_id <-
-    getConstId $
-      IntValue $
-        Int32Value $
-          fromIntegral $
-            cMemorySemanticsUniformMemory .|. cMemorySemanticsSequentiallyConsistent
-  (i_id, _) <- compileExp $ untyped i
-  (e_id, _) <- compileExp e
-  size_id <- getConstId $ IntValue $ Int32Value 4
-  (i_id', _) <- insertReturnOp int_t $ opUDiv i_id size_id
-  (ptr_id, _) <- insertReturnOp ptr_t $ opAccessChain arr_id i_id'
-  (r_id, _) <- insertReturnOp int_t $ s_op ptr_id dev_scope_id sem_id e_id
-  insertVarStore old_var r_id
+withF64AsF32 :: Id -> (Id -> Builder Id) -> Builder Id
+withF64AsF32 f64 f = do
+  f32 <- instrRT (TScalar float32) $ OpFConvert f64
+  f32' <- f f32
+  instrRT (TScalar float64) $ OpFConvert f32'
+
+withF64AsF32_2 :: (Id, Id) -> ((Id, Id) -> Builder Id) -> Builder Id
+withF64AsF32_2 (f64a, f64b) f = do
+  f32a <- instrRT (TScalar float32) $ OpFConvert f64a
+  f32b <- instrRT (TScalar float32) $ OpFConvert f64b
+  f32' <- f (f32a, f32b)
+  instrRT (TScalar float64) $ OpFConvert f32'
+
+compileFunCall :: String -> [Id] -> PrimType -> Builder Id
+compileFunCall "sqrt32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslSqrt x
+compileFunCall "sqrt64" [x] (FloatType Float64) =
+  glslInstr (TScalar float64) $ GlslSqrt x
+compileFunCall "log32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslLog x
+compileFunCall "log64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "log32" [y] float32
+compileFunCall "log10_32" [x] (FloatType Float32) = do
+  a <- glslInstr (TScalar float32) $ GlslLog x
+  const10 <- getConstId (Const $ FloatValue $ Float32Value 10.0)
+  b <- glslInstr (TScalar float32) $ GlslLog const10
+  instrRT (TScalar float32) $ OpFDiv a b
+compileFunCall "log10_64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "log10_32" [y] float32
+compileFunCall "log2_32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslLog2 x
+compileFunCall "log2_64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "log2_32" [y] float32
+compileFunCall "exp32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslExp x
+compileFunCall "exp64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "exp32" [y] float32
+compileFunCall "sin32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslSin x
+compileFunCall "sin64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "sin32" [y] float32
+compileFunCall "cos32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslCos x
+compileFunCall "cos64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "cos32" [y] float32
+compileFunCall "cosh32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslCosh x
+compileFunCall "cosh64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "cosh32" [y] float32
+compileFunCall "tan32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslTan x
+compileFunCall "tan64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "tan32" [y] float32
+compileFunCall "tanh32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslTanh x
+compileFunCall "tanh64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "tanh32" [y] float32
+compileFunCall "asin32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslAsin x
+compileFunCall "asin64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "asin32" [y] float32
+compileFunCall "asinh32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslAsinh x
+compileFunCall "asinh64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "asinh32" [y] float32
+compileFunCall "acos32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslAcos x
+compileFunCall "acos64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "acos32" [y] float32
+compileFunCall "acosh32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslAcosh x
+compileFunCall "acosh64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "acosh32" [y] float32
+compileFunCall "atan32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslAtan x
+compileFunCall "atan64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "atan32" [y] float32
+compileFunCall "atanh32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslAtanh x
+compileFunCall "atanh64" [x] (FloatType Float64) =
+  withF64AsF32 x $ \y -> compileFunCall "atanh32" [y] float32
+compileFunCall "round32" [x] (FloatType Float32) =
+  -- NB: Rounding towards even numbers
+  glslInstr (TScalar float32) $ GlslRoundEven x
+compileFunCall "round64" [x] (FloatType Float64) =
+  -- NB: Rounding towards even numbers
+  glslInstr (TScalar float64) $ GlslRoundEven x
+compileFunCall "ceil32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslCeil x
+compileFunCall "ceil64" [x] (FloatType Float64) =
+  glslInstr (TScalar float64) $ GlslCeil x
+compileFunCall "floor32" [x] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslFloor x
+compileFunCall "floor64" [x] (FloatType Float64) =
+  glslInstr (TScalar float64) $ GlslFloor x
+compileFunCall "popc8" [x] t@(IntType _) =
+  instrRT (TScalar t) $ OpBitCount x
+compileFunCall "popc16" [x] t@(IntType _) =
+  instrRT (TScalar t) $ OpBitCount x
+compileFunCall "popc32" [x] t@(IntType _) =
+  instrRT (TScalar t) $ OpBitCount x
+compileFunCall "popc64" [x] t@(IntType _) =
+  instrRT (TScalar t) $ OpBitCount x
+compileFunCall "atan2_32" [x, y] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslAtan2 x y
+compileFunCall "atan2_64" [x, y] (FloatType Float64) =
+  withF64AsF32_2 (x, y) $ \(x', y') ->
+    compileFunCall "atan2_32" [x', y'] float32
+compileFunCall "isinf32" [x] (FloatType Float32) =
+  instrRT (TScalar Bool) $ OpIsInf x
+compileFunCall "isinf64" [x] (FloatType Float64) =
+  instrRT (TScalar Bool) $ OpIsInf x
+compileFunCall "isnan32" [x] (FloatType Float32) =
+  instrRT (TScalar Bool) $ OpIsNan x
+compileFunCall "isnan64" [x] (FloatType Float64) =
+  instrRT (TScalar Bool) $ OpIsNan x
+compileFunCall "to_bits32" [x] (IntType Int32) =
+  instrRT (TScalar int32) $ OpBitcast x
+compileFunCall "to_bits64" [x] (IntType Int64) =
+  instrRT (TScalar int64) $ OpBitcast x
+compileFunCall "from_bits32" [x] (FloatType Float32) =
+  instrRT (TScalar float32) $ OpBitcast x
+compileFunCall "from_bits64" [x] (FloatType Float64) =
+  instrRT (TScalar float64) $ OpBitcast x
+compileFunCall "mad32" [x, y, z] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslFma x y z
+compileFunCall "mad64" [x, y, z] (FloatType Float64) =
+  glslInstr (TScalar float64) $ GlslFma x y z
+compileFunCall "fma32" [x, y, z] (FloatType Float32) =
+  glslInstr (TScalar float32) $ GlslFma x y z
+compileFunCall "fma64" [x, y, z] (FloatType Float64) =
+  glslInstr (TScalar float64) $ GlslFma x y z
+compileFunCall fn args retType =
+  error $ fn ++ " with arity " ++ show (length args)
+            ++ " and return type " ++ show retType ++ " is unsupported"
+
+compileExp :: PrimExp ExpLeaf -> Builder Id
+compileExp e = do
+  i <- compilePrimExp e
+  assertType (TScalar $ primExpType e) i
+  return i
+
+scopeAndMemorySemantics :: Bool -> Builder (Id, Id)
+scopeAndMemorySemantics isLocal = do
+  scopeId <- getConstId $ Const $ IntValue $ Int32Value $ fromIntegral $
+                fromList $ spirvSerialize scope
+  memSemId <- getConstId $ Const $ IntValue $ Int32Value $ fromIntegral $
+                fromList $ spirvSerialize memSem
+  return (scopeId, memSemId)
   where
-    unpack (AtomicAdd _ old arr (Count i) e) = return (opAtomicIAdd, old, arr, i, e)
-    unpack (AtomicSMax _ old arr (Count i) e) = return (opAtomicSMax, old, arr, i, e)
-    unpack (AtomicSMin _ old arr (Count i) e) = return (opAtomicSMin, old, arr, i, e)
-    unpack (AtomicUMax _ old arr (Count i) e) = return (opAtomicUMax, old, arr, i, e)
-    unpack (AtomicUMin _ old arr (Count i) e) = return (opAtomicUMin, old, arr, i, e)
-    unpack (AtomicAnd _ old arr (Count i) e) = return (opAtomicAnd, old, arr, i, e)
-    unpack (AtomicOr _ old arr (Count i) e) = return (opAtomicOr, old, arr, i, e)
-    unpack (AtomicXor _ old arr (Count i) e) = return (opAtomicXor, old, arr, i, e)
-    unpack (AtomicXchg _ old arr (Count i) e) = return (opAtomicExchange, old, arr, i, e)
-    unpack (AtomicCmpXchg _ old arr (Count i) cmp e) = do
-      (cmp_id, _) <- compileExp cmp
-      let op_f p sc sm v = opAtomicCompareExchange p sc sm sm v cmp_id
-      return (op_f, old, arr, i, e)
+    scope = if isLocal then ScopeWorkgroup else ScopeDevice
+    memSem =
+      if isLocal
+      then MemorySemantics
+            [MemorySemanticsSequentiallyConsistent,
+             MemorySemanticsWorkgroupMemory]
+      else MemorySemantics
+            [MemorySemanticsSequentiallyConsistent,
+             MemorySemanticsWorkgroupMemory,
+             MemorySemanticsUniformMemory]
 
-compileKernelOp :: KernelOp -> CompilerM ()
-compileKernelOp (GetGroupId name i) = readBuiltinTo WorkgroupId (fromIntegral i) name
-compileKernelOp (GetLocalId name i) = readBuiltinTo LocalInvocationId (fromIntegral i) name
-compileKernelOp (GetGlobalId name i) = readBuiltinTo GlobalInvocationId (fromIntegral i) name
-compileKernelOp (GetLocalSize name i) = readWorkgroupSizeTo (fromIntegral i) name
-compileKernelOp (GetGlobalSize name i) = do
-  let r_t = Scalar int32
-      ws_id = reservedId WorkgroupSize
-  (wg_size_id, _) <- insertReturnOp r_t $ opCompositeExtract ws_id (fromIntegral i)
-  (num_groups_id, _) <- readBuiltin NumWorkgroups (fromIntegral i)
-  (gsize_id, _) <- insertReturnOp r_t $ opIMul wg_size_id num_groups_id
-  gs_var <- getVarInfo name
-  insertVarStore gs_var gsize_id
-compileKernelOp (GetLockstepWidth name) = do
-  ls_var <- getVarInfo name
-  insertVarStore ls_var $ reservedSpecId LockstepWidthSpec
-compileKernelOp (Atomic space op) = compileAtomicOp space op
-compileKernelOp (Barrier _) = do
-  wg_scope_id <- getConstId $ IntValue $ Int32Value $ fromIntegral cScopeWorkgroup
-  sem_id <-
-    getConstId $
-      IntValue $
-        Int32Value $
-          fromIntegral $
-            cMemorySemanticsWorkgroupMemory .|. cMemorySemanticsSequentiallyConsistent
-  appendCode $ opControlBarrier wg_scope_id wg_scope_id sem_id
-compileKernelOp (MemFence _) = do
-  dev_scope_id <- getConstId $ IntValue $ Int32Value $ fromIntegral cScopeDevice
-  sem_id <-
-    getConstId $
-      IntValue $
-        Int32Value $
-          fromIntegral $
-            cMemorySemanticsUniformMemory .|. cMemorySemanticsSequentiallyConsistent
-  appendCode $ opMemoryBarrier dev_scope_id sem_id
+fromList :: [a] -> a
+fromList [x] = x
+fromList _ = error "Expected 1-element list"
 
-compileCode :: Code KernelOp -> CompilerM ()
+compileAtomicOp :: Space -> AtomicOp -> Builder ()
+compileAtomicOp _ aop = do
+  (f, primType, old, arr, idxExp, valExp) <- unpack aop
+  let t = TScalar primType
+  oldType <- varType <$> getScalar old
+  arrVar <- getArray arr
+  unless (t == oldType && t == arrElemType arrVar) $ error "Type mismatch"
+  val <- compileExp valExp >>= as primType
+  idx <- compileExp $ untyped idxExp
+  (accessId, sClass) <- makeArrayAccess (arrId arrVar) idx
+  let isLocal =
+        case sClass of
+          StorageClassStorageBuffer -> False
+          StorageClassWorkgroup -> True
+          _ -> error "Bad StorageClass"
+  (scopeId, memSemId) <- scopeAndMemorySemantics isLocal
+  o <- instrRT t $ f accessId scopeId memSemId val
+  storeScalar old o
+  where
+    unpack (AtomicAdd t old arr (Count i) e) =
+      return (OpAtomicIAdd, IntType t, old, arr, i, e)
+    unpack (AtomicFAdd _ _ _ _ _) = error "AtomicFAdd unsupported"
+    unpack (AtomicSMax t old arr (Count i) e) =
+      return (OpAtomicSMax, IntType t, old, arr, i, e)
+    unpack (AtomicSMin t old arr (Count i) e) =
+      return (OpAtomicSMin, IntType t, old, arr, i, e)
+    unpack (AtomicUMax t old arr (Count i) e) =
+      return (OpAtomicUMax, IntType t, old, arr, i, e)
+    unpack (AtomicUMin t old arr (Count i) e) =
+      return (OpAtomicUMin, IntType t, old, arr, i, e)
+    unpack (AtomicAnd t old arr (Count i) e) =
+      return (OpAtomicAnd, IntType t, old, arr, i, e)
+    unpack (AtomicOr t old arr (Count i) e) =
+      return (OpAtomicOr, IntType t, old, arr, i, e)
+    unpack (AtomicXor t old arr (Count i) e) =
+      return (OpAtomicXor, IntType t, old, arr, i, e)
+    unpack (AtomicXchg t old arr (Count i) e) =
+      return (OpAtomicExchange, t, old, arr, i, e)
+    unpack (AtomicCmpXchg t old arr (Count i) cmpExp e) = do
+      cmp <- compileExp cmpExp
+      let f p scope memSem val =
+            OpAtomicCompareExchange p scope memSem memSem val cmp
+      return (f, t, old, arr, i, e)
+
+compileLocalAlloc :: VName -> Exp -> PrimType -> Builder ()
+compileLocalAlloc v cExp elemPrimType = do
+  -- We assume cExp is either
+  --  1) a (64-bit unsigned) product of two @ExpLeaf@s:
+  --      i)  A SizeOf exp that matches the element type found in shArrayElemTypes
+  --      ii) A ScalarVar exp that maps to a VarFutConst (using loadFutConst)
+  --  2) a (64-bit unsigned) product of two @ExpLeaf@s:
+  --      i)  A SizeOf exp that matches the element type found in shArrayElemTypes
+  --      ii) A ValueExp 64-bit unsigned int
+  --  3) a (64-bit unsigned) SizeOf exp that matches the element type found in
+  --     shArrayElemTypes
+  --  4) a (64-bit unsigned) ValueExp indicating the byte-size of the array. In
+  --     this case, the appropriate entry in shArrayElemTypes is relied upon.
+  let elemType = TScalar elemPrimType
+  case fromProduct cExp of
+    Left (et, sizeVar) | et == elemPrimType -> do
+      cId <- getFutConst sizeVar -- sizeVar must be a futconstant
+      i <- makeLocalMemArray elemType cId
+      addArray v $ ArrayInfo i elemType
+    Right (Just et, numElems) | et == elemPrimType -> do
+      i <- makeLocalMemArrayConst elemType $ IntValue $ Int64Value numElems
+      addArray v $ ArrayInfo i elemType
+    Right (Nothing, byteSize) -> do
+      let (numElems, m) = byteSize `divMod` primByteSize elemPrimType
+      unless (m == 0) $
+        error "Array byte size not divisible by element type byte size"
+      i <- makeLocalMemArrayConst elemType $ IntValue $ Int64Value numElems
+      addArray v $ ArrayInfo i elemType
+    _ ->
+      error "SizeOf in Count Exp does not match array element type"
+  where
+    fromProduct (BinOpExp (Mul Int64 OverflowUndef)
+                 (LeafExp (SizeOf et) (IntType Int64))
+                 (LeafExp (ScalarVar sizeVar) (IntType Int64))) =
+      Left $ (et, sizeVar)
+    fromProduct (BinOpExp (Mul Int64 OverflowUndef)
+                 (LeafExp (ScalarVar sizeVar) (IntType Int64))
+                 (LeafExp (SizeOf et) (IntType Int64))) =
+      Left $ (et, sizeVar)
+    fromProduct (BinOpExp (Mul Int64 OverflowUndef)
+                 (ValueExp (IntValue (Int64Value n)))
+                 (LeafExp (SizeOf et) (IntType Int64))) =
+      Right $ (Just et, n)
+    fromProduct (BinOpExp (Mul Int64 OverflowUndef)
+                 (LeafExp (SizeOf et) (IntType Int64))
+                 (ValueExp (IntValue (Int64Value n)))) =
+      Right $ (Just et, n)
+    fromProduct (LeafExp (SizeOf et) (IntType Int64)) =
+      Right $ (Just et, 1)
+    fromProduct (ValueExp (IntValue (Int64Value n))) =
+      Right $ (Nothing, n)
+    fromProduct e = error $ "Not a simple product: " ++ show e
+
+compileKernelOp :: KernelOp -> Builder ()
+compileKernelOp (GetGroupId v n) =
+  getBuiltIn BuiltInWorkgroupId n >>= storeScalar v
+compileKernelOp (GetLocalId v n) =
+  getBuiltIn BuiltInLocalInvocationId n >>= storeScalar v
+compileKernelOp (GetLocalSize v n) =
+  getBuiltIn BuiltInWorkgroupSize n >>= instrRT (TScalar int64) . OpUConvert >>= storeScalar v
+compileKernelOp (GetGlobalSize v n) = do
+  wgSize <- getBuiltIn BuiltInWorkgroupSize n
+  numWgs <- getBuiltIn BuiltInNumWorkgroups n
+  globSize <- instrRT (TScalar int32) $ OpIMul wgSize numWgs
+  -- XXX: Does the ImpCode expect this to be int32 or int64?
+  globSize64 <- instrRT (TScalar int64) $ OpUConvert globSize
+  storeScalar v globSize64
+compileKernelOp (GetGlobalId v n) =
+  getBuiltIn BuiltInGlobalInvocationId n >>= storeScalar v
+compileKernelOp (GetLockstepWidth v) =
+  -- There is no defined lockstep width in Vulkan
+  getConstId (Const $ IntValue $ Int32Value 1) >>= storeScalar v
+compileKernelOp (Atomic space aop) = compileAtomicOp space aop
+compileKernelOp (Barrier fence) = do
+  (scopeId, memSemId) <- scopeAndMemorySemantics $ fence == FenceLocal
+  wgScopeId <- getConstId $ Const $ IntValue $ Int32Value $ fromIntegral $
+                  fromList $ spirvSerialize ScopeWorkgroup
+  -- spirv-val output:
+  --  "in Vulkan environment Execution Scope is limited to Workgroup and
+  --  Subgroup"
+  instr $ OpControlBarrier wgScopeId scopeId memSemId
+compileKernelOp (MemFence fence) = do
+  (scopeId, memSemId) <- scopeAndMemorySemantics $ fence == FenceLocal
+  instr $ OpMemoryBarrier scopeId memSemId
+compileKernelOp (LocalAlloc v (Count cExp)) = do
+  maybeElemPrimType <- getUserStateS $ M.lookup v . shArrayElemTypes
+  case maybeElemPrimType of
+    Just elemPrimType -> compileLocalAlloc v (untyped cExp) elemPrimType
+    Nothing ->
+      -- ImpCode will sometimes allocate local memory that is never accessed.
+      return ()
+compileKernelOp (ErrorSync fence) =
+  -- No error support
+  compileKernelOp (Barrier fence)
+
+compileCode :: Code KernelOp -> Builder ()
 compileCode Skip = return ()
-compileCode (Op op) = compileKernelOp op
-compileCode (lc :>>: rc) = compileCode lc >> compileCode rc
-compileCode (Comment _ c) =
-  -- SPIR-V does not support comments
-  compileCode c
-compileCode DeclareScalar {} =
-  -- Handled earlier
-  return ()
-compileCode (SetScalar dest src) = do
-  s_var <- getVarInfo dest
-  (src_id, _) <- compileExp src
-  insertVarStore s_var src_id
-compileCode (DeclareArray name space t (ArrayValues vs)) = do
-  let len = length vs
-      scope = spaceToScope space
-  zipWithM_ (insertInternalArrayWrite name scope t) [0 .. len -1] vs
-compileCode DeclareMem {} = error "DeclareMem not implemented."
-compileCode SetMem {} = error "SetMem not implemented."
-compileCode Copy {} = error "Copy not implemented."
-compileCode (Write dest (Count idx) elemtype space vol elemexp) = do
-  (elem_id, _) <- compileExp elemexp
-  (i_id, _) <- compileExp $ untyped idx
-  (_, _, dest_dec) <- getVarInfo dest
-  let scope = decSpaceToScope dest_dec space
-  insertArrayWrite dest i_id elem_id elemtype scope vol
-compileCode (Call [dest] fname args) = do
-  dest_var <- getVarInfo dest
-  arg_ids <- mapM compileArg args
-  (fres_id, _) <- compileFunCall (pretty fname) $ map fst arg_ids
-  insertVarStore dest_var fres_id
+compileCode (c1 :>>: c2)  = compileCode c1 >> compileCode c2
+compileCode (For it bound body) = do
+  let itInit = Const $ IntValue $ intValue intType (0 :: Integer)
+  void $ declareFunctionScalar it itType Nonvolatile (Just itInit)
+  loop check (compileCode body) continue
   where
-    compileArg (MemArg vn) = getVarInfo vn >>= insertVarLoad
-    compileArg (ExpArg e) = compileExp e
-compileCode Assert {} = return ()
-compileCode DebugPrint {} = return ()
-compileCode (If cond tbranch fbranch) = do
-  (cond_id, _) <- compileExp $ untyped cond
-  insertIf cond_id (compileCode tbranch) (compileCode fbranch)
+    IntType intType = primExpType bound
+    itType = TScalar $ IntType intType
+    check = do
+      itId <- loadScalar it
+      boundId <- compileExp bound
+      instrRT (TScalar Bool) $ OpULessThan itId boundId
+    continue = modifyScalar it $ \itId -> do
+      let oneConst = Const $ IntValue $ intValue intType (1 :: Integer)
+      one <- getConstId oneConst
+      instrRT itType $ OpIAdd itId one
 compileCode (While cond body) =
-  insertLoop (compileExp (untyped cond)) (compileCode body) $ return ()
-compileCode (For i bound body) = do
-  var_i@(i_id, _, _) <- getVarInfo i
-  init_id <- getConstId $ IntValue $ intValue it (0 :: Integer)
-  insertVarStore var_i init_id
-  insertLoop (check i_id) (compileCode body) (continue var_i)
+  loop (compileExp $ untyped cond) (compileCode body) $ return ()
+compileCode (DeclareMem v (ScalarSpace elemSubExps elemPrimType)) = do
+  let elemType = TScalar elemPrimType
+      t = TArray elemType $ Just $ Const $ IntValue $ Int32Value $ numElems
+  i <- makeFunctionVar t Nothing
+  constInit <- getConstId $ ConstComposite t consts
+  instr $ OpStore i constInit Nothing
+  addArray v $ ArrayInfo i elemType
+  mapM_ (\(idx, varToStore) -> do
+    idxId <- getConstId $ Const $ IntValue $ Int64Value idx
+    storeMe <- loadScalar varToStore
+    storeArray v idxId storeMe Nonvolatile) vars
   where
-    IntType it = primExpType bound
-    sit = Scalar $ IntType it
-    check i_id = do
-      (condi_id, _) <- insertReturnOp sit $ opLoad i_id []
-      (bound_id, _) <- compileExp bound
-      insertReturnOp (Scalar Bool) $ opULessThan condi_id bound_id
-    continue var_i = do
-      one_id <- getConstId $ IntValue $ intValue it (1 :: Integer)
-      (i_val_id, _) <- insertVarLoad var_i
-      (inc_id, _) <- insertReturnOp sit $ opIAdd i_val_id one_id
-      insertVarStore var_i inc_id
-compileCode _ = error "Expression not supported in kernel."
+    numElems = genericLength elemSubExps
+    subExpToConst (Constant val) = Const val
+    subExpToConst (Var _) = Const $ IntValue $ Int32Value 0
+    consts = map subExpToConst elemSubExps
+    subExpToVar (i, Var v') = Just (i, v')
+    subExpToVar (_, Constant _) = Nothing
+    vars = mapMaybe subExpToVar $ zip [0..] elemSubExps
+compileCode (DeclareMem _ (Space "local")) = return ()
+compileCode (DeclareMem _ _) =
+  error "Unsuppored space for DeclareMem"
+compileCode (DeclareScalar v vol t) = unless (t == Cert) $
+  void $ declareFunctionScalar v (TScalar t) vol Nothing
+compileCode (DeclareArray _v _space _t _contents) =
+  -- Is this ever even used in kernel code?
+  error "DeclareArray unsupported"
+compileCode (Allocate _ _ _) =
+  -- We cannot dynamically allocate or free memory in SPIR-V shaders (same for
+  -- CUDA and OpenCL).
+  -- Local memory is declared with a KernelOp (LocalAlloc)
+  error "Cannot use Allocate in SPIR-V shaders"
+compileCode (Free _ _) =
+  -- We cannot dynamically allocate or free memory in SPIR-V shaders (same for
+  -- CUDA and OpenCL), but Futhark still inserts these in some programs.
+  return ()
+compileCode (Copy _ _ _ _ _ _ _) =
+  error "Copy unsupported"
+compileCode (Write v (Count idxExp) _ _ vol writeExp) = do
+  -- We can safely ignore the PrimType in Write, as we have already verified
+  -- that arrays are only accessed with a single element type.
+  idx <- compileExp $ untyped idxExp
+  writeMe <- compileExp writeExp
+  storeArray v idx writeMe vol
+compileCode (SetScalar v e) = do
+  storeMe <- compileExp e
+  storeScalar v storeMe
+compileCode (SetMem _ _ _) = error "SetMem unsupported"
+compileCode (Call [res] fn argExps) = do
+  args <- mapM onArgExp argExps
+  t <- varType <$> getScalar res
+  case t of
+    TScalar primType -> do
+      fnRes <- compileFunCall (pretty fn) args primType
+      storeScalar res fnRes
+    _ -> error "Bad type"
+  where
+    onArgExp (MemArg _) = error "MemArgs unsupported"
+    onArgExp (ExpArg e) = compileExp e
+compileCode (Call _ _ _) = error "Call used in an unsupported manner"
+compileCode (If condExp tbranch fbranch) =
+  if_ (compileExp $ untyped condExp) (compileCode tbranch) (compileCode fbranch)
+compileCode (Assert _ _ _) = return ()
+compileCode (Comment _ c) = compileCode c
+compileCode (DebugPrint _ _) = return ()
+compileCode (Op op) = compileKernelOp op
 
--- | Inline variables must be declared in the first block
-compileEarlyDecls :: Code KernelOp -> CompilerM ()
-compileEarlyDecls (DeclareScalar name _vol t) =
-  -- FIXME: what about the volatility?
-  void $ insertVarInline name FunctionLocal (Scalar t)
-compileEarlyDecls (lc :>>: rc) = compileEarlyDecls lc >> compileEarlyDecls rc
-compileEarlyDecls (Comment _ c) = compileEarlyDecls c
-compileEarlyDecls (DeclareArray name space _ (ArrayValues vs)) = do
-  access_size_map <- gets compArrayLeastAccessSize
-  let elem_size = (M.!) access_size_map name
-      t = Scalar $ byteSizeToIntPrimType elem_size
-      len = length vs
-      scope = spaceToScope space
-  void $ insertVarInline name scope $ Array t $ Just $ fromIntegral len
-compileEarlyDecls (If _ tbranch fbranch) =
-  compileEarlyDecls tbranch >> compileEarlyDecls fbranch
-compileEarlyDecls (While _ body) = compileEarlyDecls body
-compileEarlyDecls (For i bound body) = do
-  void $ insertVarInline i FunctionLocal $ Scalar $ primExpType bound
-  compileEarlyDecls body
-compileEarlyDecls _ = return ()
+declareInterfaceVar :: KernelUse -> Builder ()
+declareInterfaceVar (ScalarUse v primType) = do
+  let t = TScalar primType
+  (i, bindingId) <- makeInterfaceVar t
+  let arg = ValueKArg (LeafExp (ScalarVar v) primType) primType
+  modifyUserState $
+    \s -> s { shInterfaceVars = (arg, bindingId) : shInterfaceVars s }
+  addScalar v $ ScalarInfo i t Nonvolatile
+declareInterfaceVar (MemoryUse v) = do
+  -- Assume every MemoryUse is actually used
+  primType <- getUserStateS $
+    fromMaybe (error $ "Unused MemoryUse: " ++ show v) .
+      M.lookup v . shArrayElemTypes
+  when (primType == Bool) $ error "Bool in interface vars not supported"
+  let elemType = TScalar primType
+  (i, bindingId) <- makeInterfaceVar (TArray elemType Nothing)
+  let arg = MemKArg v
+  modifyUserState $ \s ->
+    s { shInterfaceVars = (arg, bindingId) : shInterfaceVars s }
+  addArray v $ ArrayInfo i elemType
+declareInterfaceVar (ConstUse v kce@(LeafExp (SizeConst _) _)) = do
+  let t = TScalar $ primExpType kce
+  specId <- newSpecId
+  constId <- getConstId $ SpecConst (IntValue $ Int64Value 0x0BADBADBADBADBAD) specId
+  addFutConst v $ FutConstInfo constId t
+  let specConst = SpecConstKernelExp v kce
+  modifyUserState $ \s ->
+    s { shSpecConsts = (specConst, specId) : shSpecConsts s }
+declareInterfaceVar (ConstUse _ _) =
+  -- If we were to support @KernelConstExp@s that weren't just a single Name,
+  -- we would need to do some OpSpecConstantOp magic
+  error "Unsupported KernelConstExp"
 
-analyzeExpArrayAccessSizes :: Exp -> CompilerM ()
-analyzeExpArrayAccessSizes (LeafExp (Index src _ restype _ _) _) =
-  let size = primByteSize restype
-   in suggestArrayLeastAccessSize src size
-analyzeExpArrayAccessSizes _ = return ()
+compileKernel :: Kernel -> Builder ()
+compileKernel k = do
+  mapM_ declareInterfaceVar (kernelUses k)
+  compileCode (kernelBody k)
+  return ()
 
-analyzeCodeArrayAccessSizes :: Code KernelOp -> CompilerM ()
-analyzeCodeArrayAccessSizes (Op (Atomic _ op)) = do
-  let (arr, e, me) = atomicOpArrayAndExp op
-  suggestArrayLeastAccessSize arr 4
-  analyzeExpArrayAccessSizes e
-  maybe (return ()) analyzeExpArrayAccessSizes me
-analyzeCodeArrayAccessSizes (lc :>>: rc) = do
-  analyzeCodeArrayAccessSizes lc
-  analyzeCodeArrayAccessSizes rc
-analyzeCodeArrayAccessSizes (Comment _ c) = analyzeCodeArrayAccessSizes c
-analyzeCodeArrayAccessSizes (Copy _ (Count destoffset) _ _ (Count srcoffset) _ (Count size)) = do
-  analyzeExpArrayAccessSizes $ untyped destoffset
-  analyzeExpArrayAccessSizes $ untyped srcoffset
-  analyzeExpArrayAccessSizes $ untyped size
-analyzeCodeArrayAccessSizes (Write dest (Count idx) elemtype _ _ elemexp) = do
-  analyzeExpArrayAccessSizes elemexp
-  analyzeExpArrayAccessSizes $ untyped idx
-  let size = primByteSize elemtype
-  suggestArrayLeastAccessSize dest size
-analyzeCodeArrayAccessSizes (DeclareArray name _ t _) =
-  let size = primByteSize t
-   in suggestArrayLeastAccessSize name size
-analyzeCodeArrayAccessSizes (SetScalar _ src) = analyzeExpArrayAccessSizes src
-analyzeCodeArrayAccessSizes (If cond tbranch fbranch) = do
-  analyzeExpArrayAccessSizes $ untyped cond
-  analyzeCodeArrayAccessSizes tbranch
-  analyzeCodeArrayAccessSizes fbranch
-analyzeCodeArrayAccessSizes (While cond body) = do
-  analyzeExpArrayAccessSizes $ untyped cond
-  analyzeCodeArrayAccessSizes body
-analyzeCodeArrayAccessSizes (For _ bound body) = do
-  analyzeExpArrayAccessSizes bound
-  analyzeCodeArrayAccessSizes body
-analyzeCodeArrayAccessSizes _ = return ()
+getArrayElementTypes :: ArrayAccesses -> M.Map VName PrimType
+getArrayElementTypes = M.fromList . concatMap toMapEntries
+  where
+    toMapEntries (s1, s2) = toMapEntries' (S.toList s1, S.toList s2)
+    toMapEntries' (_, []) = [] -- Unused arrays
+    toMapEntries' (names, [t]) = map (, t) names
+    toMapEntries' (_, _) =
+      error "Array(s) accessed with more than one element type"
 
-kernelLocalMemory :: Kernel -> [LocalMemoryUse]
-kernelLocalMemory =
-  error $
-    unlines
-      [ "kernelLocalMemory: not implemented ATM",
-        "start with making this return an empty list"
-      ]
+kernelToShader' :: Kernel -> (SingleEntryShader, [(EntryPointArg, Word32)], [(SpecConstExp, Word32)])
+kernelToShader' k =
+  let arrayAccesses = getArrayAccesses $ kernelBody k
+      arrayElemTypes = getArrayElementTypes arrayAccesses
+      s = ImpCodeToShader
+                { shVars = M.empty,
+                  shInterfaceVars = [],
+                  shSpecConsts = [],
+                  shArrayElemTypes = arrayElemTypes
+                }
+      name = pretty $ kernelName k
+      exp1 = ValueExp $ IntValue $ Int32Value 1
+      (s', shader, (wgX, wgY, wgZ)) = runBuilder name (compileKernel k) s
+      wgSizeExps = kernelGroupSize k ++ repeat exp1
+      wgSpecConsts = zip (map SpecConstExp wgSizeExps) [wgX, wgY, wgZ]
+      eArgs = map (\(arg, bId) -> (arg, fromBindingId bId)) $ shInterfaceVars s'
+      specConsts = map (\(sp, spId) -> (sp, fromSpecId spId)) $ shSpecConsts s' ++ wgSpecConsts
+      seShader = SEShader name (length eArgs) shader
+  in (seShader, eArgs, (specConsts))
 
-compileKernel :: Kernel -> CompilerM ()
-compileKernel kernel = do
-  let name = pretty $ kernelName kernel
-      uses = kernelUses kernel
-      body = kernelBody kernel
-  analyzeCodeArrayAccessSizes body
-  mapM_ registerConstUse uses
-  addDescriptors name $ getDescriptorUses uses
-  mapM_ insertLocalMemory $ kernelLocalMemory kernel
-  insertEntryHead name
-  compileEarlyDecls body
-  insertDescriptorAccesses name
-  compileCode body
-  insertEntryTail
-
-finalizedShader :: CompilerM [Word32]
-finalizedShader = do
-  glsl_ext <- getGLSLExt
-  entries <- getEntryPointDeclarations
-  exec_modes <- getExecutionModeDeclarations
-  decos <- getDecorations
-  res_consts <- getReservedDeclarations
-  builtin_vars <- getBuiltinVarDeclarations
-  spec_consts <- getSpecConstDeclarations
-  consts <- getConstDeclarations
-  desc_vars <- getDescVarDeclarations
-  scalar_types <- getScalarTypeDeclarations
-
-  -- Seperate from scalar types as they may require consts before
-  nons_types <- getNonScalarTypeDeclarations
-
-  max_id <- gets compCurrentMaxId
-  code_body <- toList <$> gets compResult
-  return $
-    concat
-      [ genHeader max_id,
-        getCapabilities,
-        getExtensions,
-        glsl_ext,
-        entries,
-        exec_modes,
-        decos,
-        scalar_types,
-        consts,
-        spec_consts,
-        nons_types,
-        builtin_vars,
-        res_consts,
-        desc_vars,
-        code_body
-      ]
-
-kernelToShader :: Kernel -> SingleEntryShader
-kernelToShader kernel = runCompilerM newCompilerState $ do
-  compileKernel kernel
-  shader <- finalizedShader
-  name <- fst . head <$> gets compEntryPoints
-  desc_set_size <- length . flip (M.!) name <$> gets compDescriptors
-  return $ SEShader name desc_set_size shader
+kernelToShader :: Kernel -> (SingleEntryShader, [EntryPointArg], [SpecConstExp])
+kernelToShader k =
+  let (seShader, eArgs, specConsts) = kernelToShader' k
+  in (seShader, fromAssocList eArgs, fromAssocList specConsts)
+  where
+    fromAssocList :: [(a, Word32)] -> [a]
+    fromAssocList = fromAssocList' 0 . sortBy (compare `on` snd)
+    fromAssocList' :: Word32 -> [(a, Word32)] -> [a]
+    fromAssocList' n ((x, y) : xs)
+      | n == y = x : fromAssocList' (n + 1) xs
+      | otherwise = error "fromAssocList mismatch"
+    fromAssocList' _ [] = []

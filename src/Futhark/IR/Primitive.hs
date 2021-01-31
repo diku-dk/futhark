@@ -731,7 +731,7 @@ doFAbs v = floatValue (floatValueType v) $ abs $ floatToDouble v
 doSSignum :: IntValue -> IntValue
 doSSignum v = intValue (intValueType v) $ signum $ intToInt64 v
 
--- | @usignum(-2)@ = -1.
+-- | @usignum(-2)@ = 1.
 doUSignum :: IntValue -> IntValue
 doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
 

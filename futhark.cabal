@@ -108,7 +108,10 @@ library
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.Backends.SPIRV
+      Futhark.CodeGen.Backends.SPIRV.Builder
+      Futhark.CodeGen.Backends.SPIRV.Spec
       Futhark.CodeGen.Backends.SPIRV.Operations
+      Futhark.CodeGen.Backends.SPIRV.ArrayAccess
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.Kernels
       Futhark.CodeGen.ImpCode.Multicore

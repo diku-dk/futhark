@@ -7,32 +7,36 @@
 -- The imperative code has been augmented with a 'LaunchEntryPoint'
 -- operation that allows one to execute an SPIR-V entry point.
 module Futhark.CodeGen.ImpCode.Vulkan
-  ( Program (..),
+  ( SingleEntryShader(..),
+    Program (..),
     Function,
     FunctionT (Function),
     Code,
     EntryPointArg (..),
     SpecConstExp (..),
-    WorkGroups,
     Vulkan (..),
     Kernel.KernelConstExp,
-    SPIRV.EntryPointName,
     module Futhark.CodeGen.ImpCode,
   )
 where
 
 import qualified Data.Map.Strict as M
-import qualified Futhark.CodeGen.Backends.SPIRV as SPIRV
 import Futhark.CodeGen.ImpCode hiding (Code, Function)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import qualified Futhark.CodeGen.ImpCode.Kernels as Kernel
 import Futhark.IR.Kernels.Sizes
 import Futhark.Util.Pretty
 
+data SingleEntryShader = SEShader
+  { shaderEntryPoint :: String,
+    shaderDescriptorSetSize :: Int,
+    shaderCode :: [Word32]
+  }
+
 -- | An program calling SPIR-V entry-points using the Vulkan API.
 data Program = Program
-  { spirvShaders :: [SPIRV.SingleEntryShader],
-    hostSizes :: M.Map Name (SizeClass, Name),
+  { spirvShaders :: [SingleEntryShader],
+    hostSizes :: M.Map Name SizeClass,
     hostDefinitions :: Definitions Vulkan
   }
 
@@ -52,20 +56,18 @@ data EntryPointArg
 
 -- | The expressions of specialization constants of a shader
 data SpecConstExp
-  = SpecConstKernelExp VName Kernel.KernelConstExp
-  | SpecConstSizeExp DimSize
+  = -- For constants
+    SpecConstKernelExp VName Kernel.KernelConstExp
   | SpecConstExp Exp
-  | SpecConstLocalMemExp Kernel.KernelConstExp
-  | SpecConstLockstepWidth
+  | -- For workgroup size: spec ids (0, 1, 2)
+    SpecConstSizeExp DimSize
+  | -- LocalAlloc. NB: Count is elements, not bytes
+    SpecConstLocalMemExp (Count Elements Exp)
   deriving (Show)
-
--- | Work group dimensions of an entry point
-type WorkGroups = (Exp, Exp, Exp)
 
 -- | Host-level OpenCL operation.
 data Vulkan
-  = LaunchEntryPoint SPIRV.EntryPointName [EntryPointArg] [SpecConstExp] WorkGroups
-  | HostCode Code
+  = LaunchEntryPoint String [EntryPointArg] [SpecConstExp] (Exp, Exp, Exp)
   | GetSize VName Name
   | CmpSizeLe VName Name Exp
   | GetSizeMax VName SizeClass
