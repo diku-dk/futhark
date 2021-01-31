@@ -1,6 +1,8 @@
 -- | Transforming arrays of tuples into tuples of arrays and back
--- again.  These are generally very cheap operations, as the internal
--- compiler representation is always tuples of arrays.
+-- again.
+--
+-- These are generally very cheap operations, as the internal compiler
+-- representation is always tuples of arrays.
 
 -- The main reason this module exists is that we need it to define
 -- SOACs like `map2`.
