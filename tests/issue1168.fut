@@ -20,7 +20,7 @@ let v3mul (a:v3) (b:v3) : v3  = triadMap2 (*) a b
 let cross (a:v3) (b:v3) : v3  = (a.1*b.2-a.2*b.1, a.2*b.0-a.0*b.2, a.0*b.1-a.1*b.0)
 let v3dot (a:v3) (b:v3) : f32 = v3mul a b |> v3sum
 let scaleV3 (f:f32) = triadMap (*f)
-let v3negate = triadMap f32.negate
+let v3negate = triadMap f32.neg
 let v3outer a b = triadMap (\f -> scaleV3 f b) a
 
 let sumV3s = reduce_comm v3add (triplet 0)

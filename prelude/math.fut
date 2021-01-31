@@ -46,8 +46,6 @@ module type numeric = {
 
   -- | Arithmetic negation (use `!` for bitwise negation).
   val neg: t -> t
-  -- | Deprecated alias for `neg`.
-  val negate: t -> t
   val max: t -> t -> t
   val min: t -> t -> t
 
@@ -282,7 +280,6 @@ module i8: (integral with t = i8) = {
   let abs (x: i8) = intrinsics.abs8 x
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax8 (x, y)
   let min (x: t) (y: t) = intrinsics.smin8 (x, y)
 
@@ -355,7 +352,6 @@ module i16: (integral with t = i16) = {
   let abs (x: i16) = intrinsics.abs16 x
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax16 (x, y)
   let min (x: t) (y: t) = intrinsics.smin16 (x, y)
 
@@ -431,7 +427,6 @@ module i32: (integral with t = i32) = {
   let abs (x: i32) = intrinsics.abs32 x
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax32 (x, y)
   let min (x: t) (y: t) = intrinsics.smin32 (x, y)
 
@@ -507,7 +502,6 @@ module i64: (integral with t = i64) = {
   let abs (x: i64) = intrinsics.abs64 x
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = intrinsics.smax64 (x, y)
   let min (x: t) (y: t) = intrinsics.smin64 (x, y)
 
@@ -583,7 +577,6 @@ module u8: (integral with t = u8) = {
   let abs (x: u8) = x
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax8 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin8 (sign x, sign y))
 
@@ -659,7 +652,6 @@ module u16: (integral with t = u16) = {
   let abs (x: u16) = x
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax16 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin16 (sign x, sign y))
 
@@ -738,7 +730,6 @@ module u32: (integral with t = u32) = {
   let lowest = highest + 1u32
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax32 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin32 (sign x, sign y))
 
@@ -811,7 +802,6 @@ module u64: (integral with t = u64) = {
   let abs (x: u64) = x
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = unsign (intrinsics.umax64 (sign x, sign y))
   let min (x: t) (y: t) = unsign (intrinsics.umin64 (sign x, sign y))
 
@@ -875,7 +865,6 @@ module f64: (float with t = f64 with int_t = u64) = {
   let (x: f64) != (y: f64) = intrinsics.! (x == y)
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = intrinsics.fmax64 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin64 (x, y)
 
@@ -983,7 +972,6 @@ module f32: (float with t = f32 with int_t = u32) = {
   let (x: f32) != (y: f32) = intrinsics.! (x == y)
 
   let neg (x: t) = -x
-  let negate = neg
   let max (x: t) (y: t) = intrinsics.fmax32 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin32 (x, y)
 

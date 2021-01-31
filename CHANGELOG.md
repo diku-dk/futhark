@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * The math modules no longer define the name `negate` (use `neg`
+    instead).
+
 ### Fixed
 
   * Exotic core language alias tracking bug (#1239).

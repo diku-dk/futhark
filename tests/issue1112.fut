@@ -31,7 +31,7 @@ let gauss_jordan [m] [n] (A:[m][n]f32) =
         let irow = map2 (f32.fma f) A[j] A[i]
         in map (\j -> if j == i
                         then irow
-                        else let f = f32.negate A[j,i]
+                        else let f = f32.neg A[j,i]
                              in map2 (f32.fma f) irow A[j]) (iota m)
 
 let hStack [m][n][l] (A:[m][n]f32) (B:[m][l]f32) = map2 (concat_to (n+l)) A B
