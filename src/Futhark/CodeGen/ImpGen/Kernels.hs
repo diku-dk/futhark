@@ -50,7 +50,17 @@ callKernelOperations =
 openclAtomics, cudaAtomics :: AtomicBinOp
 (openclAtomics, cudaAtomics) = (flip lookup opencl, flip lookup cuda)
   where
-    opencl =
+    opencl64 =
+      [ (Add Int64 OverflowUndef, Imp.AtomicAdd Int64),
+        (SMax Int64, Imp.AtomicSMax Int64),
+        (SMin Int64, Imp.AtomicSMin Int64),
+        (UMax Int64, Imp.AtomicUMax Int64),
+        (UMin Int64, Imp.AtomicUMin Int64),
+        (And Int64, Imp.AtomicAnd Int64),
+        (Or Int64, Imp.AtomicOr Int64),
+        (Xor Int64, Imp.AtomicXor Int64)
+      ]
+    opencl32 =
       [ (Add Int32 OverflowUndef, Imp.AtomicAdd Int32),
         (SMax Int32, Imp.AtomicSMax Int32),
         (SMin Int32, Imp.AtomicSMin Int32),
@@ -60,6 +70,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
         (Or Int32, Imp.AtomicOr Int32),
         (Xor Int32, Imp.AtomicXor Int32)
       ]
+    opencl = opencl32 ++ opencl64
     cuda = opencl ++ [(FAdd Float32, Imp.AtomicFAdd Float32)]
 
 compileProg ::
