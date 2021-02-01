@@ -213,7 +213,7 @@ parseVideoParams =
 parseBlock :: Parser Block
 parseBlock =
   choice
-    [ token "-- >" $> BlockDirective <*> parseDirective <* void eol,
+    [ token "-- >" $> BlockDirective <*> parseDirective,
       BlockCode <$> parseTestBlock,
       BlockCode <$> parseBlockCode,
       BlockComment <$> parseBlockComment
@@ -227,16 +227,16 @@ parseBlock =
           directiveName "brief" $> DirectiveBrief
             <*> parseDirective,
           directiveName "img" $> DirectiveImg
-            <*> parseExp postlexeme,
+            <*> parseExp postlexeme <* eol,
           directiveName "plot2d" $> DirectivePlot
             <*> parseExp postlexeme
-            <*> parsePlotParams,
+            <*> parsePlotParams <* eol,
           directiveName "gnuplot" $> DirectiveGnuplot
             <*> parseExp postlexeme
             <*> (";" *> hspace *> eol *> parseBlockComment),
           (directiveName "video" <|> directiveName "video") $> DirectiveVideo
             <*> parseExp postlexeme
-            <*> parseVideoParams
+            <*> parseVideoParams <* eol
         ]
     directiveName s = try $ token (":" <> s)
 
