@@ -1,0 +1,42 @@
+-- Can we do operations on f64s, even though these are not always
+-- natively supported?
+-- ==
+--
+-- input  {
+--   [0f64, 0f64, 0f64, 0f64, 0f64]
+--   [1, 1, 1, 1, 1]
+--   [1f64, 1f64, 1f64, 1f64, 1f64]
+-- }
+-- output {
+--   [0f64, 5f64, 0f64, 0f64, 0f64]
+-- }
+--
+-- input  {
+--   [0f64, 0f64, 0f64, 0f64, 0f64]
+--   [1, 1, 4, 4, 4]
+--   [0.1f64, 0.1f64, 0.4f64, 0.4f64, 0.4f64]
+-- }
+-- output {
+--   [0f64, 0.2f64, 0f64, 0f64, 1.2f64]
+-- }
+--
+-- input  {
+--   [1f64, 2f64, 3f64, 4f64, 5f64]
+--   [1, 1, 4, 4, 4]
+--   [1f64, 1f64, 4f64, 4f64, 4f64]
+-- }
+-- output {
+--   [1f64, 4f64, 3f64, 4f64, 17f64]
+-- }
+--
+-- input  {
+--   [1f64, f64.nan, 3f64, 4f64, 5f64]
+--   [1, 1, 4, 4, 4]
+--   [1f64, 1f64, 4f64, 4f64, 4f64]
+-- }
+-- output {
+--   [1f64, f64.nan, 3f64, 4f64, 17f64]
+-- }
+
+let main [m][n] (hist : *[n]f64) (is: [m]i32) (image : [m]f64) : [n]f64 =
+  reduce_by_index hist (+) 0f64 (map i64.i32 is) image
