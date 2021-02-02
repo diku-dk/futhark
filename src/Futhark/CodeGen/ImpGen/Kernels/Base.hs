@@ -550,13 +550,13 @@ atomicUpdateLocking ::
   AtomicUpdate KernelsMem KernelEnv
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- splitOp lam,
-    all (\(_, t, _, _) -> primBitSize t == 32) ops_and_ts =
+    all (\(_, t, _, _) -> primBitSize t `elem` [32, 64]) ops_and_ts =
     primOrCas ops_and_ts $ \space arrs bucket ->
-      -- If the operator is a vectorised binary operator on 32-bit values,
-      -- we can use a particularly efficient implementation. If the
-      -- operator has an atomic implementation we use that, otherwise it
-      -- is still a binary operator which can be implemented by atomic
-      -- compare-and-swap if 32 bits.
+      -- If the operator is a vectorised binary operator on 32/64-bit
+      -- values, we can use a particularly efficient
+      -- implementation. If the operator has an atomic implementation
+      -- we use that, otherwise it is still a binary operator which
+      -- can be implemented by atomic compare-and-swap if 32/64 bits.
       forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
         -- Common variables.
         old <- dPrim "old" t
@@ -579,13 +579,13 @@ atomicUpdateLocking atomicBinOp lam
 
     isPrim (op, _, _, _) = isJust $ atomicBinOp op
 
--- If the operator functions purely on single 32-bit values, we can
+-- If the operator functions purely on single 32/64-bit values, we can
 -- use an implementation based on CAS, no matter what the operator
 -- does.
 atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t == 32 = AtomicCAS $ \space [arr] bucket -> do
+    primBitSize t `elem` [32, 64] = AtomicCAS $ \space [arr] bucket -> do
     old <- dPrim "old" t
     atomicUpdateCAS space t arr (tvVar old) bucket (paramName xp) $
       compileBody' [xp] $ lambdaBody op
@@ -703,25 +703,35 @@ atomicUpdateCAS space t arr old bucket x do_op = do
             ( \v -> Imp.FunExp "to_bits32" [v] int32,
               \v -> Imp.FunExp "from_bits32" [v] t
             )
+          FloatType Float64 ->
+            ( \v -> Imp.FunExp "to_bits64" [v] int64,
+              \v -> Imp.FunExp "from_bits64" [v] t
+            )
           _ -> (id, id)
+
+      int
+        | primBitSize t == 32 = int32
+        | otherwise = int64
+
   sWhile (tvExp run_loop) $ do
     assumed <~~ Imp.var old t
     x <~~ Imp.var assumed t
     do_op
-    old_bits <- dPrim "old_bits" int32
+    old_bits_v <- newVName "old_bits"
+    dPrim_ old_bits_v int
+    let old_bits = Imp.var old_bits_v int
     sOp $
       Imp.Atomic space $
         Imp.AtomicCmpXchg
-          int32
-          (tvVar old_bits)
+          int
+          old_bits_v
           arr'
           bucket_offset
           (toBits (Imp.var assumed t))
           (toBits (Imp.var x t))
-    old <~~ fromBits (untyped $ tvExp old_bits)
-    sWhen
-      (isInt32 (toBits (Imp.var assumed t)) .==. tvExp old_bits)
-      (run_loop <-- false)
+    old <~~ fromBits old_bits
+    let won = CmpOpExp (CmpEq int) (toBits (Imp.var assumed t)) old_bits
+    sWhen (isBool won) (run_loop <-- false)
 
 -- | Horizontally fission a lambda that models a binary operator.
 splitOp :: ASTLore lore => Lambda lore -> Maybe [(BinOp, PrimType, VName, VName)]
