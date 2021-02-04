@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     performance with `reduce_by_index` in particular.
     Double-precision float atomics are still not used.
 
+  * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
+
 ### Removed
 
 ### Changed
