@@ -1658,6 +1658,42 @@ compileGroupResult space pe (TileReturns dims what) = do
   localOps threadOperations $
     sWhen (isActive $ zip (map tvVar is_for_thread) $ map fst dims) $
       copyDWIMFix (patElemName pe) (map tvExp is_for_thread) (Var what) local_is
+compileGroupResult space pe (RegTileReturns dims_n_tiles what) = do
+  constants <- kernelConstants <$> askEnv
+
+  let gids = map fst $ unSegSpace space
+      (dims, group_tiles, reg_tiles) = unzip3 dims_n_tiles
+      group_tiles' = map toInt64Exp group_tiles
+      reg_tiles' = map toInt64Exp reg_tiles
+
+  -- Which group tile is this group responsible for?
+  let group_tile_is = map Imp.vi64 gids
+
+  -- Within the group tile, which register tile is this thread
+  -- responsible for?
+  reg_tile_is <-
+    mapM (dPrimVE "reg_tile_i") $
+      unflattenIndex group_tiles' $ sExt64 $ kernelLocalThreadId constants
+
+  -- Compute output array slice for the register tile belonging to
+  -- this thread.
+  let regTileSliceDim (group_tile, group_tile_i) (reg_tile, reg_tile_i) = do
+        tile_dim_start <-
+          dPrimVE "tile_dim_start" $
+            reg_tile * (group_tile * group_tile_i + reg_tile_i)
+        return $ DimSlice tile_dim_start reg_tile 1
+  reg_tile_slices <-
+    zipWithM
+      regTileSliceDim
+      (zip group_tiles' group_tile_is)
+      (zip reg_tiles' reg_tile_is)
+
+  localOps threadOperations $
+    sLoopNest (Shape reg_tiles) $ \is_in_reg_tile -> do
+      let dest_is = fixSlice reg_tile_slices is_in_reg_tile
+          src_is = reg_tile_is ++ is_in_reg_tile
+      sWhen (foldl1 (.&&.) $ zipWith (.<.) dest_is $ map toInt64Exp dims) $
+        copyDWIMFix (patElemName pe) dest_is (Var what) src_is
 compileGroupResult space pe (Returns _ what) = do
   constants <- kernelConstants <$> askEnv
   in_local_memory <- arrayInLocalMemory what
@@ -1683,6 +1719,8 @@ compileThreadResult ::
   PatElem KernelsMem ->
   KernelResult ->
   InKernelGen ()
+compileThreadResult _ _ RegTileReturns {} =
+  compilerLimitationS "compileThreadResult: RegTileReturns not yet handled."
 compileThreadResult space pe (Returns _ what) = do
   let is = map (Imp.vi64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []

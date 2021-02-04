@@ -307,10 +307,12 @@ extractGenericBodyAllocations lvl bound_outside bound_kernel get_stms set_stms b
               stmsToList $ get_stms body
    in (set_stms (stmsFromList stms) body, allocs)
 
-expandable :: Space -> Bool
+expandable, notScalar :: Space -> Bool
 expandable (Space "local") = False
 expandable ScalarSpace {} = False
 expandable _ = True
+notScalar ScalarSpace {} = False
+notScalar _ = True
 
 extractStmAllocations ::
   SegLevel ->
@@ -319,7 +321,12 @@ extractStmAllocations ::
   Stm KernelsMem ->
   Writer Extraction (Maybe (Stm KernelsMem))
 extractStmAllocations lvl bound_outside bound_kernel (Let (Pattern [] [patElem]) _ (Op (Alloc size space)))
-  | expandable space && expandableSize size || boundInKernel size = do
+  | expandable space && expandableSize size
+      -- FIXME: the '&& notScalar space' part is a hack because we
+      -- don't otherwise hoist the sizes out far enough, and we
+      -- promise to be super-duper-careful about not having variant
+      -- scalar allocations.
+      || (boundInKernel size && notScalar space) = do
     tell $ M.singleton (patElemName patElem) (lvl, size, space)
     return Nothing
   where

@@ -34,7 +34,7 @@ instance Pretty DeviceInfo where
   ppr (DeviceInfo s) = text "device_info" <> parens (ppr s)
 
 -- | A size that can be assigned a default.
-data WhichSize = LockstepWidth | NumGroups | GroupSize | TileSize | Threshold
+data WhichSize = LockstepWidth | NumGroups | GroupSize | TileSize | RegTileSize | Threshold
 
 -- | A heuristic for setting the default value for something.
 data SizeHeuristic = SizeHeuristic
@@ -56,11 +56,13 @@ sizeHeuristicsTable =
     SizeHeuristic "" DeviceGPU NumGroups $ 4 * max_compute_units,
     SizeHeuristic "" DeviceGPU GroupSize 256,
     SizeHeuristic "" DeviceGPU TileSize 32,
+    SizeHeuristic "" DeviceGPU RegTileSize 2,
     SizeHeuristic "" DeviceGPU Threshold $ 32 * 1024,
     SizeHeuristic "" DeviceCPU LockstepWidth 1,
     SizeHeuristic "" DeviceCPU NumGroups max_compute_units,
     SizeHeuristic "" DeviceCPU GroupSize 32,
     SizeHeuristic "" DeviceCPU TileSize 4,
+    SizeHeuristic "" DeviceCPU RegTileSize 1,
     SizeHeuristic "" DeviceCPU Threshold max_compute_units
   ]
   where

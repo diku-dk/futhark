@@ -58,6 +58,7 @@ compileProg mode class_name prog = do
           Assign (Var "default_group_size") None,
           Assign (Var "default_num_groups") None,
           Assign (Var "default_tile_size") None,
+          Assign (Var "default_reg_tile_size") None,
           Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code
         ]
 
@@ -80,6 +81,7 @@ compileProg mode class_name prog = do
             "default_group_size=default_group_size",
             "default_num_groups=default_num_groups",
             "default_tile_size=default_tile_size",
+            "default_reg_tile_size=default_reg_tile_size",
             "default_threshold=default_threshold",
             "sizes=sizes"
           ]
@@ -126,6 +128,13 @@ compileProg mode class_name prog = do
               optionArgument = RequiredArgument "int",
               optionAction =
                 [Assign (Var "default_tile_size") $ Var "optarg"]
+            },
+          Option
+            { optionLongName = "default-reg-tile-size",
+              optionShortName = Nothing,
+              optionArgument = RequiredArgument "int",
+              optionAction =
+                [Assign (Var "default_reg_tile_size") $ Var "optarg"]
             },
           Option
             { optionLongName = "size",
