@@ -71,7 +71,11 @@ openclAtomics, cudaAtomics :: AtomicBinOp
         (Xor Int32, Imp.AtomicXor Int32)
       ]
     opencl = opencl32 ++ opencl64
-    cuda = opencl ++ [(FAdd Float32, Imp.AtomicFAdd Float32)]
+    cuda =
+      opencl
+        ++ [ (FAdd Float32, Imp.AtomicFAdd Float32),
+             (FAdd Float64, Imp.AtomicFAdd Float64)
+           ]
 
 compileProg ::
   MonadFreshNames m =>
