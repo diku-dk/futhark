@@ -55,6 +55,7 @@ program = initialise_opencl_object(self,
                                    default_group_size=default_group_size,
                                    default_num_groups=default_num_groups,
                                    default_tile_size=default_tile_size,
+                                   default_reg_tile_size=default_reg_tile_size,
                                    default_threshold=default_threshold,
                                    size_heuristics=size_heuristics,
                                    required_types=$types',
@@ -117,6 +118,7 @@ sizeHeuristicsToPython = List . map f
           NumGroups -> String "num_groups"
           GroupSize -> String "group_size"
           TileSize -> String "tile_size"
+          RegTileSize -> String "reg_tile_size"
           Threshold -> String "threshold"
 
         what' =

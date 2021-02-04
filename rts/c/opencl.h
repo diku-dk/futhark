@@ -38,6 +38,7 @@ struct opencl_config {
   size_t default_group_size;
   size_t default_num_groups;
   size_t default_tile_size;
+  size_t default_reg_tile_size;
   size_t default_threshold;
 
   int default_group_size_changed;
@@ -74,6 +75,7 @@ static void opencl_config_init(struct opencl_config *cfg,
   cfg->default_group_size = 0;
   cfg->default_num_groups = 0;
   cfg->default_tile_size = 0;
+  cfg->default_reg_tile_size = 0;
   cfg->default_threshold = 0;
 
   cfg->default_group_size_changed = 0;
@@ -617,6 +619,9 @@ static cl_program setup_opencl_with_command_queue(struct opencl_context *ctx,
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = sqrt(max_group_size);
       default_value = ctx->cfg.default_tile_size;
+    } else if (strstr(size_class, "reg_tile_size") == size_class) {
+      max_value = 0; // No limit.
+      default_value = ctx->cfg.default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;

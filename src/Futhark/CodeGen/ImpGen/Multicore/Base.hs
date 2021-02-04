@@ -118,6 +118,8 @@ compileThreadResult _ _ WriteReturns {} =
   compilerBugS "compileThreadResult: WriteReturns unhandled."
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
+compileThreadResult _ _ RegTileReturns {} =
+  compilerBugS "compileThreadResult: RegTileReturns unhandled."
 
 freeVariables :: Imp.Code -> [VName] -> [VName]
 freeVariables code names =

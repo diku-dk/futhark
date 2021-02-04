@@ -38,6 +38,7 @@ struct cuda_config {
   size_t default_block_size;
   size_t default_grid_size;
   size_t default_tile_size;
+  size_t default_reg_tile_size;
   size_t default_threshold;
 
   int default_block_size_changed;
@@ -70,6 +71,7 @@ static void cuda_config_init(struct cuda_config *cfg,
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
   cfg->default_tile_size = 32;
+  cfg->default_reg_tile_size = 2;
   cfg->default_threshold = 32*1024;
 
   cfg->default_block_size_changed = 0;
@@ -408,6 +410,9 @@ static void cuda_size_setup(struct cuda_context *ctx)
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
       default_value = ctx->cfg.default_tile_size;
+    } else if (strstr(size_class, "reg_tile_size") == size_class) {
+      max_value = 0; // No limit.
+      default_value = ctx->cfg.default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
       default_value = ctx->cfg.default_threshold;

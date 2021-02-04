@@ -267,6 +267,13 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
                        }|]
     )
 
+  GC.publicDef_ "context_config_set_default_reg_tile_size" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->opencl.default_reg_tile_size = size;
+                       }|]
+    )
+
   GC.publicDef_ "context_config_set_default_threshold" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
@@ -302,6 +309,11 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
 
                          if (strcmp(size_name, "default_tile_size") == 0) {
                            cfg->opencl.default_tile_size = size_value;
+                           return 0;
+                         }
+
+                         if (strcmp(size_name, "default_reg_tile_size") == 0) {
+                           cfg->opencl.default_reg_tile_size = size_value;
                            return 0;
                          }
 
@@ -648,6 +660,7 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
       NumGroups -> [C.cexp|ctx->cfg.default_num_groups|]
       GroupSize -> [C.cexp|ctx->cfg.default_group_size|]
       TileSize -> [C.cexp|ctx->cfg.default_tile_size|]
+      RegTileSize -> [C.cexp|ctx->cfg.default_reg_tile_size|]
       Threshold -> [C.cexp|ctx->cfg.default_threshold|]
 
     get_size =
@@ -705,6 +718,13 @@ commonOptions =
         optionArgument = RequiredArgument "INT",
         optionDescription = "The default tile size used when performing two-dimensional tiling.",
         optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-reg-tile-size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default register tile size used when performing two-dimensional tiling.",
+        optionAction = [C.cstm|futhark_context_config_set_default_reg_tile_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-threshold",

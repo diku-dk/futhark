@@ -259,6 +259,7 @@ callKernel (GetSizeMax v size_class) =
     cudaSizeClass SizeGroup = "block_size"
     cudaSizeClass SizeNumGroups = "grid_size"
     cudaSizeClass SizeTile = "tile_size"
+    cudaSizeClass SizeRegTile = "reg_tile_size"
     cudaSizeClass SizeLocalMemory = "shared_memory"
     cudaSizeClass (SizeBespoke x _) = pretty x
 callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
