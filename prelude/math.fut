@@ -124,6 +124,9 @@ module type integral = {
 module type real = {
   include numeric
 
+  -- | Multiplicative inverse.
+  val recip: t -> t
+
   val from_fraction: i64 -> i64 -> t
   val to_i64: t -> i64
   val to_f64: t -> f64
@@ -865,6 +868,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let (x: f64) != (y: f64) = intrinsics.! (x == y)
 
   let neg (x: t) = -x
+  let recip (x: t) = 1/x
   let max (x: t) (y: t) = intrinsics.fmax64 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin64 (x, y)
 
@@ -972,6 +976,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let (x: f32) != (y: f32) = intrinsics.! (x == y)
 
   let neg (x: t) = -x
+  let recip (x: t) = 1/x
   let max (x: t) (y: t) = intrinsics.fmax32 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin32 (x, y)
 
