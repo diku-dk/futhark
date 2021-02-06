@@ -154,13 +154,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
               kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
               a_loc <- forLoop ry [a_loc_init'] $ \i0 [a_loc_merge] -> do
                 loop_a_loc <- forLoop tk_div_tx [a_loc_merge] $ \k0 [a_loc_merge'] -> do
-                  scatter_a_loc <- segScatter2D
-                    "A_glb2loc"
-                    a_loc_sz
-                    a_loc_merge'
-                    segthd_lvl
-                    (ty, tx)
-                    $ \(thd_y, thd_x) -> do
+                  scatter_a_loc <- segScatter2D "A_glb2loc" a_loc_sz a_loc_merge' segthd_lvl (ty, tx) $
+                    \(thd_y, thd_x) -> do
                       k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 tx)
                       i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 ty)
 
@@ -252,12 +247,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                           else true -- if in prologue, always compute redomap.
                     )
                     ( do
-                        reg_mem <- segMap2D
-                          "reg_mem"
-                          segthd_lvl
-                          ResultPrivate
-                          (ty, tx)
-                          $ \(ltid_y, ltid_x) -> do
+                        reg_mem <- segMap2D "reg_mem" segthd_lvl ResultPrivate (ty, tx) $
+                          \(ltid_y, ltid_x) -> do
                             asss_init <- scratch "asss_init" map_t1 [ry]
                             bsss_init <- scratch "bsss_init" map_t2 [rx]
 
@@ -292,12 +283,8 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                         let [asss, bsss] = reg_mem
 
                         -- the actual redomap.
-                        redomap_res <- segMap2D
-                          "redomap_res"
-                          segthd_lvl
-                          ResultPrivate
-                          (ty, tx)
-                          $ \(ltid_y, ltid_x) -> do
+                        redomap_res <- segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
+                          \(ltid_y, ltid_x) -> do
                             as <- index "as" asss [ltid_y, ltid_x]
                             bs <- index "bs" bsss [ltid_y, ltid_x]
                             css_init <- index "css_init" acc_merge [ltid_y, ltid_x]
