@@ -492,6 +492,7 @@ commandLineOptions =
     soacsPassOption fuseSOACs "o",
     soacsPassOption inlineFunctions [],
     soacsPassOption revADEntryPoints [],
+    soacsPassOption fwdADEntryPoints [],
     kernelsPassOption babysitKernels [],
     kernelsPassOption tileLoops [],
     kernelsPassOption unstreamKernels [],
