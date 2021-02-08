@@ -176,7 +176,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                                 res <- index "A_elem" inp_A [a_col_idx]
                                 resultBodyM [Var res]
                             )
-                            (eBody [eBlank $ Prim map_t1])
+                            (eBody [eBlank $ elemToType map_t1])
                       a_loc_ind <-
                         letSubExp "a_loc_ind"
                           =<< eIf
@@ -220,7 +220,7 @@ mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                                 res <- index "B_elem" inp_B [b_row_idx]
                                 resultBodyM [Var res]
                             )
-                            (eBody [eBlank $ Prim map_t2])
+                            (eBody [eBlank $ elemToType map_t2])
 
                       b_loc_ind <-
                         letSubExp "b_loc_ind"
@@ -419,7 +419,7 @@ mmBlkRegTiling _ = return Nothing
 ceilDiv :: MonadBinder m => SubExp -> SubExp -> m (Exp (Lore m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
 
-scratch :: MonadBinder m => String -> PrimType -> [SubExp] -> m VName
+scratch :: MonadBinder m => String -> ElemType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
 -- index an array with indices given in outer_indices; any inner
@@ -808,7 +808,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         -- scratch the shared-memory arrays corresponding to the arrays that are
         --   input to the redomap and are invariant to the outermost parallel dimension.
         loc_arr_nms <- forM (M.toList tab_out) $ \(nm, (ptp, _)) ->
-          scratch (baseString nm ++ "_loc") ptp [rz]
+          scratch (baseString nm ++ "_loc") (ElemPrim ptp) [rz]
 
         prologue_res_list <-
           forLoop' common_dim (reg_arr_nms ++ loc_arr_nms) $
@@ -1002,7 +1002,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
       Binder Kernels (M.Map VName (Stm Kernels), M.Map VName (PrimType, Stm Kernels))
     insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
       | [p] <- patternValueElements patt,
-        ptp <- elemType $ patElemType p,
+        ElemPrim ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
         case L.findIndices (variantSliceDim variance gidz) slc of
           [] -> return (M.insert p_nm stm tab_inn, tab_out)
