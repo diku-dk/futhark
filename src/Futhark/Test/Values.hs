@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE Trustworthy #-}
@@ -30,6 +31,10 @@ module Futhark.Test.Values
     compareValues,
     compareValues1,
     Mismatch,
+
+    -- * Converting values
+    GetValue (..),
+    PutValue (..),
   )
 where
 
@@ -44,6 +49,7 @@ import Data.Char (chr, isSpace, ord)
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Data.Traversable
 import Data.Vector.Generic (freeze)
 import qualified Data.Vector.Storable as SVec
@@ -229,7 +235,7 @@ type CompoundValue = Compound Value
 
 -- | A representation of the simple values we represent in this module.
 data ValueType = ValueType [Int] F.PrimType
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 instance PP.Pretty ValueType where
   ppr (ValueType ds t) = mconcat (map pprDim ds) <> ppr t
@@ -715,3 +721,137 @@ tolerance = SVec.foldl tolerance' minTolerance . SVec.filter (not . nanOrInf)
   where
     tolerance' t v = max t $ minTolerance * v
     nanOrInf x = isInfinite x || isNaN x
+
+-- | A class for Haskell values that can be retrieved from 'Value'.
+-- This is a convenience facility - don't expect it to be fast.
+class GetValue t where
+  getValue :: Value -> Maybe t
+
+instance GetValue t => GetValue [t] where
+  getValue = mapM getValue . valueElems
+
+instance GetValue Bool where
+  getValue (BoolValue shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int8 where
+  getValue (Int8Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int16 where
+  getValue (Int16Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int32 where
+  getValue (Int32Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Int64 where
+  getValue (Int64Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word8 where
+  getValue (Word8Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word16 where
+  getValue (Word16Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word32 where
+  getValue (Word32Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+instance GetValue Word64 where
+  getValue (Word64Value shape vs)
+    | [] <- SVec.toList shape =
+      Just $ vs SVec.! 0
+  getValue _ = Nothing
+
+-- | A class for Haskell values that can be converted to 'Value'.
+-- This is a convenience facility - don't expect it to be fast.
+class PutValue t where
+  -- | This may fail for cases such as irregular arrays.
+  putValue :: t -> Maybe Value
+
+instance PutValue Word8 where
+  putValue = Just . Word8Value mempty . SVec.singleton
+
+instance PutValue F.PrimValue where
+  putValue (F.SignedValue (F.Int8Value x)) =
+    Just $ Int8Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int16Value x)) =
+    Just $ Int16Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int32Value x)) =
+    Just $ Int32Value mempty $ SVec.singleton x
+  putValue (F.SignedValue (F.Int64Value x)) =
+    Just $ Int64Value mempty $ SVec.singleton x
+  putValue (F.UnsignedValue (F.Int8Value x)) =
+    Just $ Word8Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int16Value x)) =
+    Just $ Word16Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int32Value x)) =
+    Just $ Word32Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.UnsignedValue (F.Int64Value x)) =
+    Just $ Word64Value mempty $ SVec.singleton $ fromIntegral x
+  putValue (F.FloatValue (F.Float32Value x)) =
+    Just $ Float32Value mempty $ SVec.singleton x
+  putValue (F.FloatValue (F.Float64Value x)) =
+    Just $ Float64Value mempty $ SVec.singleton x
+  putValue (F.BoolValue b) =
+    Just $ BoolValue mempty $ SVec.singleton b
+
+instance PutValue [Value] where
+  putValue [] = Nothing
+  putValue (x : xs) = do
+    let res_shape = SVec.fromList $ length (x : xs) : valueShape x
+    guard $ all ((== valueType x) . valueType) xs
+    Just $ case x of
+      Int8Value {} -> Int8Value res_shape $ foldMap getVec (x : xs)
+      Int16Value {} -> Int16Value res_shape $ foldMap getVec (x : xs)
+      Int32Value {} -> Int32Value res_shape $ foldMap getVec (x : xs)
+      Int64Value {} -> Int64Value res_shape $ foldMap getVec (x : xs)
+      Word8Value {} -> Word8Value res_shape $ foldMap getVec (x : xs)
+      Word16Value {} -> Word16Value res_shape $ foldMap getVec (x : xs)
+      Word32Value {} -> Word32Value res_shape $ foldMap getVec (x : xs)
+      Word64Value {} -> Word64Value res_shape $ foldMap getVec (x : xs)
+      Float32Value {} -> Float32Value res_shape $ foldMap getVec (x : xs)
+      Float64Value {} -> Float64Value res_shape $ foldMap getVec (x : xs)
+      BoolValue {} -> BoolValue res_shape $ foldMap getVec (x : xs)
+    where
+      getVec (Int8Value _ vec) = SVec.unsafeCast vec
+      getVec (Int16Value _ vec) = SVec.unsafeCast vec
+      getVec (Int32Value _ vec) = SVec.unsafeCast vec
+      getVec (Int64Value _ vec) = SVec.unsafeCast vec
+      getVec (Word8Value _ vec) = SVec.unsafeCast vec
+      getVec (Word16Value _ vec) = SVec.unsafeCast vec
+      getVec (Word32Value _ vec) = SVec.unsafeCast vec
+      getVec (Word64Value _ vec) = SVec.unsafeCast vec
+      getVec (Float32Value _ vec) = SVec.unsafeCast vec
+      getVec (Float64Value _ vec) = SVec.unsafeCast vec
+      getVec (BoolValue _ vec) = SVec.unsafeCast vec
+
+instance PutValue T.Text where
+  putValue = putValue . T.encodeUtf8
+
+instance PutValue BS.ByteString where
+  putValue bs =
+    Just $ Word8Value size $ byteStringToVector bs
+    where
+      size = SVec.fromList [fromIntegral (BS.length bs)]

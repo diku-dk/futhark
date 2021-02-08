@@ -118,9 +118,9 @@ transformStm (Let pat aux (DoLoop ctx val form body)) = do
 transformStm (Let pat aux (If cond tbranch fbranch ret)) =
   oneStm . Let pat aux
     <$> (If cond <$> transformBody tbranch <*> transformBody fbranch <*> pure ret)
-transformStm (Let pat aux (MkAcc shape arrs op)) =
+transformStm (Let pat aux (MkAcc shape arrs ishape op)) =
   oneStm . Let pat aux
-    <$> (MkAcc shape arrs <$> traverse (bitraverse transformLambda pure) op)
+    <$> (MkAcc shape arrs ishape <$> traverse (bitraverse transformLambda pure) op)
 transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 

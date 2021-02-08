@@ -212,8 +212,8 @@ instance CanBeAliased inner => CanBeAliased (MemOp inner) where
   removeOpAliases (Alloc se space) = Alloc se space
   removeOpAliases (Inner k) = Inner $ removeOpAliases k
 
-  addOpAliases (Alloc se space) = Alloc se space
-  addOpAliases (Inner k) = Inner $ addOpAliases k
+  addOpAliases _ (Alloc se space) = Alloc se space
+  addOpAliases aliases (Inner k) = Inner $ addOpAliases aliases k
 
 instance Rename inner => Rename (MemOp inner) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
@@ -1212,7 +1212,7 @@ expReturns (BasicOp (UnAcc acc _)) = do
     _ -> error $ "UnAcc accumulator has info: " ++ pretty acc_info
 expReturns (BasicOp (UpdateAcc acc _ _)) =
   pure <$> varReturns acc
-expReturns (MkAcc shape arrs _) =
+expReturns (MkAcc shape arrs _ _) =
   return [MemAcc arrs $ fmap Free shape]
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op

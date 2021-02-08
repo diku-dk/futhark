@@ -131,7 +131,7 @@ expExtType (If _ _ _ rt) = pure $ map extTypeOf $ ifReturns rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 expExtType (BasicOp op) = staticShapes <$> primOpType op
-expExtType (MkAcc shape arrs _) =
+expExtType (MkAcc shape arrs _ _) =
   pure $ staticShapes [Array (ElemAcc arrs) shape NoUniqueness]
 expExtType (Op op) = opType op
 

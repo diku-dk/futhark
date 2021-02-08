@@ -77,6 +77,7 @@ kernelImpCodeGenAction =
       actionProcedure = liftIO . putStrLn . pretty . snd <=< ImpGenKernels.compileProgOpenCL
     }
 
+-- | Convert the program to CPU multicore ImpCode and print it to stdout.
 multicoreImpCodeGenAction :: Action MCMem
 multicoreImpCodeGenAction =
   Action

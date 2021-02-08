@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE TupleSections #-}
 
 -- | Defunctionalization of typed, monomorphic Futhark programs without modules.
 module Futhark.Internalise.Defunctionalise (transformProg) where
@@ -408,10 +409,9 @@ defuncFun tparams pats e0 ret loc = do
           <> patternArraySizes pat
       notSize = not . (`S.member` sizes_of_arrays)
       (fields, env) =
-        second M.fromList $
-          unzip $
-            map closureFromDynamicFun $
-              filter (notSize . fst) $ M.toList used_env
+        second M.fromList . unzip . map closureFromDynamicFun
+          . filter (notSize . fst)
+          $ M.toList used_env
 
   return
     ( RecordLit fields loc,
@@ -1128,8 +1128,12 @@ matchPatternSV (Id vn (Info t) _) sv =
   -- the pattern wins out.  This is important when matching a
   -- nonunique pattern with a unique value.
   if orderZeroSV sv
-    then M.singleton vn $ Binding Nothing $ Dynamic t
-    else M.singleton vn $ Binding Nothing sv
+    then dim_env <> M.singleton vn (Binding Nothing $ Dynamic t)
+    else dim_env <> M.singleton vn (Binding Nothing sv)
+  where
+    dim_env =
+      M.fromList $ map (,i64) $ S.toList $ typeDimNames t
+    i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
 matchPatternSV (Wildcard _ _) _ = mempty
 matchPatternSV (PatternAscription pat _ _) sv = matchPatternSV pat sv
 matchPatternSV PatternLit {} _ = mempty

@@ -807,11 +807,11 @@ defCompileExp pat (DoLoop ctx val form body) = do
   where
     merge = ctx ++ val
     mergepat = map fst merge
-defCompileExp _ (MkAcc _ arrs Nothing) =
+defCompileExp _ (MkAcc _ arrs _ Nothing) =
   -- In case these arrays have been used for another accumulator on
   -- another code path, we have to forget about that.
   modify $ \s -> s {stateAccs = M.delete arrs $ stateAccs s}
-defCompileExp _ (MkAcc _ arrs (Just (lam, nes))) =
+defCompileExp _ (MkAcc _ arrs _ (Just (lam, nes))) =
   modify $ \s -> s {stateAccs = M.insert arrs (lam, nes) $ stateAccs s}
 defCompileExp pat (Op op) = do
   opc <- asks envOpCompiler
@@ -1664,7 +1664,7 @@ compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ pretty pat
 
 -- | The number of bytes needed to represent the array in a
--- straightforward contiguous format, as an 'Int64' expression.
+-- straightforward contiguous format, as an t'Int64' expression.
 typeSize :: Type -> Count Bytes (Imp.TExp Int64)
 typeSize t =
   Imp.bytes $

@@ -282,8 +282,8 @@ instance
           freeIn' (ctxinits ++ valinits) <> freeIn' form
             <> freeIn' (ctxparams ++ valparams)
             <> freeIn' loopbody
-  freeIn' (MkAcc shape arrs op) =
-    freeIn' shape <> freeIn' arrs <> foldMap freeIn' op
+  freeIn' (MkAcc shape arrs ishape op) =
+    freeIn' shape <> freeIn' arrs <> freeIn' ishape <> foldMap freeIn' op
   freeIn' e = execState (walkExpM freeWalker e) mempty
 
 instance

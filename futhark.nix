@@ -1,5 +1,5 @@
 { mkDerivation, aeson, alex, ansi-terminal, array, base, binary
-, blaze-html, bytestring, bytestring-to-vector, cmark-gfm
+, blaze-html, bmp, bytestring, bytestring-to-vector, cmark-gfm
 , containers, directory, directory-tree, dlist, file-embed
 , filepath, free, gitrev, happy, haskeline, language-c-quote
 , mainland-pretty, megaparsec, mtl, neat-interpolation, parallel
@@ -17,7 +17,7 @@ mkDerivation {
   isLibrary = true;
   isExecutable = true;
   libraryHaskellDepends = [
-    aeson ansi-terminal array base binary blaze-html bytestring
+    aeson ansi-terminal array base binary blaze-html bmp bytestring
     bytestring-to-vector cmark-gfm containers directory directory-tree
     dlist file-embed filepath free gitrev haskeline language-c-quote
     mainland-pretty megaparsec mtl neat-interpolation parallel

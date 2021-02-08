@@ -29,7 +29,10 @@ programming techniques.
 * Any *directives* will be executed and replaced with their output.
   See below.
 
-**Warning:** Do not run untrusted programs.  See SECURITY below.
+**Warning:** Do not run untrusted programs.  See SAFETY below.
+
+Image directives and builtin functions Shells out to ``convert`` (from
+ImageMagick).  Video generation uses ``fmpeg``.
 
 Directives
 ==========
@@ -60,16 +63,23 @@ The following directives are supported:
 
 * ``> :video e[; parameters...]``
 
-  Creates a video from ``e``, which must be a 3D array where the 2D
-  elements is of a type acceptable to ``:img``.  The outermost
-  dimension is the number of frames.  The optional parameters are
-  lines of the form *key: value*:
+  Creates a video from ``e``.  The optional parameters are lines of
+  the form *key: value*:
 
   * ``repeat: <true|false>``
 
   * ``fps: <int>``
 
-  Shells out to ``fmpeg`` to actually create the video file.
+  * ``format: <webm|gif>``
+
+  ``e`` must be one of the following:
+
+  * A 3D array where the 2D elements is of a type acceptable to
+    ``:img``, and the outermost dimension is the number of frames.
+
+  * A triple ``(s -> (img,s), s, i64)``, for some types ``s`` and
+    ``img``, where ``img`` is an array acceptable to ``:img``.  This
+    means not all frames have to be held in memory at once.
 
 * ``> :brief <directive>``
 
@@ -85,8 +95,7 @@ The following directives are supported:
 * ``> :img e``
 
   Visualises ``e``, which must be of type ``[][]i32`` or ``[][]u32``
-  (interpreted as rows of ARGB pixel values).  Shells out to
-  ``convert`` (from ImageMagick) to generate the image.
+  (interpreted as rows of ARGB pixel values).
 
 * ``> :plot2d e[; size=(height,width)]``
 
@@ -116,14 +125,21 @@ FutharkScript
 Only an extremely limited subset of Futhark is supported:
 
 .. productionlist::
-   scriptexp:   `id` `scriptexp`*
+   scriptexp:   `fun` `scriptexp`*
             : | "(" `scriptexp` ")"
             : | "(" `scriptexp` ( "," `scriptexp` )+ ")"
             : | "{" "}"
             : | "{" (`id` = `scriptexp`) ("," `id` = `scriptexp`)* "}"
             : | `literal`
+   fun:  `id` | "$" `id`
 
-Any numeric literals *must* have a type suffix.
+Function applications are either of Futhark funtions or *builtin
+functions*.  The latter are prefixed with ``$`` and are magical
+(usually impure) functions that could not possibly be implemented in
+Futhark.  The following builtins are supported:
+
+* ``$loadimg "file"`` reads an image from the given file and returns
+  it as a row-major ``[][]u32`` array with each pixel encoded as ARGB.
 
 OPTIONS
 =======
@@ -171,12 +187,13 @@ OPTIONS
   Print verbose information on stderr about directives as they are
   executing.
 
-SECURITY
-========
+SAFETY
+======
 
 Some directives (e.g. ``:gnuplot``) can run arbitrary shell commands.
-Running an untrusted literate Futhark program is as dangerous as
-running a shell script you downloaded off the Internet.  Before
+Other directives or builtin functions can read or write arbitrary
+files.  Running an untrusted literate Futhark program is as dangerous
+as running a shell script you downloaded off the Internet.  Before
 running a program from an unknown source, you should always give it a
 quick read to see if anything looks fishy.
 

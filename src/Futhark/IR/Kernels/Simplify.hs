@@ -94,10 +94,10 @@ kernelRules =
     <> ruleBook
       [ RuleOp redomapIotaToLoop,
         RuleOp SOAC.simplifyKnownIterationSOAC,
-        RuleOp SOAC.removeReplicateMapping
-      ]
-      [ RuleBasicOp removeUnnecessaryCopy,
+        RuleOp SOAC.removeReplicateMapping,
         RuleOp SOAC.liftIdentityMapping
+      ]
+      [ RuleBasicOp removeUnnecessaryCopy
       ]
 
 -- We turn reductions over (solely) iotas into do-loops, because there

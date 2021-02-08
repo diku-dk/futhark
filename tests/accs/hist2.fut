@@ -1,4 +1,4 @@
--- Writing an array.
+-- Writing an array with a vector operator.
 -- ==
 -- input { [[2],[3],[4]] }
 -- output { [[3i32], [3i32], [5i32]] }

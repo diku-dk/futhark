@@ -528,9 +528,10 @@ data ExpT lore
     DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
   | -- | Create an array of accumulators of the given shape and
     -- combination function, which is ultimately backed by the given
-    -- arrays.  This is not part of 'BasicOp' because we need the @lore@
-    -- parameter.
-    MkAcc Shape [VName] (Maybe (Lambda lore, [SubExp]))
+    -- arrays.  The second 'Shape' is the write index space.  The
+    -- arrays must all have this shape outermost.  This is not part of
+    -- 'BasicOp' because we need the @lore@ parameter.
+    MkAcc Shape [VName] Shape (Maybe (Lambda lore, [SubExp]))
   | Op (Op lore)
   deriving (Generic)
 
@@ -541,7 +542,7 @@ instance Decorations lore => SexpIso (ExpT lore) where
         With (. Sexp.list (Sexp.el (Sexp.sym "apply") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el applyHelper)) $
           With (. Sexp.list (Sexp.el (Sexp.sym "if") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
             With (. Sexp.list (Sexp.el (Sexp.sym "loop") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-              With (. Sexp.list (Sexp.el (Sexp.sym "mkacc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+              With (. Sexp.list (Sexp.el (Sexp.sym "mkacc") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
                 With
                   (. sexpIso)
                   End

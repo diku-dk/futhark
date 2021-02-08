@@ -56,7 +56,7 @@ where
 
 import Control.Monad.RWS.Strict
 import Control.Parallel.Strategies
-import Data.List (find, intercalate, sort)
+import Data.List (find, intercalate, isPrefixOf, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -1088,15 +1088,17 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
                       scopeOf $ bodyStms loopbody
             map (`namesSubtract` bound_here)
               <$> mapM subExpAliasesM (bodyResult loopbody)
-checkExp (MkAcc shape arrs op) = do
+checkExp (MkAcc shape arrs ishape op) = do
   mapM_ (require [Prim int64]) (shapeDims shape)
-  arrs_ts <- mapM checkArrIdent arrs
+  arrs_ts <- forM arrs $ \arr -> do
+    arr_t <- lookupType arr
+    unless (shapeDims ishape `isPrefixOf` arrayDims arr_t) $
+      bad . TypeError $ pretty arr <> " is not an array of outer shape " <> pretty ishape
+    pure arr_t
 
   case op of
     Just (lam, nes) -> do
-      let num_is =
-            length (lambdaParams lam)
-              - 2 * length (lambdaReturnType lam)
+      let num_is = shapeRank ishape
           mkArrArg t = (stripArray num_is t, mempty)
       nes_ts <- mapM checkSubExp nes
       unless (nes_ts == lambdaReturnType lam) $

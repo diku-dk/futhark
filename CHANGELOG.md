@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+  * `futhark literate` now supports a `$loadimg` builtin function for
+    passing images to Futhark programs.
+
+  * The `futhark literate` directive for generating videos is now
+    `:video`.
+
+  * Support for 64-bit atomics on CUDA and OpenCL for higher
+    performance with `reduce_by_index` in particular.
+    Double-precision float atomics are still not used.
+
+  * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
+
+### Removed
+
+### Changed
+
+  * The math modules no longer define the name `negate` (use `neg`
+    instead).
+
+### Fixed
+
+  * Exotic core language alias tracking bug (#1239).
+
+  * Issue with entry points returning constant arrays (#1240).
+
+  * Overzealous CSE collided with uniqueness types (#1241).
+
+  * Defunctionalisation issue (#1242).
+
+  * Tiling inside multiply nested loops (#1243).
+
+## [0.18.6]
+
+### Added
+
   * The C API now exposes serialisation functions for opaque values.
 
   * The C API now lets you pick which stream (if any) is used for
@@ -34,9 +69,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * Generated header-files are now declared `extern "C"` when
     processed with a C++ compiler.
 
-### Removed
-
-### Changed
+  * Parser errors in test blocks used by `futhark bench` and `futhark
+    test` are now reported with much better error messages.
 
 ### Fixed
 
@@ -44,6 +78,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     (#1222).
 
   * Problem with user-defined functions with the same name as intrinsics.
+
+  * Names from transitive imports no longer leak into scope (#1231).
+
+  * Pattern-matching unit values now works (#1232).
 
 ## [0.18.5]
 

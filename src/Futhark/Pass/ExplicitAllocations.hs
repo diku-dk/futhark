@@ -587,6 +587,9 @@ existentializeArray ::
   Space ->
   VName ->
   AllocM fromlore tolore (SubExp, ExtIxFun, [TPrimExp Int64 VName], VName)
+existentializeArray ScalarSpace {} v = do
+  (mem', ixfun) <- lookupArraySummary v
+  return (Var v, fmap (fmap Free) ixfun, mempty, mem')
 existentializeArray space v = do
   (mem', ixfun) <- lookupArraySummary v
   sp <- lookupMemSpace mem'
@@ -941,12 +944,12 @@ allocInExp (If cond tbranch0 fbranch0 (IfDec rets ifsort)) = do
         let (_, val_res) = splitFromEnd num_vals res
         mem_ixfs <- mapM subExpIxFun val_res
         return (Body () bnds' res, mem_ixfs)
-allocInExp (MkAcc accshape arrs op) =
-  MkAcc accshape arrs <$> traverse onOp op
+allocInExp (MkAcc accshape arrs ishape op) =
+  MkAcc accshape arrs ishape <$> traverse onOp op
   where
     onOp (lam, nes) = do
       let num_vs = length (lambdaReturnType lam)
-          num_is = length (lambdaParams lam) - 2 * num_vs
+          num_is = shapeRank ishape
           (i_params, x_params, y_params) =
             splitAt3 num_is num_vs $ lambdaParams lam
           i_params' = map ((`Param` MemPrim int64) . paramName) i_params

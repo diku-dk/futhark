@@ -6,6 +6,7 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Code generation for server executables.
 module Futhark.CodeGen.Backends.GenericC.Server
   ( serverDefs,
   )
@@ -122,7 +123,7 @@ valueDescBoilerplate ev@(OpaqueValue name vds) =
                 .name = $string:name,
                 .restore = (typename restore_fn)$id:opaque_store,
                 .store = (typename store_fn)$id:opaque_restore,
-                .free = (typename free_fn)$id:opaque_free,
+                .free = (typename free_fn)free_opaque,
                 .aux = &$id:aux_name
               };|]
         )
@@ -205,6 +206,8 @@ mkBoilerplate funs =
    in (type_defs ++ entry_defs, type_inits, entry_inits)
 
 {-# NOINLINE serverDefs #-}
+
+-- | Generate Futhark server executable code.
 serverDefs :: [Option] -> Functions a -> [C.Definition]
 serverDefs options funs =
   let server_h = $(embedStringFile "rts/c/server.h")

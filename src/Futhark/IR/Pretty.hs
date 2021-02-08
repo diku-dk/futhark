@@ -307,13 +307,14 @@ instance PrettyLore lore => Pretty (Exp lore) where
       (ctxparams, ctxinit) = unzip ctx
       (valparams, valinit) = unzip val
       pprLoopVar (p, a) = ppr p <+> text "in" <+> ppr a
-  ppr (MkAcc shape arrs Nothing) =
-    text "mk_acc" <> apply [ppr shape, ppTuple' arrs]
-  ppr (MkAcc shape arrs (Just op)) =
+  ppr (MkAcc shape arrs ishape Nothing) =
+    text "mk_acc" <> apply [ppr shape, ppTuple' arrs, ppr ishape]
+  ppr (MkAcc shape arrs ishape (Just op)) =
     text "mk_acc"
       <> parens
         ( ppr shape <> comma
             <+> ppTuple' arrs <> comma
+            <+> ppr ishape <> comma
             </> ppr op
         )
 

@@ -439,8 +439,13 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w form arrs)))
             =<< (mkBody <$> paralleliseOuter <*> pure (map Var (patternNames pat)))
 
         paralleliseInner path' = do
-          (mapbnd, redbnd) <- redomapToMapAndReduce pat (w, comm', red_lam, map_lam, nes, arrs)
-          transformStms path' [certify cs mapbnd, certify cs redbnd]
+          (mapstm, redstm) <-
+            redomapToMapAndReduce pat (w, comm', red_lam, map_lam, nes, arrs)
+          types <- asksScope scopeForSOACs
+          transformStms path' . stmsToList <=< (`runBinderT_` types) $ do
+            (_, stms) <-
+              simplifyStms (stmsFromList [certify cs mapstm, certify cs redstm])
+            addStms stms
           where
             comm'
               | commutativeLambda red_lam = Commutative
