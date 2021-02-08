@@ -147,19 +147,19 @@ instance Traversable (TPrimExp t) where
 instance FreeIn v => FreeIn (TPrimExp t v) where
   freeIn' = freeIn' . untyped
 
--- | This expression is of type 'Int8'.
+-- | This expression is of type t'Int8'.
 isInt8 :: PrimExp v -> TPrimExp Int8 v
 isInt8 = TPrimExp
 
--- | This expression is of type 'Int16'.
+-- | This expression is of type t'Int16'.
 isInt16 :: PrimExp v -> TPrimExp Int16 v
 isInt16 = TPrimExp
 
--- | This expression is of type 'Int32'.
+-- | This expression is of type t'Int32'.
 isInt32 :: PrimExp v -> TPrimExp Int32 v
 isInt32 = TPrimExp
 
--- | This expression is of type 'Int64'.
+-- | This expression is of type t'Int64'.
 isInt64 :: PrimExp v -> TPrimExp Int64 v
 isInt64 = TPrimExp
 
@@ -167,11 +167,11 @@ isInt64 = TPrimExp
 isBool :: PrimExp v -> TPrimExp Bool v
 isBool = TPrimExp
 
--- | This expression is of type 'Float'.
+-- | This expression is of type t'Float'.
 isF32 :: PrimExp v -> TPrimExp Float v
 isF32 = TPrimExp
 
--- | This expression is of type 'Double'.
+-- | This expression is of type t'Double'.
 isF64 :: PrimExp v -> TPrimExp Double v
 isF64 = TPrimExp
 

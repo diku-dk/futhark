@@ -255,6 +255,13 @@ generateConfigFuns sizes = do
                        }|]
     )
 
+  GC.publicDef_ "context_config_set_default_reg_tile_size" GC.InitDecl $ \s ->
+    ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
+      [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
+                         cfg->cu_cfg.default_reg_tile_size = size;
+                       }|]
+    )
+
   GC.publicDef_ "context_config_set_default_threshold" GC.InitDecl $ \s ->
     ( [C.cedecl|void $id:s(struct $id:cfg* cfg, int num);|],
       [C.cedecl|void $id:s(struct $id:cfg* cfg, int size) {
@@ -292,6 +299,12 @@ generateConfigFuns sizes = do
                            cfg->cu_cfg.default_tile_size = size_value;
                            return 0;
                          }
+
+                         if (strcmp(size_name, "default_reg_tile_size") == 0) {
+                           cfg->cu_cfg.default_reg_tile_size = size_value;
+                           return 0;
+                         }
+
                          return 1;
                        }|]
     )

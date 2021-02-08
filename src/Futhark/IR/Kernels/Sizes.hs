@@ -41,6 +41,7 @@ data SizeClass
   | SizeGroup
   | SizeNumGroups
   | SizeTile
+  | SizeRegTile
   | -- | Likely not useful on its own, but querying the
     -- maximum can be handy.
     SizeLocalMemory
@@ -55,10 +56,11 @@ instance SexpIso SizeClass where
         With (. Sexp.sym "group") $
           With (. Sexp.sym "num-groups") $
             With (. Sexp.sym "tile") $
-              With (. Sexp.sym "local-memory") $
-                With
-                  (. Sexp.list (Sexp.el (Sexp.sym "bespoke") >>> Sexp.el sexpIso >>> Sexp.el (iso fromIntegral fromIntegral . Sexp.int)))
-                  End
+              With (. Sexp.sym "reg-tile") $
+                With (. Sexp.sym "local-memory") $
+                  With
+                    (. Sexp.list (Sexp.el (Sexp.sym "bespoke") >>> Sexp.el sexpIso >>> Sexp.el (iso fromIntegral fromIntegral . Sexp.int)))
+                    End
 
 instance Pretty SizeClass where
   ppr (SizeThreshold path _) = text $ "threshold (" ++ unwords (map pStep path) ++ ")"
@@ -68,6 +70,7 @@ instance Pretty SizeClass where
   ppr SizeGroup = text "group_size"
   ppr SizeNumGroups = text "num_groups"
   ppr SizeTile = text "tile_size"
+  ppr SizeRegTile = text "reg_tile_size"
   ppr SizeLocalMemory = text "local_memory"
   ppr (SizeBespoke k _) = ppr k
 
