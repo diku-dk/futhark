@@ -162,6 +162,8 @@ findUnmatched [] _ = [[]]
 findUnmatched _ _ = []
 
 {-# NOINLINE unmatched #-}
+
+-- | Find the unmatched cases.
 unmatched :: [Pattern] -> [Match]
 unmatched orig_ps =
   -- The algorithm may find duplicate example, which we filter away

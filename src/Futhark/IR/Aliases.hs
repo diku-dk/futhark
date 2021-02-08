@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -41,7 +42,7 @@ module Futhark.IR.Aliases
     -- * Tracking aliases
     AliasesAndConsumed,
     trackAliases,
-    consumedInStms,
+    mkStmsAliases,
   )
 where
 
@@ -353,6 +354,8 @@ mkBodyAliases bnds res =
       consumed' = consumed `namesSubtract` boundNames
    in (map AliasDec aliases', AliasDec consumed')
 
+-- | The aliases of the result and everything consumed in the given
+-- statements.
 mkStmsAliases ::
   Aliased lore =>
   Stms lore ->
@@ -371,11 +374,6 @@ mkStmsAliases bnds res = delve mempty $ stmsToList bnds
       where
         look k = M.findWithDefault mempty k aliasmap
 
--- | Everything consumed in the given statements and result (even
--- transitively).
-consumedInStms :: Aliased lore => Stms lore -> Names
-consumedInStms = snd . flip mkStmsAliases []
-
 type AliasesAndConsumed =
   ( M.Map VName Names,
     Names
@@ -386,13 +384,17 @@ trackAliases ::
   AliasesAndConsumed ->
   Stm lore ->
   AliasesAndConsumed
-trackAliases (aliasmap, consumed) bnd =
-  let pat = stmPattern bnd
-      als =
-        M.fromList $
-          zip (patternNames pat) (map addAliasesOfAliases $ patternAliases pat)
-      aliasmap' = als <> aliasmap
-      consumed' = consumed <> addAliasesOfAliases (consumedInStm bnd)
+trackAliases (aliasmap, consumed) stm =
+  let pat = stmPattern stm
+      pe_als =
+        zip (patternNames pat) $ map addAliasesOfAliases $ patternAliases pat
+      als = M.fromList pe_als
+      rev_als = foldMap revAls pe_als
+      revAls (v, v_als) =
+        M.fromList $ map (,oneName v) $ namesToList v_als
+      comb = M.unionWith (<>)
+      aliasmap' = rev_als `comb` als `comb` aliasmap
+      consumed' = consumed <> addAliasesOfAliases (consumedInStm stm)
    in (aliasmap', consumed')
   where
     addAliasesOfAliases names = names <> aliasesOfAliases names

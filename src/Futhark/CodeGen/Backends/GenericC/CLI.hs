@@ -6,6 +6,7 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TupleSections #-}
 
+-- | Code generation for standalone executables.
 module Futhark.CodeGen.Backends.GenericC.CLI
   ( cliDefs,
   )
@@ -362,6 +363,8 @@ cliEntryPoint fname (Function _ _ _ _ results args) =
       )
 
 {-# NOINLINE cliDefs #-}
+
+-- | Generate Futhark standalone executable code.
 cliDefs :: [Option] -> Functions a -> [C.Definition]
 cliDefs options (Functions funs) =
   let values_h = $(embedStringFile "rts/c/values.h")

@@ -97,7 +97,7 @@ import Futhark.Util.Pretty
   )
 import qualified Futhark.Util.Pretty as PP
 import GHC.Generics (Generic)
-import Language.SexpGrammar as Sexp
+import Language.SexpGrammar as Sexp hiding (expected)
 import Language.SexpGrammar.Generic
 import Prelude hiding (id, (.))
 
@@ -273,6 +273,14 @@ data KernelResult
       VName -- Tile written by this worker.
       -- The TileReturns must not expect more than one
       -- result to be written per physical thread.
+  | RegTileReturns
+      -- For each dim of result:
+      [ ( SubExp, -- size of this dim.
+          SubExp, -- block tile size for this dim.
+          SubExp -- reg tile size for this dim.
+        )
+      ]
+      VName -- Tile returned by this worker/group.
   deriving (Eq, Show, Ord, Generic)
 
 instance SexpIso KernelResult where
@@ -281,9 +289,10 @@ instance SexpIso KernelResult where
       With (. Sexp.list (Sexp.el (Sexp.sym "returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
         With (. Sexp.list (Sexp.el (Sexp.sym "write-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
           With (. Sexp.list (Sexp.el (Sexp.sym "concat-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With
-              (. Sexp.list (Sexp.el (Sexp.sym "tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+            With (. Sexp.list (Sexp.el (Sexp.sym "tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+              With
+                (. Sexp.list (Sexp.el (Sexp.sym "reg-tile-returns") >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+                End
 
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
@@ -291,6 +300,7 @@ kernelResultSubExp (Returns _ se) = se
 kernelResultSubExp (WriteReturns _ arr _) = Var arr
 kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
 kernelResultSubExp (TileReturns _ v) = Var v
+kernelResultSubExp (RegTileReturns _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ what) = freeIn' what
@@ -299,6 +309,8 @@ instance FreeIn KernelResult where
     freeIn' o <> freeIn' w <> freeIn' per_thread_elems <> freeIn' v
   freeIn' (TileReturns dims v) =
     freeIn' dims <> freeIn' v
+  freeIn' (RegTileReturns dims_n_tiles v) =
+    freeIn' dims_n_tiles <> freeIn' v
 
 instance ASTLore lore => FreeIn (KernelBody lore) where
   freeIn' (KernelBody dec stms res) =
@@ -329,6 +341,10 @@ instance Substitute KernelResult where
       (substituteNames subst v)
   substituteNames subst (TileReturns dims v) =
     TileReturns (substituteNames subst dims) (substituteNames subst v)
+  substituteNames subst (RegTileReturns dims_n_tiles v) =
+    RegTileReturns
+      (substituteNames subst dims_n_tiles)
+      (substituteNames subst v)
 
 instance ASTLore lore => Rename (KernelBody lore) where
   rename (KernelBody dec stms res) = do
@@ -344,10 +360,11 @@ aliasAnalyseKernelBody ::
   ( ASTLore lore,
     CanBeAliased (Op lore)
   ) =>
+  AliasTable ->
   KernelBody lore ->
   KernelBody (Aliases lore)
-aliasAnalyseKernelBody (KernelBody dec stms res) =
-  let Body dec' stms' _ = Alias.analyseBody mempty $ Body dec stms []
+aliasAnalyseKernelBody aliases (KernelBody dec stms res) =
+  let Body dec' stms' _ = Alias.analyseBody aliases $ Body dec stms []
    in KernelBody dec' stms' res
 
 removeKernelBodyAliases ::
@@ -429,6 +446,22 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
       vt <- lookupType v
       unless (vt == t `arrayOfShape` Shape (map snd dims)) $
         TC.bad $ TC.TypeError $ "Invalid type for TileReturns " ++ pretty v
+    checkKernelResult (RegTileReturns dims_n_tiles arr) t = do
+      mapM_ (TC.require [Prim int64]) dims
+      mapM_ (TC.require [Prim int64]) blk_tiles
+      mapM_ (TC.require [Prim int64]) reg_tiles
+
+      -- assert that arr is of element type t and shape (rev outer_tiles ++ reg_tiles)
+      arr_t <- lookupType arr
+      unless (arr_t == expected) $
+        TC.bad . TC.TypeError $
+          "Invalid type for TileReturns. Expected:\n  "
+            ++ pretty expected
+            ++ ",\ngot:\n  "
+            ++ pretty arr_t
+      where
+        (dims, blk_tiles, reg_tiles) = unzip3 dims_n_tiles
+        expected = t `arrayOfShape` Shape (blk_tiles ++ reg_tiles)
 
 kernelBodyMetrics :: OpMetrics (Op lore) => KernelBody lore -> MetricsM ()
 kernelBodyMetrics = mapM_ stmMetrics . kernelBodyStms
@@ -459,10 +492,14 @@ instance Pretty KernelResult where
         SplitContiguous -> mempty
         SplitStrided stride -> text "Strided" <> parens (ppr stride)
   ppr (TileReturns dims v) =
-    text "tile"
-      <> parens (commasep $ map onDim dims) <+> ppr v
+    "tile" <> parens (commasep $ map onDim dims) <+> ppr v
     where
-      onDim (dim, tile) = ppr dim <+> text "/" <+> ppr tile
+      onDim (dim, tile) = ppr dim <+> "/" <+> ppr tile
+  ppr (RegTileReturns dims_n_tiles v) =
+    "blkreg_tile" <> parens (commasep $ map onDim dims_n_tiles) <+> ppr v
+    where
+      onDim (dim, blk_tile, reg_tile) =
+        ppr dim <+> "/" <+> parens (ppr blk_tile <+> "*" <+> ppr reg_tile)
 
 -- | Do we need group-virtualisation when generating code for the
 -- segmented operation?  In most cases, we do, but for some simple
@@ -573,6 +610,8 @@ segResultShape _ t (ConcatReturns _ w _ _) =
   t `arrayOfRow` w
 segResultShape _ t (TileReturns dims _) =
   t `arrayOfShape` Shape (map fst dims)
+segResultShape _ t (RegTileReturns dims_n_tiles _) =
+  t `arrayOfShape` Shape (map (\(dim, _, _) -> dim) dims_n_tiles)
 
 -- | The return type of a 'SegOp'.
 segOpType :: SegOp lvl lore -> [Type]
@@ -955,13 +994,13 @@ instance
   where
   type OpWithAliases (SegOp lvl lore) = SegOp lvl (Aliases lore)
 
-  addOpAliases = runIdentity . mapSegOpM alias
+  addOpAliases aliases = runIdentity . mapSegOpM alias
     where
       alias =
         SegOpMapper
           return
-          (return . Alias.analyseLambda)
-          (return . aliasAnalyseKernelBody)
+          (return . Alias.analyseLambda aliases)
+          (return . aliasAnalyseKernelBody aliases)
           return
           return
 
@@ -1067,6 +1106,10 @@ instance Engine.Simplifiable KernelResult where
       <*> Engine.simplify what
   simplify (TileReturns dims what) =
     TileReturns <$> Engine.simplify dims <*> Engine.simplify what
+  simplify (RegTileReturns dims_n_tiles what) =
+    RegTileReturns
+      <$> Engine.simplify dims_n_tiles
+      <*> Engine.simplify what
 
 mkWiseKernelBody ::
   (ASTLore lore, CanBeWise (Op lore)) =>
