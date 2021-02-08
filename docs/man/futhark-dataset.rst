@@ -68,7 +68,7 @@ Generate a 4 by 2 integer matrix::
 
 Generate an array of floating-point numbers and an array of indices into that array::
 
-  futhark dataset -g [10]f32 --i32-bounds=0:9 -g [100]i32
+  futhark dataset -g [10]f32 --i64-bounds=0:9 -g [100]i64
 
 To generate binary data, the ``--binary`` must come before the ``--generate``::
 
