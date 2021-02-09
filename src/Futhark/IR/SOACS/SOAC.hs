@@ -53,7 +53,7 @@ import Control.Category
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
-import Data.List (intersperse)
+import Data.List (intersperse, sort)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Futhark.Analysis.Alias as Alias
@@ -68,7 +68,7 @@ import Futhark.Optimise.Simplify.Lore
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TC
-import Futhark.Util (chunks, maybeNth)
+import Futhark.Util (chunks, maybeNth, nubOrd)
 import Futhark.Util.Pretty (Doc, Pretty, comma, commasep, parens, ppr, text, (<+>), (</>))
 import qualified Futhark.Util.Pretty as PP
 import GHC.Generics (Generic)
@@ -108,6 +108,8 @@ data SOAC lore
       -- Dimensions of input arrays in each dimension; length of list
       -- is dimensionality of stencil ('r').
       [SubExp]
+      -- Size of stencil neighbourhood ('p').
+      SubExp
       -- Neighbourhood indexes.  Conceptually a 'p'-size array of
       -- 'r'-tuples, but we encode it as 'r' arrs each of size [p]i64.
       [VName]
@@ -130,7 +132,7 @@ instance Decorations lore => SexpIso (SOAC lore) where
       scremasexp =
         (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
       stencilsexp =
-        (. Sexp.list (Sexp.el (Sexp.sym "stencil") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+        (. Sexp.list (Sexp.el (Sexp.sym "stencil") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
 
 -- | Information about computing a single histogram.
 data HistOp lore = HistOp
@@ -473,8 +475,9 @@ mapSOACM tv (Screma w (ScremaForm scans reds map_lam) arrs) =
             <*> mapOnSOACLambda tv map_lam
         )
     <*> mapM (mapOnSOACVName tv) arrs
-mapSOACM tv (Stencil ws is lam inv arrs) =
+mapSOACM tv (Stencil ws p is lam inv arrs) =
   Stencil <$> mapM (mapOnSOACSubExp tv) ws
+    <*> mapOnSOACSubExp tv p
     <*> mapM (mapOnSOACVName tv) is
     <*> mapOnSOACLambda tv lam
     <*> mapM (traverse (mapOnSOACVName tv)) inv
@@ -531,7 +534,7 @@ soacType (Hist _len ops _bucket_fun _imgs) = do
   map (`arrayOfRow` histWidth op) (lambdaReturnType $ histOp op)
 soacType (Screma w form _arrs) =
   scremaType w form
-soacType (Stencil ws _ lam _ _) =
+soacType (Stencil ws _ _ lam _ _) =
   map (`arrayOfShape` Shape ws) $ lambdaReturnType lam
 
 instance TypedOp (SOAC lore) where
@@ -569,7 +572,7 @@ instance (ASTLore lore, Aliased lore) => AliasedOp (SOAC lore) where
   -- Only the invariant arrays can be consumed (and only those that
   -- are not *actually* invariant to any dimensions, but that's part
   -- of type checking).
-  consumedInOp (Stencil _ _ lam inv _) =
+  consumedInOp (Stencil _ _ _ lam inv _) =
     mapNames consumedArray $ consumedByLambda lam
     where
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
@@ -621,8 +624,8 @@ instance
     where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
-  addOpAliases aliases (Stencil ws is lam inv arrs) =
-    Stencil ws is (Alias.analyseLambda aliases lam) inv arrs
+  addOpAliases aliases (Stencil ws p is lam inv arrs) =
+    Stencil ws p is (Alias.analyseLambda aliases lam) inv arrs
 
   removeOpAliases = runIdentity . mapSOACM remove
     where
@@ -861,8 +864,44 @@ typeCheckSOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
         "Map function return type " ++ prettyTuple map_lam_ts
           ++ " wrong for given scan and reduction functions."
 --
-typeCheckSOAC (Stencil ws is lam inv arrs) = do
-  pure ()
+typeCheckSOAC (Stencil ws p is lam inv arrs) = do
+  let r = length ws
+  mapM_ (TC.require [Prim int64]) ws
+  TC.require [Prim int64] p
+
+  unless (length ws == length is) $
+    TC.bad $ TC.TypeError "Mismatch in number of input and neighbourhood index arrays."
+
+  void $ TC.checkSOACArrayArgs p is
+
+  let checkInput shape arr = do
+        (t, als) <- TC.checkArg $ Var arr
+        let bad =
+              arrayRank t < shapeRank shape
+                || Shape (take r (arrayDims t)) /= shape
+        when bad . TC.bad . TC.TypeError $
+          "Stencil input must have outer shape " <> pretty shape
+            <> " but array "
+            <> pretty arr
+            <> " is of type "
+            <> pretty t
+        pure (stripArray (shapeRank shape) t, als)
+
+      checkInvariant (inv_is, arr) = do
+        unless (nubOrd (sort inv_is) == inv_is) $
+          TC.bad . TC.TypeError $ "Invalid permutation: " <> pretty inv_is
+        let shape =
+              Shape $ map snd $ filter ((`notElem` inv_is) . fst) (zip [0 ..] ws)
+        checkInput shape arr
+
+      checkVariant arr = do
+        (t, als) <- checkInput (Shape ws) arr
+        pure (t `arrayOfShape` Shape ws, als)
+
+  inv' <- mapM checkInvariant inv
+  arrs' <- mapM checkVariant arrs
+
+  TC.checkLambda lam $ map TC.noArgAliases $ inv' ++ arrs'
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
@@ -881,7 +920,7 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
       lambdaMetrics map_lam
-  opMetrics (Stencil _ _ lam _ _) =
+  opMetrics (Stencil _ _ _ lam _ _) =
     inside "Stencil" $ lambdaMetrics lam
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
@@ -933,10 +972,11 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
               </> commasep (map ppr arrs)
           )
   ppr (Screma w form arrs) = ppScrema w form arrs
-  ppr (Stencil ws is lam inv arrs) =
+  ppr (Stencil ws p is lam inv arrs) =
     "stencil"
       <> parens
         ( PP.braces (commasep $ map ppr ws) <> comma
+            </> ppr p <> comma
             </> PP.braces (commasep $ map ppr is) <> comma
             </> ppr lam <> comma
             </> PP.braces (commasep $ map ppr inv) <> comma

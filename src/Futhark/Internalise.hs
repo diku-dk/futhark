@@ -1638,9 +1638,10 @@ isOverloadedFunction qname args loc = do
       arr' <- internaliseExpToVars "stencil_arr" arr
       lam' <- internaliseStencilLambda internaliseLambda is' lam inv' arr'
       w <- arraysSize 0 <$> mapM lookupType arr'
+      p <- arraysSize 0 <$> mapM lookupType is'
       letTupExp' desc $
         I.Op $
-          I.Stencil [w] is' lam' (map ([],) inv') arr'
+          I.Stencil [w] p is' lam' (map ([],) inv') arr'
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream" = Just $ \desc ->
       internaliseStreamRed desc InOrder Noncommutative op f arr
     handleSOACs [TupLit [op, f, arr] _] "reduce_stream_per" = Just $ \desc ->

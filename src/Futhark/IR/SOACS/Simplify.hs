@@ -151,10 +151,13 @@ simplifySOAC (Screma w (ScremaForm scans reds map_lam) arrs) = do
         )
     <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 --
-simplifySOAC (Stencil ws is lam inv arrs) = do
+simplifySOAC (Stencil ws p is lam inv arrs) = do
   (lam', hoisted) <- Engine.simplifyLambda lam
   (,hoisted)
-    <$> ( Stencil <$> Engine.simplify ws <*> Engine.simplify is <*> pure lam'
+    <$> ( Stencil <$> Engine.simplify ws
+            <*> Engine.simplify p
+            <*> Engine.simplify is
+            <*> pure lam'
             <*> Engine.simplify inv
             <*> Engine.simplify arrs
         )
