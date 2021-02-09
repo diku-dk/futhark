@@ -53,6 +53,8 @@ source-repository head
 library
   exposed-modules:
       Futhark.Actions
+      Futhark.AD.Fwd
+      Futhark.AD.Rev
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
       Futhark.Analysis.DataDependencies
@@ -212,7 +214,6 @@ library
       Futhark.Optimise.TileLoops.Shared
       Futhark.Optimise.Unstream
       Futhark.Pass
-      Futhark.Pass.AD
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.Kernels

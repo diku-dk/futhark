@@ -12,6 +12,8 @@ import qualified Data.ByteString.Lazy as ByteString
 import Data.List (intersperse)
 import Data.Maybe
 import qualified Data.Text.IO as T
+import Futhark.AD.Fwd
+import Futhark.AD.Rev
 import Futhark.Actions
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI
@@ -37,7 +39,6 @@ import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
-import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.Seq as Seq
