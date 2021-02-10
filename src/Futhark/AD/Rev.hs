@@ -307,10 +307,10 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
       -- adjoints of the saved loop variables of the i+1th iteration.
       -- Important: this must be done *before* computing the
       -- reverse of the body.
-      _original_res <- forM (subExpVars res) $ \v -> do
-        v' <- adjVName v
-        insAdj v v'
-        return v'
+      _original_res <- forM (subExpVars res) $ \res_v -> do
+        res_v' <- adjVName res_v
+        insAdj res_v res_v'
+        return res_v'
 
       -- return (Param _b (toDecl t Unique), Var _v)
       -- Compute the reverse of the body.
@@ -328,7 +328,7 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
       let _res' = map Var $ _iter_reset ++ _iter_vars' ++ M.elems body_update_map_free
 
       -- Remove any free paramters that weren't actually updated in the loop body
-      let _free_params' = map fst $ filter (\(p, v) -> v `M.member` body_update_map_free) $ zip _free_params fv
+      let _free_params' = map fst $ filter ((`M.member` body_update_map_free) . snd) $ zip _free_params fv
 
       -- Construct the new return patterns.
       _pats_iter <- inScopeOf (mconcat iter_stms) $ mkPats _iter_vars
@@ -375,8 +375,8 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
           v' <- letSubExp "idx" $ BasicOp (BinOp (Sub it OverflowWrap) bound' (Var v))
 
           -- Bind the accumulators
-          forM_ (zip saved_iter_vars valpats) $ \(v, (param, _)) ->
-            letBindNames [paramName param] =<< eIndex v v'
+          forM_ (zip saved_iter_vars valpats) $ \(iter_var, (param, _)) ->
+            letBindNames [paramName param] =<< eIndex iter_var v'
 
           return v'
 
@@ -395,7 +395,16 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
 
         (_, _, final_contrib_stms) <-
           inScopeOf _stm $
-            unzip3 <$> mapM (uncurry updateAdjoint) (mapMaybe (\(se, p) -> case se of Var v -> Just (v, p); _ -> Nothing) $ zip (map snd valpats) (map patElemName _pats_body_res))
+            unzip3
+              <$> mapM
+                (uncurry updateAdjoint)
+                ( mapMaybe
+                    ( \(se, p) -> case se of
+                        Var se_v -> Just (se_v, p)
+                        _ -> Nothing
+                    )
+                    $ zip (map snd valpats) (map patElemName _pats_body_res)
+                )
 
         adj_map <- gets adjs
 
@@ -412,9 +421,9 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
       _p <- newVName $ baseString _v <> "_res"
       return $ PatElem _p t
 
-    mkPats' = zipWithM $ \v _v -> do
-      t <- lookupType v
-      _p <- newVName $ baseString _v <> "_res"
+    mkPats' = zipWithM $ \resv _resv -> do
+      t <- lookupType resv
+      _p <- newVName $ baseString _resv <> "_res"
       return $ PatElem _p t
 revStm stm@(Let _ _ (BasicOp CmpOp {})) =
   return (mempty, oneStm stm)
