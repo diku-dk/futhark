@@ -46,7 +46,9 @@ data FutharkConfig = FutharkConfig
     -- | If True, ignore @unsafe@.
     futharkSafe :: Bool,
     -- | Additional functions that should be exposed as entry points.
-    futharkEntryPoints :: [Name]
+    futharkEntryPoints :: [Name],
+    -- | If false, disable type-checking
+    futharkTypeCheck :: Bool
   }
 
 -- | The default compiler configuration.
@@ -57,7 +59,8 @@ newFutharkConfig =
       futharkWarn = True,
       futharkWerror = False,
       futharkSafe = False,
-      futharkEntryPoints = []
+      futharkEntryPoints = [],
+      futharkTypeCheck = True
     }
 
 -- | Print a compiler error to stdout.  The 'FutharkConfig' controls
@@ -140,7 +143,7 @@ runPipelineOnProgram config pipeline file = do
     pipeline_config =
       PipelineConfig
         { pipelineVerbose = fst (futharkVerbose config) > NotVerbose,
-          pipelineValidate = True
+          pipelineValidate = futharkTypeCheck config
         }
 
 typeCheckInternalProgram :: I.Prog I.SOACS -> FutharkM ()

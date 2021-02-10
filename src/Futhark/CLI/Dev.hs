@@ -383,6 +383,13 @@ commandLineOptions =
       "Print on standard output the type-checked program.",
     Option
       []
+      ["no-check"]
+      ( NoArg $
+          Right $ changeFutharkConfig $ \opts -> opts {futharkTypeCheck = False}
+      )
+      "Disable type-checking.",
+    Option
+      []
       ["pretty-print"]
       ( NoArg $
           Right $ \opts ->
@@ -692,7 +699,7 @@ runPolyPasses config base initial_prog = do
     pipeline_config =
       PipelineConfig
         { pipelineVerbose = fst (futharkVerbose $ futharkConfig config) > NotVerbose,
-          pipelineValidate = True
+          pipelineValidate = futharkTypeCheck $ futharkConfig config
         }
 
 runPolyPass ::
