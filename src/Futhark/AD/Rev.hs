@@ -36,12 +36,6 @@ data REnv = REnv
     envScope :: Scope SOACS
   }
 
-data BindEnv
-  = IntEnv IntType Overflow
-  | FloatEnv FloatType
-
-type ADBind = ReaderT BindEnv (Binder SOACS)
-
 newtype ADM a = ADM (ReaderT REnv (State Env) a)
   deriving
     ( Functor,
@@ -61,9 +55,6 @@ instance HasScope SOACS ADM where
 
 instance LocalScope SOACS ADM where
   localScope scope = local $ \env -> env {envScope = scope <> envScope env}
-
-runADBind :: BindEnv -> ADBind a -> ADM (a, Stms SOACS)
-runADBind env m = runBinder $ runReaderT m env
 
 runADM :: MonadFreshNames m => ADM a -> REnv -> m a
 runADM (ADM m) renv =
@@ -109,12 +100,17 @@ instance Adjoint VName where
       Just _v -> return (_v, mempty, mempty)
 
   updateAdjoint v d = do
-    benv <- mkBEnv v
     maybeAdj <- gets $ M.lookup v . adjs
     case maybeAdj of
       Nothing -> setAdjoint v (BasicOp . SubExp . Var $ d)
       Just _v -> do
-        (_v', stms) <- runADBind benv $ getVar <$> (Var _v +^ Var d)
+        t <- lookupType v
+        (_v', stms) <- runBinder . letExp "adj" $
+          case t of
+            Prim (IntType it) ->
+              BasicOp $ BinOp (Add it OverflowWrap) (Var _v) (Var d)
+            Prim (FloatType ft) ->
+              BasicOp $ BinOp (FAdd ft) (Var _v) (Var d)
         let update = M.singleton v _v'
         insAdjMap update
         return (_v', update, stms)
@@ -206,14 +202,6 @@ setAdjoint v e = do
   insAdjMap update
   return (_v, update, stms)
 
-mkBEnv :: (Monad m, HasScope lore m) => VName -> m BindEnv
-mkBEnv v = do
-  t <- lookupType v
-  let numEnv = case t of
-        (Prim (IntType it)) -> IntEnv it OverflowWrap
-        (Prim (FloatType ft)) -> FloatEnv ft
-  return numEnv
-
 revFwdStm :: Stm -> ADM (Stms SOACS)
 revFwdStm (Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound []) (Body () stms res))) = do
   accs <- mapM (accVName . patElemName) pats
@@ -251,9 +239,6 @@ revFwdStm (Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound []) 
     accType _ _ Acc {} = error "Accumulator encountered."
     accType _ _ Mem {} = error "Mem type encountered."
 revFwdStm stm = return $ oneStm stm
-
-getVar :: SubExp -> VName
-getVar (Var v) = v
 
 revStm :: Stm -> ADM (M.Map VName VName, Stms SOACS)
 revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound []) (Body () stms_ res_))) =
@@ -773,14 +758,6 @@ revBody' b@(Body desc stms _) = do
       us' = M.filterWithKey (\k _ -> k `elem` fv) us
   let body' = Body desc _stms $ map Var $ M.elems us'
   return (us, body')
-
-(+^) :: SubExp -> SubExp -> ADBind SubExp
-(+^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it ovf -> Add it ovf
-        FloatEnv ft -> FAdd ft
-  lift $ letSubExp "+^" $ BasicOp (BinOp op x y)
 
 revFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 revFun consts fundef@(FunDef entry _attrs _ _ params body@(Body () stms res)) = do
