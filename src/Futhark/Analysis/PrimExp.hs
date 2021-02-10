@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
@@ -54,6 +55,12 @@ module Futhark.Analysis.PrimExp
     zExt64,
     fMin64,
     fMax64,
+
+    -- * Untyped construction
+    (~*~),
+    (~/~),
+    (~+~),
+    (~-~),
   )
 where
 
@@ -328,6 +335,42 @@ instance (FloatExp t, Pretty v) => Fractional (TPrimExp t v) where
 
   fromRational = fromRational'
 
+instance Pretty v => Floating (TPrimExp Float v) where
+  x ** y = isF32 $ BinOpExp (FPow Float32) (untyped x) (untyped y)
+  pi = isF32 $ ValueExp $ FloatValue $ Float32Value pi
+  exp x = isF32 $ FunExp "exp32" [untyped x] $ FloatType Float32
+  log x = isF32 $ FunExp "log32" [untyped x] $ FloatType Float32
+  sin x = isF32 $ FunExp "sin32" [untyped x] $ FloatType Float32
+  cos x = isF32 $ FunExp "cos32" [untyped x] $ FloatType Float32
+  tan x = isF32 $ FunExp "tan32" [untyped x] $ FloatType Float32
+  asin x = isF32 $ FunExp "asin32" [untyped x] $ FloatType Float32
+  acos x = isF32 $ FunExp "acos32" [untyped x] $ FloatType Float32
+  atan x = isF32 $ FunExp "atan32" [untyped x] $ FloatType Float32
+  sinh x = isF32 $ FunExp "sinh32" [untyped x] $ FloatType Float32
+  cosh x = isF32 $ FunExp "cosh32" [untyped x] $ FloatType Float32
+  tanh x = isF32 $ FunExp "tanh32" [untyped x] $ FloatType Float32
+  asinh x = isF32 $ FunExp "asinh32" [untyped x] $ FloatType Float32
+  acosh x = isF32 $ FunExp "acosh32" [untyped x] $ FloatType Float32
+  atanh x = isF32 $ FunExp "atanh32" [untyped x] $ FloatType Float32
+
+instance Pretty v => Floating (TPrimExp Double v) where
+  x ** y = isF64 $ BinOpExp (FPow Float64) (untyped x) (untyped y)
+  pi = isF64 $ ValueExp $ FloatValue $ Float64Value pi
+  exp x = isF64 $ FunExp "exp64" [untyped x] $ FloatType Float64
+  log x = isF64 $ FunExp "log64" [untyped x] $ FloatType Float64
+  sin x = isF64 $ FunExp "sin64" [untyped x] $ FloatType Float64
+  cos x = isF64 $ FunExp "cos64" [untyped x] $ FloatType Float64
+  tan x = isF64 $ FunExp "tan64" [untyped x] $ FloatType Float64
+  asin x = isF64 $ FunExp "asin64" [untyped x] $ FloatType Float64
+  acos x = isF64 $ FunExp "acos64" [untyped x] $ FloatType Float64
+  atan x = isF64 $ FunExp "atan64" [untyped x] $ FloatType Float64
+  sinh x = isF64 $ FunExp "sinh64" [untyped x] $ FloatType Float64
+  cosh x = isF64 $ FunExp "cosh64" [untyped x] $ FloatType Float64
+  tanh x = isF64 $ FunExp "tanh64" [untyped x] $ FloatType Float64
+  asinh x = isF64 $ FunExp "asinh64" [untyped x] $ FloatType Float64
+  acosh x = isF64 $ FunExp "acosh64" [untyped x] $ FloatType Float64
+  atanh x = isF64 $ FunExp "atanh64" [untyped x] $ FloatType Float64
+
 instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
   TPrimExp x `div` TPrimExp y
     | Just z <-
@@ -589,3 +632,53 @@ leafExpTypes (CmpOpExp _ e1 e2) =
   S.union (leafExpTypes e1) (leafExpTypes e2)
 leafExpTypes (FunExp _ pes _) =
   S.unions $ map leafExpTypes pes
+
+-- | Multiplication of untyped 'PrimExps', which must have the same
+-- type.
+(~*~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~*~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> Mul it OverflowUndef
+      FloatType ft -> FMul ft
+      Bool -> LogAnd
+      Cert -> LogAnd
+
+-- | Division of untyped 'PrimExps', which must have the same
+-- type.  For integers, this is unsafe signed division.
+(~/~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~/~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> SDiv it Unsafe
+      FloatType ft -> FDiv ft
+      Bool -> LogAnd
+      Cert -> LogAnd
+
+-- | Addition of untyped 'PrimExps', which must have the same type.
+(~+~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~+~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> Add it OverflowUndef
+      FloatType ft -> FAdd ft
+      Bool -> LogOr
+      Cert -> LogOr
+
+-- | Subtraction of untyped 'PrimExps', which must have the same type.
+(~-~) :: PrimExp v -> PrimExp v -> PrimExp v
+x ~-~ y = BinOpExp op x y
+  where
+    t = primExpType x
+    op = case t of
+      IntType it -> Sub it OverflowUndef
+      FloatType ft -> FSub ft
+      Bool -> LogOr
+      Cert -> LogOr
+
+infix 7 ~*~, ~/~
+
+infix 6 ~+~, ~-~

@@ -16,9 +16,10 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import qualified Data.Set as S
+import Futhark.AD.Derivatives
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
-import Futhark.IR.Primitive
 import Futhark.IR.SOACS
 import Futhark.Pass
 import Futhark.Transform.Rename
@@ -82,13 +83,6 @@ newAdj v = do
 
 accVName :: VName -> ADM VName
 accVName v = newVName (baseString v <> "_acc")
-
-mkConst :: (Integral i) => BindEnv -> i -> SubExp
-mkConst (IntEnv it _) = Constant . IntValue . intValue it
-mkConst (FloatEnv ft) = Constant . FloatValue . floatValue ft
-
-mkConstM :: Integer -> ADBind SubExp
-mkConstM i = asks (`mkConst` i)
 
 insTape :: VName -> VName -> ADM ()
 insTape v acc = modify $ \env -> env {tape = M.insert v acc (tape env)}
@@ -424,57 +418,26 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
       return $ PatElem _p t
 revStm stm@(Let _ _ (BasicOp CmpOp {})) =
   return (mempty, oneStm stm)
-revStm stm@(Let (Pattern [] [PatElem p _]) _aux (BasicOp (BinOp op x y))) =
-  case op of
-    LogAnd -> return (mempty, mempty)
-    LogOr -> return (mempty, mempty)
-    _ -> do
-      (_p, us1, s1) <- inScopeOf stm $ lookupAdj p
-      (_x, us2, s2) <- lookupAdj x
-      (_y, us3, s3) <- lookupAdj y
-      let us = us3 <> us2 <> us1
-          ss = s1 <> s2 <> s3
+revStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) = do
+  let t = binOpType op
+  (_p, us1, s1) <- inScopeOf stm $ lookupAdj $ patElemName pe
+  (_x, us2, s2) <- lookupAdj x
+  (_y, us3, s3) <- lookupAdj y
 
-          addOp = do
-            (_, us4, s4) <- updateAdjoint x _p
-            (_, us5, s5) <- updateAdjoint y _p
-            return (us5 <> us4 <> us, ss <> s4 <> s5)
+  let (wrt_x, wrt_y) =
+        pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
 
-          subOp = do
-            (_p', s4) <- runADBind (bindEnv op) $ getVar <$> (do zero <- mkConstM 0; zero -^ Var _p)
-            (_, us4, s5) <- updateAdjoint x _p'
-            (_, us5, s6) <- updateAdjoint y _p'
-            return (us5 <> us4 <> us, ss <> s4 <> s5 <> s6)
+      _p' = primExpFromSubExp t $ Var _p
 
-          mulOp = do
-            (_x', s4) <- runADBind (bindEnv op) $ getVar <$> Var _p *^ y
-            (_y', s5) <- runADBind (bindEnv op) $ getVar <$> Var _p *^ x
-            (_, us4, s6) <- updateAdjoint x _x'
-            (_, us5, s7) <- updateAdjoint y _y'
-            return (us5 <> us4 <> us, ss <> s4 <> s5 <> s6 <> s7)
+  (adj_x, adj_x_s) <- runBinder $ letExp "adj" <=< toExp $ _p' ~*~ wrt_x
+  (adj_y, adj_y_s) <- runBinder $ letExp "adj" <=< toExp $ _p' ~*~ wrt_y
+  (_, x_us, x_s) <- updateAdjoint x adj_x
+  (_, y_us, y_s) <- updateAdjoint y adj_y
 
-          divOp = do
-            (_x', s4) <- runADBind (bindEnv op) $ getVar <$> Var _p //^ y
-            (_y', s5) <- runADBind (bindEnv op) $ do
-              y_sq <- y *^ y
-              quotient <- x //^ y_sq
-              zero <- mkConstM 0
-              neg_quotient <- zero -^ quotient
-              getVar <$> Var _p *^ neg_quotient
-            (_, us4, s6) <- updateAdjoint x _x'
-            (_, us5, s7) <- updateAdjoint y _y'
-            return (us5 <> us4 <> us, ss <> s4 <> s5 <> s6 <> s7)
-
-      case op of
-        Add {} -> addOp
-        FAdd {} -> addOp
-        Sub {} -> subOp
-        FSub {} -> subOp
-        Mul {} -> mulOp
-        FMul {} -> mulOp
-        SDiv {} -> divOp
-        UDiv {} -> divOp
-        FDiv {} -> divOp
+  pure
+    ( y_us <> x_us <> us3 <> us2 <> us1,
+      s1 <> s2 <> s3 <> adj_x_s <> adj_y_s <> x_s <> y_s
+    )
 revStm stm@(Let (Pattern [] pats) aux (If cond t@(Body _ t_stms t_res) f@(Body _ f_stms f_res) attr)) = do
   (_pats, uspats, stm_pats) <- unzip3 <$> mapM (lookupAdj . patElemName) pats
   fwdStms <- revFwdStm stm
@@ -634,19 +597,29 @@ revStm (Let (Pattern [] [pe]) _ (Op (Screma n (ScremaForm [] [red] f) [xs]))) = 
   return (us2 <> us1, s1 <> d_stms <> s3)
 revStm (Let Pattern {} _ (BasicOp Assert {})) =
   return (mempty, mempty)
-revStm stm@(Let (Pattern [] [pe]) _ (Apply "tan64" [(Var x, _)] ret info)) = do
-  (pe_adj, us1, s1) <- inScopeOf stm $ lookupAdj $ patElemName pe
-  (x_contrib, x_contrib_stms) <- runBinderT' $ do
-    cos_x <-
-      letSubExp ("cos_" <> baseString x) $
-        Apply "cos64" [(Var x, Observe)] ret info
-    cos_x_squared <-
-      letSubExp ("cos_" <> baseString x <> "_squared") $
-        BasicOp $ BinOp (FMul Float64) cos_x cos_x
-    letExp (baseString x <> "_contrib") $
-      BasicOp $ BinOp (FDiv Float64) (Var pe_adj) cos_x_squared
-  (_, us2, s2) <- inScopeOf x_contrib_stms $ updateAdjoint x x_contrib
-  pure (us2 <> us1, s1 <> x_contrib_stms <> s2)
+revStm stm@(Let (Pattern [] [pe]) _ (Apply f args _ _))
+  | Just (ret, argts) <- M.lookup f builtInFunctions = do
+    (pe_adj, us1, s1) <- inScopeOf stm $ lookupAdj $ patElemName pe
+    (contribs, contribs_stms) <- runBinder $ do
+      let arg_pes = zipWith primExpFromSubExp argts (map fst args)
+          pe_adj' = primExpFromSubExp ret (Var pe_adj)
+
+      case pdBuiltin f arg_pes of
+        Nothing ->
+          error $ "No partial derivative defined for builtin function: " ++ pretty f
+        Just derivs ->
+          mapM (letExp "contrib" <=< toExp . (pe_adj' ~*~)) derivs
+
+    let updateArgAdj (Var x, _) x_contrib = Just <$> updateAdjoint x x_contrib
+        updateArgAdj _ _ = pure Nothing
+
+    (_, us2, s2) <-
+      inScopeOf contribs_stms $ unzip3 . catMaybes <$> zipWithM updateArgAdj args contribs
+
+    pure
+      ( mconcat us2 <> us1,
+        s1 <> contribs_stms <> mconcat s2
+      )
 revStm stm = error $ "unsupported stm: " ++ pretty stm ++ "\n\n\n" ++ show stm
 
 revLambda :: Lambda -> ADM (Lambda, [VName], [VName])
@@ -799,43 +772,6 @@ revBody' b@(Body desc stms _) = do
         IntEnv it ovf -> Add it ovf
         FloatEnv ft -> FAdd ft
   lift $ letSubExp "+^" $ BasicOp (BinOp op x y)
-
-(-^) :: SubExp -> SubExp -> ADBind SubExp
-(-^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it ovf -> Sub it ovf
-        FloatEnv ft -> FSub ft
-  lift $ letSubExp "-^" $ BasicOp (BinOp op x y)
-
-(*^) :: SubExp -> SubExp -> ADBind SubExp
-(*^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it ovf -> Mul it ovf
-        FloatEnv ft -> FMul ft
-  lift $ letSubExp "*^" $ BasicOp (BinOp op x y)
-
-(//^) :: SubExp -> SubExp -> ADBind SubExp
-(//^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it _ -> SDiv it Unsafe
-        FloatEnv ft -> FDiv ft
-  lift $ letSubExp "//^" $ BasicOp (BinOp op x y)
-
-bindEnv :: BinOp -> BindEnv
-bindEnv (Add it ovf) = IntEnv it ovf
-bindEnv (FAdd ft) = FloatEnv ft
-bindEnv (Sub it ovf) = IntEnv it ovf
-bindEnv (FSub ft) = FloatEnv ft
-bindEnv (Mul it ovf) = IntEnv it ovf
-bindEnv (FMul ft) = FloatEnv ft
-bindEnv (UDiv it _) = IntEnv it OverflowWrap
-bindEnv (SDiv it _) = IntEnv it OverflowWrap
-bindEnv (FDiv ft) = FloatEnv ft
-bindEnv (Pow it) = IntEnv it OverflowWrap
-bindEnv (FPow ft) = FloatEnv ft
 
 revFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
 revFun consts fundef@(FunDef entry _attrs _ _ params body@(Body () stms res)) = do

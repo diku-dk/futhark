@@ -53,6 +53,7 @@ source-repository head
 library
   exposed-modules:
       Futhark.Actions
+      Futhark.AD.Derivatives
       Futhark.AD.Fwd
       Futhark.AD.Rev
       Futhark.Analysis.Alias

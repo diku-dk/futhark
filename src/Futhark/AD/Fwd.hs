@@ -12,9 +12,10 @@ import Control.Monad.Reader
 import Control.Monad.State.Strict
 import qualified Data.Map as M
 import Data.Sequence (Seq (..))
+import Futhark.AD.Derivatives
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
-import Futhark.IR.Primitive
 import Futhark.IR.SOACS
 import Futhark.Pass
 
@@ -22,12 +23,6 @@ data REnv = REnv
   { tans :: M.Map VName VName,
     envScope :: Scope SOACS
   }
-
-data BindEnv
-  = IntEnv IntType Overflow
-  | FloatEnv FloatType
-
-type ADBind = ReaderT BindEnv (Binder SOACS)
 
 newtype ADM a = ADM (ReaderT REnv (State VNameSource) a)
   deriving
@@ -44,12 +39,6 @@ instance HasScope SOACS ADM where
 instance LocalScope SOACS ADM where
   localScope scope = local $ \env -> env {envScope = scope <> envScope env}
 
-runADBind :: BindEnv -> ADBind a -> ADM (a, Stms SOACS)
-runADBind env m = runBinder $ runReaderT m env
-
-runADBind_ :: BindEnv -> ADBind a -> ADM (Stms SOACS)
-runADBind_ env m = snd <$> runADBind env m
-
 runADM :: MonadFreshNames m => ADM a -> REnv -> m a
 runADM (ADM m) renv =
   modifyNameSource $ runState $ runReaderT m renv
@@ -59,13 +48,6 @@ tanVName v = newVName (baseString v <> "_tan")
 
 zeroTan :: Type -> ADM SubExp
 zeroTan (Prim t) = return $ constant $ blankPrimValue t
-
-mkConst :: (Integral i) => BindEnv -> i -> SubExp
-mkConst (IntEnv it _) = Constant . IntValue . intValue it
-mkConst (FloatEnv ft) = Constant . FloatValue . floatValue ft
-
-mkConstM :: Integer -> ADBind SubExp
-mkConstM i = asks (`mkConst` i)
 
 class TanBinder a where
   mkTan :: a -> ADM a
@@ -129,69 +111,6 @@ instance Tangent Stm where
   type TangentType Stm = TanStm
   tangent = flip fwdStm return
 
-($^) :: String -> SubExp -> ADBind SubExp
-($^) f x = lift $ letSubExp "f x" $ Apply (nameFromString f) [(x, Observe)] [primRetType rt] (Safe, mempty, mempty)
-  where
-    Just (_, rt, _) = M.lookup f primFuns
-
-(+^) :: SubExp -> SubExp -> ADBind SubExp
-(+^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it ovf -> Add it ovf
-        FloatEnv ft -> FAdd ft
-  lift $ letSubExp "+^" $ BasicOp (BinOp op x y)
-
-(-^) :: SubExp -> SubExp -> ADBind SubExp
-(-^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it ovf -> Sub it ovf
-        FloatEnv ft -> FSub ft
-  lift $ letSubExp "-^" $ BasicOp (BinOp op x y)
-
-(*^) :: SubExp -> SubExp -> ADBind SubExp
-(*^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it ovf -> Mul it ovf
-        FloatEnv ft -> FMul ft
-  lift $ letSubExp "*^" $ BasicOp (BinOp op x y)
-
-(//^) :: SubExp -> SubExp -> ADBind SubExp
-(//^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it _ -> SDiv it Unsafe
-        FloatEnv ft -> FDiv ft
-  lift $ letSubExp "//^" $ BasicOp (BinOp op x y)
-
-(**^) :: SubExp -> SubExp -> ADBind SubExp
-(**^) x y = do
-  numEnv <- ask
-  let op = case numEnv of
-        IntEnv it _ -> Pow it
-        FloatEnv ft -> FPow ft
-  lift $ letSubExp "**^" $ BasicOp (BinOp op x y)
-
-bindTans :: [PatElem] -> SubExp -> ADBind ()
-bindTans pes' se = do
-  e <- lift $ eSubExp se
-  lift $ letBindNames (map patElemName pes') e
-
-bindEnv :: BinOp -> BindEnv
-bindEnv (Add it ovf) = IntEnv it ovf
-bindEnv (FAdd ft) = FloatEnv ft
-bindEnv (Sub it ovf) = IntEnv it ovf
-bindEnv (FSub ft) = FloatEnv ft
-bindEnv (Mul it ovf) = IntEnv it ovf
-bindEnv (FMul ft) = FloatEnv ft
-bindEnv (UDiv it _) = IntEnv it OverflowWrap
-bindEnv (SDiv it _) = IntEnv it OverflowWrap
-bindEnv (FDiv ft) = FloatEnv ft
-bindEnv (Pow it) = IntEnv it OverflowWrap
-bindEnv (FPow ft) = FloatEnv ft
-
 --
 fwdStm :: Stm -> (TanStm -> ADM a) -> ADM a
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (SubExp se))) m = do
@@ -214,54 +133,16 @@ fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (UnOp op x))) m = do
   withTans pes $ \pes' ->
     m $
       TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux (BasicOp (UnOp op x'))))
-fwdStm stm@(Let (Pattern [] pes) _aux (BasicOp (BinOp op x y))) m = do
-  x' <- tangent x
-  y' <- tangent y
-
-  withTans pes $ \pes' -> do
-    let addOp = runADBind_ (bindEnv op) $ do
-          x1 <- x' +^ y'
-          bindTans pes' x1
-        subOp = runADBind_ (bindEnv op) $ do
-          x1 <- x' -^ y'
-          bindTans pes' x1
-        mulOp = runADBind_ (bindEnv op) $ do
-          x1 <- x' *^ y
-          x2 <- x *^ y'
-          x3 <- x1 +^ x2
-          bindTans pes' x3
-        divOp = runADBind_ (bindEnv op) $ do
-          x1 <- x' *^ y
-          x2 <- x *^ y'
-          x3 <- x1 -^ x2
-          x4 <- y *^ y
-          x5 <- x3 //^ x4
-          bindTans pes' x5
-        powOp = runADBind_ (bindEnv op) $ do
-          x0 <- mkConstM 1
-          x1 <- y -^ x0 -- x1 = y - 1
-          x2 <- x **^ x1 -- x2 = x^x1 = x^{y - 1}
-          x3 <- y *^ x2 -- x3 = y x^{y-1} = y x2
-          x4 <- x3 *^ x' -- x4 = y f^{y-1} x' = x3 x'
-          x5 <- "log32" $^ x -- x5 = log (x)  Probably should intelligently select log32 or log64
-          x6 <- x **^ y -- x6 = x^y
-          x7 <- x6 *^ x5 -- x7 = x^y ln (x) = x6 x5
-          x8 <- x7 *^ y' -- x8 = x^y ln(x) y' = x7 y'
-          x9 <- x4 +^ x8 -- x9 = x x^{y - 1} x' + x^y ln(x) y'
-          bindTans pes' x9
-
-    stms <- case op of
-      Add {} -> addOp
-      FAdd {} -> addOp
-      Sub {} -> subOp
-      FSub {} -> subOp
-      Mul {} -> mulOp
-      FMul {} -> mulOp
-      UDiv {} -> divOp
-      SDiv {} -> divOp
-      FDiv {} -> divOp
-      Pow {} -> powOp
-      FPow {} -> powOp
+fwdStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) m = do
+  let t = binOpType op
+  x_tan <- primExpFromSubExp t <$> tangent x
+  y_tan <- primExpFromSubExp t <$> tangent y
+  withTan pe $ \pe' -> do
+    stms <- runBinder_ $ do
+      let (wrt_x, wrt_y) =
+            pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
+      letBindNames [patElemName pe'] <=< toExp $
+        x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     m $ TanStm (oneStm stm) stms
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (ConvOp op x))) m = do
   x' <- tangent x
@@ -276,6 +157,22 @@ fwdStm stm@(Let (Pattern [] pes) aux cOp@(BasicOp CmpOp {})) m =
   withTan pes $ \pes' ->
     m $
       TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux cOp))
+fwdStm stm@(Let (Pattern [] pes) _ (Apply f args _ _)) m
+  | Just (_, argts) <- M.lookup f builtInFunctions = do
+    arg_tans <-
+      zipWith primExpFromSubExp argts <$> mapM (tangent . fst) args
+    withTans pes $ \pes' -> do
+      let arg_pes = zipWith primExpFromSubExp argts (map fst args)
+
+      stms <- runBinder_ $
+        case pdBuiltin f arg_pes of
+          Nothing ->
+            error $ "No partial derivative defined for builtin function: " ++ pretty f
+          Just derivs ->
+            zipWithM_ (letBindNames . pure . patElemName) pes'
+              =<< mapM toExp (zipWith (~*~) arg_tans derivs)
+
+      m $ TanStm (oneStm stm) stms
 fwdStm stm@(Let (Pattern [] pes) aux (If cond t f attr)) m = do
   t' <- fwdBodyInterleave' t
   f' <- fwdBodyInterleave' f
