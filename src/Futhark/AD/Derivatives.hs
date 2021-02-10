@@ -76,7 +76,92 @@ pdBinOp (FPow ft) a b =
 -- applied to @args@ with respect to each of its arguments.  Returns
 -- 'Nothing' if no such derivative is known.
 pdBuiltin :: Name -> [PrimExp VName] -> Maybe [PrimExp VName]
+pdBuiltin "sqrt32" [x] =
+  Just [untyped $ 1 / (2 * sqrt (isF64 x))]
+pdBuiltin "sqrt64" [x] =
+  Just [untyped $ 1 / (2 * sqrt (isF64 x))]
+pdBuiltin "log32" [x] =
+  Just [untyped $ 1 / isF32 x]
+pdBuiltin "log64" [x] =
+  Just [untyped $ 1 / isF64 x]
+pdBuiltin "log10_32" [x] =
+  Just [untyped $ 1 / (isF32 x * log 10)]
+pdBuiltin "log10_64" [x] =
+  Just [untyped $ 1 / (isF64 x * log 10)]
+pdBuiltin "log2_32" [x] =
+  Just [untyped $ 1 / (isF32 x * log 2)]
+pdBuiltin "log2_64" [x] =
+  Just [untyped $ 1 / (isF64 x * log 2)]
+pdBuiltin "exp32" [x] =
+  Just [untyped $ exp (isF32 x)]
+pdBuiltin "exp64" [x] =
+  Just [untyped $ exp (isF64 x)]
+pdBuiltin "sin32" [x] =
+  Just [untyped $ cos (isF32 x)]
+pdBuiltin "sin64" [x] =
+  Just [untyped $ cos (isF64 x)]
+pdBuiltin "sinh32" [x] =
+  Just [untyped $ cosh (isF32 x)]
+pdBuiltin "sinh64" [x] =
+  Just [untyped $ cosh (isF64 x)]
+pdBuiltin "cos32" [x] =
+  Just [untyped $ - sin (isF32 x)]
+pdBuiltin "cos64" [x] =
+  Just [untyped $ - sin (isF64 x)]
+pdBuiltin "cosh32" [x] =
+  Just [untyped $ sinh (isF32 x)]
+pdBuiltin "cosh64" [x] =
+  Just [untyped $ sinh (isF64 x)]
+pdBuiltin "tan32" [x] =
+  Just [untyped $ 1 / (cos (isF32 x) ** 2)]
 pdBuiltin "tan64" [x] =
   Just [untyped $ 1 / (cos (isF64 x) ** 2)]
+pdBuiltin "asin32" [x] =
+  Just [untyped $ 1 / sqrt (1 - isF32 x ** 2)]
+pdBuiltin "asin64" [x] =
+  Just [untyped $ 1 / sqrt (1 - isF64 x ** 2)]
+pdBuiltin "asinh32" [x] =
+  Just [untyped $ 1 / sqrt (1 + isF32 x ** 2)]
+pdBuiltin "asinh64" [x] =
+  Just [untyped $ 1 / sqrt (1 + isF64 x ** 2)]
+pdBuiltin "acos32" [x] =
+  Just [untyped $ - 1 / sqrt (1 - isF32 x ** 2)]
+pdBuiltin "acos64" [x] =
+  Just [untyped $ - 1 / sqrt (1 - isF64 x ** 2)]
+pdBuiltin "acosh32" [x] =
+  Just [untyped $ 1 / sqrt (isF32 x ** 2 - 1)]
+pdBuiltin "acosh64" [x] =
+  Just [untyped $ 1 / sqrt (isF64 x ** 2 - 1)]
+pdBuiltin "atan32" [x] =
+  Just [untyped $ 1 / (1 + isF32 x ** 2)]
+pdBuiltin "atan64" [x] =
+  Just [untyped $ 1 / (1 + isF64 x ** 2)]
+pdBuiltin "atanh32" [x] =
+  Just [untyped $ cosh (isF32 x) ** 2]
+pdBuiltin "atanh64" [x] =
+  Just [untyped $ cosh (isF64 x) ** 2]
+pdBuiltin "atan2_32" [x, y] =
+  Just
+    [ untyped $ - isF32 y / (isF32 x ** 2 + isF32 y ** 2),
+      untyped $ - isF32 x / (isF32 x ** 2 + isF32 y ** 2)
+    ]
+pdBuiltin "atan2_64" [x, y] =
+  Just
+    [ untyped $ - isF64 y / (isF64 x ** 2 + isF64 y ** 2),
+      untyped $ - isF64 x / (isF64 x ** 2 + isF64 y ** 2)
+    ]
+-- More problematic derivatives follow bellow
+pdBuiltin "round32" [_] =
+  Just [fConst Float32 0]
+pdBuiltin "round64" [_] =
+  Just [fConst Float64 0]
+pdBuiltin "ceil32" [_] =
+  Just [fConst Float32 0]
+pdBuiltin "ceil64" [_] =
+  Just [fConst Float64 0]
+pdBuiltin "floor32" [_] =
+  Just [fConst Float32 0]
+pdBuiltin "floor64" [_] =
+  Just [fConst Float64 0]
 pdBuiltin _ _ =
   Nothing
