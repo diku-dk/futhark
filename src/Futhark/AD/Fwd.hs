@@ -80,11 +80,6 @@ instance (TanBinder a) => TanBinder [a] where
   mkTan = mapM mkTan
   getVNames = concatMap getVNames
 
-data TanStm = TanStm
-  { primalStm :: Stms SOACS,
-    tanStms :: Stms SOACS
-  }
-
 class Tangent a where
   type TangentType a
   tangent :: a -> ADM (TangentType a)
@@ -107,31 +102,27 @@ instance Tangent SubExp where
       Nothing -> do t <- lookupType v; zeroTan t
 
 instance Tangent Stm where
-  type TangentType Stm = TanStm
+  type TangentType Stm = Stms SOACS
   tangent = flip fwdStm return
 
 --
-fwdStm :: Stm -> (TanStm -> ADM a) -> ADM a
+fwdStm :: Stm -> (Stms SOACS -> ADM a) -> ADM a
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (SubExp se))) m = do
   se' <- tangent se
   withTans pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux (BasicOp (SubExp se'))))
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (SubExp se')))
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (Opaque se))) m = do
   se' <- tangent se
   withTans pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux (BasicOp (Opaque se'))))
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (Opaque se')))
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (ArrayLit ses t))) m = do
   ses' <- mapM tangent ses
   withTans pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux (BasicOp (ArrayLit ses' t))))
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (ArrayLit ses' t)))
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (UnOp op x))) m = do
   x' <- tangent x
   withTans pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux (BasicOp (UnOp op x'))))
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (UnOp op x')))
 fwdStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) m = do
   let t = binOpType op
   x_tan <- primExpFromSubExp t <$> tangent x
@@ -142,20 +133,17 @@ fwdStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) m = do
             pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
       letBindNames [patElemName pe'] <=< toExp $
         x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
-    m $ TanStm (oneStm stm) stms
+    m $ oneStm stm <> stms
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (ConvOp op x))) m = do
   x' <- tangent x
   withTan pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux (BasicOp (ConvOp op x'))))
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (ConvOp op x')))
 fwdStm stm@(Let (Pattern [] pes) aux assert@(BasicOp Assert {})) m =
   withTan pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux assert))
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux assert)
 fwdStm stm@(Let (Pattern [] pes) aux cOp@(BasicOp CmpOp {})) m =
   withTan pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux cOp))
+    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux cOp)
 fwdStm stm@(Let (Pattern [] pes) _ (Apply f args _ _)) m
   | Just (_, argts) <- M.lookup f builtInFunctions = do
     arg_tans <-
@@ -171,13 +159,13 @@ fwdStm stm@(Let (Pattern [] pes) _ (Apply f args _ _)) m
             zipWithM_ (letBindNames . pure . patElemName) pes'
               =<< mapM toExp (zipWith (~*~) arg_tans derivs)
 
-      m $ TanStm (oneStm stm) stms
-fwdStm stm@(Let (Pattern [] pes) aux (If cond t f attr)) m = do
+      m $ oneStm stm <> stms
+fwdStm (Let (Pattern ctx pes) aux (If cond t f (IfDec ret ifsort))) m = do
   t' <- fwdBodyInterleave' t
   f' <- fwdBodyInterleave' f
   withTan pes $ \pes' ->
-    m $
-      TanStm (oneStm stm) (oneStm (Let (Pattern [] pes') aux (If cond t' f' attr)))
+    m . oneStm . Let (Pattern ctx (pes ++ pes')) aux $
+      If cond t' f' (IfDec (ret ++ ret) ifsort)
 fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (WhileLoop v) body)) m = do
   let (valParams, vals) = unzip valPats
   vals' <- mapM tangent vals
@@ -185,33 +173,29 @@ fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (WhileLoop v) body)) m = do
     body' <- fwdBodyInterleave' body
     withTans pes $ \pes' ->
       m $
-        TanStm mempty $
-          oneStm
-            ( Let (Pattern [] pes') aux $
-                DoLoop
-                  []
-                  (valPats ++ zip valParams' vals')
-                  (WhileLoop v)
-                  body'
-            )
+        oneStm $
+          Let (Pattern [] pes') aux $
+            DoLoop
+              []
+              (valPats ++ zip valParams' vals')
+              (WhileLoop v)
+              body'
 fwdStm stm@(Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop v it bound []) body)) m = do
   let (valParams, vals) = unzip valPats
   vals' <- mapM tangent vals
   withTans valParams $ \valParams' -> do
-    (_, body') <- fwdBodyAfter' body
+    body' <- fwdBodyAfter' body
     withTans pes $ \pes' ->
       m $
-        TanStm
-          (oneStm stm)
-          ( oneStm
-              ( Let (Pattern [] pes') aux $
-                  DoLoop
-                    []
-                    (valPats ++ zip valParams' vals')
-                    (ForLoop v it bound [])
-                    body'
-              )
-          )
+        oneStm stm
+          <> oneStm
+            ( Let (Pattern [] pes') aux $
+                DoLoop
+                  []
+                  (valPats ++ zip valParams' vals')
+                  (ForLoop v it bound [])
+                  body'
+            )
 fwdStm stm@(Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop i it bound loop_vars) body)) m = do
   let (valParams, vals) = unzip valPats
   vals' <- mapM tangent vals
@@ -219,20 +203,18 @@ fwdStm stm@(Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop i it bound loop
     withTans (map fst loop_vars) $ \loopParams' -> do
       let f p n = do n' <- tangent n; return (p, n')
       loop_vars' <- zipWithM f loopParams' (map snd loop_vars)
-      (_, body') <- fwdBodyAfter' body
+      body' <- fwdBodyAfter' body
       withTans pes $ \pes' ->
         m $
-          TanStm
-            (oneStm stm)
-            ( oneStm
-                ( Let (Pattern [] pes') aux $
-                    DoLoop
-                      []
-                      (valPats ++ zip valParams' vals')
-                      (ForLoop i it bound (loop_vars ++ loop_vars'))
-                      body'
-                )
-            )
+          oneStm stm
+            <> oneStm
+              ( Let (Pattern [] pes') aux $
+                  DoLoop
+                    []
+                    (valPats ++ zip valParams' vals')
+                    (ForLoop i it bound (loop_vars ++ loop_vars'))
+                    body'
+              )
 fwdStm stm _ =
   error $ "unhandled AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
@@ -240,9 +222,9 @@ fwdBodyInterleave :: Stms SOACS -> ADM Body -> ADM Body
 fwdBodyInterleave stms m =
   case stms of
     (stm :<| stms') ->
-      fwdStm stm $ \tStm -> do
+      fwdStm stm $ \stm' -> do
         Body _ stms'' res <- fwdBodyInterleave stms' m
-        return $ mkBody (primalStm tStm <> tanStms tStm <> stms'') res
+        return $ mkBody (stm' <> stms'') res
     Empty -> m
 
 fwdBodyInterleave' :: Body -> ADM Body
@@ -257,20 +239,20 @@ fwdBodyOnlyTangents (Body _ stms res) =
     res' <- mapM tangent res
     return $ mkBody mempty res'
 
-fwdBodyAfter :: Stms SOACS -> ADM (Body, Body) -> ADM (Body, Body)
+fwdBodyAfter :: Stms SOACS -> ADM Body -> ADM Body
 fwdBodyAfter stms m =
   case stms of
     (stm :<| stms') ->
-      fwdStm stm $ \tStm -> do
-        (Body _ stms1 res1, Body _ stms2 res2) <- fwdBodyAfter stms' m
-        return (mkBody (primalStm tStm <> stms1) res1, mkBody (tanStms tStm <> stms2) res2)
+      fwdStm stm $ \stm' -> do
+        Body _ stms'' res <- fwdBodyAfter stms' m
+        return $ mkBody (stm' <> stms'') res
     Empty -> m
 
-fwdBodyAfter' :: Body -> ADM (Body, Body)
+fwdBodyAfter' :: Body -> ADM Body
 fwdBodyAfter' (Body _ stms res) =
   fwdBodyAfter stms $ do
     res' <- mapM tangent res
-    return (mkBody mempty res, mkBody mempty res')
+    return $ mkBody mempty $ res ++ res'
 
 fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 fwdJVP scope (Lambda params body ret) = do
