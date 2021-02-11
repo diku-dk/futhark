@@ -28,6 +28,7 @@ import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
+import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
 import qualified Futhark.Pass.ExplicitAllocations.MC as MC
@@ -54,7 +55,13 @@ standardPipeline =
       fuseSOACs,
       performCSE True,
       simplifySOACS,
-      removeDeadFunctions
+      removeDeadFunctions,
+      -- TODO: we sould skip the AD pass if the program contains no AD
+      -- constructs.
+      algebraicDifferentiation,
+      simplifySOACS,
+      performCSE True,
+      simplifySOACS
     ]
 
 kernelsPipeline :: Pipeline SOACS Kernels
