@@ -759,7 +759,7 @@ revBody' b@(Body desc stms _) = do
   return (us, body')
 
 revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
-revVJP scope (Lambda params body@(Body () stms res) ret) = do
+revVJP scope (Lambda params body@(Body () stms res) _) = do
   let initial_renv = REnv {tans = mempty, envScope = scope}
   flip runADM initial_renv . localScope (scopeOfLParams params) . inScopeOf stms $ do
     let rvars = subExpVars res
