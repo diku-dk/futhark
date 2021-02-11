@@ -55,7 +55,6 @@ pdBinOp (Mul _ _) x y = (y, x)
 pdBinOp (SDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
-    derivs :: IntegralExp t => t -> t -> (t, t)
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
 --
 pdBinOp (FAdd ft) _ _ = (fConst ft 1, fConst ft 1)
@@ -64,20 +63,27 @@ pdBinOp (FMul _) x y = (y, x)
 pdBinOp (FDiv ft) a b =
   floatBinOp derivs derivs ft a b
   where
-    derivs :: Floating t => t -> t -> (t, t)
     derivs x y = (1 / x, negate (x / (y ** 2)))
 pdBinOp (FPow ft) a b =
   floatBinOp derivs derivs ft a b
   where
-    derivs :: Floating t => t -> t -> (t, t)
     derivs x y = (y * (x ** (y -1)), (x ** y) * log x)
+pdBinOp (FMax ft) a b =
+  floatBinOp derivs derivs ft a b
+  where
+    derivs x y = (fromBoolExp (x .<. y), fromBoolExp (x .>. y))
+pdBinOp (FMin ft) a b =
+  floatBinOp derivs derivs ft a b
+  where
+    derivs x y = (fromBoolExp (x .>. y), fromBoolExp (x .<. y))
+pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
 
 -- | @pdBuiltin f args i@ computes the partial derivative of @f@
 -- applied to @args@ with respect to each of its arguments.  Returns
 -- 'Nothing' if no such derivative is known.
 pdBuiltin :: Name -> [PrimExp VName] -> Maybe [PrimExp VName]
 pdBuiltin "sqrt32" [x] =
-  Just [untyped $ 1 / (2 * sqrt (isF64 x))]
+  Just [untyped $ 1 / (2 * sqrt (isF32 x))]
 pdBuiltin "sqrt64" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF64 x))]
 pdBuiltin "log32" [x] =
