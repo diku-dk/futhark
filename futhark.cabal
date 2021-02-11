@@ -215,6 +215,7 @@ library
       Futhark.Optimise.TileLoops.Shared
       Futhark.Optimise.Unstream
       Futhark.Pass
+      Futhark.Pass.AD
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.Kernels

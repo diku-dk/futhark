@@ -5,7 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.AD.Rev (revADEntryPoints) where
+module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
 import Control.Monad.Reader
@@ -21,7 +21,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
 import Futhark.IR.SOACS
-import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 
@@ -759,48 +758,22 @@ revBody' b@(Body desc stms _) = do
   let body' = Body desc _stms $ map Var $ M.elems us'
   return (us, body')
 
-revFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
-revFun consts fundef@(FunDef entry _attrs _ _ params body@(Body () stms res)) = do
-  let initial_renv = REnv {tans = mempty, envScope = mempty}
-  flip runADM initial_renv $
-    inScopeOf consts $
-      inScopeOf fundef $
-        inScopeOf stms $ do
-          let rvars = subExpVars res
-              rvars' = filter (not . isPrefixOf "impl" . baseString) rvars -- Awful hack, fix
-          _params <- forM rvars' $ \v -> do
-            _v <- adjVName v
-            insAdj v _v
-            _t <- lookupType v
-            return $ Param _v (toDecl _t Nonunique)
+revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
+revVJP scope (Lambda params body@(Body () stms res) ret) = do
+  let initial_renv = REnv {tans = mempty, envScope = scope}
+  flip runADM initial_renv . inScopeOf stms $ do
+    let rvars = subExpVars res
+        rvars' = filter (not . isPrefixOf "impl" . baseString) rvars -- Awful hack, fix
+    _params <- forM rvars' $ \v -> do
+      _v <- adjVName v
+      insAdj v _v
+      Param _v <$> lookupType v
 
-          (_body_us, Body () rev_stms _rev_res, _body) <- revBody body
+    (_body_us, Body () rev_stms _rev_res, _body) <- revBody body
 
-          (Body _decs _stms _res) <- renameBody _body
-          let _rvars = subExpVars _res
+    (Body _decs _stms _res) <- renameBody _body
+    let _rvars = subExpVars _res
 
-          _ret <-
-            inScopeOf (stms <> _stms) $
-              staticShapes . map (`toDecl` Unique) <$> mapM subExpType _res
-
-          let _entry = flip fmap entry $ \(as, _) ->
-                let _as = as ++ map (const TypeDirect) _rvars
-                    _rs = as
-                 in (_as, _rs)
-
-          let rev =
-                fundef
-                  { funDefEntryPoint = (\(as1, rs1) (as2, rs2) -> (as1 ++ as2, rs1 ++ rs2)) <$> entry <*> _entry,
-                    funDefRetType = _ret,
-                    funDefParams = params ++ _params,
-                    funDefBody = Body _decs (rev_stms <> _stms) _res
-                  }
-          return rev
-
-revADEntryPoints :: Pass SOACS SOACS
-revADEntryPoints =
-  Pass
-    { passName = "reverse-ad",
-      passDescription = "Apply reverse-mode algebraic differentiation on all entry points",
-      passFunction = intraproceduralTransformationWithConsts pure revFun
-    }
+    pure $
+      Lambda (params ++ _params) (Body _decs (rev_stms <> _stms) _res) $
+        map paramType params

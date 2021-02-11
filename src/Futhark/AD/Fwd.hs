@@ -5,7 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Futhark.AD.Fwd (fwdADEntryPoints) where
+module Futhark.AD.Fwd (fwdJVP) where
 
 import Control.Monad
 import Control.Monad.Reader
@@ -17,7 +17,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Binder
 import Futhark.Construct
 import Futhark.IR.SOACS
-import Futhark.Pass
 
 data REnv = REnv
   { tans :: M.Map VName VName,
@@ -252,6 +251,12 @@ fwdBodyInterleave' (Body _ stms res) =
     res' <- mapM tangent res
     return $ mkBody mempty $ res ++ res'
 
+fwdBodyOnlyTangents :: Body -> ADM Body
+fwdBodyOnlyTangents (Body _ stms res) =
+  fwdBodyInterleave stms $ do
+    res' <- mapM tangent res
+    return $ mkBody mempty res'
+
 fwdBodyAfter :: Stms SOACS -> ADM (Body, Body) -> ADM (Body, Body)
 fwdBodyAfter stms m =
   case stms of
@@ -267,25 +272,10 @@ fwdBodyAfter' (Body _ stms res) =
     res' <- mapM tangent res
     return (mkBody mempty res, mkBody mempty res')
 
-fwdFun :: Stms SOACS -> FunDef SOACS -> PassM (FunDef SOACS)
-fwdFun consts fundef = do
-  let initial_renv = REnv {tans = mempty, envScope = mempty}
+fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
+fwdJVP scope (Lambda params body ret) = do
+  let initial_renv = REnv {tans = mempty, envScope = scope}
   flip runADM initial_renv $
-    inScopeOf consts $
-      withTan (funDefParams fundef) $ \params' -> do
-        body' <- fwdBodyInterleave' $ funDefBody fundef
-        pure
-          fundef
-            { funDefParams = funDefParams fundef ++ params',
-              funDefBody = body',
-              funDefRetType = funDefRetType fundef ++ funDefRetType fundef,
-              funDefEntryPoint = (\(a, r) -> (a ++ a, r ++ r)) <$> funDefEntryPoint fundef
-            }
-
-fwdADEntryPoints :: Pass SOACS SOACS
-fwdADEntryPoints =
-  Pass
-    { passName = "forward-ad",
-      passDescription = "Apply forward-mode algebraic differentiation on all entry points",
-      passFunction = intraproceduralTransformationWithConsts pure fwdFun
-    }
+    withTan params $ \params' -> do
+      body' <- fwdBodyOnlyTangents body
+      pure $ Lambda (params ++ params') body' ret

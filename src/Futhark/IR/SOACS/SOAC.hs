@@ -860,6 +860,10 @@ getStreamAccums (Parallel _ _ _ accs) = accs
 getStreamAccums (Sequential accs) = accs
 
 instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
+  opMetrics (VJP lam _ _) =
+    inside "VJP" $ lambdaMetrics lam
+  opMetrics (JVP lam _ _) =
+    inside "JVP" $ lambdaMetrics lam
   opMetrics (Stream _ _ lam _) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Scatter _len lam _ivs _as) =
@@ -873,7 +877,7 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
       lambdaMetrics map_lam
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
-  ppr (VJP lam args vec) = do
+  ppr (VJP lam args vec) =
     text "vjp"
       <> parens
         ( PP.align $
@@ -881,8 +885,8 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
               </> PP.braces (commasep $ map ppr args) <> comma
               </> PP.braces (commasep $ map ppr vec)
         )
-  ppr (JVP lam args vec) = do
-    text "vjp"
+  ppr (JVP lam args vec) =
+    text "jvp"
       <> parens
         ( PP.align $
             ppr lam <> comma
