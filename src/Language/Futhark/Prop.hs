@@ -1004,7 +1004,25 @@ intrinsics =
                    uarr_ka
                ),
                ("trace", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a),
-               ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a)
+               ("break", IntrinsicPolyFun [tp_a] [Scalar t_a] $ Scalar t_a),
+               ( "jvp",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     Scalar t_a,
+                     Scalar t_a
+                   ]
+                   $ Scalar t_b
+               ),
+               ( "vjp",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b]
+                   [ Scalar t_a `arr` Scalar t_b,
+                     Scalar t_a,
+                     Scalar t_b
+                   ]
+                   $ Scalar t_a
+               )
              ]
   where
     tv_a = VName (nameFromString "a") 0

@@ -101,6 +101,10 @@ data SOAC lore
     -- list describes the operations to perform.  The t'Lambda' is the
     -- bucket function.  Finally comes the input images.
     Hist SubExp [HistOp lore] (Lambda lore) [VName]
+  | -- FIXME: this should not be here
+    JVP (Lambda lore) [SubExp] [SubExp]
+  | -- FIXME: this should not be here
+    VJP (Lambda lore) [SubExp] [SubExp]
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp (ScremaForm lore) [VName]
@@ -112,9 +116,11 @@ instance Decorations lore => SexpIso (SOAC lore) where
       With (. Sexp.list (Sexp.el (Sexp.sym "stream") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
         With (. Sexp.list (Sexp.el (Sexp.sym "scatter") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
           With (. Sexp.list (Sexp.el (Sexp.sym "hist") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
-            With
-              (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
-              End
+            With (. Sexp.list (Sexp.el (Sexp.sym "vjp") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+              With (. Sexp.list (Sexp.el (Sexp.sym "jvp") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso)) $
+                With
+                  (. Sexp.list (Sexp.el (Sexp.sym "screma") >>> Sexp.el sexpIso >>> Sexp.el sexpIso >>> Sexp.el sexpIso))
+                  End
 
 -- | Information about computing a single histogram.
 data HistOp lore = HistOp
@@ -401,6 +407,14 @@ mapSOACM ::
   SOACMapper flore tlore m ->
   SOAC flore ->
   m (SOAC tlore)
+mapSOACM tv (JVP lam args vec) =
+  JVP <$> mapOnSOACLambda tv lam
+    <*> mapM (mapOnSOACSubExp tv) args
+    <*> mapM (mapOnSOACSubExp tv) vec
+mapSOACM tv (VJP lam args vec) =
+  VJP <$> mapOnSOACLambda tv lam
+    <*> mapM (mapOnSOACSubExp tv) args
+    <*> mapM (mapOnSOACSubExp tv) vec
 mapSOACM tv (Stream size form lam arrs) =
   Stream <$> mapOnSOACSubExp tv size
     <*> mapOnStreamForm form
@@ -486,7 +500,11 @@ instance ASTLore lore => Rename (SOAC lore) where
       renamer = SOACMapper rename rename rename
 
 -- | The type of a SOAC.
-soacType :: SOAC lore -> [Type]
+soacType :: Typed (LParamInfo lore) => SOAC lore -> [Type]
+soacType (VJP lam _ _) =
+  map paramType (lambdaParams lam)
+soacType (JVP lam _ _) =
+  lambdaReturnType lam
 soacType (Stream outersize form lam _) =
   map (substNamesInType substs) rtp
   where
@@ -510,12 +528,14 @@ soacType (Hist _len ops _bucket_fun _imgs) = do
 soacType (Screma w form _arrs) =
   scremaType w form
 
-instance TypedOp (SOAC lore) where
+instance ASTLore lore => TypedOp (SOAC lore) where
   opType = pure . staticShapes . soacType
 
 instance (ASTLore lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases = map (const mempty) . soacType
 
+  consumedInOp JVP {} = mempty
+  consumedInOp VJP {} = mempty
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
   consumedInOp (Screma _ (ScremaForm _ _ map_lam) arrs) =
@@ -559,6 +579,10 @@ instance
   where
   type OpWithAliases (SOAC lore) = SOAC (Aliases lore)
 
+  addOpAliases aliases (JVP lam args vec) =
+    JVP (Alias.analyseLambda aliases lam) args vec
+  addOpAliases aliases (VJP lam args vec) =
+    VJP (Alias.analyseLambda aliases lam) args vec
   addOpAliases aliases (Stream size form lam arr) =
     Stream
       size
@@ -658,6 +682,8 @@ instance Decorations lore => ST.IndexOp (SOAC lore) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
+typeCheckSOAC JVP {} = pure ()
+typeCheckSOAC VJP {} = pure ()
 typeCheckSOAC (Stream size form lam arrexps) = do
   let accexps = getStreamAccums form
   TC.require [Prim int64] size
@@ -847,6 +873,22 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
       lambdaMetrics map_lam
 
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
+  ppr (VJP lam args vec) = do
+    text "vjp"
+      <> parens
+        ( PP.align $
+            ppr lam <> comma
+              </> PP.braces (commasep $ map ppr args) <> comma
+              </> PP.braces (commasep $ map ppr vec)
+        )
+  ppr (JVP lam args vec) = do
+    text "vjp"
+      <> parens
+        ( PP.align $
+            ppr lam <> comma
+              </> PP.braces (commasep $ map ppr args) <> comma
+              </> PP.braces (commasep $ map ppr vec)
+        )
   ppr (Stream size form lam arrs) =
     case form of
       Parallel o comm lam0 acc ->

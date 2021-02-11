@@ -95,6 +95,16 @@ simplifyConsts =
 simplifySOAC ::
   Simplify.SimplifiableLore lore =>
   Simplify.SimplifyOp lore (SOAC lore)
+simplifySOAC (VJP lam arr vec) = do
+  (lam', hoisted) <- Engine.simplifyLambda lam
+  arr' <- mapM Engine.simplify arr
+  vec' <- mapM Engine.simplify vec
+  return (VJP lam' arr' vec', hoisted)
+simplifySOAC (JVP lam arr vec) = do
+  (lam', hoisted) <- Engine.simplifyLambda lam
+  arr' <- mapM Engine.simplify arr
+  vec' <- mapM Engine.simplify vec
+  return (JVP lam' arr' vec', hoisted)
 simplifySOAC (Stream outerdim form lam arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form
