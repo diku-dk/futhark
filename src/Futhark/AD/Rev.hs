@@ -761,10 +761,9 @@ revBody' b@(Body desc stms _) = do
 revVJP :: MonadFreshNames m => Scope SOACS -> Lambda -> m Lambda
 revVJP scope (Lambda params body@(Body () stms res) ret) = do
   let initial_renv = REnv {tans = mempty, envScope = scope}
-  flip runADM initial_renv . inScopeOf stms $ do
+  flip runADM initial_renv . localScope (scopeOfLParams params) . inScopeOf stms $ do
     let rvars = subExpVars res
-        rvars' = filter (not . isPrefixOf "impl" . baseString) rvars -- Awful hack, fix
-    _params <- forM rvars' $ \v -> do
+    _params <- forM rvars $ \v -> do
       _v <- adjVName v
       insAdj v _v
       Param _v <$> lookupType v
