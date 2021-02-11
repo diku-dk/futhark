@@ -11,7 +11,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
-import Data.List (isPrefixOf, partition, sortOn, (\\))
+import Data.List (partition, sortOn, (\\))
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Sequence (Seq (..))

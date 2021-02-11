@@ -119,11 +119,15 @@ fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (ArrayLit ses t))) m = do
   ses' <- mapM tangent ses
   withTans pes $ \pes' ->
     m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (ArrayLit ses' t)))
-fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (UnOp op x))) m = do
-  x' <- tangent x
-  withTans pes $ \pes' ->
-    m $ oneStm stm <> oneStm (Let (Pattern [] pes') aux (BasicOp (UnOp op x')))
-fwdStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) m = do
+fwdStm stm@(Let (Pattern [] [pe]) aux (BasicOp (UnOp op x))) m = do
+  let t = unOpType op
+  x_tan <- primExpFromSubExp t <$> tangent x
+  withTan pe $ \pe' -> do
+    stms <- runBinder_ $ do
+      let dx = pdUnOp op $ primExpFromSubExp t x
+      auxing aux $ letBindNames [patElemName pe'] <=< toExp $ x_tan ~*~ dx
+    m $ oneStm stm <> stms
+fwdStm stm@(Let (Pattern [] [pe]) aux (BasicOp (BinOp op x y))) m = do
   let t = binOpType op
   x_tan <- primExpFromSubExp t <$> tangent x
   y_tan <- primExpFromSubExp t <$> tangent y
@@ -131,8 +135,9 @@ fwdStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) m = do
     stms <- runBinder_ $ do
       let (wrt_x, wrt_y) =
             pdBinOp op (primExpFromSubExp t x) (primExpFromSubExp t y)
-      letBindNames [patElemName pe'] <=< toExp $
-        x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
+      auxing aux $
+        letBindNames [patElemName pe'] <=< toExp $
+          x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     m $ oneStm stm <> stms
 fwdStm stm@(Let (Pattern [] pes) aux (BasicOp (ConvOp op x))) m = do
   x' <- tangent x
@@ -222,7 +227,7 @@ fwdBodyInterleave :: Stms SOACS -> ADM Body -> ADM Body
 fwdBodyInterleave stms m =
   case stms of
     (stm :<| stms') ->
-      fwdStm stm $ \stm' -> do
+      inScopeOf stm . fwdStm stm $ \stm' -> do
         Body _ stms'' res <- fwdBodyInterleave stms' m
         return $ mkBody (stm' <> stms'') res
     Empty -> m

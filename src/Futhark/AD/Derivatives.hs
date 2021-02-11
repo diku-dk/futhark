@@ -4,6 +4,7 @@
 module Futhark.AD.Derivatives
   ( pdBuiltin,
     pdBinOp,
+    pdUnOp,
   )
 where
 
@@ -22,7 +23,15 @@ fConst ft x = ValueExp $ FloatValue $ floatValue ft x
 untyped2 :: (TPrimExp t v, TPrimExp t v) -> (PrimExp v, PrimExp v)
 untyped2 = bimap untyped untyped
 
-type OnBinOp t v = (TPrimExp t v -> TPrimExp t v -> (TPrimExp t v, TPrimExp t v))
+type OnUnOp t v = TPrimExp t v -> TPrimExp t v
+
+pdUnOp :: UnOp -> PrimExp VName -> PrimExp VName
+pdUnOp (Abs it) a = UnOpExp (SSignum it) a
+pdUnOp (FAbs ft) a = UnOpExp (FSignum ft) a
+pdUnOp Not x = x
+pdUnOp (Complement it) x = UnOpExp (Complement it) x
+
+type OnBinOp t v = TPrimExp t v -> TPrimExp t v -> (TPrimExp t v, TPrimExp t v)
 
 intBinOp ::
   OnBinOp Int8 v ->
@@ -71,11 +80,11 @@ pdBinOp (FPow ft) a b =
 pdBinOp (FMax ft) a b =
   floatBinOp derivs derivs ft a b
   where
-    derivs x y = (fromBoolExp (x .<. y), fromBoolExp (x .>. y))
+    derivs x y = (fromBoolExp (x .>. y), fromBoolExp (x .<. y))
 pdBinOp (FMin ft) a b =
   floatBinOp derivs derivs ft a b
   where
-    derivs x y = (fromBoolExp (x .>. y), fromBoolExp (x .<. y))
+    derivs x y = (fromBoolExp (x .<. y), fromBoolExp (x .>. y))
 pdBinOp op _ _ = error $ "pdBinOp: missing case: " ++ pretty op
 
 -- | @pdBuiltin f args i@ computes the partial derivative of @f@

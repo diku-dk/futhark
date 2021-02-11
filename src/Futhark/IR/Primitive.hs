@@ -419,6 +419,8 @@ data UnOp
     SSignum IntType
   | -- | Unsigned sign function: @usignum(2)@ = 1.
     USignum IntType
+  | -- | Floating-point sign function.
+    FSignum FloatType
   deriving (Eq, Ord, Show, Generic)
 
 instance SexpIso UnOp where
@@ -429,9 +431,10 @@ instance SexpIso UnOp where
           With (. Sexp.list (Sexp.el (Sexp.sym "abs") >>> Sexp.el sexpIso)) $
             With (. Sexp.list (Sexp.el (Sexp.sym "fabs") >>> Sexp.el sexpIso)) $
               With (. Sexp.list (Sexp.el (Sexp.sym "ssignum") >>> Sexp.el sexpIso)) $
-                With
-                  (. Sexp.list (Sexp.el (Sexp.sym "usignum") >>> Sexp.el sexpIso))
-                  End
+                With (. Sexp.list (Sexp.el (Sexp.sym "usignum") >>> Sexp.el sexpIso)) $
+                  With
+                    (. Sexp.list (Sexp.el (Sexp.sym "fsignum") >>> Sexp.el sexpIso))
+                    End
 
 -- | What to do in case of arithmetic overflow.  Futhark's semantics
 -- are that overflow does wraparound, but for generated code (like
@@ -635,6 +638,7 @@ allUnOps =
     ++ map FAbs [minBound .. maxBound]
     ++ map SSignum [minBound .. maxBound]
     ++ map USignum [minBound .. maxBound]
+    ++ map FSignum [minBound .. maxBound]
 
 -- | A list of all binary operators for all types.
 allBinOps :: [BinOp]
@@ -710,6 +714,7 @@ doUnOp Abs {} (IntValue v) = Just $ IntValue $ doAbs v
 doUnOp FAbs {} (FloatValue v) = Just $ FloatValue $ doFAbs v
 doUnOp SSignum {} (IntValue v) = Just $ IntValue $ doSSignum v
 doUnOp USignum {} (IntValue v) = Just $ IntValue $ doUSignum v
+doUnOp FSignum {} (FloatValue v) = Just $ FloatValue $ doFSignum v
 doUnOp _ _ = Nothing
 
 -- | E.g., @~(~1) = 1@.
@@ -731,6 +736,10 @@ doSSignum v = intValue (intValueType v) $ signum $ intToInt64 v
 -- | @usignum(-2)@ = -1.
 doUSignum :: IntValue -> IntValue
 doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
+
+-- | @fsignum(-2.0)@ = -1.0.
+doFSignum :: FloatValue -> FloatValue
+doFSignum v = floatValue (floatValueType v) $ signum $ floatToDouble v
 
 -- | Apply a 'BinOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped, or outside the domain (e.g. division by
@@ -1108,6 +1117,7 @@ unOpType Not = Bool
 unOpType (Complement t) = IntType t
 unOpType (Abs t) = IntType t
 unOpType (FAbs t) = FloatType t
+unOpType (FSignum t) = FloatType t
 
 -- | The input and output types of a conversion operator.
 convOpType :: ConvOp -> (PrimType, PrimType)
@@ -1655,6 +1665,7 @@ instance Pretty UnOp where
   ppr (FAbs t) = taggedF "fabs" t
   ppr (SSignum t) = taggedI "ssignum" t
   ppr (USignum t) = taggedI "usignum" t
+  ppr (FSignum t) = taggedF "fsignum" t
   ppr (Complement t) = taggedI "complement" t
 
 -- | The human-readable name for a 'ConvOp'.  This is used to expose
