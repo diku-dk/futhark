@@ -1463,6 +1463,7 @@ $esc:("#include <string.h>")
 $esc:("#include <string.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
+$esc:("#include <ctype.h>")
 
 $esc:header_extra
 
