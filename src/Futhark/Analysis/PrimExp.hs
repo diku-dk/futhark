@@ -247,27 +247,35 @@ class NumExp t where
   -- | Construct a typed expression from an integer.
   fromInteger' :: Integer -> TPrimExp t v
 
+  -- | Construct a numeric expression from a boolean expression.  This
+  -- can be used to encode arithmetic control flow.
+  fromBoolExp :: TPrimExp Bool v -> TPrimExp t v
+
 -- | The class of integer types that can be used for constructing
 -- 'TPrimExp's.
 class NumExp t => IntExp t
 
 instance NumExp Int8 where
   fromInteger' = isInt8 . ValueExp . IntValue . Int8Value . fromInteger
+  fromBoolExp = isInt8 . ConvOpExp (BToI Int8) . untyped
 
 instance IntExp Int8
 
 instance NumExp Int16 where
   fromInteger' = isInt16 . ValueExp . IntValue . Int16Value . fromInteger
+  fromBoolExp = isInt16 . ConvOpExp (BToI Int16) . untyped
 
 instance IntExp Int16
 
 instance NumExp Int32 where
   fromInteger' = isInt32 . ValueExp . IntValue . Int32Value . fromInteger
+  fromBoolExp = isInt32 . ConvOpExp (BToI Int32) . untyped
 
 instance IntExp Int32
 
 instance NumExp Int64 where
   fromInteger' = isInt64 . ValueExp . IntValue . Int64Value . fromInteger
+  fromBoolExp = isInt64 . ConvOpExp (BToI Int64) . untyped
 
 instance IntExp Int64
 
@@ -278,10 +286,12 @@ class NumExp t => FloatExp t where
   fromRational' :: Rational -> TPrimExp t v
 
 instance NumExp Float where
-  fromInteger' = TPrimExp . ValueExp . FloatValue . Float32Value . fromInteger
+  fromInteger' = isF32 . ValueExp . FloatValue . Float32Value . fromInteger
+  fromBoolExp = isF32 . ConvOpExp (SIToFP Int32 Float32) . ConvOpExp (BToI Int32) . untyped
 
 instance NumExp Double where
   fromInteger' = TPrimExp . ValueExp . FloatValue . Float64Value . fromInteger
+  fromBoolExp = isF64 . ConvOpExp (SIToFP Int32 Float64) . ConvOpExp (BToI Int32) . untyped
 
 instance FloatExp Float where
   fromRational' = TPrimExp . ValueExp . FloatValue . Float32Value . fromRational
