@@ -411,6 +411,21 @@ revStm stm@(Let (Pattern [] pats) aux (DoLoop [] valpats (ForLoop v it bound [])
       return $ PatElem _p t
 revStm stm@(Let _ _ (BasicOp CmpOp {})) =
   return (mempty, oneStm stm)
+revStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (UnOp op x))) = do
+  let t = unOpType op
+  (pe_adj, us1, s1) <- inScopeOf stm $ lookupAdj $ patElemName pe
+  (contrib, contrib_stms) <- runBinder $ do
+    let x_pe = primExpFromSubExp t x
+        pe_adj' = primExpFromSubExp t (Var pe_adj)
+        dx = pdUnOp op x_pe
+    letExp "contrib" <=< toExp $ pe_adj' ~*~ dx
+
+  (_, us2, s2) <- inScopeOf contrib_stms $ updateAdjoint x contrib
+
+  pure
+    ( us2 <> us1,
+      s1 <> contrib_stms <> s2
+    )
 revStm stm@(Let (Pattern [] [pe]) _aux (BasicOp (BinOp op x y))) = do
   let t = binOpType op
   (_p, us1, s1) <- inScopeOf stm $ lookupAdj $ patElemName pe
@@ -744,7 +759,7 @@ revStms' Empty = return (M.empty, mempty)
 
 revBody :: Body -> ADM (M.Map VName VName, Body, Body)
 revBody b@(Body desc stms res) = do
-  (us, stms', _stms) <- revStms stms
+  (us, stms', _stms) <- inScopeOf stms $ revStms stms
   let fv = namesToList $ freeIn b
       us' = M.filterWithKey (\k _ -> k `elem` fv) us
   let body' = Body desc _stms $ map Var $ M.elems us'
