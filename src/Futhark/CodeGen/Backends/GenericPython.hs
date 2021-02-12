@@ -989,6 +989,7 @@ compileUnOp op =
     FAbs {} -> "abs"
     SSignum {} -> "ssignum"
     USignum {} -> "usignum"
+    FSignum {} -> "np.sign"
 
 compileBinOpLike ::
   Monad m =>

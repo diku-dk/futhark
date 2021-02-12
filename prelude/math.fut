@@ -872,9 +872,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   let max (x: t) (y: t) = intrinsics.fmax64 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin64 (x, y)
 
-  let sgn (x: f64) = if      x < 0f64  then -1f64
-                     else if x == 0f64 then  0f64
-                     else                    1f64
+  let sgn (x: f64) = intrinsics.fsignum64 x
   let abs (x: f64) = intrinsics.fabs64 x
 
   let sqrt (x: f64) = intrinsics.sqrt64 x
@@ -980,9 +978,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   let max (x: t) (y: t) = intrinsics.fmax32 (x, y)
   let min (x: t) (y: t) = intrinsics.fmin32 (x, y)
 
-  let sgn (x: f32) = if      x < 0f32  then -1f32
-                     else if x == 0f32 then  0f32
-                     else                    1f32
+  let sgn (x: f32) = intrinsics.fsignum32 x
   let abs (x: f32) = intrinsics.fabs32 x
 
   let sqrt (x: f32) = intrinsics.sqrt32 x

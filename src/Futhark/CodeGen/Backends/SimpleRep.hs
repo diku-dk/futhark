@@ -786,6 +786,10 @@ cFloat32Funs =
       return p.t;
     }
 
+    static inline double fsignum32(double x) {
+      return $id:(funName' "isnan32")(x) ? x : ((x > 0) - (x < 0));
+    }
+
 $esc:("#ifdef __OPENCL_VERSION__")
     static inline float fmod32(float x, float y) {
       return fmod(x, y);
@@ -960,6 +964,10 @@ cFloat64Funs =
 
     static inline double fmod64(double x, double y) {
       return fmod(x, y);
+    }
+
+    static inline double fsignum64(double x) {
+      return $id:(funName' "isnan64")(x) ? x : ((x > 0) - (x < 0));
     }
 
 $esc:("#ifdef __OPENCL_VERSION__")
