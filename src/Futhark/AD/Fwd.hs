@@ -90,7 +90,7 @@ instance Tangent VName where
     maybeTan <- asks $ M.lookup v . tans
     case maybeTan of
       Just v' -> return v'
-      Nothing -> error "Oh no!"
+      Nothing -> error $ "No tangent: " ++ show v
 
 instance Tangent SubExp where
   type TangentType SubExp = SubExp
@@ -177,49 +177,29 @@ fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (WhileLoop v) body)) m = do
   withTans valParams $ \valParams' -> do
     body' <- fwdBodyInterleave' body
     withTans pes $ \pes' ->
-      m $
-        oneStm $
-          Let (Pattern [] pes') aux $
-            DoLoop
-              []
-              (valPats ++ zip valParams' vals')
-              (WhileLoop v)
-              body'
-fwdStm stm@(Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop v it bound []) body)) m = do
+      m . oneStm . Let (Pattern [] (pes ++ pes')) aux $
+        DoLoop [] (valPats ++ zip valParams' vals') (WhileLoop v) body'
+fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop v it bound []) body)) m = do
   let (valParams, vals) = unzip valPats
   vals' <- mapM tangent vals
   withTans valParams $ \valParams' -> do
     body' <- fwdBodyAfter' body
     withTans pes $ \pes' ->
-      m $
-        oneStm stm
-          <> oneStm
-            ( Let (Pattern [] pes') aux $
-                DoLoop
-                  []
-                  (valPats ++ zip valParams' vals')
-                  (ForLoop v it bound [])
-                  body'
-            )
-fwdStm stm@(Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop i it bound loop_vars) body)) m = do
-  let (valParams, vals) = unzip valPats
-  vals' <- mapM tangent vals
-  withTans valParams $ \valParams' ->
-    withTans (map fst loop_vars) $ \loopParams' -> do
-      let f p n = do n' <- tangent n; return (p, n')
-      loop_vars' <- zipWithM f loopParams' (map snd loop_vars)
-      body' <- fwdBodyAfter' body
-      withTans pes $ \pes' ->
-        m $
-          oneStm stm
-            <> oneStm
-              ( Let (Pattern [] pes') aux $
-                  DoLoop
-                    []
-                    (valPats ++ zip valParams' vals')
-                    (ForLoop i it bound (loop_vars ++ loop_vars'))
-                    body'
-              )
+      m . oneStm . Let (Pattern [] (pes ++ pes')) aux $
+        DoLoop [] (valPats ++ zip valParams' vals') (ForLoop v it bound []) body'
+--fwdStm (Let (Pattern [] pes) aux (DoLoop [] valPats (ForLoop i it bound loop_vars) body)) m = do
+--  let (valParams, vals) = unzip valPats
+--  vals' <- mapM tangent vals
+--  withTans valParams $ \valParams' ->
+--    withTans loopParams $ \loopParams' -> do
+--      let f p n = do n' <- tangent n; return (p, n')
+--      loop_vars' <- zipWithM f loopParams' (map snd loop_vars)
+--      body' <- fwdBodyInterleave' body
+--      withTans pes $ \pes' ->
+--        m . oneStm . Let (Pattern [] (pes ++ pes')) aux $
+--          DoLoop [] (valPats ++ zip valParams' vals') (ForLoop i it bound (loop_vars ++ loop_vars')) body'
+--  where
+--    loopParams = map fst loop_vars
 fwdStm stm _ =
   error $ "unhandled AD for Stm: " ++ pretty stm ++ "\n" ++ show stm
 
