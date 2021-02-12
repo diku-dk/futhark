@@ -739,7 +739,8 @@ doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
 
 -- | @fsignum(-2.0)@ = -1.0.
 doFSignum :: FloatValue -> FloatValue
-doFSignum v = floatValue (floatValueType v) $ signum $ floatToDouble v
+doFSignum (Float32Value v) = Float32Value $ signum v
+doFSignum (Float64Value v) = Float64Value $ signum v
 
 -- | Apply a 'BinOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped, or outside the domain (e.g. division by
@@ -973,10 +974,8 @@ doSExt (Int64Value x) t = intValue t $ toInteger x
 
 -- | Convert the former floating-point type to the latter.
 doFPConv :: FloatValue -> FloatType -> FloatValue
-doFPConv (Float32Value v) Float32 = Float32Value v
-doFPConv (Float64Value v) Float32 = Float32Value $ fromRational $ toRational v
-doFPConv (Float64Value v) Float64 = Float64Value v
-doFPConv (Float32Value v) Float64 = Float64Value $ fromRational $ toRational v
+doFPConv v Float32 = Float32Value $ floatToFloat v
+doFPConv v Float64 = Float64Value $ floatToDouble v
 
 -- | Convert a floating-point value to the nearest
 -- unsigned integer (rounding towards zero).
@@ -1059,8 +1058,20 @@ intToInt :: IntValue -> Int
 intToInt = fromIntegral . intToInt64
 
 floatToDouble :: FloatValue -> Double
-floatToDouble (Float32Value v) = fromRational $ toRational v
+floatToDouble (Float32Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
 floatToDouble (Float64Value v) = v
+
+floatToFloat :: FloatValue -> Float
+floatToFloat (Float64Value v)
+  | isInfinite v, v > 0 = 1 / 0
+  | isInfinite v, v < 0 = -1 / 0
+  | isNaN v = 0 / 0
+  | otherwise = fromRational $ toRational v
+floatToFloat (Float32Value v) = v
 
 -- | The result type of a binary operator.
 binOpType :: BinOp -> PrimType

@@ -1852,9 +1852,12 @@ compilePrimExp f (UnOpExp SSignum {} x) = do
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
-compilePrimExp f (UnOpExp FSignum {} x) = do
+compilePrimExp f (UnOpExp (FSignum Float32) x) = do
   x' <- compilePrimExp f x
-  return [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
+  return [C.cexp|fsignum32($exp:x')|]
+compilePrimExp f (UnOpExp (FSignum Float64) x) = do
+  x' <- compilePrimExp f x
+  return [C.cexp|fsignum32($exp:x')|]
 compilePrimExp f (CmpOpExp cmp x y) = do
   x' <- compilePrimExp f x
   y' <- compilePrimExp f y

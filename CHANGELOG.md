@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Tiling inside multiply nested loops (#1243).
 
+  * Substitution bug in interpreter (#1250).
+
+  * `f32.sgn`/`f64.sgn` now correct for NaN arguments.
+
 ## [0.18.6]
 
 ### Added
