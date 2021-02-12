@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Tiling inside multiply nested loops (#1243).
 
+  * Substitution bug in interpreter (#1250).
+
 ## [0.18.6]
 
 ### Added
