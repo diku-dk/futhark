@@ -190,36 +190,40 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
     ModMod _ ->
       error $ "Cannot apply non-parametric module at " ++ locStr loc
     ModFun f_abs f_closure f_p f_body ->
-      bindingAbs (f_abs <> S.fromList (unInfo (modParamAbs f_p))) $
-        extendAbsTypes b_substs $
-          extendScope f_closure $
-            generating $ do
-              outer_substs <- scopeSubsts <$> askScope
-              abs <- asks envAbs
-              let forward (k, v) = (lookupSubst k outer_substs, v)
-                  p_substs' = M.fromList $ map forward $ M.toList p_substs
-                  abs_substs =
-                    M.filterWithKey (const . flip S.member abs) $
-                      M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs'
-                        <> scopeSubsts f_closure
-                        <> scopeSubsts (modScope arg_mod)
-              extendScope
-                ( Scope
-                    abs_substs
-                    ( M.singleton (modParamName f_p) $
-                        substituteInMod p_substs' arg_mod
-                    )
+      bindingAbs (f_abs <> S.fromList (unInfo (modParamAbs f_p)))
+        . extendAbsTypes b_substs
+        . extendScope f_closure
+        . generating
+        $ do
+          outer_substs <- scopeSubsts <$> askScope
+          abs <- asks envAbs
+          let forward (k, v) = (lookupSubst k outer_substs, v)
+              p_substs' = M.fromList $ map forward $ M.toList p_substs
+              keep k _ =
+                k `M.member` p_substs'
+                  || k `S.member` abs
+              abs_substs =
+                M.filterWithKey keep $
+                  M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs'
+                    <> scopeSubsts f_closure
+                    <> scopeSubsts (modScope arg_mod)
+          extendScope
+            ( Scope
+                abs_substs
+                ( M.singleton (modParamName f_p) $
+                    substituteInMod p_substs' arg_mod
                 )
-                $ do
-                  substs <- scopeSubsts <$> askScope
-                  x <- evalModExp f_body
-                  return $
-                    addSubsts abs abs_substs $
-                      -- The next one is dubious, but is necessary to
-                      -- propagate substitutions from the argument (see
-                      -- modules/functor24.fut).
-                      addSubstsModMod (scopeSubsts $ modScope arg_mod) $
-                        substituteInMod (b_substs <> substs) x
+            )
+            $ do
+              substs <- scopeSubsts <$> askScope
+              x <- evalModExp f_body
+              return $
+                addSubsts abs abs_substs $
+                  -- The next one is dubious, but is necessary to
+                  -- propagate substitutions from the argument (see
+                  -- modules/functor24.fut).
+                  addSubstsModMod (scopeSubsts $ modScope arg_mod) $
+                    substituteInMod (b_substs <> substs) x
   where
     addSubsts abs substs (ModFun mabs (Scope msubsts mods) mp me) =
       ModFun (abs <> mabs) (Scope (substs <> msubsts) mods) mp me

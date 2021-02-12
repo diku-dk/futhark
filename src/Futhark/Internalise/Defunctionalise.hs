@@ -924,8 +924,10 @@ defuncApply depth e@(Apply e1 e2 d t@(Info ret, Info ext) loc) = do
       | otherwise -> return (e', IntrinsicSV)
     _ ->
       error $
-        "Application of an expression that is neither a static lambda "
-          ++ "nor a dynamic function, but has static value: "
+        "Application of an expression\n"
+          ++ pretty e1
+          ++ "\nthat is neither a static lambda "
+          ++ "nor a dynamic function, but has static value:\n"
           ++ show sv1
 defuncApply depth e@(Var qn (Info t) loc) = do
   let (argtypes, _) = unfoldFunType t
