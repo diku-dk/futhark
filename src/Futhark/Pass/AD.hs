@@ -26,10 +26,10 @@ bindLambda pat aux (Lambda params body _) args = do
 
 onStm :: Scope SOACS -> Stm -> PassM (Stms SOACS)
 onStm scope (Let pat aux (Op (VJP lam args vec))) = do
-  lam' <- revVJP scope lam
+  lam' <- revVJP scope =<< onLambda scope lam
   runBinderT_ (bindLambda pat aux lam' $ args ++ vec) scope
 onStm scope (Let pat aux (Op (JVP lam args vec))) = do
-  lam' <- fwdJVP scope lam
+  lam' <- fwdJVP scope =<< onLambda scope lam
   runBinderT_ (bindLambda pat aux lam' $ args ++ vec) scope
 onStm scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
   where
