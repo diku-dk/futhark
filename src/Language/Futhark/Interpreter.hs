@@ -1703,6 +1703,10 @@ initialCtx =
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
         return $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
+    def "vjp" = Just $
+      fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+    def "jvp" = Just $
+      fun3t $ \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "opaque" = Just $ fun1 return
     def "trace" = Just $ fun1 $ \v -> trace v >> return v
     def "break" = Just $
