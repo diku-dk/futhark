@@ -64,12 +64,12 @@ adjVName v = newVName (baseString v <> "_adj")
 
 newAdj :: VName -> ADM (VName, M.Map VName VName, Stms SOACS)
 newAdj v = do
-  _v <- adjVName v
+  v_adj <- adjVName v
   t <- lookupType v
-  let update = M.singleton v _v
+  let update = M.singleton v v_adj
   modify $ \env -> env {adjs = update `M.union` adjs env}
-  _stms <- runBinderT'_ $ letBindNames [_v] =<< eBlank t
-  return (_v, update, _stms)
+  stms <- runBinder_ $ letBindNames [v_adj] =<< eBlank t
+  return (v_adj, update, stms)
 
 accVName :: VName -> ADM VName
 accVName v = newVName (baseString v <> "_acc")
@@ -96,7 +96,7 @@ instance Adjoint VName where
     maybeAdj <- gets $ M.lookup v . adjs
     case maybeAdj of
       Nothing -> newAdj v
-      Just _v -> return (_v, mempty, mempty)
+      Just v_adj -> return (v_adj, mempty, mempty)
 
   updateAdjoint v d = do
     maybeAdj <- gets $ M.lookup v . adjs
@@ -778,16 +778,23 @@ revVJP scope (Lambda params body@(Body () stms res) _) = do
   let initial_renv = REnv {tans = mempty, envScope = scope}
   flip runADM initial_renv . localScope (scopeOfLParams params) . inScopeOf stms $ do
     let rvars = subExpVars res
-    _params <- forM rvars $ \v -> do
-      _v <- adjVName v
-      insAdj v _v
-      Param _v <$> lookupType v
+    params_adj <- forM rvars $ \v -> do
+      v_adj <- adjVName v
+      insAdj v v_adj
+      Param v_adj <$> lookupType v
 
-    (_body_us, Body () rev_stms _rev_res, _body) <- revBody body
+    (_body_us, Body () fwd_stms _, Body () rev_stms _) <- revBody body
 
-    (Body _decs _stms _res) <- renameBody _body
-    let _rvars = subExpVars _res
+    (params_adjs, _, params_adjs_stms) <-
+      unzip3 <$> mapM (lookupAdj . paramName) params
 
-    pure $
-      Lambda (params ++ _params) (Body _decs (rev_stms <> _stms) _res) $
-        map paramType params
+    Body () rev_stms' rev_adj_res <-
+      renameBody $ Body () (rev_stms <> mconcat params_adjs_stms) (map Var params_adjs)
+
+    let lam =
+          Lambda
+            (params ++ params_adj)
+            (Body () (fwd_stms <> rev_stms') rev_adj_res)
+            $ map paramType params
+
+    pure lam
