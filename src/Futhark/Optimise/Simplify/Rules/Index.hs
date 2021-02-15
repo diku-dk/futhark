@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-overlapping-patterns -Wno-incomplete-patterns -Wno-incomplete-uni-patterns -Wno-incomplete-record-updates #-}
+
 -- | Index simplification mechanics.
 module Futhark.Optimise.Simplify.Rules.Index
   ( IndexResult (..),
