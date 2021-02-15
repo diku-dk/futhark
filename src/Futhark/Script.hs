@@ -202,7 +202,7 @@ data ScriptValueType
   = STValue TypeName
   | -- | Ins, then outs.
     STFun [TypeName] [TypeName]
-  deriving (Show)
+  deriving (Eq, Show)
 
 instance Pretty ScriptValueType where
   ppr (STValue t) = ppr t
@@ -296,6 +296,9 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
       interValToExpVal :: InterValue -> m ExpValue
       interValToExpVal = traverse (traverse toVar)
 
+      simpleType (V.ValueAtom (STValue _)) = True
+      simpleType _ = False
+
       evalExp' :: Exp -> m InterValue
       evalExp' (ServerVar t v) =
         pure $ V.ValueAtom $ SValue t $ VVar v
@@ -303,9 +306,27 @@ evalExp builtin (ScriptServer server counter) top_level_e = do
         v <- builtin name =<< mapM (interValToVal <=< evalExp') es
         pure $ valToInterVal v
       evalExp' (Call (FuncFut name) es) = do
-        ins <- mapM (interValToVar <=< evalExp') es
         in_types <- cmdEither $ cmdInputs server name
         out_types <- cmdEither $ cmdOutputs server name
+
+        es' <- mapM evalExp' es
+        let es_types = map (fmap scriptValueType) es'
+
+        unless (all simpleType es_types) $
+          throwError $
+            "Literate Futhark does not support passing script-constructed records, tuples, or functions to entry points.\n"
+              <> "Create a Futhark wrapper function."
+
+        -- Careful to not require saturated application.
+        unless (and $ zipWith (==) es_types (map (V.ValueAtom . STValue) in_types)) $
+          throwError $
+            "Function \"" <> name <> "\" expects arguments of types:\n"
+              <> prettyText (V.ValueTuple $ map V.ValueAtom in_types)
+              <> "\nBut called with arguments of types:\n"
+              <> prettyText (V.ValueTuple $ map V.ValueAtom es_types)
+
+        ins <- mapM (interValToVar <=< evalExp') es
+
         if length in_types == length ins
           then do
             outs <- replicateM (length out_types) $ newVar "out"
