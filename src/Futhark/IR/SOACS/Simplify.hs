@@ -40,11 +40,11 @@ import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplify as Simplify
-import Futhark.Optimise.Simplify.ClosedForm
 import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Optimise.Simplify.Lore
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules
+import Futhark.Optimise.Simplify.Rules.ClosedForm
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
