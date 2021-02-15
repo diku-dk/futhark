@@ -93,27 +93,6 @@ generateBoilerplate opencl_code opencl_prelude cost_centres kernels types sizes 
   GC.earlyDecl [C.cedecl|static const char *size_vars[] = { $inits:size_var_inits };|]
   GC.earlyDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
 
-  GC.publicDef_ "get_num_sizes" GC.InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(void);|],
-      [C.cedecl|int $id:s(void) {
-                return $int:num_sizes;
-              }|]
-    )
-
-  GC.publicDef_ "get_size_name" GC.InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return size_names[i];
-              }|]
-    )
-
-  GC.publicDef_ "get_size_class" GC.InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return size_classes[i];
-              }|]
-    )
-
   let size_decls = map (\k -> [C.csdecl|typename int64_t $id:k;|]) $ M.keys sizes
   GC.earlyDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   cfg <- GC.publicDef "context_config" GC.InitDecl $ \s ->
@@ -732,53 +711,5 @@ commonOptions =
         optionArgument = RequiredArgument "INT",
         optionDescription = "The default parallelism threshold.",
         optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
-      },
-    Option
-      { optionLongName = "print-sizes",
-        optionShortName = Nothing,
-        optionArgument = NoArgument,
-        optionDescription = "Print all sizes that can be set with -size or --tuning.",
-        optionAction =
-          [C.cstm|{
-                int n = futhark_get_num_sizes();
-                for (int i = 0; i < n; i++) {
-                  printf("%s (%s)\n", futhark_get_size_name(i),
-                                      futhark_get_size_class(i));
-                }
-                exit(0);
-              }|]
-      },
-    Option
-      { optionLongName = "size",
-        optionShortName = Nothing,
-        optionArgument = RequiredArgument "ASSIGNMENT",
-        optionDescription = "Set a configurable run-time parameter to the given value.",
-        optionAction =
-          [C.cstm|{
-                char *name = optarg;
-                char *equals = strstr(optarg, "=");
-                char *value_str = equals != NULL ? equals+1 : optarg;
-                int value = atoi(value_str);
-                if (equals != NULL) {
-                  *equals = 0;
-                  if (futhark_context_config_set_size(cfg, name, value) != 0) {
-                    futhark_panic(1, "Unknown size: %s\n", name);
-                  }
-                } else {
-                  futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
-                }}|]
-      },
-    Option
-      { optionLongName = "tuning",
-        optionShortName = Nothing,
-        optionArgument = RequiredArgument "FILE",
-        optionDescription = "Read size=value assignments from the given file.",
-        optionAction =
-          [C.cstm|{
-                char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
-                                                          futhark_context_config_set_size);
-                if (ret != NULL) {
-                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
-                }}|]
       }
   ]

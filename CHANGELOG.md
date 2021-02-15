@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * New functions: `f32.recip` and `f64.recip` for multiplicative inverses.
 
+  * Executables produced with the `c` and `multicore` backends now
+    also accept `--tuning` and `--size` options (although there are
+    not yet any tunable sizes).
+
 ### Removed
 
 ### Changed
