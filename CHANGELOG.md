@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `f32.sgn`/`f64.sgn` now correct for NaN arguments.
 
+  * CPU backends (`c`/`multicore`) are now more careful about staying
+    in single precision for `f32` functions (#1253).
+
 ## [0.18.6]
 
 ### Added
