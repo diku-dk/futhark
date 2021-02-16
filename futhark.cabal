@@ -106,6 +106,7 @@ library
       Futhark.CodeGen.Backends.PyOpenCL
       Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
       Futhark.CodeGen.Backends.SequentialC
+      Futhark.CodeGen.Backends.SequentialC.Boilerplate
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.ImpCode
