@@ -58,15 +58,28 @@ startServer prog options = do
   case code of
     Just (ExitFailure e) ->
       error $ "Cannot start " ++ prog ++ ": error " ++ show e
-    _ ->
-      pure $
-        Server
-          { serverStdin = stdin,
-            serverStdout = stdout,
-            serverProc = phandle,
-            serverDebug = isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1,
-            serverErrLog = err_log_f
-          }
+    _ -> do
+      let server =
+            Server
+              { serverStdin = stdin,
+                serverStdout = stdout,
+                serverProc = phandle,
+                serverDebug = isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1,
+                serverErrLog = err_log_f
+              }
+      void (responseLines server) `catch` onStartupError server
+      pure server
+  where
+    onStartupError :: Server -> IOError -> IO a
+    onStartupError s _ = do
+      code <- P.waitForProcess $ serverProc s
+      stderr_s <- readFile $ serverErrLog s
+      removeFile $ serverErrLog s
+      error $
+        "Command failed with " ++ show code ++ ":\n"
+          ++ unwords (prog : options)
+          ++ "\nStderr:\n"
+          ++ stderr_s
 
 stopServer :: Server -> IO ()
 stopServer s = do

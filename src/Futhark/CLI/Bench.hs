@@ -5,8 +5,9 @@
 -- | @futhark bench@
 module Futhark.CLI.Bench (main) where
 
+import Control.Exception
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except hiding (throwError)
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
@@ -176,7 +177,12 @@ withProgramServer program runner extra_options f = do
         | null runner = (binpath, extra_options)
         | otherwise = (runner, binpath : extra_options)
 
-  liftIO $ withServer to_run to_run_args f
+  liftIO $ withServer to_run to_run_args f `catch` onError
+  where
+    onError :: SomeException -> IO a
+    onError e = do
+      hPrint stderr e
+      exitFailure
 
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO [BenchResult]
 runBenchmark opts futhark (program, cases) = do

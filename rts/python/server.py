@@ -151,6 +151,7 @@ class Server:
 
     def run(self):
         while True:
+            print('%%% OK', flush=True)
             line = sys.stdin.readline()
             if line == '':
                 return
@@ -159,7 +160,5 @@ class Server:
             except self.Failure as e:
                 print('%%% FAILURE')
                 print(e.msg)
-            print('%%% OK', flush=True)
-
 
 # End of server.py
