@@ -798,7 +798,7 @@ revFwdStms = fmap mconcat . mapM revFwdStm . stmsToList
 
 revStms :: Stms SOACS -> ADM (M.Map VName VName, Stms SOACS, Stms SOACS)
 revStms all_stms
-  | Just (stm, stms) <- stmsHead all_stms = do
+  | Just (stms, stm) <- stmsLast all_stms = do
     stm' <- revFwdStm stm
     (u, _stm) <- inScopeOf stm' $ revStm stm
     (us, stms', _stms) <- inScopeOf _stm $ revStms stms

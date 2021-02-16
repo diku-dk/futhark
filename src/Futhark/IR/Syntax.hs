@@ -165,6 +165,7 @@ module Futhark.IR.Syntax
     stmsFromList,
     stmsToList,
     stmsHead,
+    stmsLast,
   )
 where
 
@@ -331,6 +332,12 @@ stmsHead :: Stms lore -> Maybe (Stm lore, Stms lore)
 stmsHead stms = case Seq.viewl stms of
   stm Seq.:< stms' -> Just (stm, stms')
   Seq.EmptyL -> Nothing
+
+-- | The last statement in the sequence, if any.
+stmsLast :: Stms lore -> Maybe (Stms lore, Stm lore)
+stmsLast stms = case Seq.viewr stms of
+  stms' Seq.:> stm -> Just (stms', stm)
+  Seq.EmptyR -> Nothing
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExp]
